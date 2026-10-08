@@ -30,10 +30,17 @@ local function DisplayUntrusted(value, maxBytes, allowEmpty, allowLineBreaks)
         value, maxBytes, allowEmpty, allowLineBreaks)
 end
 
+-- A pasted EBH1 code is a wire value, not a name: it needs the whole field.
+-- The supported envelope is 85 entries of at most "id.quality.stacks.1" plus
+-- the class and a 96-letter name, so this bound is far above any code the
+-- addon can produce and still bounded.
+local IMPORT_MAX_LETTERS = 4096
+
 local function ConfigureSafeNameEditBox(box)
     if not box or box._nexusSafeNameOwner then return end
     box._nexusSafeNameOwner = true
     local priorChanged = box:GetScript("OnTextChanged")
+    box._nexusSafeNamePriorChanged = priorChanged
     box:SetMaxLetters(96)
     box._NexusSetRawText = function(self, value)
         local raw = tostring(value or "")
@@ -61,14 +68,56 @@ local function ConfigureSafeNameEditBox(box)
     end)
 end
 
-local function SetExplicitCopyText(box, value)
-    -- EBH1 is an explicit copy/paste wire boundary. The selected bytes must be
-    -- retained exactly, but an EditBox is still a WoW rich-text surface. Keep
-    -- the exact wire value separate and select its reversible inert projection.
+-- StaticPopup frames and their edit boxes are pooled and reused, so a dialog
+-- that declares nothing inherits the limit and the handlers the previous
+-- dialog left. Both EBH1 dialogs therefore claim the field every time they
+-- open: the naming dialog's 96-letter limit and its display-sanitising handler
+-- are removed, so a pasted code reaches the importer unchanged and an exported
+-- code is shown for copying in full.
+local function ClaimWireEditBox(box)
     if not box then return end
-    box._nexusExplicitExportText = tostring(value or "")
-    box:SetText(DisplayUntrusted(box._nexusExplicitExportText,
-        #box._nexusExplicitExportText, true, true) or "")
+    if box._nexusSafeNameOwner then
+        box:SetScript("OnTextChanged", box._nexusSafeNamePriorChanged)
+        box._nexusSafeNameOwner = nil
+        box._nexusSafeNamePriorChanged = nil
+        box._NexusSetRawText = nil
+        box._NexusRawText = nil
+        box._nexusRawText = nil
+        box._nexusDisplayText = nil
+    end
+    box:SetMaxLetters(IMPORT_MAX_LETTERS)
+end
+
+local function ConfigureImportEditBox(box)
+    if not box then return end
+    ClaimWireEditBox(box)
+    box:SetText("")
+end
+
+local function SetExplicitCopyText(box, value)
+    -- EBH1 is an explicit copy/paste wire boundary, and the player copies
+    -- whatever this field holds. The field is still a WoW rich-text surface, so
+    -- the value is shown through the inert projection and never as raw bytes.
+    -- The projection doubles a literal pipe; a wishlist name no longer carries
+    -- one, because TrimName removes it where a name is accepted, so for every
+    -- code this addon produces the projection is the identity and the field
+    -- holds the code exactly.
+    -- The field is claimed first: a name limit inherited from the naming dialog
+    -- would cut the code that the player is about to copy.
+    if not box then return end
+    ClaimWireEditBox(box)
+    local raw = tostring(value or "")
+    box._nexusExplicitExportText = raw
+    local shown = DisplayUntrusted(raw, #raw, true, true)
+    if not shown then
+        -- Nothing showable, so nothing is shown. Say so instead of leaving an
+        -- empty box under a "copy this" label.
+        box:SetText("")
+        print("|cffff6060Nexus:|r this wishlist cannot be exported as text: "
+            .. "its name contains characters the game cannot display.")
+        return
+    end
+    box:SetText(shown)
 end
 
 local Model, Adapter
@@ -87,7 +136,15 @@ wishlistController = WishlistControllerFactory.New({
     model = DraftModel,
     store = assert(Nexus.Store,
         "Store must load before WishlistController"),
-    accountRoot = function() return NexusDB end,
+    -- The editor's own saved keys. A read-only saved root is never written:
+    -- the Store owner hands back a session-only table for it instead.
+    accountRoot = function()
+        local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+        if type(writable) == "function" then
+            return writable(nil, {"editorSearch", "editorClassOnly", "lockDesignTargets"})
+        end
+        return NexusDB
+    end,
     notify = function(message) print(Nexus.UserText and Nexus.UserText.Message(message) or message) end,
     requestRecompute = function()
         if Nexus.RequestRecompute then Nexus.RequestRecompute() end
@@ -161,7 +218,7 @@ local function AcceptApply(data)
 end
 
 StaticPopupDialogs["WISHLISTREALIZER_UPDATE_WISHLIST"] = {
-    text = "Save %d/79 rolled copies to '%s'?\nUpdates this server Wishlist. Planned permanent targets are saved separately.",
+    text = "Save %d/79 rolled copies to '%s'?\nUpdates this server Wishlist. Planned locked targets are saved separately.",
     button1 = "Save Changes",
     button2 = "Cancel",
     OnCancel = function(_, data) wishlistController.CancelApply(data) end,
@@ -182,12 +239,14 @@ StaticPopupDialogs["WISHLISTREALIZER_CREATE_WISHLIST"] = {
     timeout = 0, whileDead = true, hideOnEscape = true,
 }
 
+-- The code of the open draft, or nil and why there is none. The second value
+-- of a code is what it leaves out (the controller's note), or nil.
 local function ExportEBH1String()
     local Codec = Nexus and Nexus.Codec
     if not (Codec and Codec.EncodeEBH1) then
         return nil, "export codec unavailable"
     end
-    local entries = wishlistController.ExportEntries()
+    local entries, note = wishlistController.ExportEntries()
     local classToken = ""
     if UnitClass then
         local _, eng = UnitClass("player")
@@ -195,7 +254,39 @@ local function ExportEBH1String()
     end
     local nameText = wishlistRenderer and wishlistRenderer.NameText()
     local name = wishlistController.ExportName(nameText)
-    return Codec.EncodeEBH1(entries, classToken, name)
+    local code = Codec.EncodeEBH1(entries, classToken, name)
+    -- EncodeEBH1 empties the Echo list of a plan outside the code's envelope
+    -- (79 rolled copies, 6 locked target copies, 85 entries) and of a plan
+    -- with no Echo; such a code imports nowhere, so none is offered.
+    if type(code) ~= "string" or code:sub(1, 6) == "EBH1::" then
+        return nil, #(entries or {}) == 0 and "this wishlist has no Echoes to export"
+            or "this plan does not fit an export code (at most 79 rolled copies, 6 locked target copies and 85 entries)"
+    end
+    return code, note
+end
+
+-- The export dialog's prompt says what this code is. The client's StaticPopup
+-- dialog keeps its prompt in a font string (`text`, which the native dialogs'
+-- own OnShow handlers rewrite); without one only the chat line is given.
+local function ExportPrompt(dialog, text)
+    local label = type(dialog) == "table" and dialog.text or nil
+    if type(label) == "table" and type(label.SetText) == "function" then
+        label:SetText(text)
+    end
+end
+
+-- No importable code: the copy box is claimed and left empty, and the dialog
+-- and the chat say why instead of offering text that imports nowhere.
+local function RefuseExplicitCopy(dialog, reason)
+    local box = type(dialog) == "table" and dialog.editBox or nil
+    if box then
+        ClaimWireEditBox(box)
+        box._nexusExplicitExportText = ""
+        box:SetText("")
+    end
+    local text = "Export unavailable: " .. tostring(reason or "this plan cannot be exported") .. "."
+    ExportPrompt(dialog, text)
+    print("|cffff6060Nexus:|r " .. text)
 end
 
 local function LoadImportedWishlist(parsed, chosenName)
@@ -255,16 +346,16 @@ function RolePicker.Render()
     local total,locked=RolePicker.Count()
     local pages=math.max(1,math.ceil(#state.rows/RolePicker.visibleRows))
     state.page=math.max(1,math.min(pages,state.page or 1))
-    f.title:SetText("Choose permanent targets: " ..
+    f.title:SetText("Choose locked Echo targets: " ..
         (DisplayUntrusted(state.name,1024,false) or "Wishlist"))
-    f.count:SetText(string.format("Rolled copies %d/79  |  Permanent targets %d/6  |  %d total",total-locked,locked,total))
+    f.count:SetText(string.format("Rolled copies %d/79  |  Locked targets %d/6  |  %d total",total-locked,locked,total))
     f.pageLabel:SetText(string.format("Page %d / %d",state.page,pages))
     if state.page>1 then f.prev:Enable() else f.prev:Disable() end
     if state.page<pages then f.next:Enable() else f.next:Disable() end
     if total-locked<=79 and total-locked>0 and locked<=6 then
         f.confirm:Enable()
     else f.confirm:Disable() end
-    f.confirm:SetText(state.assign and "Confirm permanent targets & assign" or "Confirm permanent targets & edit")
+    f.confirm:SetText(state.assign and "Confirm locked targets & assign" or "Confirm locked targets & edit")
     local qualityNames={[0]="Common",[1]="Uncommon",[2]="Rare",[3]="Epic",[4]="Legendary"}
     for n,view in ipairs(f.rows) do
         local index=(state.page-1)*RolePicker.visibleRows+n
@@ -273,13 +364,13 @@ function RolePicker.Render()
         if row then
             view.label:SetText((DisplayUntrusted(row.name,256,false) or tostring(row.id))
                 .. " (" .. tostring(qualityNames[row.quality] or row.quality) .. ") x" .. row.copies)
-            view.count:SetText(tostring(row.selected) .. " permanent")
+            view.count:SetText(tostring(row.selected) .. " locked")
             if row.selected>0 then view.minus:Enable() else view.minus:Disable() end
             if row.selected<row.copies and locked<6 then view.plus:Enable() else view.plus:Disable() end
             view.frame:Show()
         else view.frame:Hide() end
     end
-    f.message:SetText(state.message or "Choose permanent targets. This changes the plan, not owned Echoes or resources.")
+    f.message:SetText(state.message or "Choose locked Echo targets. This changes the plan, not owned Echoes or resources.")
 end
 
 function RolePicker.Adjust(index,delta)
@@ -299,23 +390,25 @@ function RolePicker.UseOwned(automatic)
     if not state then return end
     local locked=wishlistController.LockedProjection()
     if not locked or locked.synced~=true or type(locked.bySpell)~="table" then
-        RolePicker.Message("Waiting for the server's current permanent Echo list. You can choose the intended targets manually.")
+        RolePicker.Message("Waiting for the server's current locked Echo list. You can choose the intended targets manually.")
         return
     end
     local catalog=wishlistController.CatalogProjection()
     local selected,remaining={},{}
     for id,copies in pairs(locked.bySpell) do
         id=tonumber(id)
-        if not id or id<1 or id~=math.floor(id) or type(copies)~="number" or copies<1 or copies~=math.floor(copies) or copies>6 then
-            RolePicker.Message("The current permanent Echo list is incomplete. Choose the intended targets manually.")
+        if not id or id<1 or id~=math.floor(id) or type(copies)~="number" or copies<1 or copies~=math.floor(copies) then
+            RolePicker.Message("The current locked Echo list is incomplete. Choose the intended targets manually.")
             return false
         end
         remaining[id]=(remaining[id] or 0)+copies
     end
     local ownedTotal=0
     for _,copies in pairs(remaining) do ownedTotal=ownedTotal+copies end
+    -- Held copies beyond the plan envelope are valid ownership, not incomplete
+    -- data; the suggestion just cannot use them.
     if ownedTotal>6 then
-        RolePicker.Message("The server reports more than six permanent copies. No targets were guessed.")
+        RolePicker.Message("Your locked Echoes hold more than the six target copies a plan designs. No targets were suggested; choose the intended targets manually.")
         return false
     end
     local count=0
@@ -330,8 +423,8 @@ function RolePicker.UseOwned(automatic)
     for i,row in ipairs(state.rows) do row.selected=selected[i] end
     state.usedCurrentLocks=automatic==true
     state.message=automatic==true
-        and "Using matching current permanent Echoes. The plan must fit 79 rolled copies / 6 permanent targets."
-        or "Matching current permanent Echoes suggested as targets. Review them, then confirm your plan."
+        and "Using matching currently locked Echoes. The plan must fit 79 rolled copies / 6 locked targets."
+        or "Matching currently locked Echoes suggested as targets. Review them, then confirm your plan."
     RolePicker.Render()
     local total=RolePicker.Count()
     return count>0 and total-count>0 and total-count<=79 and count<=6
@@ -342,7 +435,7 @@ function RolePicker.Accept()
     if not state then return false end
     local total,locked=RolePicker.Count()
     if locked>6 or total-locked>79 or total-locked<1 then
-        RolePicker.Message("Select up to six permanent-slot copies so no more than 79 rolled copies remain.")
+        RolePicker.Message("Select up to six locked targets so no more than 79 rolled copies remain.")
         return false
     end
     local echoes,ordinary,lockedRows={},{},{}
@@ -393,8 +486,8 @@ function RolePicker.Accept()
     RolePicker.Hide()
     local opened=M.OpenForWishlist(resolved,loadoutSlot)
     if opened then
-        print("|cff4dff80Nexus:|r " .. (usedCurrentLocks and "Using matching current permanent Echoes for '" or "Permanent-slot targets confirmed for '") ..
-            (DisplayUntrusted(name,1024,false) or "Wishlist") .. "'. Permanent Echoes were not changed.")
+        print("|cff4dff80Nexus:|r " .. (usedCurrentLocks and "Using matching currently locked Echoes for '" or "Locked Echo targets confirmed for '") ..
+            (DisplayUntrusted(name,1024,false) or "Wishlist") .. "'. Locked Echoes were not changed.")
     end
     if Nexus.JournalTab and Nexus.JournalTab.RefreshAssociations then Nexus.JournalTab.RefreshAssociations() end
     if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
@@ -435,7 +528,7 @@ function RolePicker.Ensure()
     f.title=label("GameFontNormal",20,-18,570)
     local help=label("GameFontHighlightSmall",20,-44,570)
     help:SetHeight(40)
-    help:SetText("Choose which copies are planned for the six permanent slots.\nThis edits only the Wishlist plan; your character's Echoes are unchanged.")
+    help:SetText("Choose which copies this plan targets for locked Echo slots (at most six).\nThis edits only the Wishlist plan; your character's Echoes are unchanged.")
     f.count=label("GameFontNormal",20,-83,570)
     f.rows={}
     for n=1,RolePicker.visibleRows do
@@ -444,6 +537,8 @@ function RolePicker.Ensure()
         local row={frame=rf};f.rows[n]=row
         row.label=rf:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
         row.label:SetPoint("LEFT",0,0);row.label:SetWidth(390);row.label:SetJustifyH("LEFT")
+        -- One line per row; a shortened Echo name is complete in the row tooltip.
+        if Nexus.LayoutMetrics then rf:EnableMouse(true);Nexus.LayoutMetrics.OneLineLabel(row.label,rf,28) end
         row.count=rf:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
         row.count:SetPoint("RIGHT",-32,0);row.count:SetWidth(66)
         row.minus=CreateFrame("Button","NexusWishlistRoleMinus"..n,rf,"UIPanelButtonTemplate")
@@ -465,11 +560,12 @@ function RolePicker.Ensure()
     f.next=button("NexusWishlistRoleNext","Next",188,-394,70,function()
         if RolePicker.state then RolePicker.state.page=RolePicker.state.page+1;RolePicker.Render() end end)
     f.pageLabel=label("GameFontHighlightSmall",108,-401,78)
-    f.owned=button("NexusWishlistRoleUseOwned","Suggest matching permanent targets",318,-394,270,function() RolePicker.UseOwned(false) end)
+    f.owned=button("NexusWishlistRoleUseOwned","Suggest matching locked targets",318,-394,270,function() RolePicker.UseOwned(false) end)
+    -- Two lines of a 16 px face (the longest message wraps to two at 570 px).
     f.message=label("GameFontHighlightSmall",20,-430,570)
-    f.message:SetHeight(30)
-    f.confirm=button("NexusWishlistRoleConfirm","Confirm permanent targets & edit",210,-470,278,RolePicker.Accept)
-    f.cancel=button("NexusWishlistRoleCancel","Cancel",498,-470,90,RolePicker.Hide)
+    f.message:SetHeight(44);f.message:SetJustifyV("TOP")
+    f.confirm=button("NexusWishlistRoleConfirm","Confirm locked targets & edit",210,-476,278,RolePicker.Accept)
+    f.cancel=button("NexusWishlistRoleCancel","Cancel",498,-476,90,RolePicker.Hide)
     f:Hide()
     return f
 end
@@ -539,7 +635,7 @@ end
 function M.UnresolvedRoleHint()
     local settings=Nexus.Store and Nexus.Store.Settings and Nexus.Store.Settings()
     return settings and settings.useCurrentLocksForUntagged==false
-        and "choose permanent targets" or "use current locks"
+        and "choose locked targets" or "use current locks"
 end
 
 function M.ResolveAndAssignWishlist(candidate, activeSlot)
@@ -584,8 +680,21 @@ StaticPopupDialogs["NEXUS_EXPORT_WISHLIST"] = {
     button1 = "Close",
     hasEditBox = true,
     editBoxWidth = 350,
+    maxLetters = IMPORT_MAX_LETTERS,
     OnShow = function(self)
-        SetExplicitCopyText(self.editBox, (ExportEBH1String()) or "")
+        local code, why = ExportEBH1String()
+        if not code then
+            RefuseExplicitCopy(self, why)
+            return
+        end
+        SetExplicitCopyText(self.editBox, code)
+        if why then
+            -- What the code leaves out (current locked Echoes above the plan's
+            -- six locked target copies).
+            ExportPrompt(self, "Your current wishlist as an EBH1 string; " .. why
+                .. ".\nCtrl+A, Ctrl+C to copy:")
+            print("|cffff9040Nexus:|r " .. why .. ".")
+        end
         self.editBox:HighlightText()
         self.editBox:SetFocus()
     end,
@@ -609,10 +718,16 @@ StaticPopupDialogs["NEXUS_NAME_IMPORTED_WISHLIST"] = {
         self.editBox:HighlightText()
     end,
     OnAccept = function(self, parsed)
-        local name = TrimWishlistName(
-            self.editBox and self.editBox._NexusRawText
+        local typed = tostring(self.editBox and self.editBox._NexusRawText
                 and self.editBox:_NexusRawText()
-                or (self.editBox and self.editBox:GetText()))
+                or (self.editBox and self.editBox:GetText()) or "")
+        local name = TrimWishlistName(typed)
+        -- Said only when something really was dropped, so the message cannot
+        -- outlive the rule that produces it.
+        if name ~= "" and name ~= typed:gsub("^%s+", ""):gsub("%s+$", "") then
+            print("|cffff6060Nexus:|r the | character is not kept in a wishlist "
+                .. "name; this import is named \"" .. name .. "\".")
+        end
         if name == "" then
             print("|cffff6060Nexus:|r Enter a name for the imported wishlist.")
             return
@@ -632,9 +747,17 @@ StaticPopupDialogs["NEXUS_IMPORT_WISHLIST"] = {
     button2 = "Cancel",
     hasEditBox = true,
     editBoxWidth = 350,
+    maxLetters = IMPORT_MAX_LETTERS,
+    OnShow = function(self)
+        ConfigureImportEditBox(self and self.editBox)
+        if self and self.editBox and self.editBox.SetFocus then
+            self.editBox:SetFocus()
+        end
+    end,
     OnAccept = function(self)
         -- Explicit EBH1 input is a lossless wire value, not ordinary display.
-        M.ImportEBH1String(self.editBox and self.editBox:GetText())
+        -- The field was claimed by OnShow, so its text is the pasted bytes.
+        M.ImportEBH1String(self and self.editBox and self.editBox:GetText())
     end,
     EditBoxOnEnterPressed = function(self)
         self:GetParent().button1:Click()
@@ -709,6 +832,13 @@ function M.OpenForCandidate(candidate)
 end
 
 function M.OpenForWishlist(wishlist, loadoutSlot)
+    -- The record the player selected (a Journal row, an assignment, a confirmed
+    -- role choice): its name and content as the server slot showed them when it
+    -- was built. Taken before any resolution, so the controller compares the
+    -- slot service with the selection, never with a record re-read from it.
+    local selectedToken = Adapter and Adapter.ServerWishlistTokenFor
+        and type(wishlist) == "table" and tonumber(wishlist.slot)
+        and Adapter.ServerWishlistTokenFor(tostring(wishlist.name or ""), wishlist.echoes) or nil
     if Adapter and Adapter.ResolveWishlistEvidence then
         local resolved,status=Adapter.ResolveWishlistEvidence(wishlist)
         if status=="evidence-pending" and type(resolved)=="table" then
@@ -718,7 +848,7 @@ function M.OpenForWishlist(wishlist, loadoutSlot)
         if status=="actionable" then wishlist=resolved end
     end
     RolePicker.Hide()
-    if not wishlistController.BeginWishlist(wishlist, loadoutSlot) then
+    if not wishlistController.BeginWishlist(wishlist, loadoutSlot, selectedToken) then
         SyncFulfilledDraftTargets()
         return false
     end

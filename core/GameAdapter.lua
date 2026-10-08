@@ -21,7 +21,9 @@ local Store
 -- per-character state goes through StoreAuthorityOwnerV1.UpdateStateV1, the
 -- architecture's counted private mutation entry (lines 1907-1912). Read-only
 -- uses of Store.State() below are unchanged.
-local function UpdateStoreState(mutator)
+-- `readLive` (no mutator): the owner's read-only entry for the same live row,
+-- for an identity sentinel; it compares and invalidates nothing.
+local function UpdateStoreState(mutator, readLive)
     local internals = Nexus and Nexus.MainInternals
     local owner = type(internals) == "table" and internals.StoreAuthorityOwner
     -- Honour the INJECTED Store. A stub Store must never resolve the real
@@ -36,15 +38,20 @@ local function UpdateStoreState(mutator)
     local realStore = type(Store) == "table"
         and type(Store.Init) == "function"
         and type(Store.CurrentOwnerKey) == "function"
-    if realStore and type(owner) == "table"
-        and type(owner.UpdateStateV1) == "function" then
-        return owner.UpdateStateV1(mutator)
+    if realStore and type(owner) == "table" then
+        if readLive and type(owner.ReadStateV1) == "function" then
+            return owner.ReadStateV1()
+        end
+        if type(owner.UpdateStateV1) == "function" then
+            return owner.UpdateStateV1(mutator or function(row) return row end)
+        end
     end
     -- No authorized owner for THIS Store. Fall back to whatever state table the
     -- injected facade exposes, which is exactly the pre-migration behaviour for
     -- such a Store.
     local injected = Store and Store.State and Store.State()
     if type(injected) ~= "table" then return nil end
+    if readLive then return true, injected end
     return true, mutator(injected)
 end
 local callbacks
@@ -60,8 +67,15 @@ local boardDirty, slotsDirty, dataDirty = true, true, true
 local staticDirty = false
 local lastBoardSig
 local boardNotificationPending = false
-local inFlightKind, inFlightSig, pendingOwnPick
-local recordedPicks = {}
+local inFlightKind, inFlightSig, pendingOwnPick, pendingOwnBaseline
+-- A Select whose board has moved on but whose grant the mirror has not shown
+-- yet: {spellId=, baseline=}. Boards auto-chain and the granted mirror can
+-- lag the next board by one pick, so this keeps the Select "in flight" --
+-- blocking a duplicate Select and every dependent action -- until the mirror
+-- shows that spell's count above the baseline taken at submission. It is
+-- intent, never ownership: Owned() reads the granted mirror only. It used to
+-- be recordedPicks, which Owned() merged into ownership (issue #62).
+local awaitingGrant = nil
 local ownedProjectionRevision = 0
 local lockedProjectionRevision = 0
 local leverProjectionRevision = 0
@@ -78,6 +92,11 @@ local ownedRequestGeneration = -1
 local ownedBaselineRef, ownedBaselineSig = nil, nil
 local boundaryAt = 0     -- time of last run boundary / PEW (owned-sync settle)
 local GHOST_OWNED = 25   -- level-1 owned count at/above which we suspect a dead-run ghost
+-- Diagnostics only (A.OwnershipTrustView): the facts the last normal Owned()
+-- and the last normal LockedOwned() evaluation saw, each with the time of its
+-- own read. Memory only; written in place by those two reads and nothing else.
+-- No decision reads them.
+local ownedSample, lockedSample = {}, {}
 local pewDone = false
 local externalActionSeen = false
 local uiHooksInstalled = {
@@ -102,6 +121,9 @@ local echoNotificationPending = false
 local echoSnapshot = nil
 local echoActiveSlot = 0
 local echoVerifiedAt = nil
+-- The Echo fields the strict check rejected at the last scan: field -> reason.
+-- Current state only (never the last accepted one); see CaptureEchoSnapshot.
+local echoRejected = {}
 local echoGenerations = {
     slots=0, granted=0, locked=0, discovery=0, activeSlot=0,
 }
@@ -171,6 +193,15 @@ local function SafeCall(fn, ...)
     if type(fn) ~= "function" then return nil end
     local ok, res = pcall(fn, ...)
     if ok then return res end
+    return nil
+end
+
+-- The time of a diagnostic sample. Never raises, so the bookkeeping cannot
+-- change the read that records it.
+local function DiagnosticTime()
+    if type(GetTime) ~= "function" then return nil end
+    local ok, now = pcall(GetTime)
+    if ok and type(now) == "number" and now == now then return now end
     return nil
 end
 
@@ -495,17 +526,63 @@ end
 -- Owned (current-run granted ∪ recorded picks; trust model)
 ------------------------------------------------------------------------
 
--- deterministic signature of the CLIENT-reported owned set (no recorded
--- picks): used to detect the post-reset refresh after a run boundary
-local function ClientOwnedSig(bySpell)
-    local ids = {}
-    for id in pairs(bySpell) do ids[#ids + 1] = id end
-    table.sort(ids)
-    local parts = {}
-    for i = 1, #ids do
-        parts[i] = ids[i] .. ":" .. bySpell[ids[i]]
+-- Diagnostics only (A.LockedShapeView): the anonymous structure of the last
+-- normal LockedOwned() read that refused a table. Hooks inside that read's own
+-- parse record it, each under pcall: a failing hook ends the collection, never
+-- the parse, and there is no second walk. Per entered table, in pre-order,
+-- seven integers or fixed codes, flat: parent row, key class, ID class (by
+-- first appearance; the IDs are dropped with the read), copies added, the ID
+-- and count alias bits the parser read, the defect bits raised there. No key,
+-- ID, name, value or table reference is kept. Memory only; replaced by the
+-- next such read and by nothing else. No decision reads it.
+local LockedShape = {
+    MAX_ROWS = 64,
+    DEFECT_BITS = { depth = 1, cycle = 2, invalid_value = 4,
+        conflicting_alias = 8, over_cap = 16, scalar_leaf = 32 },
+    last = nil,
+}
+
+function LockedShape.New()
+    return { entered = 0, classes = {}, classCount = 0 }
+end
+
+-- One table the parser entered. `id` is the one valid ID it read (nil: none;
+-- false: an invalid or conflicting alias); `why` the defect it raised. Returns
+-- the row, or false past the row bound, which ends the collection.
+function LockedShape.Row(s, key, parent, id, added, why, idBits, countBits)
+    local row = s.entered + 1
+    s.entered = row
+    if row > LockedShape.MAX_ROWS then return false end
+    local keyClass, class = "-", 0
+    if row > 1 then
+        -- The key's type and number only; its text is never read.
+        local kind = type(key)
+        keyClass = kind == "string" and "s"
+            or (kind == "number" and key >= 1 and key < math.huge
+                and key == math.floor(key) and "i" or "o")
     end
-    return table.concat(parts, ",")
+    if id == false then
+        class = "x"
+    elseif id ~= nil then
+        class = s.classes[id]
+        if not class then
+            class = s.classCount + 1
+            s.classCount, s.classes[id] = class, class
+        end
+    end
+    local base = (row - 1) * 7
+    s[base + 1], s[base + 2], s[base + 3], s[base + 4] =
+        row > 1 and parent or 0, keyClass, class, added
+    s[base + 5], s[base + 6], s[base + 7] =
+        idBits or 0, countBits or 0, LockedShape.DEFECT_BITS[why] or 0
+    return row
+end
+
+-- A defect raised at a recorded row after its children (scalar_leaf).
+function LockedShape.Defect(s, row, why)
+    local at = row * 7
+    s[at] = s[at] + LockedShape.DEFECT_BITS[why]
+    return row
 end
 
 -- GetLockedPerks has appeared in more than one server-side shape: a flat
@@ -520,70 +597,149 @@ end
 -- defensively since the exact shape of the missing entry isn't confirmed
 -- yet; A.DumpLockedPerksRaw below exists to get a definitive answer instead
 -- of guessing again.
-local function ReadLockedPerks(raw)
+-- The third return is diagnostics only: the first defect found, as a fixed
+-- code (absent, not_table, depth, cycle, invalid_value, conflicting_alias,
+-- over_cap, scalar_leaf), or nil when the view is valid.
+-- `sink` (diagnostics only): a LockedShape collector. Only LockedOwned() passes
+-- one; without it the parse is the same.
+-- Each locked SS18 entry is one client record with its own stack, and the
+-- native journal's client lock gate counts records against the capacity. Each
+-- table with a recognized ID is one occupied record; its copies stay exact.
+-- `limits` (LockedReadLimits): `records`, the live capacity when it is known
+-- (else the record ceiling), and `rowStacks`, the per-record copy ceiling. A
+-- record past `records`, or holding more copies than rowStacks, is over_cap.
+-- A record's own maxStack bounds nothing here: the native SS18 parser stores
+-- stack and maxStack independently, and whether the server holds one to the
+-- other (or retunes it) is unknown. The fourth and fifth returns are the
+-- occupied record count and the records ({spellId, stacks}, read order; not
+-- kept past the bound).
+local function ReadLockedPerks(raw, sink, limits)
     local bySpell = {}
     local seenTables = {}
     local malformed = false
-    local totalCopies = 0
+    local rejection = nil
+    local occupied, records = 0, {}
+    local maxRecords = limits and limits.records or 256
+    local maxStacks = limits and limits.rowStacks or 120
+
+    local function Reject(code)
+        malformed = true
+        rejection = rejection or code
+    end
+
+    -- One protected collector step. A failure, or the row bound, ends the
+    -- collection for this read; the parse goes on unchanged.
+    local function Collect(hook, ...)
+        local ok, row = pcall(hook, sink, ...)
+        if ok and row then return row end
+        if not ok then sink.failed = true end
+        sink = nil
+    end
 
     local function RecognizedInteger(value, names)
-        local found, selected = false, nil
+        local found, selected, bits = false, nil, 0
         for i = 1, #names do
             local rawValue = rawget(value, names[i])
             if rawValue ~= nil then
+                -- Diagnostics only: the aliases read as present, in list order.
+                if sink then bits = bits + 2 ^ (i - 1) end
                 local number = tonumber(rawValue)
                 if type(number) ~= "number" or number ~= number
                     or number <= 0 or number >= math.huge
-                    or number ~= math.floor(number)
-                    or (found and number ~= selected) then
-                    return nil, false, true
+                    or number ~= math.floor(number) then
+                    return nil, false, true, "invalid_value", bits
+                end
+                if found and number ~= selected then
+                    return nil, false, true, "conflicting_alias", bits
                 end
                 found, selected = true, number
             end
         end
-        return selected, true, found
+        return selected, true, found, nil, bits
     end
 
-    local function Walk(value, depth)
-        if type(value) ~= "table" then malformed = true; return end
-        if depth > 8 or seenTables[value] then malformed = true; return end
+    local function Walk(value, depth, key, parent)
+        if type(value) ~= "table" then
+            Reject(value == nil and "absent" or "not_table"); return
+        end
+        if depth > 8 then
+            Reject("depth")
+            if sink then Collect(LockedShape.Row, key, parent, nil, 0, "depth") end
+            return
+        end
+        if seenTables[value] then
+            Reject("cycle")
+            if sink then Collect(LockedShape.Row, key, parent, nil, 0, "cycle") end
+            return
+        end
         seenTables[value] = true
 
-        local id, idValid, hasId = RecognizedInteger(value, {
+        local id, idValid, hasId, idWhy, idBits = RecognizedInteger(value, {
             "spellId", "spellID", "id", "perkId", "perkID", "entryId",
             "entryID", "echoId", "echoID", "spell", "perk",
         })
-        local count, countValid, hasCount = RecognizedInteger(value, {
+        local count, countValid, hasCount, countWhy, countBits = RecognizedInteger(value, {
             "stack", "stacks", "count", "amount", "qty",
         })
-        if not idValid or not countValid then malformed = true end
+        -- `why` and `n` are this table's defect and copies, for the collector.
+        local why, n = nil, 0
+        if not idValid or not countValid then why = idWhy or countWhy; Reject(why) end
         if hasId and idValid and countValid then
-            local n = hasCount and count or 1
+            n = hasCount and count or 1
             bySpell[id] = (bySpell[id] or 0) + n
-            totalCopies = totalCopies + n
-            if totalCopies > 6 then malformed = true end
+            occupied = occupied + 1
+            if occupied <= maxRecords then
+                records[occupied] = {spellId=id, stacks=n}
+            end
+            if occupied > maxRecords or n > maxStacks then
+                why = "over_cap"; Reject(why)
+            end
             -- Do not `return` here -- if this table ALSO nests further locked
             -- entries as children (an id field alongside a child array, rather
             -- than instead of one), those must still be walked, not skipped.
         end
+        local row = sink and Collect(LockedShape.Row, key, parent,
+            idValid and id, n, why, idBits, countBits)
 
         local childTables, scalarLeaves = 0, 0
-        for _, child in pairs(value) do
+        for childKey, child in pairs(value) do
             if type(child) == "table" then
                 childTables = childTables + 1
-                Walk(child, depth + 1)
+                Walk(child, depth + 1, childKey, row)
             else
                 scalarLeaves = scalarLeaves + 1
             end
         end
         if not hasId and childTables == 0 and scalarLeaves > 0 then
-            malformed = true
+            Reject("scalar_leaf")
+            if sink and row then Collect(LockedShape.Defect, row, "scalar_leaf") end
         end
     end
 
     Walk(raw, 0)
-    return bySpell, not malformed
+    return bySpell, not malformed, rejection, occupied, records
 end
+
+-- The bounds of one locked read: the live capacity when the service states
+-- one, else the record ceiling; the per-record copy ceiling. The ceilings are
+-- the envelope owner's locked row ceilings (LoadoutEvidence.SemanticLimits),
+-- resource bounds that never stand in for the capacity.
+local function LockedReadLimits(capacity)
+    local owner = Nexus and Nexus.LoadoutEvidence
+    local ok, limits = false, nil
+    if owner and type(owner.SemanticLimits) == "function" then
+        ok, limits = pcall(owner.SemanticLimits)
+    end
+    limits = ok and type(limits) == "table" and limits or {}
+    local ceiling = tonumber(limits.lockedRows) or 256
+    return {records=capacity and math.min(capacity, ceiling) or ceiling,
+        rowStacks=tonumber(limits.lockedRowStacks) or 120}
+end
+
+-- The only raw type classes a locked sample reports (Lua type names).
+local LOCKED_RAW_TYPES = { ["nil"] = true, boolean = true, number = true,
+    string = true, table = true, ["function"] = true, userdata = true,
+    thread = true }
 
 -- Diagnostic-only: the exact, unfiltered GetLockedPerks() return, serialized
 -- via Codec.JSONEncode. Never used by decision logic -- exists solely so a
@@ -602,19 +758,85 @@ end
 
 function A.LockedOwned()
     projectionStatus.locked.calls = projectionStatus.locked.calls + 1
+    -- This read's serial (diagnostics only): the counter as it left it.
+    local serial = projectionStatus.locked.calls
+    -- The live capacity bounds the occupied records of this read; it is read
+    -- first. Unknown (nil) leaves the record ceiling as the only bound: the
+    -- records stay trusted, and the capacity stays unavailable to actions.
+    local capacity = A.MaxPermanentEchoes()
+    local limits = LockedReadLimits(capacity)
     local svc = PS()
-    local locked = svc and SafeCall(svc.GetLockedPerks)
-    local bySpell, valid = ReadLockedPerks(locked)
-    local byFamily = {}
+    -- SafeCall written out, so that the diagnostic sample can tell a getter
+    -- that raised (or is missing) from one that answered nil.
+    local getter = svc and svc.GetLockedPerks
+    local readable, locked = type(getter) == "function", nil
+    if readable then
+        readable, locked = pcall(getter)
+        if not readable then locked = nil end
+    end
+    -- The shape collector of this read (diagnostics only), made under
+    -- protection; a table it cannot make is recorded as failed.
+    local madeShape, shape = false, nil
+    if type(locked) == "table" then madeShape, shape = pcall(LockedShape.New) end
+    if not madeShape then shape = nil end
+    local bySpell, valid, rejection, occupied, records =
+        ReadLockedPerks(locked, shape, limits)
+    local byFamily, copies, ids = {}, 0, 0
     for id, n in pairs(bySpell) do
         projectionStatus.locked.spells = projectionStatus.locked.spells + 1
         projectionStatus.locked.copies = projectionStatus.locked.copies
             + (tonumber(n) or 0)
         local fam = FamilyOf(id) or id
         byFamily[fam] = (byFamily[fam] or 0) + n
+        copies = copies + n
+        ids = ids + 1
     end
-    return { bySpell = bySpell, byFamily = byFamily,
-        synced = type(locked) == "table" and valid == true }
+    local synced = type(locked) == "table" and valid == true
+    -- The diagnostic sample of this read. The parsed copies stay beside the
+    -- trust answer, as in the result; a rejection is a fixed code and the raw
+    -- value is reduced to its type name. Nothing here changes the result.
+    lockedSample.observed = true
+    lockedSample.at = DiagnosticTime()
+    lockedSample.synced = synced
+    lockedSample.copies = copies < math.huge and copies or nil
+    lockedSample.rejection = not readable and "unreadable"
+        or (synced and "none" or rejection)
+    lockedSample.rawType = readable and LOCKED_RAW_TYPES[type(locked)]
+        and type(locked) or "unknown"
+    lockedSample.serial = serial
+    -- A refused table replaces the shape record, from this read's own values.
+    -- A collector that failed keeps no row; past the row bound the rows are
+    -- the first ones the parse entered. The ID classes are dropped here.
+    if type(locked) == "table" and not synced then
+        local kept = shape and not shape.failed and shape or nil
+        local entered = kept and kept.entered or 0
+        if kept then kept.classes = nil end
+        LockedShape.last = {
+            serial = serial, at = lockedSample.at, generation = ownedGeneration,
+            first = rejection, copies = lockedSample.copies, ids = ids,
+            status = not kept and "failed"
+                or (entered > LockedShape.MAX_ROWS and "truncated" or "captured"),
+            rows = entered > LockedShape.MAX_ROWS and LockedShape.MAX_ROWS or entered,
+            row = kept,
+        }
+    end
+    -- diagnosticSerial is diagnostics only: this read's serial, so that a
+    -- caller can tell whether the passive sample (OwnershipTrustView) belongs
+    -- to exactly this read. It selects refusal wording (OrbAdapter.Read) and
+    -- nothing else; no decision, gate or count reads it.
+    -- occupied: the occupied locked records this read counted, and records:
+    -- one {spellId, stacks} per record within the bound, ordered by spell and
+    -- stack (read order is not a meaning). capacity: the live capacity it was
+    -- held to, or nil when unknown. Only a synced read is authority.
+    local recordList = {}
+    for i = 1, #records do recordList[i] = records[i] end
+    table.sort(recordList, function(left, right)
+        if left.spellId ~= right.spellId then return left.spellId < right.spellId end
+        return left.stacks < right.stacks
+    end)
+    return { bySpell = bySpell, byFamily = byFamily, synced = synced,
+        diagnosticSerial = serial, occupied = occupied, records = recordList,
+        capacity = capacity }
 end
 
 -- Confirmed live via /nexus sniff, 2026-08-01: the server exposes the real
@@ -654,6 +876,30 @@ local function GrantedSignature(granted)
     return table.concat(out, ",")
 end
 
+-- How many stacks of one spell the granted mirror holds right now: the same
+-- evidence, counted the same way, as GrantedSignature and A.Owned. A Select is
+-- confirmed only when this rises above the count taken when it was submitted.
+-- This is exact spell AND tier evidence: the server guarantees exact spell
+-- IDs, and each quality tier of an Echo is its own sibling spellId (see
+-- Ratchet), so a count of one spellId is never another tier's stacks.
+local function GrantedCountOf(spellId)
+    local svc = PS()
+    local granted = svc and SafeCall(svc.GetGrantedPerks)
+    if type(granted) ~= "table" then return 0 end
+    local n = 0
+    for _, entries in pairs(granted) do
+        if type(entries) == "table" then
+            for i = 1, #entries do
+                local e = entries[i]
+                if type(e) == "table" and tonumber(e.spellId) == spellId then
+                    n = n + 1
+                end
+            end
+        end
+    end
+    return n
+end
+
 function A.Owned()
     projectionStatus.owned.calls = projectionStatus.owned.calls + 1
     local cat = A.Catalog()
@@ -679,10 +925,9 @@ function A.Owned()
     -- captured for leaderboard/build metadata through LockedOwned(), but they
     -- are never part of the current run's rolled ownership, guarantee queue,
     -- wishlist progress, board decisions, or save candidate.
-    -- auto-chained boards are stale-by-one: union our own confirmed picks
-    for id, n in pairs(recordedPicks) do
-        if (bySpell[id] or 0) < n then bySpell[id] = n end
-    end
+    -- Ownership is the granted mirror and nothing else. A submitted Select is
+    -- not merged in here, however the board moved: until the mirror shows it,
+    -- it is intent, held by A.InFlight() (see awaitingGrant), not a stack.
     local byFamily, distinct, total = {}, 0, 0
     for id, n in pairs(bySpell) do
         local fam = FamilyOf(id)
@@ -712,6 +957,20 @@ function A.Owned()
     ownedSeen = ownedConfirmedGeneration == ownedGeneration
     local synced = ownedSeen and not ghost
     projectionStatus.owned.distinct = projectionStatus.owned.distinct + distinct
+    -- The diagnostic sample of this evaluation. `fresh` compares the mirror
+    -- with the armed request baseline only; nil when none is armed.
+    ownedSample.observed = true
+    ownedSample.at = DiagnosticTime()
+    ownedSample.generation = ownedGeneration
+    ownedSample.confirmed = ownedSeen
+    ownedSample.synced = synced
+    ownedSample.fresh = nil
+    if ownedRequestGeneration == ownedGeneration then
+        ownedSample.fresh = currentResponse == true
+    end
+    ownedSample.ghost = ghost
+    ownedSample.distinct = distinct
+    ownedSample.total = total
     return { bySpell = bySpell, byFamily = byFamily,
              synced = synced, ghostSuspect = ghost,
              distinct = distinct, total = total,
@@ -722,7 +981,7 @@ end
 -- are void, and we re-request granted so the fresh run's owned set loads.
 -- Sync trust is handled per-level in A.Owned (no fragile snapshot compare).
 function A.RunBoundaryReset()
-    recordedPicks = {}
+    awaitingGrant = nil
     ownedProjectionRevision = ownedProjectionRevision + 1
     pendingOwnPick = nil
     ownedGeneration = ownedGeneration + 1
@@ -1330,12 +1589,119 @@ function WishlistRoles.ResolveSaved(saved, candidates)
     return fallback
 end
 
+-- Whether the retained permanent designs of one rolled-content key differ.
+-- A server mirror carries rolled rows only, so a plain mirror of that content
+-- cannot say which design it means. The content-key bucket, every stored
+-- assignment, the first-run plan and the removal history are retained
+-- designs; when the bucket exists and two of them differ, none is chosen for
+-- the mirror (not the first saved, the newest or any other guess). Designs are
+-- compared by their canonical target token.
+function WishlistRoles.DesignAmbiguous(state, key)
+    if type(state) ~= "table" or type(key) ~= "string" or key == "" then return false end
+    local buckets = state.lockDesignTargetsBySlot
+    if type(buckets) ~= "table" or buckets[key] == nil then return false end
+    A._assignmentTargetModel = A._assignmentTargetModel or Nexus.WishlistModel.New()
+    local tokenOf = A._assignmentTargetModel.TargetMapToken
+    local first
+    local function Differs(design)
+        if design == nil or design == false then return false end
+        local token = tokenOf(design) or "invalid"
+        if first == nil then first = token; return false end
+        return token ~= first
+    end
+    local function RecordDiffers(saved)
+        if type(saved) ~= "table"
+            or (saved.designRows == nil and saved.designTargets == nil) then return false end
+        local savedKey = saved.key
+        if type(savedKey) ~= "string" then
+            local candidate = CandidateFromStoredRecord(saved)
+            savedKey = candidate and candidate.key
+        end
+        if savedKey ~= key then return false end
+        local design = saved.designTargets
+        if saved.designRows ~= nil then design = WishlistRoles.DecodeDesign(saved.designRows) end
+        return Differs(design)
+    end
+    if Differs(buckets[key]) or RecordDiffers(state.firstRunWishlist) then return true end
+    for _, saved in pairs(type(state.loadoutWishlists) == "table" and state.loadoutWishlists or {}) do
+        if RecordDiffers(saved) then return true end
+    end
+    for _, retained in ipairs(type(state.forgottenWishlists) == "table" and state.forgottenWishlists or {}) do
+        if type(retained) == "table" and RecordDiffers(retained.record) then return true end
+    end
+    return false
+end
+
+-- The design an explicit selection of a plain server row carries when its
+-- rolled contents alone are ambiguous (DesignAmbiguous). A retained design is
+-- kept under its plan's name and contents, and ResolveSaved puts it only on
+-- the unique live row of that name and contents. So the clicked row is that
+-- plan when it is still the row the picker showed (same name and contents),
+-- ResolveSaved puts that plan's validated stored record on exactly this row,
+-- and every other retained design that could be this plan's is the same one.
+-- The content-key bucket names no plan: it must be that design, or the design
+-- of a valid retained plan of another name. Otherwise -- a row renamed since
+-- the picker opened, two designs for this plan, a bucket no retained plan
+-- explains, a record only its stored key ties to these contents -- nil, and
+-- the read stays unavailable. Read-only; the records DesignAmbiguous counts.
+function WishlistRoles.SelectedDesign(state, clicked, selected, live)
+    if type(clicked) ~= "table" or type(selected) ~= "table"
+        or selected.designTargets ~= nil
+        or not WishlistRoles.DesignAmbiguous(state, selected.key) then return nil end
+    local key, name, slot = selected.key, tostring(selected.name or ""), tonumber(selected.slot)
+    local content = WishlistRoles.Content(selected.echoes)
+    if name == "" or not slot or not content or clicked.key ~= key
+        or tostring(clicked.name or "") ~= name
+        or WishlistRoles.Content(clicked.echoes) ~= content then return nil end
+    A._assignmentTargetModel = A._assignmentTargetModel or Nexus.WishlistModel.New()
+    local tokenOf = A._assignmentTargetModel.TargetMapToken
+    local own, agreed, others = nil, nil, {}
+    local function Agrees(saved)
+        if type(saved) ~= "table"
+            or (saved.designRows == nil and saved.designTargets == nil) then return true end
+        local candidate = CandidateFromStoredRecord(saved)
+        local savedKey = saved.key
+        if type(savedKey) ~= "string" then savedKey = candidate and candidate.key end
+        if savedKey ~= key then return true end
+        local design = candidate and candidate.designTargets
+        local token = type(design) == "table" and tokenOf(design) or nil
+        -- A valid plan of another name is another plan.
+        if token and candidate.name ~= "" and candidate.name ~= name then
+            others[token] = true
+            return true
+        end
+        -- Anything else could be this plan's: one design only.
+        if not token or (agreed ~= nil and token ~= agreed) then return false end
+        agreed = token
+        local resolved = WishlistRoles.ResolveSaved(saved, live)
+        if resolved and tonumber(resolved.slot) == slot then own = design end
+        return true
+    end
+    if not Agrees(state.firstRunWishlist) then return nil end
+    for _, saved in pairs(type(state.loadoutWishlists) == "table" and state.loadoutWishlists or {}) do
+        if not Agrees(saved) then return nil end
+    end
+    for _, retained in ipairs(type(state.forgottenWishlists) == "table" and state.forgottenWishlists or {}) do
+        if type(retained) == "table" and not Agrees(retained.record) then return nil end
+    end
+    local bucket = tokenOf(state.lockDesignTargetsBySlot[key])
+    if own == nil or not bucket or (bucket ~= agreed and not others[bucket]) then return nil end
+    return WishlistRoles.CopyDesign(own)
+end
+
 function WishlistRoles.Wishlist(candidate, source, hasQuality)
     local wishlist=EchoesToWishlist(candidate.echoes,candidate.name,source,hasQuality,candidate.slot)
     if wishlist then
         wishlist.assignmentId=candidate.assignmentId
         wishlist.designTargets=WishlistRoles.CopyDesign(candidate.designTargets)
         wishlist.mirrorUnavailable=candidate.mirrorUnavailable
+        -- A plan without its own design would read the content-key bucket;
+        -- when retained designs of that content differ, it reads none.
+        if candidate.designTargets==nil then
+            local state=Store and Store.State and Store.State() or nil
+            wishlist.designAmbiguous=WishlistRoles.DesignAmbiguous(state,
+                A.WishlistKey(wishlist.entries)) or nil
+        end
     end
     return wishlist
 end
@@ -1350,6 +1716,14 @@ end
 -- happened to land on the same now-freed slot number).
 function A.WishlistKey(echoes)
     return WishlistIdentity(echoes)
+end
+
+-- Read-only: whether the retained locked-target designs of one rolled-content
+-- key differ (WishlistRoles.DesignAmbiguous). The editor asks before it fills
+-- a plan without its own design from the content-key bucket.
+function A.WishlistDesignAmbiguous(key)
+    local state = Store and Store.State and Store.State() or nil
+    return WishlistRoles.DesignAmbiguous(state, key) == true
 end
 
 function A.WishlistEvidenceState(candidate, expectedKey)
@@ -1604,6 +1978,29 @@ local function LiveWishlistCandidates(slots)
     return out
 end
 
+-- One assignment read builds the candidate list at most once. AssignedWishlist
+-- makes a context for the slot projection it read and passes it down; the
+-- list is built on first use and shared by every step of that read that was
+-- given the same projection. It lives only in that read's locals, so nothing
+-- survives the read (early return or error included), and a step given any
+-- other projection, or none, builds its own as before.
+local function CandidateContext(slots)
+    return {slots = slots}
+end
+
+local function ContextCandidates(context, slots)
+    if context and slots ~= nil and context.slots == slots then
+        local list = context.candidates
+        if list == nil then
+            list = LiveWishlistCandidates(slots)
+            context.candidates = list
+        end
+        return list
+    end
+    local list = LiveWishlistCandidates(slots)
+    return list
+end
+
 function A.GetWishlistCandidates()
     local slots = A.Slots()
     local out = LiveWishlistCandidates(slots)
@@ -1617,6 +2014,14 @@ function A.GetWishlistCandidates()
     for _, candidate in ipairs(out) do
         if candidate.key then seen[candidate.key] = true end
     end
+    local maxLoadout = tonumber(slots and slots.maxSlots) or 5
+    local associationIndex, associationUsable
+    local function Stamp(candidate)
+        if not candidate or associationIndex == nil then return candidate end
+        candidate.associationIndex = associationIndex
+        candidate.associationUsable = associationUsable
+        return candidate
+    end
     local function Add(saved)
         local candidate = CandidateFromStoredRecord(saved)
         if candidate and candidate.designTargets~=nil and candidate.assignmentId then
@@ -1624,6 +2029,7 @@ function A.GetWishlistCandidates()
             seenAssignments[candidate.assignmentId]=true
             candidate=WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(slots))
             candidate=ResolveWishlistEvidence(candidate,slots)
+            Stamp(candidate)
             for index,live in ipairs(out) do
                 if candidate.slot and live.slot==candidate.slot and live.designTargets==nil then
                     out[index]=candidate;return
@@ -1631,13 +2037,38 @@ function A.GetWishlistCandidates()
             end
             out[#out+1]=candidate;return
         end
-        if not candidate or seen[candidate.key] then return end
+        if not candidate then return end
+        if seen[candidate.key] then
+            -- The same contents are already offered from the live list. The
+            -- association still belongs on it: dropping it here is what made
+            -- an out-of-range record reach the switch list unlabelled.
+            if associationIndex ~= nil then
+                for _, existing in ipairs(out) do
+                    if existing.key == candidate.key
+                        and existing.associationIndex == nil then
+                        Stamp(existing)
+                        break
+                    end
+                end
+            end
+            return
+        end
         seen[candidate.key] = true
         candidate = ResolveWishlistEvidence(candidate, slots)
-        out[#out + 1] = candidate
+        out[#out + 1] = Stamp(candidate)
     end
+    associationIndex, associationUsable = nil, nil
     Add(state.firstRunWishlist)
-    for _, saved in pairs(state.loadoutWishlists or {}) do Add(saved) end
+    for loadoutIndex, saved in pairs(state.loadoutWishlists or {}) do
+        local index = tonumber(loadoutIndex)
+        associationIndex = index or loadoutIndex
+        -- An index outside the configured Saved Build range names no loadout.
+        -- The plan is kept and shown; only its use as a target is withheld.
+        associationUsable = index ~= nil and index >= 1
+            and index == math.floor(index) and index <= maxLoadout
+        Add(saved)
+    end
+    associationIndex, associationUsable = nil, nil
     table.sort(out, function(a, b)
         return (tonumber(a.slot) or 0) < (tonumber(b.slot) or 0)
     end)
@@ -1663,7 +2094,8 @@ function A.ConfirmWishlistRoles(candidate, echoes, source)
     local matched
     for _,live in ipairs(LiveWishlistCandidates(A.Slots())) do
         if tonumber(live.slot)==slot then
-            if live.key~=key or WishlistRoles.Content(live.echoes)~=signature then
+            if live.key~=key or WishlistRoles.Content(live.echoes)~=signature
+                or (candidate.name~=nil and tostring(live.name or "")~=tostring(candidate.name)) then
                 return nil,"This Wishlist changed while the role picker was open; reopen it"
             end
             if live.lockEvidenceVersion==WISHLIST_LOCK_EVIDENCE_VERSION
@@ -1708,14 +2140,34 @@ local function SelectWishlistCandidate(wishlistSlot, candidate)
         if snapshot.designTargets~=nil then
             return Select(WishlistRoles.ResolveSaved(snapshot,live))
         end
-        for _, current in ipairs(live) do
-            if current.key == snapshot.key then return Select(current) end
-        end
+        -- Equal rolled contents do not identify one Wishlist: two plans can
+        -- differ only in local permanent designs. The clicked slot decides
+        -- while it exists; changed contents there are refused, never
+        -- redirected to another equal-content slot. A key-only match follows
+        -- an identity that left its slot only when that match is unique.
+        local moved, matches = nil, 0
         for _, current in ipairs(live) do
             if tonumber(current.slot) == wishlistSlot then
-                return nil, "wishlist changed; refresh and try again"
+                if current.key ~= snapshot.key then
+                    return nil, "wishlist changed; refresh and try again"
+                end
+                -- The clicked row can still be exactly one retained plan of
+                -- these contents; the selection then keeps that plan's design.
+                local selected, why = Select(current)
+                if selected and selected.designTargets == nil then
+                    selected.designTargets = WishlistRoles.SelectedDesign(
+                        Store and Store.State and Store.State() or nil, snapshot, selected, live)
+                end
+                return selected, why
+            end
+            if current.key == snapshot.key then
+                moved, matches = current, matches + 1
             end
         end
+        if matches > 1 then
+            return nil, "wishlist identity is ambiguous; refresh and try again"
+        end
+        if moved then return Select(moved) end
         -- A missing mirror is not deletion evidence. Derived evidence still
         -- has to pass the current exact-active checks before it can be used.
         return Select(snapshot)
@@ -1729,7 +2181,10 @@ local function SelectWishlistCandidate(wishlistSlot, candidate)
     return nil, "wishlist data is unavailable; waiting for the server mirror"
 end
 
-local function ResolveAssociation(loadoutSlot)
+-- `slots` is optional: a caller that already read the slot projection in the
+-- same call passes it, so the server slots are not projected again. `context`
+-- is optional: the read's candidate context (see CandidateContext).
+local function ResolveAssociation(loadoutSlot, slots, context)
     loadoutSlot = tonumber(loadoutSlot)
     if not loadoutSlot then return nil end
     local state = Store and Store.State and Store.State()
@@ -1737,14 +2192,14 @@ local function ResolveAssociation(loadoutSlot)
     local saved = links and links[loadoutSlot]
     if saved == nil then return nil end
 
-    -- 1.0.5 stored a bare designed-slot number. Migrate it only after
-    -- validating the current contents, then persist a content identity so a
-    -- recycled server slot can never resurrect an unrelated historical name.
+    -- 1.0.5 stored a bare designed-slot number. It is recognized here, against
+    -- the current contents; the content identity that stops a recycled server
+    -- slot from capturing it is persisted by ReconcileLegacyAssignments, not
+    -- here: Store.State() is a detached copy, and a write to it is lost.
     if type(saved) == "number" or type(saved) == "string" then
         local wanted = tonumber(saved)
         for _, c in ipairs(A.GetWishlistCandidates()) do
             if tonumber(c.slot) == wanted then
-                links[loadoutSlot] = { slot = c.slot, key = c.key, name = c.name }
                 return c
             end
         end
@@ -1754,18 +2209,18 @@ local function ResolveAssociation(loadoutSlot)
         return nil
     end
 
-    local candidates = LiveWishlistCandidates(A.Slots())
+    local candidates = ContextCandidates(context, slots or A.Slots())
     local wantedKey = saved.key
     if wantedKey and wantedKey ~= "" then
         return WishlistRoles.ResolveSaved(saved,candidates)
     end
-    -- No key means an incomplete/old record. Slot fallback is accepted once
-    -- only and upgraded immediately.
+    -- No key means an incomplete/old record. The slot fallback is accepted
+    -- while the record has no identity; ReconcileLegacyAssignments persists the
+    -- identity (a write to this detached copy would be lost).
     local wantedSlot = tonumber(saved.slot)
     if not wantedKey and wantedSlot then
         for _, c in ipairs(candidates) do
             if tonumber(c.slot) == wantedSlot then
-                saved.key, saved.name = c.key, c.name
                 return c
             end
         end
@@ -1780,11 +2235,11 @@ end
 -- wishlist target so Nexus can guide their very first 1-80 run. This is a
 -- temporary account-local association and is replaced naturally once the
 -- player has a real Saved Build selected.
-local function ResolveFirstRunWishlist()
+local function ResolveFirstRunWishlist(slots, context)
     local state = Store and Store.State and Store.State()
     local saved = state and state.firstRunWishlist
     if type(saved) ~= "table" then return nil end
-    return WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(A.Slots()))
+    return WishlistRoles.ResolveSaved(saved,ContextCandidates(context,slots or A.Slots()))
 end
 
 function A.GetFirstRunWishlist()
@@ -1806,13 +2261,122 @@ function WishlistRoles.FirstRunHandoff(state)
         and handoff.assignmentId == first.assignmentId
 end
 
+-- A stored assignment as an editor binds it: its assignment identity; for
+-- records saved before identities, its server slot (which ResolveAssociation's
+-- read-time upgrade of the oldest shapes keeps), else its content key. "none"
+-- when nothing is assigned.
+function WishlistRoles.AssignmentToken(saved)
+    if saved == nil or saved == false then return "none" end
+    if type(saved) == "table" and saved.assignmentId ~= nil then
+        return "id:" .. tostring(saved.assignmentId)
+    end
+    local slot
+    if type(saved) == "table" then slot = tonumber(saved.slot) else slot = tonumber(saved) end
+    if slot then return "slot:" .. tostring(slot) end
+    if type(saved) == "table" and type(saved.key) == "string" and saved.key ~= "" then
+        return "key:" .. saved.key
+    end
+    return "invalid"
+end
+
+-- The first-run plan as an editor binds it; false is an explicit Unassign.
+function WishlistRoles.FirstRunToken(first)
+    if first == false then return "unassigned" end
+    return WishlistRoles.AssignmentToken(first)
+end
+
+-- Assignment action tokens: one opaque token per assignment destination (a
+-- numbered Saved Build index, or "first" for the first-run plan), separate
+-- from plan identity and contents. Every write to a destination replaces its
+-- token: each explicit Assign, Unassign (also of an empty destination),
+-- Restore and Forget, a re-pick of the same plan, the automatic promotion,
+-- and an editor's own save. An editor binds a snapshot when it opens; its
+-- save writes a destination only while that destination's token is still the
+-- bound one, and adopts only the tokens that save installed. Session memory
+-- only: an editor does not survive a reload, so nothing is persisted and no
+-- token comes back from retained data. Bound to the owner and database
+-- identity; a change of either starts a new epoch with fresh tokens.
+local assignmentActions = {epoch = 0, serial = 0, tokens = {}}
+
+local function AssignmentActions()
+    local actions = assignmentActions
+    local owner = Store and type(Store.CurrentOwnerKey) == "function"
+        and Store.CurrentOwnerKey() or nil
+    if actions.epoch == 0 or actions.owner ~= owner or actions.db ~= NexusDB then
+        actions.epoch = actions.epoch + 1
+        actions.owner, actions.db = owner, NexusDB
+        actions.tokens = {}
+    end
+    return actions
+end
+
+local function ActionDestination(destination)
+    if destination == "first" then return "first" end
+    return tonumber(destination)
+end
+
+function WishlistRoles.ActionToken(destination)
+    local actions = AssignmentActions()
+    local key = ActionDestination(destination)
+    if key == nil then return nil end
+    return actions.tokens[key] or ("e" .. actions.epoch .. ":0")
+end
+
+-- Whether a bound snapshot still holds this destination's current token.
+function WishlistRoles.ActionUnchanged(bound, destination)
+    local key = ActionDestination(destination)
+    if type(bound) ~= "table" or key == nil then return false end
+    local token = type(bound.tokens) == "table" and bound.tokens[key]
+        or ("e" .. tostring(bound.epoch) .. ":0")
+    return token == WishlistRoles.ActionToken(destination)
+end
+
+-- Inside a write: may it write `destination`? Without a bound snapshot (an
+-- explicit action) yes; for an editor save only while the token is unchanged.
+function WishlistRoles.MayWrite(bound, destination)
+    return bound == nil or WishlistRoles.ActionUnchanged(bound, destination)
+end
+
+-- Inside a write that wrote `destination`: replace its token and record the
+-- new one in `installed` (the result an editor's save returns).
+function WishlistRoles.Wrote(installed, destination)
+    local key = ActionDestination(destination)
+    if key == nil then return nil end
+    local actions = AssignmentActions()
+    actions.serial = actions.serial + 1
+    local token = "e" .. actions.epoch .. ":" .. actions.serial
+    actions.tokens[key] = token
+    if installed then installed[key] = token end
+    return token
+end
+
+-- A bounded copy of every destination's current token, for an editor to bind.
+function A.AssignmentActionSnapshot()
+    local actions = AssignmentActions()
+    local tokens = {}
+    for key, token in pairs(actions.tokens) do tokens[key] = token end
+    return {epoch = actions.epoch, tokens = tokens}
+end
+
+function A.AssignmentActionToken(destination)
+    return WishlistRoles.ActionToken(destination)
+end
+
+function A.AssignmentActionUnchanged(bound, destination)
+    return WishlistRoles.ActionUnchanged(bound, destination)
+end
+
 function WishlistRoles.ReplaceFirstRun(state, record)
     -- Prove ownership before stamping the replacement. An explicit picker
     -- change must keep its existing bootstrap handoff on the same target.
     local handoff = WishlistRoles.FirstRunHandoff(state)
     WishlistRoles.StampAssignment(state,record)
     state.firstRunWishlist = record
-    if handoff then state.loadoutWishlists[1] = WishlistRoles.CopyDesign(record) end
+    WishlistRoles.Wrote(nil, "first")
+    if handoff then
+        state.loadoutWishlists[1] = WishlistRoles.CopyDesign(record)
+        WishlistRoles.Wrote(nil, 1)
+    end
 end
 
 function A.SetFirstRunWishlist(wishlistSlot, candidate)
@@ -1844,10 +2408,12 @@ function A.ClearFirstRunWishlist()
         -- Equal names or contents cannot identify an unrelated assignment.
         if WishlistRoles.FirstRunHandoff(state) then
             state.loadoutWishlists[1] = nil
+            WishlistRoles.Wrote(nil, 1)
         end
         -- False records an explicit first-run Unassign. Nil still means that
         -- an older assignment may be waiting for its active-loadout identity.
         state.firstRunWishlist = false
+        WishlistRoles.Wrote(nil, "first")
     end) then return false end
     MarkWishlistProjectionDirty()
     return true
@@ -1860,6 +2426,20 @@ local function IsPopulatedLoadout(loadoutSlot, slots)
     return row and type(row.echoes) == "table" and #row.echoes > 0 and true or false
 end
 
+-- True only when the server reports this numbered Saved Build with a valid,
+-- empty Echo list. A missing row or a malformed list is not known to be empty.
+local function IsKnownEmptyLoadout(loadoutSlot, slots)
+    local row = slots and slots.bySlot and slots.bySlot[loadoutSlot]
+    return type(row) == "table" and type(row.echoes) == "table"
+        and row.roleSourceValid == true and #row.echoes == 0
+end
+
+-- Whether a numbered Saved Build holds Echoes now (a locked-only build does).
+-- Read-only; the editor asks it before it uploads for that destination.
+function A.IsLoadoutPopulated(loadoutSlot)
+    return IsPopulatedLoadout(loadoutSlot)
+end
+
 -- Read-only association diagnosis for presentation code. Unlike
 -- ResolveAssociation, this never migrates, renames, reindexes, or otherwise
 -- rewrites SavedVariables; it admits only an exact stable identity or the
@@ -1868,23 +2448,27 @@ local function ReadLoadoutWishlistState(loadoutSlot)
     loadoutSlot = tonumber(loadoutSlot)
     if not loadoutSlot then return nil, "identity-unavailable", nil end
     local slots = A.Slots()
+    -- The fourth value of every answer below: the declared Saved Build range
+    -- of this same slots read (GetServerMaxSlots, a whole number of at least
+    -- 1; else five).
+    local maxSlots = PositiveInteger(slots and slots.maxSlots) or 5
     if not IsPopulatedLoadout(loadoutSlot, slots) then
-        return nil, "identity-unavailable", nil
+        return nil, "identity-unavailable", nil, maxSlots
     end
     local state = Store and Store.State and Store.State()
     local links = state and state.loadoutWishlists
     local saved = links and links[loadoutSlot]
-    if saved == nil then return nil, "identity-unavailable", nil end
-    if type(saved) ~= "table" then return nil, "invalid-schema", nil end
+    if saved == nil then return nil, "identity-unavailable", nil, maxSlots end
+    if type(saved) ~= "table" then return nil, "invalid-schema", nil, maxSlots end
     if saved.key ~= nil and type(saved.key) ~= "string" then
-        return nil, "invalid-schema", nil
+        return nil, "invalid-schema", nil, maxSlots
     end
 
     local expectedKey = saved.key
     local candidate=WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(slots))
     if not candidate then
         return nil, expectedKey and expectedKey ~= ""
-            and "invalid-schema" or "association-mismatch", expectedKey
+            and "invalid-schema" or "association-mismatch", expectedKey, maxSlots
     end
 
     candidate = ResolveWishlistEvidence(candidate, slots, loadoutSlot)
@@ -1893,12 +2477,14 @@ local function ReadLoadoutWishlistState(loadoutSlot)
     if expectedKey == nil or expectedKey == "" then
         evidenceState = "association-mismatch"
     end
-    return candidate, evidenceState, key
+    return candidate, evidenceState, key, maxSlots
 end
 
-local function RememberLoadoutWishlistState(loadoutSlot, key, evidenceState)
+-- Observations are kept for the declared Saved Build range only (the same
+-- bound every loadout writer uses), never for a slot outside it.
+local function RememberLoadoutWishlistState(loadoutSlot, key, evidenceState, maxSlots)
     loadoutSlot = tonumber(loadoutSlot)
-    if not loadoutSlot or loadoutSlot < 1 or loadoutSlot > 5
+    if not loadoutSlot or loadoutSlot < 1 or loadoutSlot > (maxSlots or 5)
         or type(key) ~= "string" or key == "" then
         if loadoutSlot then wishlistEvidenceObservations[loadoutSlot] = nil end
         return
@@ -1918,14 +2504,14 @@ local function RememberLoadoutWishlistState(loadoutSlot, key, evidenceState)
 end
 
 function A.GetLoadoutWishlistState(loadoutSlot)
-    local candidate, evidenceState, key =
+    local candidate, evidenceState, key, maxSlots =
         ReadLoadoutWishlistState(loadoutSlot)
-    RememberLoadoutWishlistState(loadoutSlot, key, evidenceState)
+    RememberLoadoutWishlistState(loadoutSlot, key, evidenceState, maxSlots)
     return candidate, evidenceState, key
 end
 
 -- Runs only after a semantic slot/active/locked-evidence change and only when
--- a presentation reader previously observed an association. The table is bounded by the five
+-- a presentation reader previously observed an association. The table is bounded by the declared
 -- loadout slots; ordinary 0.2-second Poll calls do no Wishlist traversal.
 local function RefreshWishlistEvidenceTransitions()
     if next(wishlistEvidenceObservations) == nil then return false end
@@ -1967,12 +2553,28 @@ function A.GetLoadoutWishlist(loadoutSlot)
     return resolved
 end
 
+-- What the Saved Build holds now, as an open editor binds it.
+function A.LoadoutAssignmentToken(loadoutSlot)
+    local state = Store and Store.State and Store.State()
+    local links = type(state) == "table" and state.loadoutWishlists or nil
+    return WishlistRoles.AssignmentToken(type(links) == "table"
+        and links[tonumber(loadoutSlot)] or nil)
+end
+
+-- What the first-run plan is now, as an open editor binds it.
+function A.FirstRunToken()
+    local state = Store and Store.State and Store.State()
+    local first = nil
+    if type(state) == "table" then first = state.firstRunWishlist end
+    return WishlistRoles.FirstRunToken(first)
+end
+
 function A.GetLoadoutWishlistSlot(loadoutSlot)
     local c = A.GetLoadoutWishlist(loadoutSlot)
     return c and tonumber(c.slot) or nil
 end
 
-function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes, designTargets)
+function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes, designTargets, bound)
     loadoutSlot = tonumber(loadoutSlot)
     local slots = A.Slots()
     if not slots or not loadoutSlot or loadoutSlot < 1
@@ -1984,14 +2586,23 @@ function A.SetLoadoutWishlistIdentity(loadoutSlot, name, echoes, designTargets)
     end
     local record = StoredWishlistRecord({name=name, echoes=echoes,designTargets=designTargets})
     if not record then return false, "invalid wishlist" end
+    -- `bound`: an editor's snapshot (WishlistRoles.MayWrite); each written
+    -- destination is checked on its own and its new token returned.
+    local installed, changed = {}, false
     if not UpdateStoreState(function(state)
+        if not WishlistRoles.MayWrite(bound, loadoutSlot) then changed = true; return end
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
-        state.firstRunWishlist = nil
+        WishlistRoles.Wrote(installed, loadoutSlot)
+        if WishlistRoles.MayWrite(bound, "first") then
+            state.firstRunWishlist = nil
+            WishlistRoles.Wrote(installed, "first")
+        end
     end) then return false, "store unavailable" end
+    if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
-    return true
+    return true, nil, record.assignmentId, record.key, installed
 end
 
 -- Bootstrap for a genuinely brand-new character: no Saved Build exists yet
@@ -2014,19 +2625,36 @@ end
 --     leveling 1-79), A.Wishlist() reads ONLY this, via
 --     ResolveFirstRunWishlist -- ResolveAssociation is never even reached
 --     yet since there's no active slot to resolve.
-function A.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets)
+function A.SetFirstLoadoutWishlistIdentity(name, echoes, designTargets, bound)
     local record = StoredWishlistRecord({name=name, echoes=echoes,designTargets=designTargets})
     if not record then return false, "invalid wishlist" end
     local mirrored = StoredWishlistRecord(record)
+    local installed, changed = {}, false
     if not UpdateStoreState(function(state)
+        -- `bound`: an editor's snapshot. The first-run plan and the slot-1
+        -- handoff are separate destinations, each checked on its own.
+        if not WishlistRoles.MayWrite(bound, "first") then changed = true; return end
+        -- Slot 1 receives the handoff only when it holds no assignment or
+        -- holds the proven handoff of the current first-run plan
+        -- (WishlistRoles.FirstRunHandoff). Another assignment there is never
+        -- replaced; the first-run plan alone is then updated.
+        local handoff = WishlistRoles.FirstRunHandoff(state)
+        local current = type(state.loadoutWishlists) == "table" and state.loadoutWishlists[1] or nil
         WishlistRoles.StampAssignment(state,record)
         mirrored.assignmentId=record.assignmentId
         state.loadoutWishlists = state.loadoutWishlists or {}
-        state.loadoutWishlists[1] = record
+        if (current == nil or handoff) and WishlistRoles.MayWrite(bound, 1) then
+            state.loadoutWishlists[1] = record
+            WishlistRoles.Wrote(installed, 1)
+        end
         state.firstRunWishlist = mirrored
+        WishlistRoles.Wrote(installed, "first")
     end) then return false, "store unavailable" end
+    if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
-    return true
+    -- The identity this save stamped and the tokens it installed, for an
+    -- editor that holds this plan.
+    return true, nil, mirrored.assignmentId, mirrored.key, installed
 end
 
 function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
@@ -2051,48 +2679,420 @@ function A.SetLoadoutWishlist(loadoutSlot, wishlistSlot, candidate)
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
+        WishlistRoles.Wrote(nil, loadoutSlot)
         state.firstRunWishlist = nil
+        WishlistRoles.Wrote(nil, "first")
     end) then return false, "store unavailable" end
     MarkWishlistProjectionDirty()
     return true
 end
 
 
-function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes, designTargets)
+function A.UpdateWishlistAssociationAfterSave(loadoutSlot, wishlistSlot, name, echoes, designTargets, binding)
     loadoutSlot, wishlistSlot = PositiveInteger(loadoutSlot), PositiveInteger(wishlistSlot)
     -- Slot 0 is the first-run context, never a numbered loadout association.
     -- Refuse invalid identifiers before clearing its durable assignment.
     if not loadoutSlot or not wishlistSlot then return false, "invalid slot" end
+    -- The SAME loadout range its two sibling writers require. Without it this
+    -- was the one path that could persist an association under a Wishlist
+    -- mirror number (the designed range sits ABOVE maxSlots), and a stored map
+    -- key is then read back as though it named a playable Saved Build.
+    -- The range is the configured one: a higher supported slot stays valid.
+    local slots = A.Slots()
+    if not slots or loadoutSlot > (tonumber(slots.maxSlots) or 5) then
+        return false, "invalid loadout"
+    end
+    -- Its two sibling writers refuse an empty Saved Build as well. An
+    -- association stored under one is unusable (GetLoadoutWishlist hides it)
+    -- yet this write also clears the first-run plan. The editor checks
+    -- before it uploads; this is the check at the moment of the write.
+    if not IsPopulatedLoadout(loadoutSlot, slots) then
+        return false, "that loadout slot is empty or unavailable"
+    end
     local record = StoredWishlistRecord({
         slot=wishlistSlot, name=name, echoes=echoes,designTargets=designTargets,
     })
     if not record then return false end
+    local installed, changed = {}, false
     if not UpdateStoreState(function(state)
+        -- `binding` is an open editor's: its action snapshot (`actions`) and,
+        -- as additional safeguards, what this Saved Build held (`assignment`)
+        -- and the first-run plan (`firstRun`) when it opened. Any Assign,
+        -- Unassign or Restore of this Saved Build since then -- also of the
+        -- same plan -- is kept; so is a first-run plan chosen since then.
+        local current = type(state.loadoutWishlists) == "table"
+            and state.loadoutWishlists[loadoutSlot] or nil
+        local bound = nil
+        if type(binding) == "table" then bound = binding.actions or false end
+        if type(binding) == "table" and (not WishlistRoles.MayWrite(bound, loadoutSlot)
+            or WishlistRoles.AssignmentToken(current) ~= binding.assignment) then
+            changed = true
+            return
+        end
         WishlistRoles.StampAssignment(state,record)
         state.loadoutWishlists = state.loadoutWishlists or {}
         state.loadoutWishlists[loadoutSlot] = record
-        state.firstRunWishlist = nil
+        WishlistRoles.Wrote(installed, loadoutSlot)
+        if type(binding) ~= "table" or (WishlistRoles.MayWrite(bound, "first")
+            and WishlistRoles.FirstRunToken(state.firstRunWishlist) == binding.firstRun) then
+            state.firstRunWishlist = nil
+            WishlistRoles.Wrote(installed, "first")
+        end
     end) then return false end
+    if changed then return false, "assignment_changed" end
     MarkWishlistProjectionDirty()
-    return true
+    -- The identity this save stamped and the tokens it installed, for the
+    -- editor that holds this plan.
+    return true, nil, record.assignmentId, record.key, installed
 end
 
+-- How many removals stay recoverable at once. A later removal must never
+-- discard an earlier one the player can still see offered as an undo.
+local REMOVAL_HISTORY = 5
+
+-- The removal list, newest first, migrating the single-record shape that
+-- earlier bytes wrote. Returns the live array so a writer can edit it.
+-- The list, migrating the single-record shape that earlier bytes wrote.
+--
+-- Adoption happens ONLY when there is no list yet, which is the whole of the
+-- upgrade path. A record written into the single field BESIDE an existing
+-- list -- which needs an older build to write after a newer one created the
+-- list -- stays where it is and is not offered. Adopting it here was tried
+-- and withdrawn: this function runs inside the write, while the caller chose
+-- from a list read before it, so inserting an entry shifted every position
+-- the caller had selected by and restored a different plan than the one the
+-- player picked. Not offering a record is a limitation; restoring the wrong
+-- plan is a defect, and the limitation is the safer of the two.
+local function RemovalList(state)
+    if type(state) ~= "table" then return {} end
+    if type(state.forgottenWishlists) ~= "table" then
+        state.forgottenWishlists = {}
+        local single = state.forgottenWishlist
+        if type(single) == "table" and type(single.record) == "table" then
+            state.forgottenWishlists[1] = single
+        end
+    end
+    return state.forgottenWishlists
+end
+
+-- Put one removed record at the front of the list and drop the oldest beyond
+-- the cap. The dropped one is genuinely gone, which is why the cap is not 1.
+local function RememberRemoval(state, entry)
+    local list = RemovalList(state)
+    table.insert(list, 1, entry)
+    -- Unassign and a confirmed removal share one bounded budget, but they are
+    -- not worth the same: the player was told a confirmed removal could be
+    -- undone. When the list is full the oldest UNASSIGN is dropped first, and
+    -- a confirmed removal only when there is nothing else left to drop.
+    while #list > REMOVAL_HISTORY do
+        local dropped
+        for position = #list, 2, -1 do
+            local entry = list[position]
+            -- Saved data this build did not write can hold anything; reading
+            -- a field off it must refuse, not raise, inside a store write.
+            if type(entry) == "table" and entry.source == "unassign" then
+                dropped = position
+                break
+            end
+        end
+        table.remove(list, dropped or #list)
+    end
+    -- The old single field is kept in step so bytes written here stay
+    -- readable by a build that only knows the earlier shape.
+    state.forgottenWishlist = list[1]
+end
+
+-- Unassign. The label and tooltip promise the Wishlist is kept, which holds
+-- for a plan that mirrors a server Wishlist because the server copy stays.
+-- A local-only plan has no other copy, so the removed record is retained in
+-- the SAME write as a recoverable entry, and the control can no longer be the
+-- last thing that touched a plan the player still wants.
 function A.ClearLoadoutWishlist(loadoutSlot)
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     loadoutSlot = tonumber(loadoutSlot)
     if not loadoutSlot then return false end
     if not UpdateStoreState(function(state)
         state.loadoutWishlists = state.loadoutWishlists or {}
+        local removed = state.loadoutWishlists[loadoutSlot]
         state.loadoutWishlists[loadoutSlot] = nil
+        WishlistRoles.Wrote(nil, loadoutSlot)
+        if type(removed) == "table" then
+            RememberRemoval(state,
+                {record = removed, loadoutSlot = loadoutSlot, source = "unassign"})
+        end
     end) then return false end
     MarkWishlistProjectionDirty()
     return true
 end
 
-function A.Wishlist()
+-- Every retained local plan, with the identity a caller must quote to act on
+-- one. Read-only: it associates nothing, resolves no mirror and writes nothing.
+-- `usable` states whether this record's map index names a Saved Build in the
+-- CONFIGURED range; a plan whose index does not is still the player's plan.
+function A.RetainedWishlistPlans()
+    local state = Store and Store.State and Store.State()
+    if type(state) ~= "table" then return {} end
+    local slots = A.Slots()
+    local maxLoadout = tonumber(slots and slots.maxSlots) or 5
+    -- Whether a server Wishlist currently mirrors a plan is a fact about the
+    -- live list, not about the number the record happens to carry. A stored
+    -- hint survives the mirror it names, and a caller that reads it as
+    -- "a copy exists elsewhere" tells the player the opposite of the truth.
+    local liveKeys, liveSlots = {}, {}
+    for _, live in ipairs(LiveWishlistCandidates(slots) or {}) do
+        if live.key then liveKeys[live.key] = true end
+        if tonumber(live.slot) then liveSlots[tonumber(live.slot)] = true end
+    end
+    local out = {}
+    for loadoutIndex, saved in pairs(state.loadoutWishlists or {}) do
+        local candidate = CandidateFromStoredRecord(saved)
+        if candidate then
+            local index = tonumber(loadoutIndex)
+            local ordinary, locked = 0, 0
+            for _, echo in ipairs(candidate.echoes or {}) do
+                if echo.locked == true then locked = locked + (tonumber(echo.stacks) or 1)
+                else ordinary = ordinary + (tonumber(echo.stacks) or 1) end
+            end
+            out[#out + 1] = {
+                associationIndex = index or loadoutIndex,
+                usable = index ~= nil and index >= 1 and index == math.floor(index)
+                    and index <= maxLoadout or false,
+                name = candidate.name, key = candidate.key,
+                assignmentId = candidate.assignmentId,
+                mirrorSlot = candidate.slot,
+                -- Two different facts, never merged: a server Wishlist whose
+                -- contents are exactly this plan, and a live mirror slot with
+                -- this number, which may hold anything by now.
+                mirrorResolved = candidate.key ~= nil
+                    and liveKeys[candidate.key] == true or false,
+                mirrorSlotLive = tonumber(candidate.slot) ~= nil
+                    and liveSlots[tonumber(candidate.slot)] == true or false,
+                rows = #(candidate.echoes or {}),
+                ordinaryCopies = ordinary, lockedCopies = locked,
+                designTargets = candidate.designTargets ~= nil,
+            }
+        end
+    end
+    -- Saved Build 10 comes after Saved Build 2. Anything that is not a
+    -- number sorts after every number, by its text.
+    table.sort(out, function(left, right)
+        local leftNumber = tonumber(left.associationIndex)
+        local rightNumber = tonumber(right.associationIndex)
+        if leftNumber and rightNumber then return leftNumber < rightNumber end
+        if leftNumber then return true end
+        if rightNumber then return false end
+        return tostring(left.associationIndex) < tostring(right.associationIndex)
+    end)
+    return out
+end
+
+-- Stop exposing ONE exact retained plan. The caller must quote the identity it
+-- means; a name is never enough, and two plans can share one. Nothing on the
+-- server, in the build, on another character, in another plan's shared design
+-- or in any pending receipt is touched: this removes one association record
+-- and the first-run pointer if it names the same identity.
+--
+-- A bounded number of removals stay recoverable, newest first, so cleaning up
+-- several plans never costs the first one. The list is short on purpose: this
+-- is an undo, not an archive.
+function A.ForgetWishlistPlan(selector)
+    if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if type(selector) ~= "table" then return false, "no plan was selected" end
+    local wantIndex = tonumber(selector.associationIndex)
+    local wantKey = type(selector.key) == "string" and selector.key ~= "" and selector.key or nil
+    local wantAssignment = type(selector.assignmentId) == "string"
+        and selector.assignmentId ~= "" and selector.assignmentId or nil
+    if wantIndex == nil and not wantKey and not wantAssignment then
+        return false, "the exact plan identity is required"
+    end
+    -- Nothing is written unless a plan actually matched. A store write that
+    -- changes nothing still bumps the saved state, and an incident that says
+    -- `committed = false` beside one would be wrong.
+    local state = Store and Store.State and Store.State()
+    if type(state) ~= "table" or type(state.loadoutWishlists) ~= "table" then
+        return false, "that exact plan is no longer retained"
+    end
+    local removed, removedIndex
+    local firstRunRemoved = false
+    local ok = UpdateStoreState(function(state)
+        state.loadoutWishlists = state.loadoutWishlists or {}
+        for loadoutIndex, saved in pairs(state.loadoutWishlists) do
+            local candidate = CandidateFromStoredRecord(saved)
+            local sameIndex = wantIndex == nil
+                or tonumber(loadoutIndex) == wantIndex
+            local sameKey = not wantKey
+                or (candidate and candidate.key == wantKey)
+            local sameAssignment = not wantAssignment
+                or (candidate and candidate.assignmentId == wantAssignment)
+            if sameIndex and sameKey and sameAssignment and removed == nil then
+                removed, removedIndex = saved, loadoutIndex
+            end
+        end
+        if removed == nil then return end
+        state.loadoutWishlists[removedIndex] = nil
+        WishlistRoles.Wrote(nil, removedIndex)
+        -- The same identity pointed at from first-run state would restore the
+        -- record on the next read. It is reconciled in THIS write.
+        local first = CandidateFromStoredRecord(state.firstRunWishlist)
+        local removedCandidate = CandidateFromStoredRecord(removed)
+        if first and removedCandidate and first.key == removedCandidate.key
+            and first.assignmentId == removedCandidate.assignmentId then
+            state.firstRunWishlist = nil
+            WishlistRoles.Wrote(nil, "first")
+            firstRunRemoved = true
+        end
+        RememberRemoval(state, {
+            record = removed, loadoutSlot = tonumber(removedIndex) or removedIndex,
+            firstRun = firstRunRemoved or nil, source = "removal",
+        })
+    end)
+    if not ok then return false, "saved data is not writable right now" end
+    if removed == nil then return false, "that exact plan is no longer retained" end
+    MarkWishlistProjectionDirty()
+    return true, nil, {loadoutSlot = tonumber(removedIndex) or removedIndex,
+        firstRun = firstRunRemoved or nil}
+end
+
+-- Everything currently recoverable, newest first, as facts a caller can show
+-- and an identity it can quote back. Read-only, and never the stored records.
+function A.ForgottenWishlistPlans()
+    local state = Store and Store.State and Store.State()
+    if type(state) ~= "table" then return {} end
+    local list = type(state.forgottenWishlists) == "table"
+        and state.forgottenWishlists or nil
+    if not list then
+        local single = state.forgottenWishlist
+        list = (type(single) == "table" and type(single.record) == "table")
+            and {single} or {}
+    end
+    local out = {}
+    for position, retained in ipairs(list) do
+        local candidate = type(retained) == "table"
+            and CandidateFromStoredRecord(retained.record) or nil
+        if candidate then
+            out[#out + 1] = {
+                position = position,
+                name = candidate.name,
+                key = candidate.key,
+                assignmentId = candidate.assignmentId,
+                associationIndex = retained.loadoutSlot,
+                mirrorSlot = candidate.slot,
+                rows = #(candidate.echoes or {}),
+            }
+        end
+    end
+    return out
+end
+
+-- The most recent one, for callers that only offer a single undo.
+function A.ForgottenWishlistPlan()
+    return A.ForgottenWishlistPlans()[1]
+end
+
+-- Undo one removal. Without a selector this is the most recent one; with a
+-- `position`, or an exact identity, it is that one, so an older removal that
+-- is still offered can be taken back without disturbing the newer ones.
+--
+-- The record goes back under the index it had. When that index now holds a
+-- different plan, the record lands on the lowest free Saved Build index and
+-- the caller is told which: the alternative is telling the player to remove
+-- whatever occupies it, and a removal would push this record further down its
+-- own list. A refusal here never asks for a destructive step.
+function A.RestoreForgottenWishlistPlan(selector)
+    if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    local state = Store and Store.State and Store.State()
+    if type(state) ~= "table" then
+        return false, "nothing was removed in a way this can restore"
+    end
+    selector = type(selector) == "table" and selector or {}
+    local wantPosition = tonumber(selector.position)
+    local wantKey = type(selector.key) == "string" and selector.key ~= "" and selector.key or nil
+    local wantAssignment = type(selector.assignmentId) == "string"
+        and selector.assignmentId ~= "" and selector.assignmentId or nil
+    local offered = A.ForgottenWishlistPlans()
+    local chosen
+    for _, entry in ipairs(offered) do
+        local samePosition = wantPosition == nil or entry.position == wantPosition
+        local sameKey = not wantKey or entry.key == wantKey
+        local sameAssignment = not wantAssignment or entry.assignmentId == wantAssignment
+        if samePosition and sameKey and sameAssignment and chosen == nil then
+            chosen = entry
+        end
+    end
+    if chosen == nil then
+        return false, "nothing was removed in a way this can restore"
+    end
+    local landedOn, full = nil, false
+    local ok = UpdateStoreState(function(live)
+        live.loadoutWishlists = live.loadoutWishlists or {}
+        local list = RemovalList(live)
+        local retained = list[chosen.position]
+        if type(retained) ~= "table" or type(retained.record) ~= "table" then
+            return
+        end
+        local index = retained.loadoutSlot
+        if index == nil or live.loadoutWishlists[index] ~= nil then
+            index = nil
+            local maxLoadout = tonumber((A.Slots() or {}).maxSlots) or 5
+            for candidateIndex = 1, maxLoadout do
+                if live.loadoutWishlists[candidateIndex] == nil then
+                    index = candidateIndex
+                    break
+                end
+            end
+            if index == nil then full = true; return end
+        end
+        live.loadoutWishlists[index] = retained.record
+        WishlistRoles.Wrote(nil, index)
+        if retained.firstRun and live.firstRunWishlist == nil then
+            live.firstRunWishlist = retained.record
+            WishlistRoles.Wrote(nil, "first")
+        end
+        table.remove(list, chosen.position)
+        live.forgottenWishlist = list[1]
+        landedOn = index
+    end)
+    if not ok then return false, "saved data is not writable right now" end
+    if full then
+        return false, "every Saved Build already holds a plan; this one stays "
+            .. "recoverable until one is free"
+    end
+    if landedOn == nil then
+        return false, "nothing was removed in a way this can restore"
+    end
+    MarkWishlistProjectionDirty()
+    return true, nil, {loadoutSlot = landedOn,
+        movedFrom = (tonumber(chosen.associationIndex) ~= landedOn)
+            and chosen.associationIndex or nil}
+end
+
+-- What the supported client interface can do about a SERVER Wishlist. The
+-- service surface this addon is given has no delete of any kind: a Wishlist
+-- mirror is a build slot the server reports unverified or above maxSlots, and
+-- every write path offered creates or overwrites one. Overwriting a slot with
+-- other contents is not deletion and would alter what the player has saved, so
+-- no delete is offered and the reason is stated rather than hidden.
+function A.ServerWishlistDeletionSupport()
+    local svc = PS()
+    local names = {"DeleteServerBuildSlot", "RemoveServerBuildSlot",
+        "DeleteWishlist", "RemoveWishlist", "ClearServerBuildSlot"}
+    for _, name in ipairs(names) do
+        if svc and type(svc[name]) == "function" then
+            return {supported = true, entry = name}
+        end
+    end
+    return {supported = false,
+        reason = "this client build exposes no Wishlist deletion call"}
+end
+
+-- `slots` is optional: AssignedWishlist passes the projection it read in the
+-- same call. Every other caller reads the current slots here. `context` is
+-- private to AssignedWishlist (its candidate context for that projection);
+-- no other caller passes one.
+function A.Wishlist(slots, context)
     projectionStatus.wishlist.calls = projectionStatus.wishlist.calls + 1
     A._wishlistNote = nil
-    local slots = A.Slots()
+    if slots == nil then slots = A.Slots() end
     if not slots or slots.activeKnown==false then
         local saved = Store and Store.State and Store.State()
         local known = saved and (saved.firstRunWishlist
@@ -2103,7 +3103,7 @@ function A.Wishlist()
     local activeSlot = slots and tonumber(slots.activeSlot) or 0
     local maxSlots = slots and (tonumber(slots.maxSlots) or 5) or 5
     if activeSlot < 1 or activeSlot > maxSlots then
-        local starter = ResolveFirstRunWishlist()
+        local starter = ResolveFirstRunWishlist(slots, context)
         if starter then
             if WishlistRequiresLockEvidence(starter) then
                 A._wishlistNote = "Wishlist needs locked targets. Open the Wishlist Editor to choose and confirm them."
@@ -2125,7 +3125,7 @@ function A.Wishlist()
         A._wishlistNote = "Choose or create a wishlist to begin your first run."
         return nil
     end
-    local linked = ResolveAssociation(activeSlot)
+    local linked = ResolveAssociation(activeSlot, slots, context)
     if linked then
         local status, resolvedKey, reason
         linked, status, resolvedKey, reason = ResolveWishlistEvidence(linked, slots)
@@ -2150,18 +3150,26 @@ function A.Wishlist()
     -- publishes a real populated active loadout. This is the only automatic
     -- hand-off; ambiguous stored associations remain unresolved.
     local starter = IsPopulatedLoadout(activeSlot, slots)
-        and ResolveFirstRunWishlist() or nil
+        and ResolveFirstRunWishlist(slots, context) or nil
     if starter then
         local record = StoredWishlistRecord(starter)
         if record then
             UpdateStoreState(function(state)
                 state.loadoutWishlists = state.loadoutWishlists or {}
                 state.loadoutWishlists[activeSlot] = record
+                WishlistRoles.Wrote(nil, activeSlot)
                 state.firstRunWishlist = nil
+                WishlistRoles.Wrote(nil, "first")
             end)
             MarkWishlistProjectionDirty()
         end
         return WishlistRoles.Wishlist(starter,"loadout-association",false)
+    end
+    if IsKnownEmptyLoadout(activeSlot, slots) then
+        -- Assigning to an empty Saved Build is refused (SetLoadoutWishlist).
+        A._wishlistNote = "Loadout " .. tostring(activeSlot)
+            .. " is empty. A Wishlist can be assigned once it holds Echoes."
+        return nil
     end
     A._wishlistNote = "Loadout " .. tostring(activeSlot)
         .. " has no wishlist association. Set it in the Echo Journal."
@@ -2170,18 +3178,40 @@ end
 
 function A.WishlistNote() return A._wishlistNote end
 
+-- The retired flat locked-design table moved under a Wishlist's content key
+-- (AutomationRuntime and WishlistController do this once). That changes what
+-- AssignedWishlist reads for that Wishlist without touching any assignment
+-- record, so no Wishlist revision moved and a reader that had cached the plan
+-- kept the old rows. The mover calls this once, after a bucket was really
+-- created. It only advances the Wishlist presentation revision; it changes
+-- no data and makes no decision.
+function A.NoteLockDesignTargetsMoved()
+    MarkWishlistPresentationDirty()
+end
+
 -- One read-only assignment projection for the HUD, editor-facing status and
 -- Orb controller. Local permanent designs are part of the assigned target,
 -- even when the server stores only the 79 rolled copies. No Orb-only cache
 -- or name match can replace this authority.
+-- The HUD runs this for every preparation. It reads the server slots once and
+-- passes that projection to Wishlist, and reads the character row through the
+-- Store read (Store.State), as Wishlist does: no Store mutation entry, which
+-- would compare the whole row with the read snapshot on every call. The
+-- candidate list is built at most once for this read's projection: the
+-- association lookup and the mirror check below share it (CandidateContext).
 function A.AssignedWishlist()
     local slots=A.Slots()
-    local _,live=UpdateStoreState(function(row)return row end)
-    local state=type(live)=="table" and live or (Store and Store.State and Store.State() or {})
+    local context=CandidateContext(slots)
+    local state=Store and Store.State and Store.State() or {}
     local active=slots and tonumber(slots.activeSlot)
     local saved=active and active>0 and state.loadoutWishlists and state.loadoutWishlists[active]
-        or state.firstRunWishlist
-    local w=A.Wishlist()
+    -- The first-run plan is the target only where no Saved Build is in use. An
+    -- empty Saved Build with no association of its own is unassigned: it has
+    -- no saved assignment, and the first-run plan is not one.
+    local emptySlot = active and active>0 and active<=(tonumber(slots.maxSlots) or 5)
+        and IsKnownEmptyLoadout(active,slots)
+    if not saved and not emptySlot then saved=state.firstRunWishlist end
+    local w=A.Wishlist(slots,context)
     local result={state="unassigned",activeSlot=active,owner=Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey(),
         note=A.WishlistNote(),name=type(saved)=="table" and saved.name or nil}
     if not slots or slots.activeKnown==false then
@@ -2191,7 +3221,8 @@ function A.AssignedWishlist()
     end
     if not w then
         if result.note=="Restoring assigned Wishlist..." then result.state="restoring"
-        elseif saved then result.state="unavailable" end
+        elseif saved then result.state="unavailable"
+        elseif emptySlot then result.emptySlot=true end
         return result
     end
     result.state="ready";result.name=w.name;result.wishlist=w;result.entries={}
@@ -2204,12 +3235,28 @@ function A.AssignedWishlist()
         if row.locked then permanent[row.spellId]=(permanent[row.spellId] or 0)+(row.stacks or 1) end
     end
     local targets=w.designTargets
-    if targets==nil then targets=state.lockDesignTargetsBySlot and state.lockDesignTargetsBySlot[result.key] end
+    -- Read from the Store.State snapshot. AutomationRuntime reads this subtree
+    -- live because WishlistController.LockDesignTargets hands out the live
+    -- per-slot table. Its callers (ApplyCommittedTargets, PlanLockCommit) only
+    -- read it, and CommitLockDesignTargets stores a new table inside the
+    -- mutation entry, so the snapshot holds the same targets. A future caller
+    -- that edits that table in place must do so through the mutation entry.
+    if targets==nil then
+        -- Equal rolled contents cannot name one of two different retained
+        -- designs: none is substituted, and the assignment is not ready until
+        -- the intended plan is assigned or restored, or its targets are set.
+        if w.designAmbiguous then
+            result.state="unavailable"
+            result.note="More than one saved locked-target design exists for this Wishlist's rolled contents. Nexus does not choose one: assign or restore the intended plan, or set its locked targets in the Wishlist Editor."
+            return result
+        end
+        targets=state.lockDesignTargetsBySlot and state.lockDesignTargetsBySlot[result.key]
+    end
     if targets~=nil then
         A._assignmentTargetModel=A._assignmentTargetModel or Nexus.WishlistModel.New()
         local rows=A._assignmentTargetModel.TargetMapEntries(targets,A.Catalog())
         if not rows then
-            result.state="unavailable";result.note="Assigned permanent targets are unavailable. Open the Wishlist Editor to inspect them."
+            result.state="unavailable";result.note="Assigned locked targets are unavailable. Open the Wishlist Editor to inspect them."
             return result
         end
         for _,e in ipairs(rows) do
@@ -2223,7 +3270,7 @@ function A.AssignedWishlist()
         result.mirrorNote="Assigned Wishlist has no distinct current server mirror. Its exact saved plan is retained. Refresh the list or reassign deliberately."
     elseif type(saved)=="table" and saved.slot then
         local found=false
-        for _,candidate in ipairs(LiveWishlistCandidates(slots)) do if candidate.key==saved.key then found=true;break end end
+        for _,candidate in ipairs(ContextCandidates(context,slots)) do if candidate.key==saved.key then found=true;break end end
         if not found then result.mirrorNote="Assigned Wishlist is absent from the current server list. Its saved plan is retained. Refresh the list or reassign deliberately." end
     end
     return result
@@ -2459,8 +3506,15 @@ function A.ToggleLever(leverId, wantDisabled)
     if cur == (wantDisabled and true or false) then return false, "already" end
     local ok = SafeCall(svc.ToggleTomeEcho, lv.members[1])
     if ok then
-        pending[leverId] = { t = GetTime(), want = wantDisabled and true or false }
-        UpdateStoreState(function(state) state.tomeTogglePending = pending end)
+        -- `pending` belongs to the read snapshot. The entry is written into
+        -- the owner's own map, so no snapshot table becomes durable state.
+        local entry = { t = GetTime(), want = wantDisabled and true or false }
+        UpdateStoreState(function(state)
+            local durable = type(state.tomeTogglePending) == "table"
+                and state.tomeTogglePending or {}
+            durable[leverId] = entry
+            state.tomeTogglePending = durable
+        end)
         leverProjectionRevision = leverProjectionRevision + 1
         return true
     end
@@ -2475,7 +3529,10 @@ end
 -- otherwise never expire).
 local function ReconcileTomePending()
     local st = Store and Store.State()
-    if not st or not st.tomeTogglePending then return end
+    -- Every shaped row has this map, usually empty. With nothing pending the
+    -- update below changes nothing, so the poll does not enter the Store
+    -- mutation entry (a whole-row comparison) five times a second for it.
+    if not st or not st.tomeTogglePending or next(st.tomeTogglePending) == nil then return end
     local cat = A.Catalog()
     local svc = PS()
     if not cat or not svc then return end
@@ -2532,6 +3589,17 @@ local function AnyLatch()
     return false
 end
 
+-- Read-only, for display: true while ANY client latch is set, including one
+-- the watchdog declared dead. An expired watchdog is not a confirmed result.
+function A.UnconfirmedLatch()
+    local p = PerksTbl()
+    if not p then return false end
+    for _, field in pairs(LATCH_FIELDS) do
+        if p[field] ~= nil then return true end
+    end
+    return false
+end
+
 -- stuck-latch watchdog: the client's latches have NO timeout and some
 -- refusals arrive with no reply at all (a user-clicked freeze the server
 -- ignores would otherwise halt automation forever). A latch stuck >10s is
@@ -2561,8 +3629,81 @@ local function WatchLatches()
     end
 end
 
+-- A Select stays in flight until its grant is seen, not only while the
+-- client's latch is held: pending intent blocks a duplicate Select and every
+-- dependent action (Take, Banish, Freeze, Reroll, Orb actions), and is never
+-- counted as owned.
 function A.InFlight()
-    return (inFlightKind ~= nil) or AnyLatch()
+    return (inFlightKind ~= nil) or awaitingGrant ~= nil or AnyLatch()
+end
+
+-- Read-only, for a caller that must not treat a loading screen as a result:
+-- every request that still waits for the server, by the same rules as
+-- A.InFlight(). A new list of { kind, source, spellId, baseline }, sorted by
+-- kind, spell and source; kind is "select", "freeze", "banish" or "reroll".
+-- source is local bookkeeping, not a server identity:
+--   "own"   the adapter's own in-flight request (its client latch is the
+--           same request and is not listed again);
+--   "grant" the adapter's own Select after its latch cleared, waiting for
+--           its grant;
+--   "latch" any other live client latch (for example the player's click).
+-- A live select latch is never merged with "grant": that request's latch has
+-- already cleared, so a latch seen now is a separate request, even for the
+-- same spell. A Select has its spell and its granted count before the send
+-- (a "latch" Select: the count now). Empty when nothing is pending.
+function A.PendingActions()
+    local out = {}
+    if awaitingGrant then
+        out[#out + 1] = { kind = "select", source = "grant",
+            spellId = awaitingGrant.spellId, baseline = awaitingGrant.baseline }
+    end
+    if inFlightKind == "select" then
+        out[#out + 1] = { kind = "select", source = "own",
+            spellId = pendingOwnPick, baseline = pendingOwnBaseline }
+    elseif inFlightKind then
+        out[#out + 1] = { kind = inFlightKind, source = "own" }
+    end
+    local p = PerksTbl()
+    if p then
+        for kind, field in pairs(LATCH_FIELDS) do
+            if p[field] ~= nil and not deadLatch[kind] then
+                local spellId = kind == "select" and tonumber(p[field]) or nil
+                local ownLatch = inFlightKind == kind and (kind ~= "select"
+                    or spellId == tonumber(pendingOwnPick))
+                if not ownLatch then
+                    out[#out + 1] = { kind = kind, source = "latch",
+                        spellId = spellId,
+                        baseline = spellId and GrantedCountOf(spellId) or nil }
+                end
+            end
+        end
+    end
+    table.sort(out, function(left, right)
+        if left.kind ~= right.kind then return left.kind < right.kind end
+        local l, r = tonumber(left.spellId) or 0, tonumber(right.spellId) or 0
+        if l ~= r then return l < r end
+        return left.source < right.source
+    end)
+    return out
+end
+
+-- The granted-mirror count ConfirmAwaitingGrant compares with a baseline.
+function A.GrantedCount(spellId)
+    return GrantedCountOf(tonumber(spellId))
+end
+
+-- The one confirmation there is: the granted mirror shows the selected spell
+-- above the count it had when the Select was submitted. A board transition,
+-- a cleared latch, elapsed time, a new table with the same contents, or a
+-- grant of a different spell confirms nothing.
+local function ConfirmAwaitingGrant()
+    local pending = awaitingGrant
+    if not pending then return end
+    if GrantedCountOf(pending.spellId) > (pending.baseline or 0) then
+        awaitingGrant = nil
+        boardDirty = true
+        dataDirty = true
+    end
 end
 
 -- poll tick: resolve our own in-flight marker from latch + board transitions
@@ -2579,14 +3720,17 @@ local function ResolveInFlight()
                 resolvedSig = table.concat(parts, ",")
             end
             if ch == nil or resolvedSig ~= inFlightSig then
-                -- success: board consumed (auto-chain requests the next one)
+                -- The board moved on (auto-chain, or it went away). That ends
+                -- the latch wait, not the Select: it now waits for its grant,
+                -- still in flight, and still not owned.
                 if pendingOwnPick then
-                    recordedPicks[pendingOwnPick] = (recordedPicks[pendingOwnPick] or 0) + 1
-                    ownedProjectionRevision = ownedProjectionRevision + 1
+                    awaitingGrant = {spellId = pendingOwnPick,
+                        baseline = pendingOwnBaseline or 0}
                 end
             end
             -- failure (SS-1000 "0"): latch cleared, same board -> just release
-            inFlightKind, inFlightSig, pendingOwnPick = nil, nil, nil
+            inFlightKind, inFlightSig, pendingOwnPick, pendingOwnBaseline =
+                nil, nil, nil, nil
             boardDirty = true
         end
     elseif inFlightKind == "banish" then
@@ -2613,18 +3757,42 @@ local function CardBlocked(card)
     return card.isGuaranteed or card.isFrozen or card.isCarried or card.justFrozen
 end
 
+-- Text only. OrbRuntime owns the truthful reason for an Orb block: what the
+-- code can do about it and what it cannot. It changes no block.
+function A.OrbBlockReason(subject)
+    local runtime = Nexus.OrbRuntime
+    if not (runtime and type(runtime.BlockReason) == "function") then return nil end
+    local ok, reason = pcall(runtime.BlockReason, subject)
+    if ok and type(reason) == "string" and reason ~= "" then return reason end
+    return nil
+end
+
 function A.OrdinaryBoardAllowed()
     if (A.Orbs and A.Orbs.IsOwned()) or (Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary()) then
-        return false, "Orb refinement owns the current action; ordinary rolling is paused"
+        return false, A.OrbBlockReason("Ordinary rolling")
+            or "Orb refinement owns the current action; ordinary rolling is paused"
     end
-    local pe = PE()
-    local orb = pe and pe.OrbService
-    if type(orb) ~= "table" then return true end
-    if type(orb.IsOfferPending) ~= "function" then return false, "orb state unavailable" end
-    local ok, pending = pcall(orb.IsOfferPending)
-    if not ok or type(pending) ~= "boolean" then return false, "orb state unknown" end
-    if pending then return false, "Orb offer active -- manual action required" end
-    return true
+    -- OrbAdapter owns the OrbService state classification (ServiceState). An
+    -- absent OrbService is the explicit legacy capability and keeps ordinary
+    -- rolling. When an OrbService exists, only an authoritative idle answer
+    -- permits ordinary mutation: unknown, pending, missing capability, invalid
+    -- return and thrown callback all block.
+    local orbs = A.Orbs
+    if not (orbs and type(orbs.ServiceState) == "function") then
+        local pe = PE()
+        if type(pe) ~= "table" or pe.OrbService == nil then return true end
+        return false, "orb state unavailable"
+    end
+    local _, status, reason = orbs.ServiceState()
+    if status == "ABSENT" or status == "IDLE" then return true end
+    return false, reason or "orb state unknown"
+end
+
+-- Read-only: which OrbService capability case the ordinary gate is using.
+function A.OrbCapability()
+    local orbs = A.Orbs
+    if not (orbs and type(orbs.ServiceState) == "function") then return "UNAVAILABLE" end
+    return (orbs.ServiceState())
 end
 
 function A.Take(spellId)
@@ -2640,6 +3808,9 @@ function A.Take(spellId)
     end
     if not found then return false, "not on board" end
     local svc = PS()
+    -- The count before the Select is sent: the only later proof of its grant
+    -- is the mirror rising above this.
+    local baseline = GrantedCountOf(spellId)
     selfCalling = true
     local ok = svc and SafeCall(svc.SelectPerk, spellId)
     selfCalling = false
@@ -2647,6 +3818,7 @@ function A.Take(spellId)
         -- ids-only signature: ResolveInFlight compares like-for-like (a
         -- flag-suffixed sig would misread every FAILED select as success)
         inFlightKind, inFlightSig, pendingOwnPick = "select", board.idSignature, spellId
+        pendingOwnBaseline = baseline
         return true
     end
     return false, "refused"
@@ -2743,7 +3915,7 @@ end
 ------------------------------------------------------------------------
 
 function A.Activate(slot)
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, "Stop and settle Orb refinement before changing this state" end
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     local level = UnitLevel("player") or 0
     if level ~= 1 and level ~= 80 then return false, "not level 1/80" end
@@ -2761,7 +3933,7 @@ function A.Activate(slot)
 end
 
 function A.Save(slot, name)
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, "Stop and settle Orb refinement before changing this state" end
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if (UnitLevel("player") or 0) ~= 80 then return false, "not level 80" end
     if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
@@ -2782,8 +3954,42 @@ end
 -- shape both captures showed. No level gate (unlike Save, which is
 -- level-80-only for rolled loadouts) -- designing a wishlist isn't tied
 -- to being at cap. Same spacing guard as Save/Activate.
-function A.UploadWishlist(slot, name, echoes)
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, "Stop and settle Orb refinement before changing this state" end
+-- What the slot service shows at a server Wishlist slot, as one comparable
+-- string: the name and the content (WishlistIdentity: Echo id and total copies,
+-- the same identity every Wishlist candidate carries). The mirror exposes no
+-- revision of a slot, so this is the strongest identity that can be observed
+-- there. It is never proof of identity: a match means no contradiction was
+-- seen, and an absent, empty or unreadable row has no token at all.
+local function ServerSlotToken(name, echoes)
+    local key = WishlistIdentity(echoes)
+    if not key then return nil end
+    return tostring(name or "") .. "\n" .. key
+end
+
+function A.ServerWishlistSlotToken(slot)
+    slot = PositiveInteger(slot)
+    local slots = slot and A.Slots()
+    local row = slots and slots.bySlot and slots.bySlot[slot]
+    if type(row) ~= "table" then return nil end
+    -- A.Slots() flags a source it could not read in full (a sparse list, an
+    -- entry without a readable id or count) and still projects the entries it
+    -- could read. Those survivors are not the row: no token.
+    if row.roleSourceValid == false then return nil end
+    return ServerSlotToken(row.name, row.echoes)
+end
+
+-- The token the slot will show once the server holds this upload.
+function A.ServerWishlistTokenFor(name, echoes)
+    return ServerSlotToken(tostring(name or "Nexus"), echoes)
+end
+
+-- `expected` (optional): a set of tokens an editor accepts for an EXISTING slot
+-- (slot > 0). The slot is read again immediately before the host call; a slot
+-- that shows anything else, or nothing, is refused ("stale_slot") and nothing is
+-- sent. Slot 0 creates a new Wishlist and is never checked. A caller that passes
+-- no set keeps the earlier behavior.
+function A.UploadWishlist(slot, name, echoes, expected)
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if type(echoes) ~= "table" or #echoes == 0 then return false, "no echoes" end
     if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
@@ -2819,6 +4025,10 @@ function A.UploadWishlist(slot, name, echoes)
     for _, e in pairs(bySpell) do clean[#clean + 1] = e end
     table.sort(clean, function(a, b) return a.spellId < b.spellId end)
     if #clean == 0 then return false, "no valid echoes" end
+    if type(expected) == "table" and (tonumber(slot) or 0) > 0 then
+        local current = A.ServerWishlistSlotToken(slot)
+        if current == nil or not expected[current] then return false, "stale_slot" end
+    end
     local ok = svc and SafeCall(svc.UploadServerBuildSlot,
         tonumber(slot) or 0, tostring(name or "Nexus"), clean)
     if ok then
@@ -2843,7 +4053,7 @@ end
 local lastLockOpAt = -10
 
 function A.LockPerk(spellId)
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, "Stop and settle Orb refinement before changing this state" end
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     spellId = tonumber(spellId)
     if not spellId then return false, "invalid spellId" end
@@ -2860,7 +4070,7 @@ function A.LockPerk(spellId)
 end
 
 function A.UnlockPerk(spellId)
-    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, "Stop and settle Orb refinement before changing this state" end
+    if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     spellId = tonumber(spellId)
     if not spellId then return false, "invalid spellId" end
@@ -2915,8 +4125,10 @@ function A.RestoreAutoAccept()
 end
 
 function A.RivalDetected()
-    -- Another loaded picker may own the same server action latches. The
-    -- LoadoutPilot policy is embedded here; its separate addon must be off.
+    -- Another loaded picker may own the same server action latches, so
+    -- automation pauses while one is loaded. The addon name and slash-command
+    -- key below belong to a separately distributed picker: they are exact
+    -- compatibility detection keys, not Nexus names (THIRD_PARTY.md).
     return _G.EchoOptimizer ~= nil
         or (type(IsAddOnLoaded) == "function" and IsAddOnLoaded("LoadoutPilot"))
         or (type(SlashCmdList) == "table" and type(SlashCmdList.LOADOUTPILOT) == "function")
@@ -2968,6 +4180,90 @@ end
 
 function A.OwnedSyncInfo()
     return { requestedAt = ownedRequestAt, retries = ownedRetries }
+end
+
+-- Read-only diagnostics for the support report: a new table of scalars on
+-- each call. ownedGeneration/ownedConfirmed/ownedArmed/ownedRetries are the
+-- CURRENT generation facts. Every other key is a SAMPLE: the last normal
+-- Owned() (owned*) or LockedOwned() (locked*) evaluation, each with its own
+-- observed flag, time and age. This reads module locals and GetTime() only: no
+-- getter, request, counter, revision, confirmation or dirty flag. A sample's
+-- age is the time of that read, not proof of a fresh server response.
+function A.OwnershipTrustView()
+    local now = DiagnosticTime()
+    local function age(at)
+        if not now or type(at) ~= "number" then return nil end
+        -- GetTime() counts milliseconds; half of one keeps float noise in the
+        -- subtraction from costing a whole second.
+        local seconds = math.floor(now - at + 0.0005)
+        if seconds ~= seconds or seconds < 0 or seconds >= math.huge then return nil end
+        return seconds
+    end
+    local view = {
+        ownedGeneration = ownedGeneration,
+        ownedConfirmed = ownedConfirmedGeneration == ownedGeneration,
+        ownedArmed = ownedRequestGeneration == ownedGeneration,
+        ownedRetries = ownedRetries,
+        ownedObserved = ownedSample.observed == true,
+        lockedObserved = lockedSample.observed == true,
+    }
+    if view.ownedObserved then
+        view.ownedAt = ownedSample.at
+        view.ownedAge = age(ownedSample.at)
+        view.ownedSampledGeneration = ownedSample.generation
+        view.ownedSampledConfirmed = ownedSample.confirmed
+        view.ownedSynced = ownedSample.synced
+        view.ownedFresh = ownedSample.fresh
+        view.ownedGhost = ownedSample.ghost
+        view.ownedDistinct = ownedSample.distinct
+        view.ownedTotal = ownedSample.total
+    end
+    if view.lockedObserved then
+        view.lockedAt = lockedSample.at
+        view.lockedAge = age(lockedSample.at)
+        view.lockedSynced = lockedSample.synced
+        view.lockedCopies = lockedSample.copies
+        view.lockedRejection = lockedSample.rejection
+        view.lockedRawType = lockedSample.rawType
+        view.lockedSerial = lockedSample.serial
+    end
+    return view
+end
+
+-- Read-only diagnostics for the support report: the shape record of the last
+-- normal LockedOwned() read that refused a table (LockedShape), as a new
+-- table on each call whose row list and rows are new tables too. This reads
+-- module locals and GetTime() only, like OwnershipTrustView. `current` and
+-- `laterReads` compare that read's serial with the last locked sample's: a
+-- later read is no proof that the source changed, and a generation is
+-- context, never a rule for locked ownership.
+function A.LockedShapeView()
+    local view = { observed = false, currentGeneration = ownedGeneration }
+    local last = LockedShape.last
+    if not last then return view end
+    view.observed = true
+    view.serial, view.at, view.sampledGeneration = last.serial, last.at, last.generation
+    view.first, view.copies, view.ids = last.first, last.copies, last.ids
+    view.status, view.rows = last.status, last.rows
+    local now = DiagnosticTime()
+    if now and type(last.at) == "number" then
+        -- As in OwnershipTrustView: half a millisecond absorbs float noise.
+        local seconds = math.floor(now - last.at + 0.0005)
+        if seconds >= 0 and seconds < math.huge then view.age = seconds end
+    end
+    if type(lockedSample.serial) == "number" then
+        view.laterReads = lockedSample.serial - last.serial
+        view.current = view.laterReads == 0
+    end
+    local rows, flat = {}, last.row
+    for i = 1, last.rows do
+        local base = (i - 1) * 7
+        rows[i] = { p = flat[base + 1], k = flat[base + 2], c = flat[base + 3],
+            n = flat[base + 4], im = flat[base + 5], cm = flat[base + 6],
+            e = flat[base + 7] }
+    end
+    view.row = rows
+    return view
 end
 
 function A.UnlockedSlots()
@@ -3123,10 +4419,15 @@ local function GrantedFingerprint(raw, catalog)
     return CountsFingerprint(counts)
 end
 
-local function LockedFingerprint(raw)
+-- The occupied records are part of the locked state: the same per-spell
+-- copies held in another partition of records occupy other slots. The
+-- records are compared as a sorted multiset, so read order is no change. The
+-- capacity the records were held to is part of it too: it decides trust.
+local function LockedFingerprint(raw, capacity)
     if raw == nil then return "nil" end
     if type(raw) ~= "table" then return nil, "locked:not-table" end
-    local ok, counts, valid = pcall(ReadLockedPerks, raw)
+    local ok, counts, valid, _, occupied, records = pcall(ReadLockedPerks, raw,
+        nil, LockedReadLimits(capacity))
     if not ok or type(counts) ~= "table" or not valid then
         return nil, "locked:read"
     end
@@ -3135,7 +4436,14 @@ local function LockedFingerprint(raw)
             return nil, "locked:value"
         end
     end
-    return CountsFingerprint(counts)
+    local parts = {}
+    for i = 1, #records do
+        parts[i] = tostring(records[i].spellId) .. "x" .. tostring(records[i].stacks)
+    end
+    table.sort(parts)
+    return CountsFingerprint(counts) .. "|records:" .. tostring(occupied)
+        .. ":" .. table.concat(parts, ",")
+        .. "|capacity:" .. tostring(capacity or "unknown")
 end
 
 local function DiscoveryFingerprint(raw, catalog)
@@ -3201,71 +4509,214 @@ local function ServiceRead(svc, name, optional)
     return true, value
 end
 
+-- A field the strict check refused is not accepted. Its snapshot value reads
+-- "rejected", the reason, and how the raw source reads now -- never the last
+-- accepted fingerprint, so a rejected mirror is not presented as an unchanged
+-- one. That raw reading is change evidence only: the field's generation moves
+-- when its source moves (into, within and out of rejection) and stays put
+-- while identical rejections repeat. Nothing takes ownership, confirmation,
+-- roles or slots from it; every reader still uses its own getter and rules.
+-- The reading is bounded WHILE it is made: keys are counted as they are
+-- collected (nothing over the limit is sorted), a string is measured before it
+-- is copied, and the size is checked before every append. A source deeper than
+-- RAW_SHAPE_DEPTH, with more than RAW_SHAPE_ENTRIES tables, keys and values,
+-- larger than RAW_SHAPE_BYTES, holding one string longer than
+-- RAW_SHAPE_SCALAR_BYTES, or containing a cycle reads "unreadable" as a whole.
+-- That reading does not track further change until the source is back within
+-- the limits. Supported mirrors are well inside them (a 15-row, 85-Echo slot
+-- mirror reads about 73 KB in about 13000 entries).
+-- Keys: a raw source can be rejected precisely because its keys are malformed,
+-- so each key is checked as it is collected, before it is stored, compared or
+-- converted. Only primitive keys are read: a finite number, a string of at most
+-- RAW_SHAPE_SCALAR_BYTES, a boolean. Any other key (table, function, userdata,
+-- thread) or an infinite number reads "unreadable" for the whole field. No key
+-- is ever passed to tostring, so no source metamethod runs, and the comparator
+-- only orders primitives: booleans (false before true), numbers, strings.
+local RAW_SHAPE_DEPTH, RAW_SHAPE_ENTRIES = 8, 20000
+local RAW_SHAPE_BYTES, RAW_SHAPE_SCALAR_BYTES = 262144, 1024
+local RAW_SHAPE_UNREADABLE = "unreadable"
+local RAW_SHAPE_KEY_RANK = { boolean = 1, number = 2, string = 3 }
+
+local function RawShapeKeyLess(a, b)
+    local ra, rb = RAW_SHAPE_KEY_RANK[type(a)], RAW_SHAPE_KEY_RANK[type(b)]
+    if ra ~= rb then return ra < rb end
+    if ra == 1 then return a == false and b == true end
+    return a < b
+end
+
+local function RawShape(value)
+    local parts, count, bytes, entries, open = {}, 0, 0, 0, {}
+    local function Over() error(RAW_SHAPE_UNREADABLE, 0) end
+    local function Add(text)
+        bytes = bytes + #text
+        if bytes > RAW_SHAPE_BYTES then Over() end
+        count = count + 1
+        parts[count] = text
+    end
+    local function Walk(v, depth)
+        entries = entries + 1
+        if entries > RAW_SHAPE_ENTRIES then Over() end
+        local kind = type(v)
+        if kind == "table" then
+            if depth > RAW_SHAPE_DEPTH or open[v] then Over() end
+            open[v] = true
+            local keys, n = {}, 0
+            for k in next, v do
+                local keyKind = type(k)
+                if keyKind == "string" then
+                    if #k > RAW_SHAPE_SCALAR_BYTES then Over() end
+                elseif keyKind == "number" then
+                    if k ~= k or k == math.huge or k == -math.huge then Over() end
+                elseif keyKind ~= "boolean" then
+                    Over()
+                end
+                n = n + 1
+                if entries + n > RAW_SHAPE_ENTRIES then Over() end
+                keys[n] = k
+            end
+            table.sort(keys, RawShapeKeyLess)
+            Add("{")
+            for i = 1, n do
+                Walk(keys[i], depth + 1); Add("=")
+                Walk(rawget(v, keys[i]), depth + 1); Add(";")
+            end
+            Add("}")
+            open[v] = nil
+        elseif kind == "string" then
+            local size = #v
+            if size > RAW_SHAPE_SCALAR_BYTES
+                or bytes + size + 12 > RAW_SHAPE_BYTES then Over() end
+            Add(TextPart(v))
+        elseif kind == "number" then Add(NumberPart(v) or tostring(v))
+        elseif kind == "boolean" then Add(v and "T" or "F")
+        else Add(kind) end
+    end
+    if not pcall(Walk, value, 0) then return RAW_SHAPE_UNREADABLE end
+    return table.concat(parts)
+end
+
+-- What IsTomeEchoDisabled answers for every lever member, as plain text: the
+-- raw reading of a rejected lever part (change evidence only, as above).
+local function DisabledAnswers(svc, catalog)
+    local out = {}
+    if type(catalog) ~= "table" or type(catalog.levers) ~= "table"
+        or not (svc and type(svc.IsTomeEchoDisabled) == "function") then
+        return out
+    end
+    for lever, row in pairs(catalog.levers) do
+        local members = type(row) == "table" and type(row.members) == "table"
+            and row.members or {}
+        local answers = {}
+        for i = 1, #members do
+            local ok, value = pcall(svc.IsTomeEchoDisabled, members[i])
+            answers[i] = ok and tostring(value) or "error"
+        end
+        out[tostring(lever)] = answers
+    end
+    return out
+end
+
+-- Every field is checked on its own: one rejected field no longer holds back
+-- the others (it used to fail the whole capture before any generation moved,
+-- freezing every generation-keyed reader on its last accepted reading).
+-- Returns the snapshot, the active slot number (0 when unknown) and the
+-- rejected fields (field -> reason).
 local function CaptureEchoSnapshot()
     local svc = PS()
     if not svc then
         return {
             slots="unavailable", granted="unavailable", locked="unavailable",
             discovery="unavailable", activeSlot=0,
-        }, 0
+        }, 0, {}
+    end
+    local rejected = {}
+    local function Rejected(field, reason, raw)
+        reason = tostring(reason or (field .. ":malformed"))
+        rejected[field] = rejected[field] or reason
+        if type(raw) == "function" then
+            local okRaw, value = pcall(raw)
+            raw = okRaw and value or nil
+        end
+        return "rejected:" .. reason .. "|raw:" .. RawShape(raw), false
+    end
+    local function Accept(field, raw, readError, check, ...)
+        if readError then return Rejected(field, readError, raw) end
+        local okCheck, sig, why = pcall(check, ...)
+        if okCheck and type(sig) == "string" then return sig, true end
+        return Rejected(field, okCheck and why or (field .. ":error"), raw)
     end
     local okSlots, rawSlots, slotsError = ServiceRead(svc, "GetServerBuildSlots")
     local okMax, maxSlots, maxError = ServiceRead(svc, "GetServerMaxSlots", true)
-    local okActive, activeSlot, activeError = ServiceRead(svc, "GetServerActiveSlot")
+    local okActive, rawActive, activeError = ServiceRead(svc, "GetServerActiveSlot")
     local okGranted, granted, grantedError = ServiceRead(svc, "GetGrantedPerks")
     local okLocked, locked, lockedError = ServiceRead(svc, "GetLockedPerks")
     local okDiscovered, discovered, discoveredError =
         ServiceRead(svc, "GetDiscoveredEchoes")
-    if not (okSlots and okMax and okActive and okGranted and okLocked
-        and okDiscovered) then
-        return nil, nil, slotsError or maxError or activeError
-            or grantedError or lockedError or discoveredError
-    end
-    maxSlots = maxSlots == nil and 5 or tonumber(maxSlots)
-    activeSlot = activeSlot == nil and 0 or tonumber(activeSlot)
-    if not IntegerAtLeast(maxSlots, 1) or not IntegerAtLeast(activeSlot, 0) then
-        return nil, nil, "echo:scalar"
-    end
     local okCatalog, catalog = pcall(A.Catalog)
-    if not okCatalog then return nil, nil, "disabled:catalog" end
-    local slotsSig, slotsSigError = SlotsFingerprint(rawSlots, maxSlots)
-    local grantedSig, grantedSigError = GrantedFingerprint(granted, catalog)
-    local lockedSig, lockedSigError = LockedFingerprint(locked)
-    local discoveredSig, discoveredSigError =
-        DiscoveryFingerprint(discovered, catalog)
-    local disabledSig, disabledSigError = DisabledFingerprint(svc, catalog)
-    if not (slotsSig and grantedSig and lockedSig and discoveredSig
-        and disabledSig) then
-        return nil, nil, slotsSigError or grantedSigError or lockedSigError
-            or discoveredSigError or disabledSigError or "echo:malformed"
+    local catalogError = not okCatalog and "disabled:catalog" or nil
+    if not okCatalog then catalog = nil end
+
+    if okMax then
+        maxSlots = maxSlots == nil and 5 or tonumber(maxSlots)
+        if not IntegerAtLeast(maxSlots, 1) then okMax, maxError = false, "echo:scalar" end
     end
+    local slotsSig = Accept("slots", rawSlots,
+        (not okSlots and slotsError) or (not okMax and maxError) or nil,
+        SlotsFingerprint, rawSlots, maxSlots)
+
+    local activeSlot, activeField = 0, nil
+    if okActive then
+        local value = rawActive == nil and 0 or tonumber(rawActive)
+        if IntegerAtLeast(value, 0) then activeSlot, activeField = value, value end
+    end
+    if activeField == nil then
+        activeField = Rejected("activeSlot",
+            okActive and "echo:scalar" or activeError, rawActive)
+    end
+
+    local grantedSig, grantedAccepted = Accept("granted", granted,
+        (not okGranted and grantedError) or catalogError,
+        GrantedFingerprint, granted, catalog)
+    local lockedSig = Accept("locked", locked, not okLocked and lockedError or nil,
+        LockedFingerprint, locked, A.MaxPermanentEchoes())
+    local discoveredSig = Accept("discovery", discovered,
+        (not okDiscovered and discoveredError) or catalogError,
+        DiscoveryFingerprint, discovered, catalog)
+    local disabledSig = Accept("discovery",
+        function() return DisabledAnswers(svc, catalog) end, catalogError,
+        DisabledFingerprint, svc, catalog)
+
     -- Confirmation is semantic state too: a fresh confirmed-empty response
     -- must invalidate a cached unsynced projection even with equal contents.
+    -- Only an accepted granted mirror can confirm; a rejected one confirms
+    -- nothing here and keeps the current confirmation state as it is.
     local confirmation = ownedConfirmedGeneration == ownedGeneration
-    local distinct = 0
-    if type(granted) == "table" then
-        local seen = {}
-        for _, entries in pairs(granted) do
-            if type(entries) == "table" then
-                for i = 1, #entries do
-                    local id = type(entries[i]) == "table" and tonumber(entries[i].spellId)
-                    if id and catalog and catalog.rows[id] and not seen[id] then
-                        seen[id], distinct = true, distinct + 1
+    if grantedAccepted then
+        local distinct = 0
+        if type(granted) == "table" then
+            local seen = {}
+            for _, entries in pairs(granted) do
+                if type(entries) == "table" then
+                    for i = 1, #entries do
+                        local id = type(entries[i]) == "table" and tonumber(entries[i].spellId)
+                        if id and catalog and catalog.rows[id] and not seen[id] then
+                            seen[id], distinct = true, distinct + 1
+                        end
                     end
                 end
             end
         end
-    end
-    local fresh = ownedRequestGeneration == ownedGeneration and type(granted) == "table"
-        and (granted ~= ownedBaselineRef or GrantedSignature(granted) ~= ownedBaselineSig)
-    if not (A.Level() <= 1 and distinct >= GHOST_OWNED)
-        and (fresh or (ownedGeneration == 0 and distinct > 0)) then
-        if not confirmation then
-            ownedConfirmedGeneration = ownedGeneration
-            ownedProjectionRevision = ownedProjectionRevision + 1
-            dataDirty = true
+        local fresh = ownedRequestGeneration == ownedGeneration and type(granted) == "table"
+            and (granted ~= ownedBaselineRef or GrantedSignature(granted) ~= ownedBaselineSig)
+        if not (A.Level() <= 1 and distinct >= GHOST_OWNED)
+            and (fresh or (ownedGeneration == 0 and distinct > 0)) then
+            if not confirmation then
+                ownedConfirmedGeneration = ownedGeneration
+                ownedProjectionRevision = ownedProjectionRevision + 1
+                dataDirty = true
+            end
+            ownedSeen, confirmation = true, true
         end
-        ownedSeen, confirmation = true, true
     end
     return {
         slots=slotsSig,
@@ -3273,8 +4724,8 @@ local function CaptureEchoSnapshot()
             .. ":" .. (confirmation and "ready" or "pending"),
         locked=lockedSig,
         discovery=discoveredSig .. "|" .. disabledSig,
-        activeSlot=activeSlot,
-    }, activeSlot
+        activeSlot=activeField,
+    }, activeSlot, rejected
 end
 
 local function RefreshEchoAssociations()
@@ -3297,19 +4748,34 @@ local function ReconcileEchoState(markDirty, source)
         return true, false
     end
     echoStatus.scans = echoStatus.scans + 1
-    local ok, snapshot, activeSlot, failure = pcall(CaptureEchoSnapshot)
-    if not ok then
-        failure, snapshot = snapshot, nil
-    end
-    if type(snapshot) ~= "table" then
+    local ok, snapshot, activeSlot, rejected = pcall(CaptureEchoSnapshot)
+    if not ok or type(snapshot) ~= "table" then
+        -- An internal error of the capture itself (every field check is
+        -- protected): nothing was read, so nothing is claimed either way.
         echoStatus.failures = echoStatus.failures + 1
-        EchoReason("failure:" .. tostring(failure or "capture"))
+        EchoReason("failure:" .. tostring(ok and "capture" or snapshot))
         return false, false
+    end
+    -- The strict check's current verdict, field by field: rejected fields are
+    -- reported as such (failures counts scans that rejected any field).
+    echoRejected = {}
+    local rejectedParts = {}
+    for _, field in ipairs(ECHO_FIELDS) do
+        local reason = type(rejected) == "table" and rejected[field] or nil
+        if reason then
+            echoRejected[field] = reason
+            rejectedParts[#rejectedParts + 1] = field .. "=" .. tostring(reason)
+        end
+    end
+    local rejectedText = ""
+    if #rejectedParts > 0 then
+        echoStatus.failures = echoStatus.failures + 1
+        rejectedText = ";failure:" .. table.concat(rejectedParts, ",")
     end
     if not echoSnapshot then
         echoSnapshot, echoActiveSlot = snapshot, activeSlot or 0
         echoVerifiedAt = now
-        EchoReason(tostring(source or "baseline") .. ":baseline")
+        EchoReason(tostring(source or "baseline") .. ":baseline" .. rejectedText)
         return true, false
     end
 
@@ -3331,12 +4797,15 @@ local function ReconcileEchoState(markDirty, source)
         else
             echoStatus.equivalentFallbacks = echoStatus.equivalentFallbacks + 1
         end
-        EchoReason(tostring(source or "reconcile") .. ":equivalent")
+        EchoReason(tostring(source or "reconcile") .. ":equivalent" .. rejectedText)
         return true, false
     end
 
     echoStatus.semanticChanges = echoStatus.semanticChanges + 1
-    if markDirty then
+    -- A notification belongs to the change it announced, whichever reader
+    -- reconciles it first: a non-dirty reader (the Orb read context) that took
+    -- a pending notification keeps its dirty marking, as the poll would have.
+    if markDirty or hadPending then
         if changed.slots or changed.activeSlot then
             slotsDirty = true
             echoStatus.dirtyReasons.slots = echoStatus.dirtyReasons.slots + 1
@@ -3350,7 +4819,8 @@ local function ReconcileEchoState(markDirty, source)
         RefreshWishlistEvidenceTransitions()
         RefreshEchoAssociations()
     end
-    EchoReason(tostring(source or "reconcile") .. ":" .. table.concat(changedNames, ","))
+    EchoReason(tostring(source or "reconcile") .. ":" .. table.concat(changedNames, ",")
+        .. rejectedText)
     return true, true
 end
 
@@ -3516,6 +4986,14 @@ local function InstallHooks()
     end
 end
 
+-- Read-only. True while a client notification that the next Poll reconciles has
+-- arrived: a board was shown or updated, or Echo data changed. These are set by the
+-- client's own presentation of a server reply, not by this addon's sends. Changes no
+-- state; the Poll still does all reading, confirming and holding.
+function A.NotificationPending()
+    return boardNotificationPending or echoNotificationPending
+end
+
 function A.ConsumeDirty()
     local b, s, d, static = boardDirty, slotsDirty, dataDirty, staticDirty
     local levelEvents = levelBurstStatus.pending
@@ -3603,10 +5081,13 @@ function A.EchoReconcileStats()
         associationRefreshes=echoStatus.associationRefreshes,
         lastReason=echoStatus.lastReason,
         generations={},fieldChanges={},dirtyReasons={},projections={},
+        -- Fields the strict check rejected at the last scan (field -> reason).
+        rejected={},
     }
     for _, field in ipairs(ECHO_FIELDS) do
         out.generations[field] = echoGenerations[field]
         out.fieldChanges[field] = echoStatus.fieldChanges[field]
+        out.rejected[field] = echoRejected[field]
     end
     out.dirtyReasons.slots = echoStatus.dirtyReasons.slots
     out.dirtyReasons.data = echoStatus.dirtyReasons.data
@@ -3654,8 +5135,10 @@ function A.AutomationSignature()
     -- post-expiry AutoLock evaluation.
     --
     -- The live row is what the sentinel always meant, so it is read through the
-    -- authorized entry. That read changes nothing, so it invalidates nothing.
-    local _, state = UpdateStoreState(function(row) return row end)
+    -- owner's read-only entry: it changes nothing, invalidates nothing and,
+    -- unlike a no-op mutator through UpdateStateV1, compares nothing (that
+    -- comparison walked the whole row every five seconds).
+    local _, state = UpdateStoreState(nil, true)
     if type(state) ~= "table" then state = nil end
     local settings = Store and Store.Settings and Store.Settings() or nil
     local associations = type(state) == "table" and state.loadoutWishlists or nil
@@ -3676,6 +5159,20 @@ function A.AutomationSignature()
             and associations[echoActiveSlot] or nil,
         firstRun=type(state) == "table" and state.firstRunWishlist or nil,
     }
+end
+
+-- The Orb read path reads the game state several times a second and keeps
+-- only the Echo reconciliation and its active-slot generation. It runs the
+-- same reconciliation as AutomationSignature, and nothing of the rest of that
+-- five-second check (the character-row comparison through the Store mutation
+-- entry, the bag scan for a Tome, the settings), whose results it discarded.
+function A.EchoActiveSlotGeneration()
+    local echoOk = ReconcileEchoState(false, "fallback")
+    if not echoOk then return nil end
+    -- An active slot the strict check rejected is unknown: no generation is
+    -- handed out for it, as when the whole reconciliation failed.
+    if echoRejected.activeSlot then return nil end
+    return echoGenerations.activeSlot
 end
 
 -- Manual-training capture: returns and clears the last user-clicked
@@ -3726,6 +5223,158 @@ function A.OnEvent(event)
     end
 end
 
+-- Persist the content identity of a legacy Saved Build assignment: a bare
+-- designed-slot number (1.0.5) or a table with a slot and no content key. The
+-- resolver only recognizes them; Store.State() is a detached copy, so an
+-- identity assigned there never reached saved data and a recycled server slot
+-- then captured the association. This is not a getter. Like
+-- ReconcileTomePending it runs from the poll, enters the mutation entry only
+-- when a legacy shape is present, and tries again only when the slot mirror
+-- has changed. It upgrades only what the live mirror shows at that slot now
+-- (the resolver's own validation), checks inside the transaction that each
+-- record is still the legacy shape it read (a newer explicit choice is never
+-- overwritten), stamps no assignment id, and leaves first-run, locked designs
+-- and every other record alone. The identity it records is the occupant of the
+-- slot at that first contact; it cannot know whether the slot was reused before.
+-- A table that carries its own contents or assignment id is not touched.
+-- Evidence it will not write from: a slot row A.Slots() could only partly read
+-- (roleSourceValid == false: the readable entries are not the row), a store
+-- that cannot write durably right now (UpdateStateV1 then succeeds on a
+-- transient row), or a write that did not reach the authoritative row. None of
+-- those counts as an attempt: the legacy record is left as it was and the
+-- upgrade is tried again after LEGACY_ASSIGNMENT_RETRY seconds, so a later
+-- complete row or a store that became ready resolves it.
+local legacyAssignmentsChecked = nil
+local legacyAssignmentsRetryAt = 0
+local LEGACY_ASSIGNMENT_RETRY = 5
+
+local function LegacyAssignmentSlot(saved)
+    if type(saved) == "number" or type(saved) == "string" then
+        return tonumber(saved)
+    end
+    -- A table with its own contents or assignment id (a plan saved before
+    -- content keys) already carries an identity of its own; it is not a bare
+    -- slot reference and is left alone.
+    if type(saved) == "table" and saved.key == nil
+        and saved.echoes == nil and saved.assignmentId == nil then
+        return tonumber(saved.slot)
+    end
+    return nil
+end
+
+local function ReconcileLegacyAssignments()
+    if A.DIAGNOSTIC_PASSIVE then return end
+    local st = Store and Store.State and Store.State()
+    local links = st and st.loadoutWishlists
+    if type(links) ~= "table" then return end
+    -- The attempt is keyed on the slot mirror's generation and on WHICH legacy
+    -- records exist: a record that appears later (a Restore) is tried at once,
+    -- not only after the mirror next changes.
+    local parts = {}
+    for index, saved in pairs(links) do
+        local wanted = LegacyAssignmentSlot(saved)
+        if wanted then parts[#parts + 1] = tostring(index) .. ":" .. tostring(wanted) end
+    end
+    if #parts == 0 then
+        legacyAssignmentsChecked = nil
+        legacyAssignmentsRetryAt = 0
+        return
+    end
+    table.sort(parts)
+    local gate = tostring(Store and Store.CurrentOwnerKey and Store.CurrentOwnerKey())
+        .. "|" .. tostring(NexusDB) .. "|" .. tostring(echoGenerations.slots)
+        .. "|" .. table.concat(parts, ",")
+    if legacyAssignmentsChecked == gate then return end
+    local now = GetTime and GetTime() or 0
+    if now < legacyAssignmentsRetryAt then return end
+    -- UpdateStateV1 falls back to a transient row (and still returns true) while
+    -- the store cannot write the character's row durably; that is not a write.
+    if Store and type(Store.StateWriteStatus) == "function" then
+        local status = Store.StateWriteStatus()
+        if type(status) ~= "table" or status.mode ~= "durable" then
+            legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
+            return
+        end
+    end
+    local slots = A.Slots()
+    if not slots then return end
+    local live = LiveWishlistCandidates(slots)
+    local plan, incomplete = {}, false
+    for index, saved in pairs(links) do
+        local wanted = LegacyAssignmentSlot(saved)
+        if wanted then
+            -- The referenced row is inspected first, not only the candidates
+            -- built from it: a row A.Slots() could not read (wholly or in part)
+            -- yields no candidate, or one of survivors, and neither is proof of
+            -- what the slot holds.
+            local row = slots.bySlot and slots.bySlot[wanted]
+            if type(row) == "table" and row.roleSourceValid == false then
+                incomplete = true
+            else
+                for _, c in ipairs(live) do
+                    if tonumber(c.slot) == wanted then
+                        if type(c.key) ~= "string" or c.key == "" then
+                            incomplete = true
+                        else
+                            plan[#plan + 1] = {index = index, wanted = wanted,
+                                slot = c.slot, key = c.key, name = c.name}
+                        end
+                        break
+                    end
+                end
+            end
+        end
+    end
+    -- Absence is only evidence while the slot mirror itself is accepted by the
+    -- strict echo check: a change after that bumps the slots generation and
+    -- changes the gate. Before the first snapshot, or while the slots field is
+    -- rejected (e.g. another row is malformed), a record that found no slot is
+    -- retried after the delay instead of being certified.
+    local settled = not incomplete and echoSnapshot ~= nil
+        and echoRejected.slots == nil
+    if #plan == 0 then
+        if settled then
+            legacyAssignmentsChecked = gate
+        else
+            legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
+        end
+        return
+    end
+    local ok = UpdateStoreState(function(state)
+        local durable = state.loadoutWishlists
+        if type(durable) ~= "table" then return end
+        for _, item in ipairs(plan) do
+            local current = durable[item.index]
+            if LegacyAssignmentSlot(current) == item.wanted then
+                if type(current) == "table" then
+                    current.key, current.name = item.key, item.name
+                else
+                    durable[item.index] = {slot = item.slot, key = item.key, name = item.name}
+                end
+            end
+        end
+    end)
+    -- Done only when the authoritative row now holds every identity written.
+    local verified = ok and true or false
+    if verified then
+        local after = Store and Store.State and Store.State()
+        local stored = after and after.loadoutWishlists
+        for _, item in ipairs(plan) do
+            local record = type(stored) == "table" and stored[item.index] or nil
+            if type(record) ~= "table" or record.key ~= item.key then
+                verified = false
+                break
+            end
+        end
+    end
+    if verified and settled then
+        legacyAssignmentsChecked = gate
+    else
+        legacyAssignmentsRetryAt = now + LEGACY_ASSIGNMENT_RETRY
+    end
+    if ok then MarkWishlistProjectionDirty() end
+end
+
 -- Main drives this from its OnUpdate (~0.2s cadence)
 function A.Poll()
     ObserveRunBoundary()
@@ -3742,8 +5391,10 @@ function A.Poll()
     end
     lastAutoAcceptState, lastRivalState = autoAcceptState, rivalState
     ResolveInFlight()
+    ConfirmAwaitingGrant()
     WatchLatches()
     ReconcileTomePending()
+    ReconcileLegacyAssignments()
     -- owned-sync retry loop: keep re-requesting granted until non-empty
     -- data has been seen at least once (handles the empty-{} window after a
     -- reset/reload); bounded so it never spins

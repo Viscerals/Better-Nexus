@@ -214,16 +214,21 @@ local function TargetMapToken(targets, catalog)
     return table.concat(parts, "|")
 end
 
+-- Current locked ownership is occupied records holding exact copies
+-- (Model.LockedProjection); MAX_LOCK_SLOTS is the authored target design and
+-- never bounds it. Returns the copies by spell, the occupied record count and
+-- the records by spell.
 local function LockedSpellCounts(locked)
     local owner = Nexus.Model and Nexus.Model.LockedProjection
-    local projection = owner and owner(locked, nil, MAX_LOCK_SLOTS) or nil
+    local projection = owner and owner(locked, nil) or nil
     return projection and projection.bySpell or nil,
-        projection and projection.total or nil
+        projection and projection.occupied or nil,
+        projection and projection.recordsBySpell or nil
 end
 
 local function LockedProjection(locked, catalog)
     local owner = Nexus.Model and Nexus.Model.LockedProjection
-    return owner and owner(locked, catalog, MAX_LOCK_SLOTS) or nil
+    return owner and owner(locked, catalog) or nil
 end
 
 local function TargetEnvelopeFields(value)
@@ -320,35 +325,124 @@ local function PendingTotal(pending)
     return total
 end
 
-local function LockBudgetUsed(pending, pendingLock, lockedBySpell, excludeRealLockedId)
-    local realLocked = {}
-    for spellId, count in pairs(type(lockedBySpell) == "table" and lockedBySpell or {}) do
-        local id, copies = tonumber(spellId), PositiveInteger(count)
-        if id and copies then realLocked[id] = copies end
+-- The locked Echoes a draft frees: `replacing`, the one whose replacement is
+-- being chosen now, and the spell each designed row replaces.
+local function FreedSpells(pending, pendingLock, replacing)
+    local freed = {}
+    local function Free(value)
+        local id = PositiveInteger(value)
+        if id then freed[id] = true end
     end
-    if excludeRealLockedId then realLocked[tonumber(excludeRealLockedId)] = nil end
-
-    local function ExemptReplaced(row)
-        local replaces = row and row.replaces
-        if type(replaces) == "number" then realLocked[replaces] = nil end
-    end
+    Free(replacing)
     for _, row in pairs(type(pending) == "table" and pending or {}) do
-        if row and row.lockIntent then ExemptReplaced(row) end
+        if type(row) == "table" and row.lockIntent then Free(row.replaces) end
     end
     for _, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
-        ExemptReplaced(row)
+        if type(row) == "table" then Free(row.replaces) end
     end
-
-    local used = 0
-    for _, copies in pairs(realLocked) do used = used + copies end
-    for _, row in pairs(type(pending) == "table" and pending or {}) do
-        if row and row.lockIntent then used = used + 1 end
-    end
-    for _, row in pairs(type(pendingLock) == "table" and pendingLock or {}) do
-        used = used + (PositiveInteger(row and row.stacks) or 1)
-    end
-    return used
+    return freed
 end
+
+-- The spells whose fulfilled target the final design drops, as PlanLockCommit
+-- reads them: the freed spells and the spells a fulfilled target already
+-- replaced.
+local function ReplacedSpells(pending, pendingLock, fulfilledTargets, replacing)
+    local replaced = FreedSpells(pending, pendingLock, replacing)
+    for spellId, value in pairs(type(fulfilledTargets) == "table"
+        and fulfilledTargets or {}) do
+        for _, replacement in ipairs(TargetReplacements(value, spellId) or {}) do
+            replaced[replacement] = true
+        end
+    end
+    return replaced
+end
+
+-- The plan's own locked target copies, as the design policy counts them: each
+-- designed row's copies (a lock-intent row one, a queued target its stacks),
+-- one for `newSpellId` when one is given, and once each the fulfilled targets
+-- the final design keeps (held, not replaced, not designed again;
+-- PlanLockCommit). `held` is the current locked copies by spell and
+-- `replacingSpellId` the locked Echo whose replacement is being chosen now.
+-- Returns the copies and the designed spells.
+local function DesignCopies(pending, pendingLock, fulfilledTargets, held,
+    replacingSpellId, newSpellId)
+    pending = type(pending) == "table" and pending or {}
+    pendingLock = type(pendingLock) == "table" and pendingLock or {}
+    fulfilledTargets = type(fulfilledTargets) == "table" and fulfilledTargets or {}
+    held = type(held) == "table" and held or {}
+    local replaced = ReplacedSpells(pending, pendingLock, fulfilledTargets,
+        replacingSpellId)
+    local designed, copies = {}, 0
+    local function Design(spellId, n)
+        local id = PositiveInteger(spellId)
+        if id then designed[id] = true end
+        copies = copies + n
+    end
+    for _, row in pairs(pending) do
+        if type(row) == "table" and row.lockIntent then Design(row.spellId, 1) end
+    end
+    for _, row in pairs(pendingLock) do
+        if type(row) == "table" then
+            Design(row.spellId, PositiveInteger(row.stacks) or 1)
+        end
+    end
+    if newSpellId ~= nil then Design(newSpellId, 1) end
+    for spellId, value in pairs(fulfilledTargets) do
+        local id = PositiveInteger(spellId)
+        local n = id and TargetCopies(value, id)
+        if n and not designed[id] and not replaced[id]
+            and (PositiveInteger(held[id]) or 0) >= n then
+            copies = copies + n
+        end
+    end
+    return copies, designed
+end
+
+-- The editor's locked-target budget has two separate rules. Returns the rule a
+-- new target of `newSpellId` breaks ("design" or "slots"), or nil.
+-- * Design policy: the plan's own locked target copies with the new target's
+--   one (DesignCopies) stay within MAX_LOCK_SLOTS, the authored six-copy
+--   design.
+-- * Slot occupancy: the occupied RECORDS of the trusted locked projection,
+--   except those of a freed spell, plus one record for each designed spell
+--   that holds none (a record carries its own stack), stay within the live
+--   capacity the projection states; while it states none, within the six
+--   authored cells.
+-- `options.lockedProjection` is the trusted locked projection
+-- (WishlistController), or nil when there is none: no current record counts.
+-- Current locked Echoes the plan does not target are occupancy, never design.
+-- No server rule is inferred.
+local function LockBudgetRefusal(pending, pendingLock, options, newSpellId)
+    options = type(options) == "table" and options or {}
+    pending = type(pending) == "table" and pending or {}
+    pendingLock = type(pendingLock) == "table" and pendingLock or {}
+    local projection = type(options.lockedProjection) == "table"
+        and options.lockedProjection or {}
+    local records = type(projection.recordsBySpell) == "table"
+        and projection.recordsBySpell or {}
+    local freed = FreedSpells(pending, pendingLock, options.replacingSpellId)
+    local copies, designed = DesignCopies(pending, pendingLock,
+        options.fulfilledTargets, projection.bySpell, options.replacingSpellId,
+        newSpellId)
+    if copies > MAX_LOCK_SLOTS then return "design" end
+
+    local occupied = 0
+    for spellId, n in pairs(records) do
+        local id = PositiveInteger(spellId)
+        if id and not freed[id] then occupied = occupied + (PositiveInteger(n) or 0) end
+    end
+    for id in pairs(designed) do
+        if freed[id] or not PositiveInteger(records[id]) then
+            occupied = occupied + 1
+        end
+    end
+    if occupied > (PositiveInteger(projection.capacity) or MAX_LOCK_SLOTS) then
+        return "slots"
+    end
+    return nil
+end
+
+local LOCK_BUDGET_OUTCOME = {design="lock_full", slots="slots_full"}
 
 local function NormalizeDraft(echoes, options)
     options = options or {}
@@ -547,12 +641,8 @@ local function NormalizeCandidateEvidence(ordinaryEchoes, lockedEchoes, options)
         or type(evidence.NormalizeLockedEchoes) ~= "function" then
         return nil, "locked Echo evidence validator is unavailable"
     end
-    local normalizedLocked, lockedReason = evidence.NormalizeLockedEchoes(
-        lockedEchoes)
+    local normalizedLocked = evidence.NormalizeLockedEchoes(lockedEchoes)
     if not normalizedLocked then
-        if tostring(lockedReason):find("six-copy", 1, true) then
-            return nil, lockedReason
-        end
         return nil, "locked Echo evidence is invalid"
     end
 
@@ -566,6 +656,16 @@ local function NormalizeCandidateEvidence(ordinaryEchoes, lockedEchoes, options)
         explicitRows[id] = explicitRows[id] or {}
         explicitRows[id][#explicitRows[id] + 1] = CopyEntry(echo)
         explicitCount = explicitCount + stacks
+    end
+    -- Locked rows stay valid evidence above six copies (CandidateEvidence
+    -- bounds rows and the copies in one row), but each becomes this draft's
+    -- design, a queued or a fulfilled target that nothing replaces, and a plan
+    -- designs at most MAX_LOCK_SLOTS locked target copies. Refused before any
+    -- draft is formed, so a Copy keeps the draft it would replace.
+    if explicitCount > MAX_LOCK_SLOTS then
+        return nil, string.format("the locked Echoes hold %d copies, more than "
+            .. "the %d locked target copies a plan designs", explicitCount,
+            MAX_LOCK_SLOTS)
     end
 
     -- Local locked ownership must not consume or suppress an ordinary role
@@ -794,9 +894,9 @@ local function ToggleDesignLock(pending, pendingLock, rowKey, options)
         nextRow.replaces = nil
         return nextPending, pendingLock, options.replacingSpellId, "untagged"
     end
-    if LockBudgetUsed(pending, pendingLock, options.lockedBySpell,
-        options.replacingSpellId) >= MAX_LOCK_SLOTS then
-        return pending, pendingLock, nil, "lock_full"
+    local refused = LockBudgetRefusal(pending, pendingLock, options, nextRow.spellId)
+    if refused then
+        return pending, pendingLock, nil, LOCK_BUDGET_OUTCOME[refused]
     end
     nextRow.lockIntent = true
     nextRow.replaces = options.replacingSpellId
@@ -833,9 +933,9 @@ local function AssignLockSlot(pending, pendingLock, data, options)
     if row then
         local nextPending = pending
         if not row.lockIntent then
-            if LockBudgetUsed(pending, pendingLock, options.lockedBySpell,
-                options.replacingSpellId) >= MAX_LOCK_SLOTS then
-                return pending, pendingLock, nil, "lock_full"
+            local refused = LockBudgetRefusal(pending, pendingLock, options, id)
+            if refused then
+                return pending, pendingLock, nil, LOCK_BUDGET_OUTCOME[refused]
             end
             nextPending = CopyMap(pending)
             nextPending[rowKey].lockIntent = true
@@ -849,9 +949,9 @@ local function AssignLockSlot(pending, pendingLock, data, options)
             return pending, pendingLock, nil, "already"
         end
     end
-    if LockBudgetUsed(pending, pendingLock, options.lockedBySpell,
-        options.replacingSpellId) >= MAX_LOCK_SLOTS then
-        return pending, pendingLock, nil, "lock_full"
+    local refused = LockBudgetRefusal(pending, pendingLock, options, id)
+    if refused then
+        return pending, pendingLock, nil, LOCK_BUDGET_OUTCOME[refused]
     end
     local catalogRow = catalog and catalog.rows and catalog.rows[id]
     local nextLock = CopyMap(pendingLock)
@@ -908,9 +1008,13 @@ local function ExportEntries(pending, pendingLock, lockedBySpell, catalog,
         entries[#entries + 1] = exported
         seenLocked[identity] = true
     end
+    -- A fulfilled target whose spell the design replaces is not exported
+    -- beside its replacement: the final design drops it (PlanLockCommit).
+    local replaced = ReplacedSpells(pending, pendingLock, fulfilledTargets, nil)
     for id, target in pairs(type(fulfilledTargets) == "table"
         and fulfilledTargets or {}) do
-        local rows = type(target) == "table" and target.rows or nil
+        local rows = not replaced[PositiveInteger(id) or 0]
+            and type(target) == "table" and target.rows or nil
         for _, source in ipairs(type(rows) == "table" and rows or {}) do
             local exported = CopyEntry(source)
             exported[TARGET_ENVELOPE_MARKER] = nil
@@ -1053,6 +1157,14 @@ end
 
 local function TrimName(name)
     name = tostring(name or "")
+    -- WoW rich-text widgets interpret pipe-prefixed sequences, and a wishlist
+    -- name travels verbatim inside an EBH1 code that the player copies out of
+    -- an edit box and pastes into another. A name carrying a pipe is therefore
+    -- either rendered as something else or changed by the projection that makes
+    -- it inert, and it drifts on every round trip. The character is removed
+    -- once, here, at the single boundary where a name is accepted, so a name is
+    -- inert everywhere and an exported code says exactly what was saved.
+    name = name:gsub("|", "")
     return name:gsub("^%s+", ""):gsub("%s+$", "")
 end
 
@@ -1065,7 +1177,8 @@ function Factory.New()
     Model.MaxStack = MaxStack
     Model.EchoListTotal = EchoListTotal
     Model.PendingTotal = PendingTotal
-    Model.LockBudgetUsed = LockBudgetUsed
+    Model.DesignCopies = DesignCopies
+    Model.LockBudgetRefusal = LockBudgetRefusal
     Model.TargetCopies = TargetCopies
     Model.TargetReplacement = TargetReplacement
     Model.TargetReplacements = TargetReplacements

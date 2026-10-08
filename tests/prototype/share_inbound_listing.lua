@@ -26,7 +26,8 @@ local function Click(button)
 end
 if frame._myBuildsBtn:IsEnabled() then Click(frame._myBuildsBtn) end
 assert(not frame._myBuildsBtn:IsEnabled() and frame._scopeBtn:IsEnabled(),'disabled scope button marks selected My Builds')
-if frame._qualifiedBtn:GetText()~='All Shared' then Click(frame._qualifiedBtn) end
+-- The DPS-record requirement is a check box: start with it unchecked.
+if frame._qualifiedBtn:GetChecked() then Click(frame._qualifiedBtn) end
 frame._searchBox:SetText('NEXUS-TEST-THREE-COPIES')
 frame._searchBox:GetScript('OnTextChanged')(frame._searchBox,true)
 local function Published(count)
@@ -40,7 +41,7 @@ local rows=assert(Nexus.ViewProjections.Builds({scope='mine',currentClassOnly=tr
  qualifiedOnly=false,search='NEXUS-TEST-THREE-COPIES',sortMode='dps'}))
 assert(#rows==1 and rows[1].id==id,'actual My Builds projection contains the approved exact ID')
 assert(not rows[1]._nexusQualified,'no synthetic DPS records were invented')
-Click(frame._qualifiedBtn);assert(frame._qualifiedBtn:GetText()=='Both DPS records')
+Click(frame._qualifiedBtn);assert(frame._qualifiedBtn:GetChecked()==true and frame._qualifiedLabel:GetText()=='Require both DPS records')
 Published(0)
 Click(frame._qualifiedBtn);Published(1)
 Click(frame._scopeBtn);Published(1)

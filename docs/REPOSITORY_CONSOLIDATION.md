@@ -30,8 +30,8 @@ under the references in section 4.
 | `Nexus.toc`, `core/`, `data/`, `logic/`, `ui/`, `third_party/` | adopted commit | Runtime. Byte-identical Git blobs (verified per file). `logic/Relay.lua` of old `main` is removed; the adopted `Nexus.toc` does not load it. |
 | `tests/prototype/` | adopted commit | Current offline suite and harness. |
 | `tests/harness.lua`, `tests/run_*.lua` (75 files) | removed | 1.19-era suite for the replaced runtime. It cannot run against the adopted runtime. It stays in history (`archive/main-pre-consolidation-8cf798d`, and the newer stack suite under `archive/pr-stack-test19-tip-eb190c5`). |
-| `tools/run_prototype_tests.py`, `tools/prototype_lua54.py`, `tools/prepare_pilot_reference.py` | adopted commit | Maintained test tools. |
-| `docs/` (35 files), `README-PROTOTYPE.md`, `THIRD_PARTY.md` | adopted commit | Historical prototype documents are kept as history. Three files (`README-PROTOTYPE.md`, `docs/P1_5_1_TERMINOLOGY_STATUS.json`, `docs/P1_5_1_TERMINOLOGY_STATUS.md`) were stored with CRLF on the prototype line; `.gitattributes` of `main` stores them with LF. They are equal after that normalization. No other adopted file differs. |
+| `tools/run_prototype_tests.py`, `tools/prototype_lua54.py` | adopted commit | Maintained test tools. (A third, which prepared an external comparison archive, was retired on 2026-09-24 with those comparisons.) |
+| `docs/` (35 files), `README-PROTOTYPE.md`, `THIRD_PARTY.md` | adopted commit | Historical prototype documents are kept as history. On 2026-09-24, 15 prototype-phase reports and receipts that described a retired offline comparison with an outside addon were removed from the current tree; they remain unchanged in Git history. Three files (`README-PROTOTYPE.md`, `docs/P1_5_1_TERMINOLOGY_STATUS.json`, `docs/P1_5_1_TERMINOLOGY_STATUS.md`) were stored with CRLF on the prototype line; `.gitattributes` of `main` stores them with LF. They are equal after that normalization. No other adopted file differs. |
 | `AI_POLICY.md`, `LICENSE.md`, `UPSTREAM.md` | both | Byte-identical on both lines. |
 | `.github/` issue forms, `CODEOWNERS`, PR template, `.gitattributes`, `.gitignore`, `CHANGELOG.md`, `CONTRACTS.md`, `RELEASE_SECURITY.md`, `SECURITY.md`, `SUPPORT.md` | old `main` | Retained unchanged. `CONTRACTS.md` describes the 1.19/stack-era contracts and is kept as a historical reference. |
 | `README.md`, `CONTRIBUTING.md` | old `main`, adapted | Current status, beta download, limitations, clean-checkout test and package commands, branch-from-`main` workflow. |
@@ -45,9 +45,8 @@ extracts, or local machine paths.
 
 - `python tools/ci_check.py`: fails on a duplicate, missing or unlisted test
   file, on any FAIL or TIMEOUT, and on any listed test without a result row.
-  No test count is hard-coded. `planner_reference` and `orbs_policy` need a
-  third-party LoadoutPilot archive that may not be redistributed; without it
-  they are printed as NOT RUN and are never counted as passed.
+  No test count is hard-coded. Every listed test runs from the checkout; a
+  NOT RUN row fails the check and is never counted as passed.
 - `python tools/build_package.py --check` / `--label <label>`: package content
   rule of the published test.9027 package (84 files there), TOC compatibility,
   and an archive that is reproducible on one platform and zlib build. The

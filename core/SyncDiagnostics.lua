@@ -49,10 +49,12 @@ local TERMINALS = {
     none=true,stable=true,expired=true,no_useful_progress=true,
     peer_state_unconfirmed=true,pass_limit=true,queue_rejected=true,
     send_dropped=true,disconnected=true,superseded=true,
+    -- A saved Sync mode (Off, or Manual without the user's operation) ended it.
+    sync_mode=true,
 }
 
 local QUEUE_OUTCOMES = {
-    none=true,queued=true,sent=true,full=true,dropped=true,
+    none=true,queued=true,sent=true,full=true,dropped=true,oversize=true,
     requeued=true,retry=true,disconnected=true,superseded=true,
 }
 
@@ -114,6 +116,10 @@ function Diagnostics.New(options)
             TERMINALS, "none")
         stats.queueOutcome = BoundedToken(snapshot.queueOutcome,
             QUEUE_OUTCOMES, "none")
+        stats.requestLength = BoundedCount(snapshot.requestLength)
+        stats.requestLimit = BoundedCount(snapshot.requestLimit)
+        stats.requestVersionForm = (snapshot.requestVersionForm == "full"
+            or snapshot.requestVersionForm == "plain") and snapshot.requestVersionForm or "none"
         return stats
     end
 

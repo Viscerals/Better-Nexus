@@ -5,7 +5,7 @@ H.AddEcho(410003,'Disposable B',0,4,4102)
 H.AddEcho(410004,'Desired B',3,2,4103)
 H.AddEcho(410005,'Protected low',0,3,4104)
 H.AddEcho(410006,'Excess high',3,3,4104)
-H.AddEcho(410007,'Permanent',2,1,4105)
+H.AddEcho(410007,'Locked',2,1,4105)
 H.AddEcho(410008,'Unsafe fallback',1,1,4106)
 H.granted={['Disposable A']={{spellId=410001,quality=1}},['Disposable B']={{spellId=410003,quality=0}}}
 H.orbs={charges=10,known=true,offer=false,mode='accept',requests=0}
@@ -22,6 +22,9 @@ ProjectEbonhold.OrbService={
  end,
  RequestCharges=function()O.requests=O.requests+1;return true end,
 }
+-- Optional: a test lists extra Echoes {id,quality} in ORB_SUPPORT_ECHOES before it loads this file.
+-- They must exist before Boot: the catalog is built at boot and does not see later additions.
+for _,e in ipairs(ORB_SUPPORT_ECHOES or {}) do H.AddEcho(e[1],"Synthetic Echo "..e[1],e[2],5,0) end
 H.Boot();local A=Nexus.GameAdapter;local M=Nexus.OrbRuntime
 local function setplan(entries)
  local ok,err=A.SetFirstLoadoutWishlistIdentity('Orb test',entries);assert(ok,err)

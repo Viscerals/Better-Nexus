@@ -18,7 +18,9 @@ Nexus.WishlistOverlay = M
 local MAX_LINES = 90
 local COLUMNS = 3
 local ROWS_PER_COLUMN = math.ceil(MAX_LINES / COLUMNS)
-local ROW_HEIGHT = 15
+-- Row step and row box alike: one full line, also for a taller replacement
+-- face (16.1 px measured natively), so adjacent rows never overlap.
+local ROW_HEIGHT = 17
 local COLUMN_WIDTH = 210
 local UPDATE_INTERVAL = 1.0
 
@@ -48,8 +50,20 @@ local stats = {
     wishlistReads=0,ownedReads=0,lockedReads=0,catalogReads=0,
 }
 
+-- The overlay's own saved keys live in the saved root, or for a read-only
+-- saved root in the Store owner's session-only table (starting with copies
+-- of the saved values).
+local OVERLAY_SAVED_KEYS = {"overlayLocked", "overlayPosition", "overlayScale", "overlayShown"}
+local function OverlayRoot()
+    NexusDB = NexusDB or {}
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    local root = type(writable) == "function"
+        and writable(NexusDB, OVERLAY_SAVED_KEYS) or nil
+    return type(root) == "table" and root or NexusDB
+end
+
 local function IsLocked()
-    return NexusDB.overlayLocked ~= false
+    return OverlayRoot().overlayLocked ~= false
 end
 
 local function ApplyLockState()
@@ -74,7 +88,7 @@ end
 local function ApplyPosition()
     if not frame then return end
     frame:ClearAllPoints()
-    local pos = NexusDB.overlayPosition
+    local pos = OverlayRoot().overlayPosition
     if type(pos) == "table" and pos.point then
         frame:SetPoint(pos.point, UIParent, pos.relativePoint or pos.point, pos.x or 0, pos.y or 0)
     else
@@ -85,7 +99,7 @@ end
 local function SavePosition()
     if not frame then return end
     local point, _, relativePoint, x, y = frame:GetPoint(1)
-    NexusDB.overlayPosition = {
+    OverlayRoot().overlayPosition = {
         point = point or "LEFT", relativePoint = relativePoint or point or "LEFT",
         x = math.floor((x or 0) + 0.5), y = math.floor((y or 0) + 0.5),
     }
@@ -93,7 +107,7 @@ end
 
 local function ApplyScale()
     if not frame then return end
-    local scale = tonumber(NexusDB.overlayScale) or 1.0
+    local scale = tonumber(OverlayRoot().overlayScale) or 1.0
     pcall(function() frame:SetScale(scale) end)
     pcall(function() if controlsFrame then controlsFrame:SetScale(scale) end end)
 end
@@ -139,7 +153,9 @@ local function EnsureFrame()
         local row = (i - 1) % ROWS_PER_COLUMN
         local fs = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         fs:SetPoint("TOPLEFT", 20 + col * COLUMN_WIDTH, -26 - (row * ROW_HEIGHT))
+        -- One line per row, the box exactly one row step tall.
         fs:SetSize(COLUMN_WIDTH - 10, ROW_HEIGHT)
+        pcall(fs.SetWordWrap, fs, false)
         fs:SetJustifyH("LEFT")
         pcall(function() fs:SetShadowColor(0, 0, 0, 1); fs:SetShadowOffset(1, -1) end)
         fs:Hide()
@@ -163,7 +179,7 @@ local function EnsureFrame()
     lockBtn:SetSize(122, 18)
     lockBtn:SetPoint("LEFT", 0, 0)
     lockBtn:SetScript("OnClick", function()
-        NexusDB.overlayLocked = not IsLocked()
+        OverlayRoot().overlayLocked = not IsLocked()
         ApplyLockState()
     end)
 
@@ -220,6 +236,23 @@ local function StoreRevisions(slotsRevision, activeRevision, grantedRevision,
     lastLockedProjectionRevision = lockedProjectionRevision
 end
 
+-- The assigned Wishlist as the HUD and the Orb read it: the server's rolled
+-- copies plus the plan's own locked design targets (GameAdapter.AssignedWishlist).
+-- The server mirror alone does not hold the plan's design targets. Display only.
+-- `plannedUnavailable` is true when that projection could not read the design.
+local function ReadAssignedPlan()
+    local read = Adapter and Adapter.AssignedWishlist
+    if type(read) ~= "function" then
+        return Adapter and Adapter.Wishlist and Adapter.Wishlist()
+    end
+    local assigned = read()
+    if type(assigned) ~= "table" or type(assigned.wishlist) ~= "table" then
+        return nil
+    end
+    return { entries = assigned.entries,
+        plannedUnavailable = assigned.state == "unavailable" }
+end
+
 local function AcquirePresentation()
     local known, slotsRevision, activeRevision, grantedRevision, ownedRevision,
         wishlistRevision, catalogRevision, lockedRevision,
@@ -237,10 +270,13 @@ local function AcquirePresentation()
         return false
     end
 
+    -- The assigned plan's rows are built through the catalog, so a catalog
+    -- change re-reads it too.
     local refreshWishlist = not known or not revisionsKnown
         or slotsRevision ~= lastSlotsRevision
         or activeRevision ~= lastActiveRevision
         or wishlistRevision ~= lastWishlistRevision
+        or catalogRevision ~= lastCatalogRevision
     local refreshOwned = not known or not revisionsKnown
         or grantedRevision ~= lastGrantedRevision
         or ownedRevision ~= lastOwnedRevision
@@ -250,7 +286,7 @@ local function AcquirePresentation()
         or lockedRevision ~= lastLockedRevision
         or lockedProjectionRevision ~= lastLockedProjectionRevision
     if refreshWishlist then
-        cachedWishlist = Adapter and Adapter.Wishlist and Adapter.Wishlist()
+        cachedWishlist = ReadAssignedPlan()
         stats.wishlistReads = stats.wishlistReads + 1
     end
     if refreshOwned then
@@ -349,22 +385,35 @@ function M.Refresh()
     end
     for index, e in ipairs(wl.entries or {}) do
         local row = catalog and catalog.rows and catalog.rows[e.spellId]
-        list[#list + 1] = { spellId = e.spellId, quality = e.quality,
-            stacks = e.stacks, family = e.family,
-            locked = e.locked == true or e.sourceRole == "locked",
-            progress = progress and progress.rows[index],
-            name = (row and row.name) or ("spell " .. tostring(e.spellId)) }
+        local entryProgress = progress and progress.rows[index]
+        local isLocked = e.locked == true or e.sourceRole == "locked"
+        -- One row per locked target Echo: the model counts the target's
+        -- copies as a group, so a second row of the same Echo repeats it.
+        if not (isLocked and entryProgress and entryProgress.primary == false) then
+            list[#list + 1] = { spellId = e.spellId, quality = e.quality,
+                stacks = e.stacks, family = e.family, locked = isLocked,
+                progress = entryProgress,
+                name = (row and row.name) or ("spell " .. tostring(e.spellId)) }
+        end
     end
     table.sort(list, function(a, b)
+        -- Locked targets are listed apart, after every ordinary row.
+        if a.locked ~= b.locked then return not a.locked end
         local ac = tonumber(a.quality) or 0
         local bc = tonumber(b.quality) or 0
         if ac ~= bc then return ac > bc end
         return tostring(a.name) < tostring(b.name)
     end)
 
+    local noteLine = wl.plannedUnavailable and #list < MAX_LINES and #list + 1
     for i = 1, MAX_LINES do
         local e = list[i]
-        if e then
+        if not e and i == noteLine then
+            local text = "|cff888888Planned locked targets unavailable"
+                .. " - open the Wishlist Editor|r"
+            changed = ShowLine(i, LineKey(text, nil, nil, nil, false),
+                text, nil, nil, nil, false) or changed
+        elseif e then
             local want = e.progress and tonumber(e.progress.want)
                 or tonumber(e.stacks) or 1
             local fallbackOwner = e.locked and locked or owned
@@ -373,7 +422,7 @@ function M.Refresh()
                     and (fallbackOwner.bySpell[e.spellId]
                         or fallbackOwner.bySpell[tostring(e.spellId)])) or 0
             local nm = e.name or ("spell " .. tostring(e.spellId))
-            if e.locked then nm = nm .. " |cffb266ff(permanent target)|r" end
+            if e.locked then nm = nm .. " |cffb266ff(locked target)|r" end
             local suffix = (want > 1 or e.locked)
                 and string.format(" (%d/%d)", math.min(have, want), want) or ""
             local text, red, green, blue
@@ -408,7 +457,7 @@ function M.Show()
     EnsureFrame()
     frame:Show()
     if controlsFrame then controlsFrame:Show() end
-    NexusDB.overlayShown = true
+    OverlayRoot().overlayShown = true
     ApplyLockState()
     M.Refresh()
 end
@@ -416,7 +465,7 @@ end
 function M.Hide()
     if frame then frame:Hide() end
     if controlsFrame then controlsFrame:Hide() end
-    NexusDB.overlayShown = false
+    OverlayRoot().overlayShown = false
 end
 
 function M.Toggle()
@@ -435,7 +484,7 @@ function M.IsLocked()
 end
 
 function M.ToggleLock()
-    NexusDB.overlayLocked = not IsLocked()
+    OverlayRoot().overlayLocked = not IsLocked()
     ApplyLockState()
 end
 
@@ -443,26 +492,26 @@ end
 -- overlay itself (moved there per request 2026-07-24) -- these are the
 -- read/write hooks it drives.
 function M.ResetPosition()
-    NexusDB.overlayPosition = nil
+    OverlayRoot().overlayPosition = nil
     ApplyPosition()
     if frame then
         frame:Show()
         if controlsFrame then controlsFrame:Show() end
-        NexusDB.overlayShown = true
+        OverlayRoot().overlayShown = true
         ApplyLockState()
         M.Refresh()
     end
 end
 
 function M.GetScale()
-    return tonumber(NexusDB.overlayScale) or 1.0
+    return tonumber(OverlayRoot().overlayScale) or 1.0
 end
 
 function M.SetScale(value)
     value = tonumber(value) or 1.0
     if value < 0.5 then value = 0.5 end
     if value > 1.6 then value = 1.6 end
-    NexusDB.overlayScale = value
+    OverlayRoot().overlayScale = value
     ApplyScale()
 end
 

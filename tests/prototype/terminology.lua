@@ -2,7 +2,7 @@ local H=dofile('tests/prototype/harness.lua');H.Boot()
 local T=assert(Nexus.UserText);local checks=0
 local function check(v,m)assert(v,m);checks=checks+1 end
 check(T.Message('unsynced')=='Waiting for current Echo data from the server - automatic choices paused','ownership is not network Sync')
-check(T.Message('Take wanted Echo (Pilot)')=='Take a needed Echo','planner provenance outside action')
+check(T.Message('Take wanted Echo (EchoWeaver)')=='Take a needed Echo','planner provenance outside action')
 check(T.Message('ROOT_MUTATION_PENDING'):find('in progress',1,true),'pending is not failure or success')
 check(T.Message('MISSING_UNKNOWN_CODE'):find('Details: MISSING_UNKNOWN_CODE',1,true),'unknown raw code retained without forced readiness')
 local d=T.Message('exact wishlist progress regressed 25 (gained 6, shed 31 exact stacks)')

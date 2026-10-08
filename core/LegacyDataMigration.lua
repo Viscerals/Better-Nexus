@@ -4,6 +4,12 @@
 -- a durable staging area over small scheduler batches, then the four owned
 -- tables are swapped together after validation.  An interrupted phase simply
 -- replays into the same idempotent staging maps on the next login.
+--
+-- Once the authority bundle is occupied, the DPS data this build serves is the
+-- bundle's dpsCapture payload and NexusDB.dpsCapture is preserved legacy input
+-- (DpsCapture DB, DataCompaction and DataRetention DurablePayload). The
+-- conversion then reads that payload and publishes its result through the
+-- catalog's maintenance commit before its receipt says complete (Served below).
 
 Nexus = Nexus or {}
 local Identity = assert(Nexus.Identity,
@@ -25,6 +31,19 @@ local VALID_PHASE = {}
 for _, phase in ipairs(PHASES) do VALID_PHASE[phase] = true end
 
 local active
+-- F-S1-1, the served DPS payload. One file-level local holds this part; its
+-- functions are defined after the converter helpers they use.
+local Served = {
+    RECOVERY_KEY = "legacy-data-migration-served",
+    -- Seconds between two checks while the catalog cannot take a commit yet.
+    WAIT = 0.2,
+    -- Refused publications per database and session (each followed by a new
+    -- pass) before the conversion or the recovery stops without a write.
+    REFUSAL_LIMIT = 8,
+    refusals = setmetatable({}, {__mode="k"}),
+}
+-- The bounded served-payload recovery of this session (memory only).
+local recovery
 
 -- Architecture 3b5de54f, docs/SYNC_TRUST_CATALOG_AUTHORITY_STATE_MACHINE.md
 -- lines 2983-2985: "Exact PR #68 LegacyDataMigration.Init/Pump/Finish and its
@@ -53,7 +72,18 @@ end
 local runtime = {
     requested=0,coalesced=0,jobs=0,pumps=0,workUnits=0,maxWork=0,
     restarts=0,failures=0,completed=0,pending=false,lastReason="none",
+    recoveries=0,recovered=0,publicationRefusals=0,
 }
+
+-- A present settings marker that is not a finite whole number of 0 or more
+-- (6.5, -1, NaN, inf, any string including "5", a boolean, a table) is
+-- malformed. Store keeps such data read-only; this converter agrees and never
+-- coerces it with tonumber.
+local function MalformedSettingsMarker(database)
+    local raw = rawget(database, "settingsVersion")
+    return raw ~= nil and not (type(raw) == "number" and raw == raw
+        and raw >= 0 and raw < math.huge and raw == math.floor(raw))
+end
 
 local function Finite(value)
     value = tonumber(value)
@@ -271,12 +301,20 @@ local function PutPersonal(staging, category, row)
     return false
 end
 
-local function IsLocalRow(row)
-    local current = CurrentOwnerKey()
+-- The canonical owner of a row that claims verified ownership, else nil. The
+-- converter promotes such a row as a personal best when that owner is the
+-- character logged in (IsLocalRow); the served-payload recovery, which cannot
+-- know who that was, applies the same test without the login.
+local function VerifiedOwner(row)
     local owner = type(row) == "table"
         and Identity.CanonicalOwnerKey(row.ownerKey) or nil
-    return current ~= nil and owner ~= nil
-        and row.ownerVerified == true and current == owner
+    return owner ~= nil and row.ownerVerified == true and owner or nil
+end
+
+local function IsLocalRow(row)
+    local current = CurrentOwnerKey()
+    local owner = VerifiedOwner(row)
+    return current ~= nil and owner ~= nil and current == owner
 end
 
 local function MergeAccount(target, incoming)
@@ -436,12 +474,18 @@ local function ValidStaging(staging)
 end
 
 local function Begin(database, meta, reason, restarting)
-    local dps = DpsStore(database)
+    -- After bundle occupancy the converter reads the served payload; the
+    -- legacy location is preserved input and is neither created nor written.
+    local served = Served.Payload(database)
+    local dps = served or DpsStore(database)
     if not dps then
         database.dpsCapture = {}
         dps = database.dpsCapture
     end
-    local canResume = not restarting and meta.state == "staging"
+    -- A served payload can be published again between two sessions (a
+    -- received record, compaction, retention), so its staging is never
+    -- resumed: a reload rebuilds it from the payload as it is then.
+    local canResume = not restarting and not served and meta.state == "staging"
         and ValidStaging(meta.staging) and VALID_PHASE[meta.phase]
     if canResume then
         -- A reload has no trustworthy Lua cursor. Replaying only the durable
@@ -463,6 +507,9 @@ local function Begin(database, meta, reason, restarting)
     runtime.pending = true
     return {
         database=database,meta=meta,dps=dps,phase=meta.phase,
+        -- `retained` (served conversions only, memory): what the converter
+        -- refuses, kept for the served payload (Served.Converted).
+        served=served ~= nil,retained=served and Served.NewRetained() or nil,
         items=nil,index=1,dpsRevision=CurrentDpsRevision(),
         canonicalAccountOwners={},accountBridgeCounts={},
         source={
@@ -573,6 +620,8 @@ local function SnapshotLeaderboard(job)
             .. type(right.key) .. ":" .. tostring(right.key)
         return leftKey < rightKey
     end)
+    -- A served conversion keeps what it cannot convert (Served.KeepItems).
+    if job.served then Served.KeepItems(job.source.leaderboard, out) end
     return out
 end
 
@@ -620,6 +669,7 @@ local function ProcessPersonal(job, item)
         AddStat(job.meta, "personalFingerprintsCopied", 1)
     else
         Quarantine(job.meta, "personal", item.key, "malformed category map")
+        if job.retained then job.retained.personalBest[item.key] = item.row end
     end
 end
 
@@ -627,15 +677,34 @@ local function ProcessCharacter(job, item)
     local row, key = NormalizeDpsRow(job.meta, item.row,
         type(item.row) == "table" and item.row.fingerprint or nil,
         item.key, "characterBest")
-    if row and PutCharacter(job.meta.staging, item.category, key, row) then
+    if not row then
+        if job.retained then
+            job.retained.characterBest[item.category][item.key] = item.row
+        end
+        return
+    end
+    if PutCharacter(job.meta.staging, item.category, key, row) then
         AddStat(job.meta, "characterRowsCopied", 1)
     end
 end
 
 local function ProcessLeaderboard(job, item)
+    if item.keep then
+        if job.retained then
+            Served.KeepLegacy(job.retained.leaderboard, item.fingerprint,
+                item.category, nil, item.row)
+        end
+        return
+    end
     local row, key = NormalizeDpsRow(job.meta, item.row,
         item.fingerprint, item.key, "leaderboard")
-    if not row then return end
+    if not row then
+        if job.retained then
+            Served.KeepLegacy(job.retained.leaderboard, item.fingerprint,
+                item.category, item.key, item.row)
+        end
+        return
+    end
     if PutCharacter(job.meta.staging, item.category, key, row) then
         AddStat(job.meta, "legacyRowsPromoted", 1)
     end
@@ -647,6 +716,7 @@ end
 local function ProcessBuildBest(job, item)
     if type(item.row) ~= "table" then
         Quarantine(job.meta, "buildBest", item.key, "malformed category map")
+        if job.retained then job.retained.buildBest[item.key] = item.row end
         return
     end
     job.meta.staging.buildBest[item.key] = ShallowCopy(item.row)
@@ -680,14 +750,22 @@ end
 
 local function SourceChanged(job)
     if job.dpsRevision ~= CurrentDpsRevision() then return true end
-    local dps = DpsStore(job.database)
+    local dps
+    if job.served then
+        -- Every catalog publication carries the payload forward as a new
+        -- top-level table over the same maps, so the maps are the signal here.
+        dps = Served.Payload(job.database)
+        if not dps then return true end
+    else
+        dps = DpsStore(job.database)
+        if dps ~= job.dps then return true end
+    end
     -- Store registration is refused while this transaction is active. Account
     -- normalization shallow-copies only the row shell and never mutates nested
     -- unknown values, so exact table replacement is the bounded ownership
     -- signal; recursively walking the whole SavedVariables graph here would
     -- escape the Pump budget and can never be made safe for arbitrary graphs.
-    return dps ~= job.dps
-        or job.source.accountCharacters ~= job.database.accountCharacters
+    return job.source.accountCharacters ~= job.database.accountCharacters
         or job.source.communityBuilds ~= job.database.communityBuilds
         or job.source.personalBest ~= dps.personalBest
         or job.source.characterBest ~= dps.characterBest
@@ -695,20 +773,267 @@ local function SourceChanged(job)
         or job.source.buildBest ~= dps.buildBest
 end
 
-local function Finish(job)
+------------------------------------------------------------------------
+-- F-S1-1: the served DPS payload.
+--
+-- The conversion's result reaches the served payload only through the
+-- catalog's maintenance commit (BuildCatalog.CommitMaintenance with a
+-- dpsCapture override), the one authorized writer of the authority bundle. It
+-- is never written into the payload in place, and no table is shared between
+-- the payload and the legacy location. Its publication guard refuses the
+-- commit unless the live payload is still exactly the one the result was
+-- prepared from, so a record accepted meanwhile, a compaction or another
+-- publication is never overwritten. Publication is verified from the
+-- catalog's own commit, never from a marker.
+------------------------------------------------------------------------
+
+-- The occupied bundle's DPS payload, or nil: no bundle, or a bundle without a
+-- table payload, which keeps the earlier behaviour on the legacy location.
+function Served.Payload(database)
+    local bundle = type(database) == "table"
+        and rawget(database, "authorityBundle") or nil
+    local payload = type(bundle) == "table" and rawget(bundle, "dpsCapture") or nil
+    return type(payload) == "table" and payload or nil
+end
+
+-- Saved data the Store keeps read-only, and a settings format this converter
+-- leaves untouched, are never written (Store never starts it for them either).
+function Served.Writable(database)
+    if MalformedSettingsMarker(database)
+        or (tonumber(rawget(database, "settingsVersion")) or 0)
+            > LAST_KNOWN_LEGACY_SETTINGS_VERSION then
+        return false
+    end
+    local internals = Nexus and Nexus.MainInternals
+    local verdict = type(internals) == "table"
+        and internals.SavedRootReadOnlyV1 or nil
+    if type(verdict) ~= "function" then return true end
+    local ok, class = pcall(verdict, database)
+    return ok and class == nil
+end
+
+function Served.NewRetained()
+    return {personalBest={}, buildBest={}, characterBest={dummy={},lk={}},
+        leaderboard={}}
+end
+
+-- One kept part of an older leaderboard map (fingerprint -> category ->
+-- player), at its own place: the whole entry, one category value, or one row.
+function Served.KeepLegacy(leaderboard, fingerprint, category, key, value)
+    if category == nil then leaderboard[fingerprint] = value; return end
+    local entry = leaderboard[fingerprint]
+    if type(entry) ~= "table" then entry = {}; leaderboard[fingerprint] = entry end
+    if key == nil then entry[category] = value; return end
+    local rows = entry[category]
+    if type(rows) ~= "table" then rows = {}; entry[category] = rows end
+    rows[key] = value
+end
+
+-- The parts of an older leaderboard map that are not dummy/lk rows of a table
+-- entry: an entry or a category value that is not a table, and any other
+-- category. They are kept as they are, never converted.
+function Served.KeepItems(leaderboard, out)
+    for fingerprint, categories in pairs(type(leaderboard) == "table"
+        and leaderboard or {}) do
+        if type(categories) ~= "table" then
+            out[#out + 1] = {keep=true, fingerprint=fingerprint, row=categories}
+        else
+            for category, rows in pairs(categories) do
+                if type(rows) ~= "table"
+                    or (category ~= "dummy" and category ~= "lk") then
+                    out[#out + 1] = {keep=true, fingerprint=fingerprint,
+                        category=category, row=rows}
+                end
+            end
+        end
+    end
+    return out
+end
+
+-- The live top level as a shallow copy and its key count, for the guard.
+function Served.TopLevel(source)
+    local out, count = {}, 0
+    for key, value in pairs(source) do out[key] = value; count = count + 1 end
+    return out, count
+end
+
+function Served.SameTopLevel(source, top, count)
+    local seen = 0
+    for key, value in pairs(source) do
+        if top[key] ~= value then return false end
+        seen = seen + 1
+    end
+    return seen == count
+end
+
+-- A conversion's replacement payload: the live top level as it is (unknown
+-- keys included), the three maps the converter owns replaced by its result,
+-- categories it does not know carried over, what it refused kept at its own
+-- key, and the older map reduced to what it could not convert.
+function Served.Converted(staging, retained, top)
+    for key, value in pairs(retained.personalBest) do
+        if staging.personalBest[key] == nil then staging.personalBest[key] = value end
+    end
+    for key, value in pairs(retained.buildBest) do
+        if staging.buildBest[key] == nil then staging.buildBest[key] = value end
+    end
+    local character = staging.characterBest
+    for _, category in ipairs({"dummy", "lk"}) do
+        local bucket = character[category]
+        for key, value in pairs(retained.characterBest[category]) do
+            if bucket[key] == nil then bucket[key] = value end
+        end
+    end
+    if type(top.characterBest) == "table" then
+        for key, value in pairs(top.characterBest) do
+            if character[key] == nil then character[key] = value end
+        end
+    end
+    local out = ShallowCopy(top)
+    out.personalBest, out.buildBest = staging.personalBest, staging.buildBest
+    out.characterBest = character
+    out.leaderboard = next(retained.leaderboard) ~= nil
+        and retained.leaderboard or nil
+    return out
+end
+
+-- An open maintenance transaction of the catalog bound to this database, or
+-- nil while it cannot take one (bootstrap seal, another candidate or walk,
+-- rebind): the caller checks again later.
+function Served.Maintenance(database)
+    local catalog = Nexus and Nexus.BuildCatalog
+    if not (catalog and type(catalog.BoundDatabase) == "function"
+        and catalog.BoundDatabase() == database
+        and type(catalog.BeginCatalogMaintenance) == "function"
+        and type(catalog.CommitMaintenance) == "function") then
+        return nil
+    end
+    local handle = catalog.BeginCatalogMaintenance({database=database,
+        operation="legacy-data-migration"})
+    if type(handle) ~= "table" then return nil end
+    return catalog, handle
+end
+
+-- One publication of `payload` as the served DPS payload. Returns true
+-- (committed and served now), nil and the catalog's pending ticket, or false
+-- and the catalog's refusal.
+function Served.Commit(catalog, handle, database, live, top, count, payload)
+    local revision = CurrentDpsRevision()
+    local committed, why, ticket = catalog.CommitMaintenance(handle,
+        {dpsCapture=payload}, function()
+            return CurrentDpsRevision() == revision
+                and Served.Payload(database) == live
+                and Served.SameTopLevel(live, top, count)
+        end)
+    if committed == true then
+        if Served.Payload(database) == payload then return true end
+        return false, "PUBLICATION_NOT_SERVED"
+    end
+    if committed == nil and why == "ROOT_MUTATION_PENDING"
+        and type(ticket) == "table" then
+        return nil, ticket
+    end
+    if type(catalog.CancelMaintenance) == "function" then
+        catalog.CancelMaintenance(handle)
+    end
+    return false, why or "PUBLICATION_FAILED"
+end
+
+-- A pending publication is verified from the catalog's own settled ticket:
+-- the bundle it committed for this database holds exactly this payload.
+function Served.Committed(database, ticket, payload)
+    local bundle = ticket.bundle
+    return ticket.state == "committed" and ticket.committed == true
+        and ticket.database == database and type(bundle) == "table"
+        and rawget(bundle, "dpsCapture") == payload
+end
+
+function Served.Refused(job, why)
+    local count = (Served.refusals[job.database] or 0) + 1
+    Served.refusals[job.database] = count
+    runtime.publicationRefusals = runtime.publicationRefusals + 1
+    return false, "publication refused: " .. tostring(why),
+        count >= Served.REFUSAL_LIMIT
+end
+
+-- The publication step of a served conversion. Returns true once its payload
+-- is served, nil while it waits for the catalog, or false, why and whether to
+-- stop (else the conversion starts a new pass from the current payload).
+function Served.Publish(job)
+    local database = job.database
+    local ticket = job.ticket
+    if ticket then
+        if ticket.state == "pending" then job.waiting = true; return nil end
+        job.ticket, job.waiting = nil, nil
+        if Served.Committed(database, ticket, job.published) then return true end
+        return Served.Refused(job, ticket.reason or "PUBLICATION_FAILED")
+    end
     if SourceChanged(job) then return false, "source-changed" end
-    local staging = job.meta.staging
+    if not Served.Writable(database) then
+        return false, "read-only saved data", true
+    end
+    local staging = job.staging or job.meta.staging
+    if not ValidStaging(staging) or type(job.retained) ~= "table" then
+        return false, "invalid staging owner"
+    end
+    local catalog, handle = Served.Maintenance(database)
+    if not handle then job.waiting = true; return nil end
+    job.waiting = nil
+    -- The receipt keeps no reference to the maps that become the payload; an
+    -- unfinished receipt without staging starts a new pass on the next login.
+    job.staging, job.meta.staging = staging, nil
+    local live = Served.Payload(database)
+    local top, count = Served.TopLevel(live)
+    local payload = Served.Converted(staging, job.retained, top)
+    local committed, detail = Served.Commit(catalog, handle, database,
+        live, top, count, payload)
+    if committed == nil then
+        job.ticket, job.published, job.waiting = detail, payload, true
+        return nil
+    end
+    if committed then return true end
+    return Served.Refused(job, detail)
+end
+
+-- A conversion whose publication keeps being refused stops for this session
+-- without a write; its receipt stays unfinished and the next login starts over.
+function Served.Stop(job, why)
+    if active == job then active = nil end
+    runtime.pending = false
+    runtime.failures = runtime.failures + 1
+    runtime.lastReason = tostring(why or "publication refused")
+end
+
+local function Finish(job)
+    local staging
+    if job.served then
+        -- The receipt says complete only once the served payload holds this
+        -- conversion.
+        local published, why, stop = Served.Publish(job)
+        if published ~= true then return published, why, stop end
+        staging = job.staging
+        if job.source.accountCharacters ~= job.database.accountCharacters then
+            return false, "source-changed"
+        end
+    else
+        if SourceChanged(job) then return false, "source-changed" end
+        staging = job.meta.staging
+    end
     if not ValidStaging(staging) then return false, "invalid staging owner" end
     local database, dps, meta = job.database, job.dps, job.meta
     meta.state, meta.phase = "committing", "commit"
 
     -- These assignments are the transaction boundary.  The old tables remain
     -- untouched until every replacement has been constructed and validated.
+    -- A served conversion's DPS maps were published above; the legacy
+    -- location keeps its preserved input.
     database.accountCharacters = staging.accountCharacters
-    dps.personalBest = staging.personalBest
-    dps.buildBest = staging.buildBest
-    dps.characterBest = staging.characterBest
-    dps.leaderboard = nil
+    if not job.served then
+        dps.personalBest = staging.personalBest
+        dps.buildBest = staging.buildBest
+        dps.characterBest = staging.characterBest
+        dps.leaderboard = nil
+    end
 
     meta.version = STORAGE_VERSION
     meta.state = "complete"
@@ -744,8 +1069,8 @@ local function Finish(job)
     end
     local refresh = Nexus and Nexus.ViewRefresh
     if refresh and type(refresh.Request) == "function" then
-        -- ViewRefresh owns the repair-before-publish ordering and coalesces the
-        -- UI work. Avoid a duplicate direct repair request here.
+        -- ViewRefresh requests the repair on each refresh and coalesces the UI
+        -- work. Avoid a duplicate direct repair request here.
         pcall(refresh.Request)
     else
         local repair = Nexus and Nexus.LegacyQualificationRepair
@@ -775,8 +1100,13 @@ function Migration.Pump(limit)
     while active and work < limit do
         if active.phase == "commit" then
             local job = active
-            local ok, why = Finish(job)
-            if ok then active = nil else Restart(job, why) end
+            local ok, why, stop = Finish(job)
+            if ok then
+                active = nil
+            elseif ok == false then
+                if stop then Served.Stop(job, why) else Restart(job, why) end
+            end
+            -- nil: the served publication is not committed yet; the job waits.
             break
         end
         if not active.items then active.items = ItemsFor(active) end
@@ -806,8 +1136,11 @@ local function ScheduledPump()
     end
     if done then return end
     local scheduler = Nexus and Nexus.Scheduler
+    -- A publication waiting for the catalog is checked again after a short
+    -- delay instead of on every frame.
+    local delay = active and active.waiting and Served.WAIT or 0
     local scheduled, why = scheduler and scheduler.After
-        and scheduler.After(SCHEDULER_KEY, 0, ScheduledPump)
+        and scheduler.After(SCHEDULER_KEY, delay, ScheduledPump)
     if not scheduled then
         runtime.failures = runtime.failures + 1
         runtime.lastReason = "schedule-failed"
@@ -823,6 +1156,305 @@ local function Schedule()
         and scheduler.After(SCHEDULER_KEY, 0, ScheduledPump)
 end
 
+------------------------------------------------------------------------
+-- F-S1-1: recovery of a profile whose conversion reached only the legacy
+-- location (the defect of b704660). Its receipt says complete, the served
+-- payload still holds the older leaderboard map, and the legacy location
+-- holds the converter's own result (Finish retired the older map there). The
+-- converted maps are merged into the served payload once, bounded and
+-- validated: a converted row is merged only when it is exactly the converted
+-- form of a row of the served older map (or that row's promoted personal
+-- best), only where the served payload has no stronger row, and always as a
+-- copy. Nothing is converted again, no record is made for a row the legacy
+-- location does not hold, and a row stays in the older map unless the
+-- converted maps account for all the converter made of it (Served.Account).
+-- The receipt and the legacy location are not written. The trigger is the
+-- served content itself, so the recovery is idempotent: afterwards the older
+-- map holds only rows that stay, whose merged rows are served already, and a
+-- later start-up scans those and publishes nothing.
+------------------------------------------------------------------------
+
+function Served.RecoveryInput(database)
+    local live = Served.Payload(database)
+    local raw = rawget(database, "dpsCapture")
+    if not live or type(raw) ~= "table" then return nil end
+    local older = rawget(live, "leaderboard")
+    if type(older) ~= "table" or next(older) == nil then return nil end
+    if rawget(raw, "leaderboard") ~= nil
+        or type(rawget(raw, "characterBest")) ~= "table" then
+        return nil
+    end
+    return live, raw
+end
+
+function Served.NewRecovery(database, restarts)
+    local live, raw = Served.RecoveryInput(database)
+    if not live then return nil end
+    return {database=database, phase="scan", index=1, items=nil,
+        restarts=restarts or 0, revision=CurrentDpsRevision(), raw=raw,
+        -- NormalizeDpsRow records its quarantine and counts here, never in
+        -- the receipt.
+        scratch={},
+        source={leaderboard=rawget(live, "leaderboard"),
+            characterBest=rawget(live, "characterBest"),
+            personalBest=rawget(live, "personalBest")},
+        -- accounted: older-map rows that leave the map; gains: merged rows
+        -- that rank above the served row at their place.
+        merge={dummy={}, lk={}}, personal={}, residual={}, accounted=0,
+        gains=0}
+end
+
+function Served.RecoveryChanged(job)
+    if job.revision ~= CurrentDpsRevision() then return true end
+    local live = Served.Payload(job.database)
+    return not live or rawget(live, "leaderboard") ~= job.source.leaderboard
+        or rawget(live, "characterBest") ~= job.source.characterBest
+        or rawget(live, "personalBest") ~= job.source.personalBest
+end
+
+-- Neither row ranks above the other: the same record.
+function Served.SameRecord(left, right)
+    return not BetterRow(left, right) and not BetterRow(right, left)
+end
+
+-- A merged row that ranks above the served row at map[outer][inner] changes
+-- the served payload (Served.Recovered makes the same comparison).
+function Served.Gain(job, map, outer, inner, row)
+    local rows = type(map) == "table" and map[outer] or nil
+    local current = type(rows) == "table" and rows[inner] or nil
+    if BetterRow(row, type(current) == "table" and current or nil) then
+        job.gains = job.gains + 1
+    end
+end
+
+-- One item of the served older map, read the way the converter read it. The
+-- converter made a character best of every row and, of a row with verified
+-- ownership, the personal best of its loadout when its owner was the
+-- character logged in (ProcessLeaderboard). That character is not recorded,
+-- so a row leaves the older map only when the converted maps account for its
+-- character best (the same record, or a stronger converted row of that
+-- character) and, for a row with verified ownership, for its personal best
+-- (the same record), whichever row the converter kept as the character best.
+-- Every other row stays; what is merged for it is still merged.
+function Served.Account(job, item)
+    if item.keep then
+        Served.KeepLegacy(job.residual, item.fingerprint, item.category, nil,
+            item.row)
+        return
+    end
+    local row, key = NormalizeDpsRow(job.scratch, item.row, item.fingerprint,
+        item.key, "leaderboard")
+    local converted = rawget(job.raw, "characterBest")
+    converted = row and type(converted) == "table" and converted[item.category]
+    converted = type(converted) == "table" and converted[key] or nil
+    if type(converted) ~= "table" then converted = nil end
+    local accounted = false
+    if converted and Served.SameRecord(row, converted) then
+        accounted = true
+        local merge = job.merge[item.category]
+        if BetterRow(converted, merge[key]) then merge[key] = converted end
+        Served.Gain(job, job.source.characterBest, item.category, key,
+            converted)
+    elseif converted and BetterRow(converted, row) then
+        -- The converter kept a stronger row of this character instead.
+        accounted = true
+    end
+    if accounted then
+        local personal = rawget(job.raw, "personalBest")
+        local entry = type(personal) == "table" and row.fingerprint ~= nil
+            and personal[row.fingerprint] or nil
+        local best = type(entry) == "table" and entry[item.category] or nil
+        if type(best) == "table" and Served.SameRecord(row, best) then
+            job.personal[row.fingerprint] = job.personal[row.fingerprint] or {}
+            job.personal[row.fingerprint][item.category] = best
+            Served.Gain(job, job.source.personalBest, row.fingerprint,
+                item.category, best)
+        elseif row.fingerprint ~= nil and VerifiedOwner(row) then
+            -- Nothing accounts for the personal best the converter can have
+            -- promoted from this row: it stays rather than being consumed.
+            accounted = false
+        end
+    end
+    if accounted then
+        job.accounted = job.accounted + 1
+    else
+        Served.KeepLegacy(job.residual, item.fingerprint, item.category,
+            item.key, item.row)
+    end
+end
+
+-- The recovery's replacement payload: the live top level as it is, each
+-- merged row copied into a copy of its map where the served payload has no
+-- stronger row, and the older map reduced to the rows that stay.
+-- nil when a map the merge needs is not a table: that payload stays as it is.
+function Served.Recovered(job, top)
+    local function Merge(target, rows)
+        if target ~= nil and type(target) ~= "table" then return nil end
+        local copy = ShallowCopy(target)
+        for key, row in pairs(rows) do
+            local current = copy[key]
+            if current ~= nil and type(current) ~= "table" then return nil end
+            if BetterRow(row, current) then copy[key] = DeepCopy(row) end
+        end
+        return copy
+    end
+    local out = ShallowCopy(top)
+    if next(job.merge.dummy) ~= nil or next(job.merge.lk) ~= nil then
+        if top.characterBest ~= nil and type(top.characterBest) ~= "table" then
+            return nil
+        end
+        local character = ShallowCopy(top.characterBest)
+        for _, category in ipairs({"dummy", "lk"}) do
+            if next(job.merge[category]) ~= nil then
+                local bucket = Merge(character[category], job.merge[category])
+                if not bucket then return nil end
+                character[category] = bucket
+            end
+        end
+        out.characterBest = character
+    end
+    if next(job.personal) ~= nil then
+        if top.personalBest ~= nil and type(top.personalBest) ~= "table" then
+            return nil
+        end
+        local personal = ShallowCopy(top.personalBest)
+        for fingerprint, categories in pairs(job.personal) do
+            local entry = Merge(personal[fingerprint], categories)
+            if not entry then return nil end
+            personal[fingerprint] = entry
+        end
+        out.personalBest = personal
+    end
+    out.leaderboard = next(job.residual) ~= nil and job.residual or nil
+    return out
+end
+
+function Served.RecoveryDone(published)
+    recovery = nil
+    if not published then return true end
+    runtime.recovered = runtime.recovered + 1
+    runtime.lastReason = "served DPS payload recovered"
+    local revisions = Nexus and Nexus.Revisions
+    if revisions and type(revisions.Advance) == "function" then
+        pcall(revisions.Advance, revisions.DPS_CHANGED,
+            {scope="all",reason="legacy DPS recovered into the served payload"})
+    end
+    local retention = Nexus and Nexus.DataRetention
+    if retention and type(retention.Request) == "function" then
+        pcall(retention.Request, "legacy DPS recovered")
+    end
+    local refresh = Nexus and Nexus.ViewRefresh
+    if refresh and type(refresh.Request) == "function" then pcall(refresh.Request) end
+    return true
+end
+
+-- A changed source or a refused publication starts a new scan of the current
+-- payload, at most REFUSAL_LIMIT times per session; then nothing is written.
+function Served.RetryRecovery(job, why)
+    recovery = nil
+    if job.restarts + 1 >= Served.REFUSAL_LIMIT then
+        runtime.failures = runtime.failures + 1
+        runtime.lastReason = "served recovery stopped: " .. tostring(why)
+        return true
+    end
+    recovery = Served.NewRecovery(job.database, job.restarts + 1)
+    return recovery == nil
+end
+
+-- One bounded step: at most `limit` rows of the older map, or one publication
+-- attempt. Returns true when the recovery is over.
+function Served.PumpRecovery(limit)
+    local job = recovery
+    if not job then return true end
+    if not WriterArmed(job.database) then recovery = nil; return true end
+    if job.ticket then
+        local ticket = job.ticket
+        if ticket.state == "pending" then job.waiting = true; return false end
+        job.ticket, job.waiting = nil, nil
+        if Served.Committed(job.database, ticket, job.published) then
+            return Served.RecoveryDone(true)
+        end
+        return Served.RetryRecovery(job, ticket.reason)
+    end
+    if Served.RecoveryChanged(job) then
+        return Served.RetryRecovery(job, "source-changed")
+    end
+    if job.phase == "scan" then
+        job.items = job.items or SnapshotLeaderboard({served=true,
+            source={leaderboard=job.source.leaderboard}})
+        local work = 0
+        while work < limit do
+            local item = job.items[job.index]
+            if not item then job.phase = "publish"; break end
+            Served.Account(job, item)
+            job.index, work = job.index + 1, work + 1
+        end
+        if job.phase == "scan" then return false end
+        -- No row leaves the older map and no merged row ranks above the
+        -- served one: nothing changes, and nothing is written. Rows that stay
+        -- therefore start no publication at a later start-up.
+        if job.accounted == 0 and job.gains == 0 then
+            return Served.RecoveryDone(false)
+        end
+    end
+    if not Served.Writable(job.database) then return Served.RecoveryDone(false) end
+    local catalog, handle = Served.Maintenance(job.database)
+    if not handle then job.waiting = true; return false end
+    job.waiting = nil
+    local live = Served.Payload(job.database)
+    local top, count = Served.TopLevel(live)
+    local payload = Served.Recovered(job, top)
+    if not payload then
+        if type(catalog.CancelMaintenance) == "function" then
+            catalog.CancelMaintenance(handle)
+        end
+        runtime.lastReason = "served recovery skipped: a DPS map is not a table"
+        return Served.RecoveryDone(false)
+    end
+    local committed, detail = Served.Commit(catalog, handle, job.database,
+        live, top, count, payload)
+    if committed == nil then
+        job.ticket, job.published, job.waiting = detail, payload, true
+        return false
+    end
+    if committed then return Served.RecoveryDone(true) end
+    return Served.RetryRecovery(job, detail)
+end
+
+function Served.ScheduledRecovery()
+    local ok, done = pcall(Served.PumpRecovery, BATCH_SIZE)
+    if not ok then
+        runtime.failures = runtime.failures + 1
+        runtime.lastReason = tostring(done or "served recovery failed")
+        recovery = nil
+        error(done)
+    end
+    if done or not recovery then return end
+    local scheduler = Nexus and Nexus.Scheduler
+    local scheduled = scheduler and scheduler.After
+        and scheduler.After(Served.RECOVERY_KEY,
+            recovery.waiting and Served.WAIT or 0, Served.ScheduledRecovery)
+    if not scheduled then recovery = nil end
+end
+
+-- Called by Init for a complete receipt. Read-only saved data, a settings
+-- format this converter leaves untouched, and a payload that does not show
+-- the defect start nothing.
+function Served.StartRecovery(database)
+    if recovery and recovery.database == database then return "pending" end
+    recovery = nil
+    if not Served.Writable(database) then return nil end
+    local job = Served.NewRecovery(database)
+    if not job then return nil end
+    local scheduler = Nexus and Nexus.Scheduler
+    local scheduled = scheduler and scheduler.After
+        and scheduler.After(Served.RECOVERY_KEY, 0, Served.ScheduledRecovery)
+    if not scheduled then return "unscheduled" end
+    recovery = job
+    runtime.recoveries = runtime.recoveries + 1
+    return "scheduled"
+end
+
 function Migration.Init(database)
     runtime.requested = runtime.requested + 1
     database = type(database) == "table" and database
@@ -836,9 +1468,16 @@ function Migration.Init(database)
     end
     if existing and existing.state == "complete"
         and (tonumber(existing.version) or 0) >= STORAGE_VERSION then
-        return {complete=true,needed=true,reason="complete"}
+        -- A conversion that reached only the legacy location is recovered
+        -- into the served payload; the receipt itself is not written.
+        return {complete=true,needed=true,reason="complete",
+            servedRecovery=Served.StartRecovery(database)}
     end
 
+    if MalformedSettingsMarker(database) then
+        return {complete=true,needed=false,skipped=true,readOnly=true,
+            reason="malformed settings format marker left untouched"}
+    end
     local settingsVersion = tonumber(database.settingsVersion) or 0
     if settingsVersion > LAST_KNOWN_LEGACY_SETTINGS_VERSION then
         -- Settings and DPS/catalog storage have separate schema owners.  This
@@ -881,10 +1520,16 @@ function Migration.AccountWritesAllowed(database)
     database = type(database) == "table" and database
         or type(NexusDB) == "table" and NexusDB or nil
     if not database then return false, "database unavailable" end
+    if MalformedSettingsMarker(database) then
+        return false, "malformed settings format marker is read-only"
+    end
     local store = Nexus and Nexus.Store
     local currentSettingsVersion = store
         and type(store.SettingsVersion) == "function"
         and tonumber(store.SettingsVersion()) or 2
+    -- Saved formats 3-5 read by Store (core/Store.lua SavedFormat) also stop
+    -- here, and Store refuses ledger writes for them on its own as well; this
+    -- converter is not started for them (Store's knownSavedFormat gate).
     if (tonumber(database.settingsVersion) or 0) > currentSettingsVersion then
         return false, "future settings schema is read-only"
     end
@@ -926,6 +1571,9 @@ function Migration.Status(database)
         retired=not WriterArmed(database),
         stats=type(meta) == "table" and DeepCopy(meta.stats) or {},
         lastResult=type(meta) == "table" and DeepCopy(meta.lastResult) or nil,
+        -- The phase of this session's served-payload recovery, if one runs.
+        servedRecovery=recovery ~= nil and recovery.database == database
+            and recovery.phase or nil,
         runtime=DeepCopy(runtime),
     }
 end
@@ -963,6 +1611,7 @@ end
 function Migration.RetireLegacyWriterV1()
     writerAuthority = nil
     active = nil
+    recovery = nil
     runtime.pending = false
     return true
 end

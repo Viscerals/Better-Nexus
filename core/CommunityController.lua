@@ -28,6 +28,10 @@ local function StableIdHash(text)
 end
 
 local COLLISION_ATTEMPT_LIMIT = 16
+-- Record linking reads at most this many same-fingerprint candidates in one
+-- call (one public record copy each); a larger exact-index bucket is refused
+-- as a whole with CURSOR_REQUIRED, never read as "no candidate".
+local EXACT_CANDIDATE_LIMIT = 256
 
 local function CollisionCandidateId(base, token, attempt)
     if attempt == 0 then return base end
@@ -45,6 +49,9 @@ function Controller.New(options)
     local savedImportJob
     local lastShareOutcome
     local pendingShare
+    -- Approved title, description and source of a Share whose local save
+    -- failed. Session-only; the Share form offers it back unchanged.
+    local failedShareDraft
     -- Explicit Stop Sharing approvals waiting for catalog admission. Bounded,
     -- session-only, one entry per exact ID.
     local pendingRemovals, MAX_PENDING_REMOVALS = {}, 8
@@ -99,14 +106,17 @@ function Controller.New(options)
         return Nexus and Nexus.BuildCatalog
     end
 
+    -- `origin` is carried only by callers that actually know whether the
+    -- record came from this player or from a received one. Everyone else
+    -- leaves it unknown rather than guessing.
     local function RetainCatalogMutation(catalog, operation, onComplete,
-                                         ok, why, ticket)
+                                         ok, why, ticket, origin)
         if ok ~= nil or why ~= "ROOT_MUTATION_PENDING"
             or type(ticket) ~= "table" then
             return ok, why
         end
         pendingCatalogMutations[ticket] = {
-            operation=operation,onComplete=onComplete,
+            operation=operation,onComplete=onComplete,origin=origin,
         }
         if type(catalog.BindMutationCompletion) ~= "function" then
             pendingCatalogMutations[ticket] = nil
@@ -118,9 +128,62 @@ function Controller.New(options)
                 if outcome.committed == true then
                     refreshView()
                 elseif retained and retained.operation ~= "publish-imported" then
-                    notify("Catalog " .. tostring(retained
+                    local reason = tostring(outcome.reason or "unknown")
+                    local detail = outcome.detail
+                    -- A semantic refusal already counted the copies it
+                    -- refused: say them, and say which shape was counted.
+                    if reason == "SEMANTIC_ENVELOPE" and type(detail) == "table" then
+                        local evidence = Nexus and Nexus.LoadoutEvidence
+                        local limits = evidence
+                            and type(evidence.SemanticLimits) == "function"
+                            and evidence.SemanticLimits() or nil
+                        reason = string.format(
+                            "%s (%s record: %s ordinary, %s locked, %s total Echo copies)",
+                            reason, tostring(detail.representation or "unknown"),
+                            tostring(detail.ordinary), tostring(detail.locked),
+                            tostring(detail.total))
+                        if limits then
+                            reason = reason .. string.format(
+                                "; at most %d ordinary copies, and %d copies in one locked row, are stored",
+                                tonumber(limits.ordinary) or 79,
+                                tonumber(limits.lockedRowStacks) or 120)
+                        end
+                        reason = reason .. ". Nothing was saved and the source is unchanged"
+                    end
+                    local label = tostring(retained
                         and retained.operation or "mutation")
-                        .. " failed: " .. tostring(outcome.reason or "unknown"))
+                    notify("Catalog " .. label .. " failed: " .. reason)
+                    -- A validation refusal is not a Lua exception, so the
+                    -- Errors page never sees it and a support report built
+                    -- from errors alone says "no errors recorded" while the
+                    -- player is reading this line. Retain the facts that were
+                    -- true at THIS boundary, session-only and bounded.
+                    local support = Nexus and Nexus.SupportIncidents
+                    if support and type(support.Record) == "function" then
+                        pcall(support.Record, "catalog-refusal", {
+                            reason = tostring(outcome.reason or "unknown"),
+                            producer = label,
+                            origin = retained and retained.origin or "unknown",
+                            operation = label,
+                            ticket = outcome.id or outcome.ticketId or nil,
+                            build = Nexus.Release and Nexus.Release.buildLabel or nil,
+                            representation = type(detail) == "table"
+                                and detail.representation or "unknown",
+                            counts = type(detail) == "table" and {
+                                ordinary=detail.ordinary, locked=detail.locked,
+                                total=detail.total} or nil,
+                            limits = (Nexus.LoadoutEvidence
+                                and type(Nexus.LoadoutEvidence.SemanticLimits) == "function")
+                                and Nexus.LoadoutEvidence.SemanticLimits() or nil,
+                            readiness = type(detail) == "table" and {
+                                generation=detail.generation,
+                                semanticGeneration=detail.semanticGeneration,
+                                slot=detail.slot} or nil,
+                            affected = type(detail) == "table" and detail.affected or nil,
+                            committed = false,
+                            scope = "this catalog write did not commit; earlier personal or public writes are not covered by this outcome",
+                        })
+                    end
                 end
                 if retained and type(retained.onComplete) == "function" then
                     local completed, completeWhy = pcall(
@@ -211,13 +274,16 @@ function Controller.New(options)
         return firstFree, nil
     end
 
-    local function SaveBuild(build, onComplete)
+    -- Every caller names its own operation, so a refusal that reaches the
+    -- player identifies the action that produced it instead of a generic put.
+    local function SaveBuild(build, onComplete, operation, origin)
         local catalog = Catalog()
         if not (catalog and catalog.Put) then
             return false, "build catalog unavailable"
         end
-        return RetainCatalogMutation(catalog, "put", onComplete,
-            catalog.Put(build))
+        local ok, why, ticket = catalog.Put(build)
+        return RetainCatalogMutation(catalog, operation or "put", onComplete,
+            ok, why, ticket, origin)
     end
 
     local function CatalogStats()
@@ -281,14 +347,19 @@ function Controller.New(options)
 
     -- Complete collections are read through the generation-bound record
     -- cursor; every page is a defensive copy and no root-owned table escapes.
+    -- Returns the map and whether the bounded walk reached the cursor's end:
+    -- the step budget can end before a large catalog does, and a prefix must
+    -- not pass as the complete collection. The browser's empty-state count is
+    -- the only consumer; record linking uses the exact-fingerprint index.
     local function Store()
         local catalog = Catalog()
         local out = {}
         if not (catalog and type(catalog.BeginRecordCursor) == "function") then
-            return out
+            return out, false
         end
         local token = catalog.BeginRecordCursor()
-        if not token then return out end
+        if not token then return out, false end
+        local complete = false
         for _ = 1, 4096 do
             local page, err = catalog.RecordCursorNext(token)
             -- MASTER-RC-018: a cursor error is NOT a clean done. Breaking on
@@ -296,13 +367,14 @@ function Controller.New(options)
             -- complete, so a mid-walk fault silently produced a short result.
             -- An error now yields the fixed empty result; only page.done ends a
             -- complete walk.
-            if err then return {} end
-            if type(page) ~= "table" or page.done then break end
+            if err then return {}, false end
+            if type(page) ~= "table" then break end
+            if page.done then complete = true; break end
             if page.id ~= nil and page.record ~= nil then
                 out[page.id] = page.record
             end
         end
-        return out
+        return out, complete
     end
 
     local function IsAdmin()
@@ -335,9 +407,14 @@ function Controller.New(options)
             if type(filters) == "table" then return filters end
         end
         if type(NexusDB) ~= "table" then return fallbackFilters end
-        NexusDB.buildFilters = type(NexusDB.buildFilters) == "table"
-            and NexusDB.buildFilters or {}
-        return NexusDB.buildFilters
+        -- A read-only saved root keeps its filters: this session's filters
+        -- live in the Store owner's session-only table, seeded from them.
+        local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+        local root = type(writable) == "function"
+            and writable(NexusDB, {"buildFilters"}) or NexusDB
+        root.buildFilters = type(root.buildFilters) == "table"
+            and root.buildFilters or {}
+        return root.buildFilters
     end
 
 
@@ -806,6 +883,7 @@ function Controller.New(options)
                         name=live.name or (kind .. " " .. tostring(slot)),
                         count=#live.echoes,echoes=live.echoes,
                         active=slots.activeSlot == slot,sourceKind=kind,
+                        roleSourceValid=live.roleSourceValid,
                     }
                     seen[tostring(slot)] = true
                 end
@@ -818,11 +896,18 @@ function Controller.New(options)
                 if not seen[tostring(candidate.slot)]
                     and type(candidate.echoes) == "table"
                     and #candidate.echoes > 0 then
-                    out[#out + 1] = {
+                    local entry = {
                         slot=candidate.slot,name=candidate.name,
                         count=candidate.count,echoes=candidate.echoes,
                         active=candidate.active,sourceKind="Wishlist",
                     }
+                    -- A plan without a server slot is its own source. Its
+                    -- design is copied as it is: false (cannot be read) must
+                    -- stay false so that the Share refuses it.
+                    if candidate.slot == nil and candidate.designTargets ~= nil then
+                        entry.designTargets = candidate.designTargets
+                    end
+                    out[#out + 1] = entry
                 end
             end
         end
@@ -1241,21 +1326,113 @@ function Controller.New(options)
         }
     end
 
+    -- The owner-edit marker of a Saved Build mirror (userTitle), or nil.
+    local function SavedMirrorMarker(build)
+        local marker = build and build.userTitle
+        return type(marker) == "string" and marker ~= "" and marker or nil
+    end
+
+    -- generatedDescriptionWitness records that this build generated (or
+    -- kept as generated) exactly this description while the mirror carried
+    -- exactly this marker: the marker's length, the marker, the description.
+    -- The catalog field holds 2048 bytes. A witness written here is at most
+    -- 1181: length 2 + ":" 1 + an EditBuild title 80 + a generated
+    -- description 1098 (42 fixed + a catalog Wishlist name 1024 + two
+    -- catalog integers of at most 16 digits). One over 2048 is not recorded.
+    local function SavedDescriptionWitness(marker, description)
+        if type(description) ~= "string" then return nil end
+        marker = marker or ""
+        local witness = tostring(#marker) .. ":" .. marker .. description
+        return #witness <= 2048 and witness or nil
+    end
+
+    -- Whether the mirror's description is one this build recorded as
+    -- generated under the marker it carries now. Another build keeps the
+    -- witness as unknown data but does not update it: a description or
+    -- marker it changed no longer matches.
+    local function SavedDescriptionGenerated(build)
+        local witness = build and build.generatedDescriptionWitness
+        return type(witness) == "string" and witness == SavedDescriptionWitness(
+            SavedMirrorMarker(build), build.description)
+    end
+
+    -- An owner edit that changes the text (EditBuild) marks a Saved Build
+    -- mirror with userTitle; a link-only save marks nothing. userDescription
+    -- is not a catalog V1 field, so no read serves it; the served description
+    -- of a marked mirror is the owner's text and is kept, unless its witness
+    -- holds (the owner changed only the title). Any other mirror describes
+    -- the assignment this import read for its slot, with a new witness. A
+    -- mirror an earlier build marked (on a link-only save too) has no witness
+    -- that holds: it cannot be told from an owner edit and keeps its text.
+    local function SavedMirrorDescription(old, current)
+        local marker = SavedMirrorMarker(old)
+        if marker and type(old.description) == "string"
+            and not SavedDescriptionGenerated(old) then
+            return old.description, nil
+        end
+        local description = "No Wishlist assigned yet."
+        if current.destinationName then
+            description = string.format(
+                "Assigned Wishlist: %s - target progress (%d/%d).",
+                tostring(current.destinationName), current.progress,
+                current.destinationTotal)
+        end
+        return description, SavedDescriptionWitness(marker, description)
+    end
+
     local function FinalizeSavedSlot(job, current, related)
         savedImportStats.finalizations = savedImportStats.finalizations + 1
         local slot, live, old = current.slot, current.live, current.old
         local echoes, total = current.echoes, current.total
+        -- The server states each row's role (locked 0|1). Ordinary rows form
+        -- the mirror's identity; an explicitly locked row stays locked
+        -- (lockedEchoes) and is never an ordinary copy. Nothing more is
+        -- inferred: no locked design and no role for an ordinary row.
+        local ordinary, lockedRows = {}, {}
+        for _, e in ipairs(echoes) do
+            if e.locked then
+                lockedRows[#lockedRows + 1] = e
+            else
+                ordinary[#ordinary + 1] = e
+            end
+        end
+        if #lockedRows > 0 then
+            -- A role is taken only from a row the adapter read in full, and a
+            -- locked row only as the locked-evidence owner admits it (whole
+            -- finite ID and copies within the row ceiling, a whole quality).
+            -- Anything else refuses the slot before it is marked seen, so its
+            -- mirror retires as for any malformed source.
+            local evidence = Nexus and Nexus.CandidateEvidence
+            if live.roleSourceValid == false or not (evidence
+                and type(evidence.NormalizeLockedEchoes) == "function") then
+                return
+            end
+            local admitted = evidence.NormalizeLockedEchoes(lockedRows)
+            if not admitted then return end
+            lockedRows = {}
+            for index, row in ipairs(admitted) do
+                lockedRows[index] = {
+                    spellId=row.spellId,quality=row.quality,stacks=row.stacks,
+                }
+            end
+        end
+        -- Only locked rows: no ordinary identity can be formed. The prior
+        -- mirror is kept as it is (neither retired nor rewritten).
+        if #ordinary == 0 then
+            if old then job.seen[current.id] = true end
+            return
+        end
         -- A present server slot is not automatically a valid Saved Build.
         -- Establish complete ordinary evidence before protecting the prior
-        -- mirror from cleanup; locked/malformed replacements must retire it.
-        if not RefreshBuildIdentity({echoes=echoes}) then return end
+        -- mirror from cleanup; malformed replacements must retire it.
+        if not RefreshBuildIdentity({echoes=ordinary}) then return end
         job.seen[current.id] = true
                 -- These slots belong to the character currently being viewed. The
                 -- current/server class is therefore authoritative for an unpublished
                 -- Saved Build. Only a verified published record may override it.
                 -- Echo-only inference is a last-resort fallback because partial locked
                 -- snapshots can contain mostly shared Echoes and resemble another class.
-        local currentClass = (select(2, UnitClass and UnitClass("player"))) or nil
+        local currentClass = CurrentClass()
         local class = (related and related.class) or live.class
             or currentClass or InferBuildClass(echoes) or "UNKNOWN"
                 -- Do not preserve a stale record link after validation fails. A bad
@@ -1281,10 +1458,12 @@ function Controller.New(options)
             tostring(job.slots.activeSlot == slot),
         }
         for _, e in ipairs(echoes) do
+            -- A locked row is marked, so a role change is a change; an
+            -- ordinary row keeps the earlier form.
             signatureParts[#signatureParts + 1] = table.concat({
                 tostring(e.spellId or 0),tostring(e.quality or ""),
                 tostring(e.stacks or 1),
-            }, ":")
+            }, ":") .. (e.locked and ":L" or "")
         end
         local signature = table.concat(signatureParts, "|")
         local desiredPublishedId = published and published.id or nil
@@ -1293,21 +1472,26 @@ function Controller.New(options)
             or old.publishedBuildId ~= desiredPublishedId then
             local stamp = NextStamp(old and old.lastModified or 0)
             local localOwner = CurrentVerifiedOwnerKey()
+            local description, witness = SavedMirrorDescription(old, current)
             local record = {
                         id=current.id, title=current.title,
                         serverTitle=current.serverTitle,
                         userTitle=old and old.userTitle or nil,
-                        description=(old and old.userDescription) or (destinationName
-                            and string.format("Assigned Wishlist: %s - target progress (%d/%d).", destinationName, progress, destinationTotal)
-                            or "No Wishlist assigned yet."),
+                        description=description,
+                        -- Provenance only: not in the signature above.
+                        generatedDescriptionWitness=witness,
                         userDescription=old and old.userDescription or nil,
+                        -- The link the owner saved (Save Link) is not server
+                        -- data: a rewrite keeps it as the catalog holds it.
+                        link=old and old.link or nil,
                         publishedBuildId=desiredPublishedId,
                         lastPublishedAt=published and (
                             (old and old.lastPublishedAt)
                             or published.lastModified or published.postedAt) or nil,
                         author=job.me, ownerKey=localOwner,
                         ownerVerified=localOwner and true or false,
-                        class=class, echoes=echoes,
+                        class=class, echoes=ordinary,
+                        lockedEchoes=#lockedRows > 0 and lockedRows or nil,
                         postedAt=(old and old.postedAt) or stamp, lastModified=stamp,
                         isMine=localOwner ~= nil, importedSavedBuild=true, serverSlot=slot,
                         recordBuildId=recordBuildId,
@@ -1545,9 +1729,12 @@ function Controller.New(options)
             if ok and type(value) == "table" then settings = value end
         end
         if not settings then
-            settings = type(NexusDB) == "table"
-                and type(NexusDB.buildFilters) == "table"
-                and NexusDB.buildFilters or fallbackFilters
+            local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+            local root = type(NexusDB) == "table" and (type(writable) == "function"
+                and writable(NexusDB, {"buildFilters"}) or NexusDB) or nil
+            settings = type(root) == "table"
+                and type(root.buildFilters) == "table"
+                and root.buildFilters or fallbackFilters
         end
         local requestedPage = tonumber(settings.page)
         requestedPage = requestedPage and requestedPage == requestedPage
@@ -1640,6 +1827,412 @@ function Controller.New(options)
         if type(wl.echoes) == "table" and #wl.echoes > 0 then return wl.echoes end
         if type(wl.entries) == "table" and #wl.entries > 0 then return wl.entries end
         return nil
+    end
+
+    -- One role reading for every Share source. A copy is permanent only when
+    -- the source states it: an inline locked flag or the separate lockedEchoes
+    -- list. Nothing is read from order, name, totals or current ownership.
+    -- Returns ordinary, locked, counts; or nil, message, diagnostic reason.
+    local function ShareRoles(wl, rows)
+        local evidence = Nexus and Nexus.LoadoutEvidence
+        if not (evidence and type(evidence.SemanticEnvelope) == "function"
+            and type(evidence.PlanLimits) == "function") then
+            return nil, "Echo role validation is unavailable", "role validator unavailable"
+        end
+        local label = tostring(wl and wl.name ~= "" and wl.name or "This source")
+        if wl.roleSourceValid == false then
+            -- The adapter omitted a server row that it could not read. The
+            -- remaining rows are not the complete source.
+            return nil, label .. " contains a server Echo row that cannot be read, so its copies are not complete. "
+                .. "Nothing was shared.", "source mirror incomplete (roleSourceValid=false)"
+        end
+        local function Whole(value, minimum)
+            return type(value) == "number" and value >= minimum
+                and value == math.floor(value) and value < math.huge
+        end
+        -- Every row of a dense list, or nothing: a hole must not hide rows.
+        local function Dense(list)
+            local count, length = 0, #list
+            for index in pairs(list) do
+                if type(index) == "number" then
+                    if index < 1 or index > length or index ~= math.floor(index) then return false end
+                    count = count + 1
+                end
+            end
+            return count == length
+        end
+        local function Split(list)
+            local ordinary, locked, unstated = {}, {}, 0
+            if type(list) ~= "table" or not Dense(list) then return nil end
+            for _, e in ipairs(list) do
+                if type(e) ~= "table" then return nil end
+                local stacks = e.stacks
+                if stacks == nil then stacks = e.count end
+                if stacks == nil then stacks = 1 end
+                local copy = {spellId=e.spellId or e.id, quality=e.quality, stacks=stacks}
+                if not Whole(copy.spellId, 1) or not Whole(copy.stacks, 1)
+                    or (copy.quality ~= nil and not Whole(copy.quality, 0)) then
+                    return nil
+                end
+                if e.locked == true or e.locked == 1 then
+                    copy.locked = true
+                    locked[#locked + 1] = copy
+                elseif e.locked == nil or e.locked == false then
+                    if e.locked == nil then unstated = unstated + 1 end
+                    ordinary[#ordinary + 1] = copy
+                else
+                    return nil
+                end
+            end
+            return ordinary, locked, unstated
+        end
+        local function Population(list)
+            local totals, parts = {}, {}
+            for _, e in ipairs(list) do
+                local k = tostring(e.spellId) .. ":" .. tostring(e.quality or 0)
+                totals[k] = (totals[k] or 0) + (tonumber(e.stacks) or 0)
+            end
+            for k, copies in pairs(totals) do
+                parts[#parts + 1] = k .. ":" .. tostring(copies)
+            end
+            table.sort(parts)
+            return table.concat(parts, ",")
+        end
+        local ordinary, locked, unstated = Split(rows)
+        if not ordinary then
+            return nil, label .. " contains an Echo row that cannot be read. Nothing was shared.",
+                "malformed source row"
+        end
+        if wl.lockedEchoes ~= nil and type(wl.lockedEchoes) ~= "table" then
+            return nil, label .. " states its locked Echoes in a form that cannot be read. Nothing was shared.",
+                "malformed permanent list"
+        end
+        if type(wl.lockedEchoes) == "table" and next(wl.lockedEchoes) ~= nil then
+            -- Same row checks as the inline list; every row here is permanent.
+            local forced = {}
+            for index, e in pairs(wl.lockedEchoes) do
+                if type(e) == "table" then
+                    local stacks = e.stacks
+                    if stacks == nil then stacks = e.count end
+                    if stacks == nil then stacks = 1 end
+                    forced[index] = {spellId=e.spellId or e.id, quality=e.quality,
+                        stacks=stacks, locked=true}
+                else
+                    forced[index] = e
+                end
+            end
+            local _, separate = Split(forced)
+            if not separate then
+                return nil, label .. " contains a locked Echo row that cannot be read. Nothing was shared.",
+                    "malformed permanent row"
+            end
+            -- The same permanent population stated twice is counted once. Two
+            -- different statements give no exact answer; nothing is guessed.
+            if #locked == 0 then
+                locked = separate
+            elseif Population(locked) ~= Population(separate) then
+                return nil, label .. " states its locked Echoes in two lists that do not agree. "
+                    .. "Nothing was shared. Save the source again, then share it.",
+                    "permanent roles stated twice with different contents"
+            end
+        end
+        -- A Wishlist made in the Wishlist Editor keeps its permanent targets
+        -- beside its server copy: the server Wishlist holds only the ordinary
+        -- rows, and the plan's permanent design is saved with its local
+        -- assignment. The adapter binds that design to exactly one server
+        -- Wishlist slot (same rows and same name). For that exact slot the
+        -- design supplies the permanent rows, at any ordinary count. Evidence
+        -- that exists but does not match the source refuses; nothing is
+        -- guessed, and a source without a saved design is unchanged.
+        local function IdCopies(list)
+            local totals, parts = {}, {}
+            for _, e in ipairs(list) do
+                local k = tostring(e.spellId)
+                totals[k] = (totals[k] or 0) + (tonumber(e.stacks) or 0)
+            end
+            for k, copies in pairs(totals) do parts[#parts + 1] = k .. ":" .. tostring(copies) end
+            table.sort(parts)
+            return table.concat(parts, ",")
+        end
+        -- A quality that both lists state for one Echo ID must agree.
+        local function QualitiesAgree(a, b)
+            local stated = {}
+            for _, e in ipairs(a) do
+                if e.quality ~= nil then
+                    if stated[e.spellId] ~= nil and stated[e.spellId] ~= e.quality then return false end
+                    stated[e.spellId] = e.quality
+                end
+            end
+            for _, e in ipairs(b) do
+                if e.quality ~= nil and stated[e.spellId] ~= nil
+                    and stated[e.spellId] ~= e.quality then return false end
+            end
+            return true
+        end
+        -- The permanent rows of one saved design. nil: the design has no
+        -- permanent target (the editor saves an empty design for every plan
+        -- without one). false: the design cannot be read.
+        local model, catalog, catalogRead
+        local function DesignRows(design)
+            if type(design) ~= "table" then return false end
+            if next(design) == nil then return nil end
+            if not catalogRead then
+                catalogRead = true
+                model = Nexus and Nexus.WishlistModel
+                    and type(Nexus.WishlistModel.New) == "function" and Nexus.WishlistModel.New() or nil
+                catalog = Adapter.Catalog and Adapter.Catalog() or nil
+            end
+            local entries = model and type(model.TargetMapEntries) == "function"
+                and model.TargetMapEntries(design, catalog) or nil
+            if not entries then return false end
+            local rows = {}
+            for _, target in ipairs(entries) do
+                local source = type(target.value) == "table" and type(target.value.rows) == "table"
+                    and target.value.rows or nil
+                if source then
+                    for _, row in ipairs(source) do
+                        rows[#rows + 1] = {spellId=row.spellId, quality=row.quality,
+                            stacks=row.stacks, locked=true}
+                    end
+                else
+                    rows[#rows + 1] = {spellId=target.spellId,
+                        quality=target.row and target.row.quality, stacks=target.copies, locked=true}
+                end
+            end
+            if #rows == 0 then return nil end
+            local _, split = Split(rows)
+            if not split or #split ~= #rows then return false end
+            return split
+        end
+        local UNREADABLE = "has a saved locked-target plan that cannot be read. "
+            .. "Open the Wishlist in the Wishlist Editor and save its locked targets again."
+        local function PlanDesign()
+            if wl.sourceKind == "Saved Build" then return nil end
+            local slot = tonumber(wl.slot)
+            if not slot then
+                -- A saved plan listed without a server Wishlist (its server
+                -- copy is gone or renamed): the plan is the source itself, so
+                -- its own design supplies the permanent rows.
+                if wl.designTargets == nil then return nil end
+                local rows = DesignRows(wl.designTargets)
+                if rows == false then return false, UNREADABLE, "saved plan design unreadable" end
+                return rows
+            end
+            if not Adapter or type(Adapter.GetWishlistCandidates) ~= "function" then return nil end
+            local okRead, known = pcall(Adapter.GetWishlistCandidates)
+            if not okRead or type(known) ~= "table" then
+                return false, UNREADABLE, "saved plan design unreadable"
+            end
+            -- boundKey: the permanent population of the first design bound to
+            -- this slot ("" for an empty design). Every bound design must agree.
+            local design, unbound, boundSeen, boundKey = nil, false, false, nil
+            for _, c in ipairs(known) do
+                if type(c) == "table" and c.designTargets ~= nil then
+                    local bound = tonumber(c.slot) == slot and c.mirrorUnavailable ~= true
+                    local related = bound
+                    if bound then boundSeen = true end
+                    if not bound and (c.slot == nil or c.mirrorUnavailable == true) then
+                        -- A design that no longer binds to one server Wishlist
+                        -- (renamed, changed or copied) but has this name or
+                        -- these rows may be this source's design.
+                        related = tostring(c.name or "") == tostring(wl.name or "")
+                            or (type(c.echoes) == "table" and IdCopies(c.echoes) == IdCopies(ordinary))
+                    end
+                    if related then
+                        local rows = DesignRows(c.designTargets)
+                        if rows == false then
+                            return false, UNREADABLE, "saved plan design unreadable"
+                        end
+                        if bound then
+                            local key = rows and Population(rows) or ""
+                            if boundKey ~= nil and boundKey ~= key then
+                                return false, "has two saved locked-target plans that do not agree. "
+                                    .. "Open the Wishlist in the Wishlist Editor for each loadout that uses it and save the same locked targets.",
+                                    "saved plan designs disagree"
+                            end
+                            boundKey = key
+                        end
+                        if rows and not bound then
+                            unbound = true
+                        elseif rows then
+                            if type(c.echoes) ~= "table" or IdCopies(c.echoes) ~= IdCopies(ordinary)
+                                or not QualitiesAgree(c.echoes, ordinary) then
+                                return false, "changed after its saved locked-target plan was made, so the plan does not match it. "
+                                    .. "Open the Wishlist in the Wishlist Editor and save it again.",
+                                    "saved plan design does not match the source rows"
+                            end
+                            design = rows
+                        end
+                    end
+                end
+            end
+            -- A design bound to this exact slot (even an empty one) decides.
+            if unbound and not boundSeen then
+                return false, "matches a saved locked-target plan, but Nexus cannot tell which server Wishlist that plan belongs to "
+                    .. "(it was renamed, changed or copied), so its locked Echoes are not known. "
+                    .. "Open the Wishlist in the Wishlist Editor and save it again.",
+                    "saved plan design not bound to one server Wishlist"
+            end
+            return design
+        end
+        local design, designMessage, designReason = PlanDesign()
+        if design == false then
+            return nil, label .. " " .. designMessage .. " Nothing was shared.", designReason
+        end
+        if design then
+            if #locked == 0 then
+                locked = design
+            elseif IdCopies(locked) ~= IdCopies(design) or not QualitiesAgree(locked, design) then
+                return nil, label .. " states locked Echoes that differ from its saved locked-target plan. "
+                    .. "Nothing was shared. Save the source again, then share it.",
+                    "permanent roles differ from the saved plan"
+            end
+        end
+        -- A Share publishes a plan: its locked rows become locked targets of
+        -- whoever imports it, and the authored target design holds six copies.
+        -- That plan envelope, not the evidence ceilings, bounds a Share.
+        local limits = evidence.PlanLimits()
+        local function Counts()
+            local o = evidence.SemanticEnvelope(ordinary)
+            local l = evidence.SemanticEnvelope(locked, {forceLocked=true})
+            if o.reason == "malformed" or l.reason == "malformed" then return nil end
+            return {ordinary=o.ordinary, locked=l.locked, total=o.ordinary + l.locked}
+        end
+        local counts = Counts()
+        if not counts then
+            return nil, label .. " contains an Echo copy count that cannot be read. Nothing was shared.",
+                "malformed copy count"
+        end
+        if #locked == 0 and counts.total > limits.ordinary and counts.total <= limits.total then
+            -- No permanent role is stated and the copies cannot all be ordinary.
+            -- This includes the server mirror that marks every row false: the
+            -- adapter does not take that as role evidence either. Only the
+            -- adapter's own read-only evidence (a content-matched role choice or
+            -- the exact verified active loadout) may supply the roles.
+            local candidate = {slot=wl.slot, name=wl.name, count=#ordinary,
+                echoes=ordinary, active=wl.active}
+            local resolved, state, _, why
+            -- The source menu lists the raw slot mirror. The adapter's candidate
+            -- for that same slot already carries the resolved roles, if any.
+            local known = wl.slot ~= nil and Adapter
+                and type(Adapter.GetWishlistCandidates) == "function"
+                and Adapter.GetWishlistCandidates() or {}
+            for _, c in ipairs(type(known) == "table" and known or {}) do
+                if type(c) == "table" and tonumber(c.slot) == tonumber(wl.slot) then
+                    why = c.lockEvidenceReason
+                    if type(Adapter.WishlistEvidenceState) == "function"
+                        and Adapter.WishlistEvidenceState(c) == "actionable" then
+                        resolved, state = c, "actionable"
+                    end
+                    break
+                end
+            end
+            if not resolved and Adapter
+                and type(Adapter.ResolveWishlistEvidence) == "function" then
+                local reason
+                resolved, state, _, reason = Adapter.ResolveWishlistEvidence(candidate)
+                why = reason or why
+            end
+            local resolvedOrdinary, resolvedLocked, stillUnstated
+            if state == "actionable" and type(resolved) == "table"
+                and resolved.lockEvidenceStatus == "authoritative" then
+                resolvedOrdinary, resolvedLocked, stillUnstated = Split(resolved.echoes)
+            end
+            local function Ids(list)
+                local all = {}
+                for _, e in ipairs(list) do all[#all + 1] = {spellId=e.spellId, quality=0, stacks=e.stacks} end
+                return Population(all)
+            end
+            local combined = {}
+            for _, e in ipairs(resolvedOrdinary or {}) do combined[#combined + 1] = e end
+            for _, e in ipairs(resolvedLocked or {}) do combined[#combined + 1] = e end
+            local settled = resolvedOrdinary and stillUnstated == 0
+                and #resolvedLocked > 0 and Ids(combined) == Ids(ordinary)
+            -- The roles come from the adapter. A quality that the selected
+            -- source states for an ID stays the source's own. When the source
+            -- states two qualities for one ID, the role evidence must match
+            -- that exact ID-and-quality content; otherwise it does not say
+            -- which quality the permanent copies have, and nothing is guessed.
+            local stated, mixed = {}, false
+            for _, e in ipairs(ordinary) do
+                if e.quality ~= nil then
+                    if stated[e.spellId] ~= nil and stated[e.spellId] ~= e.quality then mixed = true end
+                    stated[e.spellId] = e.quality
+                end
+            end
+            local mixedUnmatched = false
+            if settled and mixed and Population(combined) ~= Population(ordinary) then
+                settled, mixedUnmatched = false, true
+                why = "the source states two qualities for one Echo, and the saved role evidence does not match that exact content"
+            end
+            if not settled then
+                -- The message names what is missing and the supported way to
+                -- supply it. A count alone does not tell the user what to do.
+                local marks = unstated == 0
+                    and "The server copy marks all of them as ordinary, which is not role information: "
+                    or "It does not say which copies are locked: "
+                -- Only the ways that exist for this source. A Saved Build slot has
+                -- no role choice in the Wishlist Editor; a mixed-quality source is
+                -- not resolved by either way.
+                local way
+                if mixedUnmatched then
+                    way = "Nexus cannot tell which quality the locked copies have. Change the source so that each Echo has one quality, then share again. "
+                elseif wl.sourceKind == "Saved Build" then
+                    way = "To resolve it, make this Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. "
+                else
+                    way = "To resolve it, open this Wishlist in the Wishlist Editor and choose its locked Echoes, "
+                        .. "or make the matching Saved Build your active loadout so that Nexus can read its locked Echoes. Then share again. "
+                end
+                return nil, string.format("%s has %d Echo copies. %sa Share holds at most %d ordinary copies, "
+                    .. "so up to %d of them must be locked Echoes, and Nexus must know which. Missing evidence: %s. "
+                    .. "%sNothing was shared and the source is unchanged.",
+                    label, counts.total, marks, limits.ordinary, limits.locked,
+                    tostring(why or "no role choice is saved for this exact content"), way),
+                    string.format("roles unresolved (ordinary=%d permanent=%d total=%d): %s",
+                        counts.ordinary, counts.locked, counts.total,
+                        tostring(why or state or "no role evidence"))
+            end
+            do
+                for _, e in ipairs(combined) do
+                    if not mixed and stated[e.spellId] ~= nil then e.quality = stated[e.spellId] end
+                end
+                ordinary, locked = resolvedOrdinary, resolvedLocked
+                counts = Counts()
+                if not counts then
+                    return nil, label .. " contains an Echo copy count that cannot be read. Nothing was shared.",
+                        "malformed copy count"
+                end
+            end
+        end
+        if #ordinary == 0 then
+            return nil, label .. " has no ordinary Echoes to share.", "no ordinary Echoes"
+        end
+        if counts.ordinary > limits.ordinary or counts.locked > limits.locked
+            or counts.total > limits.total then
+            return nil, string.format("%s has %d ordinary and %d locked Echo copies (%d total). "
+                .. "A Share holds at most %d ordinary, %d locked and %d total. "
+                .. "Nothing was shared and the source is unchanged.",
+                label, counts.ordinary, counts.locked, counts.total,
+                limits.ordinary, limits.locked, limits.total),
+                string.format("SEMANTIC_ENVELOPE ordinary=%d permanent=%d total=%d",
+                    counts.ordinary, counts.locked, counts.total)
+        end
+        return ordinary, locked, counts
+    end
+
+    -- Read-only: the role counts that a Share of this source would carry, from
+    -- the same role reading as the Share itself. Nothing is saved or sent.
+    -- Returns {ordinary, permanent, ordinaryEchoes, lockedEchoes}; or nil and
+    -- the message.
+    function M.ShareSourceRoles(wl)
+        if type(wl) ~= "table" then return nil, "no source selected" end
+        local rows = WishlistEchoes(wl)
+        if not rows or #rows == 0 then return nil, "the source has no Echoes" end
+        local ok, ordinary, locked, counts = pcall(ShareRoles, wl, rows)
+        if not ok then return nil, "Echo roles cannot be read" end
+        if not ordinary then return nil, locked end
+        return {ordinary=counts.ordinary, permanent=counts.locked,
+            ordinaryEchoes=ordinary, lockedEchoes=locked}
     end
 
     local function CanonicalFingerprintHash(text)
@@ -1755,6 +2348,14 @@ function Controller.New(options)
             or (UnitName and UnitName("player")) or "Unknown")
         local recordOwner = VerifiedDpsOwnerKey(record)
         local recordClaim = OwnerEvidenceKey(record)
+        -- Only this client's own verified record may make this client share
+        -- a page. A received record's page belongs to the remote owner, whose
+        -- own client shares it; a receiver never broadcasts a build it does
+        -- not own (peers would refuse that summary as not the owner's). A
+        -- peer that missed the owner's share obtains the page through its own
+        -- Sync request, the established request/response path.
+        local playerIsLocal = recordOwner ~= nil
+            and recordOwner == CurrentVerifiedOwnerKey()
         local explicitId = record and (record.buildId or record.b)
         if type(explicitId) ~= "string" or explicitId == "" then explicitId = nil end
         local catalog = Catalog()
@@ -1763,7 +2364,7 @@ function Controller.New(options)
                 and type(onComplete) ~= "function" then return nil end
             return function(outcome)
                 if outcome.committed == true then
-                    if broadcastOnComplete
+                    if broadcastOnComplete and playerIsLocal
                         and Identity.VerifiedOwnerKey(build) then
                         BroadcastIfPossible(build)
                     end
@@ -1898,9 +2499,11 @@ function Controller.New(options)
                 explicitExisting.lastModified = NextStamp(
                     explicitExisting.lastModified or explicitExisting.postedAt or 0)
                 local saved, saveWhy = SaveBuild(explicitExisting,
-                    SavedCompletion(explicitId, explicitExisting, true))
+                    SavedCompletion(explicitId, explicitExisting, true),
+                    "saved-build update")
                 if not saved then return nil, nil, saveWhy end
-                if Identity.VerifiedOwnerKey(explicitExisting) then
+                if playerIsLocal
+                    and Identity.VerifiedOwnerKey(explicitExisting) then
                     BroadcastIfPossible(explicitExisting)
                 end
             elseif promoteOwner or presentationChanged then
@@ -1908,21 +2511,42 @@ function Controller.New(options)
                     explicitExisting.lastModified
                         or explicitExisting.postedAt or 0)
                 local saved, saveWhy = SaveBuild(explicitExisting,
-                    SavedCompletion(explicitId, explicitExisting, true))
+                    SavedCompletion(explicitId, explicitExisting, true),
+                    "saved-build update")
                 if not saved then return nil, nil, saveWhy end
-                BroadcastIfPossible(explicitExisting)
+                if playerIsLocal then BroadcastIfPossible(explicitExisting) end
             end
             return explicitId, explicitExisting
         end
 
         local ownAutoId, ownAutoBuild
         if not explicitId then
-            for id, build in pairs(Store()) do
+            -- Every admitted complete ordinary row with this exact fingerprint
+            -- comes from the catalog's exact index (one public record copy per
+            -- candidate, at most EXACT_CANDIDATE_LIMIT of them). The former
+            -- whole-collection record walk deep-copied every row synchronously
+            -- (105 ms per record at 600 rows) and stopped at a fixed step
+            -- budget. The index answers with the complete candidate set or an
+            -- explicit refusal (the catalog is not serving, or more rows share
+            -- this loadout than the bound): a refusal is returned as such and
+            -- never read as "no candidate", so no record page is created on an
+            -- incomplete query. The record keeps no page until a later
+            -- admission asks again.
+            if not (catalog and type(catalog.ExactFingerprintIds) == "function") then
+                return nil, nil, "catalog authority unavailable"
+            end
+            local candidates, candidatesWhy = catalog.ExactFingerprintIds(key,
+                EXACT_CANDIDATE_LIMIT)
+            if type(candidates) ~= "table" then
+                return nil, nil, candidatesWhy or "catalog authority unavailable"
+            end
+            for _, id in ipairs(candidates) do
+                local build = LoadBuild(id)
                 local evidence = Nexus and Nexus.LoadoutEvidence
-                local verdict = evidence
+                local verdict = build and evidence
                     and type(evidence.OrdinaryCompleteness) == "function"
                     and evidence.OrdinaryCompleteness(build) or nil
-                if Identity.SavedMirrorKind(build) == "ordinary"
+                if build and Identity.SavedMirrorKind(build) == "ordinary"
                     and type(verdict) == "table" and verdict.complete == true
                     and verdict.fingerprint == key then
                     if not build.autoDps then
@@ -1956,8 +2580,6 @@ function Controller.New(options)
         end
         -- Locked Echoes remain supplemental record evidence. They are never
         -- folded into the ordinary build pool or its fingerprint.
-        local playerIsLocal = recordOwner ~= nil
-            and recordOwner == CurrentVerifiedOwnerKey()
         local localClass
         if playerIsLocal and UnitClass then
             local _, token = UnitClass("player")
@@ -1986,9 +2608,10 @@ function Controller.New(options)
                 ownAutoBuild.lastModified = NextStamp(
                     ownAutoBuild.lastModified or ownAutoBuild.postedAt)
                 local saved, saveWhy = SaveBuild(ownAutoBuild,
-                    SavedCompletion(ownAutoId, ownAutoBuild, true))
+                    SavedCompletion(ownAutoId, ownAutoBuild, true),
+                    "automatic saved-build capture")
                 if not saved then return nil, nil, saveWhy end
-                if Identity.VerifiedOwnerKey(ownAutoBuild) then
+                if playerIsLocal and Identity.VerifiedOwnerKey(ownAutoBuild) then
                     BroadcastIfPossible(ownAutoBuild)
                 end
             end
@@ -2030,16 +2653,21 @@ function Controller.New(options)
         end
         if not RefreshBuildIdentity(build) then return nil end
         local saved, saveWhy = SaveBuild(build,
-            SavedCompletion(id, build, true))
+            SavedCompletion(id, build, true), "saved-build capture",
+            playerIsLocal and "local" or (recordOwner and "received" or "unknown"))
         if not saved then return nil, nil, saveWhy end
-        if Identity.VerifiedOwnerKey(build) then BroadcastIfPossible(build) end
+        if playerIsLocal and Identity.VerifiedOwnerKey(build) then
+            BroadcastIfPossible(build)
+        end
         return id, build
     end
 
     function M.PostCurrentWishlist(title, description, selectedWishlist, selectedClass)
         if not (Adapter and Adapter.Wishlist) then return false, "adapter not ready" end
         if pendingShare then
-            return false, "A Share is already waiting for local saving.", lastShareOutcome
+            -- The one retained request keeps its identity; nothing is added.
+            local _, text = M.ShareStatusText()
+            return false, text or "A Share is already waiting for local saving.", lastShareOutcome
         end
         PeerRecord("share_confirmed", {outcome="button confirmed"})
 
@@ -2061,6 +2689,7 @@ function Controller.New(options)
                     count = #live.echoes,
                     echoes = live.echoes,
                     active = slots.activeSlot == wl.slot,
+                    roleSourceValid = live.roleSourceValid,
                 }
                 sourceEchoes = wl.echoes
             end
@@ -2086,9 +2715,14 @@ function Controller.New(options)
         if not Identity.ValidDisplayText(description, 2000, true, true) then
             return false, "description contains unsafe text"
         end
-        local echoes = {}
-        for _, e in ipairs(sourceEchoes) do
-            echoes[#echoes+1] = { spellId=e.spellId, quality=e.quality, stacks=e.stacks or 1 }
+        -- Roles are settled and the 79/6/85 envelope is checked here, before
+        -- anything is accepted or retained. The catalog still validates the
+        -- record again when the local write runs.
+        local echoes, lockedEchoes, roleCounts = ShareRoles(wl, sourceEchoes)
+        if not echoes then
+            local message, diagnostic = lockedEchoes, roleCounts
+            PeerRecord("share_source", {outcome="rejected", reason=diagnostic})
+            return false, message
         end
         local stamp = NextStamp(0)
         local id = string.format("mine-%d-%d", stamp, math.random(100000,999999))
@@ -2102,6 +2736,7 @@ function Controller.New(options)
             echoes=echoes, postedAt=stamp, lastModified=stamp,
             isMine=localOwner ~= nil,
         }
+        if #lockedEchoes > 0 then record.lockedEchoes = lockedEchoes end
         local identityOk, identityErr = RefreshBuildIdentity(record)
         if not identityOk then return false, identityErr end
         PeerRecord("share_created", {id=id,class=record.class or "UNKNOWN",
@@ -2109,6 +2744,8 @@ function Controller.New(options)
         local outcome = {
             id=id,class=record.class or "UNKNOWN",
             echoCount=record.echoCount or #echoes,
+            title=title,ordinaryCopies=roleCounts.ordinary,
+            permanentCopies=roleCounts.locked,
             buildRevision=BuildRevision(),localSaved=false,
             queueAdmitted=false,queueReason=nil,retryPending=false,
             sent=false,sendCompleted=false,peerStored=nil,
@@ -2150,9 +2787,15 @@ function Controller.New(options)
                 outcome.queueReason = not committed and (why or "local save failed")
                     or "Share stopped: the player or catalog changed."
                 lastShareOutcome = outcome
-                if operation.notify then notify("Share not sent: " .. tostring(outcome.queueReason)) end
+                -- The approved text and source stay available to the form.
+                failedShareDraft = not committed and SameOwner() and {id=id,title=title,
+                    description=description,wishlist=selectedWishlist,
+                    class=selectedClass} or nil
+                if operation.notify then notify("Nexus: " .. tostring(select(2, M.ShareStatusText(id)))) end
+                refreshView()
                 return false
             end
+            failedShareDraft = nil
             local admitted, queueWhy, syncStatus = BroadcastIfPossible(record, true)
             for key, value in pairs(type(syncStatus) == "table"
                 and syncStatus or {}) do
@@ -2182,11 +2825,8 @@ function Controller.New(options)
             if D and D.BroadcastBestForBuild then
                 pcall(D.BroadcastBestForBuild, id)
             end
-            if operation.notify then
-                notify(outcome.queueAdmitted
-                    and "Share saved locally and queued. Peer storage confirmation is unavailable."
-                    or ("Share saved locally; not queued: " .. tostring(outcome.queueReason)))
-            end
+            if operation.notify then notify("Nexus: " .. tostring(select(2, M.ShareStatusText(id)))) end
+            refreshView()
             return true
         end
         operation.complete = CompleteLocalSave
@@ -2197,7 +2837,7 @@ function Controller.New(options)
             local saved, saveWhy = SaveBuild(record, function(ticket)
                 CompleteLocalSave(ticket.committed == true,
                     ticket.committed == true and ticket.storedAs or ticket.reason)
-            end)
+            end, "Share local save")
             if operation.finished then
                 return outcome.localSaved, outcome.localSaved and id or outcome.queueReason, outcome
             end
@@ -2303,12 +2943,103 @@ function Controller.New(options)
                 copy[key] = value
             end
         end
-        for key, value in pairs(type(remote) == "table" and remote or {}) do
-            copy[key] = value
+        -- Sync answers an unknown ID with its latest Share of any build. Only
+        -- the operation of this exact build may describe this build.
+        if type(remote) == "table" and tostring(remote.id) == tostring(current.id) then
+            for key, value in pairs(remote) do copy[key] = value end
         end
         copy.peerStored = nil
         copy.confirmation = "unavailable"
         return copy
+    end
+
+    -- One truthful sentence for the latest Share, read from the existing
+    -- outcome and the existing Sync operation status. It states no timing and
+    -- no percentage, and never calls retained work failed. Returns state, text.
+    local function BaseShareStatusText(id)
+        local s = M.ShareStatus(id)
+        if not s then return nil end
+        local name = type(s.title) == "string" and s.title ~= ""
+            and ("\"" .. s.title .. "\"") or "this build"
+        if s.localPending then
+            -- Two different waits: the record is not yet submitted, or the one
+            -- submitted local write is not yet settled. Neither can be cancelled
+            -- safely from here, and neither needs a second Share.
+            return "preparing", "Preparing " .. name .. " to share — not sent yet. "
+                .. (s.localStage == "saving"
+                    and "The local save is submitted; the catalog has not finished it. "
+                    or "The local catalog is finishing earlier work first. ")
+                .. "The same request continues by itself. Do not share it again."
+                .. (function()
+                    -- A saved Off mode is stated now, not only at the refusal.
+                    local policy = Nexus and Nexus.SyncModePolicy
+                    if policy and type(policy.Mode) == "function" and policy.Mode() == "off" then
+                        return " Your saved Sync mode is Off: it will be saved locally and not sent."
+                    end
+                    return ""
+                end)()
+        end
+        if s.localSaved ~= true then
+            local why = tostring(s.queueReason or "local save failed")
+            local evidence = Nexus and Nexus.LoadoutEvidence
+            local limits = evidence and type(evidence.PlanLimits) == "function"
+                and evidence.PlanLimits() or nil
+            if why == "SEMANTIC_ENVELOPE" and limits then
+                why = string.format("the local catalog refused %d ordinary and %d locked Echo copies; "
+                    .. "a Share holds at most %d ordinary, %d locked and %d total",
+                    tonumber(s.ordinaryCopies) or 0, tonumber(s.permanentCopies) or 0,
+                    limits.ordinary, limits.locked, limits.total)
+            end
+            -- The draft statement is made only when the form really has it.
+            local kept = failedShareDraft and failedShareDraft.id == s.id
+            return "refused", "Not shared: " .. name .. " — " .. why:gsub("%.+$", "")
+                .. ". Nothing was saved or sent."
+                .. (kept and " The Share form keeps the title, description and source." or "")
+        end
+        if s.sendCompleted == true then
+            return "sent", "Sent " .. name .. " — peer receipt not confirmed."
+        end
+        if s.terminal == true then
+            local why = tostring(s.outcome or "stopped")
+            if type(s.reason) == "string" and s.reason ~= "" and s.reason ~= "none"
+                and s.reason ~= why then
+                why = why .. " (" .. s.reason .. ")"
+            end
+            local retryable = M.CanRetryShare(s.id)
+            return "stopped", "Saved " .. name .. " locally — not sent: " .. why
+                .. (retryable and ". Open the build to use Retry Share." or ".")
+        end
+        if s.retryPending == true then
+            return "queued", "Saved " .. name .. " locally — the Sync queue is full. One bounded retry is pending."
+        end
+        if s.queueAdmitted == true then
+            return "queued", "Saved " .. name .. " locally — queued for sharing."
+        end
+        return "saved", "Saved " .. name .. " locally — not queued: "
+            .. tostring(s.queueReason or "Sync unavailable"):gsub("%.+$", "") .. "."
+    end
+
+    -- The base sentence, plus the locked-target limit when some answers for
+    -- this build went to older versions with its ordinary targets only
+    -- (docs/P1_7_LOCKED_ROLE_WIRE.md). Prepared answers, not peer receipt.
+    function M.ShareStatusText(id)
+        local state, text = BaseShareStatusText(id)
+        if not state then return state, text end
+        local s = M.ShareStatus(id)
+        local partial = s and tonumber(s.lockedRolesOrdinaryOnly) or 0
+        if partial > 0 then
+            text = text .. string.format(" %d answer%s for requesters that did not state locked-target support (for example an older Nexus version) carried the ordinary targets only.",
+                partial, partial == 1 and "" or "s")
+        end
+        return state, text
+    end
+
+    -- The approved draft of a Share whose local save failed, for the form.
+    function M.FailedShareDraft()
+        local draft = failedShareDraft
+        if not draft or type(lastShareOutcome) ~= "table"
+            or lastShareOutcome.id ~= draft.id then return nil end
+        return draft.title, draft.description, draft.wishlist, draft.class
     end
 
     function M.CanRetryShare(id)
@@ -2327,6 +3058,10 @@ function Controller.New(options)
             return false, "Share is not terminal"
         end
         local outcome = tostring(status.outcome or "")
+        -- A refusal that depends on the record itself repeats on every retry.
+        if outcome == "rejected" and tostring(status.reason or ""):find("too large", 1, true) then
+            return false, "the record is too large to send; a retry cannot change that"
+        end
         if outcome ~= "expired" and outcome ~= "dropped"
             and outcome ~= "throttle-exhausted" and outcome ~= "reset"
             and outcome ~= "rejected" then
@@ -2363,6 +3098,7 @@ function Controller.New(options)
             end
         end
         outcome.id = id
+        outcome.title = type(record.title) == "string" and record.title or nil
         outcome.class = record.class or "UNKNOWN"
         outcome.echoCount = record.echoCount or #(record.echoes or {})
         outcome.buildRevision = BuildRevision()
@@ -2376,7 +3112,7 @@ function Controller.New(options)
         outcome.sendCompleted = outcome.sendCompleted == true
         outcome.peerStored = nil
         outcome.confirmation = "unavailable"
-        lastShareOutcome = outcome
+        if not pendingShare then lastShareOutcome = outcome end
         local started = outcome.queueAdmitted or outcome.retryPending
         PeerRecord("share_retry_action", {id=id,
             outcome=started and "started" or "rejected",
@@ -2541,18 +3277,21 @@ function Controller.New(options)
     local function RepairedIdentity(build)
         if type(build.echoes) ~= "table" or #build.echoes == 0 then return nil end
         local candidate = ShallowCopy(build)
+        -- needsFullBuild nil and false both mean "no full build needed" (Sync
+        -- stores received builds with nil); that alone is not worth a
+        -- whole catalog mutation pass at start-up.
         if RefreshBuildIdentity(candidate)
             and (build.fingerprint ~= candidate.fingerprint
                 or build.fingerprintHash ~= candidate.fingerprintHash
                 or build.echoCount ~= candidate.echoCount
                 or build.loadoutAvailable ~= candidate.loadoutAvailable
-                or build.needsFullBuild ~= candidate.needsFullBuild) then
+                or (build.needsFullBuild == true) ~= (candidate.needsFullBuild == true)) then
             return candidate
         end
     end
 
     function M.RepairOverlayIdentities(candidate, onComplete)
-        return SaveBuild(candidate, onComplete)
+        return SaveBuild(candidate, onComplete, "overlay identity repair")
     end
 
     local function PublicationTarget(source, ownerKey)
@@ -2718,16 +3457,39 @@ function Controller.New(options)
         local binding = preparation and preparation.binding
 
         -- Validate every candidate field before mutating any part of the record.
-        local nextTitle = tostring(title or ""):gsub("^%s+",""):gsub("%s+$","")
+        -- The title a save stores for `value`: trimmed, else the current one.
+        local function SavedTitle(value)
+            local text = tostring(value or ""):gsub("^%s+",""):gsub("%s+$","")
+            if text == "" then text = tostring(b.title or "Untitled") end
+            return text
+        end
+        local nextTitle = SavedTitle(title)
         local nextDescription = description ~= nil
             and tostring(description) or tostring(b.description or "")
-        if nextTitle == "" then nextTitle = tostring(b.title or "Untitled") end
+        -- Only text the owner changes is owner-written: a save that re-submits
+        -- the served title and description (Save Link) changes no text.
+        local descriptionChanged = nextDescription ~= tostring(b.description or "")
+        -- Description text the owner writes keeps the Edit dialog's 2000
+        -- bytes. The stored description re-submitted unchanged was admitted
+        -- under the catalog field's 4000 bytes; the dialog does not seed one
+        -- it cannot show and then submits none, and such a save keeps it.
+        local descriptionLimit = descriptionChanged and 2000 or 4000
         if #nextTitle > 80 then return false, "title is too long" end
-        if #nextDescription > 2000 then return false, "description is too long" end
+        if #nextDescription > descriptionLimit then
+            return false, "description is too long"
+        end
         if not Identity.ValidDisplayText(nextTitle, 80, false) then
             return false, "title contains unsafe text"
         end
-        if not Identity.ValidDisplayText(nextDescription, 2000, true, true) then
+        -- The display rule governs description text the owner writes. The
+        -- stored description re-submitted unchanged stays as stored: a
+        -- generated one names the assigned server Wishlist, whose name may
+        -- hold a literal "|" (durable text keeps it; Identity.DisplaySafeText
+        -- doubles it for display). It must still pass the wire rule, which
+        -- differs from the display rule only by allowing "|".
+        local descriptionRule = descriptionChanged
+            and Identity.ValidDisplayText or Identity.ValidWireText
+        if not descriptionRule(nextDescription, descriptionLimit, true, true) then
             return false, "description contains unsafe text"
         end
         local nextLink = b.link
@@ -2743,13 +3505,28 @@ function Controller.New(options)
             end
         end
 
+        local textChanged = nextTitle ~= SavedTitle(b.title) or descriptionChanged
+        -- An unchanged description stays generated when this build knows it
+        -- is: an unmarked mirror's description is the import's, and a marked
+        -- one needs a witness that still holds. An earlier build's marker
+        -- gains none.
+        local generated = not descriptionChanged
+            and (SavedMirrorMarker(b) == nil or SavedDescriptionGenerated(b))
+
         b.title = nextTitle
         b.description = nextDescription
         b.link = nextLink
         local savedKind = Identity.SavedMirrorKind(b)
-        if savedKind == "saved" then
+        -- userTitle marks a Saved Build mirror whose text its owner wrote; the
+        -- Saved import keeps that text. Without a text change the generated
+        -- title and description stay the import's to rewrite. A title-only
+        -- edit keeps a generated description generated: its witness is
+        -- recorded again under the new marker. A description edit clears it.
+        if savedKind == "saved" and textChanged then
             b.userTitle = nextTitle
-            b.userDescription = nextDescription
+            if descriptionChanged then b.userDescription = nextDescription end
+            b.generatedDescriptionWitness = generated
+                and SavedDescriptionWitness(nextTitle, nextDescription) or nil
         end
         b.lastModified = NextStamp(b.lastModified or b.postedAt)
         local outcome = {id=b.id,localSaved=false,localPending=false,queueAdmitted=false,
@@ -2782,7 +3559,7 @@ function Controller.New(options)
         local saved, saveWhy, ticket = SaveBuild(b, function(terminal)
             Complete(terminal.committed == true, terminal.reason)
             if terminal.committed == true then notify(outcome.message) end
-        end)
+        end, "build details edit")
         if saved == nil and saveWhy == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
             -- Accepted and retained: the edit is one retained catalog
             -- mutation whose terminal ticket settles it; the reason lets a
@@ -2814,12 +3591,18 @@ function Controller.New(options)
         if not wl or not wl.entries or #wl.entries == 0 then
             return false, "no active wishlist"
         end
-        local echoes = {}
-        for _, e in ipairs(wl.entries) do
-            echoes[#echoes+1] = { spellId=e.spellId, quality=e.quality, stacks=e.stacks or 1 }
-        end
+        -- The same role reading as Share. Before, every Wishlist entry became
+        -- an ordinary row and the previous revision's lockedEchoes stayed
+        -- beside them, so a role change was lost and stale locked rows would
+        -- travel with the new revision (docs/P1_7_LOCKED_ROLE_WIRE.md).
+        local okRoles, echoes, lockedEchoes = pcall(ShareRoles, wl, WishlistEchoes(wl))
+        if not okRoles then return false, "Echo roles cannot be read" end
+        if not echoes then return false, lockedEchoes end
         local candidate = ShallowCopy(b)
         candidate.echoes = echoes
+        candidate.lockedEchoes = #lockedEchoes > 0 and lockedEchoes or nil
+        candidate.lockedAuthorityProven = nil
+        candidate.lockedFingerprint = nil
         local identityOk, identityErr = RefreshBuildIdentity(candidate)
         if not identityOk then return false, identityErr end
         candidate.lastModified = NextStamp(b.lastModified or b.postedAt)
@@ -3151,10 +3934,16 @@ function Controller.New(options)
         local function Result(job)
             local phase=job.pending and "commit" or job.phase
             local list=phase=="legacy" and job.removals or phase=="identities" and job.repairs
+            local done,total
+            if list then done,total=math.min(#list,math.max(0,job.index-1)),#list
+            elseif phase=="scan" and job.cursor and catalog
+                and type(catalog.RecordCursorProgress)=="function" then
+                -- The cursor's own position; no second pass sizes the scan.
+                done,total=catalog.RecordCursorProgress(job.cursor)
+            end
             return {state=job.state,reason=job.reason,phase=phase,
                 mutationTicket=job.pending,recordsSeen=job.scanned or 0,
-                progressDone=list and math.min(#list,math.max(0,job.index-1)) or nil,
-                progressTotal=list and #list or nil}
+                progressDone=done,progressTotal=total}
         end
         if not (catalog and catalog.BeginRecordCursor and catalog.RootState) then
             return {state="failed",reason="COMMUNITY_CATALOG_UNAVAILABLE"}
@@ -3197,6 +3986,16 @@ function Controller.New(options)
             return {state="pending",phase="source-changed"}
         end
         job.generation,job.servingGeneration=root.generation,root.servingGeneration
+        -- A read-only saved root is served as it was saved: the start-up
+        -- placeholder removal and identity repair below are writes, so they do
+        -- not run for it (the catalog would refuse them).
+        local readOnlyRoot=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+        if job.phase=="scan" and not job.cursor and type(readOnlyRoot)=="function"
+            and readOnlyRoot(job.database) then
+            job.state,job.phase="ready","complete"
+            job.removals,job.repairs=nil,nil
+            return Result(job)
+        end
 
         local function Clock()
             if type(debugprofilestop) ~= "function" then return nil end

@@ -28,7 +28,7 @@ local function Boot(rows,async)
  T.Load()
  local update=Nexus.Sync.OnUpdate;Nexus.Sync.OnUpdate=function(...)turns=turns+1;return update(...)end
  local ensure=Nexus.Sync.EnsureChannel;Nexus.Sync.EnsureChannel=function(...)ensureCalls=ensureCalls+1;return ensure(...)end
- local incoming=Nexus.Sync.HandleIncoming;Nexus.Sync.HandleIncoming=function(...)handled=handled+1;return incoming(...)end
+ local incoming=Nexus.Sync.HandleNativeChannelIncoming;Nexus.Sync.HandleNativeChannelIncoming=function(...)handled=handled+1;return incoming(...)end
  H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
  T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
  C=Nexus.BuildCatalog

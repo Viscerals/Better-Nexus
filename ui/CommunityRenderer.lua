@@ -6,6 +6,11 @@ Nexus.CommunityInternals = Nexus.CommunityInternals or {}
 
 local Renderer = {}
 
+-- Shown in a detail view when the record's owner is not established (the
+-- name itself carries no provenance text). A statement about identity only:
+-- it says nothing about the record's Echoes, locked targets or DPS.
+local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity not established.|r"
+
 local function DisplayRemoteText(value, maxBytes, allowEmpty, allowLineBreaks)
     local identity = Nexus and Nexus.Identity
     if not (identity and type(identity.DisplaySafeText) == "function") then
@@ -134,6 +139,131 @@ local function ConfigureSafeEditableText(box, maxBytes, allowLineBreaks)
         end
         CommitRaw(self, raw, display)
     end)
+end
+
+-- Detail panel geometry for its current size and font line: a fixed header,
+-- the action row at the bottom (wrapping to a second row when the labels do
+-- not fit one), and between them a scrolled body whose child is exactly as
+-- tall as its flowed, measured content.
+local function LayoutDetailPanel(p)
+    local metrics = Nexus.LayoutMetrics
+    if not (p and p.body and metrics) then return end
+    local width = math.max(200, math.floor(tonumber(p:GetWidth()) or 500))
+    local height = math.max(120, math.floor(tonumber(p:GetHeight()) or 570))
+    local line = math.max(12, tonumber(p._nexusLine) or 14)
+    local gap = math.max(4, tonumber(p._nexusGap) or 6)
+    local inner = width - 20
+
+    -- Clear of the class icon on the left and the close button on the right,
+    -- each a full line also of a wider, taller face at the same font size.
+    local _, safeLine = metrics.ConservativeText(p._nexusScale or 1)
+    local titleH = math.max(20, line + 4, safeLine + 2)
+    local authorH = math.max(12, line, safeLine)
+    p.title:SetSize(math.max(80, inner - 82), titleH)
+    p.author:SetSize(math.max(80, inner - 82), authorH)
+    local headerBottom = math.max(44, 10 + titleH + 2 + authorH) + gap
+
+    local buttonH = math.max(22, line + 8)
+    for _, button in ipairs({p.lockBtn, p.retryShareBtn, p.editBtn}) do
+        button:SetHeight(buttonH)
+    end
+    metrics.FitButtonWidth(p.lockBtn, 130, inner)
+    metrics.FitButtonWidth(p.retryShareBtn, 130, inner)
+    metrics.FitButtonWidth(p.editBtn, 96, inner)
+    local primary = p.retryShareBtn:IsShown() and p.retryShareBtn or p.lockBtn
+    local left = {primary}
+    if p.editBtn:IsShown() then left[#left+1] = p.editBtn end
+    local x, rows = 8, 1
+    for _, button in ipairs(left) do
+        local w = button:GetWidth()
+        if x > 8 and x + w > width - 8 then x, rows = 8, rows + 1 end
+        button:ClearAllPoints()
+        button:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", x, 8 + (rows-1)*(buttonH+gap))
+        x = x + w + 6
+    end
+    if p.deleteBtn:IsShown() then
+        p.deleteBtn:SetHeight(buttonH)
+        local w = metrics.FitButtonWidth(p.deleteBtn, 104, inner)
+        if x + w > width - 8 then rows = rows + 1 end
+        p.deleteBtn:ClearAllPoints()
+        p.deleteBtn:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -8,
+            8 + (rows-1)*(buttonH+gap))
+    end
+    local footer = 8 + rows*buttonH + (rows-1)*gap + gap
+
+    -- The template's scroll bar sits to the right of the scroll frame.
+    local scroll, body = p.bodyScroll, p.body
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", p, "TOPLEFT", 10, -headerBottom)
+    scroll:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -30, footer)
+    local bodyW = math.max(120, width - 40)
+    body:SetWidth(bodyW)
+
+    local y = 0
+    local function Place(region, h, indent)
+        region:ClearAllPoints()
+        region:SetPoint("TOPLEFT", body, "TOPLEFT", indent or 0, -y)
+        y = y + h
+    end
+    local function Text(fontString, minimum)
+        if not fontString:IsShown() then return end
+        Place(fontString, metrics.WrapHeight(fontString, bodyW, minimum))
+        y = y + gap
+    end
+    local function Label(fontString)
+        Place(fontString, metrics.WrapHeight(fontString, bodyW, 12) + 2)
+    end
+    Text(p.desc, 50)
+    if p.linkBox:IsShown() then
+        Label(p.linkLabel)
+        local save = 0
+        if p.linkSaveBtn:IsShown() then
+            p.linkSaveBtn:SetHeight(math.max(18, line + 4))
+            save = metrics.FitButtonWidth(p.linkSaveBtn, 72, 140) + 8
+        end
+        p.linkBox:SetSize(math.max(80, bodyW - 8 - save), math.max(18, line + 4))
+        Place(p.linkBox, p.linkBox:GetHeight(), 6)
+        y = y + gap
+    end
+    local iconSize = p.echoIcons[1]:GetWidth()
+    if p.lockedLabel:IsShown() then
+        Label(p.lockedLabel)
+        for i, ic in ipairs(p.lockedIcons) do
+            ic:ClearAllPoints()
+            ic:SetPoint("TOPLEFT", body, "TOPLEFT", (i-1)*(iconSize+6), -y)
+        end
+        y = y + iconSize + 4 + gap
+    else
+        Label(p.echoLabel)
+    end
+    local columns = math.max(1, math.floor((bodyW + 2) / (iconSize + 2)))
+    local shown = 0
+    for _, ic in ipairs(p.echoIcons) do
+        if ic:IsShown() then
+            local col, row = shown % columns, math.floor(shown / columns)
+            ic:ClearAllPoints()
+            ic:SetPoint("TOPLEFT", body, "TOPLEFT", col*(iconSize+2),
+                -(y + row*(iconSize+2)))
+            shown = shown + 1
+        end
+    end
+    y = y + math.ceil(shown / columns) * (iconSize + 2) + gap
+    Text(p.missingText, 14)
+    y = y + gap
+    Text(p.recordsTitle, 12)
+    Text(p.dummyRecord, 16)
+    Text(p.lkRecord, 16)
+    Text(p.editState, 12)
+    Text(p.detailsNote, 12)
+    -- The record rows are always shown, so the last text added a trailing gap.
+    y = y - gap
+    body:SetHeight(math.max(1, y))
+
+    local viewport = math.max(0, height - headerBottom - footer)
+    local range = math.max(0, y - viewport)
+    if (tonumber(scroll:GetVerticalScroll()) or 0) > range then
+        scroll:SetVerticalScroll(range)
+    end
 end
 
 local function Measure(name, callback, ...)
@@ -536,7 +666,7 @@ function Renderer.New(options)
         PlaceCommunityBox(scopeBtn,boxes.scope)
         PlaceCommunityBox(myBuildsBtn,boxes.mine)
         PlaceCommunityBox(classDropBtn,boxes.class)
-        PlaceCommunityBox(qualifiedBtn,boxes.qualified)
+        PlaceCommunityBox(frame._qualifiedBox,boxes.qualified)
         PlaceCommunityBox(sortToggle,boxes.sort)
         PlaceCommunityBox(frame._actionLabel,boxes.actionLabel)
         PlaceCommunityBox(syncBtn,boxes.sync)
@@ -552,15 +682,9 @@ function Renderer.New(options)
 
         if detailPanel and boxes.detail then
             local inner = math.max(120,boxes.detail.w-20)
-            detailPanel.title:SetWidth(math.max(80,inner-46))
-            detailPanel.author:SetWidth(math.max(80,inner-46))
-            detailPanel.desc:SetWidth(inner)
-            detailPanel.linkBox:SetWidth(math.max(80,inner-88))
-            detailPanel.missingText:SetWidth(inner)
-            detailPanel.dummyRecord:SetWidth(inner)
-            detailPanel.lkRecord:SetWidth(inner)
-            detailPanel.detailsNote:SetWidth(inner)
-            detailPanel.editState:SetWidth(inner)
+            detailPanel._nexusLine, detailPanel._nexusGap = layout.normal, layout.gap
+            detailPanel._nexusScale = layout.scale
+            LayoutDetailPanel(detailPanel)
             for _, row in ipairs(detailPanel.lbDummyRows) do row:SetWidth(inner) end
             for _, row in ipairs(detailPanel.lbLKRows) do row:SetWidth(inner) end
             detailPanel.lbDummyEmpty:SetWidth(inner)
@@ -594,7 +718,7 @@ function Renderer.New(options)
             labels={
                 search="Search title, author, or description",
                 scope="All Shared",mine="My Builds",
-                class="Current Class Only",qualified="Both DPS records",
+                class="Current Class Only",qualified="Require both DPS records",
                 sort="Sort: Highest DPS",sync="Listening...",
                 share="Share Build",
             },
@@ -652,15 +776,18 @@ local function MakeDropdownMenu(parent, width)
     return menu
 end
 
-local function AddMenuButton(menu, text, onClick, index)
+-- owner: the menu to close when the row is in a scrolled list inside it.
+local function AddMenuButton(menu, text, onClick, index, owner)
     local b = CreateFrame("Button", nil, menu)
-    b:SetHeight(22); b:SetPoint("TOPLEFT",6,-6-(index-1)*22); b:SetPoint("TOPRIGHT",-6,0-(index-1)*22)
+    b:SetHeight(22); b:SetPoint("TOPLEFT",6,-6-(index-1)*22); b:SetPoint("TOPRIGHT",-6,-6-(index-1)*22)
     b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
     local fs = b:CreateFontString(nil,"OVERLAY",Nexus.LayoutMetrics
         and Nexus.LayoutMetrics.FontObject("normal")
         or "GameFontHighlightSmall")
     fs:SetPoint("LEFT",6,0); fs:SetPoint("RIGHT",-6,0); fs:SetJustifyH("LEFT"); fs:SetText(text)
-    b:SetScript("OnClick", function() menu:Hide(); onClick() end)
+    -- One line per row; a shortened label is complete in the row tooltip.
+    if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(fs, b, 22) end
+    b:SetScript("OnClick", function() (owner or menu):Hide(); onClick() end)
     return b
 end
 
@@ -678,27 +805,91 @@ local function WishlistLabel(wl)
         (wl and wl.sourceKind) or "Wishlist", 128, false) or "Wishlist"
     local name = wl and DisplayRemoteText(wl.name, 1024, false) or nil
     if not name then name = "Unnamed " .. kind end
-    local count=0
-    for _,e in ipairs((wl and wl.echoes) or {}) do count=count+(tonumber(e.stacks or e.count) or 1) end
+    -- Stated permanent copies are not part of the 79 ordinary copies.
+    local count,permanent=0,0
+    for _,e in ipairs((wl and wl.echoes) or {}) do
+        local copies=tonumber(e.stacks or e.count) or 1
+        if e.locked==true or e.locked==1 then permanent=permanent+copies else count=count+copies end
+    end
+    if permanent==0 then
+        for _,e in ipairs((wl and type(wl.lockedEchoes)=="table" and wl.lockedEchoes) or {}) do permanent=permanent+(tonumber(e.stacks or e.count) or 1) end
+    end
+    -- The counts a Share of this source would really carry (for example the
+    -- saved permanent targets of an editor-made Wishlist). Read-only.
+    local controller=ControllerInstance()
+    local roles=type(controller.ShareSourceRoles)=="function" and controller.ShareSourceRoles(wl) or nil
+    if roles then count,permanent=roles.ordinary,roles.permanent end
+    if permanent>0 then
+        return string.format("[%s] %s  —  %d / 79 + %d / 6 locked", kind, name, count, permanent)
+    end
     return string.format("[%s] %s  —  %d / 79", kind, name, count)
+end
+
+-- The controller's one sentence for the latest Share, coloured by its state.
+local function ShareStatusLine()
+    local controller = ControllerInstance()
+    if type(controller.ShareStatusText) ~= "function" then return nil end
+    local ok, state, text = pcall(controller.ShareStatusText)
+    if not ok or type(text) ~= "string" then return nil end
+    -- The role counts that this Share carries, so that a lost role is visible.
+    local okStatus, s = pcall(controller.ShareStatus)
+    if state ~= "refused" and okStatus and type(s) == "table"
+        and type(s.ordinaryCopies) == "number" and type(s.permanentCopies) == "number" then
+        text = text .. string.format(" Roles: %d ordinary + %d locked Echo copies.",
+            s.ordinaryCopies, s.permanentCopies)
+    end
+    local colour = state == "refused" and "|cffff6060"
+        or (state == "preparing" or state == "stopped" or state == "saved") and "|cffffc040"
+        or "|cff4dff80"
+    return colour .. text .. "|r", state
+end
+
+-- The result of the user's own last Share click belongs to the form. A refusal
+-- stays there through every ordinary view refresh. Only a legitimate next step
+-- replaces it: another Share click, another source or class, or reopening the
+-- form. The latest Share of the session is shown when no refusal is held.
+local postRefusal
+local function SetPostRefusal(text)
+    postRefusal = type(text) == "string" and text ~= "" and text or nil
+end
+local function PostStatusText()
+    if postRefusal then return "|cffff6060" .. postRefusal .. "|r" end
+    return ShareStatusLine() or ""
 end
 
 local function RefreshPostWishlistMenu()
     if not postWishlistMenu then return end
-    for _, child in ipairs({postWishlistMenu:GetChildren()}) do child:Hide(); child:SetParent(nil) end
+    local menu = postWishlistMenu
+    -- The rows live in a list that scrolls with the mouse wheel inside the
+    -- menu, so more sources than fit its 300 px never spill below it.
+    if not menu._list then
+        menu._scroll = CreateFrame("ScrollFrame", nil, menu)
+        menu._scroll:SetPoint("TOPLEFT", 0, 0); menu._scroll:SetPoint("BOTTOMRIGHT", 0, 6)
+        menu._list = CreateFrame("Frame", nil, menu._scroll)
+        menu._list:SetWidth(menu:GetWidth()); menu._scroll:SetScrollChild(menu._list)
+        menu._scroll:EnableMouseWheel(true)
+        menu._scroll:SetScript("OnMouseWheel", function(self, delta)
+            local range = math.max(0, menu._list:GetHeight() - (menu:GetHeight() - 6))
+            local offset = (tonumber(self:GetVerticalScroll()) or 0) - (tonumber(delta) or 0) * 22
+            self:SetVerticalScroll(math.max(0, math.min(range, offset)))
+        end)
+    end
+    for _, child in ipairs({menu._list:GetChildren()}) do child:Hide(); child:SetParent(nil) end
+    menu._scroll:SetVerticalScroll(0)
     local candidates = BuildWishlistCandidates()
-    local h = math.min(300, 12 + #candidates * 24)
-    postWishlistMenu:SetHeight(h)
+    menu._list:SetHeight(12 + math.max(1, #candidates) * 22)
+    postWishlistMenu:SetHeight(math.min(300, 12 + math.max(1, #candidates) * 22))
     for i, c in ipairs(candidates) do
-        AddMenuButton(postWishlistMenu, WishlistLabel(c), function()
+        AddMenuButton(menu._list, WishlistLabel(c), function()
             ControllerInstance().SetPostWishlist(c)
+            SetPostRefusal(nil)                         -- another source: the refusal was about the earlier one
             postWishlistBtn:SetText("Source: "
                 .. (DisplayRemoteText(c.name, 1024, false) or "Unnamed"))
             RefreshPostPopupPreview()
-        end, i)
+        end, i, menu)
     end
     if #candidates == 0 then
-        AddMenuButton(postWishlistMenu, "No saved builds or wishlists found", function() end, 1)
+        AddMenuButton(menu._list, "No saved builds or wishlists found", function() end, 1, menu)
         postWishlistMenu:SetHeight(40)
     end
 end
@@ -710,6 +901,7 @@ local function RefreshPostClassMenu()
     for i, token in ipairs(CLASS_PICK_ORDER) do
         AddMenuButton(postClassMenu, CLASS_LABEL[token], function()
             ControllerInstance().SetPostClass(token)
+            SetPostRefusal(nil)
             local cc = CLASS_COLOR[token] or {1,1,1}
             postClassBtn:SetText("Class: " .. CLASS_LABEL[token])
             postClassBtn:GetFontString():SetTextColor(cc[1],cc[2],cc[3])
@@ -787,24 +979,33 @@ local function EnsurePostPopup()
             postTitleBox:_NexusRawText(), postDescBox:_NexusRawText(),
             wishlist, class)
         if not ok then
+            -- The form, its draft and its source stay. A retained earlier
+            -- Share keeps its own sentence; a refusal states its reason.
             print("|cffff6060Nexus:|r "..tostring(value))
+            SetPostRefusal(not outcome and tostring(value) or nil)
+            p._shareStatus:SetText(PostStatusText())
             return
         end
-        outcome=type(outcome)=="table" and outcome or {}
-        if outcome.localPending then
-            print("|cffffc040Nexus:|r Share accepted. Waiting to save locally; nothing has been sent.")
-        elseif outcome.sendCompleted then
-            print("|cff4dff80Nexus:|r Build saved locally and sent. Peer storage confirmation is unavailable.")
-        elseif outcome.queueAdmitted then
-            print("|cff4dff80Nexus:|r Build saved locally and queued for sharing. Peer storage confirmation is unavailable.")
-        elseif outcome.retryPending then
-            print("|cffffc040Nexus:|r Build saved locally; the Sync queue is full. One bounded retry is pending.")
-        else
-            print("|cffffc040Nexus:|r Build saved locally; not queued: "
-                ..tostring(outcome.queueReason or "Sync unavailable")..".")
-        end
+        SetPostRefusal(nil)
+        -- One sentence, from the same owner that the status line reads.
+        print("Nexus: "..(ShareStatusLine() or "Share accepted."))
         ClearPostDescriptionFocus(); p:Hide(); M.Refresh()
     end)
+    -- The open form follows its Share by itself: queued -> sent, a retry, a
+    -- terminal stop. A passive read twice a second, only while the form is
+    -- shown; it does not depend on the Community window, a view refresh, Sync
+    -- housekeeping or a receive window.
+    local statusElapsed=0
+    p:SetScript("OnUpdate",function(_,elapsed)
+        statusElapsed=statusElapsed+(tonumber(elapsed) or 0)
+        if statusElapsed<0.5 then return end
+        statusElapsed=0
+        if p._shareStatus then
+            local text=PostStatusText()
+            if p._shareStatus:GetText()~=text then p._shareStatus:SetText(text) end
+        end
+    end)
+    local shareStatus=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); shareStatus:SetPoint("TOPLEFT",16,-396); shareStatus:SetSize(334,96); shareStatus:SetJustifyH("LEFT"); shareStatus:SetJustifyV("TOP"); p._shareStatus=shareStatus
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.ApplyFontTree then
         Nexus.LayoutMetrics.ApplyFontTree(p,"normal")
     end
@@ -817,6 +1018,7 @@ end
 
 RefreshPostPopupPreview = function()
     if not postPopup or not postPopup:IsShown() then return end
+    postPopup._shareStatus:SetText(PostStatusText())
     local wl, selectedClass = ControllerInstance().PostDraft()
     local echoes = ControllerInstance().WishlistEchoes(wl)
     if not wl or not echoes or #echoes==0 then
@@ -829,12 +1031,33 @@ RefreshPostPopupPreview = function()
         or "Unnamed Echo Wishlist"
     local classToken=selectedClass or ControllerInstance().InferBuildClass(echoes) or ""
     postPopup._previewWishlist:SetText("|cffffd200"..wishlistName.."|r")
-    postPopup._previewSummary:SetText(string.format("|cff888888%d Echo rows in this source|r",#echoes))
+    -- The rows and role counts that a Share of this source carries. The
+    -- permanent rows of an editor-made Wishlist are not in its server copy.
+    local roles, rolesWhy = nil, nil
+    if type(ControllerInstance().ShareSourceRoles) == "function" then
+        roles, rolesWhy = ControllerInstance().ShareSourceRoles(wl)
+    end
+    if roles then
+        postPopup._previewSummary:SetText(string.format("|cff888888Shares %d ordinary + %d locked Echo copies|r",
+            roles.ordinary, roles.permanent))
+        -- The settled lists, not the raw source rows: on the >79 path the
+        -- source rows also contain the copies that become permanent.
+        local shown = {}
+        for _, e in ipairs(roles.ordinaryEchoes or {}) do
+            shown[#shown + 1] = {spellId=e.spellId, stacks=e.stacks}
+        end
+        for _, e in ipairs(roles.lockedEchoes or {}) do
+            shown[#shown + 1] = {spellId=e.spellId, stacks=e.stacks, locked=true}
+        end
+        echoes = shown
+    else
+        postPopup._previewSummary:SetText("|cffff6060Roles not settled: Share Build states the reason|r")
+    end
     local cc=CLASS_COLOR[(classToken or ""):upper()] or {1,1,1}; postPopup._previewClass:SetTextColor(cc[1],cc[2],cc[3]); postPopup._previewClass:SetText("Posting as: "..(CLASS_LABEL[(classToken or ""):upper()] or classToken or "Select a class"))
     local child=postPopup._previewChild
     for i,row in ipairs(postPopup._previewRows or {}) do
         local e=echoes[i]
-        if e then row:ClearAllPoints(); row:SetPoint("TOPLEFT",child,"TOPLEFT",0,-(i-1)*22); row.icon:SetTexture(SpellIcon(e.spellId)); local stacks=tonumber(e.stacks) or 1; local suffix=stacks>1 and ("  x"..stacks) or ""; row.text:SetText(string.format("%02d. %s%s",i,EchoDisplayName(e.spellId),suffix)); row:Show() else row:Hide() end
+        if e then row:ClearAllPoints(); row:SetPoint("TOPLEFT",child,"TOPLEFT",0,-(i-1)*22); row.icon:SetTexture(SpellIcon(e.spellId)); local stacks=tonumber(e.stacks) or 1; local suffix=(stacks>1 and ("  x"..stacks) or "")..((e.locked==true or e.locked==1) and "  (locked)" or ""); row.text:SetText(string.format("%02d. %s%s",i,EchoDisplayName(e.spellId),suffix)); row:Show() else row:Hide() end
     end
     child:SetHeight(math.max(1,#echoes*22)); pcall(function() postPopup._previewScroll:SetVerticalScroll(0) end)
 end
@@ -844,6 +1067,7 @@ function M.ShowPostBuild()
     if postPopup:IsShown() then
         HidePostMenus(); ClearPostDescriptionFocus(); postPopup:Hide(); return
     end
+    SetPostRefusal(nil)                                 -- reopening the form is a new start
     local candidates=BuildWishlistCandidates(); local wl=candidates[1]
     -- Auto-detect class from echo catalog, then fall back to player's own class
     local selectedClass = ControllerInstance().InferBuildClass(
@@ -852,10 +1076,19 @@ function M.ShowPostBuild()
         local _, classToken = UnitClass("player")
         selectedClass = (classToken and classToken ~= "UNKNOWN") and tostring(classToken) or ""
     end
+    -- A Share whose local save failed gives its approved draft back unchanged.
+    local failedTitle, failedDescription, failedSource, failedClass
+    if type(ControllerInstance().FailedShareDraft) == "function" then
+        failedTitle, failedDescription, failedSource, failedClass =
+            ControllerInstance().FailedShareDraft()
+    end
+    if failedTitle then
+        wl, selectedClass = failedSource or wl, failedClass or selectedClass
+    end
     ControllerInstance().BeginPostDraft(wl, selectedClass)
-    postTitleBox:_NexusSetRawText(
-        (wl and wl.name and wl.name~="") and wl.name or "")
-    postDescBox:_NexusSetRawText("")
+    postTitleBox:_NexusSetRawText(failedTitle
+        or ((wl and wl.name and wl.name~="") and wl.name or ""))
+    postDescBox:_NexusSetRawText(failedDescription or "")
     postDescBox:SetCursorPosition(0)
     postPopup._postDescScroll:SetVerticalScroll(0)
     local displayWishlistName = wl and DisplayRemoteText(
@@ -926,13 +1159,15 @@ local function EnsureEditPopup()
 
     editLockText = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     editLockText:SetPoint("TOPLEFT",18,-190)
-    editLockText:SetSize(324,30)
+    -- Up to three lines of a 16 px face, above the action row.
+    editLockText:SetSize(324,52)
     editLockText:SetJustifyH("LEFT")
     editLockText:SetJustifyV("TOP")
     p._editLockText = editLockText
 
     editEchoBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
-    editEchoBtn:SetSize(210,22)
+    -- The two actions stay 10 px apart (they used to overlap by 4 px).
+    editEchoBtn:SetSize(202,22)
     editEchoBtn:SetPoint("BOTTOMLEFT",18,16)
     editEchoBtn:SetText("Use Active Wishlist Echoes")
     p._editEchoBtn = editEchoBtn
@@ -950,11 +1185,18 @@ local function EnsureEditPopup()
     end)
 
     local saveBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
-    saveBtn:SetSize(118,22); saveBtn:SetPoint("BOTTOMRIGHT",-18,16); saveBtn:SetText("Save Details")
+    saveBtn:SetSize(112,22); saveBtn:SetPoint("BOTTOMRIGHT",-18,16); saveBtn:SetText("Save Details")
     p._saveBtn = saveBtn
     saveBtn:SetScript("OnClick",function()
+        local description = editDescBox:_NexusRawText()
+        -- A stored description the box could not seed is unchanged while the
+        -- box stays empty: no description is submitted and the stored one is
+        -- kept. Text the owner types replaces it under the usual rules.
+        if p._nexusDescriptionUnseeded and description == "" then
+            description = nil
+        end
         if not ControllerInstance().UpdateEditDraft(
-            editTitleBox:_NexusRawText(), editDescBox:_NexusRawText()) then return end
+            editTitleBox:_NexusRawText(), description) then return end
         local ok, err, outcome = ControllerInstance().CommitEditDraft()
         if ok then print("|cff4dff80Nexus:|r " .. tostring(outcome and outcome.message or "Build details saved locally.")); ClearEditDescriptionFocus(); p:Hide(); M.Refresh()
         else print("|cffff6060Nexus:|r "..tostring(err)) end
@@ -992,11 +1234,16 @@ function M.ToggleEditPopup(id)
     end
     editTitleBox:_NexusSetRawText(prepared.title)
     editTitleBox:HighlightText(0, 0)
-    editDescBox:_NexusSetRawText(prepared.description)
+    -- The box holds 2000 bytes; a longer stored description is not seeded.
+    editPopup._nexusDescriptionUnseeded = editDescBox:_NexusSetRawText(
+        prepared.description) == nil and prepared.description ~= "" or nil
     editDescBox:SetCursorPosition(#editDescBox:GetText())
     editPopup._editDescScroll:SetVerticalScroll(0)
     editPopup:ClearAllPoints(); editPopup:SetPoint("CENTER")
     editPopup:Show()
+    if editPopup._nexusDescriptionUnseeded then
+        print("|cffffd200Nexus:|r The stored description is not shown here: the Edit dialog holds 2000 bytes. Save Details keeps it unless you type a new description.")
+    end
 end
 
 local function EnsureDetailPanel(parent)
@@ -1039,8 +1286,36 @@ local function EnsureDetailPanel(parent)
     p.author:SetSize(350,12)
     p.author:SetJustifyH("LEFT")
 
-    p.desc = p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    p.desc:SetPoint("TOPLEFT",10,-56)
+    -- The title and byline keep one line each; a shortened one is read in
+    -- full from this tooltip.
+    p.headerHit = CreateFrame("Frame", nil, p)
+    p.headerHit:SetPoint("TOPLEFT", p.title, "TOPLEFT")
+    p.headerHit:SetPoint("BOTTOMRIGHT", p.author, "BOTTOMRIGHT")
+    p.headerHit:EnableMouse(true)
+    p.headerHit:SetScript("OnEnter", function(self)
+        local title, author = p.title:GetText(), p.author:GetText()
+        local metrics = Nexus.LayoutMetrics
+        if not (metrics and (metrics.Shortened(p.title)
+            or metrics.Shortened(p.author))) then return end
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
+        GameTooltip:AddLine(tostring(title or ""), 1, 0.82, 0, true)
+        GameTooltip:AddLine(tostring(author or ""), 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    p.headerHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- Everything between the header and the action row scrolls in a
+    -- measured body (LayoutDetailPanel), so a short responsive panel keeps
+    -- the records and the Details! note inside it.
+    local bodyScroll = CreateFrame("ScrollFrame", "NexusCommunityDetailScroll", p,
+        "UIPanelScrollFrameTemplate")
+    bodyScroll.scrollBarHideable = 1
+    local body = CreateFrame("Frame", nil, bodyScroll)
+    body:SetSize(440, 1)
+    bodyScroll:SetScrollChild(body)
+    p.bodyScroll, p.body = bodyScroll, body
+
+    p.desc = body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     p.desc:SetSize(350,50)
     p.desc:SetJustifyH("LEFT")
     p.desc:SetJustifyV("TOP")
@@ -1048,14 +1323,12 @@ local function EnsureDetailPanel(parent)
     -- "Build Link" — a copyable URL field. The admin (or original author)
     -- can paste a URL (EbonBuilds page, video, sim link, etc.) and viewers
     -- get a box they can copy out in one click. Field is hidden when empty.
-    local linkLabel = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    linkLabel:SetPoint("TOPLEFT",10,-108)
+    local linkLabel = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     linkLabel:SetText("|cff888888DISCORD BUILD LINK|r")
     p.linkLabel = linkLabel
 
-    local linkBox = CreateFrame("EditBox",nil,p,"InputBoxTemplate")
+    local linkBox = CreateFrame("EditBox",nil,body,"InputBoxTemplate")
     linkBox:SetSize(382,18)
-    linkBox:SetPoint("TOPLEFT",10,-122)
     linkBox:SetAutoFocus(false)
     ConfigureSafeEditableText(linkBox, 2048, true)
     linkBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1074,7 +1347,7 @@ local function EnsureDetailPanel(parent)
     p.linkBox = linkBox
 
     -- Owner-only Save button for the link
-    local linkSaveBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
+    local linkSaveBtn = CreateFrame("Button",nil,body,"UIPanelButtonTemplate")
     linkSaveBtn:SetSize(72,18)
     linkSaveBtn:SetPoint("LEFT",linkBox,"RIGHT",8,0)
     linkSaveBtn:SetText("Save Link")
@@ -1102,58 +1375,52 @@ local function EnsureDetailPanel(parent)
     linkSaveBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
     p.linkSaveBtn = linkSaveBtn
 
-    p.echoLabel = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    p.echoLabel:SetPoint("TOPLEFT",10,-148)
+    p.echoLabel = body:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     p.echoLabel:SetText("Echoes:")
 
-    -- Locked echo row (permanent baseline, up to 6)
-    p.lockedLabel = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    p.lockedLabel:SetPoint("TOPLEFT",10,-150)
+    -- Locked echo row (permanent baseline): six icons; the label counts any
+    -- further locked rows
+    p.lockedLabel = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     p.lockedLabel:SetText("LOCKED ECHOES")
 
     p.lockedIcons = {}
     for i = 1, 6 do
-        local ic = p:CreateTexture(nil,"ARTWORK")
+        local ic = body:CreateTexture(nil,"ARTWORK")
         ic:SetSize(ECHO_ICON_SIZE+4, ECHO_ICON_SIZE+4)
-        ic:SetPoint("TOPLEFT", 10 + (i-1)*(ECHO_ICON_SIZE+6), -164)
         ic:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         ic:Hide()
         p.lockedIcons[i] = ic
     end
 
-    -- echo icon grid: up to 80 icons, 13 per row (shifted down 48px for locked row)
+    -- echo icon grid: up to 80 icons, as many columns as the body width holds
     p.echoIcons = {}
-    local COLS = 13
     for i = 1, 80 do
-        local col = (i-1) % COLS
-        local row = math.floor((i-1) / COLS)
-        local ic = p:CreateTexture(nil,"ARTWORK")
+        local ic = body:CreateTexture(nil,"ARTWORK")
         ic:SetSize(ECHO_ICON_SIZE, ECHO_ICON_SIZE)
-        ic:SetPoint("TOPLEFT", 10 + col*(ECHO_ICON_SIZE+2), -212 - row*(ECHO_ICON_SIZE+2))
         ic:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         ic:Hide()
         p.echoIcons[i] = ic
     end
 
-    p.missingText = p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    p.missingText:SetPoint("TOPLEFT",10,-378)
+    p.missingText = body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     p.missingText:SetSize(470,14)
     p.missingText:SetJustifyH("LEFT")
+    p.missingText:SetJustifyV("TOP")
 
     -- Compact record summary. Full rankings live in the dedicated Leaderboard.
-    p.recordsTitle = p:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
-    p.recordsTitle:SetPoint("TOPLEFT",10,-402)
+    p.recordsTitle = body:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+    p.recordsTitle:SetJustifyH("LEFT")
     p.recordsTitle:SetText("BEST RECORDS FOR THIS LOADOUT")
 
-    p.dummyRecord = p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    p.dummyRecord:SetPoint("TOPLEFT",10,-424)
+    p.dummyRecord = body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     p.dummyRecord:SetSize(470,16)
     p.dummyRecord:SetJustifyH("LEFT")
+    p.dummyRecord:SetJustifyV("TOP")
 
-    p.lkRecord = p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
-    p.lkRecord:SetPoint("TOPLEFT",10,-446)
+    p.lkRecord = body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
     p.lkRecord:SetSize(470,16)
     p.lkRecord:SetJustifyH("LEFT")
+    p.lkRecord:SetJustifyV("TOP")
 
     -- Legacy row widgets are retained but hidden for saved UI compatibility.
     -- DPS section: Training Dummy
@@ -1210,14 +1477,13 @@ local function EnsureDetailPanel(parent)
     for _, row in ipairs(p.lbLKRows) do row:Hide() end
 
     -- Details! availability note (shown once at bottom if not installed)
-    p.detailsNote = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    p.detailsNote:SetPoint("TOPLEFT",10,-500)
+    p.detailsNote = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     p.detailsNote:SetSize(470,12)
     p.detailsNote:SetJustifyH("LEFT")
+    p.detailsNote:SetJustifyV("TOP")
     p.detailsNote:SetText("|cff666666Install Details! damage meter to enable DPS tracking.|r")
 
-    p.editState = p:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    p.editState:SetPoint("TOPLEFT",10,-470)
+    p.editState = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     p.editState:SetSize(470,26)
     p.editState:SetJustifyH("LEFT")
     p.editState:SetJustifyV("TOP")
@@ -1389,24 +1655,93 @@ local function EnsureDetailPanel(parent)
     return p
 end
 
-local function RefreshDetailPanel(buildId)
+-- A selected build that cannot be shown gets an explicit state in place of
+-- the detail, never a blank panel: still loading, or why it is unavailable.
+local DETAIL_STATUS = {
+    pending={"Loading build details...",
+        "The build library is still being prepared. The selected build appears here when it is ready."},
+    unavailable={"Build not available",
+        "This build is not in your build library. It may have been removed, not received yet, or not accepted."},
+    invalid={"Build not available",
+        "The selected build record is invalid and cannot be shown."},
+    incomplete={"Build not available yet",
+        "The full Echo list for this build is still arriving."},
+}
+
+local function ShowDetailStatus(kind)
+    local p = detailPanel
+    if not p then return end
+    local status = p._nexusStatus
+    if not status then
+        status = CreateFrame("Frame", nil, p:GetParent())
+        status:SetAllPoints(p)
+        status:SetFrameLevel(p:GetFrameLevel())
+        pcall(function()
+            status:SetBackdrop({
+                bgFile="Interface\\Tooltips\\UI-Tooltip-Background",
+                edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",
+                tile=true, tileSize=16, edgeSize=12,
+                insets={left=3,right=3,top=3,bottom=3},
+            })
+            status:SetBackdropColor(0.04,0.04,0.06,0.95)
+        end)
+        status.title = status:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        status.title:SetPoint("TOPLEFT", 16, -16)
+        status.title:SetPoint("TOPRIGHT", -16, -16)
+        status.title:SetJustifyH("LEFT")
+        status.text = status:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        status.text:SetPoint("TOPLEFT", status.title, "BOTTOMLEFT", 0, -10)
+        status.text:SetPoint("TOPRIGHT", status.title, "BOTTOMRIGHT", 0, -10)
+        status.text:SetJustifyH("LEFT")
+        p._nexusStatus = status
+    end
+    local text = DETAIL_STATUS[kind] or DETAIL_STATUS.unavailable
+    status.kind = DETAIL_STATUS[kind] and kind or "unavailable"
+    status.title:SetText(text[1])
+    status.text:SetText(text[2])
+    p._nexusShownId = nil
+    p:Hide()
+    status:Show()
+end
+
+local function HideDetailStatus()
+    local status = detailPanel and detailPanel._nexusStatus
+    if status then status.kind = nil; status:Hide() end
+end
+
+-- listPending: the build list is not published yet, so an unavailable
+-- selected build is reported as loading (or keeps its shown detail).
+local function RefreshDetailPanel(buildId, listPending)
     if not detailPanel then return end
-    if buildId == nil then detailPanel:Hide(); return end
+    if buildId == nil then
+        detailPanel._nexusShownId = nil
+        detailPanel:Hide(); HideDetailStatus(); return
+    end
     local projection = EnsureCommunityProjection()
     local detail, build
     if projection then
-        local err
-        detail, err = projection.Detail(buildId, ProjectionContext())
+        local err, why
+        detail, err, why = projection.Detail(buildId, ProjectionContext())
         if not detail then
             if err then error(err) end
-            detailPanel:Hide()
+            if listPending and detailPanel:IsShown()
+                and detailPanel._nexusShownId == buildId then return end
+            ShowDetailStatus(listPending and "pending" or why or "unavailable")
             return
         end
         build = detail.build
     else
         build = LoadBuild(buildId)
     end
-    if not build then detailPanel:Hide(); return end
+    if not build then
+        ShowDetailStatus(listPending and "pending" or "unavailable")
+        return
+    end
+    HideDetailStatus()
+    if detailPanel._nexusShownId ~= buildId and detailPanel.bodyScroll then
+        detailPanel.bodyScroll:SetVerticalScroll(0)
+    end
+    detailPanel._nexusShownId = buildId
 
     local c = CLASS_COLOR[(build.class or ""):upper()] or {1,1,1}
     detailPanel.title:SetTextColor(c[1],c[2],c[3])
@@ -1420,8 +1755,13 @@ local function RefreshDetailPanel(buildId)
     detailPanel.author:SetText("by " .. displayAuthor)
     local displayDescription = build.displayDescription
         or DisplayRemoteText(build.description or "", 4000, true, true)
-    detailPanel.desc:SetText((displayDescription ~= "" and displayDescription)
-        or "|cff666666(no description)|r")
+    displayDescription = (displayDescription ~= "" and displayDescription)
+        or "|cff666666(no description)|r"
+    -- The byline carries no provenance text; the detail says it.
+    if build.publicIdentityVerified == false then
+        displayDescription = OWNER_NOT_ESTABLISHED .. "\n" .. displayDescription
+    end
+    detailPanel.desc:SetText(displayDescription)
 
     -- Link field: always show the box so anyone can copy; only show Save
     -- button for the build's owner. Hide label/box entirely when there's no
@@ -1435,10 +1775,22 @@ local function RefreshDetailPanel(buildId)
     end
     if detailPanel.linkBox then
         if hasLink or ownThis then
+            local linkBox = detailPanel.linkBox
+            local stored = build.link or ""
+            -- An unsaved owner edit of this same build's link survives a
+            -- refresh: the field still holds neither the link it was last
+            -- given nor the stored link. Another build, or a build this
+            -- character may no longer edit, gets the stored link.
+            local current = linkBox._nexusBoundBuildId == build.id
+                and linkBox:_NexusRawText() or nil
+            local draft = ownThis and current ~= nil
+                and current ~= linkBox._nexusSeededLink and current ~= stored
             detailPanel.linkLabel:Show()
-            detailPanel.linkBox:Show()
-            detailPanel.linkBox._nexusBoundBuildId = build.id
-            detailPanel.linkBox:_NexusSetRawText(build.link or "")
+            linkBox:Show()
+            linkBox._nexusBoundBuildId = build.id
+            if not draft then
+                linkBox._nexusSeededLink = linkBox:_NexusSetRawText(stored) or ""
+            end
             if ownThis then
                 detailPanel.linkSaveBtn:Show()
             else
@@ -1461,6 +1813,11 @@ local function RefreshDetailPanel(buildId)
     end
     if detailPanel.lockedIcons then
         if lockedEchoes and #lockedEchoes > 0 then
+            -- A record can hold more locked rows (occupied records) than the
+            -- six icons; the label counts the ones not drawn.
+            local more = #lockedEchoes - #detailPanel.lockedIcons
+            detailPanel.lockedLabel:SetText(more > 0
+                and ("LOCKED ECHOES  +" .. more .. " more locked") or "LOCKED ECHOES")
             detailPanel.lockedLabel:Show()
             detailPanel.echoLabel:Hide()
             for i, ic in ipairs(detailPanel.lockedIcons) do
@@ -1650,6 +2007,7 @@ local function RefreshDetailPanel(buildId)
         else detailPanel.detailsNote:Show() end
     end
 
+    LayoutDetailPanel(detailPanel)
     detailPanel:Show()
 end
 
@@ -1758,13 +2116,6 @@ local function GetCard(parent)
     end)
     card.addBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Retained for compatibility with older pooled rows; the whole card and
-    -- the explicit View button now perform the same clear action.
-    card.menuBtn = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
-    card.menuBtn:SetSize(1, 1)
-    card.menuBtn:SetPoint("BOTTOMRIGHT", -1, 1)
-    card.menuBtn:Hide()
-
     card:SetScript("OnEnter", function(self)
         if not self.buildId then return end
         pcall(function()
@@ -1793,7 +2144,7 @@ local function GetCard(parent)
         M.Refresh()
     end)
     if Nexus.Theme and Nexus.Theme.StyleVirtualRow then
-        Nexus.Theme.StyleVirtualRow(card, {card.addBtn, card.menuBtn})
+        Nexus.Theme.StyleVirtualRow(card, {card.addBtn})
     end
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.ApplyFontTree then
         Nexus.LayoutMetrics.ApplyFontTree(card,"normal")
@@ -2275,30 +2626,48 @@ local function EnsureFrame()
     StyleDropdownPanel(dropPanel)
     dropPanel:Hide()
 
-    qualifiedBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
-    qualifiedBtn:SetSize(112,22)
-    qualifiedBtn:SetPoint("LEFT",classDropBtn,"RIGHT",6,0)
+    -- The DPS-record qualifier: one check box with a fixed label. Checked
+    -- requires both records; unchecked imposes no DPS-record requirement.
+    -- The browsing scope stays on the All Shared / My Builds buttons. The
+    -- check always shows the saved filter (M.Refresh), never a guess.
+    local qualifiedBox = CreateFrame("Button",nil,frame)
+    qualifiedBox:SetSize(196,22)
+    qualifiedBox:SetPoint("LEFT",classDropBtn,"RIGHT",6,0)
+    frame._qualifiedBox = qualifiedBox
+    qualifiedBtn = CreateFrame("CheckButton",nil,qualifiedBox,"UICheckButtonTemplate")
+    qualifiedBtn:SetSize(22,22)
+    qualifiedBtn:SetPoint("LEFT",qualifiedBox,"LEFT",0,0)
     frame._qualifiedBtn = qualifiedBtn
-    qualifiedBtn:SetScript("OnClick",function()
+    local qualifiedLabel = qualifiedBox:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    qualifiedLabel:SetPoint("LEFT",qualifiedBtn,"RIGHT",2,0)
+    qualifiedLabel:SetJustifyH("LEFT")
+    qualifiedLabel:SetText("Require both DPS records")
+    frame._qualifiedLabel = qualifiedLabel
+    local function ToggleQualified()
         local filters = FilterSettings()
         ControllerInstance().SetFilter("qualifiedOnly",
             filters.qualifiedOnly == false)
         ControllerInstance().ClearSelection()
         CloseDropdowns()
         M.Refresh()
-    end)
-    qualifiedBtn:SetScript("OnEnter",function(self)
+    end
+    local function QualifiedTip(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Both DPS records",1,0.82,0.2)
-        GameTooltip:AddLine("Requires both Training Dummy and Lich King records. This is record availability, not a verdict on build quality. Turn off to include missing records.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine("Require both DPS records",1,0.82,0.2)
+        GameTooltip:AddLine("Checked: show only builds with both a Training Dummy and a Lich King record that this client has. Unchecked: no DPS-record requirement.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine("This is record availability, not proof of build quality, not verified outside the game, and not a sign that Sync has finished.",0.8,0.8,0.8,true)
         GameTooltip:Show()
-    end)
-    qualifiedBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    end
+    for _, control in ipairs({qualifiedBtn,qualifiedBox}) do
+        control:SetScript("OnClick",ToggleQualified)
+        control:SetScript("OnEnter",QualifiedTip)
+        control:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    end
 
     local sorts={{key="dps",label="Highest DPS"},{key="recent",label="Newest"},{key="title",label="Name"}}
     sortToggle = CreateFrame("Button",nil,frame)
     sortToggle:SetSize(126,22)
-    sortToggle:SetPoint("LEFT",qualifiedBtn,"RIGHT",6,0)
+    sortToggle:SetPoint("LEFT",frame._qualifiedBox,"RIGHT",6,0)
     frame._sortToggle = sortToggle
     StyleSelectorButton(sortToggle)
     sortPanel = CreateFrame("Frame","NexusBuildSortPanel",UIParent)
@@ -2554,6 +2923,18 @@ RenderSyncStatus = function(receiveCount)
     local syncStats = type(sync.Stats) == "function" and sync.Stats() or {}
     local preparing = syncStats.preparingRequest == true
     if preparing then syncStatusText:SetText("|cff7fd5ffPreparing sync data...|r") end
+    -- The latest Share of this session keeps its own line here, so its state
+    -- is still stated after the form or this window is closed and reopened.
+    local shareLine = ShareStatusLine()
+    if shareLine then
+        syncStatusText:SetText((syncStatusText:GetText() or "") .. "\n" .. shareLine)
+    end
+    -- A saved Off or Manual Sync mode is stated, with what it does.
+    local policy = Nexus.SyncModePolicy
+    local modeText = policy and type(policy.Text) == "function" and policy.Text() or nil
+    if modeText then
+        syncStatusText:SetText((syncStatusText:GetText() or "") .. "\n|cffffd100" .. modeText .. "|r")
+    end
     if syncBtn then syncBtn:SetText(preparing and "Preparing..."
         or receiving and "Listening..." or "Sync Now") end
 end
@@ -2643,6 +3024,11 @@ end
 ------------------------------------------------------------------------
 
 function M.Refresh()
+    -- An open Share form follows its Share when that settles, also when the
+    -- Community window is closed.
+    if postPopup and postPopup:IsShown() and postPopup._shareStatus then
+        postPopup._shareStatus:SetText(PostStatusText())
+    end
     if not frame or not frame:IsShown() then return end
     M.ApplyResponsiveLayout(false)
 
@@ -2658,8 +3044,7 @@ function M.Refresh()
         end
     end
     if qualifiedBtn then
-        qualifiedBtn:SetText(fs.qualifiedOnly == false
-            and "All Shared" or "Both DPS records")
+        qualifiedBtn:SetChecked(fs.qualifiedOnly ~= false)
     end
     if scopeBtn and myBuildsBtn then
         if fs.scope == "mine" then
@@ -2706,10 +3091,16 @@ function M.Refresh()
         and controller.HasPendingSavedLoadoutImport()
     if importPending then
         refreshDirty = true
+        -- The rows still shown are the last published ones, not the result
+        -- of the current filters.
+        if resultText then resultText:SetText("|cff7fd5ffUpdating results...|r") end
+        if frame._emptyState then frame._emptyState:Hide() end
+        frame._resultsStale = true
         viewDiagnostic.projectionPending = false
         viewDiagnostic.projectionError = false
         viewDiagnostic.projectionCurrent = false
         RenderSyncStatus()
+        RefreshDetailPanel(SelectedId(), true)
         return false, "pending"
     end
 
@@ -2721,10 +3112,18 @@ function M.Refresh()
     if type(builds) ~= "table" then
         if projectionError == "pending" then
             refreshDirty = true
+            if resultText then resultText:SetText("|cff7fd5ffUpdating results...|r") end
+            -- "No builds match the current ... filters" belongs to the last
+            -- published result, not to the filters now being prepared.
+            if frame._emptyState then frame._emptyState:Hide() end
+            -- Until the next publication (a scroll or resize re-binds the
+            -- last rows, but must not show their empty text again).
+            frame._resultsStale = true
             viewDiagnostic.projectionPending = true
             viewDiagnostic.projectionError = false
             viewDiagnostic.projectionCurrent = false
             RenderSyncStatus()
+            RefreshDetailPanel(SelectedId(), true)
             return false, "pending"
         end
         refreshDirty = true
@@ -2771,6 +3170,7 @@ function M.Refresh()
         if page > 1 then prevPageBtn:Enable() else prevPageBtn:Disable() end
         if page < pageCount then nextPageBtn:Enable() else nextPageBtn:Disable() end
     end
+    frame._resultsStale = false
     if resultText then
         local first = projectionSummary and projectionSummary.first or 0
         local last = projectionSummary and projectionSummary.last or #builds
@@ -2967,7 +3367,6 @@ function M.Refresh()
         card.addBtn:SetText("View")
         card.addBtn:SetSize(52,22)
         card.addBtn:Show()
-        card.menuBtn:Hide()
         card.record = nil
 
         yOffset = yOffset + rowHeight
@@ -2977,13 +3376,24 @@ function M.Refresh()
     if #builds == 0 then
         local total = projectionSummary and projectionSummary.total or 0
         if not projectionSummary then
-            for _ in pairs(Store()) do total=total+1 end
+            -- The bounded whole-collection read says whether it is complete;
+            -- an incomplete read is not a count of zero.
+            local map, complete = Store()
+            if complete then
+                for _ in pairs(map) do total=total+1 end
+            else
+                total = nil
+            end
         end
         local msg
-        msg = total == 0
-            and "No builds yet.\n\nPost a build from your active Echo Wishlist, or press Sync Now to find builds from other players."
-            or  "No builds match the current scope, class, DPS-record, or search filters."
-        if frame._emptyState then
+        if total == nil then
+            msg = "The build library could not be read completely. Try again shortly."
+        elseif total == 0 then
+            msg = "No builds yet.\n\nPost a build from your active Echo Wishlist, or press Sync Now to find builds from other players."
+        else
+            msg = "No builds match the current scope, class, DPS-record, or search filters."
+        end
+        if frame._emptyState and not frame._resultsStale then
             frame._emptyState:SetText(msg)
             frame._emptyState:Show()
         end
@@ -3069,11 +3479,6 @@ function M.Refresh()
     -- Detail panel
     RefreshDetailPanel(SelectedId())
 
-    -- Search placeholder visibility
-    if searchBox then
-        local lbl = searchBox:GetParent() and searchBox:GetParent().searchLabel
-        -- just handle via the text directly: show placeholder if empty
-    end
     viewDiagnostic.publishedAt = ClockNow()
     viewDiagnostic.publishedPage = math.max(1, math.floor(tonumber(
         projectionSummary and projectionSummary.page) or requestedPage))

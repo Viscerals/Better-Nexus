@@ -1,0 +1,213 @@
+# Saved-data formats 3 to 5 (Good Enough Nexus and earlier Better Nexus test builds)
+
+## Problem
+
+A tester on test.9033 reported "Saved format 5; Supported 2" after using Good Enough Nexus 1.96. This build writes settings format 2. Every saved format above 2 was treated as written by a newer version. Local reads and writes then used a temporary copy, and Orb Start refused with "Saved data was written by a newer Nexus version".
+
+Format 5 is not newer. The earlier Better Nexus test line (archived commit `58b815b`) wrote formats 3 to 5. Good Enough Nexus forked from that line and still writes format 5. The comparison reference is Good Enough Nexus v1.96.6, commit `7bd6b86f7a4ece4c819b2a229167b621da36a407`, `core/Store.lua` blob `f3f43e418850d369726ad21f1a051c57d6599429`. It is identical to the archived `58b815b` Store except for one line. This reference is not proof of the exact archive a tester used.
+
+## What changed
+
+| Step | Behavior |
+|---|---|
+| Classification | Saved format 3, 4 or 5 is accepted only when the data shows what those formats' migrations produce: `syncMode` is off, manual, automatic or absent; the community-retention numbers are whole numbers of 0 or more; the account ledger is a table (4 and up); and the ledger has no `name@unknown` rows (5). This build also requires, for format 5, string ledger keys, table ledger rows and at most 4096 ledger rows. |
+| Accepted ("known") | Local reads and writes are durable. The saved marker stays at its value; it is not lowered or raised. As for every profile this build opens, start-up also adds missing default settings keys and missing empty character sub-tables, and writes its own storage-migration receipt (`nexusStoreMigrations`). Before this change, none of that happened for formats 3 to 5. |
+| Not accepted ("unverified") | The data stays unchanged and read-only (see "Read-only saved data"). Messages name the saved format, the supported format and the first failing field. |
+| Format 6 and higher ("future") | Unchanged and read-only, as before (see "Read-only saved data"). |
+| Format 2, 1, 0 and unversioned (marker absent) | Unchanged behavior. |
+| Malformed marker | A marker that is present but not a finite whole number of 0 or more: fractions such as 6.5, negative values, NaN and infinities, every string (including a numeric string such as "5"), booleans, tables and other types. The data stays unchanged and read-only, like a future format: no default filling, stamping, conversion or character writes. The message names the marker's type and, for a number, boolean or short string, its value. This build and the older converter both refuse it. Treating numeric strings as malformed is an intentional tightening: test.9034 and earlier read "5" as 5. |
+
+The message "written by a newer Nexus version" is replaced by the real markers, for example: "Saved data format 6 is not supported. This build writes format 2 and reads formats 3 to 5 after a check. The data is kept unchanged and read-only."
+
+## Read-only saved data
+
+For an unverified format, a future format and a malformed marker, "read-only" covers the whole saved profile, not only its settings, character rows and ledger. From the build after test.9035 (the change for audit items AUD-01, AUD-02 and AUD-10):
+
+- **Nothing is written.** No key is added, replaced or removed anywhere in the saved data, at start-up, during play or at logout: no catalog bundle (`authorityBundle`), no storage migration receipt, no diagnostic or error history, no repair record, no panel, overlay, minimap or HUD placement, no filter or run status, and no conversion or cleanup. Those values live in session memory and are gone after a reload.
+- **Community data.** The Build Library is admitted from the saved data as it is and served for the session. Community writes (Share, received rows, removal and retention markers, maintenance) are refused with `SAVED_FORMAT_READ_ONLY`. The next session admits the saved data again, including rows the other version added meanwhile. An authority bundle that an earlier build wrote into such data is served and kept byte for byte; it is never rewritten.
+- **DPS records.** Read-only is not unreadable. Once the catalog has admitted the saved data, the session's DPS store is a detached copy of the saved DPS records in the current layout: the authority bundle's DPS data, or with no bundle the saved `dpsCapture`. The Leaderboard, DPS lookups and the Build Library's qualified view show them as before; nothing is written back, and received records are refused. Saved data the catalog refuses (a catalog schema this build does not know, or an invalid bundle) shows no DPS records. An occupied bundle without DPS data shows none (legacy input is not revived), and the older per-player leaderboard shape is not shown, as in a writable profile. Saved DPS data that is not a plain table graph within the session copy bound (65,536 tables and 12 levels: tens of thousands of rows in the current bundle layout, about 700 rows in the older layout that keeps each row's Echo list) is not shown, and the DPS debug log says so.
+- **Error history.** The saved error history is still listed. Errors of this session are added in session memory only.
+- **Settings.** The session runs with a validated copy of the saved settings. An automation permission (`autoPick`, `autoActivate`, `autoDisable`, `autoSave`, `autoBanish`, `autoReroll`, `autoFreeze`, `autoLockEchoes`, `communityRetentionEnabled`) is on only when its saved value is exactly `true`. `false`, an absent value and any other value are off; shipped defaults never switch one on. Other settings this build knows keep a valid saved value and otherwise use the default. Settings this build does not know (for example the other addon's Sync controls) are not used. A lever opt-out list that cannot be read turns lever automation off. The session Automation master switch still starts OFF and cannot override a permission that is off.
+- **Changes in the session.** The editor's locked-Echo switch, `/nexus reroll|freeze|currentlocks on|off`, `/nexus anchor` and the placement controls change this session only, and the switch and the commands say so. The saved data is not changed; a reload starts again from the saved values.
+- **Client auto-accept.** Start-up does not change the client's auto-accept option (`autoAcceptLoadoutEchoes`), because the previous value could not be saved to restore it later. Automation waits while that option is on, as it always has.
+
+Earlier builds (test.9033 and older, and up to the change above) wrote a catalog bundle and diagnostic keys into such data. What they wrote is kept as it is.
+
+## Rolling strategy setting and local roll record (experimental builds)
+
+- **Settings.** `rollingPolicy` (`"adaptive"` or `"released"`, default `"adaptive"`) and `rollTrace` (default `true`; recording is off only for an exact `false`). Neither authorizes an action. A missing value uses the default. In a read-only saved root a valid saved value is honored for the session and nothing is written. In a writable root an invalid saved `rollingPolicy` runs the released strategy and the status says `SELECTOR_UNKNOWN`. In a read-only root an invalid value is not copied into the session settings, so the session uses the default (`adaptive`) with no fallback reason.
+- **Record.** The key `rollTraceLog` holds at most 256 flat records (an array with the same head, tail and repair metadata as the other diagnostic histories, in `diagnosticMeta.histories.rollTrace`). It holds Echo ids, counts and observed offers only: no account, character or realm name, no Wishlist or build name, no chat. An older build ignores the key and keeps it. `/nexus logclear` leaves it alone; `/nexus trace clear` deletes it.
+- **Read-only saved data.** Nothing is written to the saved root. The session keeps its own record in session memory, like every other diagnostic history.
+
+Details: `docs/ADAPTIVE_ROLLING.md`.
+
+## Saved Build mirror description provenance (`generatedDescriptionWitness`)
+
+The Build Library mirror of a server Saved Build gets a generated description of its assigned Wishlist and progress. An owner edit marks the mirror (`userTitle`), and the Saved import then keeps the mirror's text. A mirror row can now carry one optional field, `generatedDescriptionWitness`: the exact description this build generated (or kept as generated), together with the `userTitle` the mirror carried when it was written.
+
+| Case | Behavior |
+|---|---|
+| New or unmarked mirror | The import writes the generated description and a witness. As before, the description follows the assignment. |
+| Title-only edit (Edit Build, description untouched) | The title is the owner's. When the description is known to be generated (an unmarked mirror, or a witness that matches), the witness is written again under the new title, so later imports keep describing the current progress. |
+| Save Link | Changes no text and leaves the witness as it is. |
+| Description edit | The owner's text is kept through later imports. The witness is removed; a later title-only edit does not bring it back. |
+| A mirror an earlier build marked (no witness, or one that no longer matches its title and description) | Its title and description are kept exactly, as before. A title-only edit adds no witness: its text is not guessed to be generated. |
+| An older build | The field is unknown to it: it keeps the field unchanged and never updates it. A description or an owner title (`userTitle`) that it changes or adds no longer matches the witness, so this build keeps that text as the owner's. |
+
+The field is an optional catalog V1 field: a string of at most 2048 bytes. A record with any other value is malformed, as for every V1 string field. Absent means that no provenance was recorded. The field is local: it is not in record summaries, Sync messages or any peer action, it is not part of the import's change signature, and it grants no ownership, verification, publication or permission. No catalog, schema, storage or protocol version changed.
+
+Every witness this build writes fits in the field. A witness is the title's length in decimal, `:`, the title (empty for an unmarked mirror) and a generated description. Only Edit Build records a witness under a new title. The import records one only under an empty title or under a title whose witness still matches. So the title is empty or an Edit Build title.
+
+| Part | At most (bytes) | Limit |
+|---|---|---|
+| Title length | 2 | Edit Build refuses a title over 80 bytes. |
+| `:` | 1 | |
+| Title | 80 | Edit Build. |
+| Fixed description text | 42 | `Assigned Wishlist: <name> - target progress (<progress>/<total>).` without the name and the two numbers. The other generated text, `No Wishlist assigned yet.`, is 25 bytes. |
+| Wishlist name | 1024 | The catalog limit of `destinationWishlistName`, which the same record carries. |
+| Progress and total | 16 + 16 | `destinationProgress` and `destinationTotal` are catalog integers of at most 2^53 - 1. |
+| Total | 1181 | |
+
+The writer also checks the 2048-byte limit, so it never writes a malformed record. A witness within these bounds never reaches that limit.
+
+A server Wishlist name can contain a literal `|`, and the generated description repeats that name. Edit Build applies the display-text rule (no literal `|`) only to a description the owner changed. A description re-submitted unchanged (Save Link, or a title-only edit) is kept exactly as stored. It must still pass the wire-text rule, which differs from the display-text rule only by allowing `|`. Displays double the `|`. A changed description that contains `|` is still refused, and the record is left unchanged. The title rule is unchanged: a server Saved Build name that contains `|` or is longer than 80 bytes still makes Edit Build and Save Link refuse. Only offline synthetic tests cover this (`saved_mirror_pipe_resubmit`, `saved_mirror_pipe_controls`).
+
+Limits: a description edit still keeps the title the edit saved, as before. A description that the owner retyped to exactly the generated text counts as unchanged. Only offline synthetic tests cover this (`saved_mirror_title_only_description`, `saved_mirror_description_provenance`); there is no native save and reload evidence.
+
+A stored description longer than the Edit dialog's 2000 bytes (the catalog field holds 4000) is not seeded into the dialog. A Save that leaves the description box empty submits no description, and Edit Build keeps the stored one unchanged under the catalog field's 4000 bytes and the wire-text rule; the dialog says so when it opens. Text the owner types replaces it under the 2000-byte display-text rule, as before. Deleting such a description is an explicit controller edit (`description = ""`). Only offline synthetic tests cover this (`batch_description_unseeded_edit`).
+
+## Locked rows: occupied records, and Saved Build mirrors
+
+The client mirrors each SS18 entry flagged locked as one record with its own locked stack, and the native journal's client-side lock gate compares the record count (not copies) with `GetMaximumPermanentEchoes`, which keeps its last positive value (CONTRACTS.md, Occupied locked records). Records of this build (DPS records, catalog records, received builds) can therefore hold more than six locked copies, for example five records holding 1, 1, 1, 3 and 1. Not established: one record per spell, every held copy in that record, or server enforcement of the record bound. The catalog holds a locked row to 120 copies and a record to its existing 256-row and 10000-copy ceilings. No field, schema, storage or protocol version changed.
+
+A Saved Build mirror keeps a row the server marks locked (`locked = 1`) in `lockedEchoes`, never as an ordinary copy. A slot that holds only locked rows forms no ordinary identity: its earlier mirror is kept unchanged instead of being retired. A removed slot still retires its mirror, and a malformed row still refuses the slot.
+
+| Case | Behavior |
+|---|---|
+| An older build (79 / 6 / 85 envelope) | It refuses a stored or received record with more than six locked copies (`SEMANTIC_ENVELOPE`), as it refused such a record before; a downgrade may therefore not load such records. An older peer refuses an inline payload with more than six locked copies and ignores a stated locked set. |
+| A Share | Unchanged: a shared plan keeps the authored envelope of 79 ordinary and six locked target copies (`LoadoutEvidence.PlanLimits`). |
+
+Only offline synthetic tests cover this; whether the server accepts a given combined count is not claimed.
+
+## Equal rolled contents and several retained designs
+
+A server mirror carries ordinary rows only, and the content-key bucket (`lockDesignTargetsBySlot[key]`) names no plan. A plan without its own design therefore reads that bucket only while every retained design of the same rolled contents agrees: the bucket, each stored assignment, the first-run plan and the removal history, compared by their canonical target token (CONTRACTS.md, "Equal rolled contents, several retained designs"). An empty bucket `{}` left by a build before W4 (`docs/W4_EMPTY_LOCK_BUCKETS.md`) is a zero-target design and counts like any other. No field, schema, storage or protocol version changed, and nothing is migrated.
+
+| Case | Behavior |
+|---|---|
+| Upgrade of a profile holding a design-less assignment whose content key has a bucket and a differing retained design (a W4 empty bucket included) | Earlier builds read it `ready` with the bucket's targets, also when the bucket was the plan's own design. It now reads `unavailable` with a note and AutoLock reads no targets, until the intended plan is assigned, restored or given targets. Both designs and the history are kept. |
+| Opening that plan in the Wishlist Editor | No locked target is filled in from the bucket, and the editor says so. Nothing is written until the player saves; the save keeps only the targets set there. |
+| Explicit reselection of the plain row (Journal or selector picker) | It carries a design only when exactly one retained design is attributable to the clicked name and contents, that plan resolves onto exactly the clicked row, and the bucket's design (an empty bucket included) is that design or the design of a valid plan of another name. A design that only the bucket holds is never carried. |
+| A selection whose identity moved to another row, whose mirror is missing, or that names only a slot number | No design is borrowed; the assignment stays `unavailable`. These are conservative refusals. |
+| A differing design that later leaves all retained data | The removal history keeps five records. Once the other design has left the bucket, the assignments, the first-run plan and that history, the plain plan reads the bucket again. This residual limit exists since the rule was added (f53f5ed), not since the 8c baseline; removing it needs durable per-plan design provenance, a saved-format change that is not made. |
+
+Only offline synthetic tests cover this (`batch_design_reassignment`, `journal_picker_layers`).
+
+## Upgrading from a build that kept the data read-only
+
+test.9033 and earlier kept formats 3 to 5 read-only. In that state the Store built no Store-data wrapper. The catalog still saved its data bundle, with an empty Store-data placeholder in it. test.9034 and test.9035 then refused that placeholder: start-up failed with `STORE_INVALID`, and the displayed reason had no further detail. This is reproduced on the exact sources: synthetic format-5 data started on test.9033 (`487eaa9`), then on test.9035 (`753e384`).
+
+From the build after test.9035:
+
+- **The empty placeholder is accepted as a first admission.** When the bundle holds exactly the empty placeholder and the saved format is an accepted 3 to 5, the Store builds its data wrapper as a first admission does. Start-up adds only the usual missing defaults; no saved value is changed or removed. Any other invalid wrapper still fails, and so does the placeholder for any other format. The placeholder stays in the saved bundle until a later catalog save replaces the bundle; until then each start-up builds the wrapper again in the same way, which changes nothing else.
+- **Start-up failures state their cause.** A failed start-up keeps its failure code (for example `STORE_INVALID`). `/nexus status` (and any command while start-up has failed) adds one line with the retained facts: stage, cause, detail, owner, a bounded one-line error, the selection row, and the saved-format verdict. These are session-only. Reading them binds, retries and writes nothing.
+
+## Older Nexus data next to your current data (`WishlistRealizerDB`)
+
+`WishlistRealizerDB` is a saved variable that `Nexus.toc` still declares for older data. Nexus does not know where a given profile's copy came from. When a profile holds current data and a separate, non-empty `WishlistRealizerDB`, start-up stops at `STORE_LEGACY_DISPOSITION_PENDING` with `LEGACY_DISPOSITION_REAUTH_REQUIRED` and the legacy class `FOREIGN_BLOCK`. Nexus does not guess which data is yours. It does not delete, import or merge anything. A receipt that an earlier start-up recorded (`nexusStoreMigrations.wishlistRealizerDB`, for example `decision = "noLegacy"`) is not permission to discard the older data.
+
+| Case | Behavior |
+|---|---|
+| No `WishlistRealizerDB` | Unchanged. |
+| `WishlistRealizerDB` is the current root (alias) | Unchanged. One verified nil write. |
+| Distinct, empty `WishlistRealizerDB` | Unchanged. Kept as it is; it grants nothing. |
+| No current data, a non-empty `WishlistRealizerDB` | Unchanged. It becomes the current root. |
+| Future, unverified or malformed saved format (read-only), invalid or non-plain current data | Unchanged. No recovery is offered: a read-only profile is read-only as a whole, so no key is added and nothing is released. |
+| Current data and a distinct, non-empty `WishlistRealizerDB` | Start-up stops, as before. **New:** the player can keep the current setup and preserve the older data, with an explicit confirmation. |
+
+### Keep my current setup and preserve the older data
+
+1. Type `/nexus legacy`. It reads and writes nothing. It shows what was found (tables, bytes) and a 12-character code that belongs to this exact older data.
+2. Type `/nexus legacy keep <code>` with that code.
+3. Type `/reload`. Nexus starts with the current setup. The session is not resumed in place.
+
+| Step of the confirmation | What it checks or does |
+|---|---|
+| Inputs | The legacy table, the current root, its authority bundle and its migration receipt are the same ones the offer was made for, and the legacy value has the same digest. Any difference is `INPUT_DRIFT`; type `/reload` and review again. |
+| Copy | The legacy value is copied in full, verified equal, and stored under `nexusLegacyPreservationV1.entries[<digest>]` in your saved data. This store is separate from the current data and non-authoritative. Sync, Wishlists, assignments, Community and the catalog never read it. |
+| Release | Only after the copy is verified, `WishlistRealizerDB` is released with one verified nil write. |
+| Rollback | If any later step fails, the call removes only what it added and leaves `WishlistRealizerDB` in place. |
+| Untouched | The current authority, characters, settings and the old receipt. |
+
+After you confirm, the older data is kept in the archive and `WishlistRealizerDB` is cleared. Another addon that reads that variable would find it empty. Nexus has no in-game command that puts it back.
+
+Refusals change nothing. `NO_OFFER`, `CODE_MISMATCH`, `INPUT_DRIFT`, `LEGACY_NOT_PRESERVABLE` (a metatable, a cycle, a shared table, a function, a non-finite number, a key that is not a string, number or boolean), `PRESERVATION_CAPACITY` (more than 16 levels, 65,536 tables, 16,384 bytes in one string, 256 bytes in one key, 4 MiB in all, 524,288 entries in all across every table, or four entries already stored), `RECEIPT_FUTURE` and `RECEIPT_MALFORMED` (a receipt from a newer build, or a malformed one), `ARCHIVE_MALFORMED`, `ARCHIVE_FUTURE`, `ARCHIVE_CONFLICT` (an entry with this digest holds a different value; entries are never overwritten), `PRESERVATION_FAILED` and `DISPOSITION_FAILED`. The answer to `/nexus legacy` names the bound or the value that blocked the copy. `ROLLBACK_INCOMPLETE` means a late failure could not put the older copy back: the verified copy stays in the archive, nothing is lost, and the player types `/reload`. The size shown with the code is the size of the data Nexus compared, not the size of the file. An equal entry left by an interrupted earlier attempt is reused, not duplicated.
+
+If the game stops before the saved data is written, the file still holds the refusal state. The same refusal returns and the same steps work again.
+
+Evidence limit: the offline tests round-trip synthetic data through serialized saved text. They are not a native game save and reload. Two assumptions need the game and are not tested: that WoW leaves a nil global out of the saved file, and that the serialized text used in the tests equals what WoW reloads.
+
+## Older DPS records (settings formats 0 to 2)
+
+A profile of an older release can hold DPS records in the older per-build map (`dpsCapture.leaderboard[fingerprint][category][player]`) or rows without a class. Start-up converts them once; the receipt is `legacyDataMigration` (storage version 2). In `b704660` that start-up had already moved the profile into the catalog bundle (`authorityBundle`), but the converter wrote its result only to the older location `NexusDB.dpsCapture`. After that move the Leaderboard and the other DPS readers read the bundle's DPS data, so the converted records were not shown.
+
+| Case | Behavior |
+|---|---|
+| First start-up of such a profile | The converter reads the bundle's DPS data and publishes its result there through the catalog's maintenance commit. The commit is refused if that data changed meanwhile (a received record, compaction, another publication); the converter then starts a new pass. The receipt says complete only after the catalog serves the committed result. Unknown keys, unknown categories and unknown row fields stay. What the converter cannot convert (for example a score that is not positive) stays in the bundle's DPS data at its key, unless a converted record now uses that key; the older map keeps only such rows and the parts the converter does not read. The converter neither creates nor writes the older location `NexusDB.dpsCapture`, which keeps the input as it was before the upgrade. |
+| A first start-up that ended before completion | The next start-up converts again from the bundle's DPS data as it is then. The receipt's partial staging is not reused. After 8 refused commits in one session the conversion stops without changing the DPS data and starts again at the next start-up. Until the receipt is complete, Nexus makes no other account-ledger writes. |
+| A profile converted by `b704660` | Applies when the receipt is complete, the bundle's DPS data still holds the older map, and the older location holds the converter's result (no older map, a `characterBest` table). Start-up merges the converted records of the older location into the bundle's DPS data once, through the same commit. A converted record is merged only when it is the same record (same score, time, loadout, player and build) as a row of the bundle's older map, read the way the converter reads it, or as that row's personal best. It is merged only where the bundle holds no stronger record, and always as a copy. A row of the older map leaves it only when the converted records account for all that the converter made of it: its character best (that same record, or a stronger converted record of the same character) and, for a row with verified ownership, the personal best of its loadout (that same record), whether the converter kept that row or a stronger loadout as the character best. Which character was logged in when `b704660` converted is not recorded, so this applies to every row with verified ownership. Every other row stays in the older map, which no DPS view shows; a record merged for it is still merged. When no row leaves the older map and every merged record is already in the bundle, nothing is written, so later start-ups change nothing. A changed source or a refused commit starts a new scan; after 8 attempts in one session the recovery stops without a write. The receipt and the older location are not written. |
+| No bundle, or a bundle whose DPS data is not a table | The conversion keeps its earlier behavior on the older location. |
+| Read-only saved data, or a receipt from a newer build | Nothing is converted, recovered or written. |
+
+A converted record is shown with the same checks as any other record. An older record without owner proof stays unverified: the conversion never marks a record verified.
+
+## Character rows
+
+Formats 3 to 5 keep each character's row under the plain character name (`chars["Name"]`). This build uses `chars["name@realm"]`. The first write for a character copies the plain-name row to `name@realm` only when ownership is established:
+
+- the character has no `name@realm` row yet;
+- exactly one plain-name key matches the name (no case variants, and no key with a `-Realm` suffix);
+- the account ledger lists this exact `name@realm`, and no other realm, for that name;
+- start-up has admitted the rows (the bounded cycle, alias and size checks passed).
+
+The copy does not change the original plain-name row, so the other addon can still read it (start-up may add missing empty sub-tables to it, as it does to every row). An existing `name@realm` row is never merged or replaced. Any other case is ambiguous: the plain-name row stays unchanged and unread, and the character starts with a new row, as a missing row always did. The copy records its source in `savedFormatCarry`.
+
+## Field comparison
+
+| Field (format 5 meaning) | In this build |
+|---|---|
+| `settingsVersion` = 5 | Kept as 5. |
+| `settings.syncMode`, `syncOnlyWhileResting`, `syncSuspendInCombat`, `syncSuspendedInstanceTypes`, `syncDirectExperimental` (Good Enough Nexus Sync controls) | Stored and kept unchanged. From the build after test.9034, `syncMode` Off and Manual are honored; the other controls are still **not applied**. See "Sync: stored versus effective" below. |
+| `settings.autoSave` (default off there, on here) | The saved value is kept. |
+| `settings.autoPick` (stored Take preference; same meaning in both addons) | Kept as saved. It is not the Automation master switch. |
+| Automation master switch (`autoEnabled`) | Not a saved setting in either addon. It is a session-only switch that starts OFF in every session and turns on only through the panel button or `/nexus auto`. No saved data can turn it on. |
+| `settings.autoFreeze`, `settings.autoReroll` (absent there) | Added with this build's defaults, as for every profile that lacks them. |
+| `settings.communityRetention*` | The shared keys are read with this build's limits. `MaxTotal`, `MaxPerClass` and `CharacterBest` are kept and not read. |
+| `accountCharacters` (`name@realm` rows) | Same key format; kept. This build does not add or update ledger rows for these formats. |
+| `chars["Name"]` rows | Copied with established ownership as described above; otherwise kept unread. |
+| `loadoutWishlists[slot]` = `{slot, key, name, echoes}` | Readable. If a Wishlist lists the same Echo in two separate rows, the two versions compute its key differently. That assignment is kept but is not used until it is assigned again. |
+| `lockDesignTargetsBySlot[key]` = `{[spellId]=true or replaced spellId}` | Readable, with the same key caveat. A plan without its own design reads it only while the retained designs of those rolled contents agree (see "Equal rolled contents and several retained designs"). |
+| `tomeTogglePending`, `flagDemotions`, `recordedPicks`, unknown fields | Carried unchanged. |
+| Account and DPS storage | The older account/DPS converter is not started for these formats. Its commit replaces those tables and keeps no archive. DPS storage is handled as in test.9033. |
+
+## Sync: stored versus effective
+
+| Good Enough Nexus setting (its meaning) | Stored in this build | Effective in this build |
+|---|---|---|
+| `syncMode` = `off` (no Sync traffic) | Kept | **Honored** from the build after test.9034 (test.9034 did not honor it). Nexus sends no Sync message of any kind: no requests, answers, Share sends, capability handshakes or `/nexus probe` whisper. Sync Now and Share say that the saved Sync mode is Off; a Share is saved locally and marked "not sent". Records already shared earlier are not withdrawn, and this is not network isolation: the client still receives. |
+| `syncMode` = `manual` (traffic only during a Sync the user starts) | Kept | **Honored** from the build after test.9034. Idle: no automatic login Sync, no answers to other players, no handshakes. Sync Now (`/nexus sync` or either Sync Now button) sends its own requests and follow-up fetches, only until that Sync ends, at its existing fixed lifetime (300 seconds at most); pending work does not extend it. A confirmed Share (also of an edited record) sends its summary without a separate Sync Now, and answers other players that fetch that record (its Echo list, and DPS records carrying that build) until the Share's own 120-second expiry. That expiry counts from when the Share was queued, not sent: a Share held back (for example by combat) leaves less time for these answers. `/nexus probe` is allowed. Other queued work is not released. Because handshakes are not answered, directed traffic uses the channel route. |
+| `syncMode` = `automatic` or absent | Kept | Unchanged automatic behavior. |
+| `syncOnlyWhileResting` (default on: Sync only in rest areas) | Kept | **Not honored.** Sync runs anywhere. |
+| `syncSuspendedInstanceTypes` (default: party, raid, pvp, arena, scenario) | Kept | **Not honored.** Sync runs in instances. |
+| `syncSuspendInCombat` (default on) | Kept | Not read. This build's Sync channel and addon traffic always waits during combat, and that wait cannot be switched off. The manual `/nexus probe` whisper does not wait. |
+| `syncDirectExperimental` | Kept | Not applicable: this build has no such transport. |
+
+The Build Library status line states an Off or Manual mode. The saved value is never rewritten; this build has no control to change it. Profiles in format 2, unversioned profiles and read-only formats keep automatic behavior, even if they store a `syncMode` value.
+
+## Limits
+
+- In formats 3 to 5 a plain-name row is shared by every character of that name on the account. A same-name character on another realm that used the row before the ledger existed (format 4), and has not logged in since, cannot be detected. The ledger then lists only this realm, and the copy goes ahead.
+- The format check result is kept for the session per saved table. A later change inside the settings or the ledger during the same session is not re-checked; this build writes neither the checked settings nor the ledger for these formats.
+- Up to test.9034, a malformed marker (for example 6.5) was read as unversioned and stamped 2. From the build after test.9034 it stays unchanged and read-only (see "Malformed marker").
+- The check is offline, with synthetic data built from the reference layout. It has no native evidence and no tester profile behind it.
+- Returning to the other addon later is not tested. Changes made here go to the `name@realm` row, which that addon does not read.

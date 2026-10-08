@@ -72,12 +72,12 @@ local function assertPlan(copies,where)
   if e.spellId==201172 and e.quality==0 and e.locked==false then rolled=rolled+e.stacks end
   if e.spellId==200767 and e.quality==0 and e.locked==true then permanent=permanent+e.stacks end
  end
- assert(rolled==copies and permanent==1,'saved first-run assignment preserves exact rolled copies and permanent design')
+ assert(rolled==copies and permanent==1,'saved first-run assignment preserves exact rolled copies and locked design')
  assert(NexusPanel:IsShown(),'main panel remains shown after the editor closes')
  Nexus.Panel.Refresh();Nexus.OrbPanel.Show()
  assert(Nexus.Panel._lastModel.progress.wishlistName==NAME,'main projection uses the edited first-run assignment')
  assert(NexusOrbPanel.snapshot.config.name==NAME,'Orb view agrees with main assignment')
- assert(NexusPanel.toLockText:GetText():find('Arcane Bond',1,true),'actual main permanent-target text survives')
+ assert(NexusPanel.toLockText:GetText():find('Arcane Bond',1,true),'actual main locked-target text survives')
  local s=Nexus.OrbRuntime.Status()
  assert(not s.running and not s.pending and s.spent==0 and s.reserved==0,'editing keeps Orb mode idle with zero exposure')
  button('Close'):Click()
@@ -87,7 +87,7 @@ journal();button('New Wishlist'):Click()
 catalog(201172):Click()
 local empty
 for _,f in ipairs(H.frames)do if f:IsVisible() and f.slotState=='empty' then empty=f;break end end
-assert(empty,'actual empty permanent-slot picker');empty:Click();catalog(200767):Click()
+assert(empty,'actual empty locked-Echo slot picker');empty:Click();catalog(200767):Click()
 local nameBox=assert(_G.NexusWishlistNameInput,'normal editor name input')
 nameBox:SetText(NAME)
 button('Create Wishlist'):Click()

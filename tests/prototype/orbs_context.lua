@@ -13,8 +13,8 @@ H.Offer();H.service.SelectPerk(410002);H.Result(410002,2)
 check(not M.Status().pending and H.Count('orb-spend')==calls,'passive exact operation can settle when original context is observable again')
 -- An incomplete permanent-role requirement is not treated as spendable progress.
 H.OrbPlan({{spellId=410002,quality=2,stacks=1},{spellId=410007,quality=2,stacks=1,locked=true}})
-local start,why=M.Prepare();check(not start and why:find('permanent',1,true),'cannot spend trying to manufacture permanent targets')
+local start,why=M.Prepare();check(not start and why:find('locked',1,true),'cannot spend trying to manufacture locked targets')
 H.OrbPlan({{spellId=410004,quality=3,stacks=1}});H.disabled[410004]=true
 check(not M.Prepare(),'currently disabled target blocks approval');H.disabled[410004]=false
 check(H.Count('orb-spend')==calls,'context/read-only tests never repeat spend')
-print('PASS Orb approval binding, session interruption and permanent-target eligibility checks='..checks)
+print('PASS Orb approval binding, session interruption and locked-target eligibility checks='..checks)

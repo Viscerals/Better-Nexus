@@ -1,5 +1,6 @@
 -- NATIVE06 boundary checks through the actual retained Share lifecycle.
 local S=dofile('tests/prototype/share_test_support.lua');local T=S.T
+T.SingleSlicePacing()
 local function Queued()
  local H,C=S.Boot();S.Incoming(H,C);H.combat=true;local first=S.Post('NEXUS-TEST-SEND-GUARDS');local id=first.id
  T.Until(H,function()return Nexus.CommunityBuilds.ShareStatus(id).localSaved end)

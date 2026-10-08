@@ -33,9 +33,14 @@ function Protocol.New(options)
         or (identity and identity.CanonicalOwnerKey)
     local P = {}
 
-    -- Issue #22: the 79/6/85 loadout envelope is owned by LoadoutEvidence and
-    -- reused here. It is separate from, and narrower than, the parser
-    -- ceiling `maxBuildEchoes`; neither limit substitutes for the other.
+    -- Issue #22: the loadout envelope is owned by LoadoutEvidence and reused
+    -- here. It is separate from the parser ceiling `maxBuildEchoes`; neither
+    -- limit substitutes for the other. A locked copy count is not a bound:
+    -- the native journal's client lock gate counts locked records against the
+    -- capacity, which no payload carries; a locked row is held to the 120-copy
+    -- per-row ceiling (NetworkEcho). The format is unchanged. Older peers
+    -- keep their own 79/6/85 envelope: they refuse inline locked copies above
+    -- six and ignore a stated set (docs/P1_7_LOCKED_ROLE_WIRE.md).
     local function SemanticLimits()
         local evidence = options.semanticLimits
             or (Nexus and Nexus.LoadoutEvidence
@@ -46,14 +51,14 @@ function Protocol.New(options)
         elseif type(evidence) == "table" then
             return evidence
         end
-        return {ordinary=79, locked=6, total=85}
+        return {ordinary=79, lockedRows=256, lockedRowStacks=120, total=10000}
     end
 
     local function WithinSemanticEnvelope(ordinary, locked)
         local limits = SemanticLimits()
         return ordinary <= (limits.ordinary or 79)
-            and locked <= (limits.locked or 6)
-            and ordinary + locked <= (limits.total or 85)
+            and (limits.locked == nil or locked <= limits.locked)
+            and ordinary + locked <= (limits.total or 10000)
     end
     P.SemanticLimits = SemanticLimits
 
@@ -148,7 +153,11 @@ function Protocol.New(options)
         return out
     end
 
-    function P.CompactEncode(build)
+    -- lockedRoles, optional: the complete locked set of this record, stated
+    -- only to a requester that advertised locked-role version 1
+    -- (docs/P1_7_LOCKED_ROLE_WIRE.md). A table (possibly empty) adds lv=1 and
+    -- the rows in `le`; nil keeps the legacy ordinary-only form.
+    function P.CompactEncode(build, lockedRoles)
         local echoes = {}
         for _, echo in ipairs(build.echoes or {}) do
             -- Slot 4 is optional. A trailing nil keeps ordinary Echoes on the
@@ -159,7 +168,7 @@ function Protocol.New(options)
                 echo.locked and 1 or nil,
             }
         end
-        return {
+        local payload = {
             id=build.id, t=build.title, a=build.author, o=build.ownerKey,
             c=build.class,
             m=tonumber(build.lastModified) or tonumber(build.postedAt) or 0,
@@ -170,6 +179,19 @@ function Protocol.New(options)
             lk=(type(build.link) == "string" and build.link ~= "")
                 and build.link or nil,
         }
+        if type(lockedRoles) == "table" then
+            payload.lv = 1
+            local rows = {}
+            for _, echo in ipairs(lockedRoles) do
+                rows[#rows + 1] = {
+                    tonumber(echo.spellId or echo.id),
+                    tonumber(echo.quality) or 0,
+                    math.max(1, tonumber(echo.stacks or echo.count) or 1),
+                }
+            end
+            if #rows > 0 then payload.le = rows end
+        end
+        return payload
     end
 
     function P.CompactDecode(data)
@@ -325,6 +347,39 @@ function Protocol.New(options)
             and EchoAliasesAgree(data.e, data.echoes)
     end
 
+    -- Locked-role payload version 1 (docs/P1_7_LOCKED_ROLE_WIRE.md).
+    -- Returns nil (roles unknown: no lv, or a later representation), the
+    -- complete locked rows and their copies, or false (malformed). A stated
+    -- set is held to the envelope's locked row ceiling (the parser ceiling of
+    -- an Echo list), not to a guessed capacity.
+    local function NetworkLockedRoles(data)
+        if data.lv == nil then
+            if data.le ~= nil then return false end
+            return nil
+        end
+        if data.lv ~= 1 then return nil end
+        local le = data.le
+        if le == nil or (type(le) == "table" and next(le) == nil) then
+            return {}, 0
+        end
+        local maxLockedRows = math.min(maxBuildEchoes or 256,
+            tonumber(SemanticLimits().lockedRows) or 256)
+        if not DenseArray(le, maxLockedRows) then return false end
+        local rows, copies = {}, 0
+        for index = 1, #le do
+            local row = le[index]
+            if type(row) ~= "table" or row[1] == nil or row[4] ~= nil then
+                return false
+            end
+            local valid, stacks, spellId, quality = NetworkEcho(row)
+            if not valid then return false end
+            copies = copies + stacks
+            rows[#rows + 1] = {spellId=spellId, quality=quality,
+                stacks=stacks, locked=true}
+        end
+        return rows, copies
+    end
+
     local unsupportedNetworkAuthority = {
         player=true,p=true,realm=true,r=true,claimedOwnerKey=true,
         relaySender=true,ownerVerified=true,isMine=true,
@@ -375,12 +430,25 @@ function Protocol.New(options)
             if lockedRole then lockedCopies = lockedCopies + stacks
             else ordinaryCopies = ordinaryCopies + stacks end
         end
-        -- Parser/resource safety never implies a valid loadout. Slot 4 is the
-        -- only role proof; missing role authority is never inferred locked.
+        -- Parser/resource safety never implies a valid loadout. Slot 4 or a
+        -- stated locked set (lv=1) is the only role proof; missing role
+        -- authority is never inferred locked.
         if not WithinSemanticEnvelope(ordinaryCopies, lockedCopies) then
             return nil
         end
-        return P.CompactDecode(data)
+        local lockedRoles, roleCopies = NetworkLockedRoles(data)
+        if lockedRoles == false then return nil end
+        if lockedRoles then
+            -- One representation per payload: a stated set never mixes with
+            -- inline slot-4 rows.
+            if lockedCopies > 0 then return nil end
+            if not WithinSemanticEnvelope(ordinaryCopies, roleCopies) then
+                return nil
+            end
+        end
+        local decoded = P.CompactDecode(data)
+        if decoded and lockedRoles then decoded.lockedRoles = lockedRoles end
+        return decoded
     end
 
     -- WLBI is a compact scalar summary, not a permissive JSON object.  Keep
@@ -422,7 +490,7 @@ function Protocol.New(options)
             or not ValidSummaryHash(data.h)
             or (data.lh ~= nil and not ValidSummaryHash(data.lh))
             or (data.n ~= nil and (not P.FiniteNumber(data.n)
-                or data.n < 0 or data.n > (SemanticLimits().total or 85)
+                or data.n < 0 or data.n > (SemanticLimits().total or 10000)
                 or data.n ~= math.floor(data.n)))
             or (data.x ~= nil and data.x ~= 1) then
             return nil, "schema"

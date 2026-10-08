@@ -28,7 +28,8 @@ Nexus.Nameplate = M
 local function FmtDps(dps)
     if not dps or dps <= 0 then return nil end
     if dps >= 1000000 then return string.format("%.2fM", dps / 1000000) end
-    return string.format("%dk", math.floor(dps / 1000))
+    if dps >= 1000 then return string.format("%dk", math.floor(dps / 1000)) end
+    return tostring(math.floor(dps))
 end
 
 local function OrdinalSuffix(n)
@@ -38,6 +39,10 @@ local function OrdinalSuffix(n)
     elseif m10 == 3 and m100 ~= 13 then return tostring(n) .. "rd"
     else return tostring(n) .. "th" end
 end
+
+-- Nexus's own badge line begins with this text. It is also the duplicate
+-- marker: a name or guild line that merely contains "Nexus" is not it.
+local BADGE = "|cff7fd5ffNexus user|r"
 
 local function IsCommunityAuthor(name)
     if not name or name == "" then return false end
@@ -75,18 +80,20 @@ local function AugmentUnitTooltip(tooltip)
 
     if not info and not isAuthor and not peerInfo then return end
 
-    -- Avoid duplicate augmentation if another tooltip event fires for the same unit.
-    local marker = "Nexus"
+    -- Avoid duplicate augmentation if another tooltip event fires for the same
+    -- unit: only the tooltip's current lines count, and only the badge marks
+    -- them, so a cleared and reused tooltip keeps nothing from its last unit.
     for i = 1, (tooltip.NumLines and tooltip:NumLines() or 0) do
         local fs = _G[(tooltip:GetName() or "GameTooltip") .. "TextLeft" .. i]
-        if fs and tostring(fs:GetText() or ""):find(marker, 1, true) then return end
+        local text = fs and tostring(fs:GetText() or "") or ""
+        if text:sub(1, #BADGE) == BADGE then return end
     end
 
     -- Badge line
     if peerInfo and peerInfo.version and peerInfo.version ~= "?" then
-        tooltip:AddLine("|cff7fd5ffNexus user|r  |cff888888v" .. tostring(peerInfo.version) .. "|r")
+        tooltip:AddLine(BADGE .. "  |cff888888v" .. tostring(peerInfo.version) .. "|r")
     else
-        tooltip:AddLine("|cff7fd5ffNexus user|r")
+        tooltip:AddLine(BADGE)
     end
 
     -- Rank / DPS line

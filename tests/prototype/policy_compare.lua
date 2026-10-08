@@ -32,7 +32,7 @@ local resources={
  {'freeze-banish',{trustworthy=true,banish=2,freeze=2,reroll=0},true,true,false},
  {'all',{trustworthy=true,banish=2,freeze=2,reroll=2},true,true,true},
 }
-local ownership={{'empty',{},{}},{'one-rolled',{[1001]=1},{}},{'rolled-and-permanent',{[1001]=1},{[1001]=1}},{'complete',{[1001]=2,[1002]=1},{}}}
+local ownership={{'empty',{},{}},{'one-rolled',{[1001]=1},{}},{'rolled-and-locked',{[1001]=1},{[1001]=1}},{'complete',{[1001]=2,[1002]=1},{}}}
 local function Battery()
  local lines,byKey={}, {}
  for _,board in ipairs(boards)do for _,horizon in ipairs(horizons)do for _,resource in ipairs(resources)do

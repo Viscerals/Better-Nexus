@@ -35,8 +35,17 @@ function Transport.New(options)
     local sendChat = assert(options.sendChat, "sendChat callback required")
     local addMessageFilter = assert(options.addMessageFilter,
         "addMessageFilter callback required")
+    -- Optional: registers a handler for a game event (not a chat message)
+    -- with the owner's event frame. Absent, events are not observed.
+    local listenEvent = type(options.listenEvent) == "function"
+        and options.listenEvent or nil
     local observe = type(options.observe) == "function"
         and options.observe or function() end
+    -- The saved Sync mode decision (core/SyncModePolicy.lua), asked before
+    -- work is admitted and again before a queued packet is submitted. Absent,
+    -- everything is permitted as before.
+    local permit = type(options.permit) == "function" and options.permit
+        or function() return true end
 
     local bulk, bulkHead, bulkTail = {}, 1, 0
     local control, controlHead, controlTail = {}, 1, 0
@@ -60,6 +69,7 @@ function Transport.New(options)
         "queueClass", "enqueuedAt", "expiresAt", "attempts",
         "chunkOrdinal", "chunkTotal", "category",
         "operationKind", "operationId", "operationVersion", "operationKey",
+        "manualGrant",
     }
     local controlPriority = {share=1,request=2,claim=3,control=4}
 
@@ -433,6 +443,18 @@ function Transport.New(options)
         return false, "sync queue full"
     end
 
+    -- Work the saved Sync mode refuses is never admitted, so no backlog can
+    -- wait behind the refusal and be released later.
+    local function RefuseByMode(metadata, chunks, queueClass)
+        local permitted, why = permit(metadata)
+        if permitted then return nil end
+        stats.modeRefused = (stats.modeRefused or 0) + 1
+        stats.admissionRejected = (stats.admissionRejected or 0) + 1
+        observe("queue_rejected", {outcome="sync mode",chunks=chunks or 1,
+            reason=tostring(why),queueClass=queueClass})
+        return why or "saved Sync mode refused"
+    end
+
     local function Admit(packet, isControl)
         if isControl then
             controlTail = controlTail + 1
@@ -450,6 +472,8 @@ function Transport.New(options)
 
     function T.Enqueue(payload, metadata)
         if not ValidatePayload(payload) then return false, "invalid packet" end
+        local refused = RefuseByMode(metadata, 1, "bulk")
+        if refused then return false, refused end
         -- A single-packet enqueue is packet-scoped. Some compatibility paths
         -- legitimately enqueue distinct chunks one at a time under one transfer
         -- ID; only an identical packet is a duplicate here.
@@ -481,6 +505,9 @@ function Transport.New(options)
                 return false, "invalid packet"
             end
         end
+        local refused = RefuseByMode(metadata, #payloads,
+            type(metadata) == "table" and metadata.queueClass or "bulk")
+        if refused then return false, refused end
         local isControl = type(metadata) == "table"
             and (metadata.queueClass == "control"
                 or metadata.queueClass == "share"
@@ -523,6 +550,9 @@ function Transport.New(options)
 
     function T.EnqueueControl(payload, metadata)
         if not ValidatePayload(payload) then return false, "invalid packet" end
+        local refused = RefuseByMode(metadata, 1,
+            type(metadata) == "table" and metadata.queueClass or "control")
+        if refused then return false, refused end
         local requestedClass = type(metadata) == "table"
             and tostring(metadata.queueClass or "control") or "control"
         local queueClass = requestedClass == "share" and "share"
@@ -658,7 +688,16 @@ function Transport.New(options)
             return false, text, ...
         end
         pcall(addMessageFilter, "CHAT_MSG_SYSTEM", QuietWaitNotice)
-        pcall(addMessageFilter, "UI_ERROR_MESSAGE", QuietWaitNotice)
+        -- A UI error is an event (3.3.5: the message is its first argument),
+        -- never a chat message: the client runs message filters only for
+        -- CHAT_MSG events, so a filter registered for it never ran. A frame
+        -- registered for the event sees it. The same attribution to a recent
+        -- attempt applies; the error itself is left to the game to show.
+        if listenEvent then
+            pcall(listenEvent, "UI_ERROR_MESSAGE", function(message)
+                T.NoteTransportNotice(message)
+            end)
+        end
     end
 
     local function Pop(isControl, selectedIndex)
@@ -854,6 +893,20 @@ function Transport.New(options)
         local packet, isControl, selectedIndex = SelectPacket(current, preparedShareOnly)
         if not packet then return end
 
+        -- Queued before the saved mode refused it (for example a mode change
+        -- by an existing control): end it through the existing dropped
+        -- handling with the mode as its reason. It is not held at the head,
+        -- where it would stall permitted work, and never released later.
+        local permitted, modeWhy = permit(packet.metadata)
+        if not permitted then
+            Pop(isControl, selectedIndex)
+            stats.modeDropped = (stats.modeDropped or 0) + 1
+            ObserveDropped(packet, {outcome="dropped",
+                reason=tostring(modeWhy or "saved Sync mode refused"),
+                attempts=packet.metadata.attempts,
+                queue=T.Snapshot().outbound})
+            return
+        end
         if type(options.canDispatch)=="function" then
             local allowed=options.canDispatch(packet.payload,packet.metadata)
             if allowed~=true then return end

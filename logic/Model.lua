@@ -73,14 +73,26 @@ end
 -- Permanent locked-Echo evidence
 ------------------------------------------------------------------------
 
+local function WholeNumber(value, minimum)
+    value = tonumber(value)
+    if not value or value ~= value or value < minimum or value >= math.huge
+        or value ~= math.floor(value) then return nil end
+    return value
+end
+
 -- One pure admission boundary for every consumer of GetLockedPerks-derived
--- authority. With a catalog, the supplied family projection must exactly
--- equal the family totals derived from canonical spell IDs. Without one,
--- callers receive only the validated defensive spell totals.
-function Model.LockedProjection(locked, catalog, maximumCopies)
+-- authority. Locked ownership is the held copies of OCCUPIED RECORDS: the
+-- adapter's trusted read already held its records to the live capacity (or
+-- the record ceiling) and each record to the per-record ceiling, so no copy
+-- count bounds it here and every copy is kept. The read must state its
+-- occupied records, one row per record, holding exactly its per-spell
+-- copies; occupancy is never inferred from distinct IDs or copies. With a
+-- catalog, the supplied family projection must exactly equal the family
+-- totals derived from canonical spell IDs. The result keeps the copies, the
+-- occupied count, the records and the live capacity the read was held to.
+function Model.LockedProjection(locked, catalog)
     if type(locked) ~= "table" or locked.synced ~= true
         or type(locked.bySpell) ~= "table" then return nil end
-    maximumCopies = tonumber(maximumCopies) or 6
     local bySpell, seen, total = {}, {}, 0
     for spellIdKey, countValue in pairs(locked.bySpell) do
         local spellId, copies = tonumber(spellIdKey), tonumber(countValue)
@@ -91,8 +103,29 @@ function Model.LockedProjection(locked, catalog, maximumCopies)
             or seen[spellId] then return nil end
         seen[spellId] = true
         total = total + copies
-        if total > maximumCopies then return nil end
         bySpell[spellId] = copies
+    end
+    local occupied = WholeNumber(locked.occupied, 0)
+    local rows = locked.records
+    if not occupied or type(rows) ~= "table" or #rows ~= occupied then
+        return nil
+    end
+    local records, recordsBySpell, held = {}, {}, {}
+    for index = 1, occupied do
+        local row = rows[index]
+        local spellId = type(row) == "table" and WholeNumber(row.spellId, 1)
+        local stacks = type(row) == "table" and WholeNumber(row.stacks, 1)
+        if not spellId or not stacks or not bySpell[spellId] then return nil end
+        records[index] = {spellId=spellId, stacks=stacks}
+        recordsBySpell[spellId] = (recordsBySpell[spellId] or 0) + 1
+        held[spellId] = (held[spellId] or 0) + stacks
+    end
+    for spellId, copies in pairs(bySpell) do
+        if held[spellId] ~= copies then return nil end
+    end
+    local capacity = locked.capacity ~= nil and WholeNumber(locked.capacity, 1)
+    if locked.capacity ~= nil and (not capacity or occupied > capacity) then
+        return nil
     end
 
     local byFamily = {}
@@ -114,7 +147,9 @@ function Model.LockedProjection(locked, catalog, maximumCopies)
             if tonumber(locked.byFamily[family]) ~= copies then return nil end
         end
     end
-    return {synced=true,bySpell=bySpell,byFamily=byFamily,total=total}
+    return {synced=true,bySpell=bySpell,byFamily=byFamily,total=total,
+        occupied=occupied,records=records,recordsBySpell=recordsBySpell,
+        capacity=capacity or nil}
 end
 
 ------------------------------------------------------------------------
@@ -597,196 +632,9 @@ function Model.Scarce(plan, owned, family)
     return ownedFam < targetStacks
 end
 
-------------------------------------------------------------------------
--- Free-slot support
-------------------------------------------------------------------------
-
--- Catalog rows still drawable in the two free slots: class-legal,
--- level-eligible, lever not disabled, not exhausted. Exhaustion here is
--- strictly per-spellId (an owned sibling quality does NOT remove this
--- row from the pool -- it only turns its Delta into a duplicate score).
--- params is optional; Delta defaults apply when omitted.
--- Deterministic output order (ascending spellId).
-function Model.Support(catalog, owned, level, disabledLevers, plan, params)
-    local out = {}
-    if type(catalog) ~= "table" or type(catalog.rows) ~= "table" then
-        return out
-    end
-    owned = type(owned) == "table" and owned or {}
-    local bySpell = type(owned.bySpell) == "table" and owned.bySpell or {}
-    level = tonumber(level) or 0
-    disabledLevers = type(disabledLevers) == "table" and disabledLevers or {}
-    local levers = type(catalog.levers) == "table" and catalog.levers or {}
-    local familyOf = type(catalog.familyOf) == "table"
-        and catalog.familyOf or {}
-    local playerMask = tonumber(catalog.playerMask) or 0
-
-    local ids = {}
-    for id, row in pairs(catalog.rows) do
-        if type(row) == "table" then ids[#ids + 1] = id end
-    end
-    table.sort(ids)
-
-    for i = 1, #ids do
-        local id = ids[i]
-        local row = catalog.rows[id]
-        local ok = Model.MaskMatch(row.classMask, playerMask)
-            and (tonumber(row.minLevel) or 0) <= level
-        if ok then
-            local lever = tonumber(row.requiredSpell) or 0
-            if lever ~= 0 and levers[lever] ~= nil
-                and disabledLevers[lever] then
-                ok = false
-            end
-        end
-        if ok then
-            local maxStack = tonumber(row.maxStack) or 1
-            if (tonumber(bySpell[id]) or 0) >= maxStack then ok = false end
-        end
-        if ok then
-            local family = familyOf[id]
-            if family == nil then family = "s" .. tostring(id) end
-            out[#out + 1] = {
-                spellId = id,
-                family = family,
-                quality = tonumber(row.quality) or 0,
-                value = Model.Delta(plan, owned, id, catalog, params),
-            }
-        end
-    end
-    return out
-end
-
-------------------------------------------------------------------------
--- Draw distribution (quantile-binned) and order statistics
--- (verbatim fork: EchoOptimizer/logic/Model.lua)
-------------------------------------------------------------------------
-
--- entries: array of { key = normName, prob = p, value = v }, probs sum to 1.
--- Values are floored at `floor` (default 0) for the distribution only:
--- a junk card on screen contributes ~nothing to "best offer", it is never
--- force-picked at its negative utility. Live decisions use true values.
-function Model.BuildDistribution(entries, nBins, floor)
-    nBins = nBins or 16
-    floor = floor or 0
-
-    local list = {}
-    for i = 1, #entries do
-        local e = entries[i]
-        if e.prob and e.prob > 0 then
-            list[#list + 1] = {
-                key = e.key, prob = e.prob,
-                value = e.value > floor and e.value or floor,
-            }
-        end
-    end
-    table.sort(list, function(a, b) return a.value < b.value end)
-
-    local x, p = {}, {}
-    local target = 1 / nBins
-    local accP, accPV = 0, 0
-    for i = 1, #list do
-        local e = list[i]
-        accP = accP + e.prob
-        accPV = accPV + e.prob * e.value
-        local isLast = (i == #list)
-        local nextDiffers = isLast or (list[i + 1].value > e.value)
-        -- Close the bin at the quantile boundary, but never split a tie
-        -- group across bins (keeps bin values exact for degenerate pools).
-        if (accP >= target and nextDiffers) or isLast then
-            x[#x + 1] = accPV / accP
-            p[#p + 1] = accP
-            accP, accPV = 0, 0
-        end
-    end
-
-    local F = {}
-    local c = 0
-    for i = 1, #x do
-        c = c + p[i]
-        F[i] = c
-    end
-    if #F > 0 then F[#F] = 1 end -- guard fp drift
-
-    local E1 = 0
-    for i = 1, #x do E1 = E1 + x[i] * p[i] end
-
-    return {
-        x = x, p = p, F = F, n = #x,
-        E1 = E1,
-        rawEntries = entries,
-        nBins = nBins, floor = floor,
-    }
-end
-
--- E[ best of k draws ]
-function Model.EmaxK(dist, k)
-    local ev = 0
-    local Fprev = 0
-    for i = 1, dist.n do
-        local Fi = dist.F[i]
-        ev = ev + dist.x[i] * (Fi ^ k - Fprev ^ k)
-        Fprev = Fi
-    end
-    return ev
-end
-
--- E[ max(c, best of k draws) ] for an arbitrary known value c.
-function Model.EmaxGivenK(dist, c, k)
-    local ev = 0
-    local Fc = 0
-    local Fprev = 0
-    for i = 1, dist.n do
-        local Fi = dist.F[i]
-        if dist.x[i] <= c then
-            Fc = Fi
-        else
-            ev = ev + dist.x[i] * (Fi ^ k - Fprev ^ k)
-        end
-        Fprev = Fi
-    end
-    return ev + c * (Fc ^ k)
-end
-
--- Distribution with one echo removed from the pool (banish preview).
-function Model.WithoutKey(dist, nk)
-    local kept, removed = {}, 0
-    for i = 1, #dist.rawEntries do
-        local e = dist.rawEntries[i]
-        if e.key == nk then
-            removed = removed + (e.prob or 0)
-        else
-            kept[#kept + 1] = e
-        end
-    end
-    if removed <= 0 or removed >= 1 then return dist end
-    local scale = 1 / (1 - removed)
-    local rescaled = {}
-    for i = 1, #kept do
-        rescaled[i] = { key = kept[i].key, prob = kept[i].prob * scale, value = kept[i].value }
-    end
-    return Model.BuildDistribution(rescaled, dist.nBins, dist.floor)
-end
-
-------------------------------------------------------------------------
--- Free-slot distribution
-------------------------------------------------------------------------
-
--- Uniform draw belief over the support (theta unmeasured: no quality
--- mix, no counts -- addendum C/M4). Keyed by spellId so WithoutKey
--- matches the per-spellId banish granularity. nil on empty support;
--- callers treat a nil distribution as E = 0.
-function Model.FreeDist(support)
-    if type(support) ~= "table" or #support == 0 then return nil end
-    local n = #support
-    local entries = {}
-    for i = 1, n do
-        local s = support[i]
-        entries[i] = {
-            key = s.spellId,
-            prob = 1 / n,
-            value = tonumber(s.value) or 0,
-        }
-    end
-    return Model.BuildDistribution(entries)
-end
+-- The free-slot support list (Model.Support) and the draw-distribution order
+-- statistics (BuildDistribution, EmaxK, EmaxGivenK, WithoutKey, FreeDist)
+-- fed only the historical scoring engine that logic/Policy.lua no longer
+-- carries. They live in the test-only
+-- tests/prototype/historical_model_support.lua for the policy adapter;
+-- nothing in the product reads them.

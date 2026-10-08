@@ -6,7 +6,7 @@ local function owned(n)
 end
 H.OrbPlan({{spellId=410002,quality=2,stacks=2},{spellId=410007,quality=2,stacks=1,locked=true}})
 owned(1);assert(M.SuggestSources())
-assert(not M.Status().config.sources['410007:2'],'B1: acquired future permanent copy must not be suggested')
+assert(not M.Status().config.sources['410007:2'],'B1: acquired future locked copy must not be suggested')
 assert(not M.SetSource('410007:2',1),'B1: manual approval cannot waive required-copy protection')
 assert(not M.Prepare() and H.Count('orb-spend')==0,'B1: no safe source means no approval or submission')
 -- One rolled copy and one future permanent copy require two separate copies.

@@ -193,7 +193,31 @@ function Identity.DisplaySafeText(value, maxBytes, allowEmpty, allowLineBreaks)
     return (value:gsub("|", "||"))
 end
 
-local function ValidPlayer(value)
+local function RealmKey(value, trustedLocal)
+    if type(value) ~= "string" then return nil end
+    if trustedLocal then value = value:gsub("%s+", "") end
+    if value == "" or #value > 96 or value:find("@", 1, true)
+        or value:sub(1, 1) == "-" or value:sub(-1) == "-"
+        or value:find("--", 1, true)
+        or not SafeSequence(value, false) then return nil end
+    for index = 1, #value do
+        local byte = value:byte(index)
+        if byte < 0x80 and not ((byte >= 0x30 and byte <= 0x39)
+            or (byte >= 0x41 and byte <= 0x5A)
+            or (byte >= 0x61 and byte <= 0x7A)
+            or byte == 0x27 or byte == 0x28 or byte == 0x29
+            or byte == 0x2D or byte == 0x5F) then
+            return nil
+        end
+    end
+    return AsciiLower(value)
+end
+
+-- A character name is strict. A realm may also carry parentheses, e.g.
+-- "Rogue-Lite (Live)", so a qualified sender is checked as two tokens split
+-- at the first hyphen (a realm keeps its own hyphens): the strict character
+-- grammar, then the one RealmKey grammar. Nothing is stripped or aliased.
+local function ValidCharacter(value)
     if type(value) ~= "string" or value == "" or #value > 80
         or value:find("@", 1, true) or not SafeSequence(value, false) then
         return false
@@ -215,6 +239,14 @@ local function ValidPlayer(value)
     return first >= 0x80 or (first >= 0x30 and first <= 0x39)
         or (first >= 0x41 and first <= 0x5A)
         or (first >= 0x61 and first <= 0x7A) or first == 0x5F
+end
+
+local function ValidPlayer(value)
+    if type(value) ~= "string" or #value > 80 then return false end
+    local hyphen = value:find("-", 1, true)
+    if not hyphen then return ValidCharacter(value) end
+    return ValidCharacter(value:sub(1, hyphen - 1))
+        and RealmKey(value:sub(hyphen + 1), false) ~= nil
 end
 
 function Identity.ValidPlayer(value)
@@ -247,26 +279,6 @@ function Identity.SameTransportSender(declared, actual)
     return Identity.SamePlayer(declared, actual)
 end
 
-local function RealmKey(value, trustedLocal)
-    if type(value) ~= "string" then return nil end
-    if trustedLocal then value = value:gsub("%s+", "") end
-    if value == "" or #value > 96 or value:find("@", 1, true)
-        or value:sub(1, 1) == "-" or value:sub(-1) == "-"
-        or value:find("--", 1, true)
-        or not SafeSequence(value, false) then return nil end
-    for index = 1, #value do
-        local byte = value:byte(index)
-        if byte < 0x80 and not ((byte >= 0x30 and byte <= 0x39)
-            or (byte >= 0x41 and byte <= 0x5A)
-            or (byte >= 0x61 and byte <= 0x7A)
-            or byte == 0x27 or byte == 0x28 or byte == 0x29
-            or byte == 0x2D or byte == 0x5F) then
-            return nil
-        end
-    end
-    return AsciiLower(value)
-end
-
 function Identity.OwnerKey(name, realm)
     local player = Identity.PlayerKey(name)
     local normalizedRealm = RealmKey(tostring(realm or "unknown"), true)
@@ -295,6 +307,35 @@ function Identity.CanonicalOwnerKey(value)
     end
     local player, normalizedRealm = Identity.PlayerKey(name), RealmKey(realm, false)
     return player and normalizedRealm and (player .. "@" .. normalizedRealm) or nil
+end
+
+-- Native Ebonhold channels are realm-local. The legacy client's actual game
+-- realm is independent of an optional addon shim which removes hyphens.
+-- Keep the two observed spellings distinct in every general wire/storage
+-- identity operation; this alias proof is available only with native context.
+function Identity.NativeChannelSender(name)
+    local realm = type(GetRealmName) == "function" and GetRealmName() or nil
+    local owner = type(realm) == "string" and Identity.OwnerKey(name, realm)
+    if not owner or owner:match("@unknown$") then return nil end
+    local sender = name .. "-" .. owner:match("@(.+)$")
+    return Identity.CanonicalOwnerFromTransport(sender) and sender or nil
+end
+
+function Identity.NativeChannelDpsOwnerSender(nativeSender, claimedOwner)
+    local actual = Identity.CanonicalOwnerFromTransport(nativeSender)
+    local owner = Identity.CanonicalOwnerKey(claimedOwner)
+    if not actual or not owner then return nativeSender end
+    if actual == owner then return nativeSender end
+    local name, realm = actual:match("^([^@]+)@(.+)$")
+    local claimedName, claimedRealm = owner:match("^([^@]+)@(.+)$")
+    local localSender = Identity.NativeChannelSender(name)
+    -- This exact, observed server alias is not punctuation normalization.
+    local aliases = { ["rogue-lite(live)"]=true, ["roguelite(live)"]=true }
+    if name == claimedName and aliases[realm] and aliases[claimedRealm]
+        and localSender and Identity.CanonicalOwnerFromTransport(localSender) == actual then
+        return name .. "-" .. claimedRealm
+    end
+    return nativeSender
 end
 
 function Identity.TransportOwns(ownerKey, actualSender)
@@ -443,10 +484,11 @@ local function VerifiedPublicLabel(record, field, ownerKey)
     return PublicBaseName(record, field) .. "-" .. tostring(realm or "unknown")
 end
 
-local function SafePublicToken(value, maxBytes)
-    return PublicTyped(value, maxBytes)
-end
-
+-- A record without an established owner shows its readable name (with the
+-- realm it states, where valid). The complete ambiguity/provenance tuple stays
+-- in publicIdentityKey (PublicRecordKey) and in the record's own fields; it
+-- is not printed in names. publicIdentityVerified=false lets a detail view
+-- say in plain words that the owner is not established.
 local function AmbiguousPublicLabel(record, field)
     local base = PublicBaseName(record, field)
     local raw = record[field]
@@ -458,16 +500,7 @@ local function AmbiguousPublicLabel(record, field)
             and Identity.OwnerKey(base, record.realm) and record.realm or nil
         if realm and realm:lower() ~= "unknown" then base = base .. "-" .. realm end
     end
-    local discriminator = table.concat({
-        SafePublicToken(record.id, 96),
-        SafePublicToken(record.buildId, 96),
-        SafePublicToken(raw, 80),
-        SafePublicToken(record.realm, 96),
-        SafePublicToken(record.ownerKey, 177),
-        SafePublicToken(record.claimedOwnerKey, 177),
-        SafePublicToken(record.relaySender, 80),
-    }, "|")
-    return base .. " (legacy/unverified " .. discriminator .. ")"
+    return base
 end
 
 function Identity.NewPublicPresentation(field, options)
@@ -510,6 +543,11 @@ function Identity.PresentPublicRecord(context, record)
             or "Unknown"
         if field == "author" then record.displayAuthor = displayLabel
         else record.displayPlayer = displayLabel end
+        -- The character name alone, as the record writes it (capitals and
+        -- accents kept), for views that show no realm in the name. Identity
+        -- stays in publicIdentityKey, ownerKey and realm.
+        record.displayName = Identity.DisplaySafeText(
+            PublicBaseName(record, field), 1024, false) or "Unknown"
     end
     if type(record.title) == "string" then
         record.displayTitle = Identity.DisplaySafeText(
@@ -526,8 +564,9 @@ end
 -- Apply one shared public presentation policy to an owned batch of snapshots.
 -- Ambiguous evidence is only shadowed from ordinary public rows when an exact
 -- verified owner with the same short name is already visible; the durable
--- source remains untouched. Distinct builds can opt out of shadowing while
--- still receiving collision-safe author labels.
+-- source remains untouched. Distinct builds can opt out of shadowing; their
+-- rows stay distinct by publicIdentityKey, even where two show the same
+-- readable author name.
 function Identity.PresentPublicRecords(rows, field, options)
     rows = type(rows) == "table" and rows or {}
     local context = Identity.NewPublicPresentation(field, options)
@@ -624,14 +663,13 @@ function Identity.CanAdoptSavedMirror(record, currentOwnerKey)
         and LocalOwnsLegacyEvidence(record, current)
 end
 
-function Identity.SanitizeText(value, maxBytes)
-    local ok, text = pcall(tostring, value)
-    text = ok and tostring(text or "") or "unprintable"
-    if not Identity.ValidUtf8(text) then return "invalid" end
-    text = text:gsub("[%c|]", " "):gsub("%s+", " ")
-        :gsub("^%s+", ""):gsub("%s+$", "")
-    if not SafeSequence(text, true) then return "invalid" end
-    local limit = tonumber(maxBytes) or 96
+-- The longest prefix of text within maxBytes that does not end inside a
+-- UTF-8 sequence: a character that crosses the cap is left out whole. Valid
+-- input always gives valid output. Input that is already invalid is cut by
+-- the same rule and is not repaired.
+function Identity.Utf8Prefix(text, maxBytes)
+    text = tostring(text or "")
+    local limit = math.max(0, math.floor(tonumber(maxBytes) or 0))
     if #text <= limit then return text end
     local start = limit
     while start > 0 and text:byte(start) >= 0x80
@@ -642,4 +680,14 @@ function Identity.SanitizeText(value, maxBytes)
     local last = start + width - 1 <= limit and start + width - 1
         or start - 1
     return text:sub(1, math.max(0, last))
+end
+
+function Identity.SanitizeText(value, maxBytes)
+    local ok, text = pcall(tostring, value)
+    text = ok and tostring(text or "") or "unprintable"
+    if not Identity.ValidUtf8(text) then return "invalid" end
+    text = text:gsub("[%c|]", " "):gsub("%s+", " ")
+        :gsub("^%s+", ""):gsub("%s+$", "")
+    if not SafeSequence(text, true) then return "invalid" end
+    return Identity.Utf8Prefix(text, tonumber(maxBytes) or 96)
 end

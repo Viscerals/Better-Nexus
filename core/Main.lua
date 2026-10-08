@@ -99,6 +99,14 @@ end
 
 Nexus.RetryAutoLock = RetryAutoLock
 
+-- Read-only: the automation runtime's own record of an automatic action that
+-- has no confirmed result ("submitted", "uncertain" or "expired"), or nil.
+-- It authorizes nothing; the Orb window uses it for wording only.
+function Nexus.PendingIntentState()
+    local runtime = Automation()
+    return runtime and runtime.PendingIntentState and runtime.PendingIntentState() or nil
+end
+
 -- Only disables the existing session master switch. It never enables actions.
 function Nexus.DisableOrdinaryAutomation()
     local runtime=Automation()
@@ -446,19 +454,33 @@ local function DisplayCall(callback, ...)
     return ok and value or nil
 end
 
+-- Inclusive sub-step timers inside hud.prepare (Performance paths
+-- hud.phase.*, aggregate-only). Nil while Performance is off or has no clock.
+local function HudPhaseBegin(name)
+    local performance = Nexus.Performance
+    return performance and performance.Begin and performance.Begin(name) or nil
+end
+local function HudPhaseFinish(name, startedAt)
+    local performance = startedAt ~= nil and Nexus.Performance
+    if performance and performance.Finish then performance.Finish(name, startedAt) end
+end
+
 -- Main owns every service read used by the adaptive HUD. Panel receives only
 -- this defensive display snapshot and never reaches back into data services
 -- while rendering it.
+-- `base` is always lastPanelInput: Main's private copy of the panel input,
+-- which nothing mutates, so it is read here without another copy. The view
+-- model takes its own snapshot of the complete input.
 local function BuildHudDisplayModel(base)
     local viewModel = EnsureMainViewModel and EnsureMainViewModel()
     if not viewModel then return type(base) == "table" and base or {} end
-    -- Preserve the old snapshot boundary: the panel input and each service
-    -- result are copied when read, before a later provider can mutate them.
-    local baseSnapshot = viewModel.Copy(type(base) == "table" and base or {})
+    local baseSnapshot = type(base) == "table" and base or {}
     local input = {base=baseSnapshot,status=StatusLine()}
+    local phaseStarted = HudPhaseBegin("hud.phase.assignment")
     local assignment=Adapter.AssignedWishlist and DisplayCall(Adapter.AssignedWishlist)
+    HudPhaseFinish("hud.phase.assignment", phaseStarted)
     if assignment then
-        input.assignment={state=assignment.state,note=assignment.note,name=assignment.name}
+        input.assignment={state=assignment.state,note=assignment.note,name=assignment.name,emptySlot=assignment.emptySlot}
     end
     if baseSnapshot.level == nil then
         input.level = DisplayCall(Adapter and Adapter.Level) or 0
@@ -477,6 +499,37 @@ local function BuildHudDisplayModel(base)
 
     local capture = Nexus.DpsCapture
     local player = UnitName and UnitName("player") or nil
+    local progress = type(baseSnapshot.progress) == "table"
+        and baseSnapshot.progress or {}
+    local echoes = type(progress.dpsEchoes) == "table" and progress.dpsEchoes or nil
+    phaseStarted = HudPhaseBegin("hud.phase.projection")
+    local projection = capture
+        and type(capture.GetSharedHudProjection) == "function"
+        and DisplayCall(capture.GetSharedHudProjection, player, echoes) or nil
+    HudPhaseFinish("hud.phase.projection", phaseStarted)
+    if type(projection) == "table" then
+        -- Detached, read-only records retained by DpsCapture for the current
+        -- DPS state; the view model copies them into its snapshot.
+        input.bestDps = projection.bestDps
+        input.performance = {dummy={},lk={}}
+        local performance = type(projection.performance) == "table"
+            and projection.performance or nil
+        if echoes and performance then
+            local dummy = performance.dummy or {}
+            local lk = performance.lk or {}
+            input.performance.dummy.personal = dummy.personal
+            input.performance.lk.personal = lk.personal
+            input.performance.dummy.global = dummy.global
+            input.performance.lk.global = lk.global
+        end
+        phaseStarted = HudPhaseBegin("hud.phase.view-model")
+        local model = viewModel.BuildHudDisplayModel(input)
+        HudPhaseFinish("hud.phase.view-model", phaseStarted)
+        return model
+    end
+    -- Compatibility path for injected facades without the projection. They
+    -- receive a copy of the Echo set, never Main's private panel input.
+    echoes = echoes and viewModel.Copy(echoes)
     input.bestDps = {
         dummy=viewModel.Copy(capture and DisplayCall(
             capture.GetCharacterBest, "dummy", player)),
@@ -484,9 +537,6 @@ local function BuildHudDisplayModel(base)
             capture.GetCharacterBest, "lk", player)),
         info=viewModel.Copy(capture and DisplayCall(capture.GetPlayerInfo, player)),
     }
-    local progress = type(baseSnapshot.progress) == "table"
-        and baseSnapshot.progress or {}
-    local echoes = type(progress.dpsEchoes) == "table" and progress.dpsEchoes or nil
     input.performance = {dummy={},lk={}}
     if capture and echoes then
         input.performance.dummy.personal = viewModel.Copy(DisplayCall(
@@ -564,7 +614,7 @@ end
 function Nexus.HudSnapshotStats()
     local viewModel = EnsureMainViewModel and EnsureMainViewModel()
     return viewModel and viewModel.Stats()
-        or {builds=0,refreshes=0,rebuilds=0,skipped=0}
+        or {builds=0,refreshes=0,rebuilds=0,skipped=0,copiedTables=0}
 end
 
 -- Renders the panel with just status + progress, no board cards. Used at
@@ -577,17 +627,27 @@ end
 local function RenderIdlePanel(plan, owned, slots, catalog, staticContext,
     lockedOverride)
     local settings = Store.Settings()
-    local okAuto = AutoAllowed()
-    RenderPanel({
+    local okAuto, autoWhy = AutoAllowed()
+    local runtime = Automation()
+    local auto = (runtime and runtime.AutoEnabled()) or false
+    local model = {
         status = StatusLine(),
         cards = {},
         recommendation = "",
         progress = BuildPanelProgress(plan, owned, slots, catalog,
             staticContext, lockedOverride),
         level = Adapter.Level(),
-        auto = (Automation() and Automation().AutoEnabled()) or false,
+        auto = auto,
+        paused = auto and not okAuto and autoWhy and tostring(autoWhy) or nil,
         version = Nexus.VERSION,
-    })
+    }
+    if Nexus.OrbGuidance then
+        model.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
+            model.progress, runtime and runtime.PendingIntentState and runtime.PendingIntentState(),
+            plan and not plan.advisorOnly,
+            {skipHorizon = runtime and runtime.WorldLeaving and runtime.WorldLeaving() or false}))
+    end
+    RenderPanel(model)
 end
 
 ------------------------------------------------------------------------
@@ -655,10 +715,19 @@ EnsureMainDiagnostics = function()
         getAutoEnabled=function() local r=Automation(); return r and r.AutoEnabled() or false end,
         getAutoLockTrace=function() local r=Automation(); return r and r.LastAutoLockTrace() or {at=0,lines={}} end,
         getAuditRunId=function() local r=Automation(); return r and r.AuditRunId() or 0 end,
-        getDatabase=function() return NexusDB end,
+        -- Only the run-status keys are read and cleared through these. A
+        -- read-only saved root keeps its own; the session's live in the Store
+        -- owner's session-only table.
+        getDatabase=function()
+            local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+            if type(writable) ~= "function" then return NexusDB end
+            return writable(nil, {"lastSaveRefusal", "lastSaveStatus", "auditRunCounter"})
+        end,
         ensureDatabase=function()
             NexusDB = NexusDB or {}
-            return NexusDB
+            local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+            if type(writable) ~= "function" then return NexusDB end
+            return writable(NexusDB, {"lastSaveRefusal", "lastSaveStatus", "auditRunCounter"})
         end,
         resetAuditState=function()
             local runtime=Automation(); if runtime then runtime.ResetAuditState() end
@@ -761,12 +830,18 @@ EH:RegisterEvent("PLAYER_REGEN_DISABLED")
 EH:RegisterEvent("PLAYER_REGEN_ENABLED")
 EH:SetScript("OnEvent", function(_, event, ...)
     if event=="PLAYER_ENTERING_WORLD" or event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_LOGOUT" then
-        if AutomationRuntime and AutomationRuntime.AutoEnabled() then AutomationRuntime.ToggleAuto()end
+        -- A loading screen inside this session keeps Auto selected and holds
+        -- actions; logout or an unclassified entry turns it OFF.
+        if AutomationRuntime and AutomationRuntime.OnWorldEvent(event)=="revoked" and Panel.SetAuto then
+            Panel.SetAuto(false)
+        end
     end
     local lifecycle = Lifecycle()
     if lifecycle then return lifecycle.OnEvent(event, ...) end
 end)
-EH:RegisterEvent("CHAT_MSG_WHISPER")
+-- CHAT_MSG_WHISPER is not registered here: no handler reads it (the addon
+-- whisper handshake is CHAT_MSG_ADDON in SyncWire's own frame), and the
+-- registration made every incoming whisper run this dispatcher for nothing.
 EH:SetScript("OnUpdate", function(_, elapsed)
     local lifecycle = Lifecycle()
     if lifecycle then return lifecycle.OnUpdate(elapsed) end
@@ -797,12 +872,65 @@ local function CommandFlags()
     end
 end
 
+-- One bounded line of the retained start-up failure facts, or nil.
+local function StartupFailureLine(status)
+    local f = type(status) == "table" and status.failure or nil
+    if type(f) ~= "table" then return nil end
+    local parts = {}
+    local function Add(label, value)
+        if value ~= nil then parts[#parts + 1] = label .. "=" .. tostring(value) end
+    end
+    Add("component", f.component); Add("phase", f.phase); Add("map", f.map)
+    Add("counter", f.counter)
+    if f.count then Add("count at refusal", tostring(f.count) .. " (limit " .. tostring(f.limit) .. "; counting stopped here)") end
+    if type(f.counted) == "table" and f.counted.builds ~= nil then
+        Add("different builds counted (at least)", f.counted.builds)
+    end
+    -- The maps are read in this order; counting stops in f.map, so the maps
+    -- after it were not read and have no count.
+    local counted = type(f.counted) == "table" and f.counted or nil
+    if counted then
+        local listed, stopped = {}, false
+        for _, entry in ipairs({{"overlay", "builds"}, {"bundled", "shipped"},
+            {"tombstone", "removal markers"}, {"barrier", "retention markers"}}) do
+            listed[#listed + 1] = entry[2] .. " "
+                .. (stopped and "not read" or tostring(counted[entry[1]] or 0))
+            if entry[1] == f.map then stopped = true end
+        end
+        Add("keys counted before the stop (at least)", table.concat(listed, ", "))
+    end
+    Add("source", f.source)
+    Add("stage", f.stage); Add("cause", f.cause); Add("detail", f.detail)
+    Add("owner", f.owner); Add("row", f.row); Add("legacy", f.legacyClass); Add("error", f.error)
+    if f.formatClass then
+        Add("saved format", tostring(f.formatClass)
+            .. (f.formatVersion and (" " .. tostring(f.formatVersion)) or "")
+            .. (f.formatField and (" (" .. tostring(f.formatField) .. ")") or ""))
+    end
+    if #parts == 0 then return nil end
+    return "Startup failure: " .. table.concat(parts, "; ")
+end
+
 local function CommandStatus()
     local startup=type(Nexus.StartupStatus)=="function" and Nexus.StartupStatus()
     if startup and startup.state~="ready" then
         Print(startup.state=="failed"
             and "Local controls ready; shared data preparation failed (see /nexus log errors)."
             or "Local controls ready; Community, Leaderboard and Sync are preparing in the background.")
+        local capacity = Nexus.LoadingStatus and type(Nexus.LoadingStatus.CapacityText)=="function"
+            and Nexus.LoadingStatus.CapacityText(startup) or nil
+        if capacity then Print(capacity) end
+        local line = StartupFailureLine(startup)
+        if line then Print(line) end
+    end
+    -- Capacity use of the admitted shared catalog and its saturation record
+    -- (read-only, the same lines the Copy summary carries).
+    local report = Nexus.SupportReport
+    if report and type(report.CatalogCapacityLines) == "function" then
+        local ok, lines = pcall(report.CatalogCapacityLines)
+        if ok and type(lines) == "table" then
+            for _, text in ipairs(lines) do Print((tostring(text):gsub("^%s+", ""))) end
+        end
     end
     local catalog = Adapter.Catalog()
     local wishlist = Adapter.Wishlist()
@@ -854,6 +982,7 @@ local function CommandStatus()
     end
     Print(string.format("OWNED this run: %d echoes (%s).", owned.distinct or 0,
         owned.synced and "synced" or "not synced yet"))
+    for _, line in ipairs(Nexus.RollingStatusLines and Nexus.RollingStatusLines() or {}) do Print(line) end
 end
 
 local function CommandWishlist()
@@ -986,21 +1115,53 @@ local function CommandErr()
     Print(latest and latest.message or ErrorText(Nexus.lastError))
 end
 
+-- `settings` is the Store owner's settings (Store.Settings). For a read-only
+-- saved root that is the session's own validated copy, so the change is real
+-- for this session and the reply says it is not saved.
 local function CommandAnchor(settings, argument)
+    local readOnly = Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+    local sessionOnly = type(readOnly) == "function" and readOnly()
+        and " for this session only (saved data is kept unchanged and read-only)" or ""
     if argument == "off" or argument == nil then
         settings.anchorSpellId = nil
-        Print("Adaptive Power preference cleared")
+        Print("Adaptive Power preference cleared" .. sessionOnly)
     else
         settings.anchorSpellId = tonumber(argument)
-        Print("Adaptive Power preference set to " .. tostring(settings.anchorSpellId))
+        Print("Adaptive Power preference set to " .. tostring(settings.anchorSpellId) .. sessionOnly)
     end
     RequestRecompute()
 end
 
+-- Rolling strategy and local recording lines (status page, /nexus policy,
+-- /nexus trace). Read-only; nothing here changes a setting.
+function Nexus.RollingStatusLines()
+    local lines = {}
+    local runtime = Automation()
+    local status = runtime and runtime.RollingPolicyStatus and runtime.RollingPolicyStatus()
+    if status then
+        local text = "rolling strategy: " .. tostring(status.inForce)
+        if status.changePending then
+            text = text .. " (selected: " .. tostring(status.requested) .. ", applies at the next safe action boundary)"
+        end
+        lines[#lines + 1] = text
+        lines[#lines + 1] = "rolling strategy last decision: " .. tostring(status.lastPolicy or "none")
+            .. (status.lastFallback and (" (fell back to the released policy: " .. tostring(status.lastFallback) .. ")") or "")
+    end
+    local recorder = Nexus.RollRecorder
+    local trace = recorder and recorder.Status and recorder.Status()
+    if trace then
+        lines[#lines + 1] = string.format("roll recording: %s, %s saved records (limit %s), %s failed, %s dropped",
+            trace.enabled and "on (local only)" or "off", tostring(trace.retained or 0), tostring(trace.cap or "?"),
+            tostring(trace.failed), tostring(trace.dropped))
+    end
+    return lines
+end
+
 local function CommandHelp()
     if Nexus.Help then Nexus.Help.Show() end
-    Print("Nexus help: /nexus help | editor | panel | status | loading | orbs")
+    Print("Nexus help: /nexus help | editor | panel | status | loading | orbs | policy | trace")
     Print("Rolling permissions: /nexus reroll on|off, /nexus freeze on|off. Automation is a separate switch.")
+    Print("Rolling strategy: /nexus policy adaptive|released. Local roll record: /nexus trace.")
 end
 
 EnsureMainCommands = function()
@@ -1018,14 +1179,131 @@ EnsureMainCommands = function()
             Print(status and status.state=="failed"
                 and ("Startup stopped: "..tostring(status.reason or "validation failed"))
                 or "Preparing local saved data; controls unlock after validation completes.")
+            local line = status and status.state=="failed" and StartupFailureLine(status)
+            if line then Print(line) end
+            if status and status.reason=="LEGACY_DISPOSITION_REAUTH_REQUIRED" then
+                local lifecycle=Lifecycle()
+                local recovery=lifecycle and lifecycle.LegacyRecoveryStatus and lifecycle.LegacyRecoveryStatus()
+                if recovery and recovery.state=="preserved" then
+                    Print("Older data is preserved. Type /reload to start Nexus with your current setup.")
+                elseif recovery and recovery.state=="waiting" then
+                    Print("Older saved data needs your decision. Type /nexus legacy to review it. Nothing is changed unless you confirm.")
+                end
+            end
         end,
         prepare=function() return Store.Settings() end,
         callbacks={
+            -- Explicit keep-current / preserve-legacy recovery. Answered before
+            -- the initialization gate (see MainCommands). The coordinator owns
+            -- every decision; this only words the result.
+            legacy=function(_,normalized)
+                local lifecycle=Lifecycle()
+                if not (lifecycle and lifecycle.LegacyRecoveryOffer) then
+                    Print("No older-data decision is waiting.")
+                    return
+                end
+                local code=normalized:match("^legacy%s+keep%s+(%S+)%s*$")
+                if normalized~="legacy" and not normalized:match("^legacy%s+keep%s*$") and not code then
+                    Print("Use /nexus legacy to review older saved data, then /nexus legacy keep <code>.")
+                    return
+                end
+                local result
+                if code then
+                    result=lifecycle.ConfirmLegacyRecovery(code)
+                else
+                    result=lifecycle.LegacyRecoveryOffer()
+                end
+                local state=result.state
+                if state=="notWaiting" then
+                    Print("No older-data decision is waiting.")
+                elseif state=="offer" then
+                    Print("Older saved data (WishlistRealizerDB) was found next to your current data. Your current setup is unchanged. Nothing is deleted, imported or merged.")
+                    Print(string.format("Found: %d tables, about %d bytes of data. Code: %s",
+                        tonumber(result.tables) or 0, tonumber(result.bytes) or 0, tostring(result.code)))
+                    Print("Confirming stores a complete copy in an archive inside your saved data and then clears WishlistRealizerDB. Another addon that reads that variable would find it empty.")
+                    Print("To keep your current setup and do this, type: /nexus legacy keep "..tostring(result.code))
+                    Print("Then type /reload.")
+                elseif state=="blocked" then
+                    Print("The older saved data cannot be kept automatically ("..tostring(result.reason)
+                        ..(result.detail and (": "..tostring(result.detail)) or "").."). Nothing was changed. Your current setup is unchanged.")
+                elseif state=="alreadyPreserved" or (state=="preserved" and not code) then
+                    Print("Older data is already preserved. Type /reload to start Nexus with your current setup.")
+                elseif state=="preserved" then
+                    Print("Older data preserved separately (code "..tostring(result.code).."). Your current setup is unchanged. Type /reload to start Nexus with it.")
+                else
+                    if result.reason=="ROLLBACK_INCOMPLETE" then
+                        Print("The older data is safe in the archive, but the older copy could not be put back (ROLLBACK_INCOMPLETE). Type /reload; nothing is lost.")
+                    else
+                        Print("Older data was not changed: "..tostring(result.reason)..".")
+                    end
+                    if result.reason=="INPUT_DRIFT" then
+                        Print("The saved data changed. Type /reload, then /nexus legacy again.")
+                    elseif result.reason=="NO_OFFER" or result.reason=="CODE_MISMATCH" then
+                        Print("Type /nexus legacy for the current code.")
+                    end
+                end
+            end,
             orbs=function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end,
+            report=function()
+                -- This command exists for a broken install, so it says
+                -- something even when its own view did not load.
+                if Nexus.SupportReportUI then
+                    Nexus.SupportReportUI.Show()
+                else
+                    print("|cffff6060Nexus:|r the support report view is not "
+                        .. "loaded. Reinstall the addon folder, or send the "
+                        .. "text of the error you are seeing.")
+                end
+            end,
             loading=function()
                 if Nexus.LoadingStatus then Nexus.LoadingStatus.Show() end
             end,
             auto=function() CommandAuto() end,
+            -- Rolling strategy selector. The saved setting is written at once;
+            -- the runtime applies it at the next safe action boundary.
+            policy=function(settings,_,value)
+                if value=="adaptive" or value=="released" then
+                    settings.rollingPolicy=value
+                    RequestRecompute()
+                    local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+                    local sessionOnly=type(readOnly)=="function" and readOnly()
+                        and " This session only: saved data is kept unchanged and read-only." or ""
+                    Print("Rolling strategy selected: "..value..". It applies at the next safe action boundary; no pending action is cleared or repeated."..sessionOnly)
+                elseif value~=nil then
+                    Print("Use /nexus policy adaptive|released")
+                end
+                for _,line in ipairs(Nexus.RollingStatusLines()) do Print(line) end
+                if value==nil then
+                    Print("adaptive = experimental strategy (default). released = the earlier strategy. See /nexus help.")
+                end
+            end,
+            -- Automatic local roll record: open it, switch it, or clear it.
+            trace=function(settings,_,value)
+                local recorder=Nexus.RollRecorder
+                if not recorder then Print("The roll recorder is not loaded.") return end
+                if value=="off" or value=="on" then
+                    settings.rollTrace=(value=="on")
+                    local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+                    local sessionOnly=type(readOnly)=="function" and readOnly()
+                        and " This session only: saved data is kept unchanged and read-only." or ""
+                    Print("Local roll recording is now "..value..". Nothing is ever sent from this computer."..sessionOnly)
+                elseif value=="clear" then
+                    local ok=Nexus.DiagnosticLogs and Nexus.DiagnosticLogs.Clear(recorder.HISTORY)
+                    Print(ok and "Local roll record cleared." or "The local roll record could not be cleared.")
+                elseif value~=nil then
+                    Print("Use /nexus trace, /nexus trace on|off|clear")
+                    return
+                end
+                for _,line in ipairs(Nexus.RollingStatusLines()) do Print(line) end
+                if value==nil then
+                    if Nexus.LogViewer then
+                        Nexus.LogViewer.Show("trace")
+                        Print("The Roll trace tab holds the report. Copy each page in order and send it privately, never in public.")
+                    else
+                        Print("log viewer unavailable")
+                    end
+                end
+            end,
             rollingOption=function(settings,_,argument)
                 if not argument or (argument.value~="on" and argument.value~="off") then
                     Print("Use /nexus reroll on|off, /nexus freeze on|off, or /nexus currentlocks on|off")
@@ -1035,11 +1313,14 @@ EnsureMainCommands = function()
                     or argument.option=="reroll" and "autoReroll" or "autoFreeze"
                 settings[key]=argument.value=="on"
                 RequestRecompute()
+                local readOnly=Nexus.MainInternals and Nexus.MainInternals.SavedRootReadOnlyV1
+                local sessionOnly=type(readOnly)=="function" and readOnly()
+                    and " This session only: saved data is kept unchanged and read-only." or ""
                 if argument.option=="currentlocks" then
-                    Print("Unmarked Wishlist permanent targets: " .. (argument.value=="on"
-                        and "suggest current matching permanent Echoes on opening/import."
-                        or "choose intended permanent targets manually.") .. " Existing confirmed plans are unchanged.")
-                else Print(argument.option .. " permission: " .. argument.value .. ". The master Automation switch remains separate.") end
+                    Print("Unmarked Wishlist locked targets: " .. (argument.value=="on"
+                        and "suggest current matching locked Echoes on opening/import."
+                        or "choose intended locked targets manually.") .. " Existing confirmed plans are unchanged." .. sessionOnly)
+                else Print(argument.option .. " permission: " .. argument.value .. ". The master Automation switch remains separate." .. sessionOnly) end
             end,
             prototype=function()
                 Print("Experimental Nexus: plan Wishlists, follow or automate Echo choices, refine with approved Orbs, share builds, and compare DPS. /nexus help explains each mode.")
@@ -1065,7 +1346,11 @@ EnsureMainCommands = function()
             end,
             probe=function(_, _, target)
                 if target ~= "" and Nexus.Sync and Nexus.Sync.SendStatusTo then
-                    pcall(Nexus.Sync.SendStatusTo, target)
+                    -- A saved Sync mode refusal is reported, never silent.
+                    local ok, first, second, third = pcall(Nexus.Sync.SendStatusTo, target)
+                    local why = ok and (first == false and second
+                        or first == true and second == false and third) or nil
+                    if why then Print(tostring(why)) end
                 end
             end,
             nameplate=function()

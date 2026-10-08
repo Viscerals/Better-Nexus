@@ -61,10 +61,46 @@ local NEUTRAL_CLASS_ICON = "Interface\\Icons\\INV_Misc_Note_01"
 local CLASS_ORDER = {"ALL","DEATHKNIGHT","DRUID","HUNTER","MAGE","PALADIN","PRIEST","ROGUE","SHAMAN","WARLOCK","WARRIOR"}
 local classFilter = "ALL"
 
+-- Shown in a detail view when the record's owner is not established (the
+-- name itself carries no provenance text). A statement about identity only:
+-- it says nothing about the record's Echoes, locked targets or DPS.
+local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity not established.|r"
+
 local function DisplayRemoteText(value, maxBytes, allowEmpty, allowLineBreaks)
     if type(Identity.DisplaySafeText) ~= "function" then return nil end
     return Identity.DisplaySafeText(
         value, maxBytes, allowEmpty, allowLineBreaks)
+end
+
+-- The main name of a row is the character name only, as the record writes
+-- it. Realm and owner stay in the row's identity fields and in its tooltip;
+-- nothing here selects, matches or pairs a record.
+local function RowName(row, build)
+    row = type(row) == "table" and row or {}
+    if type(row.displayName) == "string" and row.displayName ~= "" then
+        return row.displayName
+    end
+    local raw = row.player
+    if raw == nil and type(build) == "table" then raw = build.author end
+    local text = raw ~= nil and tostring(raw) or "?"
+    return DisplayRemoteText(Identity.DisplayPlayer(text) or text,
+        1024, false) or "Unknown"
+end
+
+-- Tooltip lines that tell same-name characters apart. A realm is shown as
+-- verified only for an established owner; any other realm is only stated.
+local function IdentityLines(row)
+    row = type(row) == "table" and row or {}
+    local owner = Identity.VerifiedOwnerKey(row)
+    local realm = owner and owner:match("@(.+)$")
+    if realm then
+        return {"Realm: " .. (DisplayRemoteText(realm, 96, false) or "unknown"),
+            "Owner verified"}
+    end
+    local stated = type(row.realm) == "string" and row.realm ~= ""
+        and DisplayRemoteText(row.realm, 96, false) or nil
+    return {stated and ("Realm stated: " .. stated) or "Realm not stated",
+        "Owner identity not established"}
 end
 
 -- Category, class, search, and explicit Show requests are user work. They
@@ -120,9 +156,10 @@ local function DurationText(v)
     return string.format("%d:%02d", math.floor(v / 60), math.floor(v % 60))
 end
 
-local function TypedIdentity(value)
-    return type(value) .. ":" .. tostring(value or "")
-end
+-- The projection indexes its published rows (rowByKey) with this encoding.
+-- The selection key must use the same one, or no publication finds the
+-- selected row.
+local TypedIdentity = Identity.TypedIdentity
 
 local function EvidenceIdentityKey(row)
     if type(row) ~= "table" then return "invalid" end
@@ -225,6 +262,7 @@ local function CombinedRows()
             local ownerKey = Identity.VerifiedOwnerKey(lrow)
             out[#out+1] = {
                 player=lrow.player,displayPlayer=lrow.displayPlayer,
+                displayName=lrow.displayName,
                 publicIdentityKey=lrow.publicIdentityKey,
                 publicIdentityVerified=lrow.publicIdentityVerified,
                 dps=pair.bestDps,bestDps=pair.bestDps,average=avg,
@@ -351,29 +389,49 @@ local function GetRow(parent)
     local r = table.remove(rowPool)
     if r then r:SetParent(parent); r:Show(); return r end
     r = CreateFrame("Button",nil,parent); virtualStats.created=virtualStats.created+1; r:SetHeight(ROW_H); r:EnableMouse(true); SetBackdrop(r,0.80)
-    r.rank=r:CreateFontString(nil,"OVERLAY","GameFontNormal"); r.rank:SetPoint("LEFT",8,0); r.rank:SetSize(30,14); r.rank:SetJustifyH("CENTER")
+    -- Each line box is a full line (17 px) also for a taller replacement face;
+    -- the upper and lower lines of a row meet without overlapping.
+    r.rank=r:CreateFontString(nil,"OVERLAY","GameFontNormal"); r.rank:SetPoint("LEFT",8,0); r.rank:SetSize(30,17); r.rank:SetJustifyH("CENTER")
     r.icon=r:CreateTexture(nil,"ARTWORK"); r.icon:SetSize(26,26); r.icon:SetPoint("LEFT",44,0)
-    r.player=r:CreateFontString(nil,"OVERLAY","GameFontHighlight"); r.player:SetPoint("LEFT",80,7); r.player:SetSize(190,14); r.player:SetJustifyH("LEFT")
-    r.build=r:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); r.build:SetPoint("LEFT",80,-9); r.build:SetSize(275,13); r.build:SetJustifyH("LEFT")
-    r.extra=r:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); r.extra:SetPoint("RIGHT",-12,-9); r.extra:SetSize(205,13); r.extra:SetJustifyH("RIGHT")
-    r.dps=r:CreateFontString(nil,"OVERLAY","GameFontNormal"); r.dps:SetPoint("RIGHT",-12,7); r.dps:SetSize(150,14); r.dps:SetJustifyH("RIGHT")
+    r.player=r:CreateFontString(nil,"OVERLAY","GameFontHighlight"); r.player:SetPoint("LEFT",80,8); r.player:SetSize(190,17); r.player:SetJustifyH("LEFT")
+    r.build=r:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); r.build:SetPoint("LEFT",80,-9); r.build:SetSize(275,17); r.build:SetJustifyH("LEFT")
+    r.extra=r:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); r.extra:SetPoint("RIGHT",-12,-9); r.extra:SetSize(205,17); r.extra:SetJustifyH("RIGHT")
+    r.dps=r:CreateFontString(nil,"OVERLAY","GameFontNormal"); r.dps:SetPoint("RIGHT",-12,8); r.dps:SetSize(150,17); r.dps:SetJustifyH("RIGHT")
     r.sel=r:CreateTexture(nil,"BACKGROUND"); r.sel:SetAllPoints(r); r.sel:SetTexture(0.15,0.55,0.9,0.16); r.sel:Hide()
     r:SetScript("OnEnter",function(self)
         pcall(function() self:SetBackdropColor(0.08,0.09,0.14,0.96) end)
-        if self.classUnavailable and GameTooltip then
+        if GameTooltip and self.data then
+            local row = self.data
             pcall(function()
                 GameTooltip:SetOwner(self,"ANCHOR_LEFT")
-                GameTooltip:SetText("Class not supplied")
+                GameTooltip:SetText(RowName(row),1,1,1)
+                for _, line in ipairs(IdentityLines(row)) do
+                    GameTooltip:AddLine(line,0.75,0.75,0.75)
+                end
+                if self.classUnavailable then
+                    GameTooltip:AddLine("Class not supplied",0.75,0.75,0.75)
+                end
                 GameTooltip:Show()
             end)
+            self.tooltipShown = true
         end
     end)
+    local function HideOwnTooltip(self)
+        if self.tooltipShown and GameTooltip then
+            pcall(function()
+                if not GameTooltip.IsOwned or GameTooltip:IsOwned(self) then
+                    GameTooltip:Hide()
+                end
+            end)
+        end
+        self.tooltipShown = nil
+    end
     r:SetScript("OnLeave",function(self)
         pcall(function() self:SetBackdropColor(0.025,0.025,0.04,0.80) end)
-        if self.classUnavailable and GameTooltip then
-            pcall(function() GameTooltip:Hide() end)
-        end
+        HideOwnTooltip(self)
     end)
+    -- A pooled row may be hidden and rebound under the pointer.
+    r:SetScript("OnHide",HideOwnTooltip)
     r:SetScript("OnClick",function(self) SelectRow(self.data) end)
     if Nexus.Theme and Nexus.Theme.StyleVirtualRow then Nexus.Theme.StyleVirtualRow(r) end
     return r
@@ -450,6 +508,37 @@ local function ResolveCopyLocked(row, dummy, lk, ordinary)
         dummyRecord=dummy,lkRecord=lk,copyAuthorityRequired=true,
         currentProvenance=provenanceOrReason,
     })
+end
+
+-- Copy needs the current build's own locked roles (strict authority above).
+-- A remote build of a verified owner whose roles were never received offers
+-- one deliberate "Request full build" action instead. Known roles, a local
+-- build, historical record rows and unverified identities never qualify.
+local function RolesRequestTarget(row)
+    local build = CurrentCopyBuild(row)
+    if type(build) ~= "table" or build.isMine == true
+        or build.lockedAuthorityProven == true then return nil end
+    if type(build.lockedEchoes) == "table" and #build.lockedEchoes > 0 then
+        return nil
+    end
+    for _, echo in ipairs(type(build.echoes) == "table" and build.echoes or {}) do
+        if type(echo) == "table" and echo.locked then return nil end
+    end
+    return build.id
+end
+
+local function RolesRequestText(state, reason, name)
+    if state == "pending" then
+        return "Requested the full build from " .. name
+            .. ". Waiting for the owner's reply..."
+    elseif state == "timeout" then
+        return "No reply with the locked Echo roles arrived. The owner may be"
+            .. " offline, or their Sync may be Off or Manual. You can request again."
+    elseif state == "offline" or state == "refused" then
+        return "Request not sent: " .. tostring(reason or "unavailable") .. "."
+    end
+    return "Copy unavailable: the locked Echo roles of this build were not"
+        .. " received. Request full build asks the owner for them."
 end
 
 local function RecordEvidenceParts(parts, label, row)
@@ -675,33 +764,151 @@ local function ResolveOpenBuildId(row)
     return nil,"exact build identity is unavailable"
 end
 
+local RenderDetail
+
+-- Detail geometry: a fixed heading, the status text and actions fixed at the
+-- bottom, and between them a scrolled body exactly as tall as its measured
+-- content. The status wraps in full; only past its cap (a share of the panel)
+-- is it shortened, and then its tooltip carries the complete text.
+local function LayoutDetail()
+    local metrics = Nexus.LayoutMetrics
+    if not (detail and detail.body and metrics) then return end
+    local width = math.floor(tonumber(detail:GetWidth()) or 335)
+    local height = math.floor(tonumber(detail:GetHeight()) or 520)
+    local inner = width - 30
+    local actionTop = 14 + math.max(detail.copy:GetHeight(), detail.open:GetHeight())
+    local footer = actionTop + 6
+    if detail.more:IsShown() then
+        local moreH, capped = metrics.WrapHeight(detail.more, inner, 14,
+            math.floor(height * 0.35))
+        detail.more:ClearAllPoints()
+        detail.more:SetPoint("BOTTOMLEFT", detail, "BOTTOMLEFT", 14, actionTop + 6)
+        detail.moreHit.capped = capped
+        footer = actionTop + 6 + moreH + 6
+    end
+    -- The name line holds a full line also of a wider, taller face.
+    local _, safeLine = metrics.ConservativeText(1)
+    detail.owner:SetHeight(math.max(16, safeLine))
+    local headerBottom = 39 + detail.owner:GetHeight() + 6
+    local scroll, body = detail.bodyScroll, detail.body
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", detail, "TOPLEFT", 14, -headerBottom)
+    scroll:SetPoint("BOTTOMRIGHT", detail, "BOTTOMRIGHT", -34, footer)
+    local bodyW = width - 48
+    body:SetWidth(bodyW)
+    local y = 0
+    local function Place(region, h, gap)
+        region:ClearAllPoints()
+        region:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -y)
+        y = y + h + (gap or 0)
+    end
+    Place(detail.record, metrics.WrapHeight(detail.record, bodyW, 42), 5)
+    Place(detail.desc, metrics.WrapHeight(detail.desc, bodyW, 48), 9)
+    if detail.lockedTitle:IsShown() then
+        Place(detail.lockedTitle, metrics.WrapHeight(detail.lockedTitle, bodyW, 12), 2)
+        for i, b in ipairs(detail.lockedIcons) do
+            b:ClearAllPoints(); b:SetPoint("TOPLEFT", body, "TOPLEFT", (i-1)*37, -y)
+        end
+        y = y + 32 + 16
+    end
+    Place(detail.echoTitle, metrics.WrapHeight(detail.echoTitle, bodyW, 12), 5)
+    local columns = math.max(1, math.floor((bodyW + 7) / 29))
+    local shown = 0
+    for _, b in ipairs(detail.icons) do
+        if b:IsShown() then
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", body, "TOPLEFT", (shown % columns) * 29,
+                -(y + math.floor(shown / columns) * 26))
+            shown = shown + 1
+        end
+    end
+    y = y + math.ceil(shown / columns) * 26
+    body:SetHeight(math.max(1, y))
+    local range = math.max(0, y - math.max(0, height - headerBottom - footer))
+    if (tonumber(scroll:GetVerticalScroll()) or 0) > range then
+        scroll:SetVerticalScroll(range)
+    end
+end
+
+local function SetDetailStatus(text)
+    detail.more:SetText(text)
+    LayoutDetail()
+end
+
+-- Button and text for the roles request state. Reads only; never sends.
+local function ApplyRolesState()
+    if not (detail and detail.rolesBuildId) then return end
+    local state = detail.rolesState
+    local text = RolesRequestText(state, detail.rolesReason,
+        RowName(detail.row, detail.row and detail.row.build))
+    if detail.openReason then
+        text = text .. " Open unavailable: " .. tostring(detail.openReason)
+    end
+    SetDetailStatus(text)
+    if state == "pending" then
+        detail.copy:SetText("Requesting...")
+        detail.copy:Disable()
+    else
+        detail.copy:SetText("Request full build")
+        detail.copy:Enable()
+    end
+end
+
 local function EnsureDetail(parent)
     if detail then return end
-    detail=CreateFrame("Frame",nil,parent); detail:SetWidth(335); detail:SetPoint("TOPRIGHT",-18,-102); detail:SetPoint("BOTTOMRIGHT",-18,18); SetBackdrop(detail,0.90)
+    -- The window has a fixed size, so the detail's height is stated, not
+    -- derived from a second anchor.
+    detail=CreateFrame("Frame",nil,parent); detail:SetSize(335,math.max(300,(tonumber(parent:GetHeight()) or 640)-120)); detail:SetPoint("TOPRIGHT",-18,-102); SetBackdrop(detail,0.90)
     detail.title=detail:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); detail.title:SetPoint("TOPLEFT",14,-14); detail.title:SetSize(305,22); detail.title:SetJustifyH("LEFT")
     detail.owner=detail:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); detail.owner:SetPoint("TOPLEFT",14,-39); detail.owner:SetSize(305,16); detail.owner:SetJustifyH("LEFT")
-    detail.record=detail:CreateFontString(nil,"OVERLAY","GameFontNormal"); detail.record:SetPoint("TOPLEFT",14,-62); detail.record:SetSize(305,42); detail.record:SetJustifyH("LEFT"); detail.record:SetJustifyV("TOP")
-    detail.desc=detail:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); detail.desc:SetPoint("TOPLEFT",14,-109); detail.desc:SetSize(305,48); detail.desc:SetJustifyH("LEFT"); detail.desc:SetJustifyV("TOP")
-    detail.lockedTitle=detail:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); detail.lockedTitle:SetPoint("TOPLEFT",14,-166); detail.lockedTitle:SetText("LOCKED ECHOES")
+    -- One line each; a shortened title or name is read in full here.
+    detail.headerHit=CreateFrame("Frame",nil,detail); detail.headerHit:SetPoint("TOPLEFT",detail.title,"TOPLEFT"); detail.headerHit:SetPoint("BOTTOMRIGHT",detail.owner,"BOTTOMRIGHT"); detail.headerHit:EnableMouse(true)
+    detail.headerHit:SetScript("OnEnter",function(self)
+        local metrics=Nexus.LayoutMetrics
+        if not (metrics and (metrics.Shortened(detail.title) or metrics.Shortened(detail.owner))) then return end
+        GameTooltip:SetOwner(self,"ANCHOR_BOTTOMLEFT"); GameTooltip:AddLine(tostring(detail.title:GetText() or ""),1,0.82,0,true); GameTooltip:AddLine(tostring(detail.owner:GetText() or ""),0.8,0.8,0.8,true); GameTooltip:Show()
+    end)
+    detail.headerHit:SetScript("OnLeave",function() GameTooltip:Hide() end)
+    detail.bodyScroll=CreateFrame("ScrollFrame","NexusLeaderboardDetailScroll",detail,"UIPanelScrollFrameTemplate"); detail.bodyScroll.scrollBarHideable=1
+    local body=CreateFrame("Frame",nil,detail.bodyScroll); body:SetSize(287,1); detail.bodyScroll:SetScrollChild(body); detail.body=body
+    detail.record=body:CreateFontString(nil,"OVERLAY","GameFontNormal"); detail.record:SetSize(305,42); detail.record:SetJustifyH("LEFT"); detail.record:SetJustifyV("TOP")
+    detail.desc=body:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); detail.desc:SetSize(305,48); detail.desc:SetJustifyH("LEFT"); detail.desc:SetJustifyV("TOP")
+    detail.lockedTitle=body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); detail.lockedTitle:SetText("LOCKED ECHOES")
     detail.lockedIcons={}
     for i=1,6 do
-        local b=CreateFrame("Button",nil,detail); b:SetSize(32,32); b:SetPoint("TOPLEFT",14+(i-1)*37,-180); b.icon=b:CreateTexture(nil,"OVERLAY"); b.icon:SetAllPoints(b)
+        local b=CreateFrame("Button",nil,body); b:SetSize(32,32); b.icon=b:CreateTexture(nil,"OVERLAY"); b.icon:SetAllPoints(b)
         b:SetScript("OnEnter",function(self) if self.tip then GameTooltip:SetOwner(self,"ANCHOR_TOP"); GameTooltip:SetHyperlink("spell:"..tostring(self.tip)); GameTooltip:Show() end end)
         b:SetScript("OnLeave",function() GameTooltip:Hide() end); b:Hide(); detail.lockedIcons[i]=b
     end
-    detail.echoTitle=detail:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); detail.echoTitle:SetPoint("TOPLEFT",14,-228); detail.echoTitle:SetText("EXACT LOADOUT")
+    detail.echoTitle=body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); detail.echoTitle:SetText("EXACT LOADOUT")
     detail.icons={}
     for i=1,80 do
-        local b=CreateFrame("Button",nil,detail); b:SetSize(22,22); local col=(i-1)%10; local row=math.floor((i-1)/10); b:SetPoint("TOPLEFT",14+col*29,-245-row*26)
+        local b=CreateFrame("Button",nil,body); b:SetSize(22,22)
         b.icon=b:CreateTexture(nil,"ARTWORK"); b.icon:SetAllPoints(b); b.count=b:CreateFontString(nil,"OVERLAY","NumberFontNormalSmall"); b.count:SetPoint("BOTTOMRIGHT",1,-1)
         b:SetScript("OnEnter",function(self) if self.tip then GameTooltip:SetOwner(self,"ANCHOR_TOP"); GameTooltip:SetHyperlink("spell:"..tostring(self.tip)); GameTooltip:Show() end end)
         b:SetScript("OnLeave",function() GameTooltip:Hide() end); b:Hide(); detail.icons[i]=b
     end
-    detail.more=detail:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); detail.more:SetPoint("TOPLEFT",14,-458); detail.more:SetSize(305,18); detail.more:SetJustifyH("LEFT")
+    detail.more=detail:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); detail.more:SetSize(305,18); detail.more:SetJustifyH("LEFT"); detail.more:SetJustifyV("TOP")
+    detail.moreHit=CreateFrame("Frame",nil,detail); detail.moreHit:SetAllPoints(detail.more); detail.moreHit:EnableMouse(true)
+    detail.moreHit:SetScript("OnEnter",function(self)
+        if not (self.capped and detail.more:IsShown()) then return end
+        GameTooltip:SetOwner(self,"ANCHOR_TOP"); GameTooltip:AddLine(tostring(detail.more:GetText() or ""),1,1,1,true); GameTooltip:Show()
+    end)
+    detail.moreHit:SetScript("OnLeave",function() GameTooltip:Hide() end)
     detail.copy=CreateFrame("Button",nil,detail,"UIPanelButtonTemplate"); detail.copy:SetSize(138,24); detail.copy:SetPoint("BOTTOMLEFT",14,14); detail.copy:SetText("Copy into Editor")
     -- Keep ordinary and permanently locked evidence in separate immutable
     -- pools.  Neither ordering nor a shared spell ID may redefine its role.
     detail.copy:SetScript("OnClick",function()
+        -- One deliberate click sends at most one bounded request.
+        if detail.rolesBuildId then
+            local sync=Nexus.Sync
+            if not (sync and sync.RequestLockedRoles) then return end
+            local _,state,reason=sync.RequestLockedRoles(detail.rolesBuildId)
+            if state=="complete" then RenderDetail(detail.row); return end
+            detail.rolesState,detail.rolesReason=state,reason
+            ApplyRolesState()
+            return
+        end
         local candidate=detail.copyCandidate
         if not candidate then return end
         if not (Nexus.WishlistEditor and Nexus.WishlistEditor.OpenForCandidate) then return end
@@ -710,7 +917,7 @@ local function EnsureDetail(parent)
             detail.copyCandidate=nil
             detail.copyReason=tostring(reason or "record validation failed")
             detail.copy:Disable()
-            detail.more:SetText("Copy unavailable: "..detail.copyReason)
+            SetDetailStatus("Copy unavailable: "..detail.copyReason)
             return
         end
         local opened=Nexus.WishlistEditor.OpenForCandidate(validated)
@@ -722,7 +929,7 @@ local function EnsureDetail(parent)
         if not id or not (Nexus.CommunityBuilds
             and Nexus.CommunityBuilds.ShowBuild) then
             detail.openReason=tostring(reason or "Community Builds is unavailable")
-            detail.more:SetText("Open unavailable: "..detail.openReason)
+            SetDetailStatus("Open unavailable: "..detail.openReason)
             detail.open:Disable()
             return
         end
@@ -730,27 +937,48 @@ local function EnsureDetail(parent)
         if opened~=false then M.Hide() end
     end)
     detail.empty=detail:CreateFontString(nil,"OVERLAY","GameFontHighlight"); detail.empty:SetPoint("CENTER",0,15); detail.empty:SetSize(280,70); detail.empty:SetJustifyH("CENTER")
+    -- While a roles request waits, re-read its status once per second (a
+    -- read only). An arrived answer re-renders through the strict Copy path.
+    detail:SetScript("OnUpdate",function(self,elapsed)
+        if not self.rolesBuildId or self.rolesState~="pending" then return end
+        self.rolesTick=(self.rolesTick or 0)+(tonumber(elapsed) or 0)
+        if self.rolesTick<1 then return end
+        self.rolesTick=0
+        local sync=Nexus.Sync
+        if not (sync and sync.LockedRolesRequestStatus) then return end
+        local state,reason=sync.LockedRolesRequestStatus(self.rolesBuildId)
+        if state=="complete" then RenderDetail(self.row)
+        elseif state~="pending" then
+            self.rolesState,self.rolesReason=state,reason
+            ApplyRolesState()
+        end
+    end)
     parent._leaderboardDetail=detail
 end
 
-local function RenderDetail(row)
+RenderDetail = function(row)
     if not detail then return end
     virtualStats.detailRenders = virtualStats.detailRenders + 1
+    -- A different record starts at the top of the scrolled body.
+    if not row or not detail.row or RecordKey(detail.row)~=RecordKey(row) then detail.bodyScroll:SetVerticalScroll(0) end
     detail.row=row
     detail.copyCandidate=nil
     detail.copyReason=nil
     detail.openBuildId=nil
     detail.openReason=nil
+    detail.rolesBuildId,detail.rolesState,detail.rolesReason=nil,nil,nil
+    detail.copy:SetText("Copy into Editor")
     if not row then
         for _,x in ipairs({detail.title,detail.owner,detail.record,detail.desc,detail.echoTitle,detail.more,detail.copy,detail.open,detail.lockedTitle}) do x:Hide() end
         for _,b in ipairs(detail.lockedIcons) do b:Hide() end; for _,b in ipairs(detail.icons) do b:Hide() end
+        detail.bodyScroll:Hide(); detail.moreHit:Hide()
         detail.empty:Show(); return
     end
-    detail.empty:Hide()
+    detail.empty:Hide(); detail.bodyScroll:Show(); detail.moreHit:Show()
     for _,x in ipairs({detail.title,detail.owner,detail.record,detail.desc,detail.echoTitle,detail.more,detail.copy,detail.open}) do x:Show() end
     local b=row.build or {}; local class=type(row.resolvedClass)=="string" and row.resolvedClass:upper() or nil; local c=CLASS_COLOR[class] or {0.8,0.8,0.8}
     detail.title:SetText(DisplayRemoteText(
-        b.title or "Recorded build",1024,false) or "Invalid title"); detail.title:SetTextColor(c[1],c[2],c[3]); detail.owner:SetText("by "..(row.displayPlayer or b.displayAuthor or DisplayRemoteText(tostring(b.author or row.player or "?"),1024,false) or "Unknown")..(class and "" or " - Class not supplied"))
+        b.title or "Recorded build",1024,false) or "Invalid title"); detail.title:SetTextColor(c[1],c[2],c[3]); detail.owner:SetText("by "..RowName(row, b)..(class and "" or " - Class not supplied"))
     if row.category=="combined" then
         detail.record:SetText("|cff4dff80Strongest "..DpsText(row.dps)
             .." DPS|r\nAverage "..DpsText(row.average).."  •  Dummy "
@@ -761,12 +989,21 @@ local function RenderDetail(row)
     end
     local displayDescription=DisplayRemoteText(
         b.description or "",4000,true,true)
-    detail.desc:SetText((displayDescription and displayDescription~="")
-        and displayDescription or "No build description provided.")
+    displayDescription=(displayDescription and displayDescription~="")
+        and displayDescription or "No build description provided."
+    -- The row's name carries no provenance text; the detail says it.
+    if row.publicIdentityVerified==false then
+        displayDescription=OWNER_NOT_ESTABLISHED.."\n"..displayDescription
+    end
+    detail.desc:SetText(displayDescription)
     local lockedResolution=ResolveRowLocked(row)
     local locked=lockedResolution.status=="ok"
         and lockedResolution.lockedEchoes or nil
     if locked and #locked>0 then detail.lockedTitle:Show() else detail.lockedTitle:Hide() end
+    -- Six icons fit the strip; a record can hold more locked rows (occupied
+    -- records), and the heading counts the ones not drawn.
+    local lockedMore=locked and #locked-#detail.lockedIcons or 0
+    detail.lockedTitle:SetText(lockedMore>0 and ("LOCKED ECHOES  +"..lockedMore.." more locked") or "LOCKED ECHOES")
     for i,btn in ipairs(detail.lockedIcons) do local e=locked and locked[i]; if e then btn.icon:SetTexture(SpellIcon(e.spellId)); btn.tip=e.spellId; btn:Show() else btn.tip=nil; btn:Hide() end end
     local echoes=row.echoes or b.echoes or {}; local shown=math.min(#echoes,#detail.icons); local total=0
     for _,e in ipairs(echoes) do total=total+(tonumber(e.stacks or e.count) or 1) end
@@ -775,7 +1012,7 @@ local function RenderDetail(row)
     detail.copyCandidate,detail.copyReason=candidate,copyReason
     local openBuildId,openReason=ResolveOpenBuildId(row)
     detail.openBuildId,detail.openReason=openBuildId,openReason
-    detail.more:SetText(copyReason and openReason
+    SetDetailStatus(copyReason and openReason
             and ("Copy unavailable: "..tostring(copyReason)
                 .."; Open unavailable: "..tostring(openReason))
         or copyReason and ("Copy unavailable: "..tostring(copyReason))
@@ -784,6 +1021,22 @@ local function RenderDetail(row)
             or (tostring(total).." Echo slots")))
     if candidate then detail.copy:Enable() else detail.copy:Disable() end
     if openBuildId then detail.open:Enable() else detail.open:Disable() end
+    -- Only when the missing current roles are the reason: the resolver then
+    -- had nothing but historical record rows, which never prove Copy.
+    local rolesId=not candidate
+        and copyReason=="historical locked evidence is not current copy authority"
+        and RolesRequestTarget(row) or nil
+    if rolesId~=nil then
+        local sync=Nexus.Sync
+        local state,reason
+        if sync and sync.LockedRolesRequestStatus then
+            state,reason=sync.LockedRolesRequestStatus(rolesId)
+        end
+        detail.rolesBuildId=rolesId
+        detail.rolesState=state~="complete" and state or nil
+        detail.rolesReason=reason
+        ApplyRolesState()
+    end
 end
 
 local function FindSelectedRow()
@@ -823,8 +1076,7 @@ local function BindRows(reason)
             r.classUnavailable=class==nil
             r.classLabel=class and (CLASS_LABEL[class] or class)
                 or "Class not supplied"
-            r.player:SetText(row.displayPlayer or DisplayRemoteText(
-                tostring(row.player or "?"),1024,false) or "Unknown")
+            r.player:SetText(RowName(row))
             r.player:SetTextColor(c[1],c[2],c[3])
             local buildTitle=DisplayRemoteText(
                 tostring((row.build or {}).title or "Recorded build"),1024,false)
@@ -975,6 +1227,9 @@ local function EnsureFrame()
     listScroll:SetScript("OnMouseDown",function() classMenu:Hide() end)
     EnsureDetail(frame)
     frame:SetScript("OnMouseDown",function(self) if classMenu:IsShown() then classMenu:Hide() end end)
+    -- The class list is a separate UIParent frame. The close button, Escape
+    -- and another Nexus window hide only this frame, so its hide closes it.
+    frame:HookScript("OnHide",function() if classMenu then classMenu:Hide() end end)
     frame:SetScript("OnUpdate",function(self,elapsed)
         if not self:IsShown() then return end
         local receiving = Nexus.Sync and Nexus.Sync.IsReceiving
@@ -1023,6 +1278,8 @@ function M.RefreshStatus()
         elseif state=="sending" then statusText:SetText("|cff4dff80Sending queued Nexus work...|r")
         else statusText:SetText("|cff888888Best exact loadout per character|r") end
     else statusText:SetText("|cff888888Best exact loadout per character|r") end
+    -- Anchored at its right edge, the button widens left for a longer label.
+    if Nexus.LayoutMetrics then Nexus.LayoutMetrics.FitButtonWidth(syncBtn,90,240) end
     virtualStats.statusRefreshes=virtualStats.statusRefreshes+1
     return true
 end
@@ -1091,7 +1348,11 @@ function M.RefreshData()
     if #currentRows==0 then
         RenderDetail(nil)
         detail.empty:SetText(category=="combined" and "No builds have both Training Dummy and Lich King records yet.\n\nBoth-record builds are ordered by their highest valid single DPS result. The displayed average does not determine this rank." or ("No "..label.." records are known yet.\n\nLeaderboard data syncs on login; Sync Now checks again."))
+        if Nexus.LayoutMetrics then Nexus.LayoutMetrics.WrapHeight(detail.empty,280,70,math.max(70,detail:GetHeight()-40)) end
     else
+        -- Rows are listed: an earlier category's "no records" instruction no
+        -- longer applies, so the unselected pane is blank, as on first open.
+        detail.empty:SetText("")
         RenderDetail(selected)
     end
     virtualStats.dataRefreshes=virtualStats.dataRefreshes+1
@@ -1145,7 +1406,7 @@ function M.Show(mode)
         and community.WaitForStartup("Leaderboard",function() M.Show(mode) end) then
         return false,"pending"
     end
-    EnsureFrame(); if Nexus.Panel and Nexus.Panel.AttachMenuFrame then Nexus.Panel.AttachMenuFrame(frame) end; if Nexus.Theme and Nexus.Theme.StyleWindow then Nexus.Theme.StyleWindow(frame, 0.96) end; if Nexus.Theme and Nexus.Theme.StyleTree and not frame._nexusLeaderboardTreeStyled then Nexus.Theme.StyleTree(frame); frame._nexusLeaderboardTreeStyled=true; virtualStats.themeTreeWalks=virtualStats.themeTreeWalks+1 end; if Nexus.Panel and Nexus.Panel.CloseOtherWindows then Nexus.Panel.CloseOtherWindows("NexusLeaderboardFrame") end; if mode=="lk" or mode=="dummy" or mode=="combined" then category=mode end; frame:Show(); RefreshInteractive() end
+    EnsureFrame(); if Nexus.Panel and Nexus.Panel.AttachMenuFrame then Nexus.Panel.AttachMenuFrame(frame) end; if Nexus.Theme and Nexus.Theme.StyleWindow then Nexus.Theme.StyleWindow(frame, 0.96) end; if Nexus.Theme and Nexus.Theme.StyleTree and not frame._nexusLeaderboardTreeStyled then Nexus.Theme.StyleTree(frame); frame._nexusLeaderboardTreeStyled=true; virtualStats.themeTreeWalks=virtualStats.themeTreeWalks+1 end; if Nexus.Panel and Nexus.Panel.CloseOtherWindows then Nexus.Panel.CloseOtherWindows("NexusLeaderboardFrame") end; if mode=="lk" or mode=="dummy" or mode=="combined" then category=mode end; if Nexus.LayoutMetrics then Nexus.LayoutMetrics.FitToScreen(frame) end; frame:Show(); RefreshInteractive() end
 function M.Hide() if frame then frame:Hide(); classMenu:Hide() end end
 function M.Toggle(mode) if frame and frame:IsShown() then M.Hide() else M.Show(mode) end end
 function M.SetCategory(mode) category=(mode=="dummy" or mode=="combined") and mode or "lk"; selectedKey=nil; RefreshInteractive() end

@@ -1,0 +1,1220 @@
+-- A player who sees "Catalog saved-build capture failed: SEMANTIC_ENVELOPE"
+-- has to be able to hand support one thing. Two routes are driven here through
+-- the real command, the real page and the real builder: a compact summary they
+-- select and copy, and a report prepared for the isolated NexusSupport
+-- component, which WoW writes to its own file at the next normal save boundary.
+--
+-- Nothing here writes a profile, claims a file exists on disk, reloads, logs
+-- out, or sends anything anywhere. The storage component is driven as the
+-- client would load it, and the offline result is NOT filesystem verification.
+local T=dofile('tests/prototype/startup_support.lua')
+local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
+Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
+NexusSupportDB=nil;NexusSupportStorage=nil
+local H=dofile('tests/prototype/harness.lua')
+NexusDB=T.Profile(0,0)
+T.Load();H.Fire('ADDON_LOADED','Nexus');H.Fire('PLAYER_ENTERING_WORLD')
+T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
+local support=assert(Nexus.SupportIncidents,'the incident owner is loaded')
+local builder=assert(Nexus.SupportReport,'the report builder is loaded')
+local function button(label,parent)
+ for _,b in ipairs(H.frames)do
+  if b.kind=='Button' and b:GetText()==label and (not parent or b:GetParent()==parent)then return b end
+ end
+ error('button not found: '..label)
+end
+
+-- The companion addon, loaded the way the client loads it on demand.
+local companionLoads=0
+local function loadCompanion()
+ companionLoads=companionLoads+1
+ dofile('companion/NexusSupport/Storage.lua')
+ H.Fire('ADDON_LOADED','NexusSupport')
+ return true
+end
+LoadAddOn=function(name)
+ if name~='NexusSupport' then return false end
+ return loadCompanion()
+end
+
+-- 1. A refusal is retained with its failure-time facts, and it is NOT an error.
+support.Clear()
+support.Record('catalog-refusal',{
+ reason='SEMANTIC_ENVELOPE',producer='saved-build capture',origin='local',
+ operation='saved-build capture',ticket='t-1',build='test.9999-abcdef0',
+ representation='inline',counts={ordinary=81,locked=6,total=87},
+ limits={ordinary=79,locked=6,total=85},
+ readiness={generation=12,semanticGeneration=4},
+ affected={{spellId=200701,quality=2,stacks=1,locked=true},{spellId=200751,quality=3,stacks=1}},
+ committed=false,
+ scope='this catalog write did not commit; earlier personal or public writes are not covered by this outcome',
+})
+check(support.Count()==1,'the refusal is retained: '..support.Count())
+check(#Nexus.Errors.History()==0,'and the Errors page is still empty')
+local incident=support.Latest()
+check(incident.counts.ordinary==81 and incident.counts.total==87,
+ 'the counts are the ones from the failure: '..incident.counts.ordinary..'/'..incident.counts.total)
+check(incident.committed==false,'the record states that nothing committed')
+
+-- 2. The summary says the failure-time facts first, fits its budget, and never
+-- claims anything the owner did not retain.
+local body,meta=builder.Summary()
+check(#body<=builder.SUMMARY_MAX_BYTES,
+ 'the summary fits the supported '..builder.SUMMARY_MAX_BYTES..' bytes: '..#body)
+check(meta.bytes==#body,'and reports its own size: '..meta.bytes)
+check(body:find('SEMANTIC_ENVELOPE',1,true)~=nil,'it names the refusal')
+check(body:find('81 ordinary, 6 locked, 87 total',1,true)~=nil,'with the counted copies')
+check(body:find('limits 79/6/85',1,true)~=nil,'and the limits that were enforced')
+check(body:find('saved-build capture',1,true)~=nil,'it names the producer')
+check(body:find('this write did not commit',1,true)~=nil,'and the terminal result')
+check(body:find('a refusal is not an error',1,true)~=nil,
+ 'it explains why the Errors page is empty')
+check(body:find('session-',1,true)~=nil,'the character is carried as a session alias')
+check(body:find('PrototypeTester',1,true)==nil,'and not as the character name')
+local unretained=builder.Summary({kind='catalog-refusal',reason='STORE_INVALID'})
+check(unretained:find('not retained',1,true)~=nil,
+ 'an unobserved field says "not retained" instead of being filled in')
+
+-- 3. The page opens from the real command, before initialization is required.
+SlashCmdList.NEXUS('report')
+local page=assert(NexusSupportReport,'/nexus report opens the support page')
+check(page:IsShown(),'the page is shown')
+check(page.incident:GetText():find('SEMANTIC_ENVELOPE',1,true)~=nil,
+ 'it shows the retained incident: '..page.incident:GetText():sub(1,60))
+local actionsBefore=#H.actions
+local dbBefore=NexusDB.communityBuilds and #NexusDB.communityBuilds or 0
+button('Copy summary',page):Click()
+check(page.copyBox:GetText():find('Nexus support summary',1,true)~=nil,
+ 'Copy summary fills the copy field')
+check(page.copyBox:GetMaxLetters()==0,'the copy field has no letter limit')
+check(page.copyNote:GetText():find('Nothing was sent anywhere',1,true)~=nil,
+ 'and states that nothing was sent: '..page.copyNote:GetText())
+check(#H.actions==actionsBefore,'reading the report takes no game action')
+check(companionLoads==0,'and reading does not load the storage component')
+
+-- 4. Preparing the file loads the component, stores a complete report, and
+-- claims only what is true.
+check(page.storage:GetText():find('not loaded',1,true)~=nil,
+ 'the page says the component is not loaded yet: '..page.storage:GetText())
+local prepared=assert(Nexus.SupportReportUI.PrepareFile(false),'the report is prepared')
+check(companionLoads==1,'the component is loaded on demand exactly once: '..companionLoads)
+check(type(NexusSupportDB)=='table' and type(NexusSupportDB.report)=='table',
+ 'the report is stored in the component variable, not in NexusDB')
+check(NexusDB.supportReport==nil,'nothing was written into the main saved data')
+check(prepared.chunkCount>=1,'the report has chunks: '..prepared.chunkCount)
+check(prepared.bytes>0 and prepared.bytes==NexusSupportDB.report.meta.bytes,
+ 'the stored size matches the header: '..prepared.bytes)
+check(prepared.checksum==builder.Checksum(NexusSupportDB.report.chunks),
+ 'the checksum covers the stored chunks in order')
+for index,chunk in ipairs(NexusSupportDB.report.chunks) do
+ check(#chunk<=builder.CHUNK_BYTES,'chunk '..index..' is within the '..builder.CHUNK_BYTES..' byte bound: '..#chunk)
+end
+check(page.prepared:GetText():find('is prepared in memory',1,true)~=nil,
+ 'the page says the report is prepared in memory: '..page.prepared:GetText())
+check(page.prepared:GetText():find('not yet verified on disk',1,true)~=nil,
+ 'and that it is not verified on disk')
+check(page.prepared:GetText():find('WTF/Account/<ACCOUNT>/SavedVariables/NexusSupport.lua',1,true)~=nil,
+ 'and points at the account file with a placeholder, not a guessed path')
+check(page.prepared:GetText():find('Interface/AddOns',1,true)==nil,
+ 'never at the shipped addon file')
+
+-- 5. The report carries the incident and the scope of the outcome.
+local text=table.concat(NexusSupportDB.report.chunks,'')
+check(text:find('SEMANTIC_ENVELOPE',1,true)~=nil,'the report contains the incident')
+check(text:find('81 ordinary, 6 locked, 87 total',1,true)~=nil,'with its counts')
+check(text:find('earlier personal or public writes are not covered',1,true)~=nil,
+ 'and the honest scope of the refusal')
+check(NexusSupportDB.report.meta.format==builder.FORMAT,
+ 'the stored report declares its format: '..tostring(NexusSupportDB.report.meta.format))
+check(NexusSupportDB.report.meta.build~=nil and NexusSupportDB.report.meta.id~=nil,
+ 'with the generating build and a report id')
+check(NexusSupportDB.report.meta.omissions~=nil,'and what it omitted: '
+ ..tostring(NexusSupportDB.report.meta.omissions))
+
+-- 6. A second preparation replaces the report only when the new one completes.
+local firstId=NexusSupportDB.report.meta.id
+local realPrepare=builder.Prepare
+builder.Prepare=function() return nil,'synthetic preparation failure' end
+local failed,why=Nexus.SupportReportUI.PrepareFile(false)
+builder.Prepare=realPrepare
+check(failed==nil and why=='synthetic preparation failure','a failed preparation returns its reason')
+check(NexusSupportDB.report.meta.id==firstId,
+ 'and the completed report from before is still stored: '..NexusSupportDB.report.meta.id)
+check(page.prepared:GetText():find('previously stored report was kept',1,true)~=nil,
+ 'the page says so: '..page.prepared:GetText())
+local second=assert(Nexus.SupportReportUI.PrepareFile(false),'a later complete preparation succeeds')
+check(second.id~=firstId,'it gets its own report id: '..second.id)
+check(NexusSupportDB.report.meta.id==second.id,'and replaces the stored one')
+
+-- 7. Reopening verifies the stored report without claiming the old session.
+button('Inspect prepared report',page):Click()
+check(page.prepared:GetText():find('matches its own checksum in memory',1,true)~=nil,
+ 'the stored report verifies against its own checksum, and says only that: '..page.prepared:GetText())
+check(page.prepared:GetText():find('verified as loaded',1,true)==nil,
+ 'it never says the file was read back from disk')
+check(page.prepared:GetText():find('does not prove the session that made it still exists',1,true)~=nil,
+ 'and says what that does not prove')
+
+-- 8. Storage that this version does not understand is left exactly as it is.
+NexusSupportDB={format='from a newer build',report={meta={id='theirs'},chunks={'x'}}}
+NexusSupportStorage=nil
+companionLoads=0
+local blocked,blockedWhy=Nexus.SupportReportUI.PrepareFile(false)
+check(blocked==nil,'an incompatible store refuses the export: '..tostring(blockedWhy))
+check(NexusSupportDB.report.meta.id=='theirs',
+ 'and the unknown data is untouched: '..tostring(NexusSupportDB.report.meta.id))
+check(page.prepared:GetText():find('kept',1,true)~=nil or
+ page.prepared:GetText():find('untouched',1,true)~=nil,
+ 'the page says the existing data was left alone: '..page.prepared:GetText())
+local fallback=builder.Summary()
+check(#fallback>0,'and the copy summary still works as the fallback: '..#fallback..' bytes')
+
+-- 9. A missing component is not an error: the copy route stays available.
+NexusSupportDB=nil;NexusSupportStorage=nil
+LoadAddOn=function() return false end
+local missing,missingWhy=Nexus.SupportReportUI.PrepareFile(false)
+check(missing==nil and tostring(missingWhy):find('not installed',1,true)~=nil,
+ 'a missing component is reported plainly: '..tostring(missingWhy))
+check(page.prepared:GetText():find('Use Copy summary instead',1,true)~=nil,
+ 'and the page offers the copy route: '..page.prepared:GetText())
+button('Copy summary',page):Click()
+check(page.copyBox:GetText():find('Nexus support summary',1,true)~=nil,
+ 'which still works with no component at all')
+
+-- 10. Unicode, control characters and pipes survive the copy boundary intact.
+support.Clear()
+support.Record('catalog-refusal',{reason='STORE_INVALID',producer='share|local',
+ detail='name with \1 control and | pipe and \195\169 accent',
+ counts={ordinary=1,locked=0,total=1},committed=false})
+local odd=builder.Summary()
+check(odd:find('share|local',1,true)~=nil,
+ 'the copied text keeps a recorded label exactly: a pipe is not doubled into the ticket')
+check(odd:find('share||local',1,true)==nil,'and is not escaped on its way there')
+check(odd:find('\1',1,true)==nil,'a control character does not reach the report')
+check(odd:find('\195\169',1,true)~=nil,'and non-ASCII text is preserved: accent kept')
+
+-- 11. Bounds hold even when one incident is enormous, and the summary is cut
+-- on a line boundary so a ticket never receives half an identifier.
+support.Clear()
+local wide={}
+for i=1,400 do wide['key'..i]=i end
+local many={}
+for i=1,200 do many[#many+1]={spellId=2000000+i,quality=3,stacks=9} end
+for i=1,20 do
+ support.Record('catalog-refusal',{reason='WIDE'..i,producer=string.rep('p',400),
+  operation=string.rep('o',400),detail=string.rep('d',400),scope=string.rep('s',400),
+  counts={ordinary=79+i,locked=6,total=85+i},limits={ordinary=79,locked=6,total=85},
+  readiness=wide,affected=many,committed=false})
+end
+local big,bigMeta=builder.Summary()
+check(#big<=builder.SUMMARY_MAX_BYTES,
+ 'twenty large incidents still fit the summary bound: '..#big)
+check(bigMeta.bytes==#big,'and the reported size is the real one: '..bigMeta.bytes)
+local lastLine=big:match('[^' .. string.char(10) .. ']*$')
+check(lastLine and (#lastLine==0 or lastLine:sub(1,1)~=' '),
+ 'the summary ends on a whole line: '..tostring(lastLine and lastLine:sub(1,40)))
+local readinessKeys=0
+for _ in pairs(support.Latest().readiness or {}) do readinessKeys=readinessKeys+1 end
+check(readinessKeys<=13,'a large readiness map is bounded when retained: '..readinessKeys)
+check(#support.Latest().affected<=support.MAX_TUPLES,
+ 'and so is the tuple list: '..#support.Latest().affected)
+
+-- 12. A report that cannot fit its own bound says so and keeps the old one.
+local storedBefore=NexusSupportDB and NexusSupportDB.report and NexusSupportDB.report.meta.id
+local hugeReport=builder.Prepare({extended=true})
+check(type(hugeReport)=='table','a large history still produces a report')
+local hugeBytes=0
+for _,chunk in ipairs(hugeReport.chunks) do hugeBytes=hugeBytes+#chunk end
+check(hugeBytes<=builder.TOTAL_BYTES,
+ 'and it stays inside the supported total: '..hugeBytes..' of '..builder.TOTAL_BYTES)
+check(hugeReport.meta.chunkCount==#hugeReport.chunks,'its header counts its own chunks')
+
+-- 13. The copy route survives an owner that throws: it is the route a broken
+-- install depends on.
+local realStartup=Nexus.StartupStatus
+Nexus.StartupStatus=function() error('isolated startup owner') end
+local okSummary,brokenBody=pcall(builder.Summary)
+Nexus.StartupStatus=realStartup
+check(okSummary and type(brokenBody)=='string',
+ 'a failing startup owner does not take away Copy summary: '..tostring(brokenBody))
+check(brokenBody:find('Nexus support summary',1,true)~=nil,'the summary is still a summary')
+local realErrors=Nexus.Errors.History
+Nexus.Errors.History=function() error('isolated errors owner') end
+local okErrors=pcall(builder.Summary)
+Nexus.Errors.History=realErrors
+check(okErrors,'and neither does a failing Errors owner')
+
+-- 14. A write that did NOT commit is never folded into one that did, and two
+-- failures that differ in any retained field stay two incidents.
+support.Clear()
+local shared={reason='STORE_INVALID',producer='share',origin='local',
+ operation='share',counts={ordinary=1,locked=0,total=1}}
+local function record(extra)
+ local fields={}
+ for k,v in pairs(shared) do fields[k]=v end
+ for k,v in pairs(extra or {}) do fields[k]=v end
+ return support.Record('catalog-refusal',fields)
+end
+record({committed=false})
+record({committed=true})
+check(support.Count()==2,
+ 'a committed write and a refused one are two incidents: '..support.Count())
+local committedStates={}
+for _,entry in ipairs(support.History()) do
+ committedStates[tostring(entry.committed)]=true
+end
+check(committedStates['false'] and committedStates['true'],
+ 'and each keeps its own outcome')
+support.Clear()
+record({committed=false,category='dummy'})
+record({committed=false,category='lk'})
+check(support.Count()==2,'two encounters are two incidents: '..support.Count())
+support.Clear()
+record({committed=false,limits={ordinary=79,locked=6,total=85}})
+record({committed=false,limits={ordinary=60,locked=6,total=85}})
+check(support.Count()==2,'two enforced envelopes are two incidents: '..support.Count())
+support.Clear()
+record({committed=false,readiness={activeSlot=1}})
+record({committed=false,readiness={activeSlot=2}})
+check(support.Count()==2,'two source readings are two incidents: '..support.Count())
+support.Clear()
+record({committed=false,affected={{spellId=1,quality=1,stacks=1}}})
+record({committed=false,affected={{spellId=2,quality=1,stacks=1}}})
+check(support.Count()==2,'two affected lists are two incidents: '..support.Count())
+support.Clear()
+record({committed=false,readiness={activeSlot=1}})
+record({committed=false,readiness={activeSlot=1}})
+check(support.Count()==1 and support.Latest().occurrences==2,
+ 'while a true repeat is still one incident with a count: '..support.Count())
+-- A retained readiness value is TEXT the failing boundary supplied, so it can
+-- contain the characters the description itself uses. Two different readings
+-- must not describe themselves identically and be merged into one incident
+-- that then states a source reading the second failure never had.
+support.Clear()
+record({committed=false,readiness={permanentSource='x;y=z'}})
+record({committed=false,readiness={permanentSource='x',y='z'}})
+check(support.Count()==2,
+ 'two readings that only look alike when joined are two incidents: '..support.Count())
+-- A value the boundary supplied is retained SHORTENED and with its control
+-- characters written out. Two readings that differ only in what shortening or
+-- flattening would remove are still two readings.
+support.Clear()
+record({committed=false,readiness={note='x'..string.char(10)..'y'}})
+record({committed=false,readiness={note='x y'}})
+check(support.Count()==2,
+ 'a newline is not a space in a retained reading: '..support.Count())
+support.Clear()
+record({committed=false,readiness={note=string.rep('a',400)..'1'}})
+record({committed=false,readiness={note=string.rep('a',400)..'2'}})
+check(support.Count()==2,
+ 'two long readings that differ past the retained length are two readings: '..support.Count())
+support.Clear()
+record({committed=false,readiness={note=string.rep('a',400)}})
+record({committed=false,readiness={note=string.rep('a',400)}})
+check(support.Count()==1 and support.Latest().occurrences==2,
+ 'while the same long reading twice is still one: '..support.Count())
+check(#tostring(support.Latest().readiness.note)<=240,
+ 'and what is retained is still bounded: '..#tostring(support.Latest().readiness.note))
+-- A caller that hands over the RETAINED form of a longer value must not be
+-- merged with it: the marker opens with a control byte, and every control
+-- byte a caller supplies is escaped, so the retained form cannot be forged.
+support.Clear()
+record({committed=false,readiness={note=string.rep('a',400)}})
+local retained=tostring(support.Latest().readiness.note)
+record({committed=false,readiness={note=retained}})
+check(support.Count()==2,
+ 'the retained form of a long reading is not the same reading: '..support.Count())
+-- The marker is an IDENTITY device. It must never reach the text a player
+-- copies into a ticket, or the prepared file, as the byte it is stored as.
+support.Clear()
+record({committed=false,readiness={note=string.rep('a',400)}})
+local copied=builder.Summary()
+check(copied:find(string.char(1),1,true)==nil,
+ 'no marker byte reaches the copied summary')
+check(copied:find('(400B#',1,true)~=nil,
+ 'while the shortening is still stated in the text the reader sees')
+check(copied:match('%.%.%.%(400B#%x%x%x%x%x%x%x%x%)')~=nil,
+ 'and the marker is WHOLE - bracket, byte count and checksum: '
+ ..tostring(copied:match('%.%.%.%b()')))
+local markerJob=builder.NewPreparation({extended=true})
+local markerGuard=0
+while builder.Step(markerJob)=='pending' and markerGuard<400 do markerGuard=markerGuard+1 end
+local markerText=table.concat(markerJob.chunks or {},'')
+check(markerText:find(string.char(1),1,true)==nil,
+ 'and none reaches the prepared file either')
+-- The prepared-file route builds a topic from the incident. It must not raise
+-- on an incident that is missing fields, and the marker must not reach the
+-- payload, the stored header or the file the client writes.
+support.Clear()
+local bare=builder.NewPreparation({incident={id=1,occurrences=1}})
+check(type(bare)=='table','a preparation for an incident with no kind or reason is built')
+local bareGuard=0
+while builder.Step(bare)=='pending' and bareGuard<400 do bareGuard=bareGuard+1 end
+check(type(bare.report)=='table','and it completes: '..tostring(bare.report and 'yes'))
+support.Clear()
+record({committed=false,reason=string.rep('R',400)})
+local topicJob=builder.NewPreparation({extended=true})
+local topicGuard=0
+while builder.Step(topicJob)=='pending' and topicGuard<400 do topicGuard=topicGuard+1 end
+local topicText=table.concat(topicJob.chunks or {},'')
+check(topicText:find(string.char(1),1,true)==nil,
+ 'a long reason does not put a marker byte into the prepared payload')
+check(tostring(topicJob.report.meta.topic):find(string.char(1),1,true)==nil,
+ 'or into the stored header: '..tostring(topicJob.report.meta.topic):sub(1,60))
+check(#tostring(topicJob.report.meta.topic)<=200,
+ 'and the header topic stays bounded: '..#tostring(topicJob.report.meta.topic))
+-- A bound that is tighter than the value must not silently drop the statement
+-- that the value was cut. The header would otherwise claim a complete value.
+check(tostring(topicJob.report.meta.topic):match('%.%.%.%(400B#%x%x%x%x%x%x%x%x%)')~=nil,
+ 'the header topic keeps the WHOLE marker at its own tighter bound: '
+ ..tostring(topicJob.report.meta.topic))
+check(topicText:match('%.%.%.%(400B#%x%x%x%x%x%x%x%x%)')~=nil,
+ 'and so does the prepared payload')
+-- The same for the incident KIND, which is read back through the same
+-- converter and reaches both routes.
+support.Clear()
+support.Record(string.rep('K',400),{committed=false})
+local kindSummary=builder.Summary()
+check(kindSummary:find(string.char(1),1,true)==nil,
+ 'a long kind puts no marker byte into the copied summary')
+check(kindSummary:match('%.%.%.%(40[0-9]B#%x%x%x%x%x%x%x%x%)')~=nil,
+ 'and its shortening is stated whole: '..tostring(kindSummary:match('%.%.%.%b()')))
+local kindJob=builder.NewPreparation({extended=true})
+local kindGuard=0
+while builder.Step(kindJob)=='pending' and kindGuard<400 do kindGuard=kindGuard+1 end
+local kindText=table.concat(kindJob.chunks or {},'')
+check(kindText:find(string.char(1),1,true)==nil,
+ 'and none into the prepared payload')
+-- The build label is an owner field like the rest: hostile or not, neither
+-- route may be taken away and no control byte may reach the stored header.
+local realRelease=Nexus.Release.buildLabel
+Nexus.Release.buildLabel=setmetatable({},{__tostring=function() error('hostile') end})
+local okLabelSummary=pcall(builder.Summary)
+local okLabelFile,labelJob=pcall(builder.NewPreparation,{})
+Nexus.Release.buildLabel='pkg'..string.char(10)..'LINE'..string.char(1)..'MARK'
+local labelSummary=builder.Summary()
+local labelJob2=builder.NewPreparation({})
+local labelGuard=0
+while builder.Step(labelJob2)=='pending' and labelGuard<400 do labelGuard=labelGuard+1 end
+Nexus.Release.buildLabel=realRelease
+check(okLabelSummary,'a hostile build label does not take the summary away')
+check(okLabelFile,'or the prepared-file route')
+check(labelSummary:find(string.char(1),1,true)==nil,
+ 'and a build label carrying the marker byte reaches the summary without it')
+local labelLine
+for line in labelSummary:gmatch('[^'..string.char(10)..']+') do
+ if line:find('Build: ',1,true)==1 then labelLine=line end
+end
+check(labelLine~=nil and labelLine:find('pkg LINE MARK',1,true)~=nil,
+ 'its newline does not split the Build line in two: '..tostring(labelLine))
+check(tostring(labelJob2.report.meta.build):find(string.char(1),1,true)==nil
+ and tostring(labelJob2.report.meta.build):find(string.char(10),1,true)==nil,
+ 'or the stored header: '..tostring(labelJob2.report.meta.build))
+-- The prepared file's own start-up scalars are converted like every other
+-- value: a hostile field must not omit the whole section.
+local realStartup=Nexus.StartupStatus
+Nexus.StartupStatus=function()
+ return {state='failed',coreReady=false,
+  reason=setmetatable({},{__tostring=function() error('hostile') end})}
+end
+local hostileJob=builder.NewPreparation({extended=true})
+local hostileGuard=0
+while builder.Step(hostileJob)=='pending' and hostileGuard<400 do hostileGuard=hostileGuard+1 end
+Nexus.StartupStatus=realStartup
+local hostileText=table.concat(hostileJob.chunks or {},'')
+check(hostileText:find('-- startup --',1,true)~=nil,
+ 'the start-up section is still written when one of its fields is hostile')
+check(hostileText:find('state=failed',1,true)~=nil,
+ 'with the fields that ARE readable: '..hostileText:sub(1,120))
+-- A retained KEY that had to be shortened says so, like a retained value.
+support.Clear()
+record({committed=false,readiness={[string.rep('k',60)..'1']='x'}})
+record({committed=false,readiness={[string.rep('k',60)..'2']='x'}})
+check(support.Count()==2,
+ 'two readings whose keys differ only past the cut are two readings: '..support.Count())
+-- The incident kind is retained text: escaped and bounded like the rest.
+support.Clear()
+record({committed=false,kind='catalog-refusal'})
+local longKind=support.Record(string.rep('K',400)..string.char(9),{committed=false})
+check(longKind~=nil and #tostring(longKind.kind)<=240,
+ 'a long kind is bounded when retained: '..#tostring(longKind and longKind.kind))
+check(tostring(longKind.kind):find(string.char(9),1,true)==nil,
+ 'and its control characters are escaped')
+support.Clear()
+record({committed=false,readiness={permanentSource=1}})
+record({committed=false,readiness={permanentSource='1'}})
+check(support.Count()==2,
+ 'a reading of the number 1 is not a reading of the text "1": '..support.Count())
+support.Clear()
+record({committed=false,readiness={a='b=c'}})
+record({committed=false,readiness={['a=b']='c'}})
+check(support.Count()==2,'and so are two readings that differ only in where the key ends: '
+ ..support.Count())
+support.Clear()
+local caller={activeSlot=1}
+for i=1,40 do caller['k'..i]=i end
+record({committed=false,readiness=caller})
+check(caller['(omitted keys)']==nil,"the caller's own map is not written into")
+-- 13. This module does not trust its owners anywhere else, and it must not
+-- trust them here. Summary, IncidentLines and NewPreparation are public and
+-- take a caller's table, so a value carrying the marker byte followed by more
+-- control bytes must not put them into the report or forge a line.
+support.Clear()
+local injected={id=1,occurrences=1,committed=false,
+ kind='KIND'..string.char(1)..string.char(10)..'INJECTED',
+ reason='REASON'..string.char(1)..string.char(7)..'BELL'}
+local injectedSummary=builder.Summary(injected)
+local badByte=nil
+for index=1,#injectedSummary do
+ local byte=injectedSummary:byte(index)
+ if byte<32 and byte~=10 then badByte=byte end
+end
+check(badByte==nil,'no control byte from a caller value reaches the summary: '..tostring(badByte))
+check(injectedSummary:find('INJECTED',1,true)~=nil,'the text itself is still shown')
+local forged=nil
+for line in injectedSummary:gmatch('[^'..string.char(10)..']+') do
+ if line:find('^INJECTED') then forged=line end
+end
+check(forged==nil,'and it cannot forge a line of its own: '..tostring(forged))
+local injectedJob=builder.NewPreparation({incident=injected,extended=true})
+local injectedGuard=0
+while builder.Step(injectedJob)=='pending' and injectedGuard<400 do injectedGuard=injectedGuard+1 end
+local injectedText=table.concat(injectedJob.chunks or {},'')
+local badPayload=nil
+for index=1,#injectedText do
+ local byte=injectedText:byte(index)
+ if byte<32 and byte~=10 then badPayload=byte end
+end
+check(badPayload==nil,'nor the prepared payload: '..tostring(badPayload))
+
+-- 14. A hostile owner CONTAINER, not only a hostile field: a metatable on the
+-- owner table raises on the index itself.
+do
+ local realRelease,realEvidence=Nexus.Release,Nexus.LoadoutEvidence
+ local raising=setmetatable({},{__index=function() error('hostile owner') end})
+ Nexus.Release=raising
+ local okRelease=pcall(builder.Summary)
+ local okReleaseFile=pcall(builder.NewPreparation,{})
+ Nexus.Release=realRelease
+ Nexus.LoadoutEvidence=raising
+ local okEvidence=pcall(builder.Summary)
+ Nexus.LoadoutEvidence=realEvidence
+ check(okRelease and okReleaseFile,'a raising release owner takes neither route away')
+ check(okEvidence,'and neither does a raising evidence owner')
+end
+
+-- 15. The checksum detects order, and counts each chunk's position. Without
+-- the per-chunk term, two different chunk splits of the same bytes agree.
+check(builder.Checksum({'a','b'})~=builder.Checksum({'b','a'}),
+ 'the checksum is order sensitive')
+check(builder.Checksum({'ab'})~=builder.Checksum({'a','b'}),
+ 'and counts where each chunk ends')
+check(builder.Checksum({})==builder.Checksum({}),'and is stable for the same input')
+-- The VALUE is pinned, not only its properties: tools/decode_support_report.py
+-- recomputes this same function in Python, so a change here that nothing
+-- notices would make every prepared file unreadable by the decoder.
+check(builder.Checksum({'nexus'})=='08b90235',
+ 'the checksum is the one the data-only decoder computes: '..builder.Checksum({'nexus'}))
+check(builder.Checksum({'a','b'})=='025100c7',
+ 'for a split list too: '..builder.Checksum({'a','b'}))
+
+-- 15b. The Orb section prints owner labels. They are owner text like any
+-- other: bounded, and never a control byte in the payload.
+do
+ local realHistory=Nexus.OrbHistory
+ local realRuntime=Nexus.OrbRuntime and Nexus.OrbRuntime.RunLog
+ if type(realHistory)=='table' then
+  local realRows,realView=realHistory.Rows,realHistory.Report
+  realHistory.Rows=function()
+   return {{ordinal=1,
+    source={label='SRC'..string.char(1)..string.char(10)..'FORGED'},
+    replacement={label=string.rep('L',5000)},
+    result={label='RES'..string.char(7)}}}
+  end
+  if Nexus.OrbRuntime then
+   Nexus.OrbRuntime.RunLog=function() return {runId=1,state='FINISHED',entries={{}}} end
+  end
+  local orbJob=builder.NewPreparation({extended=true})
+  local orbGuard=0
+  while builder.Step(orbJob)=='pending' and orbGuard<400 do orbGuard=orbGuard+1 end
+  realHistory.Rows,realHistory.Report=realRows,realView
+  if Nexus.OrbRuntime then Nexus.OrbRuntime.RunLog=realRuntime end
+  local orbText=table.concat(orbJob.chunks or {},'')
+  local orbBad=nil
+  for index=1,#orbText do
+   local byte=orbText:byte(index)
+   if byte<32 and byte~=10 then orbBad=byte end
+  end
+  check(orbBad==nil,'no control byte from an Orb label reaches the payload: '..tostring(orbBad))
+  check(orbText:find(string.rep('L',200),1,true)==nil,
+   'and an unbounded label is bounded before it is written')
+ end
+end
+
+-- 16. The build label is bounded in the stored header, not only escaped.
+do
+ local realLabel=Nexus.Release.buildLabel
+ Nexus.Release.buildLabel=string.rep('X',5000)
+ local longJob=builder.NewPreparation({})
+ local longGuard=0
+ while builder.Step(longJob)=='pending' and longGuard<400 do longGuard=longGuard+1 end
+ Nexus.Release.buildLabel=realLabel
+ check(#tostring(longJob.report.meta.build)<=64,
+  'a 5000-byte build label is bounded in the header: '..#tostring(longJob.report.meta.build))
+end
+
+-- 17. More than one chunk. Every bound holds across the split, and the
+-- checksum still recomputes over the real chunk list.
+support.Clear()
+for index=1,20 do
+ support.Record('catalog-refusal',{reason='R'..index,producer=string.rep('P',200),
+  scope=string.rep('S',200),detail=string.rep('D',200),committed=false,
+  counts={ordinary=79,locked=6,total=85},limits={ordinary=79,locked=6,total=85}})
+end
+local bigJob=builder.NewPreparation({extended=true})
+local bigGuard=0
+while builder.Step(bigJob)=='pending' and bigGuard<2000 do bigGuard=bigGuard+1 end
+check(bigJob.report~=nil,'a large report completes')
+check(bigJob.report.meta.chunkCount>1,
+ 'across more than one chunk: '..bigJob.report.meta.chunkCount)
+local bigBytes=0
+for _,chunk in ipairs(bigJob.report.chunks) do
+ check(#chunk<=builder.CHUNK_BYTES,'each chunk stays within its bound: '..#chunk)
+ bigBytes=bigBytes+#chunk
+end
+check(bigJob.report.meta.bytes==bigBytes,
+ 'the header byte count is the real one: '..bigJob.report.meta.bytes..' vs '..bigBytes)
+check(bigJob.report.meta.checksum==builder.Checksum(bigJob.report.chunks),
+ 'and the checksum covers the real chunks in order')
+
+-- 18. The poison sweep. One value, every owner these two routes read, and the
+-- property rather than the site: a report a player can copy or hand over must
+-- never carry a control byte, never gain a line its owner did not write,
+-- never carry an unbounded segment, and never be lost to a failing owner.
+do
+ local POISON='SENTINEL'..string.char(1)..string.char(10)..string.char(7)
+  ..string.char(0)..'|cffff0000|Hitem:1|h[pipe]|h|r'..string.rep('Z',600)
+ local function hostile()
+  return setmetatable({},{__tostring=function() error('hostile owner') end,
+   __index=function() error('hostile index') end})
+ end
+ -- A header FIELD legitimately holds the value itself, so only the report
+ -- text can be checked for a forged line; both are checked for control bytes
+ -- and for an unbounded segment.
+ local function clean(text,label)
+  local badByte,badAt
+  for index=1,#text do
+   local byte=text:byte(index)
+   if byte<32 and byte~=10 then badByte,badAt=byte,index;break end
+  end
+  check(badByte==nil,label..': control byte '..tostring(badByte)..' at '..tostring(badAt))
+  -- The widest bound any single value gets in this file is 240 bytes, so a
+  -- run past that is a segment that escaped its converter, not a long field.
+  check(text:find(string.rep('Z',400),1,true)==nil,label..': an unbounded segment was written')
+ end
+ -- A value can only forge a line by carrying a line break, and a section that
+ -- lists entries legitimately gives each one its own line. So the property is
+ -- counted, not pattern-matched: the report must have exactly as many lines as
+ -- the same report built from a value with no control bytes in it.
+ local function lineCount(text)
+  local count=0
+  for _ in text:gmatch('[^'..string.char(10)..']+') do count=count+1 end
+  return count
+ end
+ -- The same record and the same owners, with a control-byte-free value.
+ local CLEAN='SENTINEL'..string.rep('Z',600)
+ local baselineSummaryLines,baselinePayloadLines
+ local saved={
+  Release=Nexus.Release,LoadoutEvidence=Nexus.LoadoutEvidence,
+  OrbRuntime=Nexus.OrbRuntime,OrbHistory=Nexus.OrbHistory,
+  StartupStatus=Nexus.StartupStatus,Errors=Nexus.Errors,
+  Storage=_G.NexusSupportStorage,UnitName=UnitName,
+ }
+ -- Every owner, poisoned one at a time, then all of them at once. The first
+ -- pass uses the clean value and fixes the line counts every later pass has
+ -- to match.
+ local owners={'baseline','Release','LoadoutEvidence','OrbRuntime','OrbHistory',
+  'StartupStatus','Errors','Storage','UnitName','all','raising'}
+ for _,owner in ipairs(owners) do
+  support.Clear()
+  -- Enough incidents that the context list of OTHER incidents runs and the
+  -- summary reaches its byte backstop, and tuples whose fields are poisoned
+  -- rather than numeric.
+  for copy=1,12 do
+   support.Record(copy..POISON,{reason=copy..POISON,producer=POISON,scope=POISON,
+    detail=POISON,operation=POISON,ticket=POISON,build=POISON,category=POISON,
+    representation=POISON,origin=POISON,committed=false,
+    readiness={[POISON]=POISON,generation=12},
+    counts={ordinary=81,locked=6,total=87},limits={ordinary=79,locked=6,total=85},
+    affected={{spellId=POISON,quality=POISON,stacks=POISON,locked={}},
+     {spellId=1,quality=2,stacks=3,locked=true}}})
+  end
+  -- Every owner is substituted in every pass, with the poisoned value for the
+  -- one under test and a control-byte-free value for the rest, so a count that
+  -- changes can only be a line a value added.
+  local function substitute(name,value,hostileOwner)
+   if name=='Release' then Nexus.Release={buildLabel=value,version=value}
+   elseif name=='LoadoutEvidence' then
+    Nexus.LoadoutEvidence={SemanticLimits=function()
+     return {ordinary=value,locked=value,total=value} end}
+   elseif name=='OrbRuntime' then Nexus.OrbRuntime={RunLog=function()
+     return {runId=value,state=value,spent=value,limit=value,total=value,entries={{}}} end}
+   elseif name=='OrbHistory' then Nexus.OrbHistory={Rows=function()
+     return {{ordinal=value,source={label=value},replacement={label=value},
+      result={label=value}}} end,Report=function() return {} end}
+   elseif name=='StartupStatus' then Nexus.StartupStatus=function()
+     return {state='failed',coreReady=false,reason=value,phase=value,
+      failure={stage=value,detail=value,cause=value,owner=value,error=value,
+       row=value,formatClass=value,formatVersion=value,formatField=value,
+       legacyClass=value,keyWidth={path=value,depth=value,keyType=value,
+        keyBytes=value,valueType=value,limit=value,exception=value}}} end
+   elseif name=='Errors' then Nexus.Errors={History=function() return {value,value} end}
+   elseif name=='Storage' then
+    _G.NexusSupportStorage={Replace=function() return true end,
+     Status=function() return {loaded=true,ready=true,reason=value} end}
+   elseif name=='UnitName' then UnitName=function() return value end
+   end
+  end
+  for _,each in ipairs(owners) do
+   if each~='baseline' and each~='all' then
+    local poisoned=owner=='all' or owner==each
+    substitute(each, poisoned and POISON or CLEAN, poisoned)
+    if owner=='raising' then
+     if each=='LoadoutEvidence' then Nexus.LoadoutEvidence=hostile()
+     elseif each=='Storage' then _G.NexusSupportStorage=hostile()
+     elseif each=='UnitName' then UnitName=function() error('hostile client') end
+     elseif each=='Release' then Nexus.Release=hostile()
+     elseif each=='Errors' then Nexus.Errors=hostile()
+     elseif each=='OrbRuntime' then Nexus.OrbRuntime=hostile()
+     elseif each=='OrbHistory' then Nexus.OrbHistory=hostile()
+     elseif each=='StartupStatus' then Nexus.StartupStatus=function() error('hostile owner') end
+     end
+    end
+   end
+  end
+  -- A CALLER's incident: nothing sanitised it first, so the report-side
+  -- converters are the only thing between it and the page.
+  local callerIncident={id=POISON,kind=POISON,reason=POISON,producer=POISON,
+   origin=POISON,operation=POISON,ticket=POISON,build=POISON,category=POISON,
+   representation=POISON,scope=POISON,detail=POISON,occurrences=POISON,
+   firstAt=POISON,lastAt=POISON,affectedOmitted=POISON,committed=false,
+   counts={ordinary=POISON,locked=POISON,total=POISON},
+   limits={ordinary=POISON,locked=POISON,total=POISON},
+   readiness={[POISON]=POISON},
+   affected={{spellId=POISON,quality=POISON,stacks=POISON,locked=POISON}}}
+  local okCaller,callerText=pcall(builder.Summary,callerIncident)
+  check(okCaller,'poisoned '..owner..': a caller incident does not take the summary away: '
+   ..tostring(callerText))
+  clean(callerText,'poisoned '..owner..' caller summary')
+  local okCallerFile,callerJob=pcall(builder.NewPreparation,{incident=callerIncident,extended=true})
+  check(okCallerFile,'poisoned '..owner..': nor the prepared-file route')
+  if okCallerFile and type(callerJob)=='table' then
+   local callerGuard=0
+   while builder.Step(callerJob)=='pending' and callerGuard<800 do callerGuard=callerGuard+1 end
+   clean(table.concat(callerJob.chunks or {},''),'poisoned '..owner..' caller payload')
+  end
+  local okSummary,summaryText=pcall(builder.Summary)
+  local okStatus=pcall(builder.StorageStatus)
+  local okNotice,noticeText=pcall(builder.WrittenNotice,{id=POISON})
+  local okJob,job=pcall(builder.NewPreparation,{extended=true})
+  local payload=''
+  if okJob and type(job)=='table' then
+   local guard=0
+   while builder.Step(job)=='pending' and guard<800 do guard=guard+1 end
+   payload=table.concat(job.chunks or {},'')
+  end
+  for key,value in pairs(saved) do
+   if key=='Storage' then _G.NexusSupportStorage=value
+   elseif key=='UnitName' then UnitName=value
+   else Nexus[key]=value end
+  end
+  check(okSummary,'poisoned '..owner..': the summary route is not lost: '..tostring(summaryText))
+  check(okStatus,'poisoned '..owner..': the storage status is not lost')
+  check(okNotice,'poisoned '..owner..': the written notice is not lost')
+  if okNotice and type(noticeText)=='string' then
+   clean(noticeText,'poisoned '..owner..' written notice')
+  end
+  check(okJob,'poisoned '..owner..': the prepared-file route is not lost: '..tostring(job))
+  check(type(summaryText)=='string' and #summaryText<=builder.SUMMARY_MAX_BYTES,
+   'poisoned '..owner..': the summary still fits its bound: '..#tostring(summaryText))
+  -- The context list of OTHER incidents is what the fixture used to miss
+  -- entirely: with one incident the loop never ran, so the five converters in
+  -- it were asserted by nothing. The 8000-byte backstop below it cannot be
+  -- reached at all while the owner bounds every field to 240 and keeps at
+  -- most 20 incidents; that is stated in the commit rather than forced here.
+  check(summaryText:find('Other retained incidents this session',1,true)~=nil,
+   'poisoned '..owner..': the context list is in the summary')
+  local contextRows=0
+  for _ in summaryText:gmatch(string.char(10)..'  %d+%. ') do contextRows=contextRows+1 end
+  local omittedNote=summaryText:match('%[(%d+) context line%(s%) omitted')
+  check(contextRows>=1,
+   'poisoned '..owner..': and it really lists the other incidents: '..contextRows)
+  check(contextRows+(tonumber(omittedNote) or 0)>=11,
+   'poisoned '..owner..': every other incident is either listed or declared omitted: '
+   ..contextRows..'+'..tostring(omittedNote))
+  check(omittedNote==nil or summaryText:find('use Prepare report file',1,true)~=nil,
+   'poisoned '..owner..': and the omission says where the whole report is')
+  -- A retained tuple flag is a boolean, whatever the caller handed over.
+  local retainedTuple=support.Latest() and (support.Latest().affected or {})[1]
+  check(retainedTuple==nil or retainedTuple.locked==nil or retainedTuple.locked==true,
+   'poisoned '..owner..': a retained tuple flag is a boolean: '
+   ..type(retainedTuple and retainedTuple.locked))
+  clean(summaryText,'poisoned '..owner..' summary')
+  clean(payload,'poisoned '..owner..' payload')
+  if owner=='baseline' then
+   baselineSummaryLines,baselinePayloadLines=lineCount(summaryText),lineCount(payload)
+   check(baselineSummaryLines>0 and baselinePayloadLines>0,
+    'the baseline report has lines to compare against: '..baselineSummaryLines
+    ..'/'..baselinePayloadLines)
+  else
+   -- A poisoned owner may cost its OWN line - a failing owner loses only
+   -- what it was going to say - but no value may ADD one.
+   check(owner=='raising' or lineCount(summaryText)<=baselineSummaryLines,
+    'poisoned '..owner..': the summary gained a line: '..lineCount(summaryText)
+    ..' vs '..baselineSummaryLines)
+   check(owner=='raising' or lineCount(payload)<=baselinePayloadLines,
+    'poisoned '..owner..': the payload gained a line: '..lineCount(payload)
+    ..' vs '..baselinePayloadLines)
+  end
+  if okJob and type(job)=='table' and type(job.report)=='table' then
+   for field,value in pairs(job.report.meta or {}) do
+    if type(value)=='string' then clean(value,'poisoned '..owner..' meta.'..field) end
+   end
+  end
+ end
+end
+
+-- 19. The public entries accept a CALLER's incident. One whose own fields
+-- raise on __index, or whose sub-tables do, must cost that incident only.
+do
+ local hostileIncident=setmetatable({},{__index=function() error('hostile row') end})
+ local okHostileSummary,hostileText=pcall(builder.Summary,hostileIncident)
+ check(okHostileSummary,'a hostile caller incident does not take the summary away: '
+  ..tostring(hostileText))
+ local okHostileFile=pcall(builder.NewPreparation,{incident=hostileIncident})
+ check(okHostileFile,'or the prepared-file route')
+ local okHostileLines,hostileLines=pcall(builder.IncidentLines,hostileIncident)
+ check(okHostileLines and type(hostileLines)=='table','or the incident lines themselves')
+ local nested={id=1,kind='catalog-refusal',reason='R',occurrences=1,
+  counts=setmetatable({},{__index=function() error('hostile counts') end}),
+  affected={setmetatable({},{__index=function() error('hostile tuple') end})}}
+ local okNested,nestedText=pcall(builder.Summary,nested)
+ check(okNested,'and neither does a hostile sub-table: '..tostring(nestedText))
+end
+
+-- 20. The escape the page depends on, pinned: a recorded label must not be
+-- able to inject a colour or hyperlink sequence into a font string.
+check(builder.Escape('a|b')=='a||b','one pipe is escaped')
+check(builder.Escape('|cffff0000|Hitem:1|h[x]|h|r')=='||cffff0000||Hitem:1||h[x]||h||r',
+ 'and every pipe of an escape sequence is: '..builder.Escape('|cffff0000|Hitem:1|h[x]|h|r'))
+check(builder.Escape('plain')=='plain','while ordinary text is unchanged')
+
+-- 21. The page. It must not reach into the storage component for itself, and
+-- a component that answers some entries and not others must not take the page
+-- away - which is exactly the shape the sweep installs.
+do
+ local realStorage=_G.NexusSupportStorage
+ local PAGEPOISON='PAGE'..string.char(1)..string.char(10)..string.rep('Y',600)
+ for _,shape in ipairs({
+  -- An incompatible component: the page says so and stops there.
+  {Latest=function() return {} end,
+   Status=function() return {loaded=true,ready=true,incompatible=PAGEPOISON} end},
+  -- A working component whose stored report describes itself in poison: the
+  -- page reaches the stored summary, so every field of it is converted.
+  {Latest=function() return {id=PAGEPOISON,bytes=PAGEPOISON,
+    chunkCount=PAGEPOISON,checksum=PAGEPOISON} end,
+   Status=function() return {loaded=true,ready=true} end},
+  {Replace=function() return true end,Status=function() return {loaded=true,ready=true} end},
+  {Latest=function() error('hostile latest') end,
+   Status=function() return {loaded=true,ready=true} end},
+  {Status=function() return setmetatable({},{__index=function() error('hostile status') end}) end},
+  setmetatable({},{__index=function() error('hostile component') end}),
+  'not a table',
+ }) do
+  _G.NexusSupportStorage=shape
+  local okPage=pcall(function() Nexus.SupportReportUI.Show() end)
+  check(okPage,'a partial or hostile storage component does not take the page away')
+  local line=page.storage and page.storage:GetText() or ''
+  check(type(line)=='string' and #line>0,'and the page still says something about storage')
+  local pageBad
+  for index=1,#line do
+   local byte=line:byte(index)
+   if byte<32 and byte~=10 then pageBad=byte;break end
+  end
+  check(pageBad==nil,'the storage line carries no control byte: '..tostring(pageBad))
+  check(line:find(string.rep('Y',400),1,true)==nil,
+   'and nothing unbounded from the component reaches it')
+ end
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 22. The storage component is read ONE lookup and call at a time, inside a
+-- pcall, and everything it returns is copied. A component whose __index
+-- answers once and then raises is the shape that proves both.
+do
+ local realStorage=_G.NexusSupportStorage
+ local builderRef=builder
+ local function stateful(entries)
+  local answered={}
+  return setmetatable({},{__index=function(_,key)
+   if answered[key] then error('second read of '..tostring(key)) end
+   answered[key]=true
+   return entries[key]
+  end})
+ end
+ _G.NexusSupportStorage=stateful({
+  Latest=function() return {id='S',bytes=1,chunkCount=1,checksum='abcd1234'} end,
+  Read=function() return {chunks={'x'}} end,
+  Status=function() return {loaded=true,ready=true} end,
+  Replace=function() return true,{bytes=1,chunkCount=1,checksum='abcd1234'} end})
+ local okStored,stored=pcall(builderRef.StoredSummary)
+ check(okStored,'a component whose __index answers once does not raise: '..tostring(stored))
+ local okReport=pcall(builderRef.StoredReport)
+ check(okReport,'and neither does the stored-report reader')
+ local okStatus2=pcall(builderRef.StorageStatus)
+ check(okStatus2,'nor the status reader')
+ local okStore2=pcall(builderRef.Store,{chunks={'x'}})
+ check(okStore2,'nor the store route')
+ local okPage2=pcall(function() Nexus.SupportReportUI.Show() end)
+ check(okPage2,'nor the page')
+ -- What it returns is a shape this addon owns, not the component's table.
+ local componentTable={id='T',bytes=2,chunkCount=1,checksum='dead',extra='leak'}
+ _G.NexusSupportStorage={Latest=function() return componentTable end,
+  Read=function() return {chunks={'x'}} end,
+  Status=function() return {loaded=true,ready=true} end}
+ local owned=builderRef.StoredSummary()
+ check(owned~=componentTable,'the stored summary is not the component table')
+ check(owned.extra==nil,'and carries no field this addon did not ask for')
+ check(getmetatable(owned)==nil,'and no metatable of theirs')
+ -- A component that says it is NOT incompatible is compatible.
+ _G.NexusSupportStorage={Replace=function() return true,{} end,
+  Status=function() return {loaded=true,ready=true,incompatible=false,reason=false} end}
+ local status=builderRef.StorageStatus()
+ check(status.incompatible==nil,'incompatible=false is not an incompatibility: '
+  ..tostring(status.incompatible))
+ check(status.reason==nil,'and reason=false is not a reason: '..tostring(status.reason))
+ check(status.loaded==true and status.ready==true,'while the rest of the status is kept')
+ -- A component that says nothing is not loaded.
+ _G.NexusSupportStorage={Replace=function() return true,{} end,
+  Status=function() return {} end}
+ local silent=builderRef.StorageStatus()
+ check(silent.loaded==true and silent.ready==false,
+  'a component that ANSWERS is loaded, and says for itself whether it is ready: '
+  ..tostring(silent.loaded)..'/'..tostring(silent.ready))
+ _G.NexusSupportStorage=nil
+ local absent=builderRef.StorageStatus()
+ check(absent.loaded==false and absent.ready==false,
+  'while a component that is not there is neither: '
+  ..tostring(absent.loaded)..'/'..tostring(absent.ready))
+ -- Bounds on what the component can put on the page.
+ local LONG=string.rep('W',900)
+ _G.NexusSupportStorage={Latest=function()
+   return {id=LONG,bytes=LONG,chunkCount=LONG,checksum=LONG} end,
+  Read=function() return {chunks={'x'}} end,
+  Status=function() return {loaded=true,ready=true} end}
+ local bounded=builderRef.StoredSummary()
+ check(#bounded.id<=48 and #bounded.bytes<=24 and #bounded.chunkCount<=16
+  and #bounded.checksum<=24,'every stored-summary field is bounded: '..#bounded.id
+  ..'/'..#bounded.bytes..'/'..#bounded.chunkCount..'/'..#bounded.checksum)
+ -- The page's own Inspect handler reads the same owned shape.
+ Nexus.SupportReportUI.Show()
+ local inspect
+ for _,b in ipairs(H.frames) do
+  if b.kind=='Button' and b:GetText()=='Inspect prepared report' then inspect=b end
+ end
+ check(inspect~=nil,'the Inspect control exists')
+ local okInspect=pcall(function() inspect:Click() end)
+ check(okInspect,'and a hostile component does not take it away')
+ local inspectText=page.prepared and page.prepared:GetText() or ''
+ check(inspectText:find(string.rep('W',200),1,true)==nil,
+  'nothing unbounded from the component reaches the page: '..#inspectText)
+ local inspectBad
+ for index=1,#inspectText do
+  local byte=inspectText:byte(index)
+  if byte<32 and byte~=10 then inspectBad=byte;break end
+ end
+ check(inspectBad==nil,'and no control byte either: '..tostring(inspectBad))
+ _G.NexusSupportStorage=setmetatable({},{__index=function() error('hostile component') end})
+ check(pcall(function() inspect:Click() end),'a raising component does not take Inspect away')
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 23. The prepared-file route survives a component that returns less than the
+-- one shipped with this addon does.
+do
+ local realStorage=_G.NexusSupportStorage
+ _G.NexusSupportStorage={Replace=function() return true end,
+  Status=function() return {loaded=true,ready=true} end,
+  Latest=function() return nil end,Read=function() return nil end}
+ local okBare=pcall(function() return Nexus.SupportReportUI.PrepareFile(false) end)
+ check(okBare,'a component that returns no header does not break the file route')
+ _G.NexusSupportStorage=realStorage
+end
+
+-- 24. A stored copy that no longer agrees with its own checksum must SAY so.
+-- The verdict is false, not absent, and "false or nil" cannot carry it.
+do
+ local realStorage=_G.NexusSupportStorage
+ local intact={id='R-1',bytes=3,chunkCount=1,checksum=builder.Checksum({'abc'})}
+ _G.NexusSupportStorage={
+  Latest=function() return intact end,
+  Read=function() return {chunks={'abc'}} end,
+  Status=function() return {loaded=true,ready=true} end}
+ local good=builder.StoredReport()
+ check(good~=nil and good.matches==true,'an intact stored copy verifies: '
+  ..tostring(good and good.matches))
+ -- The same header, one byte of the stored copy changed.
+ _G.NexusSupportStorage={
+  Latest=function() return intact end,
+  Read=function() return {chunks={'abd'}} end,
+  Status=function() return {loaded=true,ready=true} end}
+ local bad=builder.StoredReport()
+ check(bad~=nil,'a corrupted stored copy is still readable')
+ check(bad.matches==false,'and its verdict is FALSE, not absent: '..tostring(bad.matches))
+ check(bad.recomputed~=nil and bad.recomputed~=bad.checksum,
+  'the recomputed checksum differs from the stored one: '..tostring(bad.recomputed))
+ Nexus.SupportReportUI.Show()
+ local inspect
+ for _,b in ipairs(H.frames) do
+  if b.kind=='Button' and b:GetText()=='Inspect prepared report' then inspect=b end
+ end
+ inspect:Click()
+ local said=page.prepared:GetText()
+ check(said:find('CHECKSUM MISMATCH',1,true)~=nil,
+  'and the page says so in words: '..said:sub(1,160))
+ -- A component that cannot be read at all states nothing either way.
+ _G.NexusSupportStorage={
+  Latest=function() return intact end,
+  Read=function() return nil end,
+  Status=function() return {loaded=true,ready=true} end}
+ local unknown=builder.StoredReport()
+ check(unknown~=nil and unknown.matches==nil,
+  'an unreadable stored copy claims neither: '..tostring(unknown.matches))
+ -- A Read that RAISES is not a mismatch: the error text is not a checksum.
+ _G.NexusSupportStorage={
+  Latest=function() return intact end,
+  Read=function() error('the component exploded') end,
+  Status=function() return {loaded=true,ready=true} end}
+ local raised=builder.StoredReport()
+ check(raised~=nil and raised.matches==nil,
+  'a component whose Read raises does not produce a mismatch verdict: '
+  ..tostring(raised.matches))
+ check(raised.recomputed==nil,'and no error text is kept as a checksum: '
+  ..tostring(raised.recomputed))
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 25. What the component sends comes back as a verdict and a copied header,
+-- never as its own table, and its text is escaped before it is displayed.
+do
+ local realStorage=_G.NexusSupportStorage
+ local theirs={partial=true,omissions='|cffff0000|Hitem:1|h[x]|h|r',
+  bytes={},chunkCount=2,id='ID|PIPE',secret='leak'}
+ _G.NexusSupportStorage={Replace=function() return theirs,theirs end,
+  Status=function() return {loaded=true,ready=true} end,
+  Latest=function() return {id='ID|PIPE',bytes=1,chunkCount=1,checksum='c'} end,
+  Read=function() return {chunks={'x'}} end}
+ local stored,meta=builder.Store({chunks={'x'}})
+ check(stored==true,'the store verdict is a boolean, not their table: '..type(stored))
+ check(meta~=theirs,'and the header is a copy')
+ check(meta.secret==nil,'carrying no field this addon did not ask for')
+ check(meta.bytes==nil,'a header field of the wrong type is dropped, not passed on')
+ check(meta.chunkCount==2,'while a good one keeps its type: '..type(meta.chunkCount))
+ check(meta.partial==true,'and the partial flag survives')
+ -- The page displays it escaped, like everything else it shows.
+ Nexus.SupportReportUI.Show()
+ local line=page.storage:GetText()
+ check(line:find('||',1,true)~=nil or line:find('|',1,true)==nil,
+  'the storage line escapes a pipe from the component: '..line:sub(1,120))
+ local prepared=Nexus.SupportReportUI.PrepareFile(false)
+ local note=page.prepared:GetText()
+ check(note:find('This report is partial',1,true)~=nil,
+  'a partial header is declared on the page: '..note:sub(1,160))
+ check(not note:find('|c',1,true) or note:find('||c',1,true)~=nil,
+  'and the omission text is escaped: '..note:sub(1,160))
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 26. A component entry that is not a function is not a component.
+do
+ local realStorage=_G.NexusSupportStorage
+ _G.NexusSupportStorage={Replace='not a function',Status='not a function'}
+ local status=builder.StorageStatus()
+ check(status.loaded==false,'a non-function entry is not a loaded component: '
+  ..tostring(status.loaded))
+ local stored,why=builder.Store({chunks={'x'}})
+ check(stored==nil and tostring(why):find('not loaded',1,true)~=nil,
+  'and the store route says which: '..tostring(why))
+ _G.NexusSupportStorage=realStorage
+end
+
+-- 27. No heap address reaches a report.
+check(builder.Summary({kind={},reason=print,producer=coroutine.create(function() end)})
+ :find('0x',1,true)==nil,'a table, function or coroutine is named, not addressed')
+
+-- 28. A component states why it refused. That reason is what the player is
+-- shown - the shipped component refuses that way in every failure it has.
+do
+ local realStorage=_G.NexusSupportStorage
+ _G.NexusSupportStorage={
+  Replace=function() return nil,'the saved data was written by a newer version (99)' end,
+  Status=function() return {loaded=true,ready=true} end}
+ local stored,why=builder.Store({chunks={'x'}})
+ check(stored==nil,'a refusing component does not report a stored report')
+ check(tostring(why):find('newer version (99)',1,true)~=nil,
+  'and its own words reach the caller: '..tostring(why))
+ Nexus.SupportReportUI.Show()
+ local prepared,pageWhy=Nexus.SupportReportUI.PrepareFile(false)
+ check(prepared==nil,'the page does not claim a file was prepared')
+ check(page.prepared:GetText():find('newer version (99)',1,true)~=nil,
+  'and says why, in the component words: '..page.prepared:GetText():sub(1,140))
+ -- A component that refuses with no words at all still gets a sentence.
+ _G.NexusSupportStorage={Replace=function() return nil end,
+  Status=function() return {loaded=true,ready=true} end}
+ local _,bare=builder.Store({chunks={'x'}})
+ check(type(bare)=='string' and #bare>0,'a silent refusal still states something: '..tostring(bare))
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 29. Every value the page displays is escaped ONCE: not zero times, which
+-- lets a component colour the page, and not twice, which corrupts the text.
+do
+ local realStorage=_G.NexusSupportStorage
+ local COLOUR='|cffff0000RED|r'
+ _G.NexusSupportStorage={
+  Replace=function() return true,{id=COLOUR,bytes=1,chunkCount=1,checksum='c'} end,
+  Status=function() return {loaded=true,ready=true,incompatible=false} end,
+  Latest=function() return {id=COLOUR,bytes=1,chunkCount=1,checksum='c'} end,
+  Read=function() return {chunks={'x'}} end}
+ Nexus.SupportReportUI.Show()
+ Nexus.SupportReportUI.PrepareFile(false)
+ local notice=page.prepared:GetText()
+ check(notice:find('||cffff0000',1,true)~=nil,
+  'the written notice escapes the component id once: '..notice:sub(1,120))
+ check(notice:find('||||c',1,true)==nil,'and not twice')
+ -- The incompatible sentence on the prepare path, which had none.
+ _G.NexusSupportStorage={
+  Replace=function() return true,{} end,
+  Status=function() return {loaded=true,ready=true,incompatible=COLOUR} end}
+ Nexus.SupportReportUI.Show()
+ Nexus.SupportReportUI.PrepareFile(false)
+ local refused=page.prepared:GetText()
+ check(refused:find('||cffff0000',1,true)~=nil,
+  'the prepare refusal escapes it too: '..refused:sub(1,140))
+ check(refused:find('||||c',1,true)==nil,'once, not twice')
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 30. "Loaded" means the same thing in the status, on the page and on the
+-- file route. A component that is there but not ready must not be called
+-- ready by the page.
+do
+ local realStorage=_G.NexusSupportStorage
+ local shapes={
+  {name='answers, not ready',component={Replace=function() return true,{} end,
+    Status=function() return {loaded=false,ready=false,reason='still loading'} end},
+   loaded=true,ready=false},
+  {name='answers with nonsense',component={Replace=function() return true,{} end,
+    Status=function() return 'fine' end},loaded=true,ready=false},
+  {name='status raises',component={Replace=function() return true,{} end,
+    Status=function() error('no') end},loaded=true,ready=false},
+  {name='no status entry',component={Replace=function() return true,{} end},
+   loaded=false,ready=false},
+  {name='absent',component=nil,loaded=false,ready=false},
+ }
+ for _,shape in ipairs(shapes) do
+  _G.NexusSupportStorage=shape.component
+  local status=builder.StorageStatus()
+  check(status.loaded==shape.loaded,shape.name..': loaded is '..tostring(shape.loaded)
+   ..', got '..tostring(status.loaded))
+  check(status.ready==shape.ready,shape.name..': ready is '..tostring(shape.ready)
+   ..', got '..tostring(status.ready))
+  Nexus.SupportReportUI.Show()
+  local line=page.storage:GetText()
+  if not status.ready then
+   check(line:find('ready; no report',1,true)==nil,
+    shape.name..': the page does not call it ready: '..line:sub(1,120))
+  end
+ end
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+-- 31. The copied header is bounded too, not only the stored summary.
+do
+ local realStorage=_G.NexusSupportStorage
+ local LONG=string.rep('H',900)
+ _G.NexusSupportStorage={
+  Replace=function() return true,{id=LONG,build=LONG,topic=LONG,checksum=LONG,
+   omissions=LONG,bytes=1,chunkCount=1} end,
+  Status=function() return {loaded=true,ready=true} end}
+ local _,meta=builder.Store({chunks={'x'}})
+ for _,field in ipairs({'id','build','topic','checksum','omissions'}) do
+  check(#tostring(meta[field])<=120,'the copied header bounds '..field..': '
+   ..#tostring(meta[field]))
+ end
+ _G.NexusSupportStorage=realStorage
+end
+
+-- 32. A healthy start-up has NO reason, and the owner says so with the
+-- boolean false rather than nil. The report must omit the line, not print
+-- the word "false" - on both routes, in the very line this work added.
+do
+ local realStatus=Nexus.StartupStatus
+ Nexus.StartupStatus=function()
+  return {state='ready',coreReady=true,phase='complete',reason=false}
+ end
+ local healthy=builder.Summary()
+ check(healthy:find('reason: false',1,true)==nil,
+  'the copyable summary states no reason when there is none: '
+  ..tostring(healthy:match('[^'..string.char(10)..']*reason[^'..string.char(10)..']*')))
+ check(healthy:find('Startup: state ready',1,true)~=nil,'while the state is still stated')
+ local healthyJob=builder.NewPreparation({extended=true})
+ local healthyGuard=0
+ while builder.Step(healthyJob)=='pending' and healthyGuard<400 do healthyGuard=healthyGuard+1 end
+ local healthyText=table.concat(healthyJob.chunks or {},'')
+ check(healthyText:find('reason=false',1,true)==nil,
+  'and the prepared file does not either: '
+  ..tostring(healthyText:match('reason=[^'..string.char(10)..']*')))
+ check(healthyText:find('state=ready',1,true)~=nil,'while it still carries the state')
+ -- coreReady=false is a real answer and must survive the same guard.
+ Nexus.StartupStatus=function()
+  return {state='failed',coreReady=false,reason='SOURCE_KEY_WIDTH_EXCEEDED'}
+ end
+ local failedJob=builder.NewPreparation({extended=true})
+ local failedGuard=0
+ while builder.Step(failedJob)=='pending' and failedGuard<400 do failedGuard=failedGuard+1 end
+ local failedText=table.concat(failedJob.chunks or {},'')
+ check(failedText:find('coreReady=false',1,true)~=nil,
+  'core ready false is still written: '..failedText:sub(1,200))
+ check(failedText:find('reason=SOURCE_KEY_WIDTH_EXCEEDED',1,true)~=nil,
+  'and a real reason still reaches the file')
+ check(builder.Summary():find('reason: SOURCE_KEY_WIDTH_EXCEEDED',1,true)~=nil,
+  'and the summary')
+ Nexus.StartupStatus=realStatus
+end
+
+-- 33. Every "Not prepared" line the page writes is escaped, whatever supplied
+-- the words - the three of them, not two of the three.
+do
+ local realStorage=_G.NexusSupportStorage
+ _G.NexusSupportStorage={
+  Replace=function() return nil,'refused: |cffff0000RED|r' end,
+  Status=function() return {loaded=true,ready=true} end}
+ Nexus.SupportReportUI.Show()
+ Nexus.SupportReportUI.PrepareFile(false)
+ local refusal=page.prepared:GetText()
+ check(refusal:find('||cffff0000',1,true)~=nil,
+  'a component refusal is escaped on the page: '..refusal:sub(1,140))
+ check(refusal:find('||||c',1,true)==nil,'once, not twice')
+ _G.NexusSupportStorage=realStorage
+ Nexus.SupportReportUI.Show()
+end
+
+print('PASS support_report: one incident, one summary under 8000 bytes, and one prepared file that claims only what is true checks='..checks)

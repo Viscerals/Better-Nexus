@@ -18,14 +18,14 @@ assert(A.SetFirstLoadoutWishlistIdentity('Review target',{{spellId=200001,qualit
 SlashCmdList.NEXUS('freeze off');SlashCmdList.NEXUS('reroll off');Nexus.Panel.Show()
 H.Board({{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}})
 H.Notify();H.Advance(.5)
-check(texts():find('Take a needed Echo',1,true) and not texts():find('(Pilot)',1,true),'T19 actual policy -> runtime -> Panel fontstring')
+check(texts():find('Take a needed Echo',1,true) and not texts():find('(EchoWeaver)',1,true),'T19 actual policy -> runtime -> Panel fontstring')
 local rawLabels={
- {'Freeze wanted Echo before search (Pilot)','Freeze a needed Echo'},
- {'Banish to find Wishlist targets (Pilot)','Banish to find Wishlist targets'},
- {'Reroll: no requested Echo on board (Pilot)','Reroll: no requested Echo'},
- {'Take available filler (Pilot)','outside the Wishlist'},
- {'Take filler; search unavailable (Pilot)','no permitted Banish or Reroll action'},
- {'Wishlist complete; take filler (Pilot)','Wishlist complete'},
+ {'Freeze wanted Echo before search (EchoWeaver)','Freeze a needed Echo'},
+ {'Banish to find Wishlist targets (EchoWeaver)','Banish to find Wishlist targets'},
+ {'Reroll: no requested Echo on board (EchoWeaver)','Reroll: no requested Echo'},
+ {'Take available filler (EchoWeaver)','outside the Wishlist'},
+ {'Take filler; search unavailable (EchoWeaver)','no permitted Banish or Reroll action'},
+ {'Wishlist complete; take filler (EchoWeaver)','Wishlist complete'},
  {'waiting: unsynced','Waiting for current Echo data'},
  {'waiting for owned-state sync','Waiting for current Echo data'},
  {'waiting for owned-echo sync','Waiting for current Echo data'},

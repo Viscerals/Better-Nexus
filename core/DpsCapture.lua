@@ -37,7 +37,7 @@ local CLASS_LABEL = {
 local REJECTION_KEYS = {
     "duration", "owner_sender", "relay_authorization", "schema",
     "stale_record", "duplicate_not_better", "invalid_category",
-    "integrity", "outside_request",
+    "integrity", "outside_request", "storage",
 }
 local rejectionStats = {}
 
@@ -110,6 +110,15 @@ local function NormalizeClass(class)
     return class and VALID_CLASS[class] and class or nil
 end
 
+-- The current character's class token: UnitClass returns the localized name
+-- first and the token second. A missing API, a missing token or one Nexus
+-- does not know is nil; nothing is guessed.
+local function CurrentClassToken()
+    if type(UnitClass) ~= "function" then return nil end
+    local ok, _, token = pcall(UnitClass, "player")
+    return ok and NormalizeClass(token) or nil
+end
+
 local Adapter, Sync
 -- Response cursors may be retained by Sync across module reinitialization.
 -- A monotonic binding generation prevents a same-digest/same-revision profile
@@ -176,8 +185,48 @@ function dbBinding.Select(payload)
     end
     return payload
 end
+-- A saved root the Store keeps read-only still shows the DPS records this
+-- build reads, once the catalog has admitted that root: the session store
+-- becomes a detached bounded copy of the current DPS keys (from the bundle's
+-- payload, or with no bundle from the saved dpsCapture). Other saved keys,
+-- including the older per-player leaderboard shape, are not copied. The saved tables
+-- are never served, so writes and inbound records stay out of the saved
+-- root. An occupied bundle without a payload revives no legacy input.
+dbBinding.SAVED_KEYS = {
+    "personalBest", "buildBest", "characterBest",
+    "lockedMigrationSource", "lockedMigrationVersion",
+}
+function dbBinding.SavedProjection(bundle)
+    local internals = Nexus and Nexus.MainInternals
+    local project = internals and internals.ReadOnlyProjectionV1
+    if type(project) ~= "function" then return nil end
+    local source
+    if bundle ~= nil then
+        source = type(bundle) == "table" and rawget(bundle, "dpsCapture") or nil
+    else
+        source = rawget(NexusDB, "dpsCapture")
+    end
+    if type(source) ~= "table" then return nil end
+    local known = {}
+    for _, key in ipairs(dbBinding.SAVED_KEYS) do known[key] = rawget(source, key) end
+    local copy = project(NexusDB, known)
+    if copy == nil and internals.SavedRootReadOnlyV1
+        and internals.SavedRootReadOnlyV1(NexusDB) ~= nil then
+        Debug("saved DPS records not shown: read-only saved data is not a plain table graph within the session copy bound")
+    end
+    return copy
+end
 local function DB()
-    NexusDB = NexusDB or {}
+    if type(NexusDB) ~= "table" then
+        -- No saved table is loaded. A read must not create one: a fabricated
+        -- table can be saved over real data at logout. This session reads and
+        -- writes a transient store instead, and reports itself read-only.
+        dbPolicyReadOnly = true
+        if transientDbOwner ~= nil or type(transientDb) ~= "table" then
+            transientDbOwner, transientDb = nil, {}
+        end
+        return dbBinding.Select(transientDb)
+    end
     local bundle = rawget(NexusDB, "authorityBundle")
     -- Serving readiness can change without replacing the database or bundle
     -- (notably the startup seal). Do not retain its earlier read-only verdict.
@@ -186,8 +235,15 @@ local function DB()
         and catalog.Status() or nil
     dbPolicyReadOnly = type(status) == "table" and status.readOnly == true
     if dbPolicyReadOnly then
-        if transientDbOwner ~= NexusDB then
-            transientDbOwner, transientDb = NexusDB, {}
+        -- A root the catalog refuses (a catalog schema this build does not
+        -- know, an invalid bundle) shows nothing. The copy is made once, when
+        -- the catalog admits the root.
+        local admitted = status.state == "ROOT_ADMITTED"
+        if transientDbOwner ~= NexusDB
+            or (admitted and dbBinding.projectedFor ~= NexusDB) then
+            transientDbOwner = NexusDB
+            transientDb = admitted and dbBinding.SavedProjection(bundle) or {}
+            if admitted then dbBinding.projectedFor = NexusDB end
         end
         return dbBinding.Select(transientDb)
     end
@@ -636,12 +692,33 @@ local function SnapshotEchoes()
     local slots = Adapter.Slots and Adapter.Slots()
     local activeIdx = slots and tonumber(slots.activeSlot)
     local activeRow = activeIdx and activeIdx > 0 and slots.bySlot and slots.bySlot[activeIdx]
+    -- The active slot is a SAVED loadout and Owned is a THIS-RUN projection:
+    -- they describe different moments, so this merge can only be a best
+    -- effort. What it must not do is move a copy between roles. A slot row the
+    -- slot itself marks permanent is permanent evidence; merging it into the
+    -- ordinary pool left it there whenever the CURRENT permanent map no longer
+    -- carried that exact id - a replaced permanent, a stale slot, another
+    -- loadout - and an ordinary pool of 79 copies reached the catalog as 81.
+    -- A row whose role the slot does not state is still merged, and the count
+    -- of those rows is reported, so the capture boundary can refuse rather
+    -- than guess.
+    -- The slot's rows are kept as the slot marked them: its ordinary rows are
+    -- ordinary evidence, its permanent rows are permanent evidence, and a row
+    -- whose role the slot does not state is counted so the capture boundary
+    -- knows it was guessed at.
+    local roleUnknownRows = 0
+    local slotOrdinary, slotPermanent = {}, {}
     if activeRow and type(activeRow.echoes) == "table" then
         for _, e in ipairs(activeRow.echoes) do
             local eid = tonumber(e and e.spellId)
             if eid then
                 local n = tonumber(e.stacks) or 1
-                if n > (tonumber(ownedBySpell[eid]) or 0) then ownedBySpell[eid] = n end
+                if e.locked == true then
+                    slotPermanent[eid] = (slotPermanent[eid] or 0) + n
+                else
+                    if e.locked == nil then roleUnknownRows = roleUnknownRows + 1 end
+                    if n > (slotOrdinary[eid] or 0) then slotOrdinary[eid] = n end
+                end
             end
         end
     end
@@ -651,22 +728,123 @@ local function SnapshotEchoes()
     -- 79-Echo completed build is captured under an 85-Echo key and can never
     -- be found by the panel or its posted community build.
     local lockedBySpell = {}
+    local permanentKnown = false
     if Adapter.LockedOwned then
         local locked = Adapter.LockedOwned()
         if locked and type(locked.bySpell) == "table" then
-            lockedBySpell = locked.bySpell
+            -- An EMPTY permanent map that the projection states is synchronized
+            -- is an answer, not a missing one: this character holds no permanent
+            -- Echo at all. Reading that emptiness as "has not arrived" deferred
+            -- every capture such a character ever made, forever, because nothing
+            -- was ever going to arrive. Without that flag a non-empty map is
+            -- still evidence about the copies it names.
+            if locked.synced == true or next(locked.bySpell) then
+                lockedBySpell = locked.bySpell
+                permanentKnown = true
+            end
+        end
+    end
+    -- The live permanent map is the authority when it is there. When it has
+    -- not arrived yet, the saved slot's OWN permanent marks are used instead:
+    -- that is recorded evidence about those copies, not a guess, and it keeps
+    -- a correct 79+6 loadout recordable while GetLockedPerks is late.
+    local permanentSource = "live"
+    if not permanentKnown and next(slotPermanent) ~= nil then
+        lockedBySpell = slotPermanent
+        permanentSource = "saved slot marks"
+    elseif not permanentKnown then
+        permanentSource = "none available"
+    end
+
+    -- A row the saved slot marks permanent, for an id the CURRENT permanent
+    -- map does not carry, is two sources contradicting each other about one
+    -- copy: either it was replaced and is gone, or it is still held as an
+    -- ordinary copy. Nothing here can tell those apart, so the row is counted
+    -- and the capture boundary refuses rather than picking one and being
+    -- silently wrong in the other direction.
+    local contestedPermanent = 0
+    if permanentKnown then
+        for spellId, copies in pairs(slotPermanent) do
+            if (tonumber(lockedBySpell[spellId]) or 0) <= 0 then
+                contestedPermanent = contestedPermanent + copies
+            end
         end
     end
 
+    local ids = {}
+    for spellId in pairs(ownedBySpell) do ids[spellId] = true end
+    for spellId in pairs(slotOrdinary) do ids[spellId] = true end
     local source = {}
-    for spellId, count in pairs(ownedBySpell) do
-        local tracked = math.max(0, count - (tonumber(lockedBySpell[spellId]) or 0))
+    for spellId in pairs(ids) do
+        -- Permanent copies are subtracted from the OWNED projection, which is
+        -- the only pool that carries them. Subtracting them from the slot's
+        -- ordinary evidence as well would remove an ordinary copy the player
+        -- really has, which is how a 79-copy loadout became 78.
+        local ownedPortion = math.max(0, (tonumber(ownedBySpell[spellId]) or 0)
+            - (tonumber(lockedBySpell[spellId]) or 0))
+        local tracked = math.max(ownedPortion, slotOrdinary[spellId] or 0)
         if tracked > 0 then
             source[#source + 1] = { spellId = spellId, count = tracked }
         end
     end
-    return NormalizeEchoes(source)
+    local snapshot = NormalizeEchoes(source)
+    return snapshot, {
+        roleUnknownRows = roleUnknownRows,
+        slotRows = activeRow and type(activeRow.echoes) == "table"
+            and #activeRow.echoes or 0,
+        permanentKnown = permanentKnown,
+        permanentSource = permanentSource,
+        contestedPermanent = contestedPermanent,
+        activeSlot = activeIdx or nil,
+    }
 end
+
+-- The supported envelope is the only objective test available at this
+-- boundary. An ordinary pool above it is not a possible current loadout: it
+-- can only come from two sources that describe different moments, so the
+-- capture is deferred with its counts retained instead of writing a record
+-- the catalog must reject - and instead of replacing a valid earlier record
+-- with a derived one that cannot be true. Locked copies are held copies of
+-- occupied records, counted by the native journal's client lock gate against
+-- the capacity, which no record carries: here a locked row is held to the
+-- owner's row ceilings (LoadoutEvidence.SemanticLimits), not to a copy count.
+local function CaptureEnvelopeVerdict(ordinary, locked)
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    local limits = evidence and type(evidence.SemanticLimits) == "function"
+        and evidence.SemanticLimits() or nil
+    if type(limits) ~= "table" then limits = {} end
+    -- A partial answer from the authority must not turn a comparison into
+    -- "number < nil"; the documented values fill the gaps.
+    limits = {
+        ordinary = tonumber(limits.ordinary) or 79,
+        lockedRows = tonumber(limits.lockedRows) or 256,
+        lockedRowStacks = tonumber(limits.lockedRowStacks) or 120,
+        total = tonumber(limits.total) or 10000,
+    }
+    local ordinaryCopies, lockedCopies, lockedRows = 0, 0, 0
+    local lockedOver = false
+    for _, e in ipairs(type(ordinary) == "table" and ordinary or {}) do
+        ordinaryCopies = ordinaryCopies + (tonumber(e.count or e.stacks) or 1)
+    end
+    for _, e in ipairs(type(locked) == "table" and locked or {}) do
+        local copies = tonumber(e.count or e.stacks) or 1
+        lockedCopies, lockedRows = lockedCopies + copies, lockedRows + 1
+        if copies > limits.lockedRowStacks then lockedOver = true end
+    end
+    local total = ordinaryCopies + lockedCopies
+    local counts = {ordinary=ordinaryCopies, locked=lockedCopies, total=total}
+    if ordinaryCopies > limits.ordinary then
+        return false, counts, limits, "ordinary copies above the supported envelope"
+    end
+    if lockedOver or lockedRows > limits.lockedRows then
+        return false, counts, limits, "locked copies above the supported envelope"
+    end
+    if total > limits.total then
+        return false, counts, limits, "total copies above the supported envelope"
+    end
+    return true, counts, limits
+end
+DPS._CaptureEnvelopeVerdict = CaptureEnvelopeVerdict
 
 local function EchoKey(snap)
     if not snap or #snap == 0 then return nil end
@@ -731,15 +909,12 @@ ReferenceEvidence = function(row)
     end
     BindField("echoes", "evidenceKey")
     BindField("lockedEchoes", "lockedEvidenceKey", {forceLocked=true})
-    if not candidateOpen then return changed end
-    if compact and type(compaction.CompactDpsRow) == "function" then
-        local ok, compacted = pcall(compaction.CompactDpsRow, row)
-        if ok then return compacted == true or changed end
-    end
-    if type(evidence.ReferenceDpsRow) == "function" then
-        local ok, referenced = pcall(evidence.ReferenceDpsRow, row)
-        return ok and referenced == true or changed
-    end
+    -- An open candidate belongs to another catalog transaction. Its entries
+    -- are discarded if that transaction is refused, fails or is cancelled, and
+    -- once its publish plan is fixed an intern into it no longer matches the
+    -- revisions that plan applies (the published root then drifts). So this
+    -- row is never interned there: it keeps its key and its inline arrays,
+    -- exactly as outside a candidate.
     return changed
 end
 
@@ -751,48 +926,6 @@ StoredEchoes = function(row, locked)
         if ok and type(echoes) == "table" then return echoes end
     end
     return NormalizeEchoes(row[locked and "lockedEchoes" or "echoes"])
-end
-
--- Locked perks can arrive from the server after a combat record is committed.
--- Backfill this character's public rows once the API becomes ready so the
--- metadata is not permanently lost just because GetLockedPerks was late.
-local function BackfillLocalLockedRows()
-    if not (Adapter and Adapter.LockedOwned) then return false end
-    local locked = Adapter.LockedOwned()
-    local snap = NormalizeEchoes(locked and locked.bySpell and (function()
-        local out = {}
-        for spellId, count in pairs(locked.bySpell) do
-            out[#out + 1] = { spellId = spellId, count = count }
-        end
-        return out
-    end)() or nil)
-    if not snap then return false end
-
-    local localName = (UnitName and UnitName("player")) or "?"
-    local me = CurrentCharacterKey(localName)
-    local legacyMe = PlayerKey(localName)
-    local changed = false
-    local changedRows = {}
-    for _, category in ipairs({ "dummy", "lk" }) do
-        local rows = CharacterBestStore()[category]
-        local row = rows[me] or rows[legacyMe]
-        if row and LockedKey(StoredEchoes(row, true)) ~= LockedKey(snap) then
-            row.lockedEchoes = snap
-            ReferenceEvidence(row)
-            changed = true
-            changedRows[#changedRows + 1] = row
-        end
-    end
-    -- Keep the established bucket-hash format compatible with older clients.
-    -- Instead of changing the hash schema, proactively rebroadcast only the
-    -- locally enriched winning row. Updated peers can merge this metadata into
-    -- an equal record; older peers still receive all core DPS/build data.
-    if changed and Sync and Sync.BroadcastDpsRecord then
-        for _, row in ipairs(changedRows) do
-            pcall(Sync.BroadcastDpsRecord, row)
-        end
-    end
-    return changed
 end
 
 local migratedLockedBaseline = false
@@ -1149,6 +1282,22 @@ local function PairRecord(row)
     return projected
 end
 
+-- The row the pair summary reads while the identity index is built: the
+-- stored row's own fields with its Echo lists in the stored shape.
+-- CandidateEvidence.DpsSummary only reads these rows and the index keeps
+-- none of them (the summary's pair is dropped), so the row's own tables are
+-- shared, not deep-copied: one rebuild walked every stored row with a full
+-- deep copy each. A pair row handed to a caller (IndexedPairRowsForIdentity)
+-- stays a full defensive copy (PairRecord).
+local function SummaryRow(row)
+    if type(row) ~= "table" then return row end
+    local projected = {}
+    for key, value in pairs(row) do projected[key] = value end
+    projected.echoes = StoredEchoes(row, false)
+    projected.lockedEchoes = StoredEchoes(row, true) or {}
+    return projected
+end
+
 local CachedLockedRecord
 
 local function RebuildIdentityIndex()
@@ -1173,7 +1322,7 @@ local function RebuildIdentityIndex()
                 if type(fingerprint) == "string" and fingerprint ~= ""
                     and value == value and value < math.huge and value > 0 then
                     local rows = rowsByFingerprint[category][fingerprint] or {}
-                    rows[#rows + 1] = PairRecord(row)
+                    rows[#rows + 1] = SummaryRow(row)
                     rowsByFingerprint[category][fingerprint] = rows
                 end
                 indexed = indexed + 1
@@ -1342,8 +1491,9 @@ function DPS.GetCommunityEligibility()
 end
 
 -- Narrow synchronous reader for detail consumers. The eligibility index is the
--- sole owner of pair-authorized category maxima; callers must not reconstruct
--- the same summary from identity-stripped Leaderboard presentation rows.
+-- sole owner of the pair-authorized summary (one character's real pair);
+-- callers must not reconstruct the same summary from identity-stripped
+-- Leaderboard presentation rows.
 function DPS.GetCommunityQualification(fingerprint)
     if type(fingerprint) ~= "string" or fingerprint == "" then return nil end
     EnsureIdentityIndex()
@@ -1413,7 +1563,7 @@ function DPS.CommunityEligibilityCursorNext(cursor)
             if type(fingerprint) == "string" and fingerprint ~= ""
                 and value == value and value < math.huge and value > 0 then
                 local rows = cursor.best[category][fingerprint] or {}
-                rows[#rows + 1] = PairRecord(row)
+                rows[#rows + 1] = SummaryRow(row)
                 cursor.best[category][fingerprint] = rows
             end
             cursor.indexed = cursor.indexed + 1
@@ -1471,41 +1621,69 @@ function DPS.CommunityEligibilityCursorResult(cursor)
     return cursor.eligibility
 end
 
--- Legacy repair first builds the normal exact-fingerprint eligibility index,
--- then makes one second bounded pass over represented DPS rows. Each call
--- advances at most one stored row and returns only its existing table
--- reference; the repair owner materializes evidence for one candidate at a
--- time. Ineligible rows remain visible to its bounded reason accounting.
+-- Legacy repair makes one finite pass over represented DPS rows. Its scope is
+-- the set of stored keys captured when the pass begins (one walk of the two
+-- character-best buckets, keys only). Each call then advances at most one
+-- captured key and returns the row stored under that key NOW, so a row that
+-- was replaced, removed or re-keyed later is read as it is, never through a
+-- stale mutable iterator. A DPS revision after the capture does not end the
+-- pass: the cursor records it (`changed`), and the repair owner covers newer
+-- rows with a follow-up pass. A replaced store or revision owner ends it.
+-- The exact-fingerprint eligibility index is still warmed first while the DPS
+-- revision holds still; the repair itself does not read that index, so a
+-- revision during the warm-up only skips it (readers rebuild it on demand).
 function DPS.BeginLegacyQualificationCursor()
     local revisionSource, revision = CurrentDpsRevision()
+    local store = CharacterBestStore()
+    local keys = {}
+    for _, category in ipairs({"dummy", "lk"}) do
+        local list, bucket = {}, store[category]
+        if type(bucket) == "table" then
+            for key in pairs(bucket) do list[#list + 1] = key end
+        end
+        keys[category] = list
+    end
     local eligibilityCursor = DPS.BeginCommunityEligibilityCursor()
     local eligibility = eligibilityCursor.phase == "done"
         and DPS.CommunityEligibilityCursorResult(eligibilityCursor) or nil
     return {
         revisionSource=revisionSource,revision=revision,
-        store=CharacterBestStore(),eligibilityCursor=eligibilityCursor,
+        store=store,keys=keys,index=0,eligibilityCursor=eligibilityCursor,
         eligibility=eligibility,
         phase=eligibility and "dummy" or "eligibility",
-        key=nil,scanned=0,materialized=0,
+        scanned=0,materialized=0,changed=false,eligibilitySkipped=false,
     }
 end
 
-local function LegacyQualificationCursorCurrent(cursor)
+-- False when the pass's source is gone (store or revision owner replaced).
+-- Records a newer DPS revision of the same source as `changed`.
+local function LegacyQualificationCursorObserve(cursor)
     local revisionSource, revision = CurrentDpsRevision()
-    return cursor.revisionSource == revisionSource
-        and cursor.revision == revision
-        and cursor.store == CharacterBestStore()
+    if cursor.store ~= CharacterBestStore()
+        or cursor.revisionSource ~= revisionSource then
+        return false
+    end
+    if cursor.revision ~= revision then cursor.changed = true end
+    return true
 end
 
 function DPS.LegacyQualificationCursorNext(cursor)
     if type(cursor) ~= "table" then return nil, true, "invalid cursor" end
     if cursor.phase == "done" then return nil, true end
-    if not LegacyQualificationCursorCurrent(cursor) then
-        return nil, true, "DPS changed"
+    if not LegacyQualificationCursorObserve(cursor) then
+        return nil, true, "DPS source replaced"
     end
     if cursor.phase == "eligibility" then
-        local done, err = DPS.CommunityEligibilityCursorNext(
-            cursor.eligibilityCursor)
+        local done, err = false, nil
+        if not cursor.changed then
+            done, err = DPS.CommunityEligibilityCursorNext(
+                cursor.eligibilityCursor)
+        end
+        if cursor.changed or err == "DPS changed" then
+            cursor.eligibilitySkipped = true
+            cursor.phase, cursor.index = "dummy", 0
+            return nil, false
+        end
         if err then return nil, true, err end
         if done then
             cursor.eligibility = DPS.CommunityEligibilityCursorResult(
@@ -1513,19 +1691,17 @@ function DPS.LegacyQualificationCursorNext(cursor)
             if type(cursor.eligibility) ~= "table" then
                 return nil, true, "eligibility unavailable"
             end
-            cursor.phase, cursor.key = "dummy", nil
+            cursor.phase, cursor.index = "dummy", 0
         end
         return nil, false
     end
 
     local category = cursor.phase
-    local bucket = type(cursor.store[category]) == "table"
-        and cursor.store[category] or {}
-    local key, row = next(bucket, cursor.key)
-    cursor.key = key
+    cursor.index = cursor.index + 1
+    local key = cursor.keys[category][cursor.index]
     if key == nil then
         if category == "dummy" then
-            cursor.phase, cursor.key = "lk", nil
+            cursor.phase, cursor.index = "lk", 0
         else
             cursor.phase = "done"
             return nil, true
@@ -1533,6 +1709,8 @@ function DPS.LegacyQualificationCursorNext(cursor)
         return nil, false
     end
     cursor.scanned = cursor.scanned + 1
+    local bucket = cursor.store[category]
+    local row = type(bucket) == "table" and bucket[key] or nil
     local fingerprint = type(row) == "table" and row.fingerprint or nil
     if type(fingerprint) == "string" and fingerprint ~= "" then
         cursor.materialized = cursor.materialized + 1
@@ -1543,12 +1721,35 @@ function DPS.LegacyQualificationCursorNext(cursor)
     return nil, false
 end
 
+-- False once the pass's DPS store or revision owner was replaced (a
+-- compaction or migration can replace the store without a DPS revision).
+function DPS.LegacyQualificationCursorSourceCurrent(cursor)
+    return type(cursor) == "table" and LegacyQualificationCursorObserve(cursor)
+end
+
+-- The row stored under a captured key right now, or nil when it was removed
+-- or re-keyed or the store was replaced. The repair owner compares it with the
+-- row it scanned before any write.
+function DPS.LegacyQualificationCurrentRow(cursor, category, key)
+    if type(cursor) ~= "table" or cursor.store ~= CharacterBestStore()
+        or (category ~= "dummy" and category ~= "lk") or key == nil then
+        return nil
+    end
+    local bucket = cursor.store[category]
+    return type(bucket) == "table" and bucket[key] or nil
+end
+
+-- A completed pass reports the DPS revision its scope was captured at
+-- (`coveredRevision`) and whether a newer revision arrived during it.
 function DPS.LegacyQualificationCursorResult(cursor)
     if type(cursor) ~= "table" or cursor.phase ~= "done"
-        or not LegacyQualificationCursorCurrent(cursor) then return nil end
+        or not LegacyQualificationCursorObserve(cursor) then return nil end
     return {
         scanned=tonumber(cursor.scanned) or 0,
         materialized=tonumber(cursor.materialized) or 0,
+        coveredRevision=cursor.revision,
+        changed=cursor.changed == true,
+        eligibilitySkipped=cursor.eligibilitySkipped == true,
     }
 end
 
@@ -1872,6 +2073,8 @@ local dpsHashCache = {
         bucketRebuilds=0, targetedInvalidations=0, fullInvalidations=0,
         rows=0, storedRows=0, durationIneligibleRows=0,
         scoreIneligibleRows=0, schemaIneligibleRows=0,
+        jobStarts=0, jobRestarts=0, keyRestarts=0, jobPumps=0,
+        maxRowsPerPump=0, maxUnitsPerPump=0, maxKeysPerPump=0,
     },
 }
 
@@ -1903,54 +2106,34 @@ local function RebuildDpsBucket(bucket)
     dpsHashCache.stats.bucketRebuilds = dpsHashCache.stats.bucketRebuilds + 1
 end
 
-local function WarmDpsHashCache()
-    local entries, classifications, responseRows = NewDpsBuckets(),
-        NewDpsBuckets(), NewDpsBuckets()
-    local store = CharacterBestStore()
-    local counts = {eligible=0,duration=0,score=0,schema=0,stored=0}
-    dpsHashCache.stats.collectionWalks = dpsHashCache.stats.collectionWalks + 1
-    for _, category in ipairs({ "dummy", "lk" }) do
-        for playerKey, row in pairs(store[category] or {}) do
-            local bucket = DpsBucket(category,
-                type(row) == "table" and row.player or playerKey)
-            local entryKey = category .. "|" .. tostring(playerKey)
-            local classification = DpsHashClass(category, row)
-            classifications[bucket][entryKey] = classification
-            counts.stored = counts.stored + 1
-            counts[classification] = counts[classification] + 1
-            if classification == "eligible" then
-                entries[bucket][entryKey] = DpsHashEntry(category, playerKey, row)
-                local safe, authority = DpsResponseClaimInfo(
-                    category, playerKey, row)
-                responseRows[bucket][entryKey] = safe and authority or false
-            end
-        end
-    end
-    dpsHashCache.entries, dpsHashCache.classifications = entries, classifications
-    dpsHashCache.responseRows = responseRows
-    dpsHashCache.hashes, dpsHashCache.dirty = {}, {}
-    dpsHashCache.responseClaimable, dpsHashCache.responseAuthority = {}, {}
-    dpsHashCache.stats.rows = counts.eligible
-    dpsHashCache.stats.storedRows = counts.stored
-    dpsHashCache.stats.durationIneligibleRows = counts.duration
-    dpsHashCache.stats.scoreIneligibleRows = counts.score
-    dpsHashCache.stats.schemaIneligibleRows = counts.schema
-    for bucket = 1, DPS_BUCKETS do
-        dpsHashCache.dirty[bucket] = true
-        RebuildDpsBucket(bucket)
-    end
-    dpsHashCache.initialized = true
-    dpsHashCache.stats.fullRebuilds = dpsHashCache.stats.fullRebuilds + 1
-    local revisions = Nexus and Nexus.Revisions
-    dpsHashCache.observedRevision = revisions and revisions.Get
-        and revisions.Get(revisions.DPS_CHANGED) or nil
-end
+-- Bounded DPS sync digest. After a full invalidation the digest is rebuilt
+-- by one job in bounded steps (keys, rows, changed rows, per-bucket
+-- collect/sort/hash), pumped once per lifecycle update in the Sync hash slot,
+-- exactly like BuildHashCache. Until the job publishes, the digest is not
+-- ready: GetSyncHash returns nil and no bucket can be claimed. The published
+-- value is the canonical digest of one store generation (same entries, same
+-- sorted order and hash as ComputeDpsSyncHash). The response-claim evidence of
+-- each bucket (the expensive part: one evidence resolution per row) is
+-- prepared afterwards by a second bounded job; until a bucket's claim is
+-- ready it cannot be claimed (the responder answers without an exclusive
+-- claim, as for any unsafe bucket).
+local DpsDigest = {
+    KEYS_PER_PUMP=4096, ROWS_PER_PUMP=256, CLAIMS_PER_PUMP=8,
+    UNITS_PER_PUMP=2048, ONE_CALL_VALUES=1024, ONE_CALL_BYTES=131072,
+    job=nil, bucketJob=nil, claimJob=nil, bucketVersion={}, bucketShape={},
+    claimReady={}, pending={}, pendingSet={}, bucketOf={},
+}
 
 local function InvalidateAllDpsHashes()
     if dpsHashCache.initialized then
         dpsHashCache.initialized = false
         dpsHashCache.stats.fullInvalidations = dpsHashCache.stats.fullInvalidations + 1
     end
+    if DpsDigest.job then
+        dpsHashCache.stats.jobRestarts = dpsHashCache.stats.jobRestarts + 1
+    end
+    DpsDigest.job, DpsDigest.bucketJob, DpsDigest.claimJob = nil, nil, nil
+    DpsDigest.claimReady, DpsDigest.pending, DpsDigest.pendingSet = {}, {}, {}
 end
 
 -- Retained hash/index/response work belongs to the represented payload, even
@@ -1975,13 +2158,23 @@ end
 
 local function UpdateDpsHashRecord(category, player, ownerKey, realm,
         characterKey, previousCharacterKey)
-    if not dpsHashCache.initialized then return end
     if category ~= "dummy" and category ~= "lk" then
         InvalidateAllDpsHashes()
         return
     end
     local playerKey = characterKey
         or CharacterKey(player, ownerKey, realm)
+    if not dpsHashCache.initialized then
+        -- A running digest job revisits this row (and the key it replaced)
+        -- from the live store before it publishes.
+        if DpsDigest.job then
+            DpsDigest.Enqueue(DpsDigest.job, category, playerKey)
+            if previousCharacterKey and previousCharacterKey ~= playerKey then
+                DpsDigest.Enqueue(DpsDigest.job, category, previousCharacterKey)
+            end
+        end
+        return
+    end
     if previousCharacterKey and previousCharacterKey ~= playerKey then
         local previousBucket = DpsBucket(category, player)
         local previousEntry = category .. "|" .. previousCharacterKey
@@ -1992,6 +2185,9 @@ local function UpdateDpsHashRecord(category, player, ownerKey, realm,
         dpsHashCache.classifications[previousBucket][previousEntry] = nil
         dpsHashCache.responseRows[previousBucket][previousEntry] = nil
         dpsHashCache.dirty[previousBucket] = true
+        DpsDigest.bucketVersion[previousBucket] =
+            (DpsDigest.bucketVersion[previousBucket] or 0) + 1
+        DpsDigest.bucketOf[previousEntry] = nil
     end
     local bucket = DpsBucket(category, player)
     local entryKey = category .. "|" .. playerKey
@@ -2001,6 +2197,9 @@ local function UpdateDpsHashRecord(category, player, ownerKey, realm,
     AdjustDpsHashClass(previousClass, -1)
     AdjustDpsHashClass(nextClass, 1)
     dpsHashCache.classifications[bucket][entryKey] = nextClass
+    if nextClass == "eligible" and dpsHashCache.entries[bucket][entryKey] == nil then
+        DpsDigest.bucketShape[bucket] = (DpsDigest.bucketShape[bucket] or 0) + 1
+    end
     dpsHashCache.entries[bucket][entryKey] = nextClass == "eligible"
         and DpsHashEntry(category, playerKey, row) or nil
     if nextClass == "eligible" then
@@ -2010,8 +2209,472 @@ local function UpdateDpsHashRecord(category, player, ownerKey, realm,
         dpsHashCache.responseRows[bucket][entryKey] = nil
     end
     dpsHashCache.dirty[bucket] = true
+    DpsDigest.bucketVersion[bucket] = (DpsDigest.bucketVersion[bucket] or 0) + 1
+    DpsDigest.bucketOf[entryKey] = nextClass ~= nil and bucket or nil
     dpsHashCache.stats.targetedInvalidations =
         dpsHashCache.stats.targetedInvalidations + 1
+end
+
+-- One source generation: the store table, its binding generation and the
+-- revision owner. Any replacement restarts the job; nothing from an older
+-- store is carried into the published digest.
+function DpsDigest.SourceCurrent(job)
+    return job.store == CharacterBestStore()
+        and job.binding == responseGeneration
+        and job.revisionSource == (Nexus and Nexus.Revisions)
+end
+
+function DpsDigest.Start()
+    local store = CharacterBestStore()
+    local revisions = Nexus and Nexus.Revisions
+    local _, revision = CurrentDpsRevision()
+    DpsDigest.job = {
+        phase="keys", store=store, binding=responseGeneration,
+        revisionSource=revisions, keysRevision=revision,
+        categoryIndex=1, cursor=nil, keys={}, keyIndex=0,
+        entries=NewDpsBuckets(), classifications=NewDpsBuckets(),
+        responseRows=NewDpsBuckets(), bucketOf={},
+        counts={eligible=0,duration=0,score=0,schema=0,stored=0},
+        queue={}, queued={}, bucketDirty={}, hashes={},
+        claimable={}, authority={}, hashJob=nil,
+    }
+    DpsDigest.bucketJob = nil
+    dpsHashCache.stats.jobStarts = dpsHashCache.stats.jobStarts + 1
+    dpsHashCache.stats.collectionWalks = dpsHashCache.stats.collectionWalks + 1
+    return DpsDigest.job
+end
+
+function DpsDigest.Enqueue(job, category, playerKey)
+    if playerKey == nil then return end
+    local entryKey = category .. "|" .. tostring(playerKey)
+    if job.queued[entryKey] then return end
+    job.queued[entryKey] = true
+    job.queue[#job.queue + 1] = {category, playerKey, entryKey}
+end
+
+-- Classify one stored row into the job's maps from the live store.
+function DpsDigest.Process(job, category, playerKey)
+    local entryKey = category .. "|" .. tostring(playerKey)
+    local oldBucket = job.bucketOf[entryKey]
+    if oldBucket then
+        local oldClass = job.classifications[oldBucket][entryKey]
+        if oldClass then
+            job.counts[oldClass] = job.counts[oldClass] - 1
+            job.counts.stored = job.counts.stored - 1
+        end
+        job.entries[oldBucket][entryKey] = nil
+        job.classifications[oldBucket][entryKey] = nil
+        job.responseRows[oldBucket][entryKey] = nil
+        job.bucketDirty[oldBucket] = true
+        job.bucketOf[entryKey] = nil
+    end
+    local rows = job.store[category]
+    local row = type(rows) == "table" and rows[playerKey] or nil
+    if row == nil then return end
+    local bucket = DpsBucket(category,
+        type(row) == "table" and row.player or playerKey)
+    local classification = DpsHashClass(category, row)
+    job.classifications[bucket][entryKey] = classification
+    job.counts[classification] = job.counts[classification] + 1
+    job.counts.stored = job.counts.stored + 1
+    if classification == "eligible" then
+        job.entries[bucket][entryKey] = DpsHashEntry(category, playerKey, row)
+    end
+    job.bucketOf[entryKey] = bucket
+    job.bucketDirty[bucket] = true
+end
+
+-- One bucket: collect its values and claim info, merge-sort, then hash, one
+-- unit per step. The result equals HashStrings over the same values.
+function DpsDigest.NewBucketJob(bucket, entries, responseRows)
+    return {bucket=bucket, entries=entries, responseRows=responseRows,
+        phase="collect", key=nil, values={}, claimable=true, authority=nil}
+end
+
+function DpsDigest.BucketStep(job)
+    if job.phase == "collect" then
+        local key, value = next(job.entries, job.key)
+        job.key = key
+        if key ~= nil then
+            job.values[#job.values + 1] = value
+            local candidate = job.responseRows and job.responseRows[key]
+            if type(candidate) ~= "string" or candidate == "" then
+                job.claimable = false
+            elseif job.authority == nil or candidate < job.authority then
+                job.authority = candidate
+            end
+            return false
+        end
+        job.claimable = job.claimable and #job.values > 0
+        if #job.values <= 1 then
+            job.phase, job.sorted = "hash", job.values
+            job.hash, job.index = 5381, 1
+        else
+            job.phase, job.width, job.left = "sort", 1, 1
+            job.source, job.target, job.merge = job.values, {}, nil
+        end
+        return false
+    end
+    if job.phase == "sort" then
+        if not job.merge then
+            if job.left > #job.source then
+                if job.width >= #job.source then
+                    job.phase, job.sorted = "hash", job.source
+                    job.hash, job.index = 5381, 1
+                else
+                    job.source, job.target = job.target, {}
+                    job.width, job.left = job.width * 2, 1
+                end
+                return false
+            end
+            local leftEnd = math.min(job.left + job.width - 1, #job.source)
+            job.merge = {left=job.left, leftEnd=leftEnd, right=leftEnd + 1,
+                rightEnd=math.min(job.left + job.width * 2 - 1, #job.source)}
+        end
+        local merge = job.merge
+        local takeLeft = merge.right > merge.rightEnd
+            or (merge.left <= merge.leftEnd
+                and job.source[merge.left] <= job.source[merge.right])
+        if takeLeft then
+            job.target[#job.target + 1] = job.source[merge.left]
+            merge.left = merge.left + 1
+        else
+            job.target[#job.target + 1] = job.source[merge.right]
+            merge.right = merge.right + 1
+        end
+        if merge.left > merge.leftEnd and merge.right > merge.rightEnd then
+            job.left = merge.rightEnd + 1
+            job.merge = nil
+        end
+        return false
+    end
+    local text = job.sorted[job.index]
+    if text == nil then
+        job.result = #job.sorted > 0 and string.format("%x", job.hash) or "0"
+        return true
+    end
+    local h = job.hash
+    for i = 1, #text do h = ((h * 33) + text:byte(i)) % 2147483648 end
+    job.hash = h
+    job.index = job.index + 1
+    return false
+end
+
+-- Advance the full job by at most one bounded pump.
+function DpsDigest.PumpJob()
+    local job = DpsDigest.job
+    local stats = dpsHashCache.stats
+    stats.jobPumps = stats.jobPumps + 1
+    if not DpsDigest.SourceCurrent(job) then
+        InvalidateAllDpsHashes()
+        return false, false
+    end
+    if job.phase == "keys" then
+        local _, revision = CurrentDpsRevision()
+        if revision ~= job.keysRevision then
+            -- A table may not gain keys while `next` walks it: start the
+            -- (keys-only) walk again from the current revision.
+            job.keys, job.categoryIndex, job.cursor = {}, 1, nil
+            job.keysRevision = revision
+            stats.keyRestarts = stats.keyRestarts + 1
+        end
+        local count = 0
+        while count < DpsDigest.KEYS_PER_PUMP do
+            local category = ({ "dummy", "lk" })[job.categoryIndex]
+            if not category then
+                job.phase, job.keyIndex = "rows", 0
+                break
+            end
+            local rows = job.store[category]
+            local ok, key = true, nil
+            if type(rows) == "table" then ok, key = pcall(next, rows, job.cursor) end
+            if not ok then
+                job.keys, job.categoryIndex, job.cursor = {}, 1, nil
+                stats.keyRestarts = stats.keyRestarts + 1
+                break
+            end
+            if key == nil then
+                job.categoryIndex, job.cursor = job.categoryIndex + 1, nil
+            else
+                job.keys[#job.keys + 1] = {category, key}
+                job.cursor = key
+                count = count + 1
+            end
+        end
+        stats.maxKeysPerPump = math.max(stats.maxKeysPerPump, count)
+        return false, true
+    end
+    if job.phase == "rows" or job.phase == "changed" then
+        local count = 0
+        while count < DpsDigest.ROWS_PER_PUMP do
+            if job.phase == "rows" then
+                if job.keyIndex >= #job.keys then
+                    job.keys, job.phase = nil, "changed"
+                else
+                    job.keyIndex = job.keyIndex + 1
+                    local item = job.keys[job.keyIndex]
+                    DpsDigest.Process(job, item[1], item[2])
+                    count = count + 1
+                end
+            else
+                local item = table.remove(job.queue)
+                if not item then
+                    job.phase = "hash"
+                    break
+                end
+                job.queued[item[3]] = nil
+                DpsDigest.Process(job, item[1], item[2])
+                count = count + 1
+            end
+        end
+        stats.maxRowsPerPump = math.max(stats.maxRowsPerPump, count)
+        return false, true
+    end
+    -- phase "hash": rebuild every bucket the job changed, then publish.
+    local units = 0
+    while units < DpsDigest.UNITS_PER_PUMP do
+        if not job.hashJob then
+            local bucket
+            for candidate = 1, DPS_BUCKETS do
+                if job.bucketDirty[candidate] or job.hashes[candidate] == nil then
+                    bucket = candidate
+                    break
+                end
+            end
+            if not bucket then
+                DpsDigest.Publish(job)
+                stats.maxUnitsPerPump = math.max(stats.maxUnitsPerPump, units)
+                -- Changes queued during the job are applied by the next
+                -- pumps (DPS.PumpSyncHash); until then the digest is not
+                -- readable, so this pump does not report it ready.
+                return #DpsDigest.pending == 0, true
+            end
+            job.bucketDirty[bucket] = nil
+            job.hashJob = DpsDigest.NewBucketJob(bucket,
+                job.entries[bucket], job.responseRows[bucket])
+        end
+        units = units + 1
+        if DpsDigest.BucketStep(job.hashJob) then
+            local done = job.hashJob
+            job.hashes[done.bucket] = done.result
+            job.claimable[done.bucket] = done.claimable
+            job.authority[done.bucket] = done.claimable and done.authority or nil
+            job.hashJob = nil
+        end
+    end
+    stats.maxUnitsPerPump = math.max(stats.maxUnitsPerPump, units)
+    return false, true
+end
+
+function DpsDigest.Publish(job)
+    dpsHashCache.entries, dpsHashCache.classifications =
+        job.entries, job.classifications
+    dpsHashCache.responseRows = job.responseRows
+    dpsHashCache.hashes, dpsHashCache.dirty = job.hashes, {}
+    dpsHashCache.responseClaimable, dpsHashCache.responseAuthority = {}, {}
+    DpsDigest.claimReady, DpsDigest.claimJob = {}, nil
+    -- Changes that arrived after the snapshot's rows were read are applied
+    -- to the published maps in bounded steps; the digest is not ready until
+    -- they are.
+    DpsDigest.bucketOf = job.bucketOf
+    DpsDigest.pending, DpsDigest.pendingSet = job.queue, job.queued
+    dpsHashCache.stats.rows = job.counts.eligible
+    dpsHashCache.stats.storedRows = job.counts.stored
+    dpsHashCache.stats.durationIneligibleRows = job.counts.duration
+    dpsHashCache.stats.scoreIneligibleRows = job.counts.score
+    dpsHashCache.stats.schemaIneligibleRows = job.counts.schema
+    dpsHashCache.initialized = true
+    dpsHashCache.stats.fullRebuilds = dpsHashCache.stats.fullRebuilds + 1
+    local _, revision = CurrentDpsRevision()
+    dpsHashCache.observedRevision = revision
+    DpsDigest.job, DpsDigest.bucketJob = nil, nil
+end
+
+-- Apply one queued change to the published maps from the live store.
+function DpsDigest.ApplyPending(category, playerKey)
+    local entryKey = category .. "|" .. tostring(playerKey)
+    local oldBucket = DpsDigest.bucketOf[entryKey]
+    if oldBucket then
+        local oldClass = dpsHashCache.classifications[oldBucket][entryKey]
+        AdjustDpsHashClass(oldClass, -1)
+        dpsHashCache.entries[oldBucket][entryKey] = nil
+        dpsHashCache.classifications[oldBucket][entryKey] = nil
+        dpsHashCache.responseRows[oldBucket][entryKey] = nil
+        dpsHashCache.dirty[oldBucket] = true
+        DpsDigest.bucketVersion[oldBucket] = (DpsDigest.bucketVersion[oldBucket] or 0) + 1
+        DpsDigest.bucketOf[entryKey] = nil
+    end
+    local rows = CharacterBestStore()[category]
+    local row = type(rows) == "table" and rows[playerKey] or nil
+    if row == nil then return end
+    local bucket = DpsBucket(category, type(row) == "table" and row.player or playerKey)
+    local classification = DpsHashClass(category, row)
+    AdjustDpsHashClass(classification, 1)
+    dpsHashCache.classifications[bucket][entryKey] = classification
+    if classification == "eligible" then
+        if dpsHashCache.entries[bucket][entryKey] == nil then
+            DpsDigest.bucketShape[bucket] = (DpsDigest.bucketShape[bucket] or 0) + 1
+        end
+        dpsHashCache.entries[bucket][entryKey] = DpsHashEntry(category, playerKey, row)
+        local safe, authority = DpsResponseClaimInfo(category, playerKey, row)
+        dpsHashCache.responseRows[bucket][entryKey] = safe and authority or false
+    end
+    DpsDigest.bucketOf[entryKey] = bucket
+    dpsHashCache.dirty[bucket] = true
+    DpsDigest.bucketVersion[bucket] = (DpsDigest.bucketVersion[bucket] or 0) + 1
+end
+
+function DpsDigest.PumpPending(budget)
+    local used = 0
+    while used < budget do
+        local item = table.remove(DpsDigest.pending)
+        if not item then return true end
+        DpsDigest.pendingSet[item[3]] = nil
+        DpsDigest.ApplyPending(item[1], item[2])
+        used = used + 1
+    end
+    return #DpsDigest.pending == 0
+end
+
+-- Response-claim evidence of the published digest, one bucket at a time, at
+-- most `budget` evidence resolutions per pump. A row updated after
+-- publication already carries its claim (UpdateDpsHashRecord); a bucket that
+-- gains a key while it is walked is walked again.
+function DpsDigest.PumpClaims(budget)
+    local used = 0
+    while used < budget do
+        local job = DpsDigest.claimJob
+        -- A new key (shape) or an in-place change of a row already walked
+        -- (version) makes the job's evidence stale: start the bucket again.
+        if job and (job.shape ~= (DpsDigest.bucketShape[job.bucket] or 0)
+            or job.version ~= (DpsDigest.bucketVersion[job.bucket] or 0)) then
+            job, DpsDigest.claimJob = nil, nil
+        end
+        if not job then
+            local bucket
+            for candidate = 1, DPS_BUCKETS do
+                if not DpsDigest.claimReady[candidate] then bucket = candidate; break end
+            end
+            if not bucket then return true end
+            job = {bucket=bucket, key=nil, shape=DpsDigest.bucketShape[bucket] or 0,
+                version=DpsDigest.bucketVersion[bucket] or 0,
+                claimable=true, authority=nil, count=0}
+            DpsDigest.claimJob = job
+        end
+        local entries = dpsHashCache.entries[job.bucket] or {}
+        local rows = dpsHashCache.responseRows[job.bucket]
+        local key = next(entries, job.key)
+        job.key = key
+        used = used + 1
+        if key == nil then
+            -- The same aggregate a bucket rebuild derives from its rows.
+            local claimable = job.claimable and job.count > 0
+            dpsHashCache.responseClaimable[job.bucket] = claimable
+            dpsHashCache.responseAuthority[job.bucket] =
+                claimable and job.authority or nil
+            DpsDigest.claimReady[job.bucket] = true
+            DpsDigest.claimJob = nil
+        else
+            if rows[key] == nil then
+                local separator = key:find("|", 1, true)
+                local category = key:sub(1, separator - 1)
+                local playerKey = key:sub(separator + 1)
+                local store = CharacterBestStore()
+                local row = store[category] and store[category][playerKey]
+                local safe, authority = false, nil
+                if row ~= nil then
+                    safe, authority = DpsResponseClaimInfo(category, playerKey, row)
+                end
+                rows[key] = safe and authority or false
+            end
+            job.count = job.count + 1
+            local candidate = rows[key]
+            if type(candidate) ~= "string" or candidate == "" then
+                job.claimable = false
+            elseif job.authority == nil or candidate < job.authority then
+                job.authority = candidate
+            end
+        end
+    end
+    return false
+end
+
+-- A published digest with changed buckets: rebuild them in bounded steps. A
+-- bucket that changes while its rebuild runs is started again.
+function DpsDigest.PumpBuckets()
+    local units = 0
+    while units < DpsDigest.UNITS_PER_PUMP do
+        local job = DpsDigest.bucketJob
+        if job and job.version ~= (DpsDigest.bucketVersion[job.bucket] or 0) then
+            job, DpsDigest.bucketJob = nil, nil
+        end
+        if not job then
+            local bucket
+            for candidate = 1, DPS_BUCKETS do
+                if dpsHashCache.dirty[candidate] then bucket = candidate; break end
+            end
+            if not bucket then break end
+            job = DpsDigest.NewBucketJob(bucket, dpsHashCache.entries[bucket],
+                dpsHashCache.responseRows[bucket])
+            job.version = DpsDigest.bucketVersion[bucket] or 0
+            DpsDigest.bucketJob = job
+        end
+        units = units + 1
+        if DpsDigest.BucketStep(job) then
+            dpsHashCache.hashes[job.bucket] = job.result
+            local claimsReady = DpsDigest.claimReady[job.bucket] == true
+            dpsHashCache.responseClaimable[job.bucket] = claimsReady and job.claimable
+            dpsHashCache.responseAuthority[job.bucket] =
+                claimsReady and job.claimable and job.authority or nil
+            dpsHashCache.dirty[job.bucket] = nil
+            dpsHashCache.stats.bucketRebuilds = dpsHashCache.stats.bucketRebuilds + 1
+            DpsDigest.bucketJob = nil
+        end
+    end
+    dpsHashCache.stats.maxUnitsPerPump = math.max(
+        dpsHashCache.stats.maxUnitsPerPump, units)
+    for bucket = 1, DPS_BUCKETS do
+        if dpsHashCache.dirty[bucket] then return false, units > 0 end
+    end
+    return true, units > 0
+end
+
+-- The number of values and bytes of a bucket, or nil when it is larger
+-- than maxValues or maxBytes (the scan stops there).
+function DpsDigest.BucketSize(entries, maxValues, maxBytes)
+    local count, bytes = 0, 0
+    for _, value in pairs(entries or {}) do
+        count = count + 1
+        bytes = bytes + #tostring(value)
+        if count > maxValues or bytes > maxBytes then return nil end
+    end
+    return count, bytes
+end
+
+-- Changed buckets are rebuilt inside this call while their total stays within
+-- ONE_CALL_VALUES values and ONE_CALL_BYTES bytes: the per-record cost the
+-- synchronous digest had, so ordinary DPS traffic never holds Sync back.
+-- Larger or remaining buckets stay for the bounded bucket pump. Returns
+-- whether no bucket is still changed, and whether anything was rebuilt.
+function DpsDigest.RebuildSmallDirty()
+    local values, bytes, rebuilt = 0, 0, false
+    for bucket = 1, DPS_BUCKETS do
+        if dpsHashCache.dirty[bucket] then
+            local count, size = DpsDigest.BucketSize(dpsHashCache.entries[bucket],
+                DpsDigest.ONE_CALL_VALUES - values, DpsDigest.ONE_CALL_BYTES - bytes)
+            if count then
+                RebuildDpsBucket(bucket)
+                if DpsDigest.bucketJob and DpsDigest.bucketJob.bucket == bucket then
+                    DpsDigest.bucketJob = nil
+                end
+                values, bytes, rebuilt = values + count, bytes + size, true
+            end
+        end
+    end
+    for bucket = 1, DPS_BUCKETS do
+        if dpsHashCache.dirty[bucket] then return false, rebuilt end
+    end
+    return true, rebuilt
 end
 
 local function OnDpsRevision(_, revision, detail)
@@ -2050,34 +2713,81 @@ local function CachedDpsSyncHash()
         and currentRevision ~= dpsHashCache.observedRevision then
         InvalidateAllDpsHashes()
     end
-    if not dpsHashCache.initialized then WarmDpsHashCache() end
-    local rebuilt = false
-    for bucket = 1, DPS_BUCKETS do
-        if dpsHashCache.dirty[bucket] then
-            RebuildDpsBucket(bucket)
-            rebuilt = true
-        end
+    -- Not ready while the bounded job runs: nothing partial is returned.
+    if not dpsHashCache.initialized then
+        if not DpsDigest.job then DpsDigest.Start() end
+        return nil
     end
+    if #DpsDigest.pending > 0 then return nil end
+    -- Only small changed buckets are rebuilt inside this call; the rest wait
+    -- for the bounded pump.
+    local clean, rebuilt = DpsDigest.RebuildSmallDirty()
+    if not clean then return nil end
     if not rebuilt then dpsHashCache.stats.hits = dpsHashCache.stats.hits + 1 end
     return table.concat(dpsHashCache.hashes, ",")
 end
 
+-- One bounded step of the DPS digest for the lifecycle hash slot. Returns
+-- ready (a complete current digest exists) and progressed.
+function DPS.PumpSyncHash()
+    DB()
+    EnsureDpsHashSubscription()
+    if not dpsHashCache.initialized then
+        if not DpsDigest.job then DpsDigest.Start() end
+        return DpsDigest.PumpJob()
+    end
+    local applied = DpsDigest.PumpPending(DpsDigest.CLAIMS_PER_PUMP)
+    local quick = false
+    if applied then _, quick = DpsDigest.RebuildSmallDirty() end
+    local ready, progressed = DpsDigest.PumpBuckets()
+    ready = ready and applied
+    progressed = progressed or quick or not applied
+    if ready then
+        -- Readiness is the digest; claims follow within their own budget.
+        local claimsDone = DpsDigest.PumpClaims(DpsDigest.CLAIMS_PER_PUMP)
+        progressed = progressed or not claimsDone
+    end
+    return ready, progressed
+end
+
+-- The canonical digest of the current store, or nil while it is being
+-- prepared (see DPS.PumpSyncHash). Never a partial or older value.
 function DPS.GetSyncHash()
     MigrateLocalLockedBaseline()
     MigrateLegacyLeaderboard()
-    if BackfillLocalLockedRows() then
-        BumpDps("locked metadata backfilled", {scope="metadata"})
-    end
     return CachedDpsSyncHash()
 end
 
 function DPS.GetSyncHashUncached()
     MigrateLocalLockedBaseline()
     MigrateLegacyLeaderboard()
-    if BackfillLocalLockedRows() then
-        BumpDps("locked metadata backfilled", {scope="metadata"})
-    end
     return ComputeDpsSyncHash()
+end
+
+-- Diagnostic oracle: the response claim of one bucket computed synchronously
+-- from the current store, as the digest owner publishes it.
+function DPS.ResponseBucketClaimInfoUncached(bucket)
+    bucket = tonumber(bucket)
+    if not bucket or bucket < 1 or bucket > DPS_BUCKETS then return false end
+    local store = CharacterBestStore()
+    local claimable, authority, count = true, nil, 0
+    for _, category in ipairs({ "dummy", "lk" }) do
+        for playerKey, row in pairs(store[category] or {}) do
+            if DpsBucket(category, type(row) == "table" and row.player or playerKey) == bucket
+                and DpsHashClass(category, row) == "eligible" then
+                count = count + 1
+                local safe, candidate = DpsResponseClaimInfo(category, playerKey, row)
+                candidate = safe and candidate or nil
+                if type(candidate) ~= "string" or candidate == "" then
+                    claimable = false
+                elseif authority == nil or candidate < authority then
+                    authority = candidate
+                end
+            end
+        end
+    end
+    claimable = claimable and count > 0
+    return claimable, claimable and authority or nil
 end
 
 function DPS.HashCacheStats()
@@ -2094,8 +2804,21 @@ function DPS.HashCacheStats()
             end
         end
     end
-    out.digest = dpsHashCache.initialized
+    out.digest = dpsHashCache.initialized and out.dirtyBuckets == 0
+        and #DpsDigest.pending == 0
         and table.concat(dpsHashCache.hashes or {}, ",") or nil
+    out.pendingChanges = #DpsDigest.pending
+    out.pending = DpsDigest.job ~= nil or out.dirtyBuckets > 0 or out.pendingChanges > 0
+    out.claimBucketsReady = 0
+    for bucket = 1, DPS_BUCKETS do
+        if DpsDigest.claimReady[bucket] then
+            out.claimBucketsReady = out.claimBucketsReady + 1
+        end
+    end
+    out.phase = DpsDigest.job and DpsDigest.job.phase
+        or #DpsDigest.pending > 0 and "changes"
+        or out.dirtyBuckets > 0 and "buckets"
+        or dpsHashCache.initialized and "ready" or "cold"
     return out
 end
 
@@ -2103,7 +2826,10 @@ function DPS.ResponseBucketClaimInfo(bucket)
     bucket = tonumber(bucket)
     if not bucket or bucket ~= math.floor(bucket)
         or bucket < 1 or bucket > DPS_BUCKETS then return false end
-    CachedDpsSyncHash()
+    -- A bucket of a digest that is not ready cannot be claimed.
+    if CachedDpsSyncHash() == nil or not DpsDigest.claimReady[bucket] then
+        return false
+    end
     return dpsHashCache.responseClaimable[bucket] == true,
         dpsHashCache.responseAuthority[bucket]
 end
@@ -2231,13 +2957,6 @@ local function TerminalOutbound(reason, amount)
     NoteOutbound(reason, amount)
 end
 
-local function CurrentDpsRevision()
-    DB()
-    local revisions = Nexus and Nexus.Revisions
-    return revisions and type(revisions.Get) == "function"
-        and revisions.Get(revisions.DPS_CHANGED) or nil
-end
-
 local function NormalizeOutboundReason(reason)
     if reason == "duplicate" then return "duplicate_not_better" end
     if outboundStats[reason] ~= nil then return reason end
@@ -2288,7 +3007,7 @@ end
 function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
         responseContext, responseBudget)
     local localHash = tostring(DPS.GetSyncHash())
-    local localRevision = CurrentDpsRevision()
+    local _, localRevision = CurrentDpsRevision()
     progress = type(progress) == "table" and progress or {}
     local state = progress._responseState
     if peerHash and tostring(peerHash) == localHash then
@@ -2342,7 +3061,7 @@ function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
             pending=0,claimSafe=true}
         progress._responseState = state
     elseif tostring(DPS.GetSyncHash()) ~= state.localHash
-        or CurrentDpsRevision() ~= state.revision
+        or select(2, CurrentDpsRevision()) ~= state.revision
         or state.generation ~= responseGeneration then
         local pending = math.max(0, math.floor(tonumber(state.pending) or 0))
         if pending > 0 then TerminalOutbound("stale_record", pending) end
@@ -2499,7 +3218,11 @@ function DPS.BroadcastAllBuildBests(peerHash, onlyBucket, progress, maxItems,
 end
 
 local function DpsBoardEntry(row, category, summaryOnly)
-    if type(row) ~= "table" or (tonumber(row.dps) or 0) <= 0
+    -- A board score is the integer floor of a finite score and must be at least
+    -- 1: a non-finite score is not a record (the pair arithmetic refuses it as
+    -- well), and a score below 1 would be listed as 0.
+    local score = type(row) == "table" and tonumber(row.dps) or nil
+    if not FiniteNumber(score) or math.floor(score) < 1
         or not DPS.IsDurationEligible(category, row.duration) then return nil end
     local rawBuildId = row.buildId
     local buildId = rawBuildId
@@ -2714,9 +3437,6 @@ function DPS.GetDpsBoard(category)
     if RepairCurrentCharacterClass() then
         BumpDps("local class repaired", {scope="metadata"})
     end
-    if BackfillLocalLockedRows() then
-        BumpDps("locked metadata backfilled", {scope="metadata"})
-    end
     local out, seenPlayer = {}, {}
     for _, row in pairs(CharacterBestStore()[category] or {}) do
         local entry = DpsBoardEntry(row, category)
@@ -2800,13 +3520,50 @@ function DPS.GetCharacterBest(category, playerName, expectedOwnerKey,
     return DPS.MaterializeRecord(row)
 end
 
+-- The unit tooltip ranks a character on the board the Leaderboard presents:
+-- the board cursor's entries (one per public identity, with the board's own
+-- eligibility, and an unverified row hidden behind a verified namesake).
+-- Only their scores and identities are kept, per category, while the state
+-- the board reads is unchanged (the HUD projection's key, below); a board
+-- that cannot be read, or whose state moved during the read, is not kept.
+identityIndex.presented = {}
+
+local function PresentedBoardScores(category)
+    local hud = identityIndex.hud
+    local key = hud.ReadKey(nil)
+    local cached = identityIndex.presented[category]
+    if cached and key and hud.SameKey(key, cached.key) then
+        return cached.scores
+    end
+    identityIndex.presented[category] = nil
+    local ok, scores = pcall(function()
+        local cursor = DPS.BeginDpsBoardCursor(category)
+        if type(cursor) ~= "table" then return nil end
+        local done, err = false, nil
+        while not done do
+            done, err = DPS.DpsBoardCursorNext(cursor)
+            if err then return nil end
+        end
+        local out = {}
+        for _, entry in ipairs(DPS.DpsBoardCursorResult(cursor) or {}) do
+            out[#out + 1] = {dps=entry.dps, key=entry.publicIdentityKey}
+        end
+        return out
+    end)
+    if not ok or type(scores) ~= "table" then return nil end
+    if key and hud.SameKey(key, hud.ReadKey(nil)) then
+        identityIndex.presented[category] = {key=key, scores=scores}
+    end
+    return scores
+end
+
 function DPS.GetPlayerInfo(playerName)
     if not playerName or playerName == "" then return nil end
     MigrateLocalLockedBaseline()
     MigrateLegacyLeaderboard()
     local pk = PlayerKey(playerName)
     local qualified = CurrentCharacterKey(playerName)
-    local best
+    local best, bestRow
     for _, category in ipairs({"dummy", "lk"}) do
         local rows = CharacterBestStore()[category]
         local row = rows[qualified] or rows[pk]
@@ -2816,19 +3573,33 @@ function DPS.GetPlayerInfo(playerName)
             if not best or (tonumber(row.dps) or 0) > (tonumber(best.dps) or 0) then
                 best = { dps = tonumber(row.dps), category = category,
                          buildId = row.buildId, fingerprint = row.fingerprint }
+                bestRow = row
             end
         end
     end
     if not best then return nil end
-    -- Compute rank: how many players have a higher DPS in the same category
+    -- Rank on the presented board: one more than the presented entries of
+    -- other public identities with a higher board score, so tied scores share
+    -- a rank. Without a readable board, the stored rows are counted as before.
     local category = best.category
     local rank = 1
-    local bucket = CharacterBestStore()[category]
-    if bucket[qualified] then pk = qualified end
-    for opk, row in pairs(bucket) do
-        if opk ~= pk and (tonumber(row.dps) or 0) > best.dps
-            and DPS.IsDurationEligible(category, row.duration) then
-            rank = rank + 1
+    local scores = PresentedBoardScores(category)
+    if scores then
+        local okOwn, own = pcall(DpsBoardEntry, bestRow, category, true)
+        local ownKey = okOwn and type(own) == "table"
+            and Identity.PublicRecordKey(own, "player") or nil
+        local score = math.floor(best.dps)
+        for _, entry in ipairs(scores) do
+            if entry.dps > score and entry.key ~= ownKey then rank = rank + 1 end
+        end
+    else
+        local bucket = CharacterBestStore()[category]
+        if bucket[qualified] then pk = qualified end
+        for opk, row in pairs(bucket) do
+            if opk ~= pk and (tonumber(row.dps) or 0) > best.dps
+                and DPS.IsDurationEligible(category, row.duration) then
+                rank = rank + 1
+            end
         end
     end
     -- Resolve build title
@@ -2854,11 +3625,15 @@ function DPS.GetCurrentEchoCount()
 end
 
 function DPS.GetCurrentEchoKey()
-    return EchoKey(SnapshotEchoes())
+    -- One value: SnapshotEchoes also returns how the snapshot was derived, and
+    -- a bare call would pass that second value on as an argument.
+    local snap = SnapshotEchoes()
+    return EchoKey(snap)
 end
 
 function DPS.GetCurrentMatchingBuild()
-    return FindMatchingBuild(SnapshotEchoes())
+    local snap = SnapshotEchoes()
+    return FindMatchingBuild(snap)
 end
 
 function DPS.GetCurrentLeaderboard(category)
@@ -2886,6 +3661,106 @@ end
 function DPS.GetLeaderboardForEchoes(echoes, category)
     MigrateLocalLockedBaseline()
     return SortedEntries(GlobalForKey(DPS.GetEchoKey(echoes), category))
+end
+
+-- The main HUD shows this character's best Dummy and Lich King rows, its
+-- player summary and, for the displayed Echo set, the personal and global
+-- exact-set rows. Those reads walk every stored character row (and every
+-- personal row when the exact set has none) and materialize full records,
+-- and they ran on every HUD preparation, which Auto repeats for each board.
+-- One projection is kept and rebuilt only when something the reads depend on
+-- can have changed: the DPS and build-library revisions (the Leaderboard
+-- projection's key), the bound DPS payload and saved table, the player and
+-- realm, the Echo set, and the evidence the materialized rows resolve
+-- through. The pending migrations the reads start still run on every call,
+-- before the key is read. A failed read, a missing revision or evidence
+-- token, or a key that moved during the reads is never retained. The
+-- returned table holds detached records only; it is shared and read-only.
+identityIndex.hud = {key=nil, value=nil, echoes=nil,
+    stats={builds=0,hits=0,uncached=0}}
+
+-- Every value the projection depends on except the Echo set, or nil when one
+-- of them is unavailable.
+function identityIndex.hud.ReadKey(playerName)
+    DB()
+    local revisions = Nexus and Nexus.Revisions
+    local get = revisions and revisions.Get
+    if type(get) ~= "function" then return nil end
+    local key = {revisions=revisions, dps=get(revisions.DPS_CHANGED),
+        library=get(revisions.BUILD_LIBRARY_CHANGED),
+        database=dbBinding.database, payload=dbBinding.payload,
+        player=playerName, realm=CurrentRealm()}
+    if key.dps == nil or key.library == nil then return nil end
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    if evidence then
+        if type(evidence.ResolutionTokenV1) ~= "function" then return nil end
+        local ok, store, entries, appended, removed =
+            pcall(evidence.ResolutionTokenV1)
+        if not ok or store == nil then return nil end
+        key.store, key.entries = store, entries
+        key.appended, key.removed = appended, removed
+    end
+    return key
+end
+
+function identityIndex.hud.SameKey(left, right)
+    if type(left) ~= "table" or type(right) ~= "table" then return false end
+    for field, value in pairs(left) do
+        if right[field] ~= value then return false end
+    end
+    for field in pairs(right) do
+        if left[field] == nil then return false end
+    end
+    return true
+end
+
+function DPS.GetSharedHudProjection(playerName, echoes)
+    local hud = identityIndex.hud
+    MigrateLocalLockedBaseline()
+    MigrateLegacyLeaderboard()
+    local key = hud.ReadKey(playerName)
+    if key and hud.SameKey(key, hud.key) and DeepEqual(echoes, hud.echoes) then
+        hud.stats.hits = hud.stats.hits + 1
+        return hud.value
+    end
+
+    local failed = false
+    local function Read(callback, ...)
+        if type(callback) ~= "function" then return nil end
+        local ok, value = pcall(callback, ...)
+        if not ok then failed = true end
+        return ok and value or nil
+    end
+    local value = {bestDps={
+        dummy=Read(DPS.GetCharacterBest, "dummy", playerName),
+        lk=Read(DPS.GetCharacterBest, "lk", playerName),
+        info=Read(DPS.GetPlayerInfo, playerName),
+    }}
+    if type(echoes) == "table" then
+        local dummyPersonal = Read(DPS.GetPersonalBestForEchoes, echoes, "dummy")
+        local lkPersonal = Read(DPS.GetPersonalBestForEchoes, echoes, "lk")
+        local dummyRows = Read(DPS.GetLeaderboardForEchoes, echoes, "dummy")
+        local lkRows = Read(DPS.GetLeaderboardForEchoes, echoes, "lk")
+        value.performance = {
+            dummy={personal=dummyPersonal,
+                global=type(dummyRows) == "table" and dummyRows[1] or nil},
+            lk={personal=lkPersonal,
+                global=type(lkRows) == "table" and lkRows[1] or nil},
+        }
+    end
+    hud.stats.builds = hud.stats.builds + 1
+    if key and not failed and hud.SameKey(key, hud.ReadKey(playerName)) then
+        hud.key, hud.echoes, hud.value = key, DeepCopy(echoes), value
+    else
+        hud.key, hud.echoes, hud.value = nil, nil, nil
+        hud.stats.uncached = hud.stats.uncached + 1
+    end
+    return value
+end
+
+function DPS.HudProjectionStats()
+    local stats = identityIndex.hud.stats
+    return {builds=stats.builds, hits=stats.hits, uncached=stats.uncached}
 end
 
 -- Exact build match for wishlist/community-page use.
@@ -2953,7 +3828,7 @@ local function CommitSession(category)
         return
     end
 
-    local snap = SnapshotEchoes()
+    local snap, derivation = SnapshotEchoes()
     local key = EchoKey(snap)
     if not key then
         Nexus.lastDpsNote = "ignored: no owned Echo snapshot was available"
@@ -2981,7 +3856,7 @@ local function CommitSession(category)
 
     if not existing or dpsFloor > (tonumber(existing.dps) or 0) then
         local stamp = (time and time()) or 0
-        local localClass = select(2, UnitClass and UnitClass("player")) or "UNKNOWN"
+        local localClass = CurrentClassToken() or "UNKNOWN"
         -- Capture locked perks (permanent baseline echoes) at record time
         -- so the leaderboard can display the full 85-echo picture.
         local lockedSnap = nil
@@ -2995,6 +3870,66 @@ local function CommitSession(category)
                 table.sort(ls, function(a,b) return a.spellId < b.spellId end)
                 if #ls > 0 then lockedSnap = ls end
             end
+        end
+        -- Before anything is written: a derived snapshot that cannot be a
+        -- current loadout must not replace a valid earlier record, and must
+        -- not be submitted to a catalog that will only refuse it. The counts
+        -- are retained for support instead, and the previous record stands.
+        local coherent, captureCounts, captureLimits, captureWhy =
+            CaptureEnvelopeVerdict(snap, lockedSnap)
+        local contested = derivation and tonumber(derivation.contestedPermanent) or 0
+        local permanentSource = derivation and derivation.permanentSource or "live"
+        local captureReason = "SEMANTIC_ENVELOPE"
+        if coherent and permanentSource ~= "live" then
+            -- The permanent copies were separated from the ordinary ones using
+            -- the saved loadout's own marks, because the character's current
+            -- permanent list had not arrived. Those marks may be from an
+            -- earlier loadout, and a record built on them is filed under a
+            -- fingerprint that may be missing a copy - which nothing can match
+            -- later and nothing would show as wrong. The capture waits for the
+            -- permanent list instead, and clears itself when it arrives.
+            coherent = false
+            captureReason = "PERMANENT_ROLES_UNVERIFIED"
+            captureWhy = "this character's current locked Echo list has not "
+                .. "arrived yet (" .. tostring(permanentSource)
+                .. " was used to read the roles); the capture is kept until it does"
+        end
+        if coherent and contested > 0 then
+            -- The counts fit, but the two sources disagree about the role of
+            -- a copy. Writing either answer is a guess: one way the record
+            -- carries a copy the character may not have, the other way it
+            -- silently drops one and is filed under a key nothing can match.
+            coherent = false
+            captureReason = "CONTESTED_PERMANENT_ROLE"
+            captureWhy = contested .. " copy(ies) are marked locked by the saved "
+                .. "loadout but are not in this character's current locked list; "
+                .. "save the loadout again to agree"
+        end
+        if not coherent then
+            local support = Nexus and Nexus.SupportIncidents
+            if support and type(support.Record) == "function" then
+                pcall(support.Record, "capture-deferred", {
+                    reason = captureReason,
+                    producer = "DPS record capture",
+                    origin = "local",
+                    operation = "personal record capture",
+                    category = category,
+                    build = Nexus.Release and Nexus.Release.buildLabel or nil,
+                    representation = "inline",
+                    counts = captureCounts, limits = captureLimits,
+                    readiness = derivation,
+                    detail = captureWhy,
+                    affected = snap,
+                    committed = false,
+                    scope = "no personal, public or catalog write was made for this capture",
+                })
+            end
+            Nexus.lastDpsNote = "deferred: " .. tostring(captureWhy)
+                .. " (" .. tostring(captureCounts.ordinary) .. " ordinary, "
+                .. tostring(captureCounts.locked) .. " locked, "
+                .. tostring(captureCounts.total) .. " total); the previous record is unchanged"
+            Debug(Nexus.lastDpsNote)
+            return
         end
         local personalRow = {
             dps = dpsFloor, level = level, ts = stamp,
@@ -3091,11 +4026,15 @@ local function CommitSession(category)
         local setLabel = Identity and Identity.DisplaySafeText
             and Identity.DisplaySafeText(rawSetLabel, 1024, false)
             or "current Echo set"
+        -- A read-only saved root keeps this record for the session only;
+        -- the player is told so, here and in the DPS note below.
         print(string.format(
-            "|cff7fd5ffNexus:|r |cff4dff80New best for '%s' (%s): %s DPS!|r",
+            "|cff7fd5ffNexus:|r |cff4dff80New best for '%s' (%s): %s DPS!|r%s",
             tostring(setLabel), catLabel,
             dpsFloor >= 1000000 and string.format("%.2fM", dpsFloor / 1000000)
-            or string.format("%dk", math.floor(dpsFloor / 1000))))
+            or dpsFloor >= 1000 and string.format("%dk", math.floor(dpsFloor / 1000))
+            or tostring(dpsFloor),
+            StorageReadOnly() and " |cffffc040(session only: saved data is read-only, so this record is not kept after a reload)|r" or ""))
 
         -- Global comparison is only meaningful when the exact current Echo
         -- set is already a published community build.
@@ -3112,8 +4051,9 @@ local function CommitSession(category)
         end
     end
 
-    Nexus.lastDpsNote = string.format("%s: %d DPS (%s)",
-        category, dpsFloor, build and build.title or "current Echo set")
+    Nexus.lastDpsNote = string.format("%s: %d DPS (%s)%s",
+        category, dpsFloor, build and build.title or "current Echo set",
+        StorageReadOnly() and " (session only: saved data is read-only)" or "")
     Debug("saved/retained best: " .. Nexus.lastDpsNote)
 
     RequestDataViewRefresh()
@@ -3173,7 +4113,7 @@ function DPS.LocalOwnsDpsBucket(bucket)
     return false
 end
 
-local function ReceiveRecord(record, transportSender, relayed)
+local function ReceiveRecord(record, transportSender, relayed, nativeChannelSender)
     if type(record) ~= "table" then return RejectReceive("schema") end
     if not WireDpsAliasesAgree(record) then return RejectReceive("schema") end
     local version = tonumber(record.v or record.protocolVersion)
@@ -3296,12 +4236,63 @@ local function ReceiveRecord(record, transportSender, relayed)
         return RejectReceive("schema")
     end
     local incomingLocked = NormalizeEchoes(rawLocked)
+    -- #22: a received record is held to the same envelope as a local capture
+    -- (79 ordinary copies; locked rows within the row ceilings). A loadout
+    -- outside it cannot be held in the game, so it is neither stored nor
+    -- listed nor relayed.
+    if not CaptureEnvelopeVerdict(echoes, incomingLocked) then
+        return RejectReceive("integrity")
+    end
 
     MigrateLegacyLeaderboard()
     local bucket = CharacterBestStore()[category]
     local characterKey = CharacterKey(player, storageOwner, storageRealm)
     local existing = bucket[characterKey]
     local existingKey = characterKey
+    -- Recover only the exact record previously stored under the native game's
+    -- other observed Ebonhold spelling. A new authenticated owner transfer is
+    -- required; reading/reloading a historical row never promotes it.
+    local nativeOwner = nativeChannelSender
+        and Identity.CanonicalOwnerFromTransport(nativeChannelSender)
+    if not existing and directOwner and nativeOwner ~= canonicalOwner
+        and Identity.NativeChannelDpsOwnerSender(nativeChannelSender,
+            canonicalOwner) == transportSender then
+        local prior = bucket[nativeOwner]
+        local evidence = Nexus and Nexus.LoadoutEvidence
+        local function ExactPool(reference, inline, locked)
+            if not evidence or type(evidence.Resolve) ~= "function"
+                or type(evidence.Fingerprint) ~= "function" then return nil end
+            local options = locked and {forceLocked=true} or {}
+            if reference ~= nil and (type(reference) ~= "string" or reference == "") then return nil end
+            if inline ~= nil then
+                if type(inline) ~= "table" then return nil end
+                local inlineExact = evidence.Fingerprint(inline, options)
+                if not inlineExact or (reference ~= nil and reference ~= inlineExact) then return nil end
+            end
+            local rows, resolvedExact = evidence.Resolve(reference, inline, options)
+            if not rows or not resolvedExact
+                or (reference ~= nil and reference ~= resolvedExact) then return nil end
+            local exact = evidence.Fingerprint(rows, options)
+            return exact == resolvedExact and exact or nil
+        end
+        local priorOrdinary = prior and ExactPool(prior.evidenceKey, prior.echoes, false)
+        local priorLocked = prior and ExactPool(prior.lockedEvidenceKey, prior.lockedEchoes, true)
+        local incomingOrdinary = ExactPool(nil, rawEchoes, false)
+        local incomingLockedExact = ExactPool(nil, rawLocked, true)
+        local priorBuild = prior and CatalogGet(prior.buildId)
+        if prior and DPS.VerifiedOwnerKey(prior) == nil
+            and prior.ownerKey == nil and prior.realm == nativeOwner:match("@(.+)$")
+            and prior.relaySender == nativeChannelSender
+            and prior.dps == math.floor(dps) and prior.ts == ts
+            and math.abs((tonumber(prior.duration) or -1) - duration) < 0.000001
+            and prior.fingerprint == fingerprint
+            and priorOrdinary and priorOrdinary == incomingOrdinary
+            and priorLocked and priorLocked == incomingLockedExact
+            and type(priorBuild) == "table" and priorBuild.autoDps == true
+            and Identity.VerifiedOwnerKey(priorBuild) == nil then
+            existing, existingKey = prior, nativeOwner
+        end
+    end
     local legacyKey = PlayerKey(player)
     if not existing and legacyKey ~= characterKey then
         local legacy = bucket[legacyKey]
@@ -3516,8 +4507,8 @@ local function ReceiveRecord(record, transportSender, relayed)
 end
 
 
-function DPS.ReceiveRecord(record, transportSender)
-    return ReceiveRecord(record, transportSender, false)
+function DPS.ReceiveRecord(record, transportSender, nativeChannelSender)
+    return ReceiveRecord(record, transportSender, false, nativeChannelSender)
 end
 
 -- Response-only relay admission. SyncInbound establishes the intended
@@ -3525,36 +4516,6 @@ end
 -- reachable; ordinary callers retain the direct-owner ReceiveRecord contract.
 function DPS.ReceiveRelayedRecord(record, transportSender)
     return ReceiveRecord(record, transportSender, true)
-end
-
-function DPS.ReceiveSubmission(buildId, player, dps, level, category, ts,
-        duration)
-    dps = tonumber(dps); level = tonumber(level) or 0
-    category = (category == "lk" or category == "dummy") and category or "dummy"
-    local key = BuildKey(buildId)
-    if not (key and player and dps and dps > 0
-        and DPS.IsDurationEligible(category, duration)) then return false end
-    local bucket = CharacterBestStore()[category]
-    local characterKey = CharacterKey(player)
-    local existing = bucket[characterKey]
-    local row = {
-        dps = dps, level = level, ts = ts or 0, duration=duration,
-        player = player, buildId = buildId,
-        echoes = BuildSnapshot(CatalogGet(buildId)),
-        fingerprint = key, protocolVersion = PROTOCOL_VERSION,
-    }
-    ReferenceEvidence(row)
-    if not IsBetterPublicRecord(row, existing) then return false end
-    bucket[characterKey] = row
-    BumpDps("legacy submission received", {
-        scope="record", category=category, player=player,
-        characterKey=characterKey,
-    })
-    if Nexus.DataRetention and Nexus.DataRetention.Request then
-        Nexus.DataRetention.Request("legacy DPS record received")
-    end
-    RequestDataViewRefresh()
-    return true
 end
 
 ------------------------------------------------------------------------

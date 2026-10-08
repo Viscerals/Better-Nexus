@@ -7,6 +7,22 @@ if type(Nexus.MainInternals) ~= "table" then Nexus.MainInternals = {} end
 local Lifecycle = {}
 Nexus.MainInternals.Lifecycle = Lifecycle
 
+-- Root refusals that are purely about saved capacity: the data is complete
+-- and untouched, and only the shared catalog cannot be admitted. Local tools
+-- continue; every other refusal keeps the previous all-or-nothing behavior.
+local CAPACITY_REFUSALS = {
+    ROOT_SLOT_LIMIT=true, TOMBSTONE_SET_LIMIT=true, BARRIER_SET_LIMIT=true,
+    ROOT_MAP_LIMIT=true,
+}
+-- Read-only view of that class. The table itself stays private; tests and
+-- diagnostics read the exact membership instead of guessing it from behavior.
+function Nexus.MainInternals.CapacityRefusalReasonsV1()
+    local out = {}
+    for reason in pairs(CAPACITY_REFUSALS) do out[#out + 1] = reason end
+    table.sort(out)
+    return out
+end
+
 function Lifecycle.New(options)
     options = options or {}
     local Nexus = assert(options.nexus, "MainLifecycle requires Nexus")
@@ -62,11 +78,110 @@ function Lifecycle.New(options)
     -- diagnostic report, "unknown" until the gate is first reached. No
     -- history, no counter, never read by any decision.
     local syncGate = {reason="unknown", owner="unknown"}
+    -- The step the existing owners are on now, with a completed/total pair
+    -- only when that owner already holds both. Reads scalar state only: no
+    -- pump, drift check, cursor advance or extra scan sizes a step.
+    local function CurrentStep()
+        local catalog=Nexus.BuildCatalog
+        if not initialized then
+            local okState,store=false,nil
+            if bootstrapCoordinator and type(bootstrapCoordinator.State)=="function" then
+                okState,store=pcall(bootstrapCoordinator.State,bootstrapCoordinator)
+            end
+            store=okState and store or nil
+            if store=="STORE_CHAR_MIGRATION_PENDING"
+                or store=="STORE_DURABLE_BUNDLE_ADMISSION_PENDING" then
+                return "store-characters"
+            elseif store=="STORE_COMPACTION_PENDING" or store=="STORE_FINAL_COMMIT_PENDING"
+                or store=="STORE_LEGACY_DISPOSITION_PENDING"
+                or store=="STORE_SERVING_PUBLICATION_PENDING" then
+                return "store-finish"
+            elseif store=="STORE_READY" then return "local-setup"
+            elseif store~="STORE_AUTHORITY_PENDING" then return "store-validation" end
+        elseif communityReady then return "complete" end
+        local okPrep,prep=false,nil
+        if catalog and type(catalog.ManualPreparationStatus)=="function" then
+            okPrep,prep=pcall(catalog.ManualPreparationStatus)
+        end
+        if okPrep and type(prep)=="table" and prep.phase~=nil then
+            return "catalog-"..tostring(prep.phase),prep.stepDone,prep.stepTotal
+        end
+        if not initialized then return "catalog" end
+        return startupTiming.communityPhase or "community",
+            startupTiming.communityProgressDone,startupTiming.communityProgressTotal
+    end
+    -- Read-only, session-only facts the failed Store result already holds:
+    -- stage, cause, detail, owner, a bounded one-line error, the selection
+    -- row, and the settings-format verdict. Reads the retained result and a
+    -- pure classification only; never binds, pumps or retries.
+    local function FailureFacts()
+        local r = bootstrapTerminal
+        if type(r) ~= "table" or r.state ~= "failed" then
+            -- The catalog refused its root after the Store finished: the
+            -- catalog's own session-only refusal record, when it matches.
+            local reason = startupTiming.coreFailure
+            if reason == nil then return nil end
+            local catalog = Nexus.BuildCatalog
+            local ok, last = false, nil
+            if catalog and type(catalog.LastLimitSummary) == "function" then
+                ok, last = pcall(catalog.LastLimitSummary)
+            end
+            if not ok or type(last) ~= "table" or last.reason ~= reason
+                or last.mode ~= "admission" then
+                return {component="catalog"}
+            end
+            -- Keys counted in each map when counting stopped: lower bounds,
+            -- because the maps after the refusing one were not read.
+            return {component="catalog", phase=last.phase, map=last.map,
+                counter=last.counter, count=tonumber(last.count),
+                limit=tonumber(last.limit), source=last.source,
+                counted={overlay=tonumber(last.overlay), bundled=tonumber(last.bundled),
+                    tombstone=tonumber(last.tombstone), barrier=tonumber(last.barrier),
+                    builds=tonumber(last.builds)}}
+        end
+        local function Token(value, limit)
+            if value == nil then return nil end
+            local okText, text = pcall(tostring, value)
+            if not okText or type(text) ~= "string" then text = "<unprintable>" end
+            text = text:gsub("[%c|]", " ")
+            if #text > limit then text = text:sub(1, limit) .. "..." end
+            return text
+        end
+        local facts = {stage=Token(r.stage, 48), cause=Token(r.cause, 48),
+            detail=Token(r.detail, 48), owner=Token(r.owner, 64),
+            error=Token(r.error, 160), row=tonumber(r.row),
+            legacyClass=Token(r.legacyClass, 32)}
+        -- The refused-key measurement the Store already retained at its own
+        -- refusal cursor. Scalars only, and no key, name or record content:
+        -- it is copied here, never recomputed, and it never re-reads the
+        -- profile. Absent for every failure that is not a key-width refusal.
+        local width = type(r.keyWidth) == "table" and r.keyWidth or nil
+        if width then
+            facts.keyWidth = {
+                path=Token(width.path, 64), depth=tonumber(width.depth),
+                keyType=Token(width.keyType, 16), keyBytes=tonumber(width.keyBytes),
+                valueType=Token(width.valueType, 16), limit=tonumber(width.limit),
+                exception=Token(width.exception, 24),
+            }
+        end
+        local internals = Nexus.MainInternals
+        local classify = type(internals) == "table" and internals.SavedFormatClassV1
+        if type(classify) == "function" then
+            local ok, class, version, field = pcall(classify)
+            if ok then
+                facts.formatClass = Token(class, 16)
+                facts.formatVersion = tonumber(version)
+                facts.formatField = Token(field, 64)
+            end
+        end
+        return facts
+    end
     -- Read-only scalar snapshot. This does not pump, admit or authorize data.
     Nexus.StartupStatus = function()
         local failure=startupTiming.coreFailure or communityFailure
             or (bootstrapTerminal and bootstrapTerminal.state=="failed"
                 and (bootstrapTerminal.detail or bootstrapTerminal.reason or "STORE_INVALID"))
+        local step,stepDone,stepTotal=CurrentStep()
         return {coreReady=initialized, state=failure and "failed"
             or communityReady and "ready" or "pending",
             phase=not initialized and "store-validation"
@@ -75,6 +190,8 @@ function Lifecycle.New(options)
             progressDone=startupTiming.communityProgressDone,
             progressTotal=startupTiming.communityProgressTotal,
             recordsSeen=startupTiming.communityRecordsSeen or 0,
+            step=step,stepDone=stepDone,stepTotal=stepTotal,
+            failure=FailureFacts(),
             coreSlices=startupTiming.slices or 0,
             syncGate=syncGate.reason, syncGateOwner=syncGate.owner,
             syncGateAdapterReady=syncGate.adapterReady,
@@ -103,6 +220,7 @@ function Lifecycle.New(options)
         ["DpsCapture.OnUpdate"]={active=false,message=nil},
         ["DpsCapture.OnCombatStart"]={active=false,message=nil},
         ["DpsCapture.OnCombatEnd"]={active=false,message=nil},
+        ["DataRetention.Request"]={active=false,message=nil},
     }
 
     local function RunIsolatedOwner(source, callback, ...)
@@ -258,7 +376,16 @@ function Lifecycle.New(options)
         -- turn is a coordinator dispatch point, not a dependent. It admits the
         -- evidence pool before the catalog on the rebind path, the order
         -- Catalog.Init used to enforce by driving LoadoutEvidence directly.
-        if type(catalog.PendingRebindDatabaseV1) == "function" then
+        -- While the catalog only resumes its in-flight candidate, the evidence
+        -- pool is not re-initialized: that would discard the candidate's open
+        -- evidence transaction, and the candidate would publish a root that
+        -- already drifts from the evidence revision its own plan advances.
+        local okWaits, waits = true, false
+        if type(catalog.RebindWaitsForCandidateV1) == "function" then
+            okWaits, waits = pcall(catalog.RebindWaitsForCandidateV1)
+        end
+        if type(catalog.PendingRebindDatabaseV1) == "function"
+            and not (okWaits and waits) then
             local okTarget, target = pcall(catalog.PendingRebindDatabaseV1)
             if okTarget and type(target) == "table"
                 and Nexus.LoadoutEvidence
@@ -267,6 +394,16 @@ function Lifecycle.New(options)
                 local source=rawget(target,"authorityBundle") or target
                 if rebindEvidenceDb~=target or rebindEvidenceSource~=source
                     or rebindEvidenceOwner~=evidence or rebindEvidenceInit~=evidence.Init then
+                    -- Init discards an open evidence candidate: release an
+                    -- open maintenance walk with it, so that walk restarts
+                    -- instead of interning into the live pool.
+                    if type(catalog.ReleaseMaintenanceForRebindV1)=="function" then
+                        local okRelease,releaseError=pcall(catalog.ReleaseMaintenanceForRebindV1)
+                        if not okRelease then
+                            RecordError("BuildCatalog.ReleaseMaintenanceForRebindV1",releaseError)
+                            return
+                        end
+                    end
                     local okEvidence,evidenceError=pcall(evidence.Init,target)
                     if not okEvidence then
                         RecordError("LoadoutEvidence.Init",evidenceError)
@@ -339,7 +476,16 @@ function Lifecycle.New(options)
         if root and root.state~="ROOT_ADMITTED" then
             startupTiming.coreFailure=root.reason or root.state
             RecordStoreError(startupTiming.coreFailure)
-            return false
+            -- A capacity refusal is a complete, deterministic verdict on data
+            -- this build leaves exactly as it found it: the saved maps hold
+            -- more keys than the root admits. Local Wishlist and Echo tools do
+            -- not need the shared catalog, so they continue; Community,
+            -- Leaderboard and Sync stay unavailable (their own owners refuse
+            -- against the same refused root), the failure and its reason stay
+            -- reported, and nothing is written, evicted or migrated.
+            if not CAPACITY_REFUSALS[startupTiming.coreFailure] then
+                return false
+            end
         end
         local db = Database()
         local automation = EnsureAutomation()
@@ -372,6 +518,10 @@ function Lifecycle.New(options)
             end
             if Nexus.Updates and Nexus.Updates.Init then
                 Nexus.Updates.Init({
+                    -- A capacity-refused start-up leaves every saved key as it
+                    -- found it, so the update module reads its stored notice
+                    -- without rewriting, quarantining or removing it.
+                    persist=not CAPACITY_REFUSALS[startupTiming.coreFailure],
                     notify=function(version, _, message)
                         Print(type(message) == "string" and message
                             or ("Nexus build " .. tostring(version) .. ": see /nexus update. Installation is manual."))
@@ -431,7 +581,13 @@ function Lifecycle.New(options)
         initialized = true
         RegisterStutterAlertProvider()
         RequestRecompute()
-        Print("v" .. Nexus.VERSION .. " -- type /nexus for commands.")
+        local buildLabel = type(Nexus.RuntimeBuildLabel) == "function"
+            and Nexus.RuntimeBuildLabel() or "source"
+        local release = type(Nexus.ReleaseIdentity) == "function"
+            and Nexus.ReleaseIdentity() or nil
+        local privateMark = release and release.channel == "internal" and " internal" or ""
+        Print("v" .. Nexus.VERSION .. " build=" .. buildLabel .. privateMark
+            .. " -- type /nexus for commands.")
         if Adapter.RivalDetected() then
             Print("|cffff6060EchoOptimizer detected -- it conflicts with Nexus's board hook. Disable EchoOptimizer; Nexus replaces its functionality.|r")
         end
@@ -523,6 +679,19 @@ function Lifecycle.New(options)
             RecordError("BuildHashCache.Pump", ready)
             return false
         end
+        -- The DPS digest is the second hash on WLRQ and in every response:
+        -- it is prepared in the same slot, in bounded steps, and Sync waits
+        -- for both.
+        local dps = Nexus and Nexus.DpsCapture
+        if type(dps) == "table" and type(dps.PumpSyncHash) == "function" then
+            local dpsOk, dpsReady, dpsProgressed = pcall(dps.PumpSyncHash)
+            if not dpsOk then
+                RecordError("DpsCapture.PumpSyncHash", dpsReady)
+                return false
+            end
+            return ready == true and dpsReady == true,
+                progressed == true or dpsProgressed == true
+        end
         return ready == true, progressed == true
     end
 
@@ -599,13 +768,112 @@ function Lifecycle.New(options)
         return ready, catalogReady
     end
 
+    -- The same shared allowance when no manual request owns it. An eligible
+    -- pending catalog mutation advances through several of the existing
+    -- bounded slices in one update, inside ONE soft time allowance and ONE
+    -- slice cap per update (MANUAL_MS / MANUAL_SLICES), counting the slices
+    -- this update's ordinary maintenance already spent. Per-slice limits are
+    -- unchanged, nothing else is accelerated, and a missing or invalid clock
+    -- keeps the previous single slice. The loop yields at the earliest of:
+    -- candidate completion or terminal failure, a binding or generation
+    -- change (ownership loss, cancellation or publication), the allowance,
+    -- the cap, and actual lack of progress reported by the catalog itself.
+    local function PumpCatalogAdmissionBatch(preparationElapsed, preparationPumps)
+        local catalog = Nexus.BuildCatalog
+        local describe = catalog and catalog.ManualPreparationStatus
+        if type(describe) ~= "function" then
+            return PumpCatalogRootAdmissionSlice()
+        end
+        local initial = describe()
+        -- Eligible means the pending product work and the admission that
+        -- must follow it before anything can be served again. Ordinary
+        -- maintenance is not accelerated: a retention or compaction walk
+        -- keeps its previous single slice per update.
+        if initial.kind == "maintenance" then
+            return PumpCatalogRootAdmissionSlice()
+        end
+        local priorSlices = math.max(0,
+            (initial.totalPumps or 0) - (preparationPumps or 0))
+        local started = StartupClock()
+        if priorSlices > 0 then
+            started = started and preparationElapsed
+                and started-preparationElapsed or nil
+            if preparationElapsed ~= nil then
+                manualTiming.driveMaxBatchMs = math.max(
+                    manualTiming.driveMaxBatchMs or 0, preparationElapsed)
+                if preparationElapsed > MANUAL_MS then
+                    manualTiming.driveOvershoots = (manualTiming.driveOvershoots or 0) + 1
+                end
+            end
+        end
+        manualTiming.driveSlices = (manualTiming.driveSlices or 0) + priorSlices
+        local catalogReady, spent = false, priorSlices
+        for slice=1,MANUAL_SLICES do
+            -- The cap counts every preparation slice this update has spent,
+            -- whoever drove it, so no caller receives a second allowance.
+            if spent >= MANUAL_SLICES then break end
+            local before = StartupClock()
+            local timed = started ~= nil and before ~= nil and before >= started
+            if timed and before-started >= MANUAL_MS then break end
+            if not timed and spent+1 > 1 then break end
+            -- Nothing to admit: the owner-agreeing admitted root serves and no
+            -- candidate exists. The slice would return at once and report
+            -- ready, so this update records the same idle observation and
+            -- pumps nothing (no status, pump result or root-state tables on
+            -- every idle frame). The allowance checks above still decide first.
+            if initial.ready then
+                manualTiming.catalogPhase, manualTiming.catalogKind =
+                    initial.phase, initial.kind
+                manualTiming.catalogPumps, manualTiming.catalogWork =
+                    initial.pumps, initial.work
+                return true
+            end
+            local status = describe()
+            if status.binding ~= initial.binding
+                or status.generation ~= initial.generation then break end
+            local progressed
+            catalogReady, progressed = PumpCatalogRootAdmissionSlice()
+            local observed = describe()
+            manualTiming.catalogPhase, manualTiming.catalogKind =
+                observed.phase, observed.kind
+            manualTiming.catalogPumps, manualTiming.catalogWork =
+                observed.pumps, observed.work
+            manualTiming.driveSlices = (manualTiming.driveSlices or 0) + 1
+            spent = math.max(spent + 1,
+                (observed.totalPumps or 0) - (preparationPumps or 0))
+            local finished = StartupClock()
+            timed = timed and finished ~= nil and finished >= before
+            if timed then
+                manualTiming.driveMaxBatchMs = math.max(
+                    manualTiming.driveMaxBatchMs or 0, finished-started)
+                if finished-started > MANUAL_MS then
+                    manualTiming.driveOvershoots = (manualTiming.driveOvershoots or 0) + 1
+                end
+            else
+                manualTiming.driveFallbackUpdates =
+                    (manualTiming.driveFallbackUpdates or 0) + 1
+            end
+            if catalogReady or not progressed or not timed
+                or finished-started >= MANUAL_MS then break end
+        end
+        return catalogReady
+    end
+
     function CompleteWorldEntry(event)
         local Adapter = dependencies.Adapter
         local Store = dependencies.Store
         Adapter.OnEvent(event)
         -- Ordinary account registration, gated on readiness (1198-1206).
         SubmitOrdinaryRegistration()
-        if Store.Settings().autoPick then Adapter.SetSoloPicker() end
+        -- The client's own auto-accept option is changed only where the
+        -- remembered prior value can be saved to restore it later. A read-only
+        -- saved root keeps no such value, so start-up leaves the option as the
+        -- player set it (automation still waits while it is on).
+        local readOnlyRoot = Nexus.MainInternals.SavedRootReadOnlyV1
+        if Store.Settings().autoPick
+            and not (type(readOnlyRoot) == "function" and readOnlyRoot()) then
+            Adapter.SetSoloPicker()
+        end
         Adapter.RequestSlots()
         local automation = EnsureAutomation()
         if dependencies.JournalTab then
@@ -617,6 +885,20 @@ function Lifecycle.New(options)
     local function CompleteSharedWorldEntry()
         if not communityReady or not sharedWorldEntryPending then return end
         sharedWorldEntryPending = false
+        -- Retention maintenance (first observation and expiry of retention
+        -- markers) runs through its own scheduler once the shared catalog is
+        -- admitted, and only when retention markers exist. A request is
+        -- bounded and coalesced; reads never start it.
+        local catalog = Nexus.BuildCatalog
+        local okStatus, catalogStatus = pcall(function()
+            return catalog and type(catalog.Status)=="function" and catalog.Status() or nil
+        end)
+        if okStatus and type(catalogStatus)=="table"
+            and (tonumber(catalogStatus.barrierCount) or 0) > 0
+            and Nexus.DataRetention and type(Nexus.DataRetention.Request)=="function" then
+            RunIsolatedOwner("DataRetention.Request", Nexus.DataRetention.Request,
+                "shared catalog ready")
+        end
         local Adapter=dependencies.Adapter
         if Nexus.Sync and Nexus.Codec then
             if not syncInitialized
@@ -680,7 +962,13 @@ function Lifecycle.New(options)
         local catalog=Nexus.BuildCatalog
         local root=catalog and type(catalog.RootState)=="function" and catalog.RootState()
         if root and (root.state=="ROOT_ADMISSION_PENDING" or root.candidate)
-            and not (ticket and ticket.state~="pending") then return false end
+            and not (ticket and ticket.state~="pending") then
+            -- The catalog work may replace the root under the Community
+            -- cursor. Its last position is not shown again until Init reports.
+            startupTiming.communityProgressDone,startupTiming.communityProgressTotal=nil,nil
+            startupTiming.communityRecordsSeen=nil
+            return false
+        end
         local before=StartupClock()
         if started and before and before>=started
             and before-started>=STARTUP_MS then return false end
@@ -801,7 +1089,7 @@ function Lifecycle.New(options)
                     numbered = (arg4:lower():gsub("^%s*%d+%.%s*", ""))
                 end
                 if bare == want or numbered == want then
-                    local ok, err = pcall(Nexus.Sync.HandleIncoming, arg1, arg2)
+                    local ok, err = pcall(Nexus.Sync.HandleNativeChannelIncoming, arg1, arg2)
                     if not ok then
                         RecordError("Sync.HandleIncoming", err)
                         Nexus.Sync.LogEvent("RX", "handler ERROR: %s", ErrorText(err))
@@ -813,6 +1101,19 @@ function Lifecycle.New(options)
                 end
             end
         end
+    end
+
+    -- Inclusive sub-step timers inside lifecycle.update (Performance paths
+    -- lifecycle.phase.*, aggregate-only). Begin returns nil while Performance
+    -- is disabled or has no clock; Finish then does nothing.
+    local function PhaseBegin(name)
+        local performance = Nexus.Performance
+        return performance and performance.Begin and performance.Begin(name) or nil
+    end
+    local function PhaseFinish(name, startedAt)
+        if startedAt == nil then return end
+        local performance = Nexus.Performance
+        if performance and performance.Finish then performance.Finish(name, startedAt) end
     end
 
     local function RunUpdate(elapsed,updateStarted)
@@ -862,15 +1163,21 @@ function Lifecycle.New(options)
         -- One authority rebind slice per scheduler turn, before any consumer
         -- reads this frame, so a character-identity change is re-proved by the
         -- coordinator rather than by a read.
+        local phaseStarted = PhaseBegin("lifecycle.phase.rebind")
         PumpAuthorityRebind()
+        PhaseFinish("lifecycle.phase.rebind", phaseStarted)
         -- One post-ready Store mutation slice per turn, before consumer reads.
+        phaseStarted = PhaseBegin("lifecycle.phase.store")
         PumpStoreMutationSlice()
+        PhaseFinish("lifecycle.phase.store", phaseStarted)
         if not communityReady then
             -- Early return before the catalog, hash and adapter gate: those
             -- three were not evaluated in this update.
             syncGate.reason, syncGate.owner = "community-startup", "none"
             syncGate.adapterReady, syncGate.catalogReady, syncGate.hashesReady = nil, nil, nil
+            phaseStarted = PhaseBegin("lifecycle.phase.community")
             PumpCommunityStartup(updateStarted)
+            PhaseFinish("lifecycle.phase.community", phaseStarted)
             local adapter=dependencies.Adapter
             if adapter.Ready() then
                 local automation=EnsureAutomation()
@@ -878,6 +1185,7 @@ function Lifecycle.New(options)
             end
             return
         end
+        phaseStarted = PhaseBegin("lifecycle.phase.maintenance")
         CompleteSharedWorldEntry()
         if bootstrapCoordinator and bootstrapCoordinator.StartAutomaticMaintenance then
             local ok,result=pcall(bootstrapCoordinator.StartAutomaticMaintenance,bootstrapCoordinator)
@@ -887,6 +1195,7 @@ function Lifecycle.New(options)
                 RecordStoreError(ok and StoreResultReason(result) or result)
             end
         end
+        PhaseFinish("lifecycle.phase.maintenance", phaseStarted)
         local preparationFinished = StartupClock()
         local preparationElapsed = preparationStarted and preparationFinished
             and preparationFinished >= preparationStarted
@@ -911,11 +1220,21 @@ function Lifecycle.New(options)
             end
         end
         local catalogReady, buildHashesReady
+        -- The manual batch also runs its hash slices; they are part of
+        -- lifecycle.phase.catalog for that update.
+        phaseStarted = PhaseBegin("lifecycle.phase.catalog")
         if manualOwner then
             buildHashesReady, catalogReady = PumpManualPreparationBatch(manualOwner, preparationElapsed, preparationPumps)
+            PhaseFinish("lifecycle.phase.catalog", phaseStarted)
         else
-            catalogReady = PumpCatalogRootAdmissionSlice()
-            if catalogReady then buildHashesReady = PumpBuildHashCacheSlice() end
+            catalogReady = PumpCatalogAdmissionBatch(preparationElapsed,
+                preparationPumps)
+            PhaseFinish("lifecycle.phase.catalog", phaseStarted)
+            if catalogReady then
+                phaseStarted = PhaseBegin("lifecycle.phase.hashes")
+                buildHashesReady = PumpBuildHashCacheSlice()
+                PhaseFinish("lifecycle.phase.hashes", phaseStarted)
+            end
         end
         -- Give one explicitly approved Share the next normal admission turn
         -- before Sync can start another incoming write. This does not pump or
@@ -923,8 +1242,10 @@ function Lifecycle.New(options)
         local community = Nexus.CommunityBuilds
         local shareGate
         if community and type(community.PumpPendingShare) == "function" then
+            phaseStarted = PhaseBegin("lifecycle.phase.share")
             local ok, pending, submitted = RunIsolatedOwner("CommunityBuilds.PumpPendingShare",
                 community.PumpPendingShare)
+            PhaseFinish("lifecycle.phase.share", phaseStarted)
             if not ok or pending then catalogReady = false end
             if not ok or pending or submitted then buildHashesReady = false end
             -- This one pump serves a pending Share and a pending local removal;
@@ -952,11 +1273,13 @@ function Lifecycle.New(options)
             -- One transport turn per frame. Prepared manual Share bytes do
             -- not depend on a later catalog/hash candidate. Everything else
             -- retains the full readiness gate and passive expiry handling.
+            phaseStarted = PhaseBegin("lifecycle.phase.transport")
             if adapterReady and type(Nexus.Sync.PumpPreparedShare)=="function" then
                 RunIsolatedOwner("Sync.PumpPreparedShare", Nexus.Sync.PumpPreparedShare, elapsed)
             else
                 RunIsolatedOwner("Sync.Housekeep", Nexus.Sync.Housekeep)
             end
+            PhaseFinish("lifecycle.phase.transport", phaseStarted)
         end
         if not adapterReady then return end
         if syncInitialized and Nexus.Sync and catalogReady and buildHashesReady then
@@ -968,6 +1291,35 @@ function Lifecycle.New(options)
             RunIsolatedOwner("DpsCapture.OnUpdate",
                 Nexus.DpsCapture.OnUpdate, elapsed)
         end
+        -- Runtime saturation: one chat line per full category and session,
+        -- when that category first refuses a change. The line names what is
+        -- refused. Existing data and the Leaderboard stay available;
+        -- /nexus status keeps the retained counts.
+        if catalogReady then
+            local catalog = Nexus.BuildCatalog
+            local refused = catalog and type(catalog.SaturationRefusals) == "function"
+                and catalog.SaturationRefusals() or 0
+            -- The record is read only when the refusal count changed.
+            if refused > 0 and refused ~= startupTiming.saturationSeen
+                and type(catalog.SaturationSummary) == "function" then
+                startupTiming.saturationSeen = refused
+                local record = catalog.SaturationSummary() or {}
+                local noticed = startupTiming.saturationNoticed or {}
+                startupTiming.saturationNoticed = noticed
+                for _, line in ipairs({
+                    {"refusedBuilds", "Community catalog full: new shared builds are refused."},
+                    {"refusedTombstones", "Community removal markers full: new build removals are refused."},
+                    {"refusedBarriers", "Community retention markers full: older shared builds are kept instead of removed."},
+                    {"refusedCatalog", "Community catalog full: new shared data is refused."},
+                }) do
+                    if not noticed[line[1]] and (tonumber(record[line[1]]) or 0) > 0 then
+                        noticed[line[1]] = true
+                        Print(line[2] .. " Your existing Community builds and Leaderboard stay available. "
+                            .. "See /nexus status.")
+                    end
+                end
+            end
+        end
         local automation = EnsureAutomation()
         if automation then automation.OnUpdate(elapsed) end
     end
@@ -976,7 +1328,9 @@ function Lifecycle.New(options)
         -- Presentation never drives readiness. The module throttles snapshots;
         -- any UI failure is isolated from the already executed lifecycle work.
         if Nexus.LoadingStatus and type(Nexus.LoadingStatus.Update)=="function" then
+            local loadingStarted = PhaseBegin("lifecycle.loading-status")
             RunIsolatedOwner("LoadingStatus.Update",Nexus.LoadingStatus.Update)
+            PhaseFinish("lifecycle.loading-status", loadingStarted)
         end
         if started ~= nil then
             local finished = StartupClock()
@@ -1008,6 +1362,32 @@ function Lifecycle.New(options)
     end
 
     local M = {}
+    -- Explicit keep-current / preserve-legacy recovery. Pass-throughs to the
+    -- bootstrap coordinator that waits on the decision; neither pumps, binds
+    -- or resumes it. An error inside the coordinator is reported, not thrown.
+    local function LegacyRecovery(method, ...)
+        local coordinator = bootstrapCoordinator
+        if coordinator == nil or type(coordinator[method]) ~= "function" then
+            return {state="notWaiting"}
+        end
+        local ok, result = pcall(coordinator[method], coordinator, ...)
+        if not ok or type(result) ~= "table" then
+            -- Session memory only, as for every Store failure: a persistent
+            -- diagnostic write must not touch a root that is waiting on this.
+            RecordStoreError(ok and "non-table result" or result)
+            return {state="failed", reason="PRESERVATION_FAILED"}
+        end
+        return result
+    end
+    function M.LegacyRecoveryStatus()
+        local result = LegacyRecovery("LegacyRecoveryStatus")
+        return result.state == "failed" and {state="none"} or result
+    end
+    function M.LegacyRecoveryOffer() return LegacyRecovery("LegacyRecoveryOffer") end
+    function M.ConfirmLegacyRecovery(code)
+        return LegacyRecovery("ConfirmLegacyRecovery", code)
+    end
+
     function M.Initialize() return Initialize() end
     function M.IsInitialized() return initialized end
     function M.OnEvent(...) return OnEvent(...) end

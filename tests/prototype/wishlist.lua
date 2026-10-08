@@ -28,6 +28,9 @@ check(c.AcceptApply(d)==true,'first upload')
 local key=A.WishlistKey(d.echoes)
 check(count(backing.lockDesignTargetsBySlot[key])==6,'six committed targets')
 check(backing.firstRunWishlist.key==key,'association uses uploaded key')
+-- The slot service holds the uploaded Wishlist at slot 101: an editor saves to an existing slot only while
+-- the slot still shows what it opened (W16).
+H.perks.serverBuildSlots[101]={name=d.name,verified=false,echoes=H.Clone(d.echoes)}
 check(c.BeginWishlist({slot=101,name=d.name,key=key,echoes=d.echoes,lockEvidenceVersion=1}),'reopen')
 check(count(c.PendingLockRows())==6,'six targets restored')
 local same=assert(c.PrepareApply('ignored'))

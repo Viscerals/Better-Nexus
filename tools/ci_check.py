@@ -10,27 +10,46 @@ Python 3.9+ and a `luajit` executable on PATH. No network, no game client.
 Results are reported as they are. A test that was not run is NOT a pass:
   * FAIL or TIMEOUT                      -> exit 1
   * a listed test without a result row   -> exit 1
-  * NOT_RUN outside REFERENCE_DEPENDENT  -> exit 1
-  * NOT_RUN inside REFERENCE_DEPENDENT   -> printed as NOT RUN; exit 0 only without --require-reference
-REFERENCE_DEPENDENT tests compare against a third-party LoadoutPilot archive that this repository
-has no permission to redistribute (see THIRD_PARTY.md and tools/prepare_pilot_reference.py).
+  * a NOT_RUN row                        -> printed as NOT RUN; exit 1
+Every listed test runs from this checkout; none needs a separate project, archive or variable.
 The inventory size is whatever tools/run_prototype_tests.py lists; no count is hard-coded here.
+Before the RESULT line, "timing:" lines give the elapsed time and limit of every executed test whose
+limit is not the runner's default, and of the five slowest executed tests. They change no result.
 """
 from __future__ import annotations
 import argparse, importlib.util, json, pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TESTS = ROOT / 'tests' / 'prototype'
-REFERENCE_DEPENDENT = {'planner_reference', 'orbs_policy'}
 # Files under tests/prototype that are loaded by tests and are not tests themselves.
 SUPPORT = {'harness', 'policy_adapter', 'startup_benchmark'}
 
 
-def inventory() -> list[str]:
+def runner_module():
     spec = importlib.util.spec_from_file_location('run_prototype_tests', ROOT / 'tools' / 'run_prototype_tests.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return list(module.NAMES)
+    return module
+
+
+def inventory() -> list[str]:
+    return list(runner_module().NAMES)
+
+
+def timing_lines(rows: dict, default_timeout) -> list[str]:
+    """Every executed test whose timeout_seconds is not the default, then the five slowest executed
+    tests by seconds; each test once. A missing seconds or timeout_seconds is printed as unknown."""
+    executed = {n: r for n, r in rows.items() if r['status'] != 'NOT_RUN'}
+    raised = [n for n, r in executed.items()
+              if default_timeout is not None and r.get('timeout_seconds') not in (None, default_timeout)]
+    timed = [n for n, r in executed.items() if isinstance(r.get('seconds'), (int, float))]
+    slowest = sorted(timed, key=lambda n: executed[n]['seconds'], reverse=True)[:5]
+
+    def shown(value):
+        return 'unknown' if value is None else value
+    return [f'timing: {n} {executed[n]["status"]} {shown(executed[n].get("seconds"))} s '
+            f'(limit {shown(executed[n].get("timeout_seconds"))} s)'
+            for n in raised + [n for n in slowest if n not in raised]]
 
 
 def check_inventory(names: list[str]) -> list[str]:
@@ -52,12 +71,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--inventory-only', action='store_true')
     ap.add_argument('--only', help='comma-separated shard; the result is labelled PARTIAL')
-    ap.add_argument('--require-reference', action='store_true', help='fail when a reference-dependent test was not run')
-    ap.add_argument('--reference', type=pathlib.Path, help='extracted LoadoutPilot reference directory')
     ap.add_argument('--output', type=pathlib.Path, default=ROOT / 'build' / 'prototype-test-results.json')
     ns = ap.parse_args()
 
-    names = inventory()
+    runner = runner_module()
+    names = list(runner.NAMES)
     problems = check_inventory(names)
     print(f'inventory: {len(names)} listed tests')
     for p in problems:
@@ -71,8 +89,6 @@ def main() -> int:
     command = [sys.executable, str(ROOT / 'tools' / 'run_prototype_tests.py'), '--runtime', 'luajit', '--output', str(ns.output)]
     if ns.only:
         command += ['--only', ns.only]
-    if ns.reference:
-        command += ['--reference', str(ns.reference)]
     ns.output.parent.mkdir(parents=True, exist_ok=True)
     if ns.output.exists():
         ns.output.unlink()
@@ -99,11 +115,12 @@ def main() -> int:
         print(f'NOT RUN (not a pass): {n}: {rows[n].get("reason", "")}')
     if ns.only:
         print('PARTIAL: a shard was selected; this is not a complete run')
-    unexpected_not_run = [n for n in not_run if n not in REFERENCE_DEPENDENT or ns.require_reference]
-    if failed or unexecuted or unexpected_not_run:
+    for line in timing_lines(rows, getattr(runner, 'DEFAULT_TIMEOUT_SECONDS', None)):
+        print(line)
+    if failed or unexecuted or not_run:
         print('RESULT: FAILED')
         return 1
-    print('RESULT: no listed test failed' + (f'; {len(not_run)} reference-dependent test(s) NOT RUN' if not_run else ''))
+    print('RESULT: no listed test failed; every listed test ran')
     return 0
 
 

@@ -13,12 +13,13 @@ local TABS = {
     { key = "boards",   label = "Recent choices" },
     { key = "mismatch", label = "Manual overrides" },
     { key = "wishlist", label = "Wishlist" },
-    { key = "locked",   label = "Permanent Echoes" },
+    { key = "locked",   label = "Locked Echoes" },
     { key = "state",    label = "Status" },
     { key = "sync",     label = "Sync" },
     { key = "dps",      label = "DPS" },
     { key = "autolock", label = "Slot actions" },
     { key = "perf",     label = "Performance" },
+    { key = "trace",    label = "Roll trace" },
     { key = "errors",   label = "Errors" },
     { key = "peer",     label = "Advanced peer" },
 }
@@ -57,7 +58,10 @@ local function RenderCopyPage()
     if statusFS then statusFS:SetText(string.format("Page %d/%d | %d total bytes | copy pages in order (no inserted separators)",copyPage,copyPages,#copyText)) end
 end
 
-local function SetCopyText(text)
+-- keepPage: the same report repainted in place keeps the reader's page,
+-- clamped to the new page count; any other text starts at page 1.
+local function SetCopyText(text, keepPage)
+    local page=keepPage and copyPage or 1
     copyText=tostring(text or "")
     copyPage,copyRanges=1,{}
     local first=1
@@ -76,6 +80,7 @@ local function SetCopyText(text)
     end
     if #copyRanges==0 then copyRanges={{1,0}} end
     copyPages=#copyRanges
+    copyPage=math.max(1,math.min(tonumber(page) or 1,copyPages))
     RenderCopyPage()
 end
 
@@ -109,7 +114,8 @@ local function UpdatePeerControls()
     end
 end
 
-local function Repaint()
+-- keepPage: only the periodic repaint of the active Peer Test passes it.
+local function Repaint(keepPage)
     repaintPending = false
     if not (frame and editBox and frame:IsShown()) then return end
     local text = "no data provider"
@@ -119,7 +125,7 @@ local function Repaint()
     end
     -- Preserve the complete diagnostic. The visible EditBox is paged; no
     -- silent truncation and no hundreds-of-kilobytes SetText/focus operation.
-    SetCopyText(text)
+    SetCopyText(text, keepPage)
     for _, b in ipairs(tabButtons or {}) do
         if b.tabKey == activeTab then b:LockHighlight() else b:UnlockHighlight() end
     end
@@ -400,7 +406,7 @@ local function EnsureFrame()
         if type(clearProvider) == "function" then
             ok, result = pcall(clearProvider, activeTab)
         end
-        if activeTab ~= "errors" and activeTab ~= "peer" then
+        if activeTab ~= "errors" and activeTab ~= "peer" and activeTab ~= "trace" then
             activeTab = "state"
         end
         if ok and result ~= false then
@@ -436,7 +442,7 @@ local function EnsureFrame()
     clearButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:SetText("Clear diagnostic history")
-        GameTooltip:AddLine("On Errors, clears only retained errors. On Advanced peer diagnostics, clears only that session. Other tabs clear retained boards, audits, UI probes, sync events, DPS debug lines, and errors. Settings, builds, and automation are unchanged.", 1, 1, 1, true)
+        GameTooltip:AddLine("On Errors, clears only retained errors. On Roll trace, clears only the local roll record. On Advanced peer diagnostics, clears only that session. Other tabs clear retained boards, audits, UI probes, sync events, DPS debug lines, and errors; the local roll record is kept. Settings, builds, and automation are unchanged.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     clearButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -457,9 +463,15 @@ local function EnsureFrame()
     -- but keep the text restorable via Refresh
     scroll:SetScrollChild(editBox)
 
+    -- Bounded on the right by the bottom buttons, two lines high below the
+    -- peer controls; a longer status is complete in its tooltip.
     statusFS = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    statusFS:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 10)
+    -- Clear Log starts at x 376 of the 700 px window (export 220 + 6 + 86).
+    statusFS:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 6)
+    statusFS:SetSize(356, 26)
     statusFS:SetJustifyH("LEFT")
+    statusFS:SetJustifyV("BOTTOM")
+    if Nexus.LayoutMetrics then Nexus.LayoutMetrics.FullTextTooltip(statusFS, frame) end
 
     -- Active Peer Test age/counters repaint once per second only while this
     -- visible tab is selected. Hidden, stopped, and disabled diagnostics do
@@ -476,7 +488,10 @@ local function EnsureFrame()
         local debugOwner = Nexus and Nexus.PeerDebug
         local ok, active = pcall(debugOwner.IsEnabled)
         if not ok or active ~= true then peerRefreshActive = false end
-        Repaint()
+        -- The same report, repainted for its live age/counters: the reader
+        -- keeps the page they chose (explicit tab, open and button repaints
+        -- start at page 1).
+        Repaint(true)
     end)
 
     frame:Hide()

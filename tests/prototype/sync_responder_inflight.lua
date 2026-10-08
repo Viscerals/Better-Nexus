@@ -13,7 +13,14 @@ S.Served(run);S.Exact(run,'a request that arrives during a short transaction is 
 assert(S.Attempts(run)>=1,'one complete attempt')
 print(string.format('PASS short in-flight transaction: first serialization +%.1fs, exact record in %.1fs',run.seen.serialization-run.requestAt,run.seconds))
 
-run=S.Scenario({label='flong',names={'FlightGamma','FlightDelta'},rows=100,traffic={'A'},inflight=true,stop=function(r)return r.firstClaimId~=nil end})
+-- The transaction must outlast the 30-second response lifetime. The shared
+-- timed drive would finish this root sooner, so this scenario runs at the
+-- supported no-clock pacing (one slice per update) and is given the longer
+-- observation budget that pacing needs.
+local PACING=dofile('tests/prototype/startup_support.lua')
+local restorePacing=PACING.SingleSlicePacing()
+run=S.Scenario({label='flong',names={'FlightGamma','FlightDelta'},rows=100,traffic={'A'},inflight=true,limit=12000,stop=function(r)return r.firstClaimId~=nil end})
+restorePacing()
 assert(run.done and run.readyAtRequest==false,'fixture: the request arrived while the responder catalog was busy')
 local A=run.A
 local waited=run.firstClaimAt-run.requestAt

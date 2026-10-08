@@ -46,6 +46,20 @@ function Commands.New(options)
             Invoke("update",nil,early)
             return
         end
+        -- Support reporting answers BEFORE the initialization gate: a player
+        -- whose startup failed is exactly the player who needs to send a
+        -- report, and reading one prepares no settings and creates no owner.
+        if early=="report" or early=="support" then
+            Invoke("report",nil,early)
+            return
+        end
+        -- The older-data decision is answered BEFORE the initialization gate:
+        -- the player who needs it is exactly the one whose start-up stopped on
+        -- it. It reads or writes nothing unless the coordinator waits on it.
+        if early=="legacy" or early:match("^legacy%s") then
+            Invoke("legacy",nil,early)
+            return
+        end
         if not isInitialized() then
             if type(notInitialized) == "function" then notInitialized() end
             return
@@ -68,6 +82,16 @@ function Commands.New(options)
         if not option then option,value=normalized:match("^(currentlocks)%s+(%a+)$") end
         if option then
             Invoke("rollingOption",context,normalized,{option=option,value=value})
+            return
+        end
+        local policyValue = normalized:match("^policy%s+(%a+)$")
+        if normalized == "policy" or policyValue then
+            Invoke("policy", context, normalized, policyValue)
+            return
+        end
+        local traceValue = normalized:match("^trace%s+(%a+)$")
+        if normalized == "trace" or traceValue then
+            Invoke("trace", context, normalized, traceValue)
             return
         end
         if normalized == "prototype" then Invoke("prototype",context,normalized);return end

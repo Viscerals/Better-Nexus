@@ -9,6 +9,8 @@ One declared identity is the source of every other name:
       -> release asset             Better-Nexus-test.<N>-<commit>.zip
       -> announced to peers        <version>+test.<N>     (public-test packages only, at most 32 bytes)
       -> shown in game             <version> test.<N>
+      -> Nexus.toc Version         <version> test.<N>-<commit>   (" internal" after it for an internal package;
+                                   the repository copy states the plain <version>)
 
     python tools/release_check.py --label test.9028-abcdef0
     python tools/release_check.py --label test.9028-abcdef0 --zip dist/Better-Nexus-test.9028-abcdef0.zip \\
@@ -16,7 +18,8 @@ One declared identity is the source of every other name:
 
 Exit 1 on: an invalid label; a commit suffix that is not a prefix of the packaged commit; a tag or asset
 name that differs from the derived one; a ZIP whose data/Release.lua states another label, version or
-channel; a public ZIP that is not marked public-test (or the reverse); a checksum file that does not
+channel; a ZIP whose Nexus.toc has no Version line, more than one, or one that names another build; a
+repository Nexus.toc whose Version is not the plain version; a public ZIP that is not marked public-test (or the reverse); a checksum file that does not
 match; an announced identity above 32 bytes; a test number that is not above the newest existing
 v<version>-test.<N> tag (with --require-newer).
 A plain push, a branch or an archive tag publishes nothing: no workflow in this repository has a tag or
@@ -37,7 +40,7 @@ def field(text: str, name: str) -> str | None:
 
 
 def derive(version: str, label: str) -> dict:
-    m = LABEL.match(label)
+    m = LABEL.fullmatch(label)
     if not m:
         raise ValueError('label must be test.<number>-<7 to 12 lowercase hex digits>')
     number = int(m.group(1))
@@ -45,7 +48,8 @@ def derive(version: str, label: str) -> dict:
         raise ValueError('test number is above 2147483647')
     return {'version': version, 'label': label, 'test': number, 'commit': m.group(2),
             'tag': f'v{version}-test.{number}', 'asset': f'Better-Nexus-{label}.zip',
-            'announce': f'{version}+test.{number}', 'display': f'{version} test.{number}'}
+            'announce': f'{version}+test.{number}', 'display': f'{version} test.{number}',
+            'toc': f'{version} {label}'}
 
 
 def main() -> int:
@@ -71,6 +75,22 @@ def main() -> int:
         identity = derive(version, ns.label)
     except ValueError as exc:
         print('RELEASE PROBLEM:', exc); return 1
+    if ns.internal:
+        identity['toc'] += ' internal'
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from build_package import toc_directive, toc_directive_lines
+
+    def toc_version_problem(toc: bytes, where: str, wanted: str) -> str | None:
+        lines = toc_directive_lines(toc, 'Version')
+        if len(lines) != 1:
+            return f'{where} must have exactly one ## Version line; found {len(lines)}'
+        value = toc_directive(toc.decode('utf-8', 'replace'), 'Version')
+        return None if value == wanted else f'{where} Version {value} differs from {wanted}'
+
+    source_toc = (ROOT / 'Nexus.toc').read_bytes()
+    problem = toc_version_problem(source_toc, 'the repository Nexus.toc', version)
+    if problem:
+        problems.append(problem + ' (the repository copy must stay build-neutral)')
     if len(identity['announce'].encode()) > MAX_ANNOUNCE_BYTES:
         problems.append(f'announced identity {identity["announce"]} is above {MAX_ANNOUNCE_BYTES} bytes; peers would refuse it')
 
@@ -102,8 +122,38 @@ def main() -> int:
             with zipfile.ZipFile(ns.zip) as z:
                 names = [n for n in z.namelist() if not n.endswith('/')]
                 packaged = z.read('Nexus/data/Release.lua').decode('utf-8') if 'Nexus/data/Release.lua' in names else ''
-            if any(not n.startswith('Nexus/') for n in names):
-                problems.append('the package has entries outside Nexus/')
+                packaged_toc = z.read('Nexus/Nexus.toc') if 'Nexus/Nexus.toc' in names else None
+            if packaged_toc is None:
+                problems.append('the package has no Nexus/Nexus.toc')
+            else:
+                problem = toc_version_problem(packaged_toc, 'packaged Nexus.toc', identity['toc'])
+                if problem:
+                    problems.append(problem)
+            # Exactly two addon folders: the addon, and the storage-only
+            # support component that owns the report SavedVariables file.
+            stray = [n for n in names
+                     if not n.startswith('Nexus/') and not n.startswith('NexusSupport/')]
+            if stray:
+                problems.append('the package has entries outside Nexus/ and NexusSupport/: '
+                                + ', '.join(sorted(stray)[:4]))
+            companion = [n for n in names if n.startswith('NexusSupport/')]
+            if not companion:
+                problems.append('the package has no NexusSupport/ support component')
+            elif 'NexusSupport/NexusSupport.toc' not in companion:
+                problems.append('NexusSupport/ has no NexusSupport.toc')
+            else:
+                with zipfile.ZipFile(ns.zip) as z:
+                    ctoc = z.read('NexusSupport/NexusSupport.toc').decode('utf-8', 'replace')
+                # The same rules the packager applies, applied again to the
+                # artefact, because this tool inspects packages it did not build.
+                sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+                from build_package import companion_toc_problems, ALLOWED_SUFFIXES
+                problems.extend(companion_toc_problems(ctoc, 'NexusSupport.toc'))
+                for name in names:
+                    if pathlib.PurePosixPath(name).suffix.lower() not in ALLOWED_SUFFIXES:
+                        problems.append(f'unexpected file type in the package: {name}')
+                    if '..' in pathlib.PurePosixPath(name).parts:
+                        problems.append(f'package entry escapes its folder: {name}')
             if field(packaged, 'version') != version:
                 problems.append(f'packaged version {field(packaged, "version")} differs from {version}')
             if field(packaged, 'buildLabel') != ns.label:
@@ -117,7 +167,7 @@ def main() -> int:
                 if [digest, asset] not in [[r[0].lower(), r[-1].lstrip('*')] for r in rows if len(r) >= 2]:
                     problems.append(f'{ns.sums.name} has no line "{digest}  {asset}"')
 
-    for key in ('version', 'label', 'test', 'tag', 'asset', 'announce', 'display'):
+    for key in ('version', 'label', 'test', 'tag', 'asset', 'announce', 'display', 'toc'):
         print(f'{key:9} {identity[key]}')
     for p in problems:
         print('RELEASE PROBLEM:', p)

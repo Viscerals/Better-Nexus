@@ -47,7 +47,7 @@ function Renderer.New(options)
         and options.refresh or function() return M.Refresh() end
 
     local MAX_ROWS = 19
-    local PICK_ROWS = 18
+    local PICK_ROWS = 17
     local ROW_HEIGHT = 24
     local MAX_WISHLIST_ECHOES = 79
     local MAX_LOCK_SLOTS = 6
@@ -255,12 +255,217 @@ local function StyleWishlistSelector(button)
         fs:SetPoint("LEFT", button, "LEFT", 9, 0)
         fs:SetPoint("RIGHT", button, "RIGHT", -22, 0)
         fs:SetJustifyH("LEFT")
+        -- One line; the button's own tooltip adds the full text when shortened.
+        if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(fs, nil, 22) end
     end
     local arrow = button:CreateTexture(nil, "OVERLAY")
     arrow:SetTexture("Interface\\ChatFrame\\ChatFrameExpandArrow")
     arrow:SetSize(12,12)
     arrow:SetPoint("RIGHT", button, "RIGHT", -7, 0)
     button._arrow = arrow
+end
+
+-- Compact management list. State lives on the menu frame and the function
+-- on M, so this adds no upvalue to Renderer.New.
+function M.HideManageWishlistsMenu()
+    if M._manageMenu then M._manageMenu:Hide() end
+end
+
+function M.ShowManageWishlistsMenu(anchor, offset)
+    local perMenu = 8
+    local plans = Controller.RetainedPlansProjection() or {}
+    local support = Controller.ServerDeletionSupportProjection() or {}
+    local undone = Controller.ForgottenPlansProjection() or {}
+    local menu = M._manageMenu
+    if not menu then
+        menu = CreateFrame("Frame", "NexusWishlistManageMenu", frame or UIParent)
+        menu:SetFrameStrata("TOOLTIP")
+        menu:SetFrameLevel((frame and frame:GetFrameLevel() or 50) + 100)
+        menu:SetToplevel(true)
+        menu:EnableMouse(true)
+        menu.rows = {}
+        pcall(function()
+            menu:SetBackdrop({
+                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true, tileSize = 16, edgeSize = 16,
+                insets = { left = 4, right = 4, top = 4, bottom = 4 },
+            })
+            menu:SetBackdropColor(0.015, 0.02, 0.03, 0.99)
+            menu:SetBackdropBorderColor(0.48, 0.42, 0.25, 1)
+        end)
+        menu.header = menu:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        menu.header:SetPoint("TOPLEFT", 10, -8)
+        menu.header:SetPoint("TOPRIGHT", -10, -8)
+        menu.header:SetJustifyH("LEFT")
+        M._manageMenu = menu
+    end
+    if frame and menu:GetParent() ~= frame then menu:SetParent(frame) end
+
+    -- Rows: the plans on this page, then the undo row when one is
+    -- retained, then the pager when more plans exist than fit.
+    local total = #plans
+    local paged = total > perMenu
+    local perPage = paged and (perMenu - 1) or perMenu
+    if offset ~= nil then menu._offset = tonumber(offset) or 0 end
+    local first = tonumber(menu._offset) or 0
+    if not paged or first >= total or first < 0 then first = 0 end
+    menu._offset = first
+    local shown = math.min(perPage, total - first)
+    local extra = #undone + (paged and 1 or 0)
+    local visible = math.max(1, shown + extra)
+
+    menu.header:SetText(string.format(
+        "Saved wishlists on this character: %d  |cff777777%s|r", total,
+        support.supported
+            and "removals here are local; this addon never removes a server Wishlist"
+            or ("removals here are local; "
+                .. tostring(support.reason or "no deletion call"))))
+    -- The header wraps to its measured height; the rows start below it.
+    local metrics = Nexus.LayoutMetrics
+    local top = 8 + (metrics and metrics.WrapHeight(menu.header, 340, 12) or 14) + 4
+    menu:SetSize(360, top + visible * 24 + 8)
+    menu:ClearAllPoints()
+    menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)
+
+    for i = 1, visible do
+        local row = menu.rows[i]
+        if not row then
+            row = CreateFrame("Button", nil, menu)
+            row:SetSize(344, 22)
+            row:EnableMouse(true)
+            row:RegisterForClicks("LeftButtonUp")
+            row:SetFrameLevel(menu:GetFrameLevel() + 2)
+            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+            local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            label:SetPoint("LEFT", 8, 0)
+            label:SetPoint("RIGHT", row, "RIGHT", -7, 0)
+            label:SetJustifyH("LEFT")
+            if metrics then metrics.OneLineLabel(label, row, 22) end
+            row._label = label
+            menu.rows[i] = row
+        end
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 8, -top - ((i - 1) * 24))
+        local plan = (i <= shown) and plans[first + i] or nil
+        local undoRow = (i > shown) and undone[i - shown] or nil
+        local pagerRow = paged and i == visible
+        if plan then
+            local planName = DisplayUntrusted(plan.name, 1024, false)
+                or ("Wishlist " .. tostring(plan.associationIndex))
+            -- Colour codes are not nested: the client's first |r closes the
+            -- run it is in, so a nested one leaves the rest uncoloured and
+            -- the trailing marker unmatched.
+            local association
+            if plan.usable then
+                association = string.format("|cff777777Saved Build %s, %d Echo rows|r",
+                    tostring(plan.associationIndex), tonumber(plan.rows) or 0)
+            else
+                association = string.format(
+                    "|cffff9040not a Saved Build (%s)|r|cff777777, %d Echo rows|r",
+                    tostring(plan.associationIndex), tonumber(plan.rows) or 0)
+            end
+            row._label:SetTextColor(0.92, 0.92, 0.92)
+            row._label:SetText(planName .. "  " .. association
+                .. "  |cffff6060[Remove]|r")
+            row:Enable()
+            -- The confirmation carries the identity, not the label: two
+            -- plans may share a name, and only one is being removed.
+            local confirmPlan = {
+                associationIndex = plan.associationIndex, key = plan.key,
+                assignmentId = plan.assignmentId, mirrorSlot = plan.mirrorSlot,
+                name = planName, rows = plan.rows, usable = plan.usable,
+                mirrorResolved = plan.mirrorResolved,
+                mirrorSlotLive = plan.mirrorSlotLive,
+                ordinaryCopies = plan.ordinaryCopies,
+                lockedCopies = plan.lockedCopies,
+            }
+            row:SetScript("OnClick", function()
+                M.HideManageWishlistsMenu()
+                -- The confirmation repeats the facts this row showed, and
+                -- states plainly what is and is not removed.
+                -- Whether a server Wishlist survives this is a fact about
+                -- the live list, not about the mirror number the record
+                -- carries: a stored hint outlives the mirror it names.
+                -- Three states, not two: a server Wishlist that holds exactly
+                -- this plan, a mirror slot that still exists but no longer
+                -- holds these contents, and nothing at all. Merging the last
+                -- two is what let the dialog claim a copy that was not there.
+                local where
+                if confirmPlan.mirrorResolved then
+                    where = "A Wishlist on the server holds exactly this plan and is NOT removed: this client has no call that deletes one."
+                elseif confirmPlan.mirrorSlotLive then
+                    where = "The Wishlist slot this plan came from still exists but no longer holds these contents; nothing on the server is removed either way."
+                else
+                    where = "No Wishlist on the server matches this plan, so this is the only copy."
+                end
+                StaticPopup_Show("NEXUS_FORGET_WISHLIST", string.format(
+                    "Remove \"%s\" from this character?\n%d Echo rows, %d ordinary and %d locked copies, %s.\n%s\nThe Manage list can undo this.",
+                    confirmPlan.name, tonumber(confirmPlan.rows) or 0,
+                    tonumber(confirmPlan.ordinaryCopies) or 0,
+                    tonumber(confirmPlan.lockedCopies) or 0,
+                    confirmPlan.usable
+                        and ("Saved Build " .. tostring(confirmPlan.associationIndex))
+                        or ("association " .. tostring(confirmPlan.associationIndex)
+                            .. " which is not a Saved Build"),
+                    where), nil, {
+                    plan = confirmPlan,
+                    forget = function(selector)
+                        return Controller.ForgetRetainedPlan(selector)
+                    end,
+                    after = function() requestRefresh() end,
+                })
+            end)
+            row:Show()
+        elseif undoRow then
+            local undoName = DisplayUntrusted(undoRow.name, 1024, false)
+                or "a removed wishlist"
+            row._label:SetTextColor(0.45, 0.95, 0.6)
+            row._label:SetText(string.format("Undo: bring back \"%s\"  |cff777777removed from %s|r",
+                undoName, tostring(undoRow.associationIndex)))
+            row:Enable()
+            -- Each row takes back ITS removal, by the identity that row
+            -- names, so an older one can be recovered without disturbing a
+            -- newer one.
+            local take = {position = undoRow.position, key = undoRow.key,
+                assignmentId = undoRow.assignmentId}
+            row:SetScript("OnClick", function()
+                local ok, reason, detail = Controller.RestoreForgottenPlan(take)
+                if not ok then
+                    print("|cffff9040Nexus:|r " .. tostring(reason))
+                elseif type(detail) == "table" and detail.movedFrom ~= nil then
+                    print(string.format(
+                        "|cff4dff80Nexus:|r \"%s\" came back as Saved Build %s, because %s now holds a different plan.",
+                        undoName, tostring(detail.loadoutSlot), tostring(detail.movedFrom)))
+                end
+                requestRefresh()
+                M.ShowManageWishlistsMenu(anchor, 0)
+            end)
+            row:Show()
+        elseif pagerRow then
+            local nextFirst = first + shown
+            if nextFirst >= total then nextFirst = 0 end
+            row._label:SetTextColor(0.85, 0.75, 0.45)
+            row._label:SetText(string.format(
+                "More saved wishlists (%d-%d of %d)  |cff777777click for the next %d|r",
+                first + 1, first + shown, total,
+                math.min(perPage, total - nextFirst)))
+            row:Enable()
+            row:SetScript("OnClick", function()
+                M.ShowManageWishlistsMenu(anchor, nextFirst)
+            end)
+            row:Show()
+        else
+            row._label:SetTextColor(0.55, 0.55, 0.55)
+            row._label:SetText("No saved wishlists are retained on this character")
+            row:SetScript("OnClick", nil)
+            row:Disable()
+            row:Show()
+        end
+    end
+    for i = visible + 1, #menu.rows do menu.rows[i]:Hide() end
+    menu:Show()
+    return menu
 end
 
 local function HideWishlistSwitchMenu()
@@ -271,13 +476,19 @@ local function CandidateEvidenceSuffix(candidate)
     if type(candidate) == "table"
         and candidate.lockEvidenceStatus == "unavailable" then
         local editor=Nexus.WishlistEditor
-        local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or "choose permanent targets"
+        local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or "choose locked targets"
         return "  |cffff9040("..hint..")|r"
     end
     return ""
 end
 
-local function ShowWishlistSwitchMenu(anchor)
+-- How many rows the menu shows at once, and where the visible window starts.
+-- The offset survives between openings so a player who paged forward and
+-- clicked a row does not start from the top again.
+local WISHLIST_MENU_ROWS = 10
+local wishlistSwitchOffset = 0
+
+local function ShowWishlistSwitchMenu(anchor, offset)
     if wishlistSwitchMenu and frame and wishlistSwitchMenu:GetParent() ~= frame then wishlistSwitchMenu:SetParent(frame) end
     local candidates = (View and View.GetWishlistCandidates and View.GetWishlistCandidates()) or {}
     local editingContext = EditingContext()
@@ -299,7 +510,18 @@ local function ShowWishlistSwitchMenu(anchor)
             wishlistSwitchMenu:SetBackdropBorderColor(0.48, 0.42, 0.25, 1)
         end)
     end
-    local visible = math.min(#candidates, 10)
+    -- More candidates than rows: the last row becomes the pager, so nine are
+    -- listed per page and every one of them is reachable by paging.
+    local total = #candidates
+    local paged = total > WISHLIST_MENU_ROWS
+    local perPage = paged and (WISHLIST_MENU_ROWS - 1) or WISHLIST_MENU_ROWS
+    if offset ~= nil then wishlistSwitchOffset = tonumber(offset) or 0 end
+    if not paged or wishlistSwitchOffset >= total or wishlistSwitchOffset < 0 then
+        wishlistSwitchOffset = 0
+    end
+    local first = wishlistSwitchOffset
+    local shown = math.min(perPage, total - first)
+    local visible = shown + (paged and 1 or 0)
     wishlistSwitchMenu:SetSize(286, 18 + math.max(1, visible) * 24)
     wishlistSwitchMenu:ClearAllPoints()
     wishlistSwitchMenu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)
@@ -323,12 +545,29 @@ local function ShowWishlistSwitchMenu(anchor)
             label:SetPoint("LEFT", check, "RIGHT", 7, 0)
             label:SetPoint("RIGHT", row, "RIGHT", -7, 0)
             label:SetJustifyH("LEFT")
+            if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(label, row, 22) end
             row._check = check
             row._label = label
             wishlistSwitchMenu.rows[i] = row
         end
-        local c = candidates[i]
-        if c then
+        -- The pager occupies the last row when there is more than one page.
+        local pagerRow = paged and i == visible
+        local c = (not pagerRow) and candidates[first + i] or nil
+        if pagerRow then
+            local nextFirst = first + shown
+            if nextFirst >= total then nextFirst = 0 end
+            row._check:Hide()
+            row._label:SetTextColor(0.85, 0.75, 0.45)
+            row._label:SetText(string.format(
+                "More wishlists (%d-%d of %d)  |cff777777click for the next %d|r",
+                first + 1, first + shown, total,
+                math.min(perPage, total - nextFirst)))
+            row:Enable()
+            row:SetScript("OnClick", function()
+                ShowWishlistSwitchMenu(anchor, nextFirst)
+            end)
+            row:Show()
+        elseif c then
             local assignedSlot, assignedName = CandidateAssignment(c)
             local current=editingContext and ((editingContext.assignmentId and c.assignmentId
                 and editingContext.assignmentId==c.assignmentId) or (not editingContext.assignmentId
@@ -341,6 +580,14 @@ local function ShowWishlistSwitchMenu(anchor)
             local suffix = displayAssignedName
                 and ("  |cff777777Saved Build: " .. displayAssignedName .. "|r")
                 or "  |cff666666Saved Build: None|r"
+            -- A stored record whose map index names no Saved Build is
+            -- shown and labelled here too, not only in the management
+            -- list: it can be opened and saved, but it cannot be an
+            -- assignment target.
+            if c.associationUsable == false then
+                suffix = suffix .. "  |cffff9040(index "
+                    .. tostring(c.associationIndex) .. " is not a Saved Build)|r"
+            end
             row._label:SetText(wishlistLabel
                 .. CandidateEvidenceSuffix(c) .. suffix)
             if current then
@@ -418,12 +665,24 @@ end
 
 local function ShowLoadoutSwitchMenu(anchor)
     if loadoutSwitchMenu and frame and loadoutSwitchMenu:GetParent() ~= frame then loadoutSwitchMenu:SetParent(frame) end
-    -- Saved Builds are the server's fixed slots 1-5. Build this selector
-    -- directly from those slots instead of relying on inferred candidates.
+    -- Saved Builds are the server's slots 1..maxSlots, as the server declares
+    -- them (Slots() reports 5 when it declares nothing). Slots above that are
+    -- Wishlist mirrors, never Saved Builds. A declaration that is not a whole
+    -- number from 1 up is not trusted, and the selector keeps its five rows;
+    -- a very large one is limited to MAX_SELECTOR_SLOTS rows (a display
+    -- limit, not a statement about the server). Build this selector directly
+    -- from those slots instead of relying on inferred candidates.
     local slots = View and View.Slots and View.Slots()
     local active = slots and tonumber(slots.activeSlot) or 0
+    local MAX_SELECTOR_SLOTS = 10
+    local declared = slots and tonumber(slots.maxSlots)
+    local count = 5
+    if declared and declared >= 1 and declared < math.huge
+        and declared == math.floor(declared) then
+        count = math.min(declared, MAX_SELECTOR_SLOTS)
+    end
     local candidates = {}
-    for slot = 1, 5 do
+    for slot = 1, count do
         local data = slots and slots.bySlot and slots.bySlot[slot]
         local name = data and tostring(data.name or "") or ""
         if name == "" then name = "Loadout " .. tostring(slot) end
@@ -454,7 +713,7 @@ local function ShowLoadoutSwitchMenu(anchor)
             loadoutSwitchMenu:SetBackdropBorderColor(0.48, 0.42, 0.25, 1)
         end)
     end
-    local visible = 5
+    local visible = #candidates
     loadoutSwitchMenu:SetSize(230, 18 + math.max(1, visible) * 24)
     loadoutSwitchMenu:ClearAllPoints()
     loadoutSwitchMenu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)
@@ -472,6 +731,7 @@ local function ShowLoadoutSwitchMenu(anchor)
             label:SetPoint("LEFT", 8, 0)
             label:SetPoint("RIGHT", -8, 0)
             label:SetJustifyH("LEFT")
+            if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(label, row, 22) end
             row._label = label
             loadoutSwitchMenu.rows[i] = row
         end
@@ -713,10 +973,27 @@ local function EnsureDisplayPopup()
         RefreshScaleDisplay()
     end)
 
+    -- The two explanatory texts take their measured height (a wider face
+    -- needs more lines); the controls below them move down by the extra.
+    local function LayoutDisplayPopup()
+        local metrics = Nexus.LayoutMetrics
+        if not metrics then return end
+        local extra = metrics.WrapHeight(subtitle, 245, 28) - 28
+        displayCheck:ClearAllPoints(); displayCheck:SetPoint("TOPLEFT", 16, -68 - extra)
+        moveLabel:ClearAllPoints(); moveLabel:SetPoint("TOPLEFT", 18, -102 - extra)
+        hint:ClearAllPoints(); hint:SetPoint("TOPLEFT", 18, -128 - extra)
+        extra = extra + metrics.WrapHeight(hint, 260, 24) - 24
+        sizeLabel:ClearAllPoints(); sizeLabel:SetPoint("TOPLEFT", 18, -164 - extra)
+        scaleSlider:ClearAllPoints(); scaleSlider:SetPoint("TOPLEFT", 20, -195 - extra)
+        -- Room below the slider for its Low/High labels, clear of the border.
+        p:SetHeight(236 + extra)
+    end
+
     p:SetScript("OnShow", function(self)
         self:SetFrameStrata("TOOLTIP")
         self:SetFrameLevel(100)
         self:EnableMouse(true)
+        LayoutDisplayPopup()
         RefreshDisplayControls()
         RefreshScaleDisplay()
     end)
@@ -754,6 +1031,120 @@ local function HideEditorTransients()
     HideDisplayPopup()
     HideWishlistSwitchMenu()
     HideLoadoutSwitchMenu()
+    -- The Manage list, and a removal confirmation opened from it, state the
+    -- facts read when the list was drawn. They close with the editor, so a
+    -- reopened editor needs a new Manage click and shows current facts.
+    M.HideManageWishlistsMenu()
+    if type(StaticPopup_Hide) == "function" then
+        StaticPopup_Hide("NEXUS_FORGET_WISHLIST")
+    end
+end
+
+-- Locked strip slot `i`, made once (fields on M, so Renderer.New and the
+-- frame builder gain no local or upvalue). The strip holds the six authored
+-- target cells; RefreshView adds a slot for each occupied record, or live
+-- capacity, beyond them.
+function M.EnsureLockedIcon(i)
+    if lockedIcons[i] then return lockedIcons[i] end
+    -- Each slot sits right of the one before it, which is made first.
+    local previous = i > 1 and M.EnsureLockedIcon(i - 1) or nil
+    local btn = CreateFrame("Button", nil, frame)
+    btn:SetSize(18, 18)
+    if i == 1 then
+        btn:SetPoint("LEFT", lockedLabel, "RIGHT", 8, 0)
+    else
+        btn:SetPoint("LEFT", previous, "RIGHT", 4, 0)
+    end
+    btn.icon = btn:CreateTexture(nil, "ARTWORK")
+    btn.icon:SetAllPoints(btn)
+    btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:SetScript("OnEnter", function(self)
+        if self.slotState == "empty" then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine("Empty locked Echo slot", 1, 1, 1)
+            GameTooltip:AddLine("Click to choose an Echo to pursue for it.", 0.8, 0.8, 0.8, true)
+            GameTooltip:Show()
+        elseif self.spellId then
+            ShowEchoTooltip(self, self.spellId, "ANCHOR_RIGHT")
+            if self.slotState == "designed" then
+                GameTooltip:AddLine("Planned locked target, not currently in this slot. Click to remove this target.", 1, 0.85, 0.3, true)
+                GameTooltip:Show()
+            elseif self.slotState == "locked" then
+                if self.beingReplaced then
+                    GameTooltip:AddLine("A replacement is planned for this slot (the gold icon). "
+                        .. "Automatic replacement needs both Automation and locked-Echo slot management ON; "
+                        .. "otherwise change it manually when available. Remove the gold target to cancel.", 1, 0.6, 0.4, true)
+                else
+                    GameTooltip:AddLine("Left-click: find in catalog", 0.8, 0.8, 0.8, true)
+                    GameTooltip:AddLine("Right-click: design a replacement for this slot", 0.8, 0.8, 0.8, true)
+                end
+                GameTooltip:Show()
+            end
+        end
+    end)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- GameAdapter.LockPerk/UnlockPerk (confirmed live via /nexus sniff,
+    -- 2026-08-01) actually perform the lock/unlock -- this only lets
+    -- the player START pursuing a replacement now, while the current
+    -- one stays locked and useful; Main.lua's TryAutoLock unlocks the
+    -- old one and locks the new one in automatically once it's owned.
+    btn:SetScript("OnClick", function(self, mouseButton)
+        if self.slotState == "locked" and mouseButton == "RightButton" then
+            if self.spellId then
+                Controller.ToggleReplacementAssignment(self.spellId)
+                requestRefresh()
+            end
+            return
+        end
+        if self.slotState == "empty" then
+            Controller.ToggleEmptyAssignment()
+            requestRefresh()
+            return
+        end
+        if self.slotState == "designed" then
+            if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
+            return
+        end
+        if not self.spellId then return end
+        local cat = View and View.Catalog and View.Catalog()
+        local row = cat and cat.rows and cat.rows[self.spellId]
+        if row and row.name and searchBox then
+            searchBox:SetText(row.name)
+        end
+    end)
+    btn:Hide()
+    lockedIcons[i] = btn
+    return btn
+end
+
+-- "Needed" icon of locked slot `i`: directly above that slot's icon
+-- (anchored to its TOP, not a same-row neighbor) -- only shown for a column
+-- whose current Echo has an active replacement designed, so "what you have
+-- vs. what you're working toward" reads as a simple stacked pair instead of
+-- two unrelated icons sitting side by side.
+function M.EnsureLockedNeedIcon(i)
+    if lockedNeedIcons[i] then return lockedNeedIcons[i] end
+    local btn = CreateFrame("Button", nil, frame)
+    btn:SetSize(14, 14)
+    btn:SetPoint("BOTTOM", M.EnsureLockedIcon(i), "TOP", 0, 2)
+    btn.icon = btn:CreateTexture(nil, "ARTWORK")
+    btn.icon:SetAllPoints(btn)
+    btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+    btn.icon:SetVertexColor(1, 0.85, 0.3)
+    btn:SetScript("OnEnter", function(self)
+        if not self.spellId then return end
+        ShowEchoTooltip(self, self.spellId, "ANCHOR_TOP")
+        GameTooltip:AddLine("Designed to replace the Echo below -- click to un-assign.", 1, 0.85, 0.3, true)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    btn:SetScript("OnClick", function(self)
+        if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
+    end)
+    btn:Hide()
+    lockedNeedIcons[i] = btn
+    return btn
 end
 
 local function EnsureFrame()
@@ -827,7 +1218,11 @@ local function EnsureFrame()
             end
         end
     end)
-    frame:SetScript("OnShow", function() hideServerEchoUI() end)
+    frame:SetScript("OnShow", function(self)
+        -- 1040 px is wider than a 4:3 UI at scale 1; keep the edges on screen.
+        if Nexus.LayoutMetrics then Nexus.LayoutMetrics.FitToScreen(self) end
+        hideServerEchoUI()
+    end)
     frame:SetScript("OnHide", HideEditorTransients)
     frame:Hide()
 
@@ -920,7 +1315,7 @@ local function EnsureFrame()
     loadoutSwitchBtn = CreateFrame("Button", nil, frame)
     loadoutSwitchBtn:SetSize(230, 22)
     loadoutSwitchBtn:SetPoint("TOPLEFT", 34, -66)
-    loadoutSwitchBtn:SetText("Active Loadout: choose Saved Build")
+    loadoutSwitchBtn:SetText("Saved Build: choose one")
     StyleWishlistSelector(loadoutSwitchBtn)
     loadoutSwitchBtn:Enable()
     local loadoutFont = loadoutSwitchBtn:GetFontString()
@@ -935,13 +1330,18 @@ local function EnsureFrame()
     end)
     loadoutSwitchBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Swap Saved Build", 1, 0.8, 0.3)
-        GameTooltip:AddLine("Activates the selected server Saved Build and opens its assigned Wishlist. This changes the active loadout.", 0.8, 0.8, 0.8, true)
+        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Shortened(self:GetFontString()) then
+            GameTooltip:AddLine(self:GetText(), 1, 1, 1, true)
+        end
+        GameTooltip:AddLine("Saved Build to edit", 1, 0.8, 0.3)
+        GameTooltip:AddLine("Choose which Saved Build's assigned Wishlist this editor shows and edits. Choosing one does not activate it or change your active loadout; the list shows your active Saved Build in gold.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     loadoutSwitchBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    wishlistSwitchBtn = CreateFrame("Button", nil, frame)
+    -- Named like the other editor controls, so the switch list can be driven
+    -- by the prototype suite the way a player drives it.
+    wishlistSwitchBtn = CreateFrame("Button", "NexusWishlistEditorSwitchButton", frame)
     wishlistSwitchBtn:SetSize(270, 22)
     wishlistSwitchBtn:SetPoint("LEFT", loadoutSwitchBtn, "RIGHT", 8, 0)
     wishlistSwitchBtn:SetText("Choose wishlist to edit")
@@ -956,15 +1356,41 @@ local function EnsureFrame()
     end)
     wishlistSwitchBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Shortened(self:GetFontString()) then
+            GameTooltip:AddLine(self:GetText(), 1, 1, 1, true)
+        end
         GameTooltip:AddLine("Switch wishlist", 1, 0.8, 0.3)
         GameTooltip:AddLine("Open a different saved wishlist in this editor.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     wishlistSwitchBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+    frame._manageBtn = CreateFrame("Button", "NexusWishlistEditorManageButton",
+        frame, "UIPanelButtonTemplate")
+    frame._manageBtn:SetSize(88, 22)
+    frame._manageBtn:SetText("Manage")
+    frame._manageBtn:SetScript("OnClick", function(self)
+        HideWishlistSwitchMenu()
+        if M._manageMenu and M._manageMenu:IsShown() then
+            M.HideManageWishlistsMenu()
+        else
+            M.ShowManageWishlistsMenu(self)
+        end
+    end)
+    frame._manageBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Manage saved wishlists", 1, 0.8, 0.3)
+        GameTooltip:AddLine(
+            "Remove a saved wishlist from this character, with an undo. "
+            .. "Server Wishlists are not touched.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    frame._manageBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     newWishlistBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     newWishlistBtn:SetSize(112, 22)
     newWishlistBtn:SetPoint("LEFT", wishlistSwitchBtn, "RIGHT", 8, 0)
+    frame._manageBtn:SetPoint("LEFT", newWishlistBtn, "RIGHT", 6, 0)
     newWishlistBtn:SetText("+ New Wishlist")
     newWishlistBtn:SetScript("OnClick", function()
         HideWishlistSwitchMenu()
@@ -980,106 +1406,16 @@ local function EnsureFrame()
     -- place of a lock toggle scattered across every row of the pick list.
     lockedLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     lockedLabel:SetPoint("TOPLEFT", 540, -130)
-    lockedLabel:SetText("Permanent:")
+    lockedLabel:SetText("Locked:")
     lockedLabel:Hide()
 
     lockedIcons = {}
-    for i = 1, 6 do
-        local btn = CreateFrame("Button", nil, frame)
-        btn:SetSize(18, 18)
-        if i == 1 then
-            btn:SetPoint("LEFT", lockedLabel, "RIGHT", 8, 0)
-        else
-            btn:SetPoint("LEFT", lockedIcons[i - 1], "RIGHT", 4, 0)
-        end
-        btn.icon = btn:CreateTexture(nil, "ARTWORK")
-        btn.icon:SetAllPoints(btn)
-        btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        btn:SetScript("OnEnter", function(self)
-            if self.slotState == "empty" then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine("Empty permanent slot", 1, 1, 1)
-                GameTooltip:AddLine("Click to choose an Echo to pursue for it.", 0.8, 0.8, 0.8, true)
-                GameTooltip:Show()
-            elseif self.spellId then
-                ShowEchoTooltip(self, self.spellId, "ANCHOR_RIGHT")
-                if self.slotState == "designed" then
-                    GameTooltip:AddLine("Planned permanent target, not currently in this slot. Click to remove this target.", 1, 0.85, 0.3, true)
-                    GameTooltip:Show()
-                elseif self.slotState == "locked" then
-                    if self.beingReplaced then
-                        GameTooltip:AddLine("A replacement is planned for this slot (the gold icon). "
-                            .. "Automatic replacement needs both Automation and permanent-slot management ON; "
-                            .. "otherwise change it manually when available. Remove the gold target to cancel.", 1, 0.6, 0.4, true)
-                    else
-                        GameTooltip:AddLine("Left-click: find in catalog", 0.8, 0.8, 0.8, true)
-                        GameTooltip:AddLine("Right-click: design a replacement for this slot", 0.8, 0.8, 0.8, true)
-                    end
-                    GameTooltip:Show()
-                end
-            end
-        end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        -- GameAdapter.LockPerk/UnlockPerk (confirmed live via /nexus sniff,
-        -- 2026-08-01) actually perform the lock/unlock -- this only lets
-        -- the player START pursuing a replacement now, while the current
-        -- one stays locked and useful; Main.lua's TryAutoLock unlocks the
-        -- old one and locks the new one in automatically once it's owned.
-        btn:SetScript("OnClick", function(self, mouseButton)
-            if self.slotState == "locked" and mouseButton == "RightButton" then
-                if self.spellId then
-                    Controller.ToggleReplacementAssignment(self.spellId)
-                    requestRefresh()
-                end
-                return
-            end
-            if self.slotState == "empty" then
-                Controller.ToggleEmptyAssignment()
-                requestRefresh()
-                return
-            end
-            if self.slotState == "designed" then
-                if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
-                return
-            end
-            if not self.spellId then return end
-            local cat = View and View.Catalog and View.Catalog()
-            local row = cat and cat.rows and cat.rows[self.spellId]
-            if row and row.name and searchBox then
-                searchBox:SetText(row.name)
-            end
-        end)
-        btn:Hide()
-        lockedIcons[i] = btn
-    end
-
-    -- "Needed" row: directly above each locked-slot icon (anchored to its
-    -- TOP, not a same-row neighbor) -- only shown for a column whose
-    -- current Echo has an active replacement designed, so "what you have
-    -- vs. what you're working toward" reads as a simple stacked pair
-    -- instead of two unrelated icons sitting side by side.
+    for i = 1, 6 do M.EnsureLockedIcon(i) end
     lockedNeedIcons = {}
-    for i = 1, 6 do
-        local btn = CreateFrame("Button", nil, frame)
-        btn:SetSize(14, 14)
-        btn:SetPoint("BOTTOM", lockedIcons[i], "TOP", 0, 2)
-        btn.icon = btn:CreateTexture(nil, "ARTWORK")
-        btn.icon:SetAllPoints(btn)
-        btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-        btn.icon:SetVertexColor(1, 0.85, 0.3)
-        btn:SetScript("OnEnter", function(self)
-            if not self.spellId then return end
-            ShowEchoTooltip(self, self.spellId, "ANCHOR_TOP")
-            GameTooltip:AddLine("Designed to replace the Echo below -- click to un-assign.", 1, 0.85, 0.3, true)
-            GameTooltip:Show()
-        end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        btn:SetScript("OnClick", function(self)
-            if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
-        end)
-        btn:Hide()
-        lockedNeedIcons[i] = btn
+    for i = 1, 6 do M.EnsureLockedNeedIcon(i) end
+    -- RefreshView reaches the slot builders through the frame (no upvalue).
+    frame._nexusLockedSlot = function(i)
+        return M.EnsureLockedIcon(i), M.EnsureLockedNeedIcon(i)
     end
 
     -- Auto-lock opt-in: off by default (controller-owned preference,
@@ -1091,12 +1427,13 @@ local function EnsureFrame()
     autoLockCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
     autoLockCheck:SetSize(22, 22)
     autoLockCheck:SetPoint("LEFT", lockedIcons[6], "RIGHT", 26, 0)
+    autoLockCheck._nexusAnchorSlot = 6
     autoLockCheck:SetScript("OnClick", function(self)
         Controller.SetAutoLockEnabled(self:GetChecked() and true or false)
     end)
     autoLockCheck:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Auto-manage permanent Echo slots", 1, 0.8, 0.3)
+        GameTooltip:AddLine("Auto-manage locked Echo slots", 1, 0.8, 0.3)
         GameTooltip:AddLine("With Automation ON and this option enabled, Nexus may lock acquired targets "
             .. "and replace planned slots only when the game and safety checks allow it.", 0.8, 0.8, 0.8, true)
         GameTooltip:AddLine("Selecting targets alone changes no owned Echoes. With this option OFF, place "
@@ -1107,7 +1444,7 @@ local function EnsureFrame()
 
     local autoLockLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     autoLockLabel:SetPoint("LEFT", autoLockCheck, "RIGHT", 2, 0)
-    autoLockLabel:SetText("Auto-manage permanent Echo slots")
+    autoLockLabel:SetText("Auto-manage locked Echo slots")
 
     -- Nexus-native EBH1 import/export. Closures deliberately reference only
     -- the global StaticPopup_Show and a string literal -- no module-level
@@ -1142,6 +1479,12 @@ local function EnsureFrame()
         local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
         b:SetSize(115, 20)
         b:SetPoint("TOP", frame, "TOP", -180 + ((i - 1) * 121), -112)
+        -- A wishlist name stays inside its button; the full label is in a tooltip.
+        local label = b:GetFontString()
+        if label and Nexus.LayoutMetrics then
+            label:SetWidth(103)
+            Nexus.LayoutMetrics.OneLineLabel(label, b, 20, "ANCHOR_BOTTOM")
+        end
         b:Hide()
         candidateButtons[i] = b
     end
@@ -1206,7 +1549,7 @@ local function EnsureFrame()
 
     local header = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     header:SetPoint("TOPLEFT", 34, -158)
-    header:SetText("Choose up to 79 rolled copies + 6 permanent-slot copies (85 total). + / - changes the requested copies.")
+    header:SetText("Choose up to 79 rolled copies + 6 locked Echo copies (85 total). + / - changes the requested copies.")
 
     -- Left: browsable catalog -----------------------------------------
     local leftArea = CreateFrame("Frame", nil, frame)
@@ -1349,7 +1692,10 @@ local function EnsureFrame()
 
     pickFooterText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     pickFooterText:SetPoint("BOTTOMLEFT", 674, 56)
+    pickFooterText:SetSize(332, 28)
+    pickFooterText:SetWordWrap(true)
     pickFooterText:SetJustifyH("LEFT")
+    pickFooterText:SetJustifyV("TOP")
 
     -- Apply remains a presentation binding: the controller prepares and
     -- submits only after the established confirmation popup is accepted.
@@ -1412,28 +1758,37 @@ local function RefreshView(catalogRevision)
     local ownedBySpell = (owned and owned.bySpell) or {}
 
     -- Read once per refresh, reused by the strip below, the catalog row
-    -- loop further down (so an already-locked Echo shows "Permanent" instead
+    -- loop further down (so an already-locked Echo shows "Locked" instead
     -- of an addable status there too), and the footer count -- one live
     -- source of truth instead of the load-time-only lastLockedSkipped.
-    local lockedBySpell = {}
+    -- Current locked ownership is OCCUPIED RECORDS: one slot per record,
+    -- each holding its own locked stack. lockedCount counts records, never
+    -- copies. The stated maximum is the live capacity when the game reports
+    -- one; otherwise the six authored target cells, and none once more
+    -- records than that are occupied.
+    local lockedBySpell, lockedRecords, lockedCapacity = {}, {}, nil
     if View and View.LockedOwned then
         local locked = View.LockedOwned()
         if locked and locked.synced == true
-            and type(locked.bySpell) == "table" then
+            and type(locked.bySpell) == "table"
+            and type(locked.records) == "table" then
             lockedBySpell = locked.bySpell
+            lockedRecords = locked.records
+            lockedCapacity = tonumber(locked.capacity)
         end
     end
-    local lockedCount = 0
+    local lockedCount = #lockedRecords
     for _, count in pairs(lockedBySpell) do
         count = tonumber(count)
         if not count or count <= 0 or count >= math.huge
             or count ~= math.floor(count) then
-            lockedBySpell = {}
+            lockedBySpell, lockedRecords = {}, {}
             lockedCount = 0
             break
         end
-        lockedCount = lockedCount + count
     end
+    local lockedMaximum = lockedCapacity
+        or (lockedCount <= MAX_LOCK_SLOTS and MAX_LOCK_SLOTS or nil)
 
     -- Reconcile "awaiting lock" against reality: the moment LockedOwned()
     -- confirms one of these is actually locked, it belongs in the strip
@@ -1481,13 +1836,10 @@ local function RefreshView(catalogRevision)
     -- replacing anything (bound for a genuinely open slot) fills the next
     -- open column in the bottom row instead.
     if lockedLabel and lockedIcons then
-        local realIds, realSlots = {}, {}
-        for id in pairs(lockedBySpell) do realIds[#realIds + 1] = id end
-        table.sort(realIds)
-        for _, id in ipairs(realIds) do
-            for _ = 1, lockedBySpell[id] do
-                realSlots[#realSlots + 1] = id
-            end
+        -- One slot per occupied record (the records come ordered by spell).
+        local realSlots = {}
+        for _, record in ipairs(lockedRecords) do
+            realSlots[#realSlots + 1] = record.spellId
         end
 
         -- Replacement pairing reads straight off each draft entry's own
@@ -1530,14 +1882,33 @@ local function RefreshView(catalogRevision)
             end
         end
 
-        -- Always show all MAX_LOCK_SLOTS slots, not just however many are
-        -- currently locked -- an account with 5/6 locked was rendering as
-        -- "Locked (5):" with no visible hint a 6th slot even existed.
-        lockedLabel:SetText(string.format("Permanent (%d/%d):", lockedCount, MAX_LOCK_SLOTS))
+        -- Always show at least the MAX_LOCK_SLOTS authored target cells, not
+        -- just however many are currently locked -- an account with 5/6
+        -- locked was rendering as "Locked (5):" with no visible hint a 6th
+        -- slot even existed. More occupied records, or a higher live
+        -- capacity, add slots; eight fit beside the AutoLock option.
+        local slotCount = math.min(8, math.max(MAX_LOCK_SLOTS, #realSlots,
+            lockedCapacity or 0))
+        lockedLabel:SetText(lockedMaximum
+            and string.format("Locked (%d/%d):", lockedCount, lockedMaximum)
+            or string.format("Locked (%d):", lockedCount))
         lockedLabel:Show()
+        for i = slotCount + 1, #lockedIcons do
+            lockedIcons[i]:Hide()
+            if lockedNeedIcons[i] then lockedNeedIcons[i]:Hide() end
+        end
+        if autoLockCheck and autoLockCheck._nexusAnchorSlot ~= slotCount then
+            frame._nexusLockedSlot(slotCount)
+            autoLockCheck:ClearAllPoints()
+            autoLockCheck:SetPoint("LEFT", lockedIcons[slotCount], "RIGHT", 26, 0)
+            autoLockCheck._nexusAnchorSlot = slotCount
+        end
         local fi = 1
-        for i = 1, MAX_LOCK_SLOTS do
+        for i = 1, slotCount do
             local btn, needBtn = lockedIcons[i], lockedNeedIcons[i]
+            if not btn or not needBtn then
+                btn, needBtn = frame._nexusLockedSlot(i)
+            end
             local id = realSlots[i]
             if id then
                 local row = catalog and catalog.rows and catalog.rows[id]
@@ -1735,17 +2106,34 @@ local function RefreshView(catalogRevision)
 
     if loadoutSwitchBtn and not pendingLoadoutOpen then
         local slots = View and View.Slots and View.Slots()
-        local selected = editingContext and tonumber(editingContext.loadoutSlot)
-            or (createTargetContext and tonumber(createTargetContext.loadoutSlot))
-            or (slots and tonumber(slots.activeSlot))
+        local active = slots and tonumber(slots.activeSlot)
+        -- The Saved Build of the Wishlist being edited, else the one a new
+        -- Wishlist is created for; the active one only with neither. An
+        -- edited Wishlist that no Saved Build has selects none.
+        local selected = active
+        if editingContext then
+            selected = tonumber(editingContext.loadoutSlot)
+        elseif createTargetContext then
+            selected = tonumber(createTargetContext.loadoutSlot)
+        end
         local selectedRow = selected and slots and slots.bySlot and slots.bySlot[selected]
         local selectedName = selectedRow
             and (DisplayUntrusted(selectedRow.name, 1024, false) or "") or ""
+        -- The selector picks whose assigned Wishlist is edited and activates
+        -- nothing, so the label names that Saved Build and says whether it is
+        -- the server's active one.
         if selected and selected > 0 then
             if selectedName == "" then selectedName = "Saved Build " .. tostring(selected) end
-            loadoutSwitchBtn:SetText("Active Loadout: " .. selectedName)
+            local state = ""
+            if active and active > 0 then
+                state = active == selected and " (active)" or " (not active)"
+            end
+            loadoutSwitchBtn:SetText("Saved Build: " .. selectedName .. state)
+        elseif editingContext then
+            -- As the context line and the switch list say: none.
+            loadoutSwitchBtn:SetText("Saved Build: None")
         else
-            loadoutSwitchBtn:SetText("Active Loadout: choose Saved Build")
+            loadoutSwitchBtn:SetText("Saved Build: choose one")
         end
     end
 
@@ -1801,7 +2189,7 @@ local function RefreshView(catalogRevision)
             if isLocked then
                 -- Permanently secured -- never needs a wishlist slot again.
                 -- Distinct from RollStatus's unrelated "locked" (tome-gated).
-                row.status:SetText("|cffb266ffPermanent|r")
+                row.status:SetText("|cffb266ffLocked|r")
             elseif chosen and tonumber(chosen.spellId) == tonumber(data.spellId) then
                 row.status:SetText("|cff4dff80Selected|r")
             elseif ownedCount > 0 then
@@ -1856,7 +2244,7 @@ local function RefreshView(catalogRevision)
     -- An entry designed to REPLACE a specific currently-real-locked Echo
     -- (.replaces -- see LoadPendingEchoes/ToggleDesignLock/
     -- AssignLockSlotFromData) got no visual pairing here at all before --
-    -- just an easy-to-miss "(current permanent slot)"/"(awaiting lock)" tag, with
+    -- just an easy-to-miss "(current locked Echo slot)"/"(awaiting lock)" tag, with
     -- nothing showing WHICH real slot it targets. Splice a read-only row for
     -- the Echo being replaced directly after it, mirroring the Locked strip
     -- above (which already stacks the replacement directly above the real
@@ -1968,15 +2356,19 @@ local function RefreshView(catalogRevision)
         end
     end
     local footerParts = {}
-    if lockedCount > 0 then footerParts[#footerParts + 1] = "Current permanent: " .. lockedCount .. "/6" end
+    if lockedCount > 0 then
+        footerParts[#footerParts + 1] = "Currently locked: " .. lockedCount
+            .. (lockedMaximum and ("/" .. lockedMaximum) or "")
+    end
     footerParts[#footerParts + 1] = "Rolled copies: " .. PendingTotal() .. "/79"
     local totalDesigned = designedCount + toLockCount
-    footerParts[#footerParts + 1] = "Permanent targets: " .. totalDesigned .. "/6"
+    local targetParts = { "Locked targets: " .. totalDesigned .. "/6" }
     -- realEntryCount, not #list -- the spliced-in "replaces" ghost rows are
     -- a display aid, not separate wishlist entries, and shouldn't inflate
     -- this count.
-    footerParts[#footerParts + 1] = realEntryCount .. " Echo/quality entries"
-    pickFooterText:SetText(table.concat(footerParts, "  •  "))
+    targetParts[#targetParts + 1] = realEntryCount .. " Echo/quality entries"
+    pickFooterText:SetText(table.concat(footerParts, "  •  ")
+        .. "\n" .. table.concat(targetParts, "  •  "))
 end
 
     local function RefreshKeyMatches(known,controllerRevision,slots,active,
@@ -2094,6 +2486,7 @@ end
     end
 
     function M.Hide()
+        M.HideManageWishlistsMenu()
         HideEditorTransients()
         if frame then frame:Hide() end
     end
@@ -2108,5 +2501,30 @@ end
 
     return M
 end
+
+-- Confirmation for removing one retained wishlist. Everything it needs comes
+-- in as data, so this registration holds no editor state and the dialog
+-- cannot act on a plan other than the one the clicked row named.
+StaticPopupDialogs["NEXUS_FORGET_WISHLIST"] = {
+    text = "%s",
+    button1 = "Remove",
+    button2 = "Cancel",
+    OnAccept = function(self, data)
+        data = type(data) == "table" and data
+            or (type(self) == "table" and self.data) or nil
+        local plan = type(data) == "table" and data.plan or nil
+        if not (plan and type(data.forget) == "function") then return end
+        local ok, reason = data.forget({
+            associationIndex = plan.associationIndex,
+            key = plan.key, assignmentId = plan.assignmentId,
+        })
+        if not ok then
+            print("|cffff9040Nexus:|r " .. tostring(reason
+                or "that wishlist could not be removed"))
+        end
+        if type(data.after) == "function" then data.after() end
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
 
 Nexus.WishlistInternals.Renderer = Renderer

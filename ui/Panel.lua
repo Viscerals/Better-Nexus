@@ -28,6 +28,13 @@ local autoBtn, buildsBtn, leaderboardBtn, menuBtn, versionText, worldStatusBox, 
 local showPerformance = false
 local renderState = {
     committed=false,applying=false,signatures=nil,hadFailure=false,
+    -- The roll block the last committed render showed, while Auto is ON in
+    -- one rolling context: {context=..., cards=bool}, or nil. Memory only,
+    -- one entry; see RollPresentation.
+    roll=nil,
+    -- The committed model's status and recommendation before the user-text
+    -- conversion (it is not idempotent), for a render of that same model.
+    rawText=nil,
 }
 local renderStats = {
     calls=0, layouts=0, skipped=0, statusOnly=0,
@@ -68,6 +75,9 @@ function M.ShowUpdateStatus()
     local status = updates.Status()
     StaticPopup_Show("NEXUS_UPDATE_RELEASES", status.detail, status.url)
     if status.candidate and updates.Dismiss then updates.Dismiss() end
+    -- Seeing the unverified hint is enough: it is not announced again this
+    -- session. This dismissal is session state and writes no saved data.
+    if status.hint and updates.DismissHint then updates.DismissHint() end
     return true, status
 end
 
@@ -138,6 +148,8 @@ local function ModelSignatures(model)
             showPerformance=showPerformance,
             layoutRevision=layoutKey,
             assignment=model.assignment,
+            orbGuidance=model.orbGuidance,
+            paused=model.paused,
         }),
         performance = Signature({
             performance=type(model.progress) == "table" and model.progress.performance or nil,
@@ -146,6 +158,48 @@ local function ModelSignatures(model)
         notice = Signature(model.updateNotice),
         status = Signature(model.status),
         auto = Signature(model.auto),
+    }
+end
+
+-- Keep the roll block's space through an ordinary gap between Echo choices.
+-- Between boards the runtime renders no cards and no recommendation; without
+-- this the block collapsed and the panel resized (moving the title and the
+-- footer buttons) until the next board. The block is reserved only while
+-- Auto is ON with an assigned, unfinished build, and only when the last
+-- committed render showed it in the same context (Wishlist, active slot,
+-- preview, layout metrics). The reserved block shows no old card or
+-- recommendation: its content is cleared. Auto OFF, a finished build, no
+-- build or a context change release it.
+local function RollPresentation(model)
+    local pr = type(model.progress) == "table" and model.progress or {}
+    local name = pr.wishlistName
+    local total = tonumber(pr.total) or 0
+    local owned = tonumber(pr.owned) or 0
+    local complete = total > 0 and owned >= total
+        and #(type(pr.toLock) == "table" and pr.toLock or {}) == 0
+    local noBuild = total <= 0 or not name
+    local cards = type(model.cards) == "table" and model.cards or {}
+    local guide = type(model.orbGuidance) == "table" and model.orbGuidance or nil
+    local guideText = (guide and total > 0 and name) and SafeText(guide.text) or ""
+    local hasContent = #cards > 0 or SafeText(model.recommendation) ~= ""
+        or guideText ~= ""
+    local layoutKey = "legacy"
+    if Nexus.LayoutMetrics and Nexus.LayoutMetrics.RuntimeKey then
+        local ok, key = pcall(Nexus.LayoutMetrics.RuntimeKey,"panel",272,0)
+        if ok then layoutKey = tostring(key) end
+    end
+    local context = table.concat({tostring(name), tostring(pr.activeSlot),
+        pr.isCommunityPreview and "preview" or "own", layoutKey}, "|")
+    local continuing = model.auto == true and not noBuild and not complete
+    local held = continuing and renderState.roll or nil
+    if held and held.context ~= context then held = nil end
+    local reserved = not hasContent and held ~= nil
+    local cardRows = #cards > 0 or (held ~= nil and held.cards == true)
+    return {
+        reserved=reserved,cardRows=cardRows,
+        -- What a successful commit of this render leaves for the next one.
+        nextRoll=continuing and (hasContent or reserved)
+            and {context=context,cards=cardRows,reserved=reserved} or nil,
     }
 end
 
@@ -162,10 +216,39 @@ local function ShortName(v, maxChars)
     return displayText and displayText(s, 1024, false) or ""
 end
 
+-- Auto button labels (plain text; AutoLabel adds the state colour) and their
+-- fit. This code sets no width limit on the label, so `inset` is a chosen
+-- per-side margin kept clear of the button's end caps (not a template value).
+-- AUTO_LABEL.Fit (below) measures the widest label with the button's own font
+-- object and reduces only that object's size when it does not fit, never
+-- below minSize. The tooltip names the full control.
+local AUTO_LABEL = { on = "Auto ON", off = "Auto OFF", unknown = "Auto --",
+    inset = 6, minSize = 9, font = "NexusAutoButtonFont" }
+
+-- Auto OFF releases a roll-block reservation at once. The runtime does not
+-- render for a toggle, so the last committed model is rendered again with
+-- the new selection (the ordinary render transaction). Nothing else changes.
+local function ReleaseRollOnAutoOff(auto)
+    local roll = renderState.roll
+    if auto or not (roll and roll.reserved) or type(M._lastModel) ~= "table" then
+        return
+    end
+    local model = DefensiveCopy(M._lastModel)
+    local rawText = renderState.rawText or {}
+    model.status, model.recommendation = rawText.status, rawText.recommendation
+    model.auto = false
+    -- A failed render stays a failed render (hidden, counted, retried by the
+    -- next ordinary refresh); it is recorded, not raised into the toggle.
+    local ok, why = pcall(M.Render, model)
+    if not ok and Nexus.Errors and type(Nexus.Errors.Record) == "function" then
+        pcall(Nexus.Errors.Record, "Panel.ReleaseRollOnAutoOff", why)
+    end
+end
+
 local function AutoLabel(auto)
-    if auto == nil then return "Automation: --" end
-    if auto then return "|cff2ee62eAutomation: ON|r" end
-    return "|cffe63c3cAutomation: OFF|r"
+    if auto == nil then return AUTO_LABEL.unknown end
+    if auto then return "|cff2ee62e" .. AUTO_LABEL.on .. "|r" end
+    return "|cffe63c3c" .. AUTO_LABEL.off .. "|r"
 end
 
 local function FmtDps(dps)
@@ -193,7 +276,7 @@ local function CreateToLockWidgets(f)
     local layout = Nexus.LayoutMetrics
     f.toLockLabel = f:CreateFontString(nil, "OVERLAY",
         layout and layout.FontObject("small") or "GameFontDisableSmall")
-    f.toLockLabel:SetText("PERMANENT TARGETS")
+    f.toLockLabel:SetText("LOCKED TARGETS")
     f.toLockLabel:SetTextColor(0.7, 0.45, 1)
     f.toLockText = f:CreateFontString(nil, "OVERLAY",
         layout and layout.FontObject("small") or "GameFontHighlightSmall")
@@ -204,11 +287,11 @@ local function CreateToLockWidgets(f)
     f.toLockHit:SetScript("OnEnter", function(self)
         if #toLockNamesCache == 0 then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Permanent targets remaining", 1, 1, 1)
-        GameTooltip:AddLine("These targets are planned for your six permanent slots.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Locked targets remaining", 1, 1, 1)
+        GameTooltip:AddLine("These targets are planned for your locked Echo slots (a plan designs at most six target copies).", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine("Acquire the exact requested Echo and quality first.", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("Owned copies still need to be placed in permanent slots.", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("Current permanent slots and card Freeze are separate.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Owned copies still need to be placed in locked Echo slots.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("Current locked Echo slots and card Freeze are separate.", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Still need to acquire:", 0.85, 0.6, 1)
         for i, name in ipairs(toLockNamesCache) do
@@ -257,6 +340,72 @@ local function SetOwnedButtonFont(widget, font)
     end
 end
 
+-- Fit of the Auto labels to this button (see AUTO_LABEL). The button uses its
+-- own font object, a copy of the owned normal font: the shared objects are
+-- never changed. Runs from the one-shot font pass and the footer layout, not
+-- per frame; the result is cached until the base font or the button width
+-- changes. Returns { width, budget, fits, size, baseSize, adjustable }.
+function AUTO_LABEL.Fit(force)
+    if not autoBtn then return nil end
+    local layout = Nexus.LayoutMetrics
+    local base = layout and _G[layout.FontObject("normal")]
+    local path, size, flags
+    if base and type(base.GetFont) == "function" then
+        local ok, p, s, f = pcall(base.GetFont, base)
+        if ok then path, size, flags = p, tonumber(s), f end
+    end
+    local width = tonumber(autoBtn:GetWidth()) or 72
+    local key = tostring(path) .. "|" .. tostring(size) .. "|" .. tostring(width)
+    if not force and autoBtn._nexusFit and autoBtn._nexusFitKey == key then
+        return autoBtn._nexusFit
+    end
+    local font = _G[AUTO_LABEL.font]
+    if not font and base and path and type(CreateFont) == "function" then
+        local ok, created = pcall(CreateFont, AUTO_LABEL.font)
+        if ok and created then
+            font = created
+            -- Colour and shadow come from the owned normal font.
+            if type(font.SetFontObject) == "function" then
+                pcall(font.SetFontObject, font, base)
+            end
+        end
+    end
+    -- A font string needs a font before SetText; with neither font there is
+    -- nothing to measure, and the button keeps the owned normal font.
+    if not (font or base) then return nil end
+    local probe = autoBtn._nexusFitProbe
+    if not probe then
+        probe = autoBtn:CreateFontString(nil, "OVERLAY")
+        if not probe then return nil end
+        probe:Hide()
+        autoBtn._nexusFitProbe = probe
+    end
+    local budget = width - 2 * AUTO_LABEL.inset
+    local fitSize, widest = size, 0
+    for _ = 1, 8 do
+        if font and path and fitSize and type(font.SetFont) == "function" then
+            pcall(font.SetFont, font, path, fitSize, flags or "")
+        end
+        if type(probe.SetFontObject) == "function" then
+            pcall(probe.SetFontObject, probe, font or base)
+        end
+        widest = 0
+        for _, text in ipairs({ AUTO_LABEL.on, AUTO_LABEL.off, AUTO_LABEL.unknown }) do
+            probe:SetText(text)
+            widest = math.max(widest, tonumber(probe:GetStringWidth()) or 0)
+        end
+        if widest <= budget or not (font and path and fitSize)
+            or fitSize <= AUTO_LABEL.minSize then break end
+        fitSize = math.max(AUTO_LABEL.minSize,
+            math.floor(fitSize * budget / widest))
+    end
+    if font then SetOwnedButtonFont(autoBtn, font) end
+    autoBtn._nexusFitKey = key
+    autoBtn._nexusFit = { width = widest, budget = budget, fits = widest <= budget,
+        size = fitSize, baseSize = size, adjustable = font ~= nil }
+    return autoBtn._nexusFit
+end
+
 function M.ApplyOwnedFonts()
     local layout = Nexus.LayoutMetrics
     if not (layout and frame) then return false end
@@ -282,6 +431,10 @@ function M.ApplyOwnedFonts()
             switchBtn,setupGetStartedBtn,setupImportBtn,autoBtn,buildsBtn,
             leaderboardBtn,menuBtn,
         }) do SetOwnedButtonFont(widget, normal) end
+        SetOwnedButtonFont(frame._orbsBtn, small)
+        -- The Auto button then takes its own fitted font (AUTO_LABEL.Fit);
+        -- if none can be made it keeps the owned normal font above.
+        AUTO_LABEL.Fit(true)
     end
     if frame.toLockLabel and not frame.toLockLabel._nexusOwnedFont then
         SetOwnedFont(frame.toLockLabel, small)
@@ -329,10 +482,14 @@ local function CloseOtherNexusWindows(exceptName)
     if _G.DropDownList2 and _G.DropDownList2.Hide then pcall(_G.DropDownList2.Hide, _G.DropDownList2) end
 end
 
+-- The windows that hold the HUD's menu suppression: the attached ones
+-- (AttachMenuFrame), whose hide retries the restore. QuickStart is not
+-- attached and never hides the HUD, so it does not hold it hidden either:
+-- its hide retries nothing, and a restore it blocked would never come.
 local function AnyNexusMenuShown()
     local names = {
         "NexusCommunityBuildsFrame", "NexusLeaderboardFrame", "NexusEditorFrame",
-        "NexusLogViewer", "NexusQuickStart", "NexusChangelogPopup", "NexusSharedStartupFrame",
+        "NexusLogViewer", "NexusChangelogPopup", "NexusSharedStartupFrame",
     }
     for i = 1, #names do
         local f = _G[names[i]]
@@ -399,15 +556,29 @@ function M.CloseOtherWindows(exceptName)
     menuTransition = false
 end
 
+-- The panel's own saved keys (position, DPS-records toggle, minimap angle)
+-- live in the saved root, or for a read-only saved root in the Store owner's
+-- session-only table, which starts with copies of the saved values.
+-- It is a module field rather than a local because EnsureFrame is at the Lua
+-- 5.1 upvalue limit.
+local PANEL_SAVED_KEYS = {"panelX", "panelY", "uiShowPerformance", "minimapAngle"}
+function M.SavedLayoutRoot()
+    NexusDB = NexusDB or {}
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    local root = type(writable) == "function"
+        and writable(NexusDB, PANEL_SAVED_KEYS) or nil
+    return type(root) == "table" and root or NexusDB
+end
+
 local function EnsureFrame()
     if frame then return frame end
 
     frame = CreateFrame("Frame", "NexusPanel", UIParent)
     frame:SetSize(272, 210)
     frame:SetClampedToScreen(true)
-    NexusDB = NexusDB or {}
-    if tonumber(NexusDB.panelX) and tonumber(NexusDB.panelY) then
-        frame:SetPoint("CENTER", UIParent, "CENTER", NexusDB.panelX, NexusDB.panelY)
+    local savedLayout = M.SavedLayoutRoot()
+    if tonumber(savedLayout.panelX) and tonumber(savedLayout.panelY) then
+        frame:SetPoint("CENTER", UIParent, "CENTER", savedLayout.panelX, savedLayout.panelY)
     else
         frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
     end
@@ -420,7 +591,8 @@ local function EnsureFrame()
         local x, y = self:GetCenter()
         local ux, uy = UIParent:GetCenter()
         if x and y and ux and uy then
-            NexusDB.panelX, NexusDB.panelY = math.floor(x - ux + 0.5), math.floor(y - uy + 0.5)
+            local saved = M.SavedLayoutRoot()
+            saved.panelX, saved.panelY = math.floor(x - ux + 0.5), math.floor(y - uy + 0.5)
         end
     end)
     frame:Hide()
@@ -442,9 +614,12 @@ local function EnsureFrame()
         if Nexus.JournalTab and Nexus.JournalTab.OpenBuilds then
             Nexus.JournalTab.OpenBuilds()
         else
+            -- The journal's Show(tab) is a dot-call whose argument is a tab
+            -- index; no tab is established here, so none is passed (the
+            -- journal opens its current tab).
             local pe = _G["ProjectEbonhold"]
             if pe and pe.EchoJournal and pe.EchoJournal.Show then
-                pcall(pe.EchoJournal.Show, pe.EchoJournal)
+                pcall(pe.EchoJournal.Show)
             end
         end
     end)
@@ -513,17 +688,27 @@ local function EnsureFrame()
         worldStatusBox.intensityTicks[i] = tick
     end
 
+    -- The ticks mark the game's level thresholds 1-4 on the bar scaled to its
+    -- maximum (worldStatusBox._intensityScale, from the validated constants
+    -- of ServerStatus). Without a known scale there are no ticks.
     local function PositionIntensityTicks()
         local bar = worldStatusBox and worldStatusBox.intensityBar
         if not bar then return end
         local width = tonumber(bar:GetWidth()) or 0
         if width <= 0 then return end
+        local scale = worldStatusBox._intensityScale
         for i = 1, 4 do
             local tick = worldStatusBox.intensityTicks[i]
-            tick:ClearAllPoints()
-            local x = math.floor((width * i / 5) + 0.5)
-            tick:SetPoint("TOPLEFT", bar, "TOPLEFT", x, 0)
-            tick:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, 0)
+            local threshold = scale and tonumber(scale.thresholds[i])
+            if threshold then
+                tick:ClearAllPoints()
+                local x = math.floor((width * threshold / scale.max) + 0.5)
+                tick:SetPoint("TOPLEFT", bar, "TOPLEFT", x, 0)
+                tick:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, 0)
+                tick:Show()
+            else
+                tick:Hide()
+            end
         end
     end
     worldStatusBox.PositionIntensityTicks = PositionIntensityTicks
@@ -548,8 +733,13 @@ local function EnsureFrame()
         if ss.ash then GameTooltip:AddLine("Soul Ash: " .. tostring(ss.ash):gsub(",",""), 1, 1, 1) end
         if ss.gain then GameTooltip:AddLine("Soul Ash Multiplier: " .. tostring(ss.gain), 0.2, 1, 0.2) end
         if ss.intensity ~= nil then
-            GameTooltip:AddLine("Intensity: " .. tostring(math.floor(tonumber(ss.intensity) or 0)) .. " / 500", 1, 0.55, 0.25)
-            GameTooltip:AddLine("Intensity Level: " .. tostring(tonumber(ss.intensityLevel) or 0), 0.85, 0.75, 0.65)
+            -- The maximum and level come from the game's validated constants;
+            -- without them neither is stated.
+            local maximum = tonumber(ss.intensityMax)
+            local level = tonumber(ss.intensityLevel)
+            GameTooltip:AddLine("Intensity: " .. tostring(math.floor(tonumber(ss.intensity) or 0))
+                .. (maximum and (" / " .. tostring(math.floor(maximum))) or ""), 1, 0.55, 0.25)
+            GameTooltip:AddLine("Intensity Level: " .. (level and tostring(level) or "unknown"), 0.85, 0.75, 0.65)
         end
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Click to open the Hardcore difficulty panel.", 1, 0.82, 0, true)
@@ -567,6 +757,7 @@ local function EnsureFrame()
     statusText:SetPoint("TOPLEFT", 2, -1)
     statusText:SetSize(276, 14)
     statusText:SetJustifyH("LEFT")
+    frame._rollStatus = statusText
 
     for i = 1, 3 do
         local fs = rollArea:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -576,12 +767,37 @@ local function EnsureFrame()
         cardTexts[i] = fs
     end
 
+    -- Passive navigation only: it opens the Orb window, which reads and
+    -- shows state. It starts, resumes, approves and spends nothing.
+    local orbsBtn = CreateFrame("Button", nil, rollArea, "UIPanelButtonTemplate")
+    -- The responsive layout gives it its own row (ApplyPanelLayout); this is
+    -- only the initial placement.
+    orbsBtn:SetSize(104, 17)
+    orbsBtn:SetPoint("BOTTOMRIGHT", rollArea, "BOTTOMRIGHT", -2, 4)
+    orbsBtn:SetText("Open Orbs...")
+    orbsBtn:SetScript("OnClick", function()
+        if Nexus.OrbPanel and Nexus.OrbPanel.Show then Nexus.OrbPanel.Show() end
+    end)
+    orbsBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Orbs / Lost Memories", 1, 0.82, 0)
+        GameTooltip:AddLine("Opens the Orb window to inspect it. It starts or spends nothing.", 0.85, 0.85, 0.85, true)
+        for _, b in ipairs(self.blockers or {}) do
+            GameTooltip:AddLine(tostring(b.text), 1, 0.6, 0.4, true)
+        end
+        GameTooltip:Show()
+    end)
+    orbsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    orbsBtn:Hide()
+    frame._orbsBtn = orbsBtn
+
     recText = rollArea:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     recText:SetPoint("TOPLEFT", 2, -64)
     recText:SetSize(276, 30)
     recText:SetJustifyH("LEFT")
     recText:SetJustifyV("TOP")
     recText:SetTextColor(1, 0.82, 0)
+    frame._rollRec = recText
 
     rollDivider = rollArea:CreateTexture(nil, "ARTWORK")
     rollDivider:SetSize(278, 1)
@@ -636,6 +852,9 @@ local function EnsureFrame()
     needText:SetSize(136, 52)
     needText:SetJustifyH("LEFT")
     needText:SetJustifyV("TOP")
+    -- One line per name, so a long name never pushes "+N more" out of the
+    -- box; the hover list carries every complete name.
+    needText:SetWordWrap(false)
     needText:SetTextColor(1, 0.5, 0.2)
     needHit = HitFrame(frame, needText)
     needHit:SetScript("OnEnter", function(self)
@@ -683,6 +902,7 @@ local function EnsureFrame()
     shedText:SetSize(136, 46)
     shedText:SetJustifyH("LEFT")
     shedText:SetJustifyV("TOP")
+    shedText:SetWordWrap(false)
     shedText:SetTextColor(0.72, 0.52, 1)
     shedHit = HitFrame(frame, shedText)
     shedHit:SetScript("OnEnter", function(self)
@@ -693,7 +913,7 @@ local function EnsureFrame()
         GameTooltip:AddLine("including unrequested or different-quality copies.", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine("This is a comparison, not a delete action. A later run may reduce these extras.", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Permanent copies protected by this Saved Build are", 0.75, 0.75, 0.75, true)
+        GameTooltip:AddLine("Locked copies protected by this Saved Build are", 0.75, 0.75, 0.75, true)
         GameTooltip:AddLine("never listed here, even if off-wishlist.", 0.75, 0.75, 0.75, true)
         GameTooltip:AddLine(" ")
         for i, name in ipairs(shedNamesCache) do
@@ -773,9 +993,11 @@ local function EnsureFrame()
         if Nexus.JournalTab and Nexus.JournalTab.OpenBuilds then
             Nexus.JournalTab.OpenBuilds()
         else
+            -- Show(tab) is a dot-call taking a tab index; no tab is passed
+            -- (the journal opens its current tab).
             local pe = _G["ProjectEbonhold"]
             if pe and pe.EchoJournal and pe.EchoJournal.Show then
-                pcall(pe.EchoJournal.Show, pe.EchoJournal)
+                pcall(pe.EchoJournal.Show)
             end
         end
     end)
@@ -810,14 +1032,15 @@ local function EnsureFrame()
     autoBtn:SetScript("OnClick", function()
         if callbacks and type(callbacks.ToggleAuto) == "function" then
             local ok, state = pcall(callbacks.ToggleAuto)
-            if ok and state ~= nil then autoBtn:SetText(AutoLabel(state and true or false)) end
+            -- The label, and at Auto OFF the release of a reserved roll block.
+            if ok and state ~= nil then M.SetAuto(state and true or false) end
         end
     end)
     autoBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Automation and enabled actions", 1, 1, 1)
         GameTooltip:AddLine("When ON: permits your enabled automatic actions. These may", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("consume charges or change saved-build state. Permanent-slot", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("consume charges or change saved-build state. Locked-Echo slot", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("management is a separate opt-in. Orb runs require separate approval.", 0.6, 1, 0.6, true)
         GameTooltip:AddLine("OFF keeps recommendations visible; it does not turn off Sync.", 0.75, 0.75, 0.75, true)
@@ -919,7 +1142,7 @@ local function EnsureFrame()
                 notCheckable = true,
                 func = MenuAction(function()
                     showPerformance = not showPerformance
-                    NexusDB.uiShowPerformance = showPerformance
+                    M.SavedLayoutRoot().uiShowPerformance = showPerformance
                     if M.Refresh then M.Refresh() end
                 end),
             },
@@ -943,7 +1166,8 @@ local function EnsureFrame()
                 text = "Reset Panel Position",
                 notCheckable = true,
                 func = MenuAction(function()
-                    NexusDB.panelX, NexusDB.panelY = nil, nil
+                    local saved = M.SavedLayoutRoot()
+                    saved.panelX, saved.panelY = nil, nil
                     frame:ClearAllPoints()
                     frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
                 end),
@@ -981,8 +1205,8 @@ local function EnsureFrame()
         local notice = M._lastModel and M._lastModel.updateNotice
         if notice then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine((notice.verified and "Update available: "
-                or "Newer build reported (unverified): ")
+            -- Only bundled release evidence reaches here (core/Updates.lua).
+            GameTooltip:AddLine("Update available: "
                 .. tostring(notice.display or notice.version), 1, 0.82, 0, true)
             GameTooltip:AddLine("Open this menu for the manual Releases-page link.", 0.8, 0.8, 0.8, true)
         end
@@ -1022,8 +1246,7 @@ local function EnsureFrame()
     versionText = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     versionText:Hide() -- version remains in /nexus and tooltips; avoids bottom-row overlap
 
-    NexusDB = NexusDB or {}
-    showPerformance = NexusDB.uiShowPerformance == true
+    showPerformance = M.SavedLayoutRoot().uiShowPerformance == true
 
     pcall(function()
         frame:SetBackdrop({
@@ -1045,8 +1268,8 @@ end
 
 local function EnsureMinimapButton()
     if minimapBtn then return minimapBtn end
-    NexusDB = NexusDB or {}
-    NexusDB.minimapAngle = NexusDB.minimapAngle or 220
+    local saved = M.SavedLayoutRoot()
+    saved.minimapAngle = saved.minimapAngle or 220
 
     local btn = CreateFrame("Button", "NexusMinimapButton", Minimap)
     btn:SetSize(31, 31)
@@ -1063,7 +1286,7 @@ local function EnsureMinimapButton()
     end)
 
     local function Reposition()
-        local angle = math.rad(NexusDB.minimapAngle or 220)
+        local angle = math.rad(M.SavedLayoutRoot().minimapAngle or 220)
         local r = 80
         btn:ClearAllPoints()
         btn:SetPoint("CENTER", Minimap, "CENTER", r * math.cos(angle), r * math.sin(angle))
@@ -1076,7 +1299,7 @@ local function EnsureMinimapButton()
             local px, py = GetCursorPosition()
             local scale = Minimap:GetEffectiveScale()
             px, py = px / scale, py / scale
-            NexusDB.minimapAngle = math.deg(math.atan2(py - my, px - mx))
+            M.SavedLayoutRoot().minimapAngle = math.deg(math.atan2(py - my, px - mx))
             Reposition()
         end)
     end)
@@ -1242,6 +1465,7 @@ end
 
 function M.SetAuto(auto)
     if autoBtn then autoBtn:SetText(AutoLabel(auto and true or false)) end
+    ReleaseRollOnAutoOff(auto and true or false)
 end
 
 function M.Toggle()
@@ -1330,6 +1554,7 @@ local function LayoutFooter(showAuto, completed)
         autoBtn:Show()
         autoBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 8, 7)
         autoBtn:SetSize(72, 22)
+        AUTO_LABEL.Fit() -- cached; refits only when the font or width changed
 
         buildsBtn:SetPoint("LEFT", autoBtn, "RIGHT", 4, 0)
         buildsBtn:SetSize(84, 22)
@@ -1395,10 +1620,28 @@ local function ApplyPanelLayout(layout, completed)
             text:SetSize(boxes.roll.w-inset*2, layout.small)
             y = y + layout.small + math.max(2,math.floor(layout.gap/3))
         end
+        -- Guidance alone (no cards) starts right below the heading, so it
+        -- has the card rows' space; with cards it follows them as before.
+        local noCards = true
+        for index = 1, 3 do
+            if (cardTexts[index]:GetText() or "") ~= "" then noCards = false end
+        end
+        local recY = y
+        if noCards then
+            recY = 1 + layout.small + math.max(3,math.floor(layout.gap/2))
+        end
+        local button = frame._orbsBtn
+        local buttonRow = 0
+        if button and button:IsShown() and layout.orbButtonH then
+            buttonRow = layout.orbButtonH + math.ceil(layout.gap/2)
+            button:ClearAllPoints()
+            button:SetPoint("BOTTOMRIGHT", rollArea, "BOTTOMRIGHT", -inset, math.ceil(layout.gap/2))
+            button:SetSize(layout.orbButtonW, layout.orbButtonH)
+        end
         recText:ClearAllPoints()
-        recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -y)
+        recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -recY)
         recText:SetSize(boxes.roll.w-inset*2,
-            math.max(layout.small*2,boxes.roll.h-y-layout.gap))
+            math.max(layout.small*2,boxes.roll.h-recY-layout.gap-buttonRow))
         rollDivider:ClearAllPoints()
         rollDivider:SetPoint("BOTTOMLEFT", rollArea, "BOTTOMLEFT", 1, 0)
         rollDivider:SetSize(boxes.roll.w-2,1)
@@ -1472,7 +1715,7 @@ local function RenderBestDps(model, complete, noBuild, activeRoll, statusVisible
     end
 end
 
-local function ApplyModel(model, signatures)
+local function ApplyModel(model, signatures, roll)
     local previousSignatures = renderState.signatures
     if previousSignatures and signatures.layout == previousSignatures.layout then
         local changed = false
@@ -1487,7 +1730,9 @@ local function ApplyModel(model, signatures)
             local complete = total > 0 and owned >= total
                 and #(type(pr.toLock) == "table" and pr.toLock or {}) == 0
             local cards = type(model.cards) == "table" and model.cards or {}
+            local guide = type(model.orbGuidance) == "table" and model.orbGuidance or nil
             local activeRoll = #cards > 0 or SafeText(model.recommendation) ~= ""
+                or (guide and SafeText(guide.text) ~= "") or false
             local noBuild = total <= 0 or not pr.wishlistName
             local ss = type(model.serverStatus) == "table" and model.serverStatus or nil
             local statusVisible = ss and (ss.tier or ss.mode or ss.ash
@@ -1525,7 +1770,18 @@ local function ApplyModel(model, signatures)
         and #(type(pr.toLock) == "table" and pr.toLock or {}) == 0
     local cards = type(model.cards) == "table" and model.cards or {}
     local recommendation = SafeText(model.recommendation)
-    local activeRoll = #cards > 0 or recommendation ~= ""
+    local guide = type(model.orbGuidance) == "table" and model.orbGuidance or nil
+    -- With no build, the setup view already names the missing Wishlist.
+    local guideText = (guide and total > 0 and name) and SafeText(guide.text) or ""
+    local activeRoll = #cards > 0 or recommendation ~= "" or guideText ~= ""
+    -- The roll block's space: current content, or a reservation through an
+    -- ordinary gap between choices (RollPresentation). Content and actions
+    -- still come only from the current model.
+    local rollBlock = activeRoll or (type(roll) == "table" and roll.reserved) or false
+    -- The roll body: an unresolved Orb run's own reason first, else the
+    -- recommendation (which carries an Orb pause reason), else the guidance.
+    local bodyText = (guide and guide.state == "orb-run" and guideText ~= "") and guideText
+        or (recommendation ~= "" and recommendation or guideText)
     local noBuild = total <= 0 or not name
     local ss = type(model.serverStatus) == "table" and model.serverStatus or nil
     local statusVisible = ss and (ss.tier or ss.mode or ss.ash or ss.gain or ss.intensity ~= nil) and true or false
@@ -1536,7 +1792,7 @@ local function ApplyModel(model, signatures)
     -- Keep the master Auto control visible for every active offering,
     -- including level 80 and completed-target boards. Toggling Auto off must
     -- never make the control used to turn it back on disappear.
-    local showAutoControl = not noBuild and (activeRoll or (not complete and playerLevel < 80))
+    local showAutoControl = not noBuild and (rollBlock or (not complete and playerLevel < 80))
     local responsiveLayout
     if Nexus.LayoutMetrics then
         local metricsOk, fontScale, uiScale, revision =
@@ -1544,12 +1800,21 @@ local function ApplyModel(model, signatures)
         if metricsOk then
             local layoutOk, candidate = pcall(Nexus.LayoutMetrics.Panel,{
                 width=272,fontScale=fontScale,uiScale=uiScale,
-                revision=revision,activeRoll=activeRoll,
+                revision=revision,activeRoll=rollBlock,
                 statusVisible=statusVisible,noBuild=noBuild,
                 complete=complete,showPerformance=showPerformance,
                 toLockCount=type(pr.toLock) == "table" and #pr.toLock or 0,
                 unknownTomes=type(pr.unknownTomes) == "table"
                     and #pr.unknownTomes or 0,
+                orbButton=(activeRoll and guide and guide.openOrbs
+                    and total > 0 and name) and true or false,
+                -- Rows for the body while it shows the Orb guidance or,
+                -- with the Open Orbs button, the Orb pause reason.
+                guidanceRows=(guideText ~= "" and (bodyText == guideText
+                    or guide.openOrbs))
+                    and Nexus.LayoutMetrics.TextRows(bodyText, 248, fontScale)
+                    or 0,
+                cardRows=#cards > 0 or (type(roll) == "table" and roll.cardRows) or false,
             })
             if layoutOk and type(candidate) == "table" then
                 responsiveLayout = candidate
@@ -1564,17 +1829,40 @@ local function ApplyModel(model, signatures)
     frame._buildHeaderText:SetText(name and ("|cff7fd5ff" .. ShortName(name, 29) .. "|r" .. (pr.isCommunityPreview and " |cff888888[Preview]|r" or "")) or "|cff7fd5ffNexus|r")
     frame._switchBtn:SetText("My Builds")
 
-    SetVisible(frame._rollArea, activeRoll)
+    SetVisible(frame._rollArea, rollBlock)
     frame._rollArea:ClearAllPoints()
     frame._rollArea:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, statusVisible and -98 or -39)
-    if activeRoll then
+    if rollBlock then
         local activeSlot = tonumber(pr.activeSlot) or 0
-        statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Roll recommendations active — Slot " .. activeSlot) or "|cff888888Preview: Roll recommendation preview|r")
+        -- Auto stays ON while paused; the heading must not say it is acting.
+        if model.auto and model.paused then
+            statusText:SetText("|cffffd100Auto ON — paused|r")
+        elseif #cards == 0 and recommendation == "" then
+            statusText:SetText("|cff7fd5ffRoll status|r")
+        elseif guide and guide.openOrbs and guideText ~= "" then
+            -- With the Orb guidance and its button: the short form, which
+            -- stays one line at every font scale.
+            statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Slot " .. activeSlot) or "|cff888888Preview|r")
+        else
+            statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Roll recommendations active — Slot " .. activeSlot) or "|cff888888Preview: Roll recommendation preview|r")
+        end
         for i = 1, 3 do
             local c = cards[i]
             cardTexts[i]:SetText(type(c) == "table" and SafeText(c.text) or "")
         end
-        recText:SetText(recommendation)
+        -- An unresolved Orb action's own reason is more specific than the
+        -- general pause text; otherwise the recommendation stays first. A
+        -- reserved block has no current choice: it says so, and no more.
+        recText:SetText(activeRoll and bodyText
+            or "|cff888888No Echo choice is showing.|r")
+    end
+    if frame._orbsBtn then
+        frame._orbsBtn.blockers = guide and guide.blockers or nil
+        if activeRoll and guide and guide.openOrbs and total > 0 and name then
+            frame._orbsBtn:Show()
+        else
+            frame._orbsBtn:Hide()
+        end
     end
 
     missingNamesCache = type(pr.missing) == "table" and pr.missing or {}
@@ -1591,7 +1879,7 @@ local function ApplyModel(model, signatures)
     -- Collapse the space reserved for Nexus' Soul Ash card whenever the player
     -- uses the server HUD. Live-roll content still gets its own fixed block.
     local contentTop
-    if activeRoll then
+    if rollBlock then
         contentTop = statusVisible and -220 or -161
     else
         contentTop = statusVisible and -103 or -44
@@ -1616,7 +1904,7 @@ local function ApplyModel(model, signatures)
         -- (Create Wishlist is only needed first if no wishlist exists yet),
         -- so it sits right under the instructions instead of sharing a row
         -- with an equally-weighted second option.
-        frame:SetHeight((activeRoll and 428 or 278) - statusHeightReduction)
+        frame:SetHeight((rollBlock and 428 or 278) - statusHeightReduction)
         SetPoint(setupText, "TOP", frame, "TOP", 0, contentTop - 18)
         local assignment=model.assignment or {}
         local restoring=assignment.state=="restoring" or assignment.state=="loading"
@@ -1624,6 +1912,7 @@ local function ApplyModel(model, signatures)
             or (assignment.state=="unavailable" and "Assigned Wishlist is unavailable" or "Assign a wishlist to this loadout"))
         SetPoint(setupHint, "TOP", frame, "TOP", 0, contentTop - 48)
         setupHint:SetText((restoring or assignment.state=="unavailable") and (assignment.note or "Waiting for the saved assignment and current loadout data.")
+            or (assignment.emptySlot and assignment.note)
             or "Assign an existing wishlist to this loadout, or create a new one. No Saved Build is required.")
         if restoring then setupGetStartedBtn:Hide();setupImportBtn:Hide()end
         setupGetStartedBtn:ClearAllPoints()
@@ -1634,7 +1923,7 @@ local function ApplyModel(model, signatures)
         -- Once a build is complete, progress text stops being the purpose of the
         -- HUD. The panel becomes a compact replacement for the stock difficulty /
         -- Soul Ash tracker, with Nexus navigation and the player's best DPS.
-        frame:SetHeight((showPerformance and (activeRoll and 430 or 286) or (activeRoll and 292 or 168)) - statusHeightReduction)
+        frame:SetHeight((showPerformance and (rollBlock and 430 or 286) or (rollBlock and 292 or 168)) - statusHeightReduction)
         -- completeBadge/completeSubtext were created and toggled everywhere but
         -- never given text anywhere in this file -- when the server-status HUD
         -- has nothing to show (statusVisible false) and Performance is off, the
@@ -1674,7 +1963,7 @@ local function ApplyModel(model, signatures)
         -- most wishlists design zero locked-slot targets, so the extra
         -- height stays reserved only while it's actually needed.
         local toLockExtra = #toLockNamesCache > 0 and 34 or 0
-        frame:SetHeight((showPerformance and (activeRoll and 448 or 325) or (activeRoll and 388 or 267)) - statusHeightReduction + toLockExtra)
+        frame:SetHeight((showPerformance and (rollBlock and 448 or 325) or (rollBlock and 388 or 267)) - statusHeightReduction + toLockExtra)
         SetPoint(progressLabel, "TOPLEFT", frame, "TOPLEFT", 12, contentTop)
         SetPoint(progressValue, "TOPLEFT", frame, "TOPLEFT", 12, contentTop - 17)
         progressValue:SetText(string.format("%d / %d complete", owned, total))
@@ -1782,12 +2071,24 @@ local function ApplyModel(model, signatures)
         worldStatusText:SetText("|cffff6b5f" .. difficulty .. "|r")
         worldStatusAsh:SetText((complete and "|cff8ec9d6Soul Ash  |r" or "|cffb8b8b8Ash |r") .. "|cffffffff" .. ashFmt .. "|r")
         worldStatusGain:SetText(ss.gain and ("|cff35e635" .. ss.gain .. "|r") or "")
-        local intensity = math.max(0, math.min(500, tonumber(ss.intensity) or 0))
-        local intensityLevel = tonumber(ss.intensityLevel) or math.floor(intensity / 100)
-        worldStatusBox.intensityBar:SetMinMaxValues(0, 500)
-        worldStatusBox.intensityBar:SetValue(intensity)
+        -- The bar is scaled to the game's validated maximum. Without valid
+        -- constants, or without a reading, it has no truthful scale and stays
+        -- hidden; the tooltip still states the raw value.
+        local maximum = tonumber(ss.intensityMax)
+        local thresholds = type(ss.intensityThresholds) == "table"
+            and ss.intensityThresholds or nil
         worldStatusBox.intensityText:SetText("")
-        worldStatusBox.intensityBar:Show()
+        if ss.intensity ~= nil and maximum and maximum > 0 and thresholds then
+            worldStatusBox._intensityScale = {max=maximum, thresholds=thresholds}
+            worldStatusBox.intensityBar:SetMinMaxValues(0, maximum)
+            worldStatusBox.intensityBar:SetValue(
+                math.max(0, math.min(maximum, tonumber(ss.intensity) or 0)))
+            worldStatusBox.PositionIntensityTicks()
+            worldStatusBox.intensityBar:Show()
+        else
+            worldStatusBox._intensityScale = nil
+            worldStatusBox.intensityBar:Hide()
+        end
         worldStatusBox:Show()
     else
         worldStatusText:SetText("")
@@ -1812,20 +2113,26 @@ local function ApplyModel(model, signatures)
     return true
 end
 
-local function ApplyCandidate(model, signatures)
+local function ApplyCandidate(model, signatures, roll)
     if not frame.toLockLabel then CreateToLockWidgets(frame) end
     M.ApplyOwnedFonts()
-    return ApplyModel(model, signatures)
+    return ApplyModel(model, signatures, roll)
 end
 
 function M.Render(model)
     if type(model) ~= "table" then return false end
     local candidate = DefensiveCopy(model)
+    local rawText = {status=candidate.status,recommendation=candidate.recommendation}
     if Nexus.UserText then
         candidate.recommendation=Nexus.UserText.Message(candidate.recommendation)
         candidate.status=Nexus.UserText.Message(candidate.status)
     end
     local signatures = ModelSignatures(candidate)
+    -- The reservation changes the layout, so it is part of its signature.
+    local roll = RollPresentation(candidate)
+    signatures.layout = signatures.layout .. "|roll:"
+        .. (roll.reserved and "reserved" or "content") .. ":"
+        .. (roll.cardRows and "cards" or "none")
     renderStats.calls = renderStats.calls + 1
     EnsureFrame()
 
@@ -1839,7 +2146,7 @@ function M.Render(model)
     local previousModel = M._lastModel
     renderState.applying = true
     frame:Hide()
-    local ok, result = pcall(ApplyCandidate, candidate, signatures)
+    local ok, result = pcall(ApplyCandidate, candidate, signatures, roll)
     renderState.applying = false
     if not ok or result == false then
         M._lastModel = previousModel
@@ -1858,6 +2165,10 @@ function M.Render(model)
 
     M._lastModel = candidate
     renderState.signatures = signatures
+    -- Only a successful render decides the next reservation; a failed one
+    -- leaves the last committed state as it was.
+    renderState.roll = roll.nextRoll
+    renderState.rawText = rawText
     renderState.committed = true
     renderStats.commits = renderStats.commits + 1
     if renderState.hadFailure then
@@ -1880,6 +2191,8 @@ function M.SetStatus(status)
     local nextStatus = SafeText(Nexus.UserText and Nexus.UserText.Message(status) or status)
     if SafeText(M._lastModel.status) == nextStatus then return false end
     M._lastModel.status = nextStatus
+    -- Keep the release render (ReleaseRollOnAutoOff) on the current line.
+    if renderState.rawText then renderState.rawText.status = status end
     if renderState.signatures then
         renderState.signatures.status = Signature(nextStatus)
     end
@@ -1887,6 +2200,28 @@ function M.SetStatus(status)
     return true
 end
 function M.RenderStats() return DefensiveCopy(renderStats) end
+
+-- What this owner knows about its own visibility, as facts another owner can
+-- act on. Read-only: it creates no frame, requests no render and writes
+-- nothing. `ready` is the question the stock HUD needs answered before it
+-- steps aside -- can this panel display at all -- which is deliberately NOT
+-- the same as `shown`: a player who hid it and a dialog that suppresses it
+-- both leave a panel that is perfectly able to display.
+function M.VisibilityFacts()
+    return {
+        exists = frame ~= nil,
+        shown = frame ~= nil and frame:IsShown() and true or false,
+        wanted = panelWantedVisible and true or false,
+        menuSuppressed = menuSuppressed and true or false,
+        ready = frame ~= nil and renderState.committed == true
+            and renderState.applying ~= true,
+        committed = renderState.committed == true,
+        hadFailure = renderState.hadFailure == true,
+        hiddenUncommitted = renderStats.hiddenUncommitted,
+        commits = renderStats.commits,
+        failures = renderStats.failures,
+    }
+end
 function M.Show()
     panelWantedVisible = true
     EnsureFrame()

@@ -10,10 +10,12 @@ SelectPerk(choice ID) -> fresh ownership/diff/charge confirmation -> next approv
 source or terminal stop.
 
 The frame advances at most one transaction step per 0.2-second update; it does not
-loop through a run synchronously. The ordinary WishlistPilot planner is not called
+loop through a run synchronously. The ordinary EchoWeaver planner is not called
 on Orb boards. All mutation calls sit behind GameAdapter.Orbs. Ordinary Take,
 Freeze, Banish, Reroll and permanent-slot/activation/upload actions stay guarded
-while an Orb operation owns state. Sync and Community transport are not repurposed
+while an Orb operation owns state. When an OrbService exists, ordinary Take,
+Freeze, Banish and Reroll also require its known, not-pending state
+(`OrbAdapter.ServiceState`). Sync and Community transport are not repurposed
 as an Orb API.
 
 ## Targets and source selection
@@ -56,6 +58,26 @@ content evidence, one-Orb charge change, no unresolved offer/choice/host action,
 and unchanged permanent ownership. These are local evidence checks; no native
 server correlation capability is invented.
 
+The one-Orb charge change is required once. When it was already observed while
+the action's Orb offer was pending (`spendConfirmed` in the saved receipt), settlement does not
+require the player's later total Orb balance to stay one less than before the
+action: an Orb gained or spent later for another reason must not hold the action
+forever. A later balance change is not completion evidence. Every other
+requirement above still applies, and only the exact ownership result settles it.
+
+On the live path `spendConfirmed` is client-side evidence, not a server
+confirmation. The game client lowers its own Orb count and marks an offer as
+owed when the spend is called, before the server answers, and Nexus reads those
+two values. After a reload, recovery can also set it from the balance and the
+owed offer that the server sends after the reload. The
+server's evidence is the offer it then shows (three choices, recorded in the
+receipt) and the ownership that follows the choice. Settlement therefore still
+needs the recorded offer, the recorded choice and the exact fresh ownership
+delta. Without the later balance check, the balance can no longer show that
+the server charged exactly one Orb: a moved balance can make Nexus's usage count
+differ by one from the server's charge, but it cannot change which Echo result
+settles the action.
+
 ## Persistence and interruption
 
 Only configuration, explicit choices, and passive unresolved-operation evidence
@@ -63,6 +85,94 @@ are stored per character through the existing Store authority owner. No live
 function/object, mutation callback, raw server owner, or automatic-resume flag is
 persisted. Reload starts RECOVERY, not running. A fresh baseline plus a later
 read-only response can settle the old result; it cannot launch another Orb.
+
+Recovery after reload is passive (see `docs/ROLLING_ORB_REVIEW_EADFF8A.md`, R2).
+It holds no action owner. It installs only the read-only `SelectPerk` observer.
+An offer that is still open is tied to the saved action only on exact evidence:
+one Orb less than the receipt, ownership equal to the receipt with or without
+the named source, unchanged permanent Echoes, and the original loadout. A manual
+choice observed in that offer, then the exact fresh ownership delta, settles the
+action. An action that ended while unobserved stays unresolved; the visible
+text says that it cannot be confirmed and that Recheck cannot settle it.
+The offer and the choice are also recorded at the moment of a manual choice
+(event-driven, through the same read-only observer), so the observation does not
+depend on the timed reads. Besides the exact matching result, the only exit from a block is the player's explicit
+Continue for an action with a spend this client observed (one Orb fewer with its
+offer) and no recorded outcome whose offer is gone
+(`docs/ORB_RECOVERY_CONTINUE.md`); a block that has no such exit says so.
+
+After a reload or login the client shows its load-time default active slot
+(0, "none") until the server sends its build-slot data; `GetServerBuildSlots()`
+is nil until then. That default is not an observation of a loadout change: a
+restored action waits read-only (`LOADOUT_UNKNOWN`), records nothing and
+settles nothing until the real slot is known, and then applies the normal
+loadout rule (a different slot, or a receipt without an original slot, keeps
+the hold). A slot other than 0 shown in that state comes from the server's
+active-slot push: a different one is a loadout change, and a later return to
+the original slot does not settle the action. A client without
+`GetServerBuildSlots()` keeps the plain slot comparison.
+
+The loadout hold is one saved flag (`loadoutChanged`). Several different causes
+set it alike: a real slot change, a different slot pushed before the build-slot
+data, the plain comparison on a client that cannot report slot data, a receipt
+without an original slot, and (in builds before the wait for the build-slot data
+existed) a reload whose first read came before the server's slot data, because
+that build compared the load-time default slot 0 with the recorded slot. A hold that an earlier build saved says nothing about which
+of these happened, and no later read can tell. The support summary therefore
+adds a loadout line to the Orb action: the original slot (`not recorded` when
+absent), the slot read now and whether the build-slot data has arrived, the
+loadout check, the cause the hold was first set for and when, whether an offer
+is recorded, and the requirements that the saved record alone shows unmet
+(`loadout`, and `choice` when no choice is recorded). The cause is recorded once,
+at the moment a build with this line first sets the hold, as three small saved
+fields in the pending receipt (`loadoutCause`, a fixed name;
+`loadoutObservedSlot`, a whole number from 0 to 65535; and `loadoutObservedAt`,
+the client clock time in whole seconds, from 2000-01-01 to 2100-01-01 UTC, shown
+with the date in the local form of the audit rows and labelled "local", so that it
+can be compared with them (the error times in the same report are UTC and say so);
+it is absent when the clock is missing, failing or implausible). They are never changed
+later. A hold saved without a cause stays `not recorded`: it is not filled in
+from a later read, and a missing original slot is never inferred. Older builds
+copy these fields through their own saves. The line is text only. It adds no
+requirement, removes none, and changes no block. Settlement still needs the
+recorded offer, a recorded choice inside that offer and the exact fresh ownership
+delta, so a receipt that records no choice cannot be settled, with or without the
+hold.
+
+While a recorded choice waits for its result (`WAIT_RESULT`), the
+status names the settlement requirement that the last read did not meet (a
+fresh ownership response, the chosen Echo in ownership, an open offer or
+another game action, an open Echo choice, or, while the spend is not yet
+confirmed, an Orb balance other than one less than before the action). Naming it
+changes no requirement.
+
+After a reload the player can choose in the game before Nexus has read the game
+state. The first ownership read then already shows the recorded choice, but it
+is not newer than the recovery baseline. When that is the only missing
+requirement, recovery asks the game once per load for a newer ownership
+response: the same read-only request as Recheck. It sends no Orb and no choice
+and changes no requirement. If no newer response arrives, the status says that
+the request was made and that Recheck requests one more.
+
+A loading screen pauses a running Orb action ("Session interrupted"). When the
+choice that Nexus sent before it gets no reply, the game keeps its own latch for
+that choice and refuses every choice in its offer window until a /reload. If
+the game still holds this action's choice five seconds after the loading screen,
+the status says so, names the recorded Echo, and says that /reload ends the
+wait and that only that Echo can confirm the action afterwards. After the
+reload, while the recorded offer is still open, the recovery status names the
+same Echo, also when the Orb balance moved after a spend this client observed
+(the same recorded offer still belongs to the action). It is text only; any other offer
+stays unmatched.
+
+The support summary and the prepared support report state the unresolved Orb
+action, if any: whether it was restored after a reload, the recovery state, the
+settlement requirement that the last read did not meet, whether the spend and the
+choice are recorded, the selected and source Echo keys, whether the game still
+holds a choice, whether a loadout change is recorded, and whether the automatic
+refresh was requested. It contains no names and writes nothing; like the
+ordinary-rolling block check, reading it can start the read-only recovery of a
+saved action.
 
 Character/run/service/loadout change pauses the run. Resume rechecks the original
 context, targets, owner, and budget. A budget increase needs a new approval token
@@ -85,10 +195,11 @@ or interference from other game addons.
 ## Verification limits
 
 New tests exercise the actual Nexus adapter/runtime and mocked game services.
-3,000 offer-decision and 3,000 result-diff comparisons run against the supplied
-MemoryMode source on compatible represented inputs. Exact-role/source/budget and
-fresh-evidence guards have separate controls, not a claim of blanket parity.
-The ordinary 10,000-case reference comparison remains unchanged.
+Exact-role/source/budget and fresh-evidence guards have separate controls
+(`tests/prototype/echoweaver_orb_policy.lua` and the `orbs_*` tests). An earlier
+offline comparison with an outside addon's source (3,000 offer decisions,
+3,000 result diffs, and 10,000 ordinary decisions) is retired (2026-09-24);
+it was never a claim of blanket parity.
 
 All tests in this build use Lua 5.4 with the included compatibility shims. They are
 not a LuaJIT, native client, original upstream inventory, or independent review
@@ -97,3 +208,9 @@ result. No Orbs, player resources, live profiles, or game sessions were accessed
 Future native testing needs separate explicit consent, with an expendable approved
 source and a one-Orb limit first. An unresolved server operation must be handled
 in the game, not by deleting the marker or retrying a spend.
+
+## Local readiness and idle window work (2026-09-22)
+
+- **Start and persistence agree.** Orb preferences and the recovery receipt are written through the Store owner (`StoreAuthorityOwner.UpdateStateV1`). `Store.StateWriteStatus()` (read-only) states whether that write can be durable now: character identity unknown, saved data loading, database or character container missing, a newer schema, or a character row of another shape. Start is enabled only when it can be durable, and its reason names the case. An absent character row is not a refusal: the owner creates it at the explicit Orb write, and the Orb runtime then checks that the durable row holds the data (the owner also reports success for its transient fallback). Reading a view never creates or writes the row. No spend or choice is sent before its receipt is durable; if persistence fails after a spend may have been sent, the unresolved exposure stays.
+- **Idle window work.** One display refresh (every 0.25 s while the window is shown) makes one adapter read. The adapter builds availability rows only for the IDs a read is asked about (targets, owned copies, offered cards), with the same rules per row, instead of rebuilding the whole local Echo catalog on every read; nothing is kept between reads. The source list is prepared only while Advanced is open. Every action (Start, Resume, each spend and selection) reads again; the display snapshot authorizes nothing.
+- Measured offline with the review probe setup (1,000-row catalog, one idle second): before 8 reads, 8 full catalog traversals (8,000 row visits), 16 assignment lookups; after 4 reads, 0 traversals, 8 row builds, 4 assignment lookups. These are work counts, not native frame times.

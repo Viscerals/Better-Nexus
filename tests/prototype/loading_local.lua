@@ -13,7 +13,7 @@ assert(A.SetFirstLoadoutWishlistIdentity('Local planned',{{spellId=200001,qualit
 E.Show()
 assert(NexusEditorFrame:IsShown(),'actual Wishlist editor usable before shared ready')
 local before=sharedCalls
-H.Board({{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}})
+H.Board({{spellId=200001,quality=1},{spellId=200001,quality=1},{spellId=200021,quality=1}})
 H.Notify();H.Advance(.5)
 assert(A.Wishlist()~=nil and A.Owned().synced==true,'local plan and owned evidence real')
 SlashCmdList.NEXUS('auto');H.Advance(1.2)

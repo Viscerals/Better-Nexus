@@ -23,12 +23,22 @@ local function PositiveInteger(value, fallback)
     return math.floor(number)
 end
 
+-- #36: cut at a UTF-8 character boundary (Identity.Utf8Prefix, loaded
+-- earlier in the TOC), never inside a character.
+local function Prefix(text, maxBytes)
+    local identity = Nexus.Identity
+    if identity and type(identity.Utf8Prefix) == "function" then
+        return identity.Utf8Prefix(text, maxBytes)
+    end
+    return text:sub(1, maxBytes)
+end
+
 function DiagnosticHistory.SafeText(value, maxBytes)
     maxBytes = PositiveInteger(maxBytes, DEFAULT_TEXT_BYTES)
     local ok, text = pcall(tostring, value)
     if not ok then text = "<unprintable:" .. type(value) .. ">" end
     text = tostring(text or ""):gsub("[%c]", " ")
-    if #text > maxBytes then text = text:sub(1, maxBytes) end
+    if #text > maxBytes then text = Prefix(text, maxBytes) end
     return text
 end
 

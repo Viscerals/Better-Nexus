@@ -262,7 +262,7 @@ function Inbound.New(options)
     end
 
     local function HandleCompleteBuild(buildId, envelopeModified, fullData,
-            transportSender, context)
+            transportSender, context, channelOwnerSender)
         local json = base64Decode(fullData)
         if not json then
             noteOutcome(context, "rejected", "malformed")
@@ -276,6 +276,13 @@ function Inbound.New(options)
             noteOutcome(context, "rejected", "malformed")
             noteMalformed()
             log("RX", "REJECT '%s': JSON decode failed", tostring(buildId))
+            return false
+        end
+        -- A valid JSON scalar root (number, true, string) is not a record.
+        if type(data) ~= "table" then
+            noteOutcome(context, "rejected", "schema")
+            noteMalformed()
+            log("RX", "REJECT '%s': validation failed", tostring(buildId))
             return false
         end
         -- Retain the established rejection of pre-rename placeholder records.
@@ -321,7 +328,7 @@ function Inbound.New(options)
             return terminal
         end
         local committed, why = commitBuild(payload, transportSender,
-            context, Finish)
+            context, Finish, nil, channelOwnerSender)
         if settled then return terminal end
         if committed == nil and why == "ROOT_MUTATION_PENDING" then
             return false
@@ -329,7 +336,7 @@ function Inbound.New(options)
         return Finish(committed)
     end
 
-    local function HandleDpsTransfer(parts)
+    local function HandleDpsTransfer(parts, channelOwnerSender)
         local sender, transferId, spec, data =
             parts[2], parts[3], parts[4], parts[5]
         local context
@@ -369,10 +376,11 @@ function Inbound.New(options)
             local current = now()
             entry = {chunks={}, total=total, t0=current, lastSeen=current,
                 sender=sender, transferId=transferId, bytes=0, received=0,
-                context=context}
+                context=context, channelOwnerSender=channelOwnerSender}
             dpsInflight[key] = entry
         end
         if entry.total ~= total or entry.sender ~= sender
+            or entry.channelOwnerSender ~= channelOwnerSender
             or entry.transferId ~= transferId
             or not I.SameContext(entry.context, context) then
             dpsInflight[key] = nil
@@ -418,6 +426,9 @@ function Inbound.New(options)
         if type(record) == "table" then
             record, schemaReason = validateDpsPayload(record)
         end
+        -- A scalar root, or a validator result that is not a record, is the
+        -- ordinary schema rejection.
+        if type(record) ~= "table" then record = nil end
         if not record then
             noteDpsRejection(schemaReason or "schema")
             noteMalformed()
@@ -440,7 +451,11 @@ function Inbound.New(options)
                 tostring(sender))
             return false
         end
-        local committed = commitDps(record, sender, relayed, context)
+        -- Retain raw peer identity for response windows and diagnostics. Only
+        -- the admitted native realm-local channel route supplies this owner
+        -- context; every chunk must agree before it can reach durable storage.
+        local committed = commitDps(record, sender, relayed, context,
+            entry.channelOwnerSender)
         if committed then
             noteInbound({kind="dps_commit",sender=sender,
                 transferId=transferId,
@@ -450,7 +465,7 @@ function Inbound.New(options)
         return committed
     end
 
-    local function HandleBuildTransfer(parts, protocolSender)
+    local function HandleBuildTransfer(parts, protocolSender, channelOwnerSender)
         local buildId, lastMod, chunkSpec, data =
             parts[3], parts[4], parts[5], parts[6]
         local context
@@ -484,7 +499,7 @@ function Inbound.New(options)
             if TransferBlocked("build", key) then return false end
             if total == 1 then
                 return HandleCompleteBuild(buildId, lastMod, data,
-                    protocolSender, context)
+                    protocolSender, context, channelOwnerSender)
             end
             I.CleanExpired()
             if not CanStartTransfer(protocolSender) then
@@ -496,12 +511,16 @@ function Inbound.New(options)
             local current = now()
             entry = {chunks={}, total=total, t0=current, lastSeen=current,
                 buildId=buildId, lastMod=lastMod, sender=protocolSender,
-                bytes=0, received=0,context=context}
+                bytes=0, received=0,context=context,
+                channelOwnerSender=channelOwnerSender}
             buildInflight[key] = entry
         end
         if total ~= entry.total or buildId ~= entry.buildId
             or protocolSender ~= entry.sender
             or tostring(lastMod) ~= tostring(entry.lastMod)
+            -- Every chunk must carry the same admitted channel authority.
+            -- An addon/direct chunk cannot borrow it from a native chunk.
+            or channelOwnerSender ~= entry.channelOwnerSender
             or not I.SameContext(entry.context, context) then
             buildInflight[key] = nil
             RememberBlockedTransfer("build", key)
@@ -544,10 +563,10 @@ function Inbound.New(options)
         observe("build_transfer_complete", {id=buildId,peer=protocolSender,
             chunks=entry.total,bytes=#full,outcome="complete"})
         return HandleCompleteBuild(buildId, lastMod, full, protocolSender,
-            context)
+            context, entry.channelOwnerSender)
     end
 
-    function I.HandleIncoming(text, sender)
+    function I.HandleIncoming(text, sender, channelOwnerSender)
         if type(text) ~= "string" then return false end
         local claimedCode = text:match("^([^|]+)")
         if not peerCodes[claimedCode] then return false end
@@ -576,6 +595,20 @@ function Inbound.New(options)
                 return rejectIncoming("invalid presence")
             end
             return acceptPeer(protocolSender, parts[3])
+        end
+
+        -- WLCP|sender|caps|nonce: advertised support for a representation
+        -- (docs/P1_7_LOCKED_ROLE_WIRE.md). It is noted for this transport
+        -- sender only and grants nothing else.
+        if codes.capability and code == codes.capability then
+            local caps, nonce = parts[3], parts[4]
+            if #parts ~= 4 or type(caps) ~= "string" or #caps > 64
+                or not caps:match("^[%w,_%-]+$") or type(nonce) ~= "string"
+                or #nonce < 6 or #nonce > 16 or not nonce:match("^[%l%d]+$") then
+                return rejectIncoming("invalid capability")
+            end
+            if type(options.noteCapability) ~= "function" then return false end
+            return options.noteCapability(protocolSender, caps, nonce) and true or false
         end
 
         if code == codes.request then
@@ -766,14 +799,16 @@ function Inbound.New(options)
             if #parts ~= 5 and #parts ~= 8 then
                 return rejectIncoming("invalid DPS transfer")
             end
-            if HandleDpsTransfer(parts) then return acceptPeer(protocolSender) end
+            if HandleDpsTransfer(parts, channelOwnerSender) then
+                return acceptPeer(protocolSender)
+            end
             return false
         end
 
         if code ~= codes.build or (#parts ~= 6 and #parts ~= 8) then
             return rejectIncoming("invalid build transfer")
         end
-        return HandleBuildTransfer(parts, protocolSender)
+        return HandleBuildTransfer(parts, protocolSender, channelOwnerSender)
     end
 
     function I.Reset()

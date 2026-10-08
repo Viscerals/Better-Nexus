@@ -1,13 +1,25 @@
 -- Manual update notices. This module performs no network request, downloads
 -- nothing and installs nothing.
 --
--- Two kinds of evidence, never mixed:
+-- Release evidence has one source only:
 --   "bundled-release"  release metadata shipped inside this package. Trusted.
 --                      A fixed file cannot learn a release made after it.
---   "peer-advisory"    a valid newer version stated by a Sync peer in the
---                      existing request version field. It is an unverified
---                      report. It never proves that a release exists, however
---                      high it is and however many peers repeat it.
+-- A version stated by a Sync peer is a bounded session DIAGNOSTIC only
+-- (Updates.PeerObservations). It never proves that a release exists, however
+-- high it is, however many peers repeat it and whatever metadata it carries,
+-- so it never becomes a release candidate, never replaces or hides bundled
+-- evidence and is never saved (2026-09-21: a peer stating "1.96.6" was
+-- announced as a newer release). Without bundled evidence the state is
+-- "unknown" with the configured Releases page.
+--
+-- 2026-09-23, authorized narrowing of that rule for ONE labelled case: an
+-- announcement with the exact public test shape, in the series this public
+-- test installation is in, with a higher test number, is shown as a
+-- session-only UNVERIFIED HINT (Updates.PublicTestHint). A hint is not release
+-- evidence and says so: it never states that GitHub was checked, never asserts
+-- that the build exists or is safe, never carries a peer-supplied link, never
+-- raises the trusted HUD badge, never becomes the candidate, and is never
+-- written to saved data. Everything else a peer can say stays silent.
 -- The comparison is always against the actual installed identity
 -- (Nexus.ReleaseIdentity): release series by standard SemVer precedence, then
 -- the numeric test number inside one series. The commit suffix never orders.
@@ -18,20 +30,59 @@ local Updates = {}
 Nexus.Updates = Updates
 
 local callbacks = {}
+-- Saved-data maintenance of the update keys (notice sanitation, the one-time
+-- peer-advisory quarantine, the legacy dismissed-list conversion and a new
+-- dismissal) happens only when saved data may really be written. Two
+-- conditions must hold: the start-up that initialized this module stated that
+-- its session may write, and the saved-data owner does not refuse writes at
+-- that moment. A refused shared catalog and a read-only saved format therefore
+-- keep every stored update key exactly as found, also through /nexus update,
+-- which answers before start-up completes. An owner that is merely still
+-- loading is an early state of a valid owner, not a refusal, so ordinary
+-- upkeep is unchanged there. The bundled release notice is evaluated and shown
+-- in every case.
+local sessionPersists = true
+local function CanPersist()
+    if not sessionPersists then return false end
+    local Store = Nexus.Store
+    -- No saved-data owner is loaded at all (standalone package checks).
+    if type(Store) ~= "table" or type(Store.StateWriteStatus) ~= "function" then
+        return true
+    end
+    local ok, status = pcall(Store.StateWriteStatus)
+    if not ok or type(status) ~= "table" then return false end
+    return status.mode ~= "unavailable"
+end
 local notifiedTargets = {}            -- session only: one chat notice per target
-local sessionBest = {}                -- best peer report of this session, per kind
+local hintTarget = nil                -- session only: the highest reported public test
+-- key -> the order it was remembered in. ONE structure per set, so nothing can
+-- report the bound of a list beside the map that actually holds the memory.
+local hintNotified, hintDismissed = {}, {}
+local hintSequence = 0
+local hintNotices = 0
 local peerObservations, peerObservationOrder = {}, {}
 local MAX_PEER_OBSERVATIONS = 32
 local MAX_SESSION_NOTICES = 3         -- chat lines about updates per session
-local MAX_SESSION_ADVISORIES = 8      -- quick stored changes per kind and session
-local ADVISORY_SLOW_SECONDS = 300     -- after that: one change per kind in this time
 local MAX_DISMISSED = 8
 local sessionNotices = 0
-local sessionAdvisories, lastAdvisoryAt = {}, {}
 local MAX_TEST = 2147483647
 local BUNDLED_AUTHORITY = "bundled-release"
+-- A public-test HINT is a peer report that has the exact public test shape and
+-- is newer than this installation inside the same release series. It is shown
+-- as an explicitly unverified hint, separately from bundled release
+-- information, and it is never stored, never a candidate and never authority:
+-- a syntactically perfect announcement can still be false.
+local HINT_AUTHORITY = "peer-report-unverified"
+local MAX_HINT_NOTICES = 2            -- chat lines about hints per session
+-- Every other structure in this file is bounded, and so are these two: a peer
+-- can raise the reported number as often as it likes, and each raise is a new
+-- key. Only the newest keys are kept, which is all that "already seen" and
+-- "already announced" ever need - the hint they describe is the highest one.
+local MAX_HINT_KEYS = 8
+-- The status is read in a chat line and in a popup, so it is kept to short
+-- lines instead of one long sentence.
+local LINE = "\n"
 local BUNDLED_UNAVAILABLE = "bundled-release-unavailable"
-local PEER_ADVISORY = "peer-advisory"
 local DEFAULT_URL = "https://github.com/Viscerals/Better-Nexus/releases"
 
 local function Release()
@@ -80,8 +131,8 @@ local function Series(parsed)
     return text .. "-" .. pre[1].text .. "." .. pre[2].text
 end
 
--- What a PEER may report. Anything else is kept as a bounded diagnostic
--- observation only:
+-- The two shapes in which a peer version states a release. Used only to
+-- classify the diagnostic observation; it is never release evidence:
 --   stable release     X.Y.Z             no prerelease, no build metadata
 --   public test build  X.Y.Z-word.N+test.M
 -- A prerelease without a public test number is not a public build: older
@@ -173,7 +224,7 @@ local function Candidate(parsed, test, authority, observedAt, anyChannel)
     }
 end
 
-local function BundledCandidate()
+local function BundledCandidate(anyChannel)
     local release = Release()
     local parsed = Parse(release.availableVersion)
     if not parsed then return nil end
@@ -181,7 +232,7 @@ local function BundledCandidate()
     local stated = tonumber(release.availableTest)
     if not test and stated and stated >= 1 and stated <= MAX_TEST
         and stated == math.floor(stated) then test = stated end
-    return Candidate(parsed, test, BUNDLED_AUTHORITY, release.availableObservedAt)
+    return Candidate(parsed, test, BUNDLED_AUTHORITY, release.availableObservedAt, anyChannel)
 end
 
 -- A stored notice from an older client that took a peer version as release
@@ -219,72 +270,54 @@ local function SanitizeStoredNotice(bundled)
     bundled.observedAt = stored.observedAt
 end
 
--- (The header comment above states the two evidence kinds.)
--- The stored advisory has one slot for the best reported test build and one
--- for the best reported stable release, so a stable-only user is never shown
--- a test build and never loses a stable report behind one. A slot holds a
--- validated version, a number and fixed words: no peer name, no peer text, no
--- link. Every read checks it again against the installed identity, so a manual
--- update clears it.
-local SLOT = {test="testBuild", stable="stableRelease"}
-local function StoredSlot(kind, anyChannel)
-    NexusDB = NexusDB or {}
-    local root = NexusDB.updateAdvisory
-    if type(root) ~= "table" or root.authority ~= PEER_ADVISORY then
-        NexusDB.updateAdvisory = nil
-        return nil
-    end
-    local stored = root[SLOT[kind]]
-    if stored == nil then return nil end
-    local parsed = type(stored) == "table" and type(stored.version) == "string"
-        and Parse(stored.version) or nil
-    local test = type(stored) == "table" and stored.test or nil
-    if test ~= nil and (type(test) ~= "number" or test < 1 or test > MAX_TEST
-        or test ~= math.floor(test) or kind == "stable") then parsed = nil end
-    local reportable = parsed and not parsed.build and Series(parsed) ~= nil
-        and (parsed.prerelease == nil or test ~= nil)
-    local candidate = reportable
-        and Candidate(parsed, test, PEER_ADVISORY, stored.observedAt, true) or nil
-    if not candidate or candidate.kind ~= kind then
-        root[SLOT[kind]] = nil               -- malformed, or no longer newer than this installation
-        return nil
-    end
-    if not anyChannel and not Wanted(kind) then return nil end
-    return candidate
+-- A peer advisory stored by an earlier build (NexusDB.updateAdvisory) is not
+-- release evidence. It is moved once into a bounded diagnostic record and is
+-- never read for a notice. Nothing else is touched: settings, preference,
+-- dismissals and bundled notices stay.
+local function Bounded(value)
+    if type(value) == "string" then return #value <= 64 and value or value:sub(1, 64) end
+    if type(value) == "number" then return value end
+    return nil
 end
-
-local function StoredAdvisory()
-    local test, stable = StoredSlot("test"), StoredSlot("stable")
-    -- What peers state in this session is shown before a report that was only
-    -- kept from an earlier session: an old false report must not hide it.
-    local liveTest = (test and sessionBest.test and sessionBest.test.key == test.key) and true or false
-    local liveStable = (stable and sessionBest.stable and sessionBest.stable.key == stable.key) and true or false
-    if liveTest ~= liveStable then return liveTest and test or stable end
-    if test and stable then return Better(test, stable) and test or stable end
-    return test or stable
+local function QuarantineStoredAdvisory()
+    NexusDB = NexusDB or {}
+    local stored = NexusDB.updateAdvisory
+    if stored == nil then return end
+    local record = {reason="peer report is not release evidence"}
+    if type(stored) == "table" then
+        for _, slot in ipairs({"testBuild", "stableRelease"}) do
+            local row = stored[slot]
+            if type(row) == "table" then
+                record[slot] = {version=Bounded(row.version), test=Bounded(row.test),
+                    observedAt=Bounded(row.observedAt)}
+            end
+        end
+    end
+    -- One earlier record is kept (one level), as SanitizeStoredNotice does.
+    local previous = NexusDB.updateAdvisoryQuarantine
+    if type(previous) == "table" then
+        previous.previousQuarantine = nil
+        record.previousQuarantine = previous
+    end
+    NexusDB.updateAdvisoryQuarantine = record
+    NexusDB.updateAdvisory = nil
 end
 
 local function Current()
     local bundled = BundledCandidate()
-    SanitizeStoredNotice(bundled)
-    local advisory = StoredAdvisory()
-    -- Trusted evidence wins unless the unverified report is strictly newer.
-    if bundled and not (advisory and Better(advisory, bundled)) then return bundled end
-    return advisory or bundled
+    if CanPersist() then
+        SanitizeStoredNotice(bundled)
+        QuarantineStoredAdvisory()
+    end
+    return bundled
 end
 
 local function Message(candidate)
     local installed = Installed()
-    local you = " You have " .. installed.display .. "."
-    if candidate.authority == BUNDLED_AUTHORITY then
-        return (candidate.kind == "stable" and "New Nexus release available: "
-            or "New Nexus test build available: ") .. candidate.display .. "." .. you
-            .. " Installation is manual: /nexus update shows the Releases page."
-    end
-    return (candidate.kind == "stable" and "A newer Nexus release was reported: "
-        or "A newer Nexus test build was reported: ") .. candidate.display .. "." .. you
-        .. " Check GitHub Releases before updating. This report is not verified."
-        .. " /nexus update shows the Releases page."
+    return (candidate.kind == "stable" and "New Nexus release available: "
+        or "New Nexus test build available: ") .. candidate.display .. "."
+        .. " You have " .. installed.display .. "."
+        .. " Installation is manual: /nexus update shows the Releases page."
 end
 
 -- Seen targets, newest last, bounded. A target that was dismissed stays
@@ -292,7 +325,10 @@ end
 local function Dismissed(key)
     NexusDB = NexusDB or {}
     local list = NexusDB.updateDismissed
-    if type(list) == "string" then list = {list}; NexusDB.updateDismissed = list end
+    if type(list) == "string" then
+        list = {list}
+        if CanPersist() then NexusDB.updateDismissed = list end
+    end
     if type(list) ~= "table" then return false end
     for i = math.max(1, #list - MAX_DISMISSED + 1), #list do
         if list[i] == key then return true end
@@ -302,8 +338,8 @@ end
 
 local function MaybeNotify(candidate)
     if type(candidate) ~= "table" or not Updates.IsEnabled() then return false end
+    if candidate.authority ~= BUNDLED_AUTHORITY then return false end
     if notifiedTargets[candidate.key] or Dismissed(candidate.key) then return false end
-    -- A peer that raises its number in every request cannot fill the chat.
     if sessionNotices >= MAX_SESSION_NOTICES then return false end
     if type(callbacks.notify) == "function" then
         local ok = pcall(callbacks.notify, candidate.display, Updates.ReleaseUrl(), Message(candidate))
@@ -323,17 +359,118 @@ end
 
 function Updates.Init(nextCallbacks)
     callbacks = type(nextCallbacks) == "table" and nextCallbacks or {}
-    notifiedTargets, sessionBest = {}, {}
-    sessionNotices, sessionAdvisories, lastAdvisoryAt = 0, {}, {}
+    sessionPersists = callbacks.persist ~= false
+    notifiedTargets = {}
+    sessionNotices = 0
+    hintTarget, hintNotices, hintSequence = nil, 0, 0
+    hintNotified, hintDismissed = {}, {}
     peerObservations, peerObservationOrder = {}, {}
     local settings = Settings()
     if settings.updateNotifications == nil then settings.updateNotifications = true end
     Updates.Reevaluate()
 end
 
+-- The one shape that can become a hint: a public test build, in the series
+-- this installation is in, with a higher test number than this installation.
+-- Everything else is excluded here rather than later: a plain version, an
+-- internal or development announcement, a malformed or out-of-range test
+-- identifier, an older or equal test, and any announcement received by an
+-- installation that is not itself a public test package - a development
+-- checkout and an internal package are not placed in a public series by a peer.
+-- The commit suffix never participates: the comparison is the release series by
+-- SemVer precedence, then the numeric test number.
+local function HintCandidate(parsed, test)
+    if not test or not PeerReportable(parsed, test) then return nil end
+    local series = Series(parsed)
+    if not series then return nil end
+    local installed = Installed()
+    if installed.channel ~= "public-test" then return nil end
+    if type(installed.test) ~= "number" then return nil end
+    if Nexus.Version.Compare(parsed, installed.version) ~= 0 then return nil end
+    if test <= installed.test then return nil end
+    return {version=series, test=test, display=Display(series, test),
+        key=TargetKey(series, test), authority=HINT_AUTHORITY, verified=false}
+end
+
+local function HintMessage(hint)
+    return "Another player's client reports a newer public test build: "
+        .. hint.display .. "."
+        .. " UNVERIFIED: Nexus did not check GitHub and cannot confirm that this"
+        .. " build exists or is safe."
+        .. " Check the Releases page yourself: /nexus update."
+end
+
+-- One bounded map of keys, each stamped with when it was remembered.
+-- Remembering that a hint was seen or announced must never be a way to grow
+-- this session's memory, so the oldest stamp is dropped once the map is full.
+local function Remember(set, key)
+    if set[key] then return end
+    hintSequence = hintSequence + 1
+    set[key] = hintSequence
+    local count, oldestKey, oldestStamp = 0, nil, nil
+    for entry, stamp in pairs(set) do
+        count = count + 1
+        if oldestStamp == nil or stamp < oldestStamp then
+            oldestKey, oldestStamp = entry, stamp
+        end
+    end
+    if count > MAX_HINT_KEYS and oldestKey ~= nil then set[oldestKey] = nil end
+end
+
+-- Announced at most once per target and at most twice per session. A repeated
+-- report of the same target adds nothing and never revives a dismissal.
+local function MaybeHintNotice()
+    if not hintTarget or not Updates.IsEnabled() then return false end
+    if Updates.Preference() == "stable" then return false end
+    if hintNotified[hintTarget.key] ~= nil
+        or hintDismissed[hintTarget.key] ~= nil then return false end
+    if hintNotices >= MAX_HINT_NOTICES then return false end
+    if type(callbacks.notify) == "function" then
+        local ok = pcall(callbacks.notify, hintTarget.display, Updates.ReleaseUrl(),
+            HintMessage(hintTarget))
+        if not ok then return false end
+    end
+    Remember(hintNotified, hintTarget.key)
+    hintNotices = hintNotices + 1
+    return true
+end
+
+-- The hint as the status, the menu and the popup may show it, or nil. Read
+-- through the current preference and the current installed identity, so a
+-- stable-only user never receives a test hint and a hint that this
+-- installation has caught up with disappears by itself.
+function Updates.PublicTestHint()
+    if not hintTarget or not Updates.IsEnabled() then return nil end
+    if Updates.Preference() == "stable" then return nil end
+    local installed = Installed()
+    if installed.channel ~= "public-test" or type(installed.test) ~= "number"
+        or hintTarget.test <= installed.test then return nil end
+    return {version=hintTarget.version, test=hintTarget.test,
+        display=hintTarget.display, key=hintTarget.key,
+        reports=hintTarget.reports, observedAt=hintTarget.observedAt,
+        source=hintTarget.source, authority=HINT_AUTHORITY, verified=false,
+        dismissed=hintDismissed[hintTarget.key] ~= nil}
+end
+
+-- Seen. No further chat line for this hint in this session. Nothing is saved:
+-- a hint is session state, so a read-only or failed start-up gains no write
+-- from dismissing one.
+function Updates.DismissHint()
+    local hint = Updates.PublicTestHint()
+    if not hint then return false end
+    Remember(hintDismissed, hint.key)
+    Remember(hintNotified, hint.key)
+    return true
+end
+
+
 -- One accepted Sync peer version. `version` is the parsed table or the wire
 -- text that the inbound validator already accepted; `source` is the sender and
--- stays in the bounded session list only.
+-- stays in the bounded session list only. A DIAGNOSTIC observation: nothing is
+-- written to saved data, nothing is reevaluated and no notice is shown.
+-- `reported` states whether the version has one of the two release shapes and
+-- is newer than this installation ("test" or "stable"); that is not evidence
+-- that such a release exists.
 function Updates.Observe(version, source)
     local parsed = Parse(version)
     if type(parsed) ~= "table" or type(parsed.major) ~= "number" then
@@ -348,46 +485,49 @@ function Updates.Observe(version, source)
             peerObservations[removed] = nil
         end
     end
+    local test = TestNumber(parsed)
+    local reported = nil
+    if PeerReportable(parsed, test) then
+        local candidate = Candidate(parsed, test, "peer-observation", 0, true)
+        reported = candidate and candidate.kind or nil
+    end
+    local observedAt = time and tonumber(time()) or 0
     peerObservations[source] = {
         version=parsed.normalized,
-        observedAt=time and tonumber(time()) or 0,
+        observedAt=observedAt,
         source=source,
         authority="peer-observation",
+        reported=reported,
     }
+    -- Same intake, no extra traffic: the hint is derived from the observation
+    -- this client already accepted. Only the highest reported test is kept,
+    -- and a repeat of the one already held is counted, not re-announced.
+    local hint = HintCandidate(parsed, test)
+    if hint then
+        if not hintTarget or hint.test > hintTarget.test then
+            hint.reports, hint.observedAt, hint.source = 1, observedAt, source
+            hintTarget = hint
+            MaybeHintNotice()
+        elseif hint.key == hintTarget.key then
+            hintTarget.reports = math.min((hintTarget.reports or 1) + 1, 9999)
+            MaybeHintNotice()
+        end
+    end
+    return true, "peer observation"
+end
 
-    local test = TestNumber(parsed)
-    if not PeerReportable(parsed, test) then return true, "peer observation" end
-    local candidate = Candidate(parsed, test, PEER_ADVISORY, time and time() or 0, true)
-    if not candidate then return true, "peer observation" end
-    -- The best report of THIS session replaces a report kept from an earlier
-    -- session, also a higher one: an old false report must not hide what
-    -- peers state now. The same or an older target changes nothing.
-    local best = sessionBest[candidate.kind]
-    if best and not Better(candidate, best) then
-        return true, "peer observation"
-    end
-    -- Bounded per kind, so false test reports cannot stop a stable report.
-    -- After the quick changes the rate is slow, never zero: a peer that raises
-    -- its number in every request cannot fill the saved data, and an honest
-    -- later report is still recorded in the same session.
-    local kind, now = candidate.kind, (GetTime and GetTime()) or 0
-    local used = sessionAdvisories[kind] or 0
-    if used >= MAX_SESSION_ADVISORIES
-        and now - (lastAdvisoryAt[kind] or -math.huge) < ADVISORY_SLOW_SECONDS then
-        return true, "peer observation"
-    end
-    sessionAdvisories[kind], lastAdvisoryAt[kind] = used + 1, now
-    sessionBest[candidate.kind] = candidate
-    NexusDB = NexusDB or {}
-    local root = type(NexusDB.updateAdvisory) == "table"
-        and NexusDB.updateAdvisory.authority == PEER_ADVISORY and NexusDB.updateAdvisory or {}
-    root.authority = PEER_ADVISORY
-    root[SLOT[candidate.kind]] = {
-        version=candidate.version, test=candidate.test, observedAt=candidate.observedAt,
-    }
-    NexusDB.updateAdvisory = root
-    Updates.Reevaluate()
-    return true, "peer advisory"
+-- What this session is holding for hints. Diagnostic only: counts, no text,
+-- so that the bounds can be observed instead of assumed. There is exactly ONE
+-- structure per set, so nothing beside it can report a bound it does not have.
+local function size(map)
+    local n = 0
+    for _ in pairs(map) do n = n + 1 end
+    return n
+end
+function Updates.HintDiagnostics()
+    return {notices=hintNotices, notified=size(hintNotified),
+        dismissed=size(hintDismissed), maxKeys=MAX_HINT_KEYS,
+        maxNotices=MAX_HINT_NOTICES}
 end
 
 function Updates.PeerObservations()
@@ -398,6 +538,7 @@ function Updates.PeerObservations()
             out[#out + 1] = {
                 version=row.version,observedAt=row.observedAt,
                 source=row.source,authority=row.authority,
+                reported=row.reported,
             }
         end
     end
@@ -428,32 +569,55 @@ function Updates.Status()
     local installed = Installed()
     local enabled = Updates.IsEnabled()
     local candidate = Updates.GetCandidate()
+    local hint = Updates.PublicTestHint()
     local status = {
         installed=installed.display, installedLabel=installed.label,
         channel=installed.channel,
         channelLabel=CHANNEL_LABEL[installed.channel] or installed.channel,
         preference=Updates.Preference(), enabled=enabled,
         url=Updates.ReleaseUrl(), candidate=enabled and candidate or nil,
+        hint=enabled and hint or nil,
     }
     local have = "Installed: " .. installed.display .. " (" .. status.channelLabel
         .. (installed.label ~= "source" and (", " .. installed.label) or "") .. ")."
+    -- Only an installation that can be placed in a public test series can
+    -- receive a hint at all, so only it is told that none arrived.
+    local listens = enabled and Updates.Preference() ~= "stable"
+        and installed.channel == "public-test" and type(installed.test) == "number"
     if not enabled then
         status.state, status.menu = "disabled", "Update notices off - open Releases page"
         status.detail = have .. " Update notices are off."
+    elseif not candidate and hint then
+        -- A hint is never trusted release information, so it never becomes the
+        -- candidate, never hides bundled evidence and says what it is.
+        status.state = "hint"
+        status.menu = "Newer public test reported: " .. hint.display .. " (unverified)"
+        status.detail = have
+            .. LINE .. "Newer public test reported: " .. hint.display .. "."
+            .. LINE .. "Reported by another client; not checked against GitHub."
+            .. LINE .. "Check the Better Nexus Releases page before updating."
     elseif not candidate then
         status.state, status.menu = "unknown", "Update status unknown - open Releases page"
-        status.detail = have .. " No newer build was reported to this client. That is not proof that this build is the latest."
-    elseif candidate.verified then
+        -- Bundled evidence that only the stable-only preference hides is named.
+        local hidden = Updates.Preference() == "stable" and BundledCandidate(true) or nil
+        status.detail = have .. (hidden
+            and (" A newer test build (" .. hidden.display .. ") is not announced because notices are set to stable releases only.")
+            or " This client has no release information about a newer build.")
+            .. (listens and " No newer public-test announcement was received." or "")
+            .. " Nexus does not check GitHub, and versions stated by other players' clients are not release information."
+            .. " That is not proof that this build is the latest: check the Releases page."
+    else
         status.state = "available"
         status.menu = "Update available: " .. candidate.display
         status.detail = have .. " " .. (candidate.kind == "stable" and "New Nexus release available: "
             or "New Nexus test build available: ") .. candidate.display .. "."
-    else
-        status.state = "reported"
-        status.menu = "Newer build reported (unverified): " .. candidate.display
-        status.detail = have .. " " .. (candidate.kind == "stable" and "A newer Nexus release was reported: "
-            or "A newer Nexus test build was reported: ") .. candidate.display
-            .. ". This report comes from another player's client and is not verified. Check GitHub Releases before updating."
+        -- Trusted information is never replaced or hidden by a hint; a hint
+        -- that names something else is added after it, still unverified.
+        if hint and hint.key ~= candidate.key then
+            status.detail = status.detail
+                .. LINE .. "Another client also reports " .. hint.display
+                .. " (unverified, not checked against GitHub)."
+        end
     end
     status.detail = status.detail .. " Notices: "
         .. (status.preference == "stable" and "stable releases only." or "stable releases and public test builds.")
@@ -465,13 +629,22 @@ end
 function Updates.Dismiss()
     local candidate = Current()
     if not candidate then return false end
+    notifiedTargets[candidate.key] = true
+    -- Without a durable write the dismissal holds for this session only. The
+    -- saved list is never replaced by a partial copy of itself, so a dismissal
+    -- saved by an older client in the single-entry form is not dropped.
+    if not CanPersist() then return true end
     if not Dismissed(candidate.key) then
-        local list = type(NexusDB.updateDismissed) == "table" and NexusDB.updateDismissed or {}
+        local list = NexusDB.updateDismissed
+        -- Dismissed() has already converted a saved single-entry string when
+        -- the owner allows it. The branch stays as the local guarantee that
+        -- the older entry is carried over rather than replaced.
+        if type(list) == "string" then list = {list} end
+        if type(list) ~= "table" then list = {} end
         list[#list + 1] = candidate.key
         while #list > MAX_DISMISSED do table.remove(list, 1) end
         NexusDB.updateDismissed = list
     end
-    notifiedTargets[candidate.key] = true
     return true
 end
 

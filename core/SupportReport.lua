@@ -1,0 +1,1717 @@
+-- Nexus: core/SupportReport.lua
+-- Builds the two things a player can hand to support: a compact summary they
+-- select and copy, and a detached report snapshot the isolated NexusSupport
+-- component can store so WoW writes it to its own file at the next normal save
+-- boundary.
+--
+-- What this file does NOT do: it opens no file, touches no clipboard, sends
+-- nothing anywhere, never reloads or logs out, and writes nothing into NexusDB.
+-- Preparing a report changes a value in memory inside the helper addon; the
+-- client writes the file later, and this code never claims otherwise.
+--
+-- Privacy: the default report is ONE incident plus the context that incident
+-- needs. Character identity is carried as a session alias unless the report is
+-- the extended one, which is labelled private before it is prepared. No
+-- credentials, account names, chat transcripts, unrelated profiles or other
+-- players' records are collected here.
+
+Nexus = Nexus or {}
+local M = {}
+Nexus.SupportReport = M
+
+local FORMAT = 1
+local SUMMARY_MAX_BYTES = 8000
+local CHUNK_BYTES = 8 * 1024
+local TOTAL_BYTES = 1024 * 1024
+local STEP_LINES = 60
+
+M.FORMAT = FORMAT
+M.SUMMARY_MAX_BYTES = SUMMARY_MAX_BYTES
+M.CHUNK_BYTES = CHUNK_BYTES
+M.TOTAL_BYTES = TOTAL_BYTES
+
+local sessionSalt = nil
+local reportSequence = 0
+
+local function clock()
+    if type(time) == "function" then
+        local ok, value = pcall(time)
+        if ok and type(value) == "number" then return value end
+    end
+    return nil
+end
+
+-- A stable per-session alias, so two lines about the same character can be
+-- correlated without carrying the character and realm into an ordinary report.
+local function alias(value)
+    if sessionSalt == nil then
+        sessionSalt = 0
+        local okSeed, seed = pcall(function()
+            return tostring(clock() or 0) .. tostring(GetTime and GetTime() or 0)
+        end)
+        if not okSeed or type(seed) ~= "string" then seed = "session" end
+        for index = 1, #seed do
+            sessionSalt = (sessionSalt * 31 + seed:byte(index)) % 2147483647
+        end
+    end
+    local hash = sessionSalt
+    local text = tostring(value or "")
+    for index = 1, #text do
+        hash = (hash * 33 + text:byte(index)) % 2147483647
+    end
+    return string.format("session-%06d", hash % 1000000)
+end
+M.Alias = alias
+
+local function plain(value, limit)
+    if value == nil then return nil end
+    -- tostring runs a caller-supplied __tostring, which can raise. A field of
+    -- a status table is not allowed to take this report away.
+    local ok, converted = pcall(tostring, value)
+    if not ok or type(converted) ~= "string" then
+        converted = "unreadable " .. type(value)
+    end
+    return (converted:gsub("%c", " ")):sub(1, limit or 200)
+end
+
+-- plain() for a value that is going into a concatenation: never nil.
+local function shown(value, limit)
+    local text = plain(value, limit)
+    if text == nil or text == "" then return "unknown" end
+    return text
+end
+
+-- A retained incident value. The incident owner marks a value it had to
+-- shorten with a byte no caller can supply, because it escapes every control
+-- character a caller hands it; that byte is an IDENTITY device and must never
+-- reach a ticket, so it is read back here as the printable marker it stands
+-- for. Everything else goes through plain() exactly as before.
+local function retained(value, limit)
+    -- nil is "not retained", exactly as plain() reports it: the callers here
+    -- fall back on that, and "nil" is not a value anyone retained.
+    if value == nil then return nil end
+    -- The same rule safeText applies: a heap address is not a retained value.
+    local kind = type(value)
+    if kind == "table" or kind == "function" or kind == "userdata"
+        or kind == "thread" then
+        return "unreadable " .. kind
+    end
+    local ok, text = pcall(tostring, value)
+    if not ok or type(text) ~= "string" then text = "unreadable " .. type(value) end
+    limit = limit or 200
+    local marker = text:match(string.char(1) .. ".*$")
+    if not marker then return plain(text, limit) end
+    -- The marker is the only statement that this value was shortened at all,
+    -- so it is the part that must survive this bound. The body yields to it.
+    local printable = plain("..." .. marker:sub(2), limit)
+    if #printable >= limit then return printable end
+    return plain(text:sub(1, #text - #marker), limit - #printable) .. printable
+end
+
+-- The report is copied out of an edit box and pasted into a ticket, so a pipe
+-- must survive as one pipe: an edit box shows its text literally, and a doubled
+-- pipe would reach support as part of a recorded label. Escaping belongs to the
+-- font strings on the page, which DO interpret pipe sequences.
+local function escape(value)
+    return (tostring(value or ""):gsub("|", "||"))
+end
+M.Escape = escape
+
+-- Simple, bounded, dependency-free checksum over the chunk texts in order. It
+-- detects a truncated or reordered copy. It is NOT authenticity and NOT proof
+-- that a server ever saw this report.
+local function checksum(chunks)
+    local a, b = 1, 0
+    for index = 1, #chunks do
+        local chunk = chunks[index]
+        for position = 1, #chunk do
+            a = (a + chunk:byte(position)) % 65521
+            b = (b + a) % 65521
+        end
+        a = (a + index) % 65521
+        b = (b + a) % 65521
+    end
+    return string.format("%04x%04x", b, a)
+end
+M.Checksum = checksum
+
+local function limits()
+    local okOwner, evidence = pcall(function()
+        local owner = Nexus and Nexus.LoadoutEvidence
+        return type(owner) == "table" and type(owner.SemanticLimits) == "function"
+            and owner.SemanticLimits or nil
+    end)
+    if okOwner and evidence then
+        local ok, value = pcall(evidence)
+        -- A partial answer is reported as far as it goes, never as "nil".
+        if ok and type(value) == "table" then
+            return {ordinary = value.ordinary or "not stated",
+                lockedRowStacks = value.lockedRowStacks or "not stated",
+                total = value.total or "not stated"}
+        end
+    end
+    return nil
+end
+
+-- The converter for a value going into a concatenation: never nil, never
+-- raising, always bounded, never carrying a control byte. `shown` and
+-- `retained` below give the same guarantees for their own cases. Any NEW
+-- concatenation in this file takes one of the three; a segment appended
+-- without one is how three separate reviews found the same defect.
+local function safeText(value, limit)
+    local kind = type(value)
+    -- A table, function or userdata converts to its heap address, which is
+    -- noise in a ticket and an implementation detail in a saved file.
+    if kind == "table" or kind == "function" or kind == "userdata"
+        or kind == "thread" then
+        return "unreadable " .. kind
+    end
+    local ok, text = pcall(tostring, value)
+    if not ok or type(text) ~= "string" then text = "unreadable " .. type(value) end
+    return (text:gsub("%c", " ")):sub(1, limit or 200)
+end
+
+-- The build label is an owner field like every other one, and it reaches the
+-- copied summary, the payload and the stored header. It gets the same
+-- treatment, not an exception for being "ours".
+-- A replaced UnitName can raise; the alias is not worth the summary.
+local function playerName()
+    local ok, name = pcall(function()
+        return UnitName and UnitName("player") or nil
+    end)
+    if not ok or type(name) ~= "string" or name == "" then return "unknown" end
+    return name
+end
+
+local function buildLabel()
+    -- The READ is protected, not only the value: a metatable on the owner
+    -- table can raise on the index itself.
+    local ok, label = pcall(function()
+        local release = Nexus and Nexus.Release
+        return release and release.buildLabel or nil
+    end)
+    if not ok or label == nil or label == "" then return "unknown" end
+    return safeText(label, 64)
+end
+
+local function counts(line, label, value, limit)
+    if type(value) ~= "table" then
+        line[#line + 1] = label .. ": not retained"
+        return
+    end
+    local text = label .. ": " .. safeText(value.ordinary or "?", 16) .. " ordinary, "
+        .. safeText(value.locked or "?", 16) .. " locked, "
+        .. safeText(value.total or "?", 16) .. " total"
+    if type(limit) == "table" then
+        text = text .. " (limits " .. safeText(limit.ordinary or "not stated", 16) .. "/"
+            .. safeText(limit.locked or "not stated", 16) .. "/"
+            .. safeText(limit.total or "not stated", 16)
+        -- The locked row ceilings, where the incident retained them: they
+        -- bound the locked role where no locked copy count does.
+        if limit.lockedRows ~= nil or limit.lockedRowStacks ~= nil then
+            text = text .. "; locked rows " .. safeText(limit.lockedRows or "not stated", 16)
+                .. ", " .. safeText(limit.lockedRowStacks or "not stated", 16)
+                .. " copies in one locked row"
+        end
+        text = text .. ")"
+    end
+    line[#line + 1] = text
+end
+
+-- A caller's incident, copied into the shape this file reads. Every field is
+-- taken inside one pcall, so a table whose own __index raises costs the
+-- incident, never the report. The owner's incidents are already plain tables;
+-- this exists because M.Summary and M.IncidentLines are public.
+local INCIDENT_FIELDS = {"id", "kind", "reason", "producer", "origin",
+    "operation", "ticket", "build", "category", "representation", "scope",
+    "detail", "occurrences", "firstAt", "lastAt", "committed", "affectedOmitted"}
+local COUNT_FIELDS = {"ordinary", "locked", "total"}
+local LIMIT_FIELDS = {"ordinary", "locked", "total", "lockedRows", "lockedRowStacks"}
+local function incidentShape(value)
+    if type(value) ~= "table" then return nil end
+    local out = {}
+    local ok = pcall(function()
+        for _, field in ipairs(INCIDENT_FIELDS) do out[field] = value[field] end
+        for name, fields in pairs({counts = COUNT_FIELDS, limits = LIMIT_FIELDS}) do
+            local source = value[name]
+            if type(source) == "table" then
+                local copy = {}
+                for _, field in ipairs(fields) do copy[field] = source[field] end
+                out[name] = copy
+            end
+        end
+        if type(value.readiness) == "table" then
+            local copy = {}
+            -- pairs() uses next(), which no metamethod can reach in 5.1.
+            for key, entry in pairs(value.readiness) do copy[key] = entry end
+            out.readiness = copy
+        end
+        if type(value.affected) == "table" then
+            local copy = {}
+            for index, tuple in ipairs(value.affected) do
+                if type(tuple) == "table" then
+                    copy[index] = {spellId=tuple.spellId, quality=tuple.quality,
+                        stacks=tuple.stacks, locked=tuple.locked == true or nil}
+                end
+            end
+            out.affected = copy
+        end
+    end)
+    if not ok then return nil end
+    return out
+end
+
+-- One incident, said plainly, with the failure-time facts first. Anything the
+-- owner did not retain says so instead of being filled in.
+function M.IncidentLines(incident, options)
+    options = type(options) == "table" and options or {}
+    incident = incidentShape(incident)
+    local out = {}
+    if type(incident) ~= "table" then
+        out[#out + 1] = "No incident was retained in this session."
+        return out
+    end
+    out[#out + 1] = "Incident: " .. (retained(incident.kind, 240) or "not retained")
+        .. " / " .. (retained(incident.reason, 240) or "not retained")
+    out[#out + 1] = "Producer: " .. (retained(incident.producer, 240) or "not retained")
+        .. "; origin: " .. (retained(incident.origin, 64) or "unknown")
+    if incident.operation or incident.ticket then
+        out[#out + 1] = "Operation: " .. (retained(incident.operation, 240) or "not retained")
+            .. (incident.ticket and ("; ticket " .. retained(incident.ticket, 240)) or "")
+    end
+    out[#out + 1] = "Build at failure: " .. (retained(incident.build, 240) or "not retained")
+        .. (incident.category and ("; category " .. retained(incident.category, 240)) or "")
+    out[#out + 1] = "Representation: " .. (retained(incident.representation, 64) or "unknown")
+    counts(out, "Counted at refusal", incident.counts, incident.limits)
+    if incident.readiness then
+        local parts = {}
+        for key, value in pairs(incident.readiness) do
+            parts[#parts + 1] = retained(key, 64) .. "=" .. retained(value, 240)
+        end
+        table.sort(parts)
+        out[#out + 1] = "Capture-time sources: " .. (#parts > 0
+            and table.concat(parts, ", ") or "not retained")
+    else
+        out[#out + 1] = "Capture-time sources: not retained"
+    end
+    if incident.committed == false then
+        out[#out + 1] = "Result: this write did not commit."
+    elseif incident.committed == true then
+        out[#out + 1] = "Result: this write committed."
+    else
+        out[#out + 1] = "Result: not retained."
+    end
+    if incident.scope then out[#out + 1] = "Scope: " .. retained(incident.scope, 240) end
+    if incident.detail then out[#out + 1] = "Detail: " .. retained(incident.detail, 240) end
+    out[#out + 1] = "Occurrences: " .. safeText(incident.occurrences or 1, 16)
+        .. (incident.firstAt and (" (first " .. safeText(incident.firstAt, 24)
+            .. ", last " .. safeText(incident.lastAt, 24) .. ")") or "")
+    if options.tuples ~= false and type(incident.affected) == "table"
+        and #incident.affected > 0 then
+        local rows = {}
+        for _, tuple in ipairs(incident.affected) do
+            rows[#rows + 1] = safeText(tuple.spellId or "?", 16)
+                .. "." .. safeText(tuple.quality or "?", 8)
+                .. "x" .. safeText(tuple.stacks or 1, 8)
+                .. (tuple.locked and "P" or "")
+        end
+        out[#out + 1] = "Affected copies retained at the boundary ("
+            .. #rows .. (incident.affectedOmitted
+                and (" shown, " .. safeText(incident.affectedOmitted, 16) .. " omitted") or "")
+            .. "): " .. table.concat(rows, " ")
+    elseif options.tuples ~= false then
+        out[#out + 1] = "Affected copies: not retained"
+    end
+    return out
+end
+
+-- The compact report. It is BUILT at this size: the incident and its context
+-- come first, and sections stop being added when the budget is reached. It is
+-- never a truncated copy of the extended report.
+-- What is guaranteed, exactly: every value that enters a line goes through
+-- safeText, shown or retained; the STORAGE COMPONENT - a separate addon, the
+-- one owner treated as adversarial here - is read only inside a pcall, one
+-- lookup and call at a time, and NOTHING it returns reaches a caller: its
+-- header is copied field by field and its verdict comes back as a boolean.
+-- A caller's incident is copied the same way. A poison sweep in the prototype
+-- suite checks all three, and the page escapes what it displays.
+-- What is NOT guaranteed: a table an owner RETURNS is read as an ordinary
+-- table. A status, a limits table, a start-up snapshot or an incident row
+-- whose own fields raise on __index is out of scope here, because the owners
+-- of those tables build them from scalars in this addon. The two exceptions
+-- are the storage component, which is a separate addon and whose returned
+-- tables ARE copied into a shape this file owns, and every value that reaches
+-- a line, which is converted whatever it is.
+function M.StartupSnapshot()
+    local ok, status = pcall(function()
+        return Nexus and Nexus.StartupStatus and Nexus.StartupStatus() or nil
+    end)
+    if not ok or type(status) ~= "table" then return nil end
+    return status
+end
+
+-- ONE projection of what the passive start-up owner retained, used by the
+-- copyable summary and by the prepared file. It reads that owner only: it
+-- initializes nothing, pumps nothing, rescans nothing and writes nothing.
+-- A start-up refusal is not a Lua error and not an incident, so it must be
+-- legible with zero of both.
+-- The catalog's retained capacity facts, read-only: no scan and no work.
+-- A refusal keeps the map where counting stopped; the maps after it were not
+-- read and are shown as "not read", and every count is a lower bound.
+function M.CatalogRefusalLines(facts)
+    local out = {}
+    if type(facts) ~= "table" or facts.component ~= "catalog"
+        or facts.counter == nil then return out end
+    out[#out + 1] = "  catalog refusal: map " .. shown(facts.map, 16)
+        .. ", counter " .. shown(facts.counter, 24) .. ", count "
+        .. shown(facts.count, 16) .. " (limit " .. shown(facts.limit, 16)
+        .. "), source " .. shown(facts.source, 16)
+    local counted = type(facts.counted) == "table" and facts.counted or nil
+    if counted then
+        local parts, stopped = {}, false
+        for _, entry in ipairs({{"overlay", "builds"}, {"bundled", "shipped"},
+            {"tombstone", "removal markers"}, {"barrier", "retention markers"}}) do
+            parts[#parts + 1] = entry[2] .. " "
+                .. (stopped and "not read" or shown(counted[entry[1]] or 0, 16))
+            if entry[1] == facts.map then stopped = true end
+        end
+        out[#out + 1] = "  keys counted before the stop (at least): "
+            .. table.concat(parts, ", ")
+            .. (counted.builds ~= nil
+                and ("; different builds " .. shown(counted.builds, 16)) or "")
+    end
+    return out
+end
+
+-- Capacity use of an admitted catalog and its session saturation record.
+-- Protected owner reads; nothing is counted here.
+function M.CatalogCapacityLines()
+    local out = {}
+    local catalog = Nexus and Nexus.BuildCatalog
+    local okStatus, st = pcall(function()
+        return catalog and type(catalog.Status) == "function" and catalog.Status() or nil
+    end)
+    if okStatus and type(st) == "table" and st.state == "ROOT_ADMITTED"
+        and st.readOnly ~= true and st.buildIdentityLimit ~= nil then
+        local retention = Nexus and Nexus.DataRetention
+        local okWaiting, waiting = pcall(function()
+            return retention and type(retention.MarkerFirstSeenCount) == "function"
+                and retention.MarkerFirstSeenCount() or nil
+        end)
+        out[#out + 1] = "  catalog capacity: different builds "
+            .. shown(st.buildIdentityCount, 16) .. "/" .. shown(st.buildIdentityLimit, 16)
+            .. ", removal markers " .. shown(st.tombstoneCount, 16) .. "/"
+            .. shown(st.tombstoneLimit, 16) .. ", retention markers "
+            .. shown(st.barrierCount, 16) .. "/" .. shown(st.barrierLimit, 16)
+            .. ((okWaiting and tonumber(waiting) and tonumber(waiting) > 0)
+                and (" (" .. shown(waiting, 16) .. " aging from first local observation)")
+                or "")
+    end
+    local okSaturation, record = pcall(function()
+        return catalog and type(catalog.SaturationSummary) == "function"
+            and catalog.SaturationSummary() or nil
+    end)
+    if okSaturation and type(record) == "table" then
+        local split = {}
+        for _, part in ipairs({{"refusedBuilds", "builds"},
+            {"refusedTombstones", "removal markers"},
+            {"refusedBarriers", "retention markers"}, {"refusedCatalog", "all identities"}}) do
+            if (tonumber(record[part[1]]) or 0) > 0 then
+                split[#split + 1] = part[2] .. " " .. shown(record[part[1]], 16)
+            end
+        end
+        out[#out + 1] = "  catalog full: " .. shown(record.refused, 16)
+            .. " new change(s) refused this session"
+            .. (#split > 0 and (" (" .. table.concat(split, ", ") .. ")") or "")
+            .. ", last " .. shown(record.reason, 32)
+            .. " (" .. shown(record.counter, 24) .. " " .. shown(record.count, 16)
+            .. ", limit " .. shown(record.limit, 16)
+            .. "); existing Community and Leaderboard data stay available"
+    end
+    return out
+end
+
+function M.StartupLines(status, extended)
+    if type(status) ~= "table" then return {} end
+    local failed = status.state == "failed"
+    local out = {}
+    out[#out + 1] = (failed and "STARTUP FAILED: state " or "Startup: state ")
+        .. shown(status.state, 32)
+        .. (status.coreReady ~= nil and ("; core ready " .. shown(status.coreReady, 16)) or "")
+        .. (status.phase ~= nil and ("; phase " .. shown(status.phase, 48)) or "")
+    if status.reason ~= nil and status.reason ~= false then
+        out[#out + 1] = "  reason: " .. shown(status.reason, 96)
+    end
+    local facts = type(status.failure) == "table" and status.failure or nil
+    if facts then
+        local row = {}
+        for _, field in ipairs({"stage", "detail", "cause", "component", "owner"}) do
+            if facts[field] ~= nil then
+                row[#row + 1] = field .. "=" .. shown(facts[field], 64)
+            end
+        end
+        if #row > 0 then out[#out + 1] = "  " .. table.concat(row, "; ") end
+        for _, line in ipairs(M.CatalogRefusalLines(facts)) do out[#out + 1] = line end
+        if facts.formatClass ~= nil or facts.formatVersion ~= nil then
+            out[#out + 1] = "  saved format: " .. shown(facts.formatClass, 24)
+                .. (facts.formatVersion ~= nil
+                    and (" version " .. shown(facts.formatVersion, 16)) or "")
+                .. (extended and facts.formatField ~= nil
+                    and (" (" .. shown(facts.formatField, 64) .. ")") or "")
+        end
+        local width = type(facts.keyWidth) == "table" and facts.keyWidth or nil
+        if width then
+            out[#out + 1] = "  refused key: " .. shown(width.path, 64)
+                .. ", depth " .. shown(width.depth, 8)
+                .. ", " .. shown(width.keyType, 16) .. " key of "
+                .. shown(width.keyBytes, 16) .. " bytes, limit "
+                .. shown(width.limit, 16)
+                .. ", path exception " .. shown(width.exception, 24)
+            out[#out + 1] = "  (the key, the character and the record contents are not included)"
+        end
+        if extended then
+            if facts.error ~= nil then
+                out[#out + 1] = "  owner error: " .. shown(facts.error, 160)
+            end
+            if facts.row ~= nil then
+                out[#out + 1] = "  selection row: " .. shown(facts.row, 16)
+            end
+            if facts.legacyClass ~= nil then
+                out[#out + 1] = "  legacy class: " .. shown(facts.legacyClass, 32)
+            end
+        end
+    end
+    for _, line in ipairs(M.CatalogCapacityLines()) do out[#out + 1] = line end
+    if failed then
+        out[#out + 1] = "  A start-up refusal is a business rule, not a Lua error"
+            .. " and not an incident: both histories can be empty."
+    end
+    return out
+end
+
+------------------------------------------------------------------------
+-- Recorded Lua errors
+------------------------------------------------------------------------
+
+-- The error owner keeps {timestamp, source, message} per entry, newest last.
+-- Only those three fields are read, each through a converter, so no other
+-- field of an entry reaches a ticket, and a malformed entry costs only its own
+-- line. An entry is never handed to a converter whole: that turns the table
+-- into "unreadable table" instead of the error it holds.
+local ERROR_MESSAGE_BYTES = 240
+
+local function errorTime(value)
+    if type(value) ~= "number" or value ~= value or value <= 0
+        or value == math.huge then
+        return "time not recorded"
+    end
+    -- A wall-clock time is shown as UTC; anything smaller is not one.
+    if value >= 1000000000 and type(date) == "function" then
+        local ok, text = pcall(date, "!%Y-%m-%d %H:%M:%S", value)
+        if ok and type(text) == "string" then return safeText(text, 24) .. " UTC" end
+    end
+    return "t=" .. safeText(value, 24)
+end
+
+-- Bounded, and cut on a UTF-8 character boundary so a shortened message is
+-- still whole text; the "..." says it was shortened.
+local function errorMessage(value)
+    if value == nil then return "no message recorded" end
+    local text = safeText(value, 4096)
+    if #text <= ERROR_MESSAGE_BYTES then return text end
+    local cut = ERROR_MESSAGE_BYTES - 3
+    -- A character is at most 4 bytes: text that is not UTF-8 is still cut.
+    local floor = cut - 3
+    while cut > floor do
+        local nextByte = text:byte(cut + 1)
+        if nextByte < 0x80 or nextByte > 0xBF then break end
+        cut = cut - 1
+    end
+    return text:sub(1, cut) .. "..."
+end
+
+local function errorLine(entry, origin)
+    local ok, line = pcall(function()
+        local message, source, stamp
+        if type(entry) == "table" then
+            -- The older shape {error, t} is read the way the owner reads it.
+            message = entry.message
+            if message == nil then message = entry.error end
+            source = entry.source
+            stamp = entry.timestamp
+            if stamp == nil then stamp = entry.t end
+        elseif type(entry) == "string" then
+            message = entry
+        else
+            return "entry unreadable (" .. type(entry) .. ")"
+        end
+        if source == nil or source == "" then source = "unknown source" end
+        return errorTime(stamp) .. (origin and (", " .. origin) or "") .. ", "
+            .. safeText(source, 64) .. ": " .. errorMessage(message)
+    end)
+    if ok and type(line) == "string" then return line end
+    return "entry unreadable"
+end
+
+-- The history and how many of its newest entries were recorded this session,
+-- or nil when the owner cannot answer: "not available" is not "none".
+local function errorHistoryView()
+    local ok, view = pcall(function()
+        local errors = Nexus and Nexus.Errors
+        if type(errors) ~= "table" or type(errors.History) ~= "function" then return nil end
+        local history = errors.History()
+        if type(history) ~= "table" then return nil end
+        local okCount, count = pcall(function()
+            return type(errors.SessionCount) == "function" and errors.SessionCount() or nil
+        end)
+        count = okCount and tonumber(count) or nil
+        if count and count ~= count then count = nil end
+        if count then count = math.min(math.max(math.floor(count), 0), #history) end
+        return {history = history, total = #history, session = count}
+    end)
+    if ok and type(view) == "table" then return view end
+    return nil
+end
+
+local function errorSessionText(view)
+    return view.session and (view.session .. " this session") or "this session not known"
+end
+
+-- rank 1 is the newest entry.
+local function errorOrigin(view, rank)
+    if not view.session then return nil end
+    return rank <= view.session and "this session" or "earlier session"
+end
+
+-- The loadout line of the unresolved Orb action. Every value of the owner's answer is
+-- matched against a fixed list, a small whole number or an exact text form before it is
+-- shown. A value that fails is shown as "unreadable", "unread", "not reported" or "not
+-- recorded", or left out (a seen slot or a time that fails its own check, or that comes
+-- without a valid cause); it is never copied.
+local LOADOUT_CAUSE_TEXT = {
+    NO_ORIGINAL_SLOT = "no original slot in the record",
+    SLOT_DIFFERS = "slot differed (slot data received)",
+    SLOT_PUSHED = "slot pushed before the slot data",
+    SLOT_DIFFERS_UNVERIFIED = "slot differed (client reports no slot data)",
+}
+local LOADOUT_CHECK_TEXT = {SAME = "same", UNKNOWN = "waiting", CHANGED = "changed"}
+local UNMET_TEXT = {loadout = "loadout", choice = "choice"}
+local function slotNumber(value)
+    if type(value) == "number" and value == math.floor(value) and value >= 0 and value <= 65535 then
+        return value == 0 and 0 or value
+    end
+    return nil
+end
+-- The client clock time at which the hold was first set, in the same LOCAL form as the audit
+-- rows' time of day, with the date, and labelled "local" (the error times in this report are UTC
+-- and say so). Whole seconds from 2000-01-01 to 2100-01-01 (UTC) only; the same bounds are checked
+-- in core/OrbRuntime.lua (epochValue). `date` is a shared API: only an answer of the exact form
+-- YYYY-MM-DD HH:MM:SS is shown.
+local function clockText(epoch)
+    if type(epoch) ~= "number" or epoch ~= math.floor(epoch) or epoch < 946684800 or epoch > 4102444800 then
+        return nil
+    end
+    if type(date) ~= "function" then return nil end
+    local ok, text = pcall(date, "%Y-%m-%d %H:%M:%S", epoch)
+    if not ok or type(text) ~= "string"
+        or not text:find("^%d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d$") then
+        return nil
+    end
+    return text .. " local"
+end
+local function loadoutLine(view)
+    local original = "unreadable"
+    if view.originalSlotState == "absent" then original = "not recorded"
+    elseif view.originalSlotState == "recorded" and slotNumber(view.originalSlot) then
+        original = tostring(slotNumber(view.originalSlot))
+    end
+    local now = "unread"
+    if view.slotRead == true then
+        local slot = slotNumber(view.slotNow)
+        now = (slot and tostring(slot) or "not reported") .. " ("
+            .. (view.slotNowKnown == true and "data received"
+                or view.slotNowKnown == false and "data not yet received"
+                or "client reports no slot data") .. ")"
+    end
+    local cause = "none recorded"
+    if view.loadoutChanged == true then
+        local text = type(view.loadoutCause) == "string" and LOADOUT_CAUSE_TEXT[view.loadoutCause] or nil
+        cause = text or "not recorded"
+        local seen = text and slotNumber(view.loadoutSeenSlot) or nil
+        if seen then cause = cause .. ", saw slot " .. seen end
+        local at = text and clockText(view.loadoutSeenAt) or nil
+        if at then cause = cause .. ", set at " .. at end
+    end
+    local unmet = {}
+    if type(view.unmet) == "table" then
+        for index = 1, 3 do
+            local text = type(view.unmet[index]) == "string" and UNMET_TEXT[view.unmet[index]] or nil
+            if text then unmet[#unmet + 1] = text end
+        end
+    end
+    return "  original slot=" .. original
+        .. "; slot now=" .. now
+        .. "; check=" .. (type(view.loadoutCheck) == "string" and LOADOUT_CHECK_TEXT[view.loadoutCheck] or "unread")
+        .. "; hold cause=" .. cause
+        .. "; offer recorded=" .. (view.offerRecorded == true and "yes" or "no")
+        .. "; unmet in record=" .. (#unmet > 0 and table.concat(unmet, ",") or "none")
+end
+
+-- Raw pick evidence of the unresolved Orb action: counts only. A pick that the game's
+-- callback showed is kept as evidence even when no choice could be recorded for the
+-- action; it is not a choice and settles nothing. No Echo id, name or board is shown.
+local function smallCount(value)
+    if type(value) == "number" and value == math.floor(value) and value >= 0 and value <= 999 then
+        return value == 0 and 0 or value
+    end
+    return 0
+end
+local function pickLine(view)
+    return "  raw picks: callbacks seen=" .. smallCount(view.rawPickCallbacks)
+        .. "; stored=" .. smallCount(view.rawPicks)
+        .. "; not stored=" .. smallCount(view.rawPickDropped)
+        .. "; on the recorded offer=" .. smallCount(view.rawPickMatching)
+        .. "; recorded as the action's choice=" .. smallCount(view.rawPickUsed)
+        .. "; not yet saved=" .. (view.rawPickUnsaved == true and "yes" or "no")
+        .. " (evidence only; it settles nothing)"
+end
+
+-- The player-confirmed continuation (035): the strict path's own counters, the last
+-- attempts of this session and the archive. Every value is a whole number in a fixed range,
+-- a code that matches a fixed shape, or a hex identifier; nothing is copied from a packet,
+-- no sender, player, Echo id or board is shown. "Observed after the refresh began" is all
+-- the protocol allows: arrival order is not a correlation, so two replies do not prove that
+-- no older reply remains. Native server behavior is not tested.
+local function bigCount(value)
+    if type(value) == "number" and value == math.floor(value) and value >= 0 and value <= 10000000 then
+        return tostring(value == 0 and 0 or value)
+    end
+    return "?"
+end
+local function signedCount(value)
+    if type(value) == "number" and value == math.floor(value) and value >= -10000000 and value <= 10000000 then
+        return tostring(value == 0 and 0 or value)
+    end
+    return "?"
+end
+local function codeText(value)
+    if type(value) == "string" and #value <= 24 and value:find("^[%a_]+$") then return value end
+    return value == nil and "none" or "unreadable"
+end
+local function hexText(value)
+    if type(value) == "string" and #value <= 16 and value:find("^%x+$") then return value end
+    return value == nil and "none" or "unreadable"
+end
+local function replyText(r)
+    if type(r) ~= "table" then return "none" end
+    return "(ordinal " .. bigCount(r.ord) .. ", fields " .. bigCount(r.nf) .. ", pending " .. bigCount(r.pd)
+        .. ", balance " .. bigCount(r.ch) .. ", reported change " .. signedCount(r.dl) .. ")"
+end
+local function continueLines()
+    local runtime = Nexus.OrbRuntime
+    local out = {}
+    if not (type(runtime) == "table" and type(runtime.ContinueView) == "function") then return out end
+    local view = runtime.ContinueView()
+    if type(view) ~= "table" then return out end
+    local archive = type(view.archive) == "table" and view.archive or {}
+    local log = type(runtime.ContinueLog) == "function" and runtime.ContinueLog() or {}
+    local adapter = Nexus.GameAdapter and Nexus.GameAdapter.Orbs
+    local st = adapter and type(adapter.TransportStatus) == "function" and adapter.TransportStatus() or nil
+    local pending = view.reason ~= "no_receipt"
+    local archived = type(archive.count) == "number" and archive.count > 0
+    if not (pending or archived or #log > 0) then return out end
+    out[#out + 1] = "  continue: stage=" .. codeText(view.stage)
+        .. "; available=" .. (view.eligible == true and "yes" or "no")
+        .. "; why not=" .. codeText(view.refusal or view.reason)
+        .. "; archive=" .. bigCount(archive.count) .. "/" .. bigCount(archive.capacity) .. " (" .. codeText(archive.state) .. ")"
+    if type(st) == "table" then
+        local c = type(st.counts) == "table" and st.counts or {}
+        local r = type(st.rejects) == "table" and st.rejects or {}
+        out[#out + 1] = "  strict reply path: listening=" .. (st.started == true and "yes" or "no")
+            .. "; observed qualifying=" .. bigCount(c.Q) .. " admitted-unqualified=" .. bigCount(c.A) .. " rejected=" .. bigCount(c.R)
+            .. "; not accepted: identity=" .. bigCount(r.identity) .. " sender=" .. bigCount(r.sender)
+            .. " channel=" .. bigCount(r.channel) .. " segmented=" .. bigCount(r.segmented)
+            .. " third_absent=" .. bigCount(r.third_absent) .. " fields_extra=" .. bigCount(r.fields_extra)
+            .. " malformed=" .. bigCount(r.malformed) .. " range=" .. bigCount(r.range) .. " mixed=" .. bigCount(r.mixed)
+            .. "; partial fragments seen=" .. bigCount(c.seg)
+            .. "; local epoch=" .. bigCount(st.epoch) .. " (rejects local work only; no server correlation)"
+    end
+    for index = math.max(1, #log - 1), #log do
+        local e = log[index]
+        if type(e) == "table" then
+            out[#out + 1] = "  attempt " .. bigCount(e.n) .. ": " .. codeText(e.outcome) .. " (" .. codeText(e.reason) .. ")"
+                .. "; replies seen=" .. bigCount(e.replies) .. "; first " .. replyText(e.r1) .. "; second " .. replyText(e.r2)
+                .. "; balance=" .. bigCount(e.balance) .. " vs record=" .. codeText(e.rel)
+                .. "; slot now=" .. bigCount(e.slot) .. " original=" .. bigCount(e.orig) .. " loadout=" .. codeText(e.lo)
+                .. "; ownership=" .. hexText(e.fpC) .. " locks=" .. hexText(e.fpL)
+                .. "; consent v" .. bigCount(e.v) .. " " .. codeText(e.policy) .. "; receipt=" .. hexText(e.rid)
+        end
+    end
+    if type(runtime.Archive) == "function" then
+        local list = runtime.Archive()
+        local entries = type(list) == "table" and type(list.entries) == "table" and list.entries or {}
+        for index = math.max(1, #entries - 1), #entries do
+            local e = entries[index]
+            if type(e) == "table" then
+                out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. codeText(e.outcome)
+                    .. "; spent=" .. bigCount(e.spent) .. " limit=" .. bigCount(e.limit)
+                    .. "; late events kept=" .. bigCount(e.late) .. " seen=" .. bigCount(e.lateN)
+            end
+        end
+    end
+    return out
+end
+
+-- The unresolved Orb action, if any: the recovery state and the requirement
+-- that the last read did not meet, so a report shows why an Orb action (and
+-- ordinary rolling) is held. Scalars from OrbRuntime.RecoveryView; no names.
+function M.OrbLines()
+    local unavailable = {"Orb action: not available (the Orb owner did not answer)"}
+    -- Every read of the owner and of its answer is protected, as for the
+    -- other owners here: a failing Orb owner must not take the report away.
+    local ok, lines = pcall(function()
+        local runtime = Nexus.OrbRuntime
+        if not (type(runtime) == "table" and type(runtime.RecoveryView) == "function") then
+            return {"Orb action: not available"}
+        end
+        local view = runtime.RecoveryView()
+        if type(view) ~= "table" then return unavailable end
+        if view.pending ~= true then
+            local none = {"Orb action: none unresolved"}
+            -- A continued action stays visible (archive and late events), and so does an attempt.
+            for _, line in ipairs(continueLines()) do none[#none + 1] = line end
+            return none
+        end
+        local function yes(value) return value == true and "yes" or "no" end
+        local choice = {}
+        if view.choiceSent == true then choice[#choice + 1] = "sent" end
+        if view.choiceObserved == true then choice[#choice + 1] = "observed" end
+        local inFlight = view.pickInFlight
+        local lines = {
+            "Orb action: unresolved " .. (view.restored == true and "after a reload" or "in this session")
+                .. "; state=" .. safeText(view.state or "unknown", 24)
+                .. "; recovery=" .. safeText(view.recovery or "none", 24)
+                .. "; waiting for=" .. safeText(view.gate or "none", 24),
+            -- The one-Orb decrement this client saw with the offer; no server
+            -- reply identifies a spend, so it is not stated as confirmed.
+            "  client-observed spend=" .. yes(view.spendObserved)
+                .. "; choice=" .. (#choice > 0 and table.concat(choice, ",") or "none")
+                .. "; selected=" .. safeText(view.selectedKey or "none", 24)
+                .. "; source=" .. safeText(view.removed or "none", 24)
+                .. "; game pick in flight=" .. (type(inFlight) == "boolean" and yes(inFlight) or "unknown")
+                .. "; loadout change recorded=" .. yes(view.loadoutChanged)
+                .. "; automatic refresh=" .. (view.autoRefresh == true and "requested" or "not requested"),
+            loadoutLine(view),
+            pickLine(view),
+        }
+        for _, line in ipairs(continueLines()) do lines[#lines + 1] = line end
+        return lines
+    end)
+    if ok and type(lines) == "table" then return lines end
+    return unavailable
+end
+
+function M.Summary(selection)
+    local support = Nexus and Nexus.SupportIncidents
+    -- Protected like every other owner read here: an incident owner that
+    -- raises must not take away the start-up reason, which is the one fact a
+    -- player with a failed start-up came to copy.
+    local okIncidents, incidents = pcall(function()
+        return support and type(support.History) == "function" and support.History() or {}
+    end)
+    if not okIncidents or type(incidents) ~= "table" then incidents = {} end
+    local incident = nil
+    if type(selection) == "table" then incident = incidentShape(selection)
+    elseif type(selection) == "number" then
+        for _, entry in ipairs(incidents) do
+            if entry.id == selection then incident = entry end
+        end
+    else
+        incident = incidents[#incidents]
+    end
+    local out = {}
+    local function add(line)
+        out[#out + 1] = line
+    end
+    add("Nexus support summary (report format " .. FORMAT .. ")")
+    add("Build: " .. buildLabel() .. "; character alias: " .. alias(playerName()))
+    local semantic = limits()
+    if semantic then
+        -- Locked copies have no fixed limit: occupied locked records are
+        -- bounded by the character's live capacity, which is not stated here.
+        add("Supported envelope: " .. safeText(semantic.ordinary, 16) .. " ordinary copies; "
+            .. safeText(semantic.lockedRowStacks, 16) .. " copies in one locked row; "
+            .. safeText(semantic.total, 16) .. " copies in all")
+    end
+    add("Session incidents retained: " .. #incidents)
+    -- A failed start-up goes ABOVE the incident and inside the kept part of the
+    -- summary: it is the reason the player is here, and it is exactly the case
+    -- in which no incident and no Lua error exists to carry it.
+    local startup = M.StartupSnapshot()
+    if type(startup) == "table" and startup.state == "failed" then
+        add("")
+        for _, line in ipairs(M.StartupLines(startup, false)) do add(line) end
+    end
+    add("")
+    for _, line in ipairs(M.IncidentLines(incident)) do add(line) end
+    local budget = SUMMARY_MAX_BYTES
+    local used = 0
+    for _, line in ipairs(out) do used = used + #escape(line) + 1 end
+    -- Context after the incident, and only while it fits.
+    local context = {}
+    context[#context + 1] = ""
+    context[#context + 1] = "Other retained incidents this session (newest last):"
+    if #incidents == 0 then
+        context[#context + 1] = "  (none)"
+    end
+    for _, entry in ipairs(incidents) do
+        if not incident or entry.id ~= incident.id then
+            context[#context + 1] = "  " .. safeText(entry.id, 16) .. ". "
+                .. shown(retained(entry.kind, 64), 64) .. "/"
+                .. shown(retained(entry.reason, 96), 96)
+                .. " from " .. (retained(entry.producer, 96) or "unknown producer")
+                .. " x" .. safeText(entry.occurrences or 1, 16)
+        end
+    end
+    -- Every owner read here is protected: this summary is the route a player
+    -- uses when something else is already broken, so one failing owner must
+    -- not take it away.
+    if type(startup) == "table" and startup.state ~= "failed" then
+        context[#context + 1] = ""
+        for _, line in ipairs(M.StartupLines(startup, false)) do
+            context[#context + 1] = line
+        end
+    end
+    local errorView = errorHistoryView()
+    if not errorView then
+        context[#context + 1] = "Recorded Lua errors: not available (the error owner did not answer)"
+    else
+        context[#context + 1] = "Recorded Lua errors retained: " .. errorView.total
+            .. " (" .. errorSessionText(errorView) .. ")"
+            .. (errorView.total == 0 and (#incidents > 0
+                and " (a refusal is not an error; the incident above is retained separately)"
+                or " (a refusal is not an error, and nothing was retained in either history)") or "")
+        if errorView.total > 0 then
+            context[#context + 1] = "Newest recorded Lua error: "
+                .. errorLine(errorView.history[errorView.total], errorOrigin(errorView, 1))
+        end
+    end
+    -- After the Lua error line, so a nearly full summary keeps that first.
+    for _, line in ipairs(M.OrbLines()) do context[#context + 1] = line end
+    local omitted = 0
+    for _, line in ipairs(context) do
+        local size = #escape(line) + 1
+        if used + size <= budget - 80 then
+            add(line)
+            used = used + size
+        else
+            omitted = omitted + 1
+        end
+    end
+    if omitted > 0 then
+        add("[" .. omitted .. " context line(s) omitted to keep this summary under "
+            .. SUMMARY_MAX_BYTES .. " bytes; use Prepare report file for the full retained report]")
+    end
+    -- The copyable size is measured on the text the player selects, and the
+    -- backstop drops WHOLE LINES: cutting mid-line could leave a partial
+    -- escape or half a recorded identifier in the ticket.
+    local cut = false
+    while true do
+        local text = table.concat(out, "\n")
+        local note = "\n[summary shortened to stay under " .. SUMMARY_MAX_BYTES
+            .. " bytes; use Prepare report file for everything retained]"
+        if #text + (cut and #note or 0) <= SUMMARY_MAX_BYTES or #out <= 3 then
+            if cut then text = text .. note end
+            return text, {bytes = #text, incidents = #incidents,
+                cut = cut or nil,
+                incidentId = incident and incident.id or nil}
+        end
+        table.remove(out)
+        cut = true
+    end
+end
+
+------------------------------------------------------------------------
+-- Passive readiness diagnostics: the last normal Orb window read and the last
+-- normal ownership reads, as their owners recorded them in memory. Each block
+-- reads one accessor, looked up now, inside its own protection, and shows
+-- only key=value facts: a known code, yes/no, or a whole number of at most
+-- seven digits. Anything else is "unknown"; nothing is guessed or refreshed.
+------------------------------------------------------------------------
+
+local function codeSet(list)
+    local set = {}
+    for _, code in ipairs(list) do set[code] = true end
+    return set
+end
+-- The codes of core/OrbAdapter.lua (stage), core/OrbRuntime.lua (assignment
+-- state, role mode) and core/GameAdapter.lua (locked rejection, raw type).
+local READINESS_STAGES = codeSet({"ok", "assignment", "targets", "capability",
+    "state", "balance_loading", "balance_invalid", "catalog", "trust_owned",
+    "trust_locked", "trust_both", "call", "granted_unavailable", "granted_shape",
+    "granted_verify", "locked_unavailable", "locked_shape", "locked_verify",
+    "limits", "choice", "auto_accept", "host", "unknown"})
+local ASSIGNMENT_STATES = codeSet({"ready", "unassigned", "restoring", "loading",
+    "unavailable", "unknown"})
+local ROLE_MODES = codeSet({"explicit", "untyped", "none", "unknown"})
+local PROGRESS_STATES = codeSet({"available", "unavailable"})
+local LOCKED_REJECTIONS = codeSet({"none", "absent", "not_table", "unreadable",
+    "invalid_value", "conflicting_alias", "cycle", "depth", "over_cap", "scalar_leaf"})
+local RAW_TYPES = codeSet({"nil", "boolean", "number", "string", "table",
+    "function", "userdata", "thread", "unknown"})
+local READINESS_KEYS = {"observed", "age", "stage", "assignment", "roles",
+    "progress", "rolledMissing", "permanentMissing", "ownedSynced",
+    "ownedConfirmed", "ownedArmed", "ownedFresh", "ownedGhost", "ownedGeneration",
+    "ownedTotal", "lockedSynced", "lockedCopies", "lockedRejection", "lockedSerial"}
+local OWNERSHIP_KEYS = {"ownedObserved", "ownedAge", "ownedSampledGeneration",
+    "ownedSampledConfirmed", "ownedSynced", "ownedFresh", "ownedGhost",
+    "ownedDistinct", "ownedTotal", "ownedGeneration", "ownedConfirmed",
+    "ownedArmed", "ownedRetries", "lockedObserved", "lockedAge", "lockedSynced",
+    "lockedCopies", "lockedRejection", "lockedRawType"}
+
+-- Type checks only: no value is converted before it passed its check.
+local function factCode(value, set)
+    if type(value) == "string" and set[value] then return value end
+    return "unknown"
+end
+local function factFlag(value)
+    if value == true then return "yes" end
+    if value == false then return "no" end
+    return "unknown"
+end
+local function factCount(value)
+    if type(value) == "number" and value == math.floor(value)
+        and value >= 0 and value <= 9999999 then
+        return string.format("%d", value)
+    end
+    return "unknown"
+end
+local function factAge(value)
+    local count = factCount(value)
+    return count == "unknown" and count or (count .. "s")
+end
+-- A locked read serial (GameAdapter's own locked read count) starts at 1.
+local function factSerial(value)
+    if value == 0 then return "unknown" end
+    return factCount(value)
+end
+
+-- A copy of the named fields of one accessor's answer, or nil when the
+-- accessor is missing, raises, or answers anything but a table.
+local function accessorFacts(owner, accessor, keys)
+    local ok, copied = pcall(function()
+        local module = Nexus[owner]
+        local fn = type(module) == "table" and module[accessor] or nil
+        if type(fn) ~= "function" then return nil end
+        local raw = fn()
+        if type(raw) ~= "table" then return nil end
+        local out = {}
+        for _, key in ipairs(keys) do out[key] = raw[key] end
+        return out
+    end)
+    if ok and type(copied) == "table" then return copied end
+    return nil
+end
+
+-- The last normal Orb window read (OrbRuntime.ReadinessView). Its facts are
+-- those of that read, not current ones; its age is shown.
+local function readinessLines()
+    local view = accessorFacts("OrbRuntime", "ReadinessView", READINESS_KEYS)
+    if not view or type(view.observed) ~= "boolean" then
+        return {"Orb readiness: observed=unavailable (the Orb owner did not answer)"}
+    end
+    if not view.observed then
+        return {"Orb readiness: observed=no (no Orb window read since this load)"}
+    end
+    local available = view.progress == "available"
+    return {
+        "Orb readiness (the last Orb window read, as it was then): observed=yes"
+            .. " age=" .. factAge(view.age)
+            .. " stage=" .. factCode(view.stage, READINESS_STAGES)
+            .. " progress=" .. factCode(view.progress, PROGRESS_STATES)
+            .. (available and (" progress.rolled=" .. factCount(view.rolledMissing)
+                .. " progress.permanent=" .. factCount(view.permanentMissing)) or ""),
+        "Orb readiness assignment: assignment.state="
+            .. factCode(view.assignment, ASSIGNMENT_STATES)
+            .. " assignment.roles=" .. factCode(view.roles, ROLE_MODES),
+        "Orb readiness rolled: owned.synced=" .. factFlag(view.ownedSynced)
+            .. " owned.confirmed=" .. factFlag(view.ownedConfirmed)
+            .. " owned.armed=" .. factFlag(view.ownedArmed)
+            .. " owned.fresh=" .. factFlag(view.ownedFresh)
+            .. " owned.ghost=" .. factFlag(view.ownedGhost)
+            .. " owned.generation=" .. factCount(view.ownedGeneration)
+            .. " owned.total=" .. factCount(view.ownedTotal),
+        "Orb readiness locked: locked.synced=" .. factFlag(view.lockedSynced)
+            .. " locked.copies=" .. factCount(view.lockedCopies)
+            .. " locked.rejection=" .. factCode(view.lockedRejection, LOCKED_REJECTIONS)
+            .. " locked.serial=" .. factSerial(view.lockedSerial),
+    }
+end
+
+-- The last normal Owned() and LockedOwned() samples
+-- (GameAdapter.OwnershipTrustView), each with its own age, kept apart from
+-- the current generation. A sample's age is when that read ran, not proof of
+-- a fresh server reply. A component that was not observed shows no facts.
+local function ownershipLines()
+    local view = accessorFacts("GameAdapter", "OwnershipTrustView", OWNERSHIP_KEYS)
+    if not view then
+        return {"Ownership sample: ordinary.observed=unavailable locked.observed=unavailable"
+            .. " (the ownership owner did not answer)"}
+    end
+    local out = {"Ownership sample (the last normal read of each; an age is not proof of a fresh server reply):"
+        .. " current.generation=" .. factCount(view.ownedGeneration)
+        .. " current.confirmed=" .. factFlag(view.ownedConfirmed)
+        .. " current.armed=" .. factFlag(view.ownedArmed)
+        .. " current.retries=" .. factCount(view.ownedRetries)}
+    if view.ownedObserved == true then
+        out[#out + 1] = "Ownership sample ordinary: ordinary.observed=yes"
+            .. " ordinary.age=" .. factAge(view.ownedAge)
+            .. " ordinary.generation=" .. factCount(view.ownedSampledGeneration)
+            .. " ordinary.confirmed=" .. factFlag(view.ownedSampledConfirmed)
+            .. " ordinary.synced=" .. factFlag(view.ownedSynced)
+            .. " ordinary.fresh=" .. factFlag(view.ownedFresh)
+            .. " ordinary.ghost=" .. factFlag(view.ownedGhost)
+            .. " ordinary.distinct=" .. factCount(view.ownedDistinct)
+            .. " ordinary.total=" .. factCount(view.ownedTotal)
+    else
+        out[#out + 1] = "Ownership sample ordinary: ordinary.observed="
+            .. (view.ownedObserved == false and "no" or "unknown")
+    end
+    if view.lockedObserved == true then
+        out[#out + 1] = "Ownership sample locked: locked.observed=yes"
+            .. " locked.age=" .. factAge(view.lockedAge)
+            .. " locked.synced=" .. factFlag(view.lockedSynced)
+            .. " locked.copies=" .. factCount(view.lockedCopies)
+            .. " locked.rejection=" .. factCode(view.lockedRejection, LOCKED_REJECTIONS)
+            .. " locked.raw=" .. factCode(view.lockedRawType, RAW_TYPES)
+    else
+        out[#out + 1] = "Ownership sample locked: locked.observed="
+            .. (view.lockedObserved == false and "no" or "unknown")
+    end
+    return out
+end
+
+-- The last refused locked table read (GameAdapter.LockedShapeView): its
+-- anonymous structure, one checked token per row, with that read's serial and
+-- age. Structure only: a repeated ID class, a count or a nesting is not a
+-- native meaning. At most 64 rows in 14 lines and SHAPE_BYTES bytes.
+local SHAPE_KEYS = {"observed", "serial", "age", "current", "laterReads",
+    "sampledGeneration", "currentGeneration", "first", "copies", "ids",
+    "status", "rows", "row"}
+local SHAPE_REJECTIONS = codeSet({"invalid_value", "conflicting_alias", "cycle",
+    "depth", "over_cap", "scalar_leaf"})
+local SHAPE_STATUSES = codeSet({"captured", "truncated", "failed", "mismatch"})
+local SHAPE_KEY_CLASSES = codeSet({"i", "s", "o", "-"})
+local SHAPE_LEGEND = {
+    "Locked shape legend: r<row> is p.k.c.n.im.cm.e: p parent row (0 the root),"
+        .. " k key class (i whole number, s string, o other, - the root),"
+        .. " c ID class by first appearance (0 none, x invalid or conflicting), n copies added",
+    "Locked shape legend: im bits spellId 1 spellID 2 id 4 perkId 8 perkID 16"
+        .. " entryId 32 entryID 64 echoId 128 echoID 256 spell 512 perk 1024;"
+        .. " cm bits stack 1 stacks 2 count 4 amount 8 qty 16",
+    "Locked shape legend: e bits depth 1 cycle 2 invalid_value 4 conflicting_alias 8"
+        .. " over_cap 16 scalar_leaf 32; ? a value that failed its check",
+}
+local SHAPE_BYTES = 4096
+
+-- One row component: a whole number from 0 to `maximum`, otherwise "?".
+local function shapePart(value, maximum)
+    if type(value) == "number" and value == math.floor(value)
+        and value >= 0 and value <= maximum then
+        return string.format("%d", value)
+    end
+    return "?"
+end
+
+-- One row token. Each component is checked on its own; a row that is not a
+-- table, or that raises when read, is unknown as a whole.
+local function shapeRow(list, index)
+    local ok, text = pcall(function()
+        local row = list[index]
+        if type(row) ~= "table" then return "unknown" end
+        local k, c = row.k, row.c
+        return shapePart(row.p, 63)
+            .. "." .. (type(k) == "string" and SHAPE_KEY_CLASSES[k] and k or "?")
+            .. "." .. (c == "x" and "x" or shapePart(c, 64))
+            .. "." .. shapePart(row.n, 9999999)
+            .. "." .. shapePart(row.im, 2047)
+            .. "." .. shapePart(row.cm, 31)
+            .. "." .. shapePart(row.e, 63)
+    end)
+    return ok and text or "unknown"
+end
+
+local function lockedShapeLines()
+    local view = accessorFacts("GameAdapter", "LockedShapeView", SHAPE_KEYS)
+    if not view or type(view.observed) ~= "boolean" then
+        return {"Locked shape: observed=unavailable (the shape owner did not answer)"}
+    end
+    if not view.observed then
+        return {"Locked shape: observed=no (no refused locked table read since this load)"}
+    end
+    local rows = view.rows
+    if not (type(rows) == "number" and rows == math.floor(rows)
+        and rows >= 0 and rows <= 64) then
+        rows = nil
+    end
+    local out = {
+        "Locked shape (the last refused locked table read, as it was then;"
+            .. " a later read is no proof of a change): observed=yes"
+            .. " serial=" .. factSerial(view.serial)
+            .. " age=" .. factAge(view.age)
+            .. " current=" .. factFlag(view.current)
+            .. " later.reads=" .. factCount(view.laterReads),
+        "Locked shape facts (structure only; a generation is context, not a rule for"
+            .. " locked ownership): sampled.generation=" .. factCount(view.sampledGeneration)
+            .. " current.generation=" .. factCount(view.currentGeneration)
+            .. " first=" .. factCode(view.first, SHAPE_REJECTIONS)
+            .. " copies=" .. factCount(view.copies)
+            .. " ids=" .. factCount(view.ids)
+            .. " status=" .. factCode(view.status, SHAPE_STATUSES)
+            .. " rows=" .. (rows and string.format("%d", rows) or "unknown"),
+    }
+    for _, line in ipairs(SHAPE_LEGEND) do out[#out + 1] = line end
+    local used = 0
+    for _, line in ipairs(out) do used = used + #line + 1 end
+    -- Eight rows a line. 64 rows of the widest valid tokens stay well inside
+    -- SHAPE_BYTES; were they not to, whole rows are left out and declared.
+    local shown = 0
+    for first = 1, rows or 0, 8 do
+        local tokens = {}
+        for index = first, math.min(rows, first + 7) do
+            tokens[#tokens + 1] = "r" .. index .. "=" .. shapeRow(view.row, index)
+        end
+        local line = "Locked shape rows: " .. table.concat(tokens, " ")
+        if used + #line + 1 > SHAPE_BYTES - 64 then break end
+        out[#out + 1] = line
+        used = used + #line + 1
+        shown = first + #tokens - 1
+    end
+    if rows and shown < rows then
+        out[#out + 1] = "Locked shape rows: omitted=" .. (rows - shown)
+    end
+    return out
+end
+
+------------------------------------------------------------------------
+-- Detached preparation for the file route
+------------------------------------------------------------------------
+
+local function sectionLines(name, builder)
+    local ok, lines = pcall(builder)
+    if not ok or type(lines) ~= "table" then
+        return {"[section " .. name .. " was unavailable and is omitted]"}, false
+    end
+    return lines, true
+end
+
+-- Build the report in bounded steps so a large history cannot stall a frame.
+-- The caller pumps Step() until it returns "done". Nothing is handed to the
+-- helper until the whole snapshot exists.
+function M.NewPreparation(options)
+    options = type(options) == "table" and options or {}
+    reportSequence = reportSequence + 1
+    local support = Nexus and Nexus.SupportIncidents
+    -- Protected exactly like the summary route: an incident owner that raises
+    -- must not take the prepared file away as well.
+    local okIncidents, incidents = pcall(function()
+        return support and type(support.History) == "function" and support.History() or {}
+    end)
+    if not okIncidents or type(incidents) ~= "table" then incidents = {} end
+    local incident = nil
+    if type(options.incident) == "table" then incident = incidentShape(options.incident)
+    else incident = incidents[#incidents] end
+    local job = {
+        extended = options.extended == true,
+        stage = "header",
+        lines = {},
+        omissions = {},
+        chunks = {},
+        startedAt = clock(),
+        id = string.format("%s-%03d", tostring(clock() or 0), reportSequence),
+        incident = incident,
+        incidents = incidents,
+        cursor = 0,
+        topic = incident and (shown(retained(incident.kind, 64), 64) .. "/"
+                .. shown(retained(incident.reason, 96), 96))
+            or "session report",
+    }
+    return job
+end
+
+local function pushLines(job, lines)
+    for _, line in ipairs(lines) do job.lines[#job.lines + 1] = line end
+end
+
+function M.Step(job)
+    if type(job) ~= "table" then return "done" end
+    if job.stage == "header" then
+        pushLines(job, {
+            "Nexus support report",
+            "format=" .. FORMAT .. "; id=" .. job.id,
+            "build=" .. buildLabel(),
+            "topic=" .. job.topic,
+            "extended=" .. safeText(job.extended, 16),
+            "captureStart=" .. safeText(job.startedAt, 24),
+            "characterAlias=" .. alias(playerName()),
+            "",
+        })
+        job.stage = "incident"
+        return "pending"
+    end
+    if job.stage == "incident" then
+        pushLines(job, {"-- selected incident --"})
+        pushLines(job, M.IncidentLines(job.incident))
+        pushLines(job, {""})
+        job.stage = "incidents"
+        return "pending"
+    end
+    if job.stage == "incidents" then
+        if job.cursor == 0 then
+            pushLines(job, {"-- retained incidents (" .. #job.incidents .. ") --"})
+        end
+        local done = 0
+        while job.cursor < #job.incidents and done < 4 do
+            job.cursor = job.cursor + 1
+            local entry = job.incidents[job.cursor]
+            pushLines(job, {"[" .. safeText(entry.id, 16) .. "]"})
+            pushLines(job, M.IncidentLines(entry, {tuples = job.extended}))
+            pushLines(job, {""})
+            done = done + 1
+        end
+        if job.cursor >= #job.incidents then
+            job.stage = "sections"
+            job.sectionIndex = 0
+        end
+        return "pending"
+    end
+    if job.stage == "sections" then
+        local sections = {
+            {name = "startup", build = function()
+                local status = M.StartupSnapshot() or {}
+                local out = {"-- startup --"}
+                -- The scalars this section has always carried, then the same
+                -- retained failure facts the copyable summary shows.
+                for _, key in ipairs({"state", "coreReady", "storeReady", "reason"}) do
+                    -- A healthy start-up has no reason, and the owner states
+                    -- that as false rather than nil. coreReady = false is a
+                    -- real answer and is still written.
+                    if status[key] ~= nil
+                        and not (key == "reason" and status[key] == false) then
+                        out[#out + 1] = key .. "=" .. safeText(status[key], 96)
+                    end
+                end
+                for _, line in ipairs(M.StartupLines(status, true)) do
+                    out[#out + 1] = line
+                end
+                return out
+            end},
+            -- Which HUD is actually on screen. "My panel disappeared" is
+            -- invisible to every other section here: hiding a frame on
+            -- purpose is not an error, not an incident, and not a failed
+            -- start-up. These are session facts read from the owners that
+            -- already hold them; nothing is stored and no frame tree is
+            -- walked.
+            {name = "hud", build = function()
+                local out = {"-- HUD (this session; nothing here is stored) --"}
+                -- The same boundary rule the visibility owner follows: what
+                -- another owner hands back never leaves the protection. Each
+                -- field is copied INSIDE the pcall, so a table that raises on
+                -- read cannot take this section away -- which is the one
+                -- section a player with a missing HUD is here to send.
+                local function facts(name, fields)
+                    local ok, copied = pcall(function()
+                        local owner = Nexus and Nexus[name]
+                        if type(owner) ~= "table"
+                            or type(owner.VisibilityFacts) ~= "function" then
+                            return nil
+                        end
+                        local raw = owner.VisibilityFacts()
+                        if type(raw) ~= "table" then return nil end
+                        local out = {}
+                        for _, field in ipairs(fields) do out[field] = raw[field] end
+                        return out
+                    end)
+                    if not ok or type(copied) ~= "table" then return nil end
+                    return copied
+                end
+                local server = facts("ServerStatus",
+                    {"mode", "detected", "stockShown", "stockAlpha", "replacing"})
+                local panel = facts("Panel",
+                    {"exists", "shown", "wanted", "menuSuppressed", "ready",
+                     "committed", "commits", "failures", "hiddenUncommitted"})
+                if not server and not panel then
+                    out[#out + 1] = "not available"
+                    return out
+                end
+                if server then
+                    out[#out + 1] = "preference=" .. safeText(server.mode, 16)
+                        .. "; server widget=" .. (server.detected and "present" or "not found")
+                        .. (server.stockShown ~= nil
+                            and ("; shown=" .. safeText(server.stockShown, 8)) or "")
+                        .. (server.stockAlpha ~= nil
+                            and ("; alpha=" .. safeText(server.stockAlpha, 8)) or "")
+                        .. "; replaced by Nexus=" .. safeText(server.replacing, 8)
+                end
+                if panel then
+                    out[#out + 1] = "Nexus panel=" .. (panel.exists and "built" or "not built")
+                        .. "; shown=" .. safeText(panel.shown, 8)
+                        .. "; wanted=" .. safeText(panel.wanted, 8)
+                        .. "; menu suppressed=" .. safeText(panel.menuSuppressed, 8)
+                        .. "; render committed=" .. safeText(panel.committed, 8)
+                    out[#out + 1] = "  renders: commits=" .. safeText(panel.commits, 12)
+                        .. "; failures=" .. safeText(panel.failures, 12)
+                        .. "; hidden while uncommitted=" .. safeText(panel.hiddenUncommitted, 12)
+                end
+                -- The sentence has to match the two facts above it. Saying the
+                -- server widget "keeps its place" while this same section
+                -- reports it hidden would send a supporter looking for the
+                -- wrong thing in the one case where the player has no HUD at
+                -- all.
+                if server and panel and not server.detected and not panel.ready then
+                    -- True in either mode: nothing was found to show, and
+                    -- nothing here can display instead.
+                    out[#out + 1] = "  NEITHER HUD is on screen: the Nexus HUD cannot display and no server widget was found"
+                elseif server and panel and server.mode == "nexus"
+                    and server.detected and not panel.ready then
+                    if server.stockShown == false then
+                        out[#out + 1] = "  NEITHER HUD is on screen: the Nexus HUD cannot display and the server widget is hidden"
+                    elseif server.stockShown == true then
+                        out[#out + 1] = "  the Nexus HUD cannot display, so the server widget keeps its place"
+                    else
+                        out[#out + 1] = "  the Nexus HUD cannot display; whether the server widget is on screen is not knowable here"
+                    end
+                end
+                return out
+            end},
+            {name = "errors", build = function()
+                -- An owner that cannot answer omits this section, declared
+                -- in the header like every other unavailable section.
+                local view = errorHistoryView()
+                if not view then error("the error owner did not answer") end
+                local history = view.history
+                local limit = job.extended and 20 or 5
+                local listed = math.min(view.total, limit)
+                local out = {"-- recorded Lua errors (" .. view.total .. " retained; "
+                    .. errorSessionText(view) .. "; newest first) --"}
+                for index = 1, listed do
+                    out[#out + 1] = "  " .. index .. ". "
+                        .. errorLine(history[view.total - index + 1], errorOrigin(view, index))
+                end
+                if view.total > listed then
+                    out[#out + 1] = "  [" .. (view.total - listed) .. " older recorded error(s) not shown"
+                        .. (job.extended and "" or "; the extended report lists up to 20") .. "]"
+                end
+                return out
+            end},
+            {name = "orb", build = function()
+                local out = {"-- Orb history (diagnostic copy; it restores nothing) --"}
+                for _, line in ipairs(M.OrbLines()) do out[#out + 1] = line end
+                local runtime = Nexus.OrbRuntime
+                if not (runtime and type(runtime.RunLog) == "function") then
+                    out[#out + 1] = "not available";return out
+                end
+                local view = runtime.RunLog("current", 1, job.extended and 40 or 8)
+                if not view or not view.runId then
+                    out[#out + 1] = "no run in this session";return out
+                end
+                out[#out + 1] = "run=" .. safeText(view.runId, 24)
+                    .. "; state=" .. safeText(view.state, 32)
+                    .. "; spent=" .. safeText(view.spent, 16)
+                    .. "/" .. safeText(view.limit, 16)
+                    .. "; operations=" .. safeText(view.total, 16)
+                local history = Nexus.OrbHistory
+                if history and type(history.Rows) == "function" then
+                    for _, row in ipairs(history.Rows(view, nil)) do
+                        out[#out + 1] = "  " .. safeText(row.ordinal, 16) .. ". "
+                            .. safeText(row.source.label, 64) .. " -> "
+                            .. safeText(row.replacement.label, 64)
+                            .. " [" .. safeText(row.result.label, 64) .. "]"
+                    end
+                end
+                return out
+            end},
+            -- Three passive blocks, each its own section so that none of them
+            -- (nor the Orb history above) can take another away. None reads
+            -- the game: each copies one memory-only accessor.
+            {name = "orb readiness", build = function()
+                local out = {"-- Orb readiness (memory only; facts as observed, not refreshed) --"}
+                for _, line in ipairs(readinessLines()) do out[#out + 1] = line end
+                return out
+            end},
+            {name = "ownership samples", build = function()
+                local out = {"-- ownership samples (memory only; facts as observed, not refreshed) --"}
+                for _, line in ipairs(ownershipLines()) do out[#out + 1] = line end
+                return out
+            end},
+            {name = "locked shape", build = function()
+                local out = {"-- locked shape (memory only; structure as observed, not refreshed) --"}
+                for _, line in ipairs(lockedShapeLines()) do out[#out + 1] = line end
+                return out
+            end},
+        }
+        -- The local roll record (core/RollRecorder.lua), so a tester sends one
+        -- private file. Bounded: at most 256 records of at most 2 KiB each.
+        sections[#sections + 1] = {name = "rolltrace", build = function()
+            local recorder = Nexus and Nexus.RollRecorder
+            if not (recorder and type(recorder.ExportLines) == "function") then
+                return {"-- local roll record: not available --"}
+            end
+            local out = {"-- local roll record (local only; no names; not a draw model) --"}
+            for _, line in ipairs(recorder.ExportLines()) do
+                -- A 2048-byte record can grow to three times that when every byte is escaped.
+                out[#out + 1] = safeText(line, 6300)
+            end
+            return out
+        end}
+        job.sectionIndex = (job.sectionIndex or 0) + 1
+        local section = sections[job.sectionIndex]
+        if not section then
+            job.stage = "chunks"
+            return "pending"
+        end
+        local lines, ok = sectionLines(section.name, section.build)
+        if not ok then job.omissions[#job.omissions + 1] = section.name end
+        pushLines(job, lines)
+        pushLines(job, {""})
+        return "pending"
+    end
+    if job.stage == "chunks" then
+        local text = table.concat(job.lines, "\n")
+        job.rawBytes = #text
+        if #text > TOTAL_BYTES then
+            -- Truthful refusal: the essential incident is preserved, the rest
+            -- is declared, and the previous stored report is left alone.
+            local essential = table.concat(M.IncidentLines(job.incident), "\n")
+            job.omissions[#job.omissions + 1] = "context beyond the selected incident"
+            local header = "Nexus support report (partial)\nformat=" .. FORMAT
+                .. "; id=" .. job.id .. "; build=" .. buildLabel()
+                .. "\nThe full retained report is larger than the supported "
+                .. TOTAL_BYTES .. " bytes, so only the selected incident is included.\n\n"
+            -- The replacement is checked against the same bound it exists to
+            -- satisfy. A selected incident that still does not fit is cut on a
+            -- line boundary and says so, instead of being handed over oversized.
+            local room = TOTAL_BYTES - #header - 120
+            if #essential > room then
+                local kept, used = {}, 0
+                for _, line in ipairs(M.IncidentLines(job.incident)) do
+                    if used + #line + 1 > room then break end
+                    kept[#kept + 1] = line
+                    used = used + #line + 1
+                end
+                essential = table.concat(kept, "\n")
+                    .. "\n[the selected incident itself exceeds the supported size; later lines are omitted]"
+                job.omissions[#job.omissions + 1] = "part of the selected incident"
+            end
+            text = header .. essential
+            job.partial = true
+        end
+        local position = 1
+        while position <= #text do
+            job.chunks[#job.chunks + 1] = text:sub(position, position + CHUNK_BYTES - 1)
+            position = position + CHUNK_BYTES
+        end
+        job.stage = "done"
+        job.report = {
+            meta = {
+                format = FORMAT,
+                id = job.id,
+                build = buildLabel(),
+                topic = job.topic,
+                extended = job.extended,
+                partial = job.partial == true,
+                omissions = #job.omissions > 0
+                    and table.concat(job.omissions, ",") or "none",
+                captureStart = job.startedAt,
+                captureEnd = clock(),
+                rawBytes = job.rawBytes,
+                -- The header declares what the chunks are, so a reader can
+                -- check the copy it received against it.
+                chunkCount = #job.chunks,
+                bytes = (function()
+                    local total = 0
+                    for _, chunk in ipairs(job.chunks) do total = total + #chunk end
+                    return total
+                end)(),
+                checksum = checksum(job.chunks),
+                incidentCount = #job.incidents,
+            },
+            chunks = job.chunks,
+        }
+        return "done"
+    end
+    return "done"
+end
+
+function M.Prepare(options, maxSteps)
+    local job = M.NewPreparation(options)
+    local steps = 0
+    while M.Step(job) ~= "done" do
+        steps = steps + 1
+        if steps > (tonumber(maxSteps) or 500) then
+            return nil, "preparation did not finish within its step budget"
+        end
+    end
+    return job.report, nil, job
+end
+
+-- Hand a COMPLETE report to the isolated component. This is the only call in
+-- Nexus that writes support data, and it writes nothing else: no profile, no
+-- catalog, no receipt, no assignment.
+-- The component is a separate addon, so the READ of it is protected too: a
+-- broken or hostile storage owner must not take the page away.
+local function storageOwner(entry)
+    local ok, owner = pcall(function()
+        local storage = _G.NexusSupportStorage
+        return type(storage) == "table" and type(storage[entry]) == "function"
+            and storage or nil
+    end)
+    if not ok then return nil end
+    return owner
+end
+
+function M.Store(report)
+    local storage = storageOwner("Replace")
+    if not storage then
+        return nil, "the support component is not loaded"
+    end
+    if type(report) ~= "table" or type(report.chunks) ~= "table"
+        or #report.chunks == 0 then
+        return nil, "the report was not completed, so the previous one was kept"
+    end
+    -- The LOOKUP and the call in one pcall: a component whose __index answers
+    -- once and then raises must not raise out of the route that offered it.
+    -- What it returns is copied into a shape this file owns, so a caller never
+    -- holds the component's table.
+    local copied = {}
+    local ok, stored, why = pcall(function()
+        local value, meta = storage.Replace(report)
+        if type(meta) ~= "table" then
+            -- A component that answered with a NOTE rather than a header -
+            -- which is how the shipped one states every REFUSAL. The note is
+            -- carried out as the second return value, so a refusal reaches the
+            -- player in the component's own words. On the success path no
+            -- caller reads it, so a note sent beside a successful store is not
+            -- displayed.
+            return value, meta ~= nil and safeText(meta, 240) or nil
+        end
+        -- The header the component accepted, field by field, into a table
+        -- this file owns. Numbers stay numbers; text is converted.
+        for _, field in ipairs({"bytes", "rawBytes", "chunkCount",
+            "captureStart", "captureEnd", "incidentCount", "format"}) do
+            copied[field] = tonumber(meta[field])
+        end
+        for _, field in ipairs({"id", "build", "topic", "checksum", "omissions"}) do
+            if meta[field] ~= nil then copied[field] = safeText(meta[field], 120) end
+        end
+        copied.partial = meta.partial == true or nil
+        copied.extended = meta.extended == true or nil
+        return value, nil
+    end)
+    if not ok then
+        return nil, "the support component refused the report"
+    end
+    if not stored then
+        return nil, why ~= nil and safeText(why, 240)
+            or "the support component refused the report"
+    end
+    -- `true`, not their table: the first return value is a verdict, and a
+    -- caller holding the component's table is the thing this route avoids.
+    return true, copied
+end
+
+-- The LAST prepared report, as scalars this file owns. The component's own
+-- table is never handed to a caller, and never read outside this pcall.
+function M.StoredSummary()
+    local storage = storageOwner("Latest")
+    if not storage then return nil end
+    local out = {}
+    local ok, found = pcall(function()
+        local latest = storage.Latest()
+        if type(latest) ~= "table" then return false end
+        out.id = safeText(latest.id, 48)
+        out.bytes = safeText(latest.bytes, 24)
+        out.chunkCount = safeText(latest.chunkCount, 16)
+        out.checksum = safeText(latest.checksum, 24)
+        return true
+    end)
+    if not ok or not found then return nil end
+    return out
+end
+
+-- What the stored copy says about ITSELF, checked against this session's own
+-- checksum of it. The page never touches the component: it asks for this.
+function M.StoredReport()
+    local storage = storageOwner("Read")
+    local summary = M.StoredSummary()
+    if not storage or not summary then return nil end
+    local ok, recomputed = pcall(function()
+        local stored = storage.Read()
+        if type(stored) ~= "table" or type(stored.chunks) ~= "table" then return nil end
+        local chunks = {}
+        for index, chunk in ipairs(stored.chunks) do
+            if type(chunk) ~= "string" then return nil end
+            chunks[index] = chunk
+        end
+        return checksum(chunks)
+    end)
+    -- Explicit, for the same reason as `matches` below: this must be able to
+    -- distinguish "not computed" from any value the computation returns.
+    if ok then summary.recomputed = recomputed end
+    -- NOT `a and b or nil`: the answer that matters here is `false`, and that
+    -- form collapses it to nil - which silently retired the mismatch warning.
+    if summary.recomputed ~= nil then
+        summary.matches = summary.recomputed == summary.checksum
+    end
+    return summary
+end
+
+function M.StorageStatus()
+    local storage = storageOwner("Status")
+    if not storage then
+        -- Not there, or there without the entry: either way nothing answers.
+        return {loaded = false, ready = false,
+            reason = "the support component is not loaded"}
+    end
+    local ok, status = pcall(function()
+        local value = storage.Status()
+        if type(value) ~= "table" then return nil end
+        -- Copied into a shape this file owns: a caller reading the result
+        -- never touches the component's table or its metamethods.
+        -- false is an answer, not a value to print: a component saying it is
+        -- NOT incompatible must not be read as incompatible with the reason
+        -- "false", which would disable the file route for good.
+        local incompatible = value.incompatible
+        local reason = value.reason
+        -- Reaching here means the component answered, so it is loaded
+        -- whatever it says about itself; `ready` stays its own statement.
+        return {loaded = true,
+            ready = value.ready == true,
+            incompatible = (incompatible ~= nil and incompatible ~= false)
+                and safeText(incompatible, 120) or nil,
+            reason = (reason ~= nil and reason ~= false)
+                and safeText(reason, 240) or nil}
+    end)
+    if not ok or type(status) ~= "table" then
+        -- It IS there - the lookup found a function - but it did not answer
+        -- in a shape this addon can read. That is not "not loaded".
+        return {loaded = true, ready = false,
+            reason = "the support component did not answer"}
+    end
+    return status
+end
+
+-- What the player is told after a successful preparation. It states exactly
+-- what has and has not happened.
+function M.WrittenNotice(meta)
+    local id = type(meta) == "table" and meta.id or "?"
+    return "Report " .. safeText(id, 48) .. " is prepared in memory. WoW writes the "
+        .. "file when you reload, log out, or exit normally. It is not yet "
+        .. "verified on disk."
+end
+
+function M.FilePathHint()
+    return "WTF/Account/<ACCOUNT>/SavedVariables/NexusSupport.lua"
+end
+
+return M

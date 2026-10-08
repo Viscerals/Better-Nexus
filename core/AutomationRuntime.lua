@@ -21,7 +21,24 @@ Nexus.MainInternals.AutomationRuntime = AutomationRuntime
 -- so it cannot close over the constructor-local `Store` directly.
 local boundStore
 
-local function UpdateStoreState(mutator)
+-- Run status (last save status/refusal, audit run counter) and the retired
+-- flat lockDesignTargets key live in the saved root, or for a read-only saved
+-- root in the Store owner's session-only table, which starts with copies of
+-- the saved values. File scope for the same local-ceiling reason as above.
+local RUN_SAVED_KEYS = {
+    "lastSaveStatus", "lastSaveRefusal", "auditRunCounter", "lockDesignTargets",
+}
+local function RunRoot()
+    if type(NexusDB) ~= "table" then return nil end
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    local root = type(writable) == "function"
+        and writable(NexusDB, RUN_SAVED_KEYS) or nil
+    return type(root) == "table" and root or NexusDB
+end
+
+-- `readLive` (no mutator): the owner's read-only entry for the same live row
+-- (the live per-slot design protocol); it compares and invalidates nothing.
+local function UpdateStoreState(mutator, readLive)
     local internals = Nexus and Nexus.MainInternals
     local owner = type(internals) == "table" and internals.StoreAuthorityOwner
     -- Honour the INJECTED Store. A stub Store must never resolve the real
@@ -37,15 +54,20 @@ local function UpdateStoreState(mutator)
     local realStore = type(Store) == "table"
         and type(Store.Init) == "function"
         and type(Store.CurrentOwnerKey) == "function"
-    if realStore and type(owner) == "table"
-        and type(owner.UpdateStateV1) == "function" then
-        return owner.UpdateStateV1(mutator)
+    if realStore and type(owner) == "table" then
+        if readLive and type(owner.ReadStateV1) == "function" then
+            return owner.ReadStateV1()
+        end
+        if type(owner.UpdateStateV1) == "function" then
+            return owner.UpdateStateV1(mutator or function(row) return row end)
+        end
     end
     -- No authorized owner for THIS Store. Fall back to whatever state table the
     -- injected facade exposes, which is exactly the pre-migration behaviour for
     -- such a Store.
     local injected = Store and Store.State and Store.State()
     if type(injected) ~= "table" then return nil end
+    if readLive then return true, injected end
     return true, mutator(injected)
 end
 
@@ -58,6 +80,11 @@ function AutomationRuntime.New(options)
     local Strategy = assert(options.strategy, "AutomationRuntime requires Strategy")
     local Store = assert(options.store, "AutomationRuntime requires Store")
     boundStore = Store
+    if Nexus.RollRecorder then
+        Nexus.RollRecorder.Configure({
+            enabled = function() return Store.Settings().rollTrace end,
+            now = options.now })
+    end
     local Adapter = assert(options.adapter, "AutomationRuntime requires GameAdapter")
     local Readout = assert(options.readout, "AutomationRuntime requires Readout")
     local DefaultProfile = assert(options.defaultProfile,
@@ -331,7 +358,29 @@ local forcedTakesBySpell = {}
 local frozeThisBoard = nil       -- board signature we already spent a freeze on
 local refusedBanishSig = nil
 local refusedRerollSig = nil
-local externalPauseUntil = 0
+-- Reasons actions are held while Auto stays selected. One table, not
+-- separate locals: this factory is at Lua 5.1's 200-local limit.
+-- externalUntil: a short pause after the player acted on the board.
+-- World fields: loading-screen transitions inside this UI session. The 3.3.5a
+-- client gives PLAYER_ENTERING_WORLD no login/reload arguments; the evidence
+-- used is that this Lua state saw PLAYER_LEAVING_WORLD first (a login or
+-- /reload starts a new Lua state with Auto OFF). Actions are held from the
+-- leave until the entry that closes it, then for worldSettle seconds and
+-- until the adapter is ready. The settle is pacing only: Adapter.Ready() is
+-- normally already true at a same-session entry, and each action still needs
+-- its own current reads. worldPending: everything that still waited for the
+-- server at the leave (a runtime intent, marked crossedWorld, and every
+-- adapter latch) holds actions after the settle too, until player input, a
+-- run boundary or, when a single Take was pending, its own grant. An entry
+-- with no observed leave is not classified and revokes Auto.
+local actionHold = { externalUntil = 0, worldLeaving = false,
+    worldSettleUntil = nil, worldSettle = 3, worldPending = nil,
+    -- Rolling-policy selection and the open decision's recorder link. Kept on
+    -- this table: the factory has no free local slot. `set` is false until the
+    -- first read; `inForce` changes only while no action intent exists.
+    rolling = { set = false, inForce = nil, requested = nil, switches = 0,
+        decisionId = nil, sig = nil, sessionMarked = false,
+        lastPolicy = nil, lastFallback = nil } }
 
 -- SAVE state
 local savedThisVisit = false
@@ -432,7 +481,19 @@ end
 
 local function AutoAllowed()
     if not autoEnabled then return false, "manual mode" end
-    if GetTime() < externalPauseUntil then return false, "user acting" end
+    if actionHold.worldLeaving then return false, "loading screen (waiting for world entry)" end
+    if actionHold.worldSettleUntil then
+        if GetTime() < actionHold.worldSettleUntil or not Adapter.Ready() then
+            return false, "settling after world entry"
+        end
+        actionHold.worldSettleUntil = nil
+    end
+    if actionHold.worldPending then
+        return false, "no confirmed result for "
+            .. actionHold.worldPending.label
+            .. " sent before the loading screen -- turn Auto off and on to continue"
+    end
+    if GetTime() < actionHold.externalUntil then return false, "user acting" end
     if Adapter.RivalDetected() then return false, "Another Echo automation addon is loaded -- disable it" end
     if Adapter.AutoAcceptOn() then return false, "client auto-accept re-enabled" end
     if type(Adapter.OrdinaryBoardAllowed) == "function" then
@@ -493,7 +554,13 @@ end
 -- whatever's in it into the CURRENTLY ACTIVE wishlist's own per-character
 -- bucket (the best available guess for what it was designed against -- and
 -- for THIS character specifically, unlike the account-wide bucket it came
--- from) and retire the flat key permanently. The Dev Test 42-47 account-wide
+-- from) and retire the flat key once its targets are kept: the move was
+-- accepted and reads back equal, or the key already holds an equal bucket,
+-- and the Store reports durable (Store.StateWriteStatus) at that moment.
+-- A refused or unpersisted move, a different bucket that must not be
+-- overwritten, or a Store that is not durable leaves the flat key as it was
+-- (it can then still be adopted later by a Wishlist that has no bucket yet).
+-- The Dev Test 42-47 account-wide
 -- lockDesignTargetsBySlot bucket is deliberately NOT migrated forward -- its
 -- contents can't be reliably attributed to any one character, so carrying it
 -- over would just reintroduce the same cross-character bleed one more time.
@@ -502,25 +569,86 @@ local function LockDesignTargetsFor(wishlist, knownKey)
     if type(wishlist)=="table" and wishlist.designTargets~=nil then
         return wishlist.designTargets
     end
-    local legacy = NexusDB and NexusDB.lockDesignTargets
+    -- Retained designs of this rolled content differ (GameAdapter): no
+    -- content-key bucket stands in for the one the player meant.
+    if type(wishlist)=="table" and wishlist.designAmbiguous then return nil end
+    local runRoot = RunRoot()
+    local legacy = runRoot and runRoot.lockDesignTargets
     if type(legacy) == "table" then
-        UpdateStoreState(function(state)
-            state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
-            local key = LockSlotKey(wishlist, knownKey)
-            if not state.lockDesignTargetsBySlot[key] then
-                state.lockDesignTargetsBySlot[key] = legacy
+        -- The flat table is retired only once its targets are known to be
+        -- kept: the Store accepted the move and the bucket reads back equal,
+        -- or the key already holds an equal bucket. A refused or unverified
+        -- move, or a different bucket that must not be overwritten, leaves
+        -- the flat table untouched (nothing is lost and nothing is merged).
+        local function Same(a, b, depth)
+            if type(a) ~= "table" or type(b) ~= "table" then return a == b end
+            if (depth or 0) > 8 then return false end
+            for k, v in pairs(a) do
+                if not Same(v, b[k], (depth or 0) + 1) then return false end
             end
-        end)
-        NexusDB.lockDesignTargets = nil
+            for k in pairs(b) do
+                if a[k] == nil then return false end
+            end
+            return true
+        end
+        -- Retirement also needs the Store to be durable now: while it is only
+        -- keeping a transient, never-persisted row (an unusable container, an
+        -- unadmitted row) or the lifecycle is still loading, an equal bucket
+        -- proves nothing about the saved data. An injected facade is its own
+        -- authority; a real Store that cannot say is treated as not durable.
+        local function Durable()
+            local Store = boundStore
+            if not (type(Store) == "table" and type(Store.Init) == "function"
+                and type(Store.CurrentOwnerKey) == "function") then
+                return true
+            end
+            if type(Store.StateWriteStatus) ~= "function" then return false end
+            local ok, status = pcall(Store.StateWriteStatus)
+            return ok and type(status) == "table" and status.mode == "durable"
+        end
+        local key = LockSlotKey(wishlist, knownKey)
+        local function Bucket()
+            local ok, row = UpdateStoreState(nil, true)
+            local map = ok and type(row) == "table"
+                and row.lockDesignTargetsBySlot or nil
+            if not ok or type(row) ~= "table" then return false end
+            return true, type(map) == "table" and map[key] or nil
+        end
+        local readable, existing = Bucket()
+        if readable and existing ~= nil then
+            if Same(existing, legacy) and Durable() then
+                runRoot.lockDesignTargets = nil
+            end
+        elseif readable then
+            local moved = false
+            local accepted = UpdateStoreState(function(state)
+                moved = false -- a re-run of the mutator starts clean
+                state.lockDesignTargetsBySlot = state.lockDesignTargetsBySlot or {}
+                if not state.lockDesignTargetsBySlot[key] then
+                    state.lockDesignTargetsBySlot[key] = legacy
+                    moved = true
+                end
+            end)
+            local _, stored = Bucket()
+            if accepted and moved and Same(stored, legacy) then
+                if Durable() then runRoot.lockDesignTargets = nil end
+                -- A bucket was really created and verified: readers that
+                -- cached this Wishlist's plan re-read it (a revision step
+                -- only; no data changes).
+                if Adapter and type(Adapter.NoteLockDesignTargetsMoved) == "function" then
+                    Adapter.NoteLockDesignTargetsMoved()
+                end
+            end
+        end
     end
     -- Read LIVE, not from the defensive snapshot. lockDesignTargetsBySlot is
     -- part of the live sub-tree protocol: WishlistController.LockDesignTargets
-    -- hands callers the live per-slot table and they mutate it in place AFTER
-    -- the authorized entry has returned, so those nested writes cannot
-    -- invalidate the read snapshot and a snapshot read here would observe stale
-    -- targets. Reading through the owner is free now that invalidation is
-    -- content-based: this reads and changes nothing, so it invalidates nothing.
-    local ok, state = UpdateStoreState(function(row) return row end)
+    -- hands out the live committed per-slot table (its callers only read it; a
+    -- design is stored through the authorized entry), and a snapshot read here
+    -- could observe stale targets. The owner's read-only entry hands out the
+    -- live row: it reads and changes nothing, invalidates nothing and, unlike
+    -- a no-op mutator through UpdateStateV1, compares nothing.
+    local ok, state = UpdateStoreState(nil, true)
     if not ok or type(state) ~= "table" then return nil end
     local bySlot = state.lockDesignTargetsBySlot
     local key = LockSlotKey(wishlist, knownKey)
@@ -953,8 +1081,11 @@ local function WishlistWithLockTargets(wishlist, catalog, knownKey, knownTargets
         local copies = targetEntry.copies
         if id and row and fam and copies then
             local q = tonumber(row.quality) or 0
+            -- designTarget: appended from the design, not a row of the
+            -- plan itself; it does not make an untyped plan typed.
             entries[#entries + 1] = {
                 spellId=id,quality=q,stacks=copies,family=fam,locked=true,
+                designTarget=true,
             }
             local target = WritableTarget(fam)
             if target then
@@ -1042,8 +1173,13 @@ local function StrategyWishlistKey(wishlist)
     local entryParts = {}
     for index, entry in ipairs(type(wishlist.entries) == "table"
         and wishlist.entries or {}) do
-        entryParts[index] = KeyPart(type(entry) == "table"
-            and entry.spellId or nil)
+        -- Roles and copies are compiled into the plan (Strategy.Compile's
+        -- locked-target counts and explicit-roles signal), so a role-only
+        -- change must not reuse the old plan.
+        entryParts[index] = type(entry) == "table" and table.concat({
+            KeyPart(entry.spellId), KeyPart(entry.stacks),
+            KeyPart(entry.locked), KeyPart(entry.sourceRole)}, ":")
+            or KeyPart(nil)
     end
     return table.concat({
         table.concat(familyParts, ","),
@@ -1241,6 +1377,11 @@ local function AutoLockRecordMatches(record, descriptor)
             tonumber(record.lockedRevision),record.lockedToken)
 end
 
+-- The identity of the locked state an attempt was prepared against: the
+-- copies by spell and, when a spell is held in more than one record, the
+-- record partition (the same copies in other records occupy other slots).
+-- With one mirrored record per locked spell, the token keeps the copies-only
+-- form of earlier builds.
 local function AutoLockLockedToken(locked)
     if type(locked) ~= "table" or locked.synced ~= true
         or type(locked.bySpell) ~= "table" then return nil end
@@ -1253,7 +1394,25 @@ local function AutoLockLockedToken(locked)
         parts[#parts + 1] = tostring(spellId) .. "x" .. tostring(count)
     end
     table.sort(parts)
-    return #parts > 0 and table.concat(parts, ",") or "0"
+    local token = #parts > 0 and table.concat(parts, ",") or "0"
+    local records, perSpell, split = locked.records, {}, false
+    if type(records) == "table" then
+        local rows = {}
+        for index = 1, #records do
+            local row = records[index]
+            local spellId = type(row) == "table" and AutoLockInteger(row.spellId)
+            local stacks = type(row) == "table" and AutoLockInteger(row.stacks)
+            if not spellId or not stacks then return nil end
+            perSpell[spellId] = (perSpell[spellId] or 0) + 1
+            if perSpell[spellId] > 1 then split = true end
+            rows[index] = tostring(spellId) .. "x" .. tostring(stacks)
+        end
+        if split then
+            table.sort(rows)
+            token = token .. "|records:" .. table.concat(rows, ",")
+        end
+    end
+    return token
 end
 
 local function AutoLockDescriptors(targets, wishlistKey, catalog)
@@ -1486,6 +1645,17 @@ local function FallbackNeedsRepair(now)
         if ok and type(signature) == "table" then
             fallbackSignature = signature
         end
+        -- The repair rebuilds the static context when ANY mismatched component
+        -- is static, so the reported component is the first static one. Taking
+        -- only the first field let a dynamic one listed earlier (granted,
+        -- locked, discovery, tomeSafety) hide a static one listed later
+        -- (state, settings, associations, association, firstRun), and the new
+        -- baseline above then absorbed that static change for good.
+        for _, field in ipairs(mismatches or {}) do
+            if FALLBACK_STATIC_COMPONENTS[field] then
+                return true, field, signature
+            end
+        end
         return true, mismatches and mismatches[1] or nil, signature
     end
     return false, nil, signature
@@ -1509,8 +1679,12 @@ local function AdvanceFallbackDynamicBaseline(level)
         -- Reconcile performed during StaticContext may already have captured
         -- a newer generation than ConsumeDirty returned at the start of this
         -- same tick. Never roll that freshly validated fallback baseline back.
-        AdvanceFallbackGeneration("slots", projectionRevisions.slots)
-        AdvanceFallbackGeneration("activeSlot", projectionRevisions.activeSlot)
+        -- Only the dynamic generations are advanced here: this step re-read
+        -- those projections. The slots and active-slot generations are static
+        -- inputs; their baseline moves only when StaticContext rebuilt the
+        -- static context (CaptureFallbackSignature). Advancing them after a
+        -- step that did not rebuild it hid a slot change that a non-dirty
+        -- reader had already reconciled, so the plan stayed stale for good.
         AdvanceFallbackGeneration("granted", projectionRevisions.granted)
         AdvanceFallbackGeneration("locked", projectionRevisions.locked)
         AdvanceFallbackGeneration("discovery", projectionRevisions.discovery)
@@ -1630,6 +1804,23 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
     trace[#trace + 1] = string.format("autoLockEchoes setting: %s", tostring(settings.autoLockEchoes))
     if not settings.autoLockEchoes then return end
 
+    -- An Echo action whose outcome is not settled -- above all a Select still
+    -- waiting for its grant -- defers locking. Locking the awaited Echo in that
+    -- window would move its stacks out of the granted mirror, so the grant
+    -- could never be seen and automation would stay held.
+    if Adapter.InFlight and Adapter.InFlight() then
+        trace[#trace + 1] = "deferred: an Echo action is still in flight"
+        -- Come back for it. A grant marks data dirty, which makes this step
+        -- due again. A Banish, Freeze or Reroll latch clearing or a refused
+        -- Select marks only the board dirty, and a latch the watchdog
+        -- declares dead marks nothing dirty; neither makes this step due.
+        -- The delay only schedules a re-check: the
+        -- gate above is still the in-flight evidence, and nothing here
+        -- counts or confirms anything.
+        RequestAutoLockAt(GetTime() + 1)
+        return
+    end
+
     targets = targets or LockDesignTargetsFor(wishlist, wishlistKey)
     if type(targets) ~= "table" then
         trace[#trace + 1] = string.format(
@@ -1659,9 +1850,12 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         tostring(LockSlotKey(wishlist, wishlistKey)), targetCount)
     if targetCount == 0 then return end
 
-    local lockedBySpell, lockedCount =
+    -- lockedCount is the number of OCCUPIED locked records: the native
+    -- journal's client lock gate compares records, not copies, with the
+    -- capacity; here too a lock needs one record slot, whatever its copies.
+    local lockedBySpell, lockedCount, recordsBySpell =
         options.wishlistModel.LockedSpellCounts(locked)
-    if not lockedBySpell then
+    if not lockedBySpell or not lockedCount then
         trace[#trace + 1] = "authoritative locked-state counts are invalid"
         return
     end
@@ -1675,7 +1869,7 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         used=lockedCount,maximum=maxSlots or 0,known=maxSlots ~= nil,
         source=capacitySource,synced=locked and locked.synced == true or false,
     }
-    trace[#trace + 1] = string.format("locked: %d/%s source=%s synced=%s revision=%s",
+    trace[#trace + 1] = string.format("locked records: %d/%s source=%s synced=%s revision=%s",
         lockedCount,tostring(maxSlots or "unknown"),tostring(capacitySource),
         tostring(lastAutoLockCapacity.synced),tostring(lockedRevision))
     if not lastAutoLockCapacity.synced or lockedRevision == nil
@@ -1787,9 +1981,10 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
             Print(string.format(
                 "|cff4dff80Nexus:|r unlocked %s -- %s is acquired and ready to replace it.",
                 EchoName(oldId), EchoName(newId)))
-            local removedCopies = tonumber(lockedBySpell[oldId]) or 0
+            local removedRecords = tonumber(recordsBySpell
+                and recordsBySpell[oldId]) or 1
             lockedBySpell[oldId] = nil
-            lockedCount = math.max(0, lockedCount - removedCopies)
+            lockedCount = math.max(0, lockedCount - removedRecords)
             return true
         elseif err ~= "spacing" then
             Print(string.format("|cffff6060Nexus:|r couldn't unlock %s: %s",
@@ -1858,10 +2053,15 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
                 UnlockReplacement(replaces, id)
                 mutationAttempted = true
             end
+        elseif (tonumber(lockedBySpell[id]) or 0) > 0 then
+            -- Locked already, with fewer copies than the target. LockPerk
+            -- sends only the spellId, and the native journal refuses to lock
+            -- an already-locked Echo, so Nexus submits no lock to add copies.
+            trace[#trace + 1] =
+                "  -> already locked with fewer copies than the target; a lock cannot add copies to its record"
         elseif haveN >= targetCopies then
-            local currentCopies = tonumber(lockedBySpell[id]) or 0
-            local neededCopies = math.max(0, targetCopies - currentCopies)
-            if lockedCount + neededCopies <= maxSlots then
+            -- One lock occupies one more record, whatever its copies.
+            if lockedCount + 1 <= maxSlots then
                 if not record and not outstanding and not uncertainTerminal
                     and not mutationAttempted then
                     record = NewAutoLockRecord(descriptor, wishlistKey,
@@ -1985,6 +2185,17 @@ local function RecordActionLifecycle(intent, state, reason)
     lastActionLifecycle.submittedAt = intent.submittedAt or 0
     lastActionLifecycle.resolvedAt = (state == "prepared" or state == "submitted")
         and 0 or GetTime()
+    do
+        local recorder = Nexus.RollRecorder
+        if recorder and intent.decisionId then
+            local prepared = intent.action
+            recorder.Intent(intent.decisionId, state, reason, {
+                elapsed = GetTime() - (intent.preparedAt or GetTime()),
+                mutation = intent.mutationAttempted and true or false,
+                type = prepared and prepared.type, index = prepared and prepared.index,
+                spellId = prepared and prepared.spellId })
+        end
+    end
 end
 
 local function FinishActionIntent(state, reason, keepBlocking)
@@ -1997,6 +2208,12 @@ end
 local function ResolveActionIntent(board)
     local intent = actionIntent
     if not intent then return end
+    -- Sent before a loading screen and unresolved at its start: a board read
+    -- after it (missing, changed or the same) and elapsed time are not its
+    -- result. It stays unresolved and AutoAllowed holds every automatic
+    -- action until new player input, a run boundary or, for a Take, its own
+    -- grant (DispatchLevelStep) ends it.
+    if intent.crossedWorld then return end
     if type(board) ~= "table" then
         if intent.state == "prepared" then
             FinishActionIntent("superseded", "board_unavailable_before_submit", false)
@@ -2049,6 +2266,8 @@ local function PrepareActionIntent(board, action)
         action=copy,actionKey=ActionKey(copy),
         targetSpellId=targetSpellId,
         decisionRevision=actionDecisionRevision,
+        decisionId=(actionHold.rolling.sig == board.signature)
+            and actionHold.rolling.decisionId or nil,
         preparedAt=now,readyAt=now + ACTION_INTENT_BEAT,
         mutationAttempted=false,state="idle",
     }
@@ -2131,13 +2350,43 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     lastStepContext.boardPresent = board ~= nil
     ResolveActionIntent(board)
     if not board then
-        SetStatus("waiting for board")
+        do
+            local recorder, rolling = Nexus.RollRecorder, actionHold.rolling
+            if recorder and rolling.decisionId then
+                rolling.decisionId, rolling.sig = nil, nil
+                recorder.After({ basis = "board_cleared", owned = owned })
+            end
+        end
+        -- A loading-screen hold keeps its reason visible without a board.
+        local heldOk, heldWhy = true, nil
+        if autoEnabled and actionHold.worldPending then
+            heldOk, heldWhy = AutoAllowed()
+        end
+        SetStatus(heldOk and "waiting for board"
+            or ("auto paused: " .. tostring(heldWhy)))
         local preparePerformance, prepareStarted = BeginPhase("overlayPrepare")
         local model = { status = statusLine, cards = {}, recommendation = "",
             progress = BuildProgress(plan, owned, slots, catalog,
                 nil, nil, static, locked),
-            auto = AutoAllowed() and settings.autoPick,
+            -- The selection, as on the board path: a hold is shown in the
+            -- status line, never as a button that reads OFF.
+            auto = autoEnabled,
+            paused = nil,
             version = Nexus.VERSION }
+        if autoEnabled then
+            -- Between boards the same pause stays visible (read-only gate).
+            local gateOk, gateWhy = true, nil
+            if Adapter.OrdinaryBoardAllowed then gateOk, gateWhy = Adapter.OrdinaryBoardAllowed() end
+            if not heldOk then model.paused = tostring(heldWhy)
+            elseif not gateOk then model.paused = tostring(gateWhy) end
+        end
+        if Nexus.OrbGuidance then
+            model.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
+                model.progress, (actionIntent and (actionIntent.state == "submitted"
+                or actionIntent.state == "uncertain" or actionIntent.state == "expired")
+                and actionIntent.state or nil),
+            plan and not plan.advisorOnly, {skipHorizon = actionHold.worldLeaving == true}))
+        end
         FinishPhase(preparePerformance, "overlayPrepare", prepareStarted)
         MeasurePhase("overlayRender", RenderPanel, model)
         return
@@ -2186,8 +2435,26 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     local queue = {entries={}}
     local charges = Adapter.Charges()
     local horizon = Adapter.Horizon()
+    -- Rolling policy selector. It is read every decision but takes effect only
+    -- while no action intent exists, so a policy change never clears, replays
+    -- or re-decides an unresolved intent.
+    do
+        local rolling = actionHold.rolling
+        rolling.requested = settings.rollingPolicy
+        if not rolling.set or actionIntent == nil then
+            if rolling.set and rolling.inForce ~= rolling.requested then
+                rolling.switches = rolling.switches + 1
+                if Nexus.RollRecorder then
+                    Nexus.RollRecorder.Boundary("policy", tostring(rolling.inForce or "default")
+                        .. ">" .. tostring(rolling.requested or "default"))
+                end
+            end
+            rolling.set, rolling.inForce = true, rolling.requested
+        end
+    end
     local state = {
         board = board, owned = owned, locked = locked, charges = charges, plan = plan,
+        rollingPolicy = actionHold.rolling.inForce,
         ordinaryBoardAllowed = not Adapter.OrdinaryBoardAllowed or Adapter.OrdinaryBoardAllowed(),
         allowReroll = settings.autoReroll ~= false,
         allowFreeze = settings.autoFreeze ~= false,
@@ -2197,7 +2464,10 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         canFreeze = settings.autoFreeze ~= false and (level < 80
             or (type(horizon) == "number" and horizon > 1))
             and (frozeThisBoard ~= board.signature),
-        support = Model.Support(catalog, owned, level, disabledLevers, plan, DefaultProfile.params),
+        -- No draw-support list: Policy.Decide routes every ordinary board to
+        -- EchoWeaver, which never reads it; only the historical scoring path
+        -- did. Building it walked the whole Echo catalog per new board
+        -- (measured 0.5 ms at 2090 rows) for nothing.
         params = DefaultProfile.params,
         allowBanish = settings.autoBanish ~= false,
         searchRefused = {
@@ -2227,6 +2497,8 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     }
     FinishPhase(preparePerformance, "boardPrepare", prepareStarted)
     local action = MeasurePhase("policy", Policy.Decide, state)
+    actionHold.rolling.lastPolicy = action.policyId
+    actionHold.rolling.lastFallback = action.fallbackReason
 
     -- ------------------------------------------------------------------
     -- Decision log (manual-training data). One entry per fresh board:
@@ -2247,6 +2519,26 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         end
         if lastLoggedSig ~= board.signature then
             lastLoggedSig = board.signature
+            do
+                -- Automatic local record (core/RollRecorder.lua): the previous
+                -- decision's first observation, then this decision. Observation
+                -- only; it never blocks or changes the action below.
+                local recorder, rolling = Nexus.RollRecorder, actionHold.rolling
+                if recorder then
+                    if not rolling.sessionMarked then
+                        rolling.sessionMarked = true
+                        recorder.Boundary("session", "")
+                    end
+                    recorder.After({ basis = "next_board", board = board, owned = owned, charges = charges })
+                    rolling.decisionId = recorder.Decision({
+                        state = state, action = action, board = board, owned = owned,
+                        locked = locked, plan = plan, catalog = catalog, level = level,
+                        horizon = horizon, charges = charges, disabledLevers = disabledLevers,
+                        activeSlot = slots and slots.activeSlot or 0,
+                        catalogRevision = CatalogRevision() })
+                    rolling.sig = board.signature
+                end
+            end
             local entry = {
                 t = date and date("%H:%M:%S") or "",
                 level = level,
@@ -2378,8 +2670,17 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         level = level,
         recommendation = recommendation,
         auto = autoEnabled,
+        -- Auto stays ON; this only says it is not acting now, and why.
+        paused = autoEnabled and not okAuto and tostring(autoWhy) or nil,
         version = Nexus.VERSION,
     }
+    if Nexus.OrbGuidance then
+        panelModel.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
+            panelModel.progress, (actionIntent and (actionIntent.state == "submitted"
+                or actionIntent.state == "uncertain" or actionIntent.state == "expired")
+                and actionIntent.state or nil),
+            plan and not plan.advisorOnly, {horizon = horizon, horizonKnown = true}))
+    end
     FinishPhase(overlayPerformance, "overlayPrepare", overlayStarted)
     MeasurePhase("overlayRender", RenderPanel, panelModel)
 
@@ -2430,6 +2731,9 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
                 forcedTakesBySpell[fid] = (forcedTakesBySpell[fid] or 0) + 1
             end
         end
+        -- The granted count before the send: a later rise is this Take's
+        -- result (the ConfirmAwaitingGrant rule), used at a loading screen.
+        intent.grantBaseline = Adapter.GrantedCount(immutable.spellId)
         local ok, err = Adapter.Take(immutable.spellId)
         if ok then
             lastDecision = immutable
@@ -2469,7 +2773,13 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
                 immutable.index))
         else
             intent.mutationAttempted = true
-            FinishActionIntent("rejected", err or "adapter_refused", true)
+            -- A refused Freeze does not keep the board blocked. Its loop
+            -- breaker is frozeThisBoard below: the next decision runs with
+            -- canFreeze=false and takes a needed offer. (A refused Take keeps
+            -- blocking on purpose: re-deciding would pick the same card.)
+            -- Keeping the rejected intent here left the board at "waiting:
+            -- rejected freeze" until the player acted on it.
+            FinishActionIntent("rejected", err or "adapter_refused", false)
             frozeThisBoard = board.signature   -- refused: do not retry this board
         end
     elseif immutable.type == "reroll" then
@@ -2500,7 +2810,11 @@ local function StepSave(level, plan, slots, owned, static, locked)
     MeasurePhase("overlayRender", RenderIdlePanel,
         plan, owned, slots, static.catalog, static, locked)
     local settings = Store.Settings()
-    local automationAllowed = AutoAllowed()
+    local automationAllowed, heldWhy = AutoAllowed()
+    if not automationAllowed and autoEnabled and actionHold.worldPending then
+        -- The save gate is held too; show why, as the board path does.
+        SetStatus("auto paused: " .. tostring(heldWhy))
+    end
     if not automationAllowed or not settings.autoSave or savedThisVisit then
         return
     end
@@ -2587,7 +2901,7 @@ local function StepSave(level, plan, slots, owned, static, locked)
                 SetStatus("Save sent — checking server")
                 Print(string.format("Save sent — %s. Checking the Saved Build now. Still needed: %s.",
                     saveVerifySummary or "loadout improved", stillNeeded))
-                NexusDB.lastSaveStatus = {
+                RunRoot().lastSaveStatus = {
                     state = "sent", slot = incumbent.slot, name = saveName,
                     t = date and date("%H:%M:%S") or "",
                     summary = saveVerifySummary or "", stillNeeded = stillNeeded,
@@ -2631,7 +2945,7 @@ local function StepSave(level, plan, slots, owned, static, locked)
             SetStatus(string.format(
                 "Working toward '%s' — run complete, no improvement (%s)",
                 wlName, readableDetail))
-            NexusDB.lastSaveRefusal = {
+            RunRoot().lastSaveRefusal = {
                 t = date and date("%H:%M:%S") or "",
                 level = level, detail = tostring(detail),
                 incumbentSlot = incumbent.slot,
@@ -2751,8 +3065,9 @@ local function ResetRunBoundary()
         Print("|cffff9040Nexus:|r the first-run Saved Build write was not confirmed before the reset. "
             .. "Open Echo Journal > My Builds and verify/save the loadout manually before relying on automated convergence.")
     end
-    NexusDB.auditRunCounter = (tonumber(NexusDB.auditRunCounter) or 0) + 1
-    auditRunId = NexusDB.auditRunCounter
+    local runRoot = RunRoot()
+    runRoot.auditRunCounter = (tonumber(runRoot.auditRunCounter) or 0) + 1
+    auditRunId = runRoot.auditRunCounter
     auditRunStarted = nil
     leversDoneThisVisit = {}
     armAttempts, armTargetSlot = 0, nil
@@ -2770,6 +3085,11 @@ local function ResetRunBoundary()
     if actionIntent then
         FinishActionIntent("superseded", "run_boundary", false)
     end
+    if Nexus.RollRecorder then
+        Nexus.RollRecorder.Boundary("run", "")
+        actionHold.rolling.decisionId, actionHold.rolling.sig = nil, nil
+    end
+    actionHold.worldPending = nil -- the dead run's pending action ends here
     lastDecision = nil
     lastLoggedSig = nil
     lastBoardForRerollWatch = nil
@@ -2794,12 +3114,12 @@ local function HandleLevelTransition(level, boundaryGeneration)
         -- A short user-action pause belongs to the board/level where it was
         -- observed. Never let it suppress the first actionable board after a
         -- genuine progression transition.
-        externalPauseUntil = 0
+        actionHold.externalUntil = 0
         if level ~= 80 then savedThisVisit = false end
         lastLevelSeen = level
     end
     if Adapter.ExternalActionSeen() and not levelChanged then
-        externalPauseUntil = GetTime() + 3
+        actionHold.externalUntil = GetTime() + 3
     end
 end
 
@@ -2876,7 +3196,7 @@ local function ObservePendingSave(catalog)
                     SetStatus("Save complete — server confirmed Active Loadout "
                         .. saveVerifySlot)
                 end
-                NexusDB.lastSaveStatus = {
+                RunRoot().lastSaveStatus = {
                     state = "confirmed", slot = saveVerifySlot,
                     t = date and date("%H:%M:%S") or "",
                     summary = saveVerifySummary or "",
@@ -2902,7 +3222,7 @@ local function ObservePendingSave(catalog)
             else
                 SetStatus("Save request sent; server confirmation not received. Check My Builds before resetting.")
             end
-            NexusDB.lastSaveStatus = {
+            RunRoot().lastSaveStatus = {
                 state = seedVerify and "first_run_unconfirmed" or "saved_unverified",
                 slot = saveVerifySlot,
                 name = saveVerifyName or "",
@@ -2924,6 +3244,19 @@ end
 
 local function DispatchLevelStep(level, plan, slots, owned, flags,
                                  disabledLevers, static, locked)
+    -- The one supported result after a loading screen: a Take's grant in the
+    -- granted mirror, by the rule of the adapter's ConfirmAwaitingGrant. The
+    -- leave sets spellId only when that Select was the one pending item (and
+    -- the crossed intent's own spell). Checked here, before every level
+    -- path, so the hold and its intent end together.
+    local held = actionHold.worldPending
+    if held and held.spellId and held.baseline
+        and Adapter.GrantedCount(held.spellId) > held.baseline then
+        actionHold.worldPending = nil
+        if actionIntent and actionIntent.crossedWorld then
+            FinishActionIntent("confirmed", "grant_observed", false)
+        end
+    end
     if level == 1 then
         StepArm(level, plan, owned, slots, disabledLevers, static, locked)
         if plan.advisorOnly then
@@ -2945,11 +3278,29 @@ local function DispatchLevelStep(level, plan, slots, owned, flags,
             if board then
                 StepRun(level, plan, slots, owned, flags, disabledLevers,
                     static, locked)
+            -- Both waits below render the idle HUD, as every other outcome of
+            -- this dispatch already does. A status line alone never reaches
+            -- the screen when no panel input exists yet: Panel.Toggle then
+            -- only schedules a recompute and keeps itself hidden, so without
+            -- a render here the main HUD could not be opened at all in this
+            -- state, and each left-click only added to its hidden count.
+            -- The idle render takes, freezes, banishes, rerolls, saves,
+            -- locks and spends nothing.
             elseif Adapter.InFlight() then
                 SetStatus("finishing final Echo selections")
+                MeasurePhase("overlayRender", RenderIdlePanel,
+                    plan, owned, slots, static.catalog, static, locked)
             else
-                SetStatus(string.format("finishing run — %d/79 Echoes",
-                    rolledTotal))
+                -- A count that has not been synchronized is not a count:
+                -- say it is unknown rather than show a number it lacks.
+                if owned and owned.synced then
+                    SetStatus(string.format("finishing run — %d/79 Echoes",
+                        rolledTotal))
+                else
+                    SetStatus("finishing run — Echo count not synchronized yet")
+                end
+                MeasurePhase("overlayRender", RenderIdlePanel,
+                    plan, owned, slots, static.catalog, static, locked)
             end
         end
     end
@@ -3065,7 +3416,7 @@ local function JournalData()
         est = (e and e.text) or "estimate unavailable"
     end
     sections[#sections + 1] = { title = "Notes", lines = {
-        "Compares the assigned Wishlist with the active Saved Build; planned permanent targets are not proof of ownership.",
+        "Compares the assigned Wishlist with the active Saved Build; planned locked targets are not proof of ownership.",
         est,
     } }
     return { sections = sections, version = Nexus.VERSION }
@@ -3077,8 +3428,11 @@ local function ScheduleKnownDeadlines()
         local resumeAt = Adapter.TomeMutationResumeAt()
         if resumeAt and resumeAt > now then RequestStepAt(resumeAt) end
     end
-    if externalPauseUntil and externalPauseUntil > now then
-        RequestStepAt(externalPauseUntil)
+    if actionHold.externalUntil and actionHold.externalUntil > now then
+        RequestStepAt(actionHold.externalUntil)
+    end
+    if actionHold.worldSettleUntil and actionHold.worldSettleUntil > now then
+        RequestStepAt(actionHold.worldSettleUntil)
     end
     if actionIntent then
         if actionIntent.state == "prepared"
@@ -3186,7 +3540,7 @@ end
     local M = {}
 
     function M.Initialize()
-        auditRunId = tonumber(NexusDB and NexusDB.auditRunCounter) or 0
+        auditRunId = tonumber(RunRoot() and RunRoot().auditRunCounter) or 0
         local revisions = Nexus and Nexus.Revisions
         if not catalogRevisionUnsubscribe and revisions
             and type(revisions.Subscribe) == "function" then
@@ -3201,6 +3555,16 @@ end
     function M.RequestRecompute() return RequestRecompute() end
     function M.RequestStepAt(when) return RequestStepAt(when) end
     function M.StatusLine() return statusLine end
+    -- Read-only: "submitted" or "uncertain" while an automatic action waits
+    -- for its result (HUD guidance only; it authorizes nothing).
+    function M.PendingIntentState()
+        local state = actionIntent and actionIntent.state
+        -- An expired intent is not a confirmed one: it still counts.
+        if state == "submitted" or state == "uncertain" or state == "expired" then return state end
+        return nil
+    end
+    -- Read-only: true between a loading screen's start and its world entry.
+    function M.WorldLeaving() return actionHold.worldLeaving == true end
     function M.AutoEnabled() return autoEnabled end
     function M.AutoAllowed() return AutoAllowed() end
     function M.ToggleAuto()
@@ -3209,10 +3573,20 @@ end
             return false
         end
         autoEnabled = not autoEnabled
+        if Nexus.RollRecorder then
+            Nexus.RollRecorder.Boundary("auto", autoEnabled and "on" or "off")
+        end
         if autoEnabled then
             -- Authorization changed, represented data did not. Coalesce one
             -- bounded decision evaluation without invalidating static state.
             authorizationStepPending = true
+            -- New player input ends the hold of an action that a loading
+            -- screen left unresolved. Its result stays unknown: it is
+            -- recorded as uncertain, never as confirmed.
+            actionHold.worldPending = nil
+            if actionIntent and actionIntent.crossedWorld then
+                FinishActionIntent("uncertain", "player_resumed", false)
+            end
         else
             authorizationStepPending = false
             if actionIntent and actionIntent.state == "prepared" then
@@ -3225,6 +3599,141 @@ end
             end
         end
         return autoEnabled
+    end
+    -- Called by Main before the lifecycle sees the event. Returns "held",
+    -- "resuming", "revoked" or "off" (Auto was not selected).
+    function M.OnWorldEvent(event)
+        if event == "PLAYER_LEAVING_WORLD" then
+            actionHold.worldLeaving = true
+            actionHold.worldSettleUntil = nil
+            -- A prepared (unsubmitted) action is dropped, not kept for after
+            -- the loading screen. A sent action without a result is marked:
+            -- nothing is resent, and it stays unresolved (ResolveActionIntent,
+            -- AutoAllowed). (Inline, not a helper local: this factory is at
+            -- Lua 5.1's 200-local limit.)
+            -- Every request the adapter still sees (GameAdapter.PendingActions;
+            -- a live latch next to a Select awaiting its grant is a separate
+            -- request, even for the same spell).
+            local pendingNow = Adapter.PendingActions()
+            local sent = actionIntent and (actionIntent.state == "submitted"
+                or actionIntent.state == "uncertain"
+                or actionIntent.state == "expired")
+            local sameSpellLatch = false
+            for i = 1, #pendingNow do
+                local item = pendingNow[i]
+                if actionIntent and item.kind == "select"
+                    and item.source == "latch"
+                    and item.spellId == tonumber(actionIntent.action.spellId) then
+                    sameSpellLatch = true
+                end
+            end
+            if actionIntent and actionIntent.state == "prepared" then
+                local revokedDeadline = actionIntent.readyAt
+                FinishActionIntent("superseded", "world_transition", false)
+                if revokedDeadline ~= nil and nextStepAt == revokedDeadline then
+                    nextStepAt = nil
+                    ScheduleKnownDeadlines()
+                end
+            elseif sent and not actionIntent.crossedWorld
+                and not sameSpellLatch
+                and actionIntent.action.type == "take"
+                and actionIntent.grantBaseline
+                and Adapter.GrantedCount(actionIntent.action.spellId)
+                    > actionIntent.grantBaseline then
+                -- Its grant is already visible (for example at level 80,
+                -- where no StepRun resolves it) and no other request for the
+                -- same spell is pending: this is its result. A Take that was
+                -- never sent, or one with another same-spell request pending,
+                -- cannot be matched to a grant.
+                FinishActionIntent("confirmed", "grant_observed", false)
+            elseif sent then
+                actionIntent.crossedWorld = true
+                FinishActionIntent("uncertain", "world_transition", true)
+            end
+            -- Also every latch the adapter still holds, with or without a
+            -- runtime intent: a board read one poll before the leave may
+            -- already have recorded the action as a result, or the player
+            -- sent it. A later watchdog release of a latch is not a result.
+            -- A grant can end the hold only when a single Select is pending
+            -- and, with a crossed intent, it is that Take's own tracked
+            -- request (not another latch for the same spell). A later leave
+            -- adds its items to an open hold, and keeps the grant release
+            -- only if that same Select is still all that is pending.
+            local crossed = actionIntent and actionIntent.crossedWorld
+            local held = actionHold.worldPending
+            if held or crossed or #pendingNow > 0 then
+                local only = #pendingNow == 1 and pendingNow[1] or nil
+                local byGrant = only and only.kind == "select"
+                    and only.spellId and only.baseline
+                    and (not crossed or (actionIntent.action.type == "take"
+                        and only.source ~= "latch"
+                        and tonumber(actionIntent.action.spellId) == only.spellId))
+                if not held then
+                    held = { kinds = {}, label = "",
+                        spellId = byGrant and only.spellId or nil,
+                        baseline = byGrant and only.baseline or nil }
+                    actionHold.worldPending = held
+                elseif held.spellId and #pendingNow > 0
+                    and not (byGrant and only.spellId == held.spellId) then
+                    held.spellId, held.baseline = nil, nil
+                end
+                -- Requests per kind, for a truthful reason. A crossed Take is
+                -- the adapter's own tracked Select ("own"/"grant") when one is
+                -- listed; otherwise it is one more Take request. Freeze,
+                -- Banish and Reroll have one client latch each and no grant
+                -- path; a crossed one is named once with its latch.
+                local counts, tracked = {}, false
+                for i = 1, #pendingNow do
+                    local kind = tostring(pendingNow[i].kind)
+                    kind = kind == "select" and "take" or kind
+                    counts[kind] = (counts[kind] or 0) + 1
+                    if kind == "take" and pendingNow[i].source ~= "latch" then
+                        tracked = true
+                    end
+                end
+                if crossed then
+                    local kind = tostring(actionIntent.action.type)
+                    if kind == "take" then
+                        if not tracked then counts.take = (counts.take or 0) + 1 end
+                    elseif not counts[kind] then
+                        counts[kind] = 1
+                    end
+                end
+                for kind, n in pairs(counts) do
+                    if n > (held.kinds[kind] or 0) then held.kinds[kind] = n end
+                end
+                local names, labels = {}, {}
+                for kind in pairs(held.kinds) do names[#names + 1] = kind end
+                table.sort(names)
+                for i = 1, #names do
+                    local n = held.kinds[names[i]]
+                    labels[i] = n > 1 and (n .. " " .. names[i] .. " requests") or names[i]
+                end
+                held.label = table.concat(labels, " and ")
+            end
+            if Nexus.RollRecorder then
+                Nexus.RollRecorder.Boundary("world_leave", "")
+                actionHold.rolling.decisionId, actionHold.rolling.sig = nil, nil
+            end
+            return autoEnabled and "held" or "off"
+        end
+        if event == "PLAYER_ENTERING_WORLD" and Nexus.RollRecorder then
+            Nexus.RollRecorder.Boundary("world_enter", "")
+        end
+        local closesTransition = event == "PLAYER_ENTERING_WORLD"
+            and actionHold.worldLeaving
+        actionHold.worldLeaving = false
+        actionHold.worldSettleUntil = nil
+        if closesTransition then
+            actionHold.worldSettleUntil = GetTime() + actionHold.worldSettle
+            if not autoEnabled then return "off" end
+            RequestStepAt(actionHold.worldSettleUntil)
+            return "resuming"
+        end
+        -- Logout, or an entry this session cannot classify (no leave seen).
+        if not autoEnabled then return "off" end
+        M.ToggleAuto()
+        return "revoked"
     end
     function M.RecomputeStats()
         local out = {}
@@ -3289,6 +3798,19 @@ end
         out.fallbackSeconds = FALLBACK_RECOMPUTE
         return out
     end
+    -- The rolling-policy selection: what the saved setting asks for, what is
+    -- in force (they differ while an action intent is unresolved), and what
+    -- the last decision actually ran, with the fallback reason if any.
+    function M.RollingPolicyStatus()
+        local rolling = actionHold.rolling
+        local selection = Nexus.EchoWeaver and Nexus.EchoWeaver.PolicySelection
+        local requested = selection and selection(rolling.requested) or tostring(rolling.requested)
+        local inForce = selection and selection(rolling.inForce) or tostring(rolling.inForce)
+        return { requested = requested, inForce = inForce,
+            changePending = rolling.set and requested ~= inForce or false,
+            switches = rolling.switches, lastPolicy = rolling.lastPolicy,
+            lastFallback = rolling.lastFallback }
+    end
     function M.EffectiveFlags() return EffectiveFlags() end
     function M.LockDesignTargetsFor(wishlist)
         return LockDesignTargetsFor(wishlist)
@@ -3313,7 +3835,27 @@ end
     end
     local function RunUpdate(elapsed)
         pollAccum = pollAccum + (elapsed or 0)
-        if pollAccum < POLL then return end
+        if pollAccum < POLL then
+            -- Early poll (docs/ROLLING_LATENCY.md). The loop normally waits for the
+            -- next 0.2 s tick, which adds up to 0.2 s after every server reply and
+            -- after every scheduled deadline. While Auto is ON, and at most once per
+            -- 0.05 s, the same poll runs at once when (a) a scheduled step is due, or
+            -- (b) the client reports a board or Echo-data notification the poll would
+            -- reconcile. Nothing else changes: the poll, the confirmation rules, the
+            -- in-flight and grant holds, the 0.4 s intent beat and the authorization
+            -- checks run exactly as before, only earlier. Two scalar reads per frame
+            -- while Auto is ON, none while it is OFF.
+            if not autoEnabled or pollAccum < 0.05 or Nexus.EarlyPollDisabled
+                or recomputeStats.earlyBlocked or stepRetry.pending then
+                return
+            end
+            local due = nextStepAt ~= nil and GetTime() >= nextStepAt
+            if not due and not (Adapter.NotificationPending
+                and Adapter.NotificationPending()) then
+                return
+            end
+            recomputeStats.earlyPolls = (recomputeStats.earlyPolls or 0) + 1
+        end
         pollAccum = 0
         recomputeStats.polls = recomputeStats.polls + 1
         local performance = Nexus and Nexus.Performance
@@ -3327,6 +3869,9 @@ end
         if startedAt and performance and type(performance.Finish) == "function" then
             pcall(performance.Finish, "gameadapter.poll", startedAt)
         end
+        -- A failing poll or step is never retried early (state is kept in recomputeStats:
+        -- this chunk is at Lua's local-variable limit).
+        recomputeStats.earlyBlocked = not okPoll or nil
         if not okPoll then
             recomputeStats.pollFailures = recomputeStats.pollFailures + 1
             SetStatus("error (see /nexus err)")
@@ -3372,6 +3917,27 @@ end
                 forceStep = true
                 staticInvalidated = true
                 RecordError("GameAdapter.ConsumeDirty", board)
+            end
+        end
+        -- The ordinary-board gate (Orb state known/pending, Orb ownership)
+        -- can change with no board, slot or ownership change, and the game
+        -- sends no event for it. One scalar comparison per poll (POLL cadence,
+        -- not per frame) turns such a change into one coalesced decision
+        -- evaluation, the same bounded trigger that an authorization change
+        -- uses. It reads the gate only, invalidates no static state and
+        -- submits nothing itself. State lives in recomputeStats because this
+        -- chunk is at Lua's local-variable limit.
+        if type(Adapter.OrdinaryBoardAllowed) == "function" then
+            local okGate, gateAllowed, gateWhy = pcall(Adapter.OrdinaryBoardAllowed)
+            local gateKey = not okGate and "error"
+                or (gateAllowed and "allowed" or ("blocked:" .. tostring(gateWhy)))
+            if gateKey ~= recomputeStats.ordinaryGateKey then
+                if recomputeStats.ordinaryGateKey ~= nil then
+                    recomputeStats.ordinaryGateChanges =
+                        (recomputeStats.ordinaryGateChanges or 0) + 1
+                    authorizationStepPending = true
+                end
+                recomputeStats.ordinaryGateKey = gateKey
             end
         end
         local now = GetTime()

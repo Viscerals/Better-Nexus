@@ -29,6 +29,16 @@ that the supplied exact contents are available and consistent; it does not
 mean 79 copies. The protocol has upper limits of 79 ordinary and six locked
 copies. A full Mage build would not resolve occupied catalog admission.
 
+Current contract (later correction; the limits above describe
+test.9015-3551401 and are kept as history): evidence and the wire keep 79
+ordinary copies and hold the locked role to resource ceilings of at most 256
+rows of up to 120 copies each, with a 10000-copy total where a total is
+checked; these are not server legality claims. The live occupied-record
+capacity is absent from evidence and payloads. A Share plan keeps 79 / 6 / 85
+as authored policy (`LoadoutEvidence.PlanLimits`). The wire format is
+unchanged; older builds and peers keep their six-copy acceptance limit.
+CONTRACTS.md (Occupied locked records) is authoritative.
+
 The library first requires available, consistent ordinary evidence, then uses
 scope, class and search filters. Both DPS records additionally requires a
 positive Dummy record and a positive Lich King record. All Shared on that

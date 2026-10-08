@@ -10,17 +10,37 @@ function A.Boot(rows)
  T.Until(H,function()return Nexus.StartupStatus().state=='ready' end)
  local C=Nexus.BuildCatalog
  T.Until(H,function()return C.ManualPreparationStatus().ready end)
- -- Observe only. Every call and result passes through unchanged.
- H.puts={}
+ -- Observe only. Every call and result passes through unchanged. A record
+ -- submitted inside a receiver batch is counted exactly like a single put,
+ -- so "one submission per item" keeps its meaning on both routes.
+ H.puts={};H.batches={}
+ local function Note(id,accepted,why,batched)
+  if id==nil then return end
+  local seen=H.puts[id] or {calls=0,accepted=0,refused=0,batched=0}
+  seen.calls=seen.calls+1
+  if batched then seen.batched=seen.batched+1 end
+  if accepted then seen.accepted=seen.accepted+1
+  else seen.refused=seen.refused+1;seen.lastRefusal=why end
+  H.puts[id]=seen
+ end
  local put=C.Put
  C.Put=function(record,options,...)
   local ok,why,ticket=put(record,options,...)
-  local seen=H.puts[record.id] or {calls=0,accepted=0,refused=0}
-  seen.calls=seen.calls+1
-  if ok==true or (ok==nil and type(ticket)=='table') then seen.accepted=seen.accepted+1
-  else seen.refused=seen.refused+1;seen.lastRefusal=why end
-  H.puts[record.id]=seen
+  Note(record.id,ok==true or (ok==nil and type(ticket)=='table'),why,false)
   return ok,why,ticket
+ end
+ local putBatch=C.PutBatch
+ if type(putBatch)=='function' then
+  C.PutBatch=function(requests,...)
+   local ok,why,tickets=putBatch(requests,...)
+   H.batches[#H.batches+1]={members=#(requests or {}),accepted=type(tickets)=='table'}
+   for index,request in ipairs(requests or {})do
+    local record=type(request)=='table' and request.record or nil
+    Note(record and record.id,
+     ok==nil and type(tickets)=='table' and tickets[index]~=nil,why,true)
+   end
+   return ok,why,tickets
+  end
  end
  A.base=time()
  return H,C

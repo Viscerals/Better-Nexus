@@ -22,9 +22,24 @@ function regionMethods:HookScript(k,fn) local old=self.scripts[k];self.scripts[k
 function regionMethods:RegisterEvent(e) self.events[e]=true end
 function regionMethods:UnregisterEvent(e) self.events[e]=nil end
 function regionMethods:UnregisterAllEvents() self.events={} end
-function regionMethods:SetText(t) self.text=tostring(t or '') end
+function regionMethods:SetMaxLetters(n) self.maxLetters=tonumber(n) or 0 end
+function regionMethods:GetMaxLetters() return self.maxLetters or 0 end
+-- A WoW EditBox holds at most maxLetters characters; anything longer is cut
+-- when it is typed, pasted or set. 0 means no limit. The count is characters,
+-- not bytes (bytes are SetMaxBytes, which is not modelled); the two are the
+-- same for the ASCII wire values these tests carry.
+local function editBoxText(box,value,userInput)
+ local limit=tonumber(box.maxLetters) or 0
+ if limit>0 and #value>limit then value=value:sub(1,limit) end
+ box.text=value
+ local changed=box.scripts and box.scripts.OnTextChanged
+ -- The client passes isUserInput=false for a programmatic change.
+ if changed then changed(box,userInput==true) end
+end
+function regionMethods:SetText(t) editBoxText(self,tostring(t or ''),false) end
+function regionMethods:Insert(t) editBoxText(self,(self.text or '')..tostring(t or ''),true) end
 function regionMethods:GetText() return self.text end
-function regionMethods:SetFormattedText(fmt,...) self.text=string.format(fmt,...) end
+function regionMethods:SetFormattedText(fmt,...) editBoxText(self,string.format(fmt,...),false) end
 function regionMethods:Show() local change=not self.shown; self.shown=true;if change and self.scripts.OnShow then self.scripts.OnShow(self) end end
 function regionMethods:Hide() local change=self.shown;self.shown=false;if change and self.scripts.OnHide then self.scripts.OnHide(self) end end
 function regionMethods:IsShown() return self.shown end
@@ -77,7 +92,9 @@ function regionMethods:HasFocus() return self.focused==true end
 function regionMethods:SetFocus() self.focused=true end
 function regionMethods:ClearFocus() self.focused=false end
 function regionMethods:GetNumLines() return 1 end
-function regionMethods:GetMaxLetters() return 0 end
+-- GetMaxLetters used to answer 0 unconditionally, which hid every letter
+-- limit a dialog or a caller had set. It now reports the real limit, set
+-- above with SetMaxLetters.
 function regionMethods:Click(button) if self.enabled and self.scripts.OnClick then return self.scripts.OnClick(self,button or 'LeftButton') end end
 function CreateFrame(kind,name,parent) local f=Region(kind or 'Frame',name,parent);H.frames[#H.frames+1]=f;return f end
 H.Region=Region
@@ -87,12 +104,51 @@ ChatFontNormal=Region('Font','ChatFontNormal');ChatFrame1=Region('Frame','ChatFr
 DEFAULT_CHAT_FRAME={AddMessage=function(_,line) H.chat[#H.chat+1]=tostring(line) end}
 UIErrorsFrame=DEFAULT_CHAT_FRAME
 SlashCmdList={};UISpecialFrames={};StaticPopupDialogs={}
-function StaticPopup_Show(which,a,b,data) H.popup={which=which,data=data};return H.popup end
+-- The client keeps a small pool of StaticPopup frames and reuses their edit
+-- boxes. StaticPopup_Show applies a dialog's own maxLetters when it declares
+-- one and leaves the previous limit in place when it does not, so a dialog
+-- can inherit the limit and the handlers an earlier dialog installed on the
+-- same box. That reuse is modelled here, because an import path that pastes a
+-- long code cannot be tested against a stub that has no field at all.
+H.popupPool={}
+function StaticPopup_Show(which,a,b,data)
+ local dialog=StaticPopupDialogs[which]
+ local frame=H.popupPool[1]
+ if not frame then
+  frame=CreateFrame('Frame','NexusTestStaticPopup1',UIParent)
+  frame.editBox=CreateFrame('EditBox',nil,frame)
+  H.popupPool[1]=frame
+ end
+ frame.which,frame.data=which,data
+ -- The client substitutes the show arguments into the dialog's text; a
+ -- confirmation that cannot be read back cannot be tested for what it says.
+ frame.arg1,frame.arg2=a,b
+ frame.text=type(dialog)=='table' and dialog.text or nil
+ if type(dialog)=='table' and dialog.maxLetters then
+  frame.editBox:SetMaxLetters(dialog.maxLetters)
+ end
+ H.popup={which=which,data=data,frame=frame,editBox=frame.editBox,arg1=a,arg2=b}
+ if type(dialog)=='table' and type(dialog.OnShow)=='function' then
+  dialog.OnShow(frame,data)
+ end
+ return H.popup
+end
 function StaticPopup_Hide() H.popup=nil end
-function H.AcceptPopup() local p=assert(H.popup);return StaticPopupDialogs[p.which].OnAccept(nil,p.data) end
+function H.AcceptPopup()
+ local p=assert(H.popup)
+ return StaticPopupDialogs[p.which].OnAccept(p.frame,p.data)
+end
 function GetTime() return H.now end
 function GetTimePreciseSec() return H.now end
-function debugprofilestop() return os.clock()*1000 end
+-- The client's millisecond profiler. A fixture that must observe long-running
+-- catalog work selects the supported no-clock pacing (one slice per update)
+-- through startup_support.SingleSlicePacing, which sets this flag before the
+-- runtime is loaded; every later boot in that test keeps the same pacing.
+if NEXUS_TEST_NO_PROFILE_CLOCK then
+ debugprofilestop=nil
+else
+ function debugprofilestop() return os.clock()*1000 end
+end
 function GetFramerate() return 60 end
 GetFrameRate=GetFramerate
 function UnitLevel() return H.playerLevel end

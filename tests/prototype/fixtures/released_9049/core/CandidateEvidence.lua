@@ -1,0 +1,985 @@
+-- Nexus: pure typed candidate evidence shared by Community, Leaderboard, and
+-- the Wishlist editor. This module owns no frames, persistence, adapter I/O,
+-- automation, or action state.
+
+Nexus = Nexus or {}
+local Evidence = {}
+Nexus.CandidateEvidence = Evidence
+
+local CURRENT_KIND = "candidate-typed-v1"
+local LEGACY_KIND = "leaderboard-typed-v1"
+local MAX_ORDINARY = 79
+local MAX_LOCKED = 6
+local validationSnapshots = setmetatable({}, {__mode="k"})
+
+local LOCKED_DISAGREEMENT =
+    "record categories disagree on locked Echo evidence"
+local LOCKED_CLAIM_MISMATCH =
+    "locked Echo fingerprint does not match its evidence"
+local CURRENT_COPY_AUTHORITY_UNAVAILABLE =
+    "independently verified current Copy authority is unavailable"
+
+local function DeepCopy(value, seen)
+    if type(value) ~= "table" then return value end
+    seen = seen or {}
+    if seen[value] then return seen[value] end
+    local out = {}
+    seen[value] = out
+    for key, child in pairs(value) do
+        out[DeepCopy(key, seen)] = DeepCopy(child, seen)
+    end
+    return out
+end
+
+local function PositiveInteger(value)
+    value = tonumber(value)
+    if not value or value ~= value or value <= 0 or value >= math.huge
+        or value ~= math.floor(value) then return nil end
+    return value
+end
+
+local function NonNegativeInteger(value)
+    value = tonumber(value)
+    if not value or value ~= value or value < 0 or value >= math.huge
+        or value ~= math.floor(value) then return nil end
+    return value
+end
+
+local function NormalizePool(source, lockedRole, allowOrdinaryOverflow,
+    markLockedRole)
+    if type(source) ~= "table" then
+        return nil, (lockedRole and "locked" or "ordinary")
+            .. " Echo evidence is unavailable"
+    end
+    local entries, maxIndex = 0, 0
+    for index, row in pairs(source) do
+        if type(index) ~= "number" or index < 1
+            or index ~= math.floor(index) or type(row) ~= "table" then
+            return nil, (lockedRole and "locked" or "ordinary")
+                .. " Echo evidence must be a dense array"
+        end
+        entries = entries + 1
+        if index > maxIndex then maxIndex = index end
+    end
+    if entries ~= maxIndex then
+        return nil, (lockedRole and "locked" or "ordinary")
+            .. " Echo evidence must be a dense array"
+    end
+    if not lockedRole and entries == 0 then
+        return nil, "ordinary Echo evidence is still syncing"
+    end
+    local out, total = {}, 0
+    for index = 1, entries do
+        local row = source[index]
+        if not lockedRole and (row.locked
+            or (row.sourceRole ~= nil
+                and tostring(row.sourceRole) ~= "ordinary")) then
+            return nil, "ordinary Echo evidence contains locked-role data"
+        end
+        local id = PositiveInteger(row.spellId or row.spellID
+            or row.id or row.perkId or row.perkID)
+        local stacks = PositiveInteger(row.stacks or row.stack
+            or row.count or row.amount or 1)
+        local quality = row.quality
+        if not id or not stacks
+            or (quality ~= nil and not NonNegativeInteger(quality)) then
+            return nil, (lockedRole and "locked" or "ordinary")
+                .. " Echo evidence is invalid"
+        end
+        total = total + stacks
+        if lockedRole and total > MAX_LOCKED then
+            return nil, "locked Echo evidence exceeds the six-copy limit"
+        end
+        if not lockedRole and not allowOrdinaryOverflow
+            and total > MAX_ORDINARY then
+            return nil, "ordinary Echo evidence exceeds 79 copies"
+        end
+        local copy = DeepCopy(row)
+        copy.spellId, copy.stacks = id, stacks
+        copy.quality = quality ~= nil and NonNegativeInteger(quality) or nil
+        if lockedRole and markLockedRole then
+            copy.locked = true
+            copy.sourceRole = "locked"
+        end
+        out[index] = copy
+    end
+    return out, nil, total
+end
+
+local function Token(identity, ordinary, locked)
+    local parts = {tostring(identity)}
+    for _, row in ipairs(ordinary or {}) do
+        parts[#parts + 1] = table.concat({
+            "o", tostring(row.spellId), tostring(row.quality or ""),
+            tostring(row.stacks),
+        }, ":")
+    end
+    for _, row in ipairs(locked or {}) do
+        parts[#parts + 1] = table.concat({
+            "l", tostring(row.spellId), tostring(row.quality or ""),
+            tostring(row.stacks),
+        }, ":")
+    end
+    return table.concat(parts, "|")
+end
+
+local function CanonicalFingerprint(rows)
+    local counts, ids = {}, {}
+    for _, row in ipairs(rows or {}) do
+        local id, stacks = row.spellId, row.stacks
+        if counts[id] == nil then ids[#ids + 1] = id end
+        counts[id] = (counts[id] or 0) + stacks
+    end
+    table.sort(ids)
+    local parts = {}
+    for _, id in ipairs(ids) do
+        parts[#parts + 1] = tostring(id) .. "x" .. tostring(counts[id])
+    end
+    return #parts > 0 and table.concat(parts, ",") or "0"
+end
+
+-- Locked claims historically fingerprint spell-copy totals only. Category
+-- agreement is stronger: every represented exact quality bucket must also
+-- carry the same copy total, while equivalent duplicate segmentation remains
+-- compatible.
+local function ExactLockedIdentity(rows)
+    local counts, keys = {}, {}
+    for _, row in ipairs(rows or {}) do
+        local quality = row.quality ~= nil and ("q" .. tostring(row.quality))
+            or "unknown"
+        local key = tostring(row.spellId) .. ":" .. quality
+        if counts[key] == nil then keys[#keys + 1] = key end
+        counts[key] = (counts[key] or 0) + row.stacks
+    end
+    table.sort(keys)
+    local parts = {}
+    for _, key in ipairs(keys) do
+        parts[#parts + 1] = key .. "x" .. tostring(counts[key])
+    end
+    return table.concat(parts, ",")
+end
+
+local function SameTypedIdentity(left, right)
+    return left ~= nil and right ~= nil and type(left) == type(right)
+        and tostring(left) == tostring(right)
+end
+
+local function LockedOutcome(status, reason, source, fingerprint, rows)
+    return {
+        status=status,
+        reason=reason or "",
+        source=source or "none",
+        fingerprint=fingerprint or "0",
+        lockedEchoes=DeepCopy(rows or {}),
+    }
+end
+
+local function SplitBuildEchoes(build)
+    local ordinary, locked = {}, {}
+    if type(build) ~= "table" or type(build.echoes) ~= "table" then
+        return nil, nil
+    end
+    local entries, maxIndex = 0, 0
+    for index in pairs(build.echoes) do
+        if type(index) ~= "number" or index < 1
+            or index ~= math.floor(index) then
+            return nil, nil, "build Echo evidence must be a dense array"
+        end
+        entries = entries + 1
+        if index > maxIndex then maxIndex = index end
+    end
+    if entries ~= maxIndex then
+        return nil, nil, "build Echo evidence must be a dense array"
+    end
+    for index = 1, entries do
+        local row = build.echoes[index]
+        if type(row) == "table" and row.locked then
+            locked[#locked + 1] = row
+        else
+            ordinary[#ordinary + 1] = row
+        end
+    end
+    return ordinary, locked
+end
+
+local function TargetIdentity(options, ordinaryFingerprint)
+    local build = type(options.build) == "table" and options.build or nil
+    local buildId = options.buildId
+    if buildId == nil and build then buildId = build.id end
+    local fingerprint = options.fingerprint
+    if fingerprint == nil and build then fingerprint = build.fingerprint end
+    if buildId ~= nil and ((type(buildId) ~= "string"
+        and type(buildId) ~= "number") or tostring(buildId) == "") then
+        return nil, nil, "record build identity is invalid"
+    end
+    if fingerprint ~= nil then
+        if (type(fingerprint) ~= "string" and type(fingerprint) ~= "number")
+            or tostring(fingerprint) == "" then
+            return nil, nil, "record fingerprint is invalid"
+        end
+        fingerprint = tostring(fingerprint)
+        if fingerprint ~= ordinaryFingerprint then
+            return nil, nil,
+                "record fingerprint does not match its Echo evidence"
+        end
+    else
+        fingerprint = ordinaryFingerprint
+    end
+    return buildId, fingerprint
+end
+
+local function RecordIdentity(record, expectedId, expectedFingerprint,
+    allowOrdinaryOverflow)
+    if record.recordIdentityMismatch then
+        return nil, "record fingerprint does not match its Echo evidence"
+    end
+    if record.resolvedIdentityMismatch then
+        return nil,
+            "record categories disagree on resolved build identity"
+    end
+    local fingerprint = record.fingerprint
+    if type(fingerprint) ~= "string" or fingerprint == "" then
+        return nil, "record fingerprint is unavailable"
+    end
+    if fingerprint ~= expectedFingerprint then
+        return nil, "record and catalog identities do not match"
+    end
+    if record.echoes ~= nil then
+        if type(record.echoes) ~= "table" then
+            return nil, "ordinary Echo evidence is invalid"
+        end
+        local ordinary, reason = NormalizePool(
+            record.echoes, false, allowOrdinaryOverflow)
+        if not ordinary then return nil, reason end
+        if CanonicalFingerprint(ordinary) ~= fingerprint then
+            return nil, "record fingerprint does not match its Echo evidence"
+        end
+    end
+
+    local resolved = record.resolvedBuildId
+    local direct = record.buildId
+    if expectedId ~= nil then
+        local directMatch = SameTypedIdentity(direct, expectedId)
+        local resolvedMatch = SameTypedIdentity(resolved, expectedId)
+        if not directMatch and not resolvedMatch then
+            return nil, "record and catalog build IDs do not match"
+        end
+        if resolved ~= nil and directMatch and not resolvedMatch then
+            return nil, "record and catalog build IDs do not match"
+        end
+        if record.buildIdentityMismatch and not resolvedMatch then
+            return nil, "record and catalog identities do not match"
+        end
+    elseif record.buildIdentityMismatch then
+        return nil, "record and catalog identities do not match"
+    end
+
+    local build = type(record.build) == "table" and record.build or nil
+    if build and type(build.fingerprint) == "string"
+        and build.fingerprint ~= ""
+        and build.fingerprint ~= fingerprint then
+        return nil, "record and catalog identities do not match"
+    end
+    if build and expectedId ~= nil and build.id ~= nil
+        and not SameTypedIdentity(build.id, expectedId) then
+        return nil, "record and catalog build IDs do not match"
+    end
+    return resolved ~= nil and resolved or direct
+end
+
+local function LockedRecord(record, category, expectedId,
+    expectedFingerprint, allowOrdinaryOverflow)
+    if record == nil then return nil, nil, nil, nil end
+    if type(record) ~= "table" then
+        return nil, nil, nil, "locked Echo record is invalid"
+    end
+    if record.category ~= nil and tostring(record.category) ~= category then
+        return nil, nil, nil, "locked Echo record category is invalid"
+    end
+    local identity, identityReason = RecordIdentity(
+        record, expectedId, expectedFingerprint, allowOrdinaryOverflow)
+    if identityReason then return nil, nil, nil, identityReason end
+    local source = record.lockedEchoes
+    if source == nil then source = {} end
+    local rows, reason = NormalizePool(source, true)
+    if not rows then return nil, nil, nil, reason end
+    local fingerprint = CanonicalFingerprint(rows)
+    if record.lockedFingerprint ~= nil
+        and tostring(record.lockedFingerprint) ~= fingerprint then
+        return nil, nil, nil, LOCKED_CLAIM_MISMATCH
+    end
+    return rows, fingerprint, identity
+end
+
+local function LockedPoolOnly(record, category)
+    if record == nil then return nil, nil end
+    if type(record) ~= "table"
+        or (record.category ~= nil
+            and tostring(record.category) ~= category) then
+        return nil, "locked Echo record category is invalid"
+    end
+    if record.lockedEchoes ~= nil
+        and type(record.lockedEchoes) ~= "table" then
+        return nil, "locked Echo evidence is invalid"
+    end
+    local rows, reason = NormalizePool(record.lockedEchoes or {}, true)
+    if not rows then return nil, reason end
+    local fingerprint = CanonicalFingerprint(rows)
+    if record.lockedFingerprint ~= nil
+        and tostring(record.lockedFingerprint) ~= fingerprint then
+        return nil, LOCKED_CLAIM_MISMATCH
+    end
+    return fingerprint
+end
+
+local function CategoryRecord(options, category)
+    local records = type(options.records) == "table" and options.records
+        or type(options.categories) == "table" and options.categories or nil
+    local named
+    if category == "dummy" then
+        named = options.dummyRecord
+    else
+        named = options.lkRecord
+    end
+    if named ~= nil then return named end
+    if records and records[category] ~= nil then return records[category] end
+    return options[category]
+end
+
+-- Resolve one exact locked-Echo authority without reading global state. The
+-- caller supplies the selected ordinary evidence plus zero, one, or both
+-- category records. Every outcome has bounded scalar diagnostics; only an
+-- `ok` result carries locked rows, and those rows are always defensive copies.
+function Evidence.ResolveLocked(options)
+    options = type(options) == "table" and options or {}
+    local buildOrdinary, buildLocked, splitReason =
+        SplitBuildEchoes(options.build)
+    if splitReason then return LockedOutcome("invalid", splitReason) end
+    if (buildLocked == nil or #buildLocked == 0)
+        and type(options.build) == "table"
+        and type(options.build.lockedEchoes) == "table" then
+        buildLocked = options.build.lockedEchoes
+    end
+    local ordinarySource = options.ordinaryEchoes
+        or options.echoes or buildOrdinary
+    local dummyRecord = CategoryRecord(options, "dummy")
+    local lkRecord = CategoryRecord(options, "lk")
+    if ordinarySource == nil and dummyRecord ~= nil and lkRecord ~= nil then
+        local dummyFingerprint, dummyReason =
+            LockedPoolOnly(dummyRecord, "dummy")
+        if dummyReason then return LockedOutcome("invalid", dummyReason) end
+        local lkFingerprint, lkReason = LockedPoolOnly(lkRecord, "lk")
+        if lkReason then return LockedOutcome("invalid", lkReason) end
+        if dummyFingerprint ~= lkFingerprint then
+            return LockedOutcome("conflict", LOCKED_DISAGREEMENT)
+        end
+    end
+    local allowOrdinaryOverflow = options.allowOrdinaryOverflow == true
+        or options.ordinaryComplete == false
+    local ordinary, ordinaryReason = NormalizePool(
+        ordinarySource, false, allowOrdinaryOverflow)
+    if not ordinary then
+        return LockedOutcome("unavailable", ordinaryReason)
+    end
+    local ordinaryFingerprint = CanonicalFingerprint(ordinary)
+    local buildId, expectedFingerprint, targetReason = TargetIdentity(
+        options, ordinaryFingerprint)
+    if targetReason then return LockedOutcome("invalid", targetReason) end
+
+    -- Category rows are immutable capture-time evidence. They may diagnose a
+    -- historical conflict, but never grant current copy authority. An exact
+    -- independently supplied build can do so because TargetIdentity above has
+    -- already bound its ordinary fingerprint and typed ID to this request.
+    if options.copyAuthorityRequired == true
+        and type(options.build) == "table" and type(buildLocked) == "table"
+        and (#buildLocked > 0
+            or options.build.lockedAuthorityProven == true) then
+        local authority, authorityReason = Evidence.CurrentCopyAuthority(
+            options.build, options.currentProvenance)
+        if not authority then
+            return LockedOutcome("unavailable", authorityReason)
+        end
+        local current, currentReason = NormalizePool(buildLocked, true)
+        if not current then
+            return LockedOutcome("invalid", currentReason)
+        end
+        local currentFingerprint = CanonicalFingerprint(current)
+        local currentClaim = options.build.lockedFingerprint
+        if currentClaim ~= nil
+            and tostring(currentClaim) ~= currentFingerprint then
+            return LockedOutcome("invalid", LOCKED_CLAIM_MISMATCH)
+        end
+        return LockedOutcome(#current > 0 and "ok" or "none", nil, "build",
+            currentFingerprint, current)
+    end
+
+    local dummy, dummyFingerprint, dummyIdentity, dummyReason = LockedRecord(
+        dummyRecord, "dummy", buildId, expectedFingerprint,
+        allowOrdinaryOverflow)
+    if dummyReason then return LockedOutcome("invalid", dummyReason) end
+    local lk, lkFingerprint, lkIdentity, lkReason = LockedRecord(
+        lkRecord, "lk", buildId, expectedFingerprint,
+        allowOrdinaryOverflow)
+    if lkReason then return LockedOutcome("invalid", lkReason) end
+
+    if dummyRecord ~= nil and lkRecord ~= nil then
+        if dummyFingerprint ~= lkFingerprint
+            or ExactLockedIdentity(dummy) ~= ExactLockedIdentity(lk) then
+            return LockedOutcome("conflict", LOCKED_DISAGREEMENT)
+        end
+        if buildId == nil and dummyIdentity ~= nil and lkIdentity ~= nil
+            and not SameTypedIdentity(dummyIdentity, lkIdentity) then
+            return LockedOutcome("conflict",
+                "record categories disagree on resolved build identity")
+        end
+        if options.copyAuthorityRequired == true then
+            return LockedOutcome("unavailable",
+                "historical locked evidence is not current copy authority",
+                "history", dummyFingerprint)
+        end
+        local status = #dummy > 0 and "ok" or "none"
+        return LockedOutcome(status, nil, "dummy+lk",
+            dummyFingerprint, dummy)
+    end
+    if dummyRecord ~= nil then
+        if options.copyAuthorityRequired == true then
+            return LockedOutcome("unavailable",
+                "historical locked evidence is not current copy authority",
+                "history", dummyFingerprint)
+        end
+        local status = #dummy > 0 and "ok" or "none"
+        return LockedOutcome(status, nil, "dummy", dummyFingerprint, dummy)
+    end
+    if lkRecord ~= nil then
+        if options.copyAuthorityRequired == true then
+            return LockedOutcome("unavailable",
+                "historical locked evidence is not current copy authority",
+                "history", lkFingerprint)
+        end
+        local status = #lk > 0 and "ok" or "none"
+        return LockedOutcome(status, nil, "lk", lkFingerprint, lk)
+    end
+
+    local inlineSource = options.inlineLockedEchoes
+        or options.lockedEchoes or buildLocked or {}
+    local inline, inlineReason = NormalizePool(inlineSource, true)
+    if not inline then return LockedOutcome("invalid", inlineReason) end
+    local inlineFingerprint = CanonicalFingerprint(inline)
+    local inlineClaim = options.inlineLockedFingerprint
+    if inlineClaim == nil then inlineClaim = options.lockedFingerprint end
+    if inlineClaim == nil and type(options.build) == "table" then
+        inlineClaim = options.build.lockedFingerprint
+    end
+    if inlineClaim ~= nil and tostring(inlineClaim) ~= inlineFingerprint then
+        return LockedOutcome("invalid", LOCKED_CLAIM_MISMATCH)
+    end
+    return LockedOutcome(#inline > 0 and "ok" or "none", nil,
+        #inline > 0 and "inline" or "none", inlineFingerprint, inline)
+end
+
+local function RevisionValue(value)
+    local kind = type(value)
+    if kind ~= "string" and kind ~= "number" then return nil end
+    value = tostring(value)
+    return value ~= "" and value or nil
+end
+
+local function ValidateBound(bound, expectedIdentity, expectedRevision,
+    expectedToken, currentOrdinary, currentLocked)
+    if tostring(expectedIdentity or "") ~= bound.identity
+        or tostring(expectedToken or "") ~= bound.token then
+        return false, "record identity changed"
+    end
+    if tostring(expectedRevision or "") ~= bound.revision then
+        return false, bound.evidenceScoped and "record evidence changed"
+            or "record projection changed"
+    end
+    local ordinary, ordinaryReason = NormalizePool(
+        currentOrdinary or bound.ordinary, false)
+    if not ordinary then return false, ordinaryReason end
+    local locked, lockedReason = NormalizePool(
+        currentLocked or bound.locked, true)
+    if not locked then return false, lockedReason end
+    if Token(bound.identity, ordinary, locked) ~= bound.token then
+        return false, "record Echo evidence changed"
+    end
+    local provider = bound.currentEvidence or bound.currentRevision
+    if provider then
+        local ok, value = pcall(provider)
+        if not ok or RevisionValue(value) ~= bound.revision then
+            if bound.evidenceScoped then
+                return false, ok and "record evidence changed"
+                    or "record evidence unavailable"
+            end
+            return false, ok and "record projection changed"
+                or "record projection unavailable"
+        end
+    end
+    return true
+end
+
+function Evidence.Build(options)
+    options = type(options) == "table" and options or {}
+    local identity = options.sourceIdentity
+    if (type(identity) ~= "string" and type(identity) ~= "number")
+        or tostring(identity) == "" then
+        return nil, "record identity is unavailable"
+    end
+    identity = tostring(identity)
+    local selected = options.selectedEvidence
+    local revision = RevisionValue(selected ~= nil
+        and selected or options.sourceRevision)
+    if not revision then
+        return nil, selected ~= nil and "record evidence is unavailable"
+            or "record revision is unavailable"
+    end
+    if selected ~= nil and options.sourceRevision ~= nil
+        and RevisionValue(options.sourceRevision) ~= revision then
+        return nil, "record evidence binding is inconsistent"
+    end
+    if options.currentEvidence ~= nil
+        and type(options.currentEvidence) ~= "function" then
+        return nil, "record evidence provider is invalid"
+    end
+    if options.currentRevision ~= nil
+        and type(options.currentRevision) ~= "function" then
+        return nil, "record revision provider is invalid"
+    end
+    if options.currentEvidence ~= nil and options.currentRevision ~= nil then
+        return nil, "record evidence provider is ambiguous"
+    end
+
+    local ordinary, ordinaryReason = NormalizePool(
+        options.ordinaryEchoes, false)
+    if not ordinary then return nil, ordinaryReason end
+    local locked, lockedReason = NormalizePool(
+        options.lockedEchoes, true, false, true)
+    if not locked then return nil, lockedReason end
+    local token = Token(identity, ordinary, locked)
+    local bound = {
+        identity=identity, revision=revision, token=token,
+        ordinary=DeepCopy(ordinary), locked=DeepCopy(locked),
+        currentRevision=options.currentRevision,
+        currentEvidence=options.currentEvidence,
+        evidenceScoped=selected ~= nil or options.currentEvidence ~= nil,
+    }
+    local candidate = {
+        evidenceKind=CURRENT_KIND,
+        title=tostring(options.title or ""),
+        ordinaryEchoes=ordinary,
+        lockedEchoes=locked,
+        sourceIdentity=identity,
+        sourceRevision=revision,
+        selectedEvidence=selected ~= nil and revision or nil,
+        evidenceToken=token,
+    }
+    candidate.validate = function(expectedIdentity, expectedRevision,
+        expectedToken, currentOrdinary, currentLocked)
+        return ValidateBound(bound, expectedIdentity, expectedRevision,
+            expectedToken, currentOrdinary, currentLocked)
+    end
+    validationSnapshots[candidate.validate] = bound
+    return candidate
+end
+
+function Evidence.Validate(candidate)
+    if type(candidate) ~= "table" then
+        return nil, "candidate evidence is unavailable"
+    end
+    if candidate.evidenceKind ~= CURRENT_KIND
+        and candidate.evidenceKind ~= LEGACY_KIND then
+        return nil, "unsupported candidate evidence contract"
+    end
+    if type(candidate.validate) ~= "function" then
+        return nil, "record validation is unavailable"
+    end
+    if candidate.selectedEvidence ~= nil
+        and RevisionValue(candidate.selectedEvidence)
+            ~= RevisionValue(candidate.sourceRevision) then
+        return nil, "record evidence changed"
+    end
+    local ok, current, reason = pcall(candidate.validate,
+        candidate.sourceIdentity, candidate.sourceRevision,
+        candidate.evidenceToken, candidate.ordinaryEchoes,
+        candidate.lockedEchoes)
+    if not ok or current ~= true then
+        return nil, tostring(ok and reason or "record validation failed")
+    end
+    local bound = validationSnapshots[candidate.validate]
+    local ordinary, ordinaryReason = NormalizePool(
+        type(bound) == "table" and bound.ordinary
+            or candidate.ordinaryEchoes, false)
+    if not ordinary then return nil, ordinaryReason end
+    local locked, lockedReason = NormalizePool(
+        type(bound) == "table" and bound.locked
+            or candidate.lockedEchoes, true, false, true)
+    if not locked then return nil, lockedReason end
+    return {
+        evidenceKind=candidate.evidenceKind,
+        title=tostring(candidate.title or ""),
+        ordinaryEchoes=ordinary,
+        lockedEchoes=locked,
+        sourceIdentity=tostring(candidate.sourceIdentity),
+        sourceRevision=tostring(candidate.sourceRevision),
+        selectedEvidence=candidate.selectedEvidence ~= nil
+            and tostring(candidate.selectedEvidence) or nil,
+        evidenceToken=tostring(candidate.evidenceToken),
+        validate=candidate.validate,
+    }
+end
+
+function Evidence.CurrentKind()
+    return CURRENT_KIND
+end
+
+-- Mutation authority is conjunctive: verified canonical ownership and the
+-- selected current catalog source must both be independently established.
+function Evidence.CurrentCopyAuthority(build, provenance)
+    local identity = Nexus and Nexus.Identity
+    local ownerKey = identity and type(identity.VerifiedOwnerKey) == "function"
+        and identity.VerifiedOwnerKey(build) or nil
+    local trusted = provenance == "overlay" or provenance == "bundled"
+    if type(build) ~= "table" or not ownerKey or not trusted then
+        return nil, CURRENT_COPY_AUTHORITY_UNAVAILABLE
+    end
+    return {build=build,ownerKey=ownerKey,provenance=provenance}
+end
+
+-- DPS pairing is a projection over immutable category records. One real pair
+-- must share independently verified canonical owner, ordinary fingerprint,
+-- and the full locked combat identity (exact spell, quality, and copy total).
+local function PairIdentity(record)
+    if type(record) ~= "table" or type(record.fingerprint) ~= "string"
+        or record.fingerprint == "" then return nil end
+    local identity = Nexus and Nexus.Identity
+    local owner = identity and type(identity.VerifiedOwnerKey) == "function"
+        and identity.VerifiedOwnerKey(record) or nil
+    if not owner then return nil end
+    if type(record.echoes) ~= "table" then return nil end
+    local ordinary, ordinaryReason = NormalizePool(record.echoes, false, true)
+    if not ordinary or ordinaryReason
+        or CanonicalFingerprint(ordinary) ~= record.fingerprint then
+        return nil
+    end
+    local rows, reason = NormalizePool(record.lockedEchoes or {}, true)
+    if not rows or reason then return nil end
+    local lockedFingerprint = CanonicalFingerprint(rows)
+    if record.lockedFingerprint ~= nil
+        and tostring(record.lockedFingerprint) ~= lockedFingerprint then
+        return nil
+    end
+    return owner .. "|" .. record.fingerprint .. "|"
+        .. ExactLockedIdentity(rows)
+end
+
+local PairRowKeys = {"ownerKey","ownerVerified","buildId","resolvedBuildId",
+    "sourceIdentity","protocolVersion","class","realm","fingerprint",
+    "lockedFingerprint","echoes","lockedEchoes","dps","duration"}
+
+local function PairProjectionRow(row)
+    local result = {}
+    for _, key in ipairs(PairRowKeys) do result[key] = DeepCopy(row[key]) end
+    -- Equal-authority duplicates may disagree only in presentation labels.
+    -- Rebuild their public identity from the already verified owner tuple so
+    -- the neutral projection remains actionable without letting a label or
+    -- input order select one historical source row.
+    local identity = Nexus and Nexus.Identity
+    local owner = identity and type(identity.VerifiedOwnerKey) == "function"
+        and identity.VerifiedOwnerKey(row) or nil
+    if owner then
+        local player, realm = owner:match("^([^@]+)@(.+)$")
+        if player and realm then
+            result.player = player
+            result.displayPlayer = player .. "-" .. realm
+            result.realm = realm
+            result.publicIdentityKey = "verified:" .. owner
+            result.publicIdentityVerified = true
+        end
+    end
+    -- Build detail is output-relevant, but only these structural values may
+    -- distinguish equal-DPS rows. Presentation labels never enter a pair tie.
+    if type(row.build) == "table" then
+        result.build = {variant=row.build.variant,rank=row.build.rank}
+        if type(row.build.nested) == "table" then
+            result.build.nested = {variant=row.build.nested.variant,
+                rank=row.build.nested.rank}
+        end
+    end
+    return result
+end
+
+local function PairTie(row)
+    local projected = PairProjectionRow(row)
+    local scalar = table.concat({
+        tostring(row.ownerKey or ""),
+        type(row.buildId) .. ":" .. tostring(row.buildId or ""),
+        type(row.resolvedBuildId) .. ":" .. tostring(row.resolvedBuildId or ""),
+        tostring(row.sourceIdentity or ""),
+        tostring(row.protocolVersion or ""),
+        tostring(row.class or ""),
+        tostring(row.realm or ""),
+        tostring(row.fingerprint or ""),
+        tostring(row.lockedFingerprint or ""),
+        tostring(row.dps or ""),
+    }, "|")
+
+    -- Only explicitly admitted output detail may break an equal authority/DPS
+    -- tie. Ordinary and locked pools are already canonicalized by PairIdentity;
+    -- labels, category, resemblance, clocks, and unknown nested metadata are
+    -- never selection inputs.
+    local seen, budget = {}, {left=4096,nextReference=0}
+    local function stable(value, depth)
+        if budget.left <= 0 then return "!limit" end
+        budget.left = budget.left - 1
+        local kind = type(value)
+        if kind == "nil" then return "n" end
+        if kind == "boolean" then return value and "b1" or "b0" end
+        if kind == "number" or kind == "string" then
+            return kind:sub(1, 1) .. #tostring(value) .. ":" .. tostring(value)
+        end
+        if kind ~= "table" then return "x:" .. kind end
+        if seen[value] then return "r:" .. tostring(seen[value]) end
+        if depth >= 12 then return "!depth" end
+        budget.nextReference = budget.nextReference + 1
+        seen[value] = budget.nextReference
+        local entries = {}
+        for key, child in pairs(value) do
+            entries[#entries + 1] = {key=stable(key, depth + 1),value=child}
+        end
+        -- Do not route this bounded per-record canonicalization through the
+        -- shared projection sort. It is already capped by `budget` and must
+        -- not consume a view's ranked-comparison allowance.
+        local function sift(root, last)
+            while root * 2 <= last do
+                local child = root * 2
+                if child < last
+                    and entries[child].key < entries[child + 1].key then
+                    child = child + 1
+                end
+                if entries[child].key <= entries[root].key then return end
+                entries[root], entries[child] = entries[child], entries[root]
+                root = child
+            end
+        end
+        for root = math.floor(#entries / 2), 1, -1 do
+            sift(root, #entries)
+        end
+        for last = #entries, 2, -1 do
+            entries[1], entries[last] = entries[last], entries[1]
+            sift(1, last - 1)
+        end
+        local out = {"{"}
+        for _, entry in ipairs(entries) do
+            out[#out + 1] = entry.key
+            out[#out + 1] = "="
+            out[#out + 1] = stable(entry.value, depth + 1)
+            out[#out + 1] = ";"
+        end
+        out[#out + 1] = "}"
+        return table.concat(out)
+    end
+    return scalar .. "|" .. stable({duration=projected.duration,
+        build=projected.build}, 0)
+end
+
+local function AddPairSource(sources, row)
+    for _, existing in ipairs(sources) do
+        if existing == row then return end
+    end
+    sources[#sources + 1] = row
+end
+
+local function PositiveFiniteDps(value)
+    value = tonumber(value)
+    if not value or value ~= value or value == math.huge
+        or value == -math.huge or value <= 0 then return nil end
+    return value
+end
+
+function Evidence.DpsPairIdentity(record)
+    return PairIdentity(record)
+end
+
+function Evidence.DpsRowBefore(left, right)
+    local leftDps, rightDps = PositiveFiniteDps(left and left.dps) or 0,
+        PositiveFiniteDps(right and right.dps) or 0
+    if leftDps ~= rightDps then return leftDps > rightDps end
+    return PairTie(left or {}) < PairTie(right or {})
+end
+
+function Evidence.BeginRealDpsPairs(dummyRows, lkRows)
+    local best = {dummy={},lk={}}
+    return {dummy=type(dummyRows) == "table" and dummyRows or {},dummyIndex=1,
+        lk=type(lkRows) == "table" and lkRows or {},lkIndex=1,
+        dummyByIdentity=best.dummy,best=best,bestKeys={},collectIndex=1,
+        result={},summary={dummy=0,lk=0,best=0,average=0,count=0,pair=nil},
+        sortBuffer={},sortWidth=1,sortLeft=1,sortMerge=nil,phase="dummy"}
+end
+
+local function PairBefore(left, right)
+    if left.bestDps ~= right.bestDps then
+        return left.bestDps > right.bestDps
+    end
+    if left.identity ~= right.identity then
+        return left.identity < right.identity
+    end
+    return left.tie < right.tie
+end
+
+local function ConsiderPairCategory(cursor, category, row)
+    local dps = PositiveFiniteDps(row and row.dps)
+    local key = dps and PairIdentity(row) or nil
+    if not key then return end
+    if dps > cursor.summary[category] then
+        cursor.summary[category] = dps
+    end
+    local tie = PairTie(row)
+    local current = cursor.best[category][key]
+    if not current or dps > current.dps
+        or dps == current.dps and tie < current.tie then
+        if not current and category == "dummy" then
+            cursor.bestKeys[#cursor.bestKeys + 1] = key
+        end
+        cursor.best[category][key] = {
+            row=row,dps=dps,tie=tie,sources={row},
+        }
+    elseif dps == current.dps and tie == current.tie then
+        -- Rows that differ only by excluded clocks have equal authority and
+        -- output. Keep every real retention source, but publish a neutral copy
+        -- so input order cannot leak one record's recency into the pair.
+        current.row = PairProjectionRow(current.row)
+        AddPairSource(current.sources, row)
+    end
+end
+
+local function CompletePairCursor(cursor)
+    local summary = cursor.summary
+    summary.count = (summary.dummy > 0 and 1 or 0)
+        + (summary.lk > 0 and 1 or 0)
+    summary.best = math.max(summary.dummy, summary.lk)
+    local pair = cursor.result[1]
+    if pair then
+        summary.average = pair.average
+        summary.pair = pair
+    end
+    cursor.phase = "done"
+end
+
+local function PumpPairSort(cursor)
+    local total = #cursor.result
+    if total <= 1 or cursor.sortWidth >= total then
+        CompletePairCursor(cursor)
+        return
+    end
+    if not cursor.sortMerge then
+        if cursor.sortLeft > total then
+            cursor.result = cursor.sortBuffer
+            cursor.sortBuffer = {}
+            cursor.sortWidth = cursor.sortWidth * 2
+            cursor.sortLeft = 1
+            return
+        end
+        local left = cursor.sortLeft
+        local middle = math.min(left + cursor.sortWidth - 1, total)
+        local right = math.min(left + cursor.sortWidth * 2 - 1, total)
+        cursor.sortMerge = {
+            left=left,leftEnd=middle,right=middle + 1,rightEnd=right,
+            output=left,
+        }
+    end
+    local merge = cursor.sortMerge
+    local takeLeft = merge.right > merge.rightEnd
+        or merge.left <= merge.leftEnd
+            and not PairBefore(cursor.result[merge.right],
+                cursor.result[merge.left])
+    if takeLeft then
+        cursor.sortBuffer[merge.output] = cursor.result[merge.left]
+        merge.left = merge.left + 1
+    else
+        cursor.sortBuffer[merge.output] = cursor.result[merge.right]
+        merge.right = merge.right + 1
+    end
+    merge.output = merge.output + 1
+    if merge.output > merge.rightEnd then
+        cursor.sortLeft = cursor.sortLeft + cursor.sortWidth * 2
+        cursor.sortMerge = nil
+    end
+end
+
+function Evidence.PumpRealDpsPairs(cursor, limit)
+    if type(cursor) ~= "table" or cursor.phase == "done" then return true, 0 end
+    limit = PositiveInteger(limit) or 1
+    local work = 0
+    while work < limit and cursor.phase ~= "done" do
+        work = work + 1
+        if cursor.phase == "dummy" then
+            local row = cursor.dummy[cursor.dummyIndex]
+            if row then
+                ConsiderPairCategory(cursor, "dummy", row)
+                cursor.dummyIndex = cursor.dummyIndex + 1
+            else
+                cursor.phase = "lk"
+            end
+        elseif cursor.phase == "lk" then
+            local row = cursor.lk[cursor.lkIndex]
+            if row then
+                ConsiderPairCategory(cursor, "lk", row)
+                cursor.lkIndex = cursor.lkIndex + 1
+            else
+                cursor.phase = "collect"
+            end
+        elseif cursor.phase == "collect" then
+            local key = cursor.bestKeys[cursor.collectIndex]
+            if key then
+                local dummy, lk = cursor.best.dummy[key], cursor.best.lk[key]
+                if dummy and lk then
+                    local average = PositiveFiniteDps(
+                        dummy.dps / 2 + lk.dps / 2)
+                    if average then
+                        cursor.result[#cursor.result + 1] = {
+                            identity=key,dummy=dummy.row,lk=lk.row,
+                            dummySources=dummy.sources,lkSources=lk.sources,
+                            dummyDps=dummy.dps,lkDps=lk.dps,
+                            bestDps=math.max(dummy.dps, lk.dps),
+                            average=average,
+                            tie=dummy.tie .. "|" .. lk.tie,
+                        }
+                    end
+                end
+                cursor.collectIndex = cursor.collectIndex + 1
+            else
+                cursor.phase = "sort"
+            end
+        elseif cursor.phase == "sort" then
+            PumpPairSort(cursor)
+        end
+    end
+    return cursor.phase == "done", work
+end
+
+function Evidence.RealDpsPairsResult(cursor)
+    return type(cursor) == "table" and cursor.phase == "done"
+        and cursor.result or nil,
+        type(cursor) == "table" and cursor.phase == "done"
+            and cursor.summary or nil
+end
+
+function Evidence.RealDpsPairs(dummyRows, lkRows)
+    local cursor = Evidence.BeginRealDpsPairs(dummyRows, lkRows)
+    while not Evidence.PumpRealDpsPairs(cursor, 1000) do end
+    return cursor.result
+end
+
+function Evidence.DpsSummary(dummyRows, lkRows)
+    local cursor = Evidence.BeginRealDpsPairs(dummyRows, lkRows)
+    while not Evidence.PumpRealDpsPairs(cursor, 1000) do end
+    local _, summary = Evidence.RealDpsPairsResult(cursor)
+    return summary
+end
+
+-- Public normalization seam for consumers that need to materialize the same
+-- locked-role envelope. CandidateEvidence remains the single owner of the
+-- six-copy limit and returns defensive rows with explicit provenance.
+function Evidence.NormalizeLockedEchoes(source)
+    return NormalizePool(source, true, false, true)
+end

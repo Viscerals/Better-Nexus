@@ -9,19 +9,32 @@ local MAX_ENTRIES = 20
 local MAX_SOURCE_BYTES = 64
 local MAX_MESSAGE_BYTES = 2000
 local recording = false
+-- Errors recorded since this load. The history lists newest last, so these
+-- are its newest entries; everything before them was retained from earlier.
+local sessionRecorded = 0
+
+-- #36: cut at a UTF-8 character boundary (Identity.Utf8Prefix, loaded
+-- earlier in the TOC), never inside a character.
+local function Prefix(text, maxBytes)
+    local identity = Nexus.Identity
+    if identity and type(identity.Utf8Prefix) == "function" then
+        return identity.Utf8Prefix(text, maxBytes)
+    end
+    return text:sub(1, maxBytes)
+end
 
 local function SafeText(value, fallback)
     if value == nil then return "nil" end
     if type(value) == "string" then
         if #value <= MAX_MESSAGE_BYTES then return value end
-        return value:sub(1, MAX_MESSAGE_BYTES) .. "..."
+        return Prefix(value, MAX_MESSAGE_BYTES) .. "..."
     end
     local ok, text = pcall(tostring, value)
     if not ok or type(text) ~= "string" then
         return fallback or ("<unprintable " .. type(value) .. ">")
     end
     if #text > MAX_MESSAGE_BYTES then
-        text = text:sub(1, MAX_MESSAGE_BYTES) .. "..."
+        text = Prefix(text, MAX_MESSAGE_BYTES) .. "..."
     end
     return text
 end
@@ -31,7 +44,7 @@ local function SourceText(value)
     local text = SafeText(value, "unknown")
     text = text:gsub("[%c]", " ")
     if text == "" then text = "unknown" end
-    if #text > MAX_SOURCE_BYTES then text = text:sub(1, MAX_SOURCE_BYTES) end
+    if #text > MAX_SOURCE_BYTES then text = Prefix(text, MAX_SOURCE_BYTES) end
     return text
 end
 
@@ -86,18 +99,31 @@ local function SanitizeHistory(value)
     return trimmed
 end
 
+-- The table that holds errorHistory: the saved root, or for a read-only saved
+-- root the Store owner's session-only table (the saved history is kept
+-- unchanged and this session's errors are not saved). That table starts with
+-- a bounded copy of the saved history, so earlier errors are still listed.
+local function HistoryRoot()
+    NexusDB = type(NexusDB) == "table" and NexusDB or {}
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    local root = type(writable) == "function"
+        and writable(NexusDB, {"errorHistory"}) or nil
+    return type(root) == "table" and root or NexusDB
+end
+
 local function StoredHistory()
     if type(NexusDB) ~= "table" then return {} end
-    return type(NexusDB.errorHistory) == "table" and NexusDB.errorHistory or {}
+    local root = HistoryRoot()
+    return type(root.errorHistory) == "table" and root.errorHistory or {}
 end
 
 function Errors.Init()
     if recording then return false, "recursion blocked" end
     recording = true
     local ok, err = pcall(function()
-        NexusDB = type(NexusDB) == "table" and NexusDB or {}
-        NexusDB.errorHistory = SanitizeHistory(NexusDB.errorHistory)
-        local latest = NexusDB.errorHistory[#NexusDB.errorHistory]
+        local root = HistoryRoot()
+        root.errorHistory = SanitizeHistory(root.errorHistory)
+        local latest = root.errorHistory[#root.errorHistory]
         if latest then Nexus.lastError = latest.message end
     end)
     recording = false
@@ -111,18 +137,19 @@ function Errors.Record(source, value)
     local message = SafeText(value, "<unprintable error>")
     Nexus.lastError = message -- compatibility for existing integrations
     local ok, err = pcall(function()
-        NexusDB = type(NexusDB) == "table" and NexusDB or {}
-        local history = SanitizeHistory(NexusDB.errorHistory)
+        local root = HistoryRoot()
+        local history = SanitizeHistory(root.errorHistory)
         history[#history + 1] = {
             timestamp = Timestamp(nil, true),
             source = SourceText(source),
             message = message,
         }
         while #history > MAX_ENTRIES do table.remove(history, 1) end
-        NexusDB.errorHistory = history
+        root.errorHistory = history
     end)
     recording = false
     if not ok then return false, SafeText(err, "error history write failed") end
+    sessionRecorded = sessionRecorded + 1
     return true
 end
 
@@ -153,8 +180,7 @@ function Errors.Clear()
     if recording then return false, "recursion blocked" end
     recording = true
     local ok, err = pcall(function()
-        NexusDB = type(NexusDB) == "table" and NexusDB or {}
-        NexusDB.errorHistory = {}
+        HistoryRoot().errorHistory = {}
         Nexus.lastError = nil
     end)
     recording = false
@@ -178,6 +204,13 @@ end
 
 function Errors.Limit()
     return MAX_ENTRIES
+end
+
+-- How many errors were recorded since this load: the newest entries of
+-- History. It can exceed the MAX_ENTRIES that History retains, and Clear does
+-- not reset it, so a reader caps it at the number of entries it holds.
+function Errors.SessionCount()
+    return sessionRecorded
 end
 
 function Errors.SafeText(value)

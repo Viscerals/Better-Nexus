@@ -20,6 +20,18 @@ function S.Boot()
  C.Put=function(record,...)
   H.putCalls[record.id]=(H.putCalls[record.id] or 0)+1;return put(record,...)
  end
+ -- A record committed inside a receiver batch is counted exactly like a
+ -- single put, so the per-ID counts keep their meaning on both routes.
+ local putBatch=C.PutBatch
+ if type(putBatch)=='function' then
+  C.PutBatch=function(requests,...)
+   for _,request in ipairs(requests or {})do
+    local record=type(request)=='table' and request.record or nil
+    if record then H.putCalls[record.id]=(H.putCalls[record.id] or 0)+1 end
+   end
+   return putBatch(requests,...)
+  end
+ end
  return H,C
 end
 function S.Incoming(H,C)

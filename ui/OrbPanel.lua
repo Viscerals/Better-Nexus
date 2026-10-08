@@ -24,6 +24,7 @@ local function editLimit(on)
 end
 local function inactiveControls()
     editLimit(false)
+    if frame.cont then frame.cont:Hide()end
     for _,b in ipairs(frame.mutations)do b:Disable()end
     frame.advanced:Hide();frame:SetHeight(445)
 end
@@ -32,16 +33,100 @@ local function notify(ok,err)
     if frame then frame.notice:SetText(err or (ok and "" or "No change."))end
     UI.Refresh()
 end
-local function primary(limit)
+local function primary(limit,tracked)
     local s=Nexus.OrbRuntime.Status()
     if s.running then return Nexus.OrbRuntime.Pause()end
     if s.state=="PAUSED" then return Nexus.OrbRuntime.Resume()end
-    return Nexus.OrbRuntime.Start(limit)
+    return Nexus.OrbRuntime.Start(limit,tracked)
 end
+-- The maximum box shows the draft; a refresh sets it without counting as
+-- typing (OnTextChanged ignores changes made here).
+local function showLimit(value)
+    local e=frame.limit;e.settingText=true;e:SetText(value);e.settingText=nil;e.shownDraft=value
+end
+local MAX_TIP="Follow your confirmed Orb balance, up to 1000, until you enter another amount or start the run. This does not spend Orbs."
 local phases={IDLE="Not started",READY="Preparing next replacement",WAIT_OFFER="Waiting for the Orb offer",
     WAIT_RESULT="Waiting for result confirmation",PAUSED="Paused",STOPPED="Stopped",COMPLETE="Targets complete",
     ROLLED_COMPLETE="Rolled targets complete",LIMIT="Maximum reached",OUT_OF_ORBS="No Orbs remain",
-    NO_SOURCES="No safe surplus copies remain",RECOVERY="Previous result is unresolved"}
+    NO_SOURCES="No safe surplus copies remain",RECOVERY="Previous result is unresolved",
+    FINISHED="Finished - limit reached"}
+-- At FINISHED the primary control is the same button that was Pause while the
+-- run was going and Resume while it was paused, and the limit box has just
+-- been refilled with the configured maximum. One press there would start a new
+-- spending run. The first press only arms it; the second press starts it.
+local confirmNewRun=false
+-- The maximum shown when the new run was armed. A different amount (for
+-- example a tracked balance that changed) needs a new review.
+local confirmAmount=nil
+
+-- Read-only Orb history window. It renders one fixed row pool, reads only the
+-- page it shows plus the operation whose details are open, and performs no Orb
+-- action: opening, paging, selecting and copying spend nothing, select nothing
+-- and write nothing. All presentation lives in Nexus.OrbHistory, which reads
+-- recorded fields only.
+local LOG_ROWS=8
+-- One column layout for the header AND the body. A heading that keeps its own
+-- offsets drifts away from the values it labels the moment either side is
+-- touched, so both read these measurements and nothing else. ROW_X is where a
+-- row starts inside the window, so the header sits on the same origin.
+local LOG_ROW_X,LOG_ROW_W=20,720
+local LOG_COLUMNS={
+    {key="index",label="#",x=0,w=28},
+    {key="source",label="Replaced Echo",x=52,w=180,iconX=30},
+    {key="replacement",label="Replacement",x=260,w=190,iconX=238},
+    {key="reason",label="Why selected",x=456,w=150},
+    {key="result",label="Result",x=612,w=105},
+}
+local logFrame,logView,logPage=nil,"current",1
+local logSelection=nil
+local logCopyFrame=nil
+local logCopy={key=nil,text=nil}
+local logSeen={}
+local logRendered=nil
+-- Labels resolved for the ids this page actually shows. Cleared whenever the
+-- history revision changes, so a stale label cannot outlive its page.
+local logLabels={key=nil,byId={}}
+local function logRunKey(run)
+    if not run then return "none" end
+    return tostring(run.which).."|"..tostring(run.runId)
+end
+local function logPageView(page)
+    return Nexus.OrbRuntime.RunLog(logView,((page or 1)-1)*LOG_ROWS+1,LOG_ROWS)
+end
+local function logKey(run)
+    if not run then return "none" end
+    -- The revision changes on every recorded event, so a cached copy cannot
+    -- outlive the history it was made from.
+    return table.concat({tostring(run.which),tostring(run.runId),
+        tostring(run.revision),tostring(run.total)},"|")
+end
+-- One lookup of ONE recorded id, at most once per distinct id on the page:
+-- the addon's shared catalog accessor, then the client's own spell info. It
+-- indexes the catalog by that exact id and never iterates it; the accessor
+-- itself may refresh its own cache when the client's data changed, which is
+-- the same shared call every other view makes. It sends no request, reads no
+-- gameplay state, and writes nothing back into the run, the log or the
+-- profile.
+local function logResolve(spellId)
+    local found=logLabels.byId[spellId]
+    if found~=nil then return found.label,found.icon end
+    local label,icon
+    local adapter=Nexus.GameAdapter
+    local catalog=adapter and adapter.Catalog and adapter.Catalog()
+    local rows=catalog and (catalog.rows or catalog)
+    local row=type(rows)=="table" and rows[spellId] or nil
+    if type(row)=="table" and row.name and row.name~="" then label=row.name end
+    if type(GetSpellInfo)=="function" then
+        local ok,spellName,_,texture=pcall(GetSpellInfo,spellId)
+        if ok then
+            if not label and spellName and spellName~="" then label=spellName end
+            if texture and texture~="" then icon=texture end
+        end
+    end
+    logLabels.byId[spellId]={label=label,icon=icon}
+    return label,icon
+end
+local function logHistory() return assert(Nexus.OrbHistory,"Orb history projection unavailable") end
 local function refresh()
     if not frame or not frame:IsShown()then return end
     local ready=Nexus.StartupStatus and Nexus.StartupStatus()
@@ -53,22 +138,56 @@ local function refresh()
         inactiveControls()
         return
     end
-    local s=Nexus.OrbRuntime.Status();frame.snapshot=s
+    -- One display read per refresh; the source list is prepared only for Advanced.
+    -- The snapshot authorizes nothing: Start, Resume and every spend read again.
+    local s=Nexus.OrbRuntime.Status(advanced);frame.snapshot=s
     local a=s.assignment or {};local busy=s.running or s.pending or s.state=="PAUSED" or s.state=="LIMIT"
     frame.plan:SetText(a.state=="restoring" and "Restoring assigned Wishlist..." or ("Assigned Wishlist: "..name(a.name or "none")))
-    frame.targets:SetText(s.progress and (s.progress.rolledMissing.." rolled target copies still missing")
-        or a.note or "Assign a Wishlist through My Builds to begin.")
+    -- A ready assignment whose read was refused is still assigned: its progress
+    -- is unavailable (the reason is in the status line), not unassigned.
+    local targets
+    if s.progress then targets=s.progress.rolledMissing.." rolled target copies still missing"
+    elseif a.state=="ready" then targets="Target progress unavailable"..(a.note and (": "..tostring(a.note)) or ".")
+    else targets=a.note or "Assign a Wishlist through My Builds to begin." end
+    frame.targets:SetText(targets)
     local permanent=s.progress and s.progress.permanentMissing
-    frame.permanent:SetText(permanent and permanent>0 and (permanent.." permanent target copies remain. Orbs cannot change permanent slots.")or "")
-    frame.balance:SetText(s.charges~=nil and ("Confirmed Orb balance: "..s.charges)
-        or ("Orb balance: "..(s.balanceState or "unknown")..". "..(s.balanceReason or "")))
-    frame.start:SetText(s.running and "Pause" or (s.state=="PAUSED" and "Resume" or "Start"))
+    frame.permanent:SetText(permanent and permanent>0 and (permanent.." locked target copies remain. Orbs cannot change locked Echo slots.")or "")
+    local d=s.limitDraft or {}
+    local mode=""
+    if not busy then
+        if d.tracking then
+            mode=d.value~=nil and ("\nMaximum follows this balance (up to "..tostring(d.cap or 1000)..") until you enter another amount.")
+                or "\nMaximum follows the confirmed balance; unavailable until it is confirmed."
+        elseif d.text~=nil and d.value==nil then
+            mode="\nEnter a whole-number maximum from 1 to 10,000, or press Max."
+        end
+    end
+    frame.balance:SetText((s.charges~=nil and ("Confirmed Orb balance: "..s.charges)
+        or ("Orb balance: "..(s.balanceState or "unknown")..". "..(s.balanceReason or "")))..mode)
+    if s.state~="FINISHED" then confirmNewRun=false;confirmAmount=nil end
     editLimit(not busy)
-    if not frame.limit:HasFocus()then frame.limit:SetText(tostring(busy and s.limit or s.config.maxOrbs))end
-    frame.usage:SetText("Orbs used: "..s.spent.." / "..((busy or s.limit>0)and s.limit or s.config.maxOrbs)
+    local shown
+    if busy then shown=tostring(s.limit)
+    elseif d.text~=nil then shown=d.text
+    else shown=d.value~=nil and tostring(d.value) or "" end
+    if not frame.limit:HasFocus() and frame.limit:GetText()~=shown then showLimit(shown) end
+    -- Max: only an editable draft with a confirmed balance above zero. The
+    -- click checks again.
+    enable(frame.max,not busy and (tonumber(s.charges) or 0)>0 and s.balanceState=="confirmed")
+    if confirmNewRun and confirmAmount~=nil and frame.limit:GetText()~=confirmAmount then
+        confirmNewRun=false;confirmAmount=nil
+        frame.notice:SetText("The maximum changed. Review it, then press Start new run again.")
+    end
+    frame.start:SetText(s.running and "Pause" or (s.state=="PAUSED" and "Resume"
+        or (s.state=="FINISHED" and (confirmNewRun and "Confirm new run" or "Start new run") or "Start")))
+    frame.usage:SetText("Orbs used: "..s.spent.." / "..((busy or s.limit>0)and s.limit or (shown~="" and shown or "-"))
         ..(s.reserved>0 and ("; unresolved exposure: "..s.reserved)or ""))
     local reason=(s.running or s.pending or s.state=="PAUSED")and s.reason or (s.startReason or s.reason)
     frame.status:SetText((phases[s.state]or s.state).."\n"..(reason or s.error or ""))
+    if confirmNewRun and s.state=="FINISHED" then
+        frame.status:SetText(frame.status:GetText().."\nPress Confirm new run to start a new run of up to "
+            ..tostring(frame.limit:GetText()).." Orb(s). Close this window to cancel.")
+    end
     if s.targetChanged then frame.status:SetText(frame.status:GetText().."\nOriginal operation: "..name(s.operationName))end
     frame.assignmentNote:SetText(a.mirrorNote or "")
     if advanced then
@@ -82,6 +201,11 @@ local function refresh()
         frame.sourcePage:SetText("Eligible sources "..sourcePage.." / "..math.max(1,math.ceil(#rows/4)))
     end
     enable(frame.start,s.running or s.canResume or s.canStart);enable(frame.stop,busy);enable(frame.assigned,not busy)
+    do
+        local cv=Nexus.OrbRuntime.ContinueView()
+        local stage=cv.stage
+        if cv.eligible==true or stage=="checking" or stage=="ready" or stage=="refused" or stage=="done" then frame.cont:Show()else frame.cont:Hide()end
+    end
     if advanced then frame.advanced:Show()else frame.advanced:Hide()end
     frame:SetHeight(advanced and 660 or 445)
 end
@@ -109,22 +233,93 @@ local function ensure()
         elseif Nexus.WishlistEditor then Nexus.WishlistEditor.Show()end
     end)
     frame.targets=text(frame,20,-82,580,26);frame.permanent=text(frame,20,-112,580,28);frame.balance=text(frame,20,-144,580,34)
-    text(frame,20,-190,225,24,"Maximum Orbs this run:")
-    frame.limit=CreateFrame("EditBox",nil,frame,"InputBoxTemplate");frame.limit:SetSize(65,25);frame.limit:SetPoint("TOPLEFT",225,-188)
+    frame.limitLabel=text(frame,20,-190,170,24,"Maximum Orbs this run:")
+    frame.limit=CreateFrame("EditBox",nil,frame,"InputBoxTemplate");frame.limit:SetSize(65,25);frame.limit:SetPoint("TOPLEFT",196,-188)
     frame.limit:SetFrameLevel(32);frame.limit:SetAutoFocus(false);frame.limit:SetNumeric(true);frame.limit:SetMaxLetters(5)
     frame.limit:SetScript("OnEditFocusGained",function(self)if not self.editable or not frame:IsShown()then self:ClearFocus()end end)
     frame.limit:SetScript("OnEnterPressed",function(self)
         if not self.editable then self:ClearFocus();return end
         local ok,err=Nexus.OrbRuntime.SetLimit(tonumber(self:GetText()));self:ClearFocus();notify(ok,err)
     end)
-    frame.limit:SetScript("OnEscapePressed",function(self)self:ClearFocus();UI.Refresh()end)
-    frame.start=button(frame,326,-188,120,"Start",function()notify(primary(tonumber(frame.limit:GetText())))end)
-    frame.stop=button(frame,461,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
+    frame.limit:SetScript("OnEscapePressed",function(self)Nexus.OrbRuntime.CancelLimitEdit();self:ClearFocus();UI.Refresh()end)
+    -- Typing (also the same number, a partial or an empty text) is the
+    -- player's own amount. A refresh setting the box, or focus alone, is not.
+    frame.limit:SetScript("OnTextChanged",function(self,userInput)
+        if self.settingText or not self.editable then return end
+        if userInput==true or self:HasFocus() then Nexus.OrbRuntime.EditLimitText(self:GetText()) end
+    end)
+    -- A button click does not take keyboard focus from the box: release it
+    -- first, so the refresh shows the tracked amount instead of old typing.
+    frame.max=button(frame,268,-188,48,"Max",function()frame.limit:ClearFocus();notify(Nexus.OrbRuntime.TrackBalance())end)
+    frame.max:SetScript("OnEnter",function(self)
+        if GameTooltip then GameTooltip:SetOwner(self,"ANCHOR_TOP");GameTooltip:SetText(MAX_TIP,1,1,1,1,true);GameTooltip:Show()end
+    end)
+    frame.max:SetScript("OnLeave",function()if GameTooltip then GameTooltip:Hide()end end)
+    frame.max.tooltip=MAX_TIP
+    frame.start=button(frame,334,-188,126,"Start",function()
+        local s=Nexus.OrbRuntime.Status()
+        if s.state=="FINISHED" and not confirmNewRun then
+            -- The explicit preparation of a new run: its draft follows the
+            -- confirmed balance again; the amount is shown for review.
+            -- A refusal (for example a balance that became unknown after the
+            -- render) arms nothing and changes nothing.
+            frame.limit:ClearFocus()
+            local prepared,why=Nexus.OrbRuntime.NewRunDraft()
+            if not prepared then notify(nil,why);return end
+            UI.Refresh()
+            local amount=frame.limit:GetText();local v=tonumber(amount)
+            if v==nil or v<1 or v>10000 or v~=math.floor(v) then
+                -- A draft that follows the balance has no amount of its own:
+                -- name the balance, not typing or Max.
+                local d=Nexus.OrbRuntime.LimitDraft()
+                local why="Enter a whole-number maximum from 1 to 10,000, or press Max. Nothing was started."
+                if d.tracking and d.text==nil then
+                    why=d.value==0 and "The confirmed Orb balance is 0. Nothing was started."
+                        or "The maximum follows the confirmed Orb balance, which is not available. Nothing was started."
+                end
+                notify(nil,why)
+                return
+            end
+            confirmNewRun=true;confirmAmount=amount;UI.Refresh();return
+        end
+        -- The Confirm click checks the reviewed amount itself: an amount
+        -- changed since the review (typed, or not yet refreshed) needs a new
+        -- review, whatever the refresh timing.
+        if confirmNewRun and frame.limit:GetText()~=confirmAmount then
+            confirmNewRun=false;confirmAmount=nil
+            notify(nil,"The maximum changed. Review it, then press Start new run again.")
+            return
+        end
+        confirmNewRun=false;confirmAmount=nil
+        if s.running or s.state=="PAUSED" then notify(primary(nil));return end
+        -- Start uses the amount shown, never a newer balance read at the click.
+        local d=s.limitDraft or {}
+        local shown=frame.limit:GetText()
+        local n=tonumber(shown)
+        if n==nil or n<1 or n~=math.floor(n) then
+            notify(nil,d.tracking and "The maximum follows the confirmed Orb balance, which is not available. Nothing was started."
+                or "Enter a whole-number maximum from 1 to 10,000, or press Max. Nothing was started.")
+            return
+        end
+        -- Still the tracked amount this window showed: approve it as shown.
+        -- Any other text is the player's own amount (the existing path).
+        notify(primary(n,d.tracking and d.text==nil and shown==frame.limit.shownDraft))
+    end)
+    frame.stop=button(frame,470,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
     frame.approval=text(frame,20,-221,580,37,"Start approves this maximum and automatic use of eligible surplus copies, including safe recycling. Ordinary Automation will turn OFF.")
-    frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,580,24)
+    frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,440,24)
+    -- Fixed boxes; a status or refusal longer than its box is complete in a tooltip.
+    if Nexus.LayoutMetrics then
+        frame.statusHit=Nexus.LayoutMetrics.FullTextTooltip(frame.status,frame)
+        frame.noticeHit=Nexus.LayoutMetrics.FullTextTooltip(frame.notice,frame)
+    end
+    -- 035: only while an unresolved action can be continued, or a check is in progress, or its result is shown.
+    frame.cont=button(frame,470,-364,130,"Continue...",function()UI.ShowContinue()end)
+    frame.cont:Hide()
     frame.closeNotice=text(frame,20,-393,580,20,CLOSE_NOTICE)
     button(frame,20,-414,85,"Help",function()Nexus.Help.Show("orbs")end)
     button(frame,115,-414,95,"Advanced",function()advanced=not advanced;UI.Refresh()end)
+    button(frame,220,-414,95,"Run log",function()UI.ShowLog()end)
     button(frame,515,-414,85,"Close",function()frame:Hide()end)
     frame.advanced=CreateFrame("Frame",nil,frame);frame.advanced:Hide();frame.advanced:SetSize(590,205);frame.advanced:SetPoint("TOPLEFT",15,-446);frame.advanced:SetFrameLevel(31)
     local af=frame.advanced
@@ -140,13 +335,381 @@ local function ensure()
     button(af,285,-151,85,"Previous",function()sourcePage=math.max(1,sourcePage-1);UI.Refresh()end)
     button(af,380,-151,85,"Next",function()sourcePage=sourcePage+1;UI.Refresh()end)
     frame.assignmentNote=text(af,5,-180,565,31)
-    frame.mutations={frame.start,frame.stop,frame.assigned,frame.clearExclusions}
+    frame.mutations={frame.start,frame.stop,frame.assigned,frame.clearExclusions,frame.max}
     for _,r in ipairs(frame.sourceRows)do frame.mutations[#frame.mutations+1]=r.exclude end
     inactiveControls()
     frame:SetScript("OnShow",function()UI.Refresh()end)
-    frame:SetScript("OnHide",function()editLimit(false)end)
+    frame:SetScript("OnHide",function()editLimit(false);confirmNewRun=false;confirmAmount=nil end)
     local elapsed=0;frame:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;UI.Refresh()end end)
     frame:Hide();UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbPanel"
+end
+local RESULT_TONE={Confirmed={.55,.85,.55},["Not sent"]={.95,.5,.45},
+    Unconfirmed={.95,.78,.35},Paused={.95,.78,.35}}
+local function logRowTone(result)
+    if result.confirmed then return RESULT_TONE.Confirmed end
+    if result.refused then return RESULT_TONE["Not sent"] end
+    if result.unresolved then return RESULT_TONE.Unconfirmed end
+    return {.82,.84,.88}
+end
+local function logCell(fs,label,color)
+    fs:SetText(label or "")
+    if color then pcall(fs.SetTextColor,fs,color[1],color[2],color[3]) end
+end
+-- Two lines per Echo cell: the name, then the rarity word. The colour repeats
+-- the rarity; it is never the only cue.
+local CELL_LETTERS=30
+local function logEchoText(cell)
+    if not cell then return "" end
+    local history=Nexus.OrbHistory
+    local shown=history.Ellipsis(cell.label,CELL_LETTERS)
+    if cell.recorded==false then return shown end
+    return shown.."\n"..cell.rarity.label
+end
+local function logDetailText(details,history)
+    if not details then return "Select an operation to see what was offered and why it was chosen." end
+    local lines={}
+    local function add(text) lines[#lines+1]=text end
+    add("Operation "..tostring(details.ordinal)..": "..details.result.label)
+    if details.offers then
+        local parts={}
+        for _,offer in ipairs(details.offers) do
+            local mark=offer.confirmed and " [received]" or (offer.selected and " [selected]" or "")
+            parts[#parts+1]=offer.label.." ("..offer.rarity.label..")"..mark
+        end
+        add("Offered: "..table.concat(parts,"   "))
+    else
+        add("Offered: "..tostring(details.offersNote))
+    end
+    add("Why: "..details.reason.label..(details.reason.detail and (" - "..details.reason.detail) or ""))
+    if details.proposedSource then
+        add("Proposed source: "..details.proposedSource.label
+            .." ("..details.proposedSource.rarity.label..")"
+            .."; no consumed source is recorded for this operation.")
+    elseif details.consumed then
+        add("Consumed source: "..details.consumed.label
+            .." ("..details.consumed.rarity.label..")")
+    end
+    if details.eligibleSurplus~=nil then
+        add("Eligible surplus at selection: "..tostring(details.eligibleSurplus)
+            .." copy(ies). This is what the policy could draw from, not a count of copies sacrificed.")
+    end
+    if details.recycled then add("This source was the run's permitted recycle candidate.") end
+    if details.note then add("Recorded note: "..details.note) end
+    local t=details.technical
+    add("Technical: serial "..tostring(t.serial or details.serial)
+        .."; state "..tostring(t.state)
+        .."; source "..tostring(t.sourceKey)
+        .."; selected "..tostring(t.selectedKey).." ("..tostring(t.selectionKind)..")"
+        .."; obtained "..tostring(t.obtained)
+        ..(details.sinceStart and ("; "..string.format("%.1f",details.sinceStart).."s after the run started") or ""))
+    return table.concat(lines,"\n")
+end
+local function refreshLog(force)
+    if not logFrame or not logFrame:IsShown() then return end
+    local history=logHistory()
+    local run=logPageView(logPage)
+    local key=logKey(run)
+    local runKey=logRunKey(run)
+    if logLabels.key~=runKey then logLabels.key,logLabels.byId=runKey,{} end
+    local total=run and run.total or 0
+    local pages=history.Pages(total,LOG_ROWS)
+    if logPage>pages then
+        logPage=pages;logSelection=nil;run=logPageView(logPage);key=logKey(run)
+    end
+    local header=history.Header(run)
+    logFrame.header:SetText(header.empty and header.status
+        or (header.runLabel.." - "..header.wishlist.."\n"..header.status.."\n"..header.usage
+            ..(header.increased and " (maximum was increased)" or "")))
+    local warnings={}
+    if header.pending then warnings[#warnings+1]=header.pending end
+    if header.truncated then warnings[#warnings+1]=header.truncated end
+    logFrame.warning:SetText(table.concat(warnings,"  "))
+    enable(logFrame.current,logView~="current")
+    enable(logFrame.previous,logView~="previous" and header.hasPrevious)
+    local rows=history.Rows(run,logResolve)
+    local selected=nil
+    for index,row in ipairs(logFrame.rows) do
+        local model=rows[index]
+        row.serial=model and model.serial or nil
+        if model then
+            row:Show()
+            logCell(row.index,tostring(model.ordinal)..".")
+            logCell(row.source,logEchoText(model.source),model.source.rarity.color)
+            logCell(row.replacement,logEchoText(model.replacement),model.replacement.rarity.color)
+            logCell(row.reason,model.reason.label)
+            logCell(row.result,model.result.label,logRowTone(model.result))
+            row.detail=model.reason.detail
+            row.full=model.source.label.." ("..model.source.rarity.label..")"
+                .."  ->  "..model.replacement.label
+                ..(model.replacement.recorded~=false
+                    and (" ("..model.replacement.rarity.label..")") or "")
+            row.icon:SetTexture(model.source.icon or "")
+            row.resultIcon:SetTexture(model.replacement.icon or "")
+            if logSelection and model.serial==logSelection then
+                selected=model;row.highlight:Show()
+            else row.highlight:Hide() end
+        else
+            row:Hide();row.highlight:Hide();row.detail=nil;row.full=nil
+            logCell(row.index,"");logCell(row.source,"");logCell(row.replacement,"")
+            logCell(row.reason,"");logCell(row.result,"")
+        end
+    end
+    if logSelection and not selected then logSelection=nil end
+    local details=selected and history.Details(selected.entry,logResolve,run and run.startedAt) or nil
+    logFrame.details:SetText(logDetailText(details,history))
+    -- The scrolled child is as tall as the measured details, so every line
+    -- of a long operation is reachable.
+    if Nexus.LayoutMetrics then
+        logFrame.detailChild:SetHeight(Nexus.LayoutMetrics.WrapHeight(logFrame.details,680,96))
+    end
+    logFrame.page:SetText(history.PageLabel(total,logPage,LOG_ROWS,run and run.truncated))
+    enable(logFrame.prev,logPage>1)
+    enable(logFrame.next,logPage<pages)
+    -- The page the player is reading stays where it is; new operations are
+    -- announced instead of moving them.
+    local seen=logSeen[tostring(logView)..":"..tostring(run and run.runId)]
+    if seen and total>seen and logPage<pages then
+        logFrame.note:SetText((total-seen).." new operation(s) recorded. Use Next to read them.")
+    else
+        logFrame.note:SetText(history.SESSION_NOTE)
+    end
+    logSeen[tostring(logView)..":"..tostring(run and run.runId)]=total
+    logRendered=key
+end
+-- Cheap bounded check: one header read with a single entry, never the whole
+-- run. It re-renders only when the recorded history actually changed.
+local function logVisibleCheck()
+    if not logFrame or not logFrame:IsShown() then return end
+    local probe=Nexus.OrbRuntime.RunLog(logView,1,1)
+    if logKey(probe)~=logRendered then refreshLog() end
+end
+local function logReportText(technical)
+    local run=Nexus.OrbRuntime.RunLog(logView)
+    local key=logKey(run)..(technical and "|tech" or "|plain")
+    if logCopy.key~=key or not logCopy.text then
+        -- The whole selected run is serialized only here, for the text the
+        -- player asked for, and only when it changed since the last request.
+        logCopy.key,logCopy.text=key,logHistory().Report(run,logResolve,technical)
+    end
+    return logCopy.text
+end
+local function ensureCopyView()
+    if logCopyFrame then return logCopyFrame end
+    local f=CreateFrame("Frame","NexusOrbHistoryCopy",UIParent);f:Hide()
+    logCopyFrame=f
+    f:SetSize(640,460);f:SetPoint("CENTER",UIParent,"CENTER",0,0)
+    f:SetFrameStrata("DIALOG");f:SetFrameLevel(60);f:EnableMouse(true)
+    f:SetMovable(true);f:SetClampedToScreen(true);f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart",function(self)self:StartMoving()end)
+    f:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
+    f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=14,insets={left=4,right=4,top=4,bottom=4}})
+    f:SetBackdropColor(.035,.04,.05,1)
+    text(f,20,-14,600,22,"Copy this report")
+    text(f,20,-36,600,32,"Select the text and copy it. Opening this view sends nothing anywhere.")
+    f.check=CreateFrame("CheckButton","NexusOrbHistoryTechnical",f,"UICheckButtonTemplate")
+    f.check:SetSize(22,22);f.check:SetPoint("TOPLEFT",20,-68)
+    f.checkLabel=text(f,46,-72,400,20,"Include technical details")
+    f.check:SetScript("OnClick",function(self)
+        -- GetChecked answers 1 or nil on this client, never a boolean.
+        f.editBox:SetText(logReportText(self:GetChecked() and true or false))
+        f.editBox:SetCursorPosition(0)
+    end)
+    f.scroll=CreateFrame("ScrollFrame","NexusOrbHistoryCopyScroll",f,"UIPanelScrollFrameTemplate")
+    f.scroll:SetPoint("TOPLEFT",20,-96);f.scroll:SetSize(580,300)
+    f.editBox=CreateFrame("EditBox",nil,f.scroll)
+    f.editBox:SetMultiLine(true)
+    -- The dedicated copy field is sized for the whole report: no name-limited
+    -- popup, and nothing is silently cut.
+    f.editBox:SetMaxLetters(0)
+    f.editBox:SetAutoFocus(false)
+    f.editBox:SetFontObject(ChatFontNormal)
+    f.editBox:SetWidth(566)
+    f.editBox:SetScript("OnEscapePressed",function(self)self:ClearFocus()end)
+    f.scroll:SetScrollChild(f.editBox)
+    button(f,20,-410,110,"Clear focus",function()f.editBox:ClearFocus()end)
+    button(f,515,-410,85,"Close",function()f:Hide()end)
+    f:SetScript("OnHide",function()f.editBox:ClearFocus()end)
+    UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbHistoryCopy"
+    return f
+end
+local function ensureLog()
+    if logFrame then return end
+    logFrame=CreateFrame("Frame","NexusOrbRunLog",UIParent);logFrame:Hide()
+    logFrame:SetSize(760,560);logFrame:SetPoint("CENTER",UIParent,"CENTER",40,-20)
+    logFrame:SetFrameStrata("DIALOG");logFrame:SetFrameLevel(40);logFrame:EnableMouse(true)
+    logFrame:SetMovable(true);logFrame:SetClampedToScreen(true);logFrame:RegisterForDrag("LeftButton")
+    logFrame:SetScript("OnDragStart",function(self)self:StartMoving()end)
+    logFrame:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
+    logFrame:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=14,insets={left=4,right=4,top=4,bottom=4}})
+    logFrame:SetBackdropColor(.035,.04,.05,1)
+    text(logFrame,20,-14,400,24,"Orb history")
+    logFrame.current=button(logFrame,20,-42,120,"Current run",function()
+        if logView=="current" then return end
+        logView="current";logPage=1;logSelection=nil;refreshLog()
+    end)
+    logFrame.previous=button(logFrame,146,-42,120,"Previous run",function()
+        if logView=="previous" then return end
+        logView="previous";logPage=1;logSelection=nil;refreshLog()
+    end)
+    logFrame.header=text(logFrame,280,-40,460,50)
+    logFrame.warning=text(logFrame,20,-72,720,20)
+    -- The heading row is a frame on the row origin, and each heading is one
+    -- font string at its own column's x and width. Same numbers, one source.
+    logFrame.columns=CreateFrame("Frame",nil,logFrame)
+    logFrame.columns:SetSize(LOG_ROW_W,18)
+    logFrame.columns:SetPoint("TOPLEFT",LOG_ROW_X,-96)
+    logFrame.columnHeadings={}
+    for _,column in ipairs(LOG_COLUMNS) do
+        local heading=text(logFrame.columns,column.x,0,column.w,18,column.label)
+        heading:SetJustifyV("MIDDLE")
+        logFrame.columnHeadings[column.key]=heading
+    end
+    logFrame.rows={}
+    for i=1,LOG_ROWS do
+        local row=CreateFrame("Button",nil,logFrame)
+        row:SetSize(LOG_ROW_W,40);row:SetPoint("TOPLEFT",LOG_ROW_X,-118-(i-1)*40)
+        row:SetFrameLevel(logFrame:GetFrameLevel()+1)
+        row.highlight=row:CreateTexture(nil,"BACKGROUND")
+        row.highlight:SetTexture("Interface\\Buttons\\WHITE8X8")
+        row.highlight:SetAllPoints(row);row.highlight:SetVertexColor(.16,.24,.29,.5)
+        row.highlight:Hide()
+        row.separator=row:CreateTexture(nil,"BACKGROUND")
+        row.separator:SetTexture("Interface\\Buttons\\WHITE8X8")
+        row.separator:SetSize(LOG_ROW_W,1);row.separator:SetPoint("BOTTOMLEFT",0,0)
+        row.separator:SetVertexColor(.22,.24,.28,.55)
+        local columns={}
+        for _,column in ipairs(LOG_COLUMNS) do columns[column.key]=column end
+        row.index=text(row,columns.index.x,-4,columns.index.w,18)
+        row.icon=row:CreateTexture(nil,"ARTWORK");row.icon:SetSize(18,18)
+        row.icon:SetPoint("TOPLEFT",columns.source.iconX,-4)
+        row.source=text(row,columns.source.x,-4,columns.source.w,34)
+        row.resultIcon=row:CreateTexture(nil,"ARTWORK");row.resultIcon:SetSize(18,18)
+        row.resultIcon:SetPoint("TOPLEFT",columns.replacement.iconX,-4)
+        row.replacement=text(row,columns.replacement.x,-4,columns.replacement.w,34)
+        row.reason=text(row,columns.reason.x,-4,columns.reason.w,34)
+        row.result=text(row,columns.result.x,-4,columns.result.w,34)
+        row:SetScript("OnClick",function(self)
+            -- Reading only: this selects a row for display and nothing else.
+            if logSelection==self.serial then logSelection=nil
+            else logSelection=self.serial end
+            refreshLog()
+        end)
+        row:SetScript("OnEnter",function(self)
+            -- A shortened cell keeps its whole recorded value here.
+            if not GameTooltip or (not self.detail and not self.full) then return end
+            GameTooltip:SetOwner(self,"ANCHOR_TOP")
+            GameTooltip:SetText(self.full or "Why this Echo was selected")
+            if self.detail then GameTooltip:AddLine(self.detail,1,1,1,true) end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave",function() if GameTooltip then GameTooltip:Hide() end end)
+        row:Hide()
+        logFrame.rows[i]=row
+    end
+    logFrame.detailScroll=CreateFrame("ScrollFrame","NexusOrbHistoryDetailScroll",
+        logFrame,"UIPanelScrollFrameTemplate")
+    logFrame.detailScroll:SetPoint("TOPLEFT",20,-444)
+    logFrame.detailScroll:SetSize(700,96)
+    logFrame.detailChild=CreateFrame("Frame",nil,logFrame.detailScroll)
+    logFrame.detailChild:SetSize(680,96)
+    logFrame.details=text(logFrame.detailChild,0,0,680,400)
+    logFrame.detailScroll:SetScrollChild(logFrame.detailChild)
+    logFrame.page=text(logFrame,20,-512,300,22)
+    logFrame.prev=button(logFrame,320,-510,85,"Previous",function()
+        if logPage<=1 then return end
+        logPage=logPage-1;logSelection=nil;refreshLog()
+    end)
+    logFrame.next=button(logFrame,410,-510,85,"Next",function()
+        logPage=logPage+1;logSelection=nil;refreshLog()
+    end)
+    button(logFrame,500,-510,115,"Copy report",function()
+        local view=ensureCopyView()
+        view:Show()
+        view.editBox:SetText(logReportText(view.check:GetChecked() and true or false))
+        view.editBox:SetCursorPosition(0)
+    end)
+    button(logFrame,625,-510,95,"Close",function()logFrame:Hide()end)
+    logFrame.note=text(logFrame,20,-536,720,20,Nexus.OrbHistory and Nexus.OrbHistory.SESSION_NOTE or "")
+    logFrame:SetScript("OnShow",function()refreshLog()end)
+    logFrame:SetScript("OnHide",function() if logCopyFrame then logCopyFrame:Hide() end end)
+    local elapsed=0
+    logFrame:SetScript("OnUpdate",function(_,dt)
+        -- Nothing runs while hidden; visible, this is one bounded header read.
+        elapsed=elapsed+(dt or 0);if elapsed>=.5 then elapsed=0;logVisibleCheck() end
+    end)
+    UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbRunLog"
+end
+function UI.ShowLog()
+    ensureLog();logFrame:Show();refreshLog();return logFrame
+end
+
+-- 035: Continue with an unconfirmed outcome. Reading and opening this window send nothing.
+-- Check starts the strict read-only check; Continue, enabled only for the current ready token,
+-- is the player's explicit confirmation; Cancel and closing the window cancel a check. The
+-- text is the runtime's own (what was observed, what Continue does, what stays uncertain).
+local contFrame
+local function contRefresh()
+    if not contFrame or not contFrame:IsShown()then return end
+    local v=Nexus.OrbRuntime.ContinueView()
+    contFrame.token=v.token
+    contFrame.body:SetText(v.text or "")
+    local idle=v.stage=="idle" or v.stage=="refused"
+    local active=v.stage=="checking" or v.stage=="ready"
+    enable(contFrame.check,v.eligible==true and idle)
+    enable(contFrame.go,v.stage=="ready" and v.token~=nil)
+    enable(contFrame.cancel,active)
+    contFrame.state:SetText(v.stage=="ready" and "Ready: waiting for your confirmation"
+        or v.stage=="checking" and "Checking the game's current state..."
+        or v.stage=="done" and "Continued"
+        or v.stage=="refused" and "Not continued"
+        or (v.eligible and "Not checked yet" or "Not available"))
+end
+local function ensureContinue()
+    if contFrame then return end
+    local f=CreateFrame("Frame","NexusOrbContinue",UIParent);contFrame=f;f:Hide()
+    f:SetSize(580,330);f:SetPoint("CENTER",UIParent,"CENTER",30,10)
+    f:SetFrameStrata("DIALOG");f:SetFrameLevel(50);f:EnableMouse(true);f:SetMovable(true);f:SetClampedToScreen(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart",function(self)self:StartMoving()end)
+    f:SetScript("OnDragStop",function(self)self:StopMovingOrSizing()end)
+    f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",edgeSize=14,insets={left=4,right=4,top=4,bottom=4}})
+    f:SetBackdropColor(.035,.04,.05,1)
+    text(f,20,-14,540,22,"Continue with an unconfirmed Orb outcome")
+    f.state=text(f,20,-40,540,20)
+    f.body=text(f,20,-66,540,170)
+    f.notice=text(f,20,-240,540,22)
+    -- Fixed boxes; text longer than its box is complete in a tooltip.
+    if Nexus.LayoutMetrics then
+        f.bodyHit=Nexus.LayoutMetrics.FullTextTooltip(f.body,f)
+        f.noticeHit=Nexus.LayoutMetrics.FullTextTooltip(f.notice,f)
+    end
+    f.check=button(f,20,-282,150,"Check the game's state",function()
+        local ok,why=Nexus.OrbRuntime.ContinueBegin()
+        f.notice:SetText(ok and "" or Nexus.OrbRuntime.ContinueReason(why))
+        contRefresh()
+    end)
+    f.go=button(f,180,-282,130,"Continue",function()
+        -- The token this window showed, never a newer one: a stale click is refused.
+        local ok,why=Nexus.OrbRuntime.ContinueConfirm(f.token)
+        f.notice:SetText(ok and "" or Nexus.OrbRuntime.ContinueReason(why))
+        UI.Refresh();contRefresh()
+    end)
+    f.cancel=button(f,320,-282,90,"Cancel",function()
+        Nexus.OrbRuntime.ContinueCancel();f.notice:SetText("");contRefresh()
+    end)
+    button(f,480,-282,80,"Close",function()f:Hide()end)
+    f:SetScript("OnShow",function()contRefresh()end)
+    -- Closing the window (also with Escape) cancels a check: no token outlives its window.
+    f:SetScript("OnHide",function()
+        local v=Nexus.OrbRuntime.ContinueView()
+        if v.stage=="checking" or v.stage=="ready" then Nexus.OrbRuntime.ContinueCancel()end
+    end)
+    local elapsed=0
+    f:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;contRefresh()end end)
+    UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbContinue"
+end
+function UI.ShowContinue()
+    ensureContinue();contFrame:Show();contRefresh();return contFrame
 end
 function UI.Show()ensure();frame:Show();UI.Refresh();return frame end
 function UI.Hide()if frame then frame:Hide()end end

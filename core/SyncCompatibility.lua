@@ -160,6 +160,9 @@ function Compatibility.New(options)
         if dps and dps.GetSyncHash then
             local ok, value = pcall(dps.GetSyncHash)
             if ok and value then return tostring(value) end
+            -- Not ready (or failed): no digest is advertised; a request waits
+            -- in its "preparing" state. "0" would claim an empty store.
+            return nil
         end
         return "0"
     end
@@ -305,6 +308,24 @@ function Compatibility.New(options)
             and snapshot.key == CandidateKey(hash)
     end
 
+    -- A refused walk step (the catalog answers done with no id and a reason:
+    -- the walk is stale or invalid after a root change) is not the end of the
+    -- collection. The snapshot starts its scan over, at most twice; a
+    -- snapshot whose delta hash moved is refused by SnapshotCurrent anyway.
+    local function RestartCandidateScan(snapshot)
+        snapshot.restarts = (snapshot.restarts or 0) + 1
+        if snapshot.restarts > 2 then
+            return false, "candidate walk unavailable", true
+        end
+        snapshot.phase, snapshot.cursor = "overlay", nil
+        for bucket = 1, buckets do
+            snapshot.byBucket[bucket] = {}
+            snapshot.claimSafeByBucket[bucket] = true
+        end
+        noteStat("candidateRestarts", 1)
+        return false, nil, true
+    end
+
     function C.AdvanceCandidateSnapshot(snapshot)
         if not C.SnapshotCurrent(snapshot) then
             return false, "stale candidate snapshot", true
@@ -318,6 +339,9 @@ function Compatibility.New(options)
                 id, build, done = catalog.SyncDeltaNext(snapshot.cursor)
             else
                 done = true
+            end
+            if done and id == nil and build ~= nil then
+                return RestartCandidateScan(snapshot)
             end
             if done then
                 snapshot.phase, snapshot.cursor = "tombstone", nil
@@ -346,9 +370,14 @@ function Compatibility.New(options)
         local catalog = getCatalog()
         local id, tombstone, done
         if catalog and type(catalog.TombstoneNext) == "function" then
-            id, tombstone, done = catalog.TombstoneNext(snapshot.cursor)
+            -- Its own named walk slot: the synchronous retention sweep in the
+            -- shared slot never invalidates this multi-call scan.
+            id, tombstone, done = catalog.TombstoneNext(snapshot.cursor, "sync-candidate")
         else
             done = true
+        end
+        if done and id == nil and tombstone ~= nil then
+            return RestartCandidateScan(snapshot)
         end
         if done or id == nil then
             snapshot.complete = true

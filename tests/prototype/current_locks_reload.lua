@@ -52,6 +52,6 @@ H2.perks.serverBuildSlots[102]={name='Another',verified=false,echoes=different}
 for _,v in ipairs(a.GetWishlistCandidates())do if v.slot==102 then c=v end end
 assert(Nexus.WishlistEditor.OpenForWishlist(c,1))
 assert(NexusWishlistRolePicker:IsShown() and not NexusWishlistRoleConfirm:IsEnabled())
-assert(NexusWishlistRolePicker.message:GetText():find("Waiting for the server's current permanent Echo list",1,true))
+assert(NexusWishlistRolePicker.message:GetText():find("Waiting for the server's current locked Echo list",1,true))
 NexusWishlistRoleCancel:Click()
 print('PASS default current-lock role save/fresh reload, reorder/rename, missing evidence and no ownership fabrication')

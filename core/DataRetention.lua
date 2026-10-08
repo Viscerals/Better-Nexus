@@ -105,6 +105,14 @@ local function ResolveLimits(database)
     return limits
 end
 
+local function DpsRevision()
+    local revisions = Nexus and Nexus.Revisions
+    if revisions and type(revisions.Get) == "function" then
+        return tonumber(revisions.Get(revisions.DPS_CHANGED)) or 0
+    end
+    return 0
+end
+
 local function EpochNow()
     if type(time) ~= "function" then return 0 end
     local ok, value = pcall(time)
@@ -474,7 +482,9 @@ local function OverlaySummaries(catalog, database)
             return rows, true
         end
         if why ~= "CURSOR_REQUIRED" then return nil, nil, why end
-        local token, cursorWhy = catalog.BeginSummaryCursor()
+        -- This owner's own named slot: the hash cache's probe and the Sync
+        -- diagnostic page no longer end a scan that takes many frames.
+        local token, cursorWhy = catalog.BeginSummaryCursor("retention")
         if not token then return nil, nil, cursorWhy or "CURSOR_UNAVAILABLE" end
         job = {catalog=catalog, token=token, rows={}, slices=0}
         pendingOverlayScans[database] = job
@@ -631,20 +641,77 @@ local function ExpireReservations(database, stepName, expireName, transaction)
     return staged
 end
 
-local function PruneEvictionMarkers(database, transaction)
+-- Retention markers (owner decision of 2026-09-24). Suppression stays exact
+-- per typed ID; no global floor. A current-format marker carries its trusted
+-- local creation time. An untimed current-format marker and a recognized
+-- legacy numeric marker carry none: their first local observation is
+-- recorded once, here, in this owner's saved metadata (markerFirstSeen: one
+-- entry per such marker, never more than the marker limit). A reload, a read
+-- or a repeated observation never resets it, and a marker's own number is
+-- never used as age. The catalog expires a marker 30 days after its age,
+-- inside this transaction; an entry leaves the map with its marker. Opaque,
+-- malformed and future markers are never aged or expired, a full catalog is
+-- not a reason to expire anything, and removal markers keep their own rules.
+local function PruneEvictionMarkers(database, transaction, priorMeta)
     local before = Count(DurablePayload(database,
         "communityRetentionEvictions"))
-    -- Retention suppression is exact-ID authority. Older schema versions
-    -- compacted removed markers into a global timestamp floor, which allowed
-    -- build B's history to reject an unrelated older build A. Forget the
-    -- obsolete floor; once an exact marker is deliberately removed, that one
-    -- build may re-enter and converge normally.
-    local removed = ExpireReservations(database, "BarrierNext",
-        "MaintenanceExpireBarrier", transaction)
-    return {
-        before=before, after=math.max(0, before - removed), removed=removed,
-        floor=0,
-    }
+    local prior = type(priorMeta) == "table"
+        and type(priorMeta.markerFirstSeen) == "table"
+        and priorMeta.markerFirstSeen or {}
+    local result = {before=before, after=before, removed=0, floor=0,
+        firstSeen=prior, firstSeenRecorded=0, firstSeenChanged=false}
+    local catalog = CatalogFor(database)
+    if not (catalog and transaction and type(catalog.BarrierNext) == "function") then
+        return result
+    end
+    local now = type(catalog.TrustedServerTime) == "function"
+        and catalog.TrustedServerTime() or nil
+    local firstSeen, cursor, complete = {}, nil, false
+    for _ = 1, DEFAULT_LIMITS.evictionMarkers + 1 do
+        local id, state, done = catalog.BarrierNext(cursor)
+        if done or id == nil then
+            complete = id == nil and state == nil
+            break
+        end
+        cursor = id
+        local kind = type(state) == "table" and state.ageKind or nil
+        local seen
+        if kind == "untimed" or kind == "legacy" then
+            -- The same range as the catalog's age check: an integer from 1
+            -- to 2^53 - 1. Anything else is recorded again from the clock.
+            seen = tonumber(prior[id])
+            if not (seen and seen >= 1 and seen <= 9007199254740991
+                and seen == math.floor(seen)) then
+                seen = now
+                if seen then result.firstSeenRecorded = result.firstSeenRecorded + 1 end
+            end
+            firstSeen[id] = seen
+        end
+        if kind and catalog.MaintenanceExpireBarrier(transaction, id, seen) then
+            result.removed = result.removed + 1
+            firstSeen[id] = nil
+        end
+    end
+    -- An incomplete walk keeps every earlier observation it did not reach.
+    if not complete then
+        for id, seen in pairs(prior) do
+            if firstSeen[id] == nil then firstSeen[id] = seen end
+        end
+    end
+    local changed = result.firstSeenRecorded > 0 or result.removed > 0
+    if not changed then
+        for id, seen in pairs(prior) do
+            if firstSeen[id] ~= seen then changed = true; break end
+        end
+    end
+    if not changed then
+        for id in pairs(firstSeen) do
+            if prior[id] == nil then changed = true; break end
+        end
+    end
+    result.firstSeen, result.firstSeenChanged = firstSeen, changed
+    result.after = math.max(0, before - result.removed)
+    return result
 end
 
 local function PruneTombstones(database, transaction)
@@ -673,9 +740,13 @@ end
 
 local pendingEnforcements = setmetatable({}, {__mode="k"})
 
-local function PrepareMetadata(source, summary, now, changed)
+local function PrepareMetadata(source, summary, now, changed, firstSeen)
     local meta = DeepCopy(type(source) == "table" and source or {})
     meta.schemaVersion = SCHEMA_VERSION
+    -- Bounded first-observation map of retention markers without local age.
+    if firstSeen ~= nil then
+        meta.markerFirstSeen = next(firstSeen) ~= nil and DeepCopy(firstSeen) or nil
+    end
     if changed or type(meta.last) ~= "table" then
         local terminal = DeepCopy(summary)
         terminal.pending = false
@@ -688,8 +759,12 @@ local function PrepareMetadata(source, summary, now, changed)
     return meta
 end
 
+-- publicationGuard (optional, ranked runs): see Catalog.CommitMaintenance. A
+-- publication it refuses (PUBLICATION_SOURCE_CHANGED) writes nothing; the
+-- bounded retry in ScheduleRetention prepares the run again from the current
+-- rows of the bound database.
 local function FinishEnforcement(database, catalog, transaction, summary,
-                                 changed, overrides)
+                                 changed, overrides, publicationGuard)
     local function Finish()
         if changed and (summary.characterBestRemoved or 0)
             + (summary.personalRemoved or 0)
@@ -702,7 +777,7 @@ local function FinishEnforcement(database, catalog, transaction, summary,
     end
     if not transaction then return Finish() end
     local committed, why, ticket = catalog.CommitMaintenance(
-        transaction, overrides)
+        transaction, overrides, publicationGuard)
     if committed == true then return Finish() end
     if committed ~= nil or why ~= "ROOT_MUTATION_PENDING"
         or type(ticket) ~= "table" then
@@ -726,6 +801,52 @@ local function FinishEnforcement(database, catalog, transaction, summary,
         job.result = {pending=false, blocked=true, reason="INVALID_MUTATION_TICKET"}
     end
     return Copy(job.result)
+end
+
+-- Retention markers and removal markers only, in one retention transaction.
+-- Used when the ranked overlay scan could not complete. It writes only the
+-- retention metadata: no build, DPS or evidence payload. When the catalog is
+-- busy, the pass is marked pending and reports ROOT_MUTATION_PENDING, so the
+-- bounded busy retry repeats this marker pass, never another overlay scan.
+local pendingMarkerPasses = setmetatable({}, {__mode="k"})
+local function MarkerOnlyEnforcement(database, owner, reason, priorMeta, scanWhy)
+    local transaction = owner.BeginCatalogMaintenance({database=database,
+        operation="retention"})
+    if not transaction then
+        pendingMarkerPasses[database] = true
+        return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING",
+            markerPass="busy"}
+    end
+    pendingMarkerPasses[database] = nil
+    local evictions = PruneEvictionMarkers(database, transaction, priorMeta)
+    local tombstones = PruneTombstones(database, transaction)
+    local now = EpochNow()
+    local summary = {
+        schemaVersion=SCHEMA_VERSION,
+        reason=tostring(reason or "maintenance"):sub(1, 80),
+        overlayScanIncomplete=tostring(scanWhy):sub(1, 40),
+        characterBestRemoved=0, personalRemoved=0, buildBestRemoved=0,
+        overlayRemoved=0, evictionMarkersAdded=0,
+        evictionMarkersBefore=evictions.before,
+        evictionMarkersAfter=evictions.after,
+        evictionMarkersRemoved=evictions.removed,
+        evictionMarkersFirstSeenRecorded=evictions.firstSeenRecorded,
+        buildRetentionFloor=evictions.floor,
+        tombstonesBefore=tombstones.before,
+        tombstonesAfter=tombstones.after,
+        tombstonesRemoved=tombstones.removed,
+        tombstoneFloor=tombstones.floor,
+        evidenceRemoved=0, evidenceGcBlocked=false,
+    }
+    local changed = evictions.removed > 0 or tombstones.removed > 0
+    local metadataChanged = changed or type(priorMeta) ~= "table"
+        or evictions.firstSeenChanged
+    local overrides = metadataChanged and {
+        dataRetention=PrepareMetadata(priorMeta, summary, now, changed,
+            evictions.firstSeen),
+    } or nil
+    return FinishEnforcement(database, owner, transaction, summary,
+        changed, overrides)
 end
 
 function Retention.Enforce(database, reason)
@@ -776,12 +897,14 @@ function Retention.Enforce(database, reason)
             reason="future compaction schema" }
     end
     local limits = ResolveLimits(database)
+    -- Every run samples the catalog's trusted clock, the fast path too, so a
+    -- backward step inside the session is noticed before any marker expiry.
+    local clockOwner = Nexus and Nexus.BuildCatalog
+    if clockOwner and type(clockOwner.TrustedServerTime) == "function" then
+        pcall(clockOwner.TrustedServerTime)
+    end
     if not limits.enabled then
         pendingOverlayScans[database] = nil
-        local dpsSource = DurablePayload(database, "dpsCapture")
-        local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
-        local overlaySource = DurablePayload(database, "communityBuilds")
-        overlaySource = type(overlaySource) == "table" and overlaySource or {}
         local now = EpochNow()
         local prior = priorMeta and priorMeta.last
         local nextMaintenanceAt = tonumber(
@@ -793,6 +916,20 @@ function Retention.Enforce(database, reason)
             summary.fastPath = true
             return summary
         end
+        -- A busy catalog is found before any payload is copied.
+        local owner = CatalogFor(database)
+        local transaction = owner and owner.BeginCatalogMaintenance({database=database,
+            operation="retention"})
+        if owner and not transaction then
+            return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
+        end
+        -- This branch only COUNTS the DPS buckets for the summary: it reads
+        -- the durable payload in place and writes nothing. (The ranked branch
+        -- below copies the payload because it trims the copy.)
+        local dpsSource = DurablePayload(database, "dpsCapture")
+        local dps = type(dpsSource) == "table" and dpsSource or nil
+        local overlaySource = DurablePayload(database, "communityBuilds")
+        overlaySource = type(overlaySource) == "table" and overlaySource or {}
         local character = type(dps) == "table" and dps.characterBest or nil
         local dummyCount = Count(type(character) == "table"
             and character.dummy or nil)
@@ -804,13 +941,7 @@ function Retention.Enforce(database, reason)
             "communityRetentionEvictions"))
         local tombstoneCount = Count(DurablePayload(database,
             "syncTombstones"))
-        local owner = CatalogFor(database)
-        local transaction = owner and owner.BeginCatalogMaintenance({database=database,
-            operation="retention"})
-        if owner and not transaction then
-            return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
-        end
-        local evictions = PruneEvictionMarkers(database, transaction)
+        local evictions = PruneEvictionMarkers(database, transaction, priorMeta)
         local tombstones = PruneTombstones(database, transaction)
         local evidenceRemoved, evidenceBlocked = 0, false
         local summary = {
@@ -827,6 +958,7 @@ function Retention.Enforce(database, reason)
             evictionMarkersBefore=evictionCount,
             evictionMarkersAfter=evictions.after,
             evictionMarkersRemoved=evictions.removed,
+            evictionMarkersFirstSeenRecorded=evictions.firstSeenRecorded,
             buildRetentionFloor=evictions.floor,
             tombstonesBefore=tombstoneCount,
             tombstonesAfter=tombstones.after,
@@ -843,14 +975,22 @@ function Retention.Enforce(database, reason)
         local nextMaintenanceAt = now > 0 and now + 300 or 0
         local metadataChanged = changed or type(priorMeta) ~= "table"
             or rawget(priorMeta, "nextMaintenanceAt") ~= nextMaintenanceAt
+            or evictions.firstSeenChanged
         local overrides = transaction and metadataChanged and {
-            dataRetention=PrepareMetadata(priorMeta, summary, now, changed),
+            dataRetention=PrepareMetadata(priorMeta, summary, now, changed,
+                evictions.firstSeen),
         } or nil
         return FinishEnforcement(database, owner, transaction, summary,
             changed, overrides)
     end
     local owner = CatalogFor(database)
     local overlayRows = {}
+    if owner and pendingMarkerPasses[database] then
+        -- A marker pass found the catalog busy: its retry does the same
+        -- marker work without another overlay scan.
+        return MarkerOnlyEnforcement(database, owner, reason, priorMeta,
+            "MARKER_PASS_RETRY")
+    end
     if owner then
         local complete, scanWhy, slices
         overlayRows, complete, scanWhy, slices =
@@ -862,19 +1002,27 @@ function Retention.Enforce(database, reason)
                 evictionMarkersRemoved=0, evictionMarkersAdded=0}
         end
         if complete ~= true then
-            return {pending=false, blocked=true,
-                reason=scanWhy or "CATALOG_SCAN_FAILED"}
+            -- The scan shares the one summary cursor with the build hash
+            -- warm-up and the Community view, and a commit also ends it.
+            -- Retention-marker aging and removal markers do not need it:
+            -- they run now in their own transaction, and overlay and DPS
+            -- trimming wait for a later complete run. A busy retry of this
+            -- pass starts no new scan, so a lost scan never leads to repeated
+            -- scans that would restart another summary reader.
+            return MarkerOnlyEnforcement(database, owner, reason, priorMeta,
+                scanWhy or "CATALOG_SCAN_FAILED")
         end
     end
-    local dpsSource = DurablePayload(database, "dpsCapture")
-    local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
-    local overlaySource = DurablePayload(database, "communityBuilds")
-    overlaySource = type(overlaySource) == "table" and overlaySource or {}
     local transaction = owner and owner.BeginCatalogMaintenance({database=database,
         operation="retention"})
     if owner and not transaction then
         return {pending=false, blocked=true, reason="ROOT_MUTATION_PENDING"}
     end
+    local dpsSource = DurablePayload(database, "dpsCapture")
+    local dpsRevision = DpsRevision()
+    local dps = type(dpsSource) == "table" and DeepCopy(dpsSource) or nil
+    local overlaySource = DurablePayload(database, "communityBuilds")
+    overlaySource = type(overlaySource) == "table" and overlaySource or {}
     local selected, fingerprints, selectedBuildIds, categoryCounts =
         SelectCharacterBest(dps, limits, overlaySource)
     local characterRemoved = TrimCharacterBest(dps, selected)
@@ -883,10 +1031,10 @@ function Retention.Enforce(database, reason)
     local buildBestRemoved = dps and TrimFingerprintMap(
         dps.buildBest, limits.buildBestFingerprints, fingerprints) or 0
     local referenced = CollectBuildReferences(dps, selectedBuildIds)
+    local evictions = PruneEvictionMarkers(database, transaction, priorMeta)
     local overlay = PruneOverlay(
         database, referenced, limits, transaction, overlayRows)
     local now = EpochNow()
-    local evictions = PruneEvictionMarkers(database, transaction)
     local tombstones = PruneTombstones(database, transaction)
     local dpsRemoved = characterRemoved + personalRemoved + buildBestRemoved
     local evidenceRemoved, evidenceBlocked = 0, false
@@ -913,6 +1061,7 @@ function Retention.Enforce(database, reason)
         evictionMarkersBefore=evictions.before,
         evictionMarkersAfter=evictions.after,
         evictionMarkersRemoved=evictions.removed,
+        evictionMarkersFirstSeenRecorded=evictions.firstSeenRecorded,
         buildRetentionFloor=evictions.floor,
         tombstonesBefore=tombstones.before,
         tombstonesAfter=tombstones.after,
@@ -925,13 +1074,27 @@ function Retention.Enforce(database, reason)
         or evictions.removed > 0 or tombstones.removed > 0
         or evidenceRemoved > 0
     local metadataChanged = changed or type(priorMeta) ~= "table"
-        or type(priorMeta.last) ~= "table"
+        or type(priorMeta.last) ~= "table" or evictions.firstSeenChanged
     local overrides = transaction and metadataChanged and {
-        dataRetention=PrepareMetadata(priorMeta, summary, now, changed),
-        dpsCapture=dps or {},
+        dataRetention=PrepareMetadata(priorMeta, summary, now, changed,
+            evictions.firstSeen),
+        -- Only a run that removed DPS rows writes dpsCapture; otherwise the
+        -- stored DPS payload is left as it is, so a DPS record written while
+        -- this commit is pending is not replaced by the older copy.
+        dpsCapture=dpsRemoved > 0 and (dps or {}) or nil,
     } or nil
+    -- The DPS removals and the overlay evictions were decided from this copy
+    -- of dpsCapture. They are published only while the live DPS store is
+    -- still the value copied and no DPS change was represented since, so a
+    -- record accepted while this commit is pending is never replaced by the
+    -- older copy; the run is prepared again from the current rows instead.
+    local publicationGuard = transaction
+        and (dpsRemoved > 0 or overlay.removed > 0) and function()
+            return DpsRevision() == dpsRevision
+                and DurablePayload(database, "dpsCapture") == dpsSource
+        end or nil
     return FinishEnforcement(database, owner, transaction, summary,
-        changed, overrides)
+        changed, overrides, publicationGuard)
 end
 
 function Retention.Init(database)
@@ -939,14 +1102,53 @@ function Retention.Init(database)
 end
 
 local ScheduleRetention
-ScheduleRetention = function(scheduler, reason, delay)
+-- A run that finds the catalog busy with another change is tried again with a
+-- growing delay (5, 10, 20 and 40 s, then every 60 s) for about one hour.
+-- BUSY_RETRY_LIMIT counts retries after the first busy run: one chain makes
+-- at most 1 + 64 = 65 busy runs, and the delays between them add up to
+-- 3675 s. A request during the chain joins it (Retention.Request). A busy run
+-- stops before it copies any payload. In the default mode a busy run does no
+-- other work, so the chain ends about 3675 s after its first run. In the
+-- ranked mode a retry that follows a completed overlay scan scans again
+-- before it finds the catalog busy, so that chain lasts longer; a retry of a
+-- marker-only pass (MarkerOnlyEnforcement) starts no scan. So a request made
+-- during a long first compaction or identity repair is not lost and never
+-- becomes an endless retry. A ranked run whose publication was refused
+-- because the DPS rows changed after its copy (PUBLICATION_SOURCE_CHANGED)
+-- is retried in the same chain and counts against the same limit; every
+-- other refusal ends the chain. A chain that stops at the limit records one
+-- "retention-deferred" support incident (nothing was committed).
+local BUSY_RETRY_DELAY, BUSY_RETRY_MAX_DELAY, BUSY_RETRY_LIMIT = 5, 60, 64
+ScheduleRetention = function(scheduler, reason, delay, busyAttempts)
     return scheduler.After("data-retention.enforce", delay, function()
         -- Resolve the exact bound authority at run time; never the raw global.
         local result = Retention.Enforce(nil, reason)
+        local attempts = busyAttempts or 0
         if type(result) == "table" and result.pending == true then
             -- A new scheduler generation runs this continuation on a later
             -- turn, so one callback cannot drain a retained catalog cursor.
-            ScheduleRetention(scheduler, reason, 0)
+            ScheduleRetention(scheduler, reason, 0, busyAttempts)
+        elseif type(result) == "table" and result.blocked == true
+            and (result.reason == "ROOT_MUTATION_PENDING"
+                or result.reason == "PUBLICATION_SOURCE_CHANGED") then
+            if attempts < BUSY_RETRY_LIMIT then
+                ScheduleRetention(scheduler, reason, math.min(BUSY_RETRY_MAX_DELAY,
+                    BUSY_RETRY_DELAY * 2 ^ attempts), attempts + 1)
+            else
+                -- The chain stops: this run committed nothing and the saved
+                -- data is unchanged. Say so in the bounded, session-only
+                -- support record instead of leaving no trace.
+                local support = Nexus and Nexus.SupportIncidents
+                if support and type(support.Record) == "function" then
+                    pcall(support.Record, "retention-deferred", {
+                        reason=result.reason, producer="data retention",
+                        operation="bounded retry chain", committed=false,
+                        scope="run not committed after " .. (attempts + 1)
+                            .. " attempts; saved data unchanged; the next"
+                            .. " retention request runs again",
+                    })
+                end
+            end
         end
     end)
 end
@@ -1006,6 +1208,13 @@ function Retention.Stats(database)
     database = AuthorityDatabase(database)
     local meta = DurablePayload(database, "dataRetention")
     return type(meta) == "table" and Copy(meta.last) or nil
+end
+
+-- Read-only count of retention markers that wait for their locally recorded
+-- first observation to age. Starts no work and writes nothing.
+function Retention.MarkerFirstSeenCount(database)
+    local meta = DurablePayload(AuthorityDatabase(database), "dataRetention")
+    return Count(type(meta) == "table" and meta.markerFirstSeen or nil)
 end
 
 function Retention.SchemaVersion()

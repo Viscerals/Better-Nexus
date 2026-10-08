@@ -457,6 +457,7 @@ local function CombinedRows()
             local ownerKey = Identity.VerifiedOwnerKey(lrow)
             out[#out + 1] = {
                 player=lrow.player,displayPlayer=lrow.displayPlayer,
+                displayName=lrow.displayName,
                 publicIdentityKey=lrow.publicIdentityKey,
                 publicIdentityVerified=lrow.publicIdentityVerified,
                 dps=pair.bestDps, bestDps=pair.bestDps, average=average,
@@ -596,7 +597,8 @@ end
 local function BeginCatalogRows(job, catalog)
     if type(catalog.BeginSummaryCursor) == "function"
         and type(catalog.SummaryCursorNext) == "function" then
-        job.catalogCursor = catalog.BeginSummaryCursor()
+        -- Its own named slot: no other long walk may supersede this one.
+        job.catalogCursor = catalog.BeginSummaryCursor("community")
         if type(job.catalogCursor) ~= "table" then
             return false, "catalog cursor unavailable"
         end
@@ -760,11 +762,16 @@ local function PumpBuildJob(job, unit)
                 job.sortSource, job.sortTarget, job.merge = job.rows, {}, nil
                 break
             end
-            if job.countProvenance and fromBaseline then
-                job.summary.bundledCount = job.summary.bundledCount + 1
-            end
-            if job.countProvenance and fromOverlay then
-                job.summary.overlayCount = job.summary.overlayCount + 1
+            -- Provenance belongs to a returned row only. A "scan pending" step
+            -- returns no row and its COPY_PENDING marker in the baseline
+            -- position, which is not a shipped copy.
+            if job.countProvenance and type(build) == "table" then
+                if fromBaseline == true then
+                    job.summary.bundledCount = job.summary.bundledCount + 1
+                end
+                if fromOverlay == true then
+                    job.summary.overlayCount = job.summary.overlayCount + 1
+                end
             end
             if type(build) == "table" and IsLoaded(build) then
                 local indexed = Identity.IndexPublicRecord(
@@ -897,6 +904,7 @@ local function CombinedRow(drow, lrow)
     local ownerKey = Identity.VerifiedOwnerKey(lrow)
     return {
         player=lrow.player,displayPlayer=lrow.displayPlayer,
+        displayName=lrow.displayName,
         publicIdentityKey=lrow.publicIdentityKey,
         publicIdentityVerified=lrow.publicIdentityVerified,
         dps=bestDps,bestDps=bestDps,average=average,

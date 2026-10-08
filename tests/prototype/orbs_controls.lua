@@ -12,14 +12,24 @@ check(M.Status().reserved==0,'spend reservation replaced not added')
 check(M.Resume(),'explicit Resume accepts known waiting offer')
 check(H.Count('take')==1,'one fallback selection after Resume')
 H.Result(410001,1)
-check(M.Status().state=='LIMIT' and H.Count('orb-spend')==1,'single-step stops at one with targets still missing')
-check(not M.Resume(),'limit not bypassed by Resume')
-SlashCmdList.NEXUS('auto');check(Nexus.RecomputeStats().autoEnabled==false,'master auto cannot restart while a limited run owns actions')
-local a,err=M.PrepareLimitIncrease(3);check(a~=nil,err)
-check(M.ConfirmLimit(a.token),'explicit limit confirmation')
-check(M.Status().spent==1 and M.Status().limit==3 and not M.Status().running,'increase preserves usage, does not resume')
-check(M.Resume(),'resume increased original limit')
-check(H.Count('orb-spend')==2,'one next Orb, not duplicate first')
+-- A settled completion at the approved limit ends the run through its owner:
+-- the replacement is confirmed, the durable receipt is cleared and nothing is
+-- pending, so ownership is released and no Stop is needed.
+check(M.Status().state=='FINISHED' and H.Count('orb-spend')==1,
+ 'a settled single step finishes the run at its approved limit: '..M.Status().state)
+check(M.Status().spent==1 and M.Status().limit==1 and not M.Status().running,
+ 'the completed usage and approved limit stay visible')
+check(not M.Status().pending and M.Status().reserved==0,'nothing is pending or exposed')
+check(not M.BlocksOrdinary(),'the finished run released Orb-action ownership')
+check(not M.Resume(),'a finished run cannot be resumed')
+check(M.Status().canStart==true,'a new run may be started without an intermediate Stop')
+-- Finishing never turns ordinary Automation back on by itself.
+check(Nexus.RecomputeStats().autoEnabled==false,'ordinary Automation stays off after a finished run')
+-- One deliberate Start authorizes the next run and only then resets counters.
+H.Approve(3,true,false)
+check(M.Status().spent==0 and M.Status().limit==3 and M.Status().running,
+ 'the next authorized run starts its own counters: '..M.Status().spent..'/'..M.Status().limit)
+check(H.Count('orb-spend')==2,'the new run spends its own next Orb, not a duplicate of the first')
 check(O.source==410001,'confirmed recyclable result prioritized')
 check(M.Stop(),'Stop accepted with pending spend')
 H.Offer();check(H.Count('take')==1,'Stop never auto-selects later offer')

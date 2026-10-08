@@ -2,7 +2,7 @@
 -- Real pure modules in production TOC order through the maintained adapter.
 local P=dofile('tests/prototype/policy_adapter.lua')
 P.Load()
-assert(table.concat(P.order,','):find('WishlistPilot.lua,logic\\OrbPolicy.lua,logic\\Policy.lua',1,true),'WishlistPilot loads before Policy, as in the TOC')
+assert(table.concat(P.order,','):find('EchoWeaver.lua,logic\\OrbPolicy.lua,logic\\Policy.lua',1,true),'EchoWeaver loads before Policy, as in the TOC')
 local catalog=P.Catalog({f1={[0]=1001,[1]=1011},f2={[0]=1002},f3={[0]=1003},f4={[0]=1004}})
 local plan=P.Plan(catalog,{{spellId=1001,stacks=1},{spellId=1002,stacks=1}})
 local saved={verified=true,echoes=P.Echoes(catalog,{{spellId=1001,stacks=1}})}
@@ -39,9 +39,11 @@ print('PASS adapter projects the production catalog and Wishlist shapes: '..P.Li
 
 -- 1. Dispatch and useful progress. A targetless Wait is not adapter success.
 local action=P.Decide(Base({activeRow=unsaved}))
-assert(action.planner=='pilot103' and action.type~='wait' and plan.requestedCounts[action.spellId]==1,'ordinary Wishlist board reaches the intended planner and acts on a requested Echo')
+assert(action.planner=='echoweaver' and action.type~='wait' and plan.requestedCounts[action.spellId]==1,'ordinary Wishlist board reaches the intended planner and acts on a requested Echo')
 local reference=P.Line(action)
-assert(reference=='freeze|1001|1|pilot103|Freeze wanted Echo before search (Pilot)','exact diagnostic fixture decision: '..reference)
+assert(reference=='freeze|1001|1|echoweaver|Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)','exact diagnostic fixture decision (adaptive default): '..reference)
+local releasedInput=Base({activeRow=unsaved});releasedInput.rollingPolicy='released'
+assert(P.Line(P.Decide(releasedInput))=='freeze|1001|1|echoweaver|Freeze wanted Echo before search (EchoWeaver)','released policy keeps its exact fixture decision')
 print('PASS real TOC-order dispatch makes useful progress: '..reference)
 
 -- 2. Metadata invariance: only saved verification, old flags or a stale
@@ -85,12 +87,19 @@ end
 local one=Copies({[1001]=1},{})
 assert(one.type=='take' and one.spellId==1001 and one.outstanding==2,'one rolled copy of two leaves one copy and the other target outstanding')
 local both=Copies({[1001]=1},{[1001]=1})
-assert(both.outstanding==1 and both.annotations[1]=='target satisfied' and both.reasonCode~='SELECT_OUTSTANDING_WISHLIST','one rolled plus one permanent copy satisfies exactly two; the card is no longer a wanted Echo')
+assert(both.outstanding==1 and both.annotations[1]=='target satisfied' and both.reasonCode~='SELECT_OUTSTANDING_WISHLIST','one rolled plus one locked copy satisfies exactly two; the card is no longer a wanted Echo')
 local doubled=Copies({[1001]=2},{[1001]=2})
 assert(doubled.outstanding==1,'surplus copies never reduce another target')
 local sibling=Copies({[1011]=2},{},{{spellId=1011},{spellId=1003},{spellId=1004}})
-assert(sibling.outstanding==3 and sibling.annotations[1]=='filler','a different-quality sibling neither satisfies nor counts as the requested exact Echo')
-print('PASS exact copies and quality; rolled and permanent ownership each subtract once')
+-- The sibling's family is wished at another quality: it is explained as a
+-- different quality, not as "not on Wishlist"; it still counts for nothing
+-- and is not a wanted card.
+assert(sibling.outstanding==3 and sibling.annotations[1]=='wrong quality'
+ and sibling.deltas[1]==-15 and sibling.type=='take' and sibling.spellId==1011
+ and sibling.reasonCode=='RESOURCE_EXHAUSTED_FALLBACK',
+ 'a different-quality sibling neither satisfies nor counts as the requested exact Echo: '
+ ..tostring(sibling.type)..' '..tostring(sibling.spellId)..' '..tostring(sibling.reasonCode))
+print('PASS exact copies and quality; rolled and locked ownership each subtract once')
 
 -- 5. Observed board state is kept; it is not an inferred future roll.
 local held=P.Decide(Base({activeRow=saved,cards={{spellId=1001,isFrozen=true},{spellId=1002},{spellId=1003}}}))

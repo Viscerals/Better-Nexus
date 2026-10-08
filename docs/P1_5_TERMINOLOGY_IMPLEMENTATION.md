@@ -23,7 +23,7 @@ Stable identifiers, raw diagnostic reasons, policy logic, codecs, saved-data key
 | T16 | Open imported draft; import/save/assignment separate actions. | `ui/WishlistEditor.lua`, `core/WishlistController.lua` |
 | T17 | Invalid build/plan/stale draft gives a known reason/action and preserves raw detail without forcing acceptance. | `core/UserText.lua`, `core/WishlistController.lua` |
 | T18 | Automation master permission and per-action spending/slot effects explained. | `ui/Panel.lua`, `core/Main.lua`, `ui/Help.lua` |
-| T19 | Player action labels omit Pilot suffix; policy provenance remains in About and documentation. | `core/UserText.lua`, `ui/Readout.lua`, `ui/Help.lua` |
+| T19 | Player action labels omit the engine suffix; the engine is named in About and in the documentation. | `core/UserText.lua`, `ui/Readout.lua`, `ui/Help.lua` |
 | T20 | Normal recommendation lines use need/category descriptions rather than unexplained signed priority numbers; diagnostics remain intact. | `ui/Readout.lua`, `ui/Help.lua` |
 | T21 | Off-Wishlist picks explained without claiming every choice is correct or guaranteed to be replaced. | `ui/Panel.lua`, `ui/Help.lua` |
 | T22 | EXTRA COPIES and complete explanatory tooltip; no delete or future replacement promise. | `ui/Panel.lua`, `core/Main.lua`, `ui/Help.lua` |
@@ -58,5 +58,5 @@ Stable identifiers, raw diagnostic reasons, policy logic, codecs, saved-data key
 | H01 | Persistent Help/Getting Started controls and seven pages, no mandatory wizard. | `ui/QuickStart.lua`, `ui/Panel.lua`, `ui/Help.lua` |
 | H02 | /nexus help/guide/tutorial reopen real guide, not just a terse command list. | `core/Main.lua`, `core/MainCommands.lua`, `ui/Help.lua` |
 | H03 | Early help/orbs/loader routing; reroll/freeze/currentlocks/prototype and Orb control meanings documented. | `core/MainCommands.lua`, `ui/Help.lua` |
-| H04 | Current P1.5 install/user guide replaces mixed old instructions; full older README preserved only in source history. | `README-PROTOTYPE.md`, `docs/P1_4_README_HISTORICAL.md` |
+| H04 | Current P1.5 install/user guide replaces mixed old instructions; full older README preserved only in source history. | `README-PROTOTYPE.md` (the older README is in Git history; its tracked copy was retired on 2026-09-24) |
 | H05 | Current P1.5-specific changelog and seen key; no unsupported faster/migration guarantee. | `ui/Changelog.lua` |

@@ -15,7 +15,7 @@ local function b(label)
  for _,x in ipairs(H.frames)do if x:GetParent()==f and x.kind=='Button' and x:GetText()==label then return x end end
  error('missing help button '..label)
 end
-b('Next'):Click();check(f.title:GetText():find('permanent targets',1,true),'real next handler')
+b('Next'):Click();check(f.title:GetText():find('locked targets',1,true),'real next handler')
 b('Previous'):Click();check(f.title:GetText():find('Getting started',1,true),'real previous handler')
 Nexus.Help.Show('orbs');check(f.body:GetText():find('one Orb per replacement',1,true),'Orb instructions explain one-Orb boundary')
 check(f.body:GetText():find('does not automatically re%-enable'),'no auto restart promise')

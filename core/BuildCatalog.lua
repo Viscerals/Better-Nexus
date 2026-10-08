@@ -70,7 +70,15 @@ local MAX_SAFE_INTEGER = 9007199254740991
 -- including the start-token capture pump and every named and derived frontier
 -- term. Fixture drivers read it from Catalog.Budget instead of fitting a bound
 -- to the bundled data set.
-local ADMISSION_MAX_PUMPS = 58622488
+-- Capacity envelope V2 adds up to 4096 marker-only typed IDs (2048 removal +
+-- 2048 retention markers beside 2048 build identities). Their marker work was
+-- already budgeted per category (TE/TB, BR/BE/BN/BB at 2048 each), and the
+-- one merged identity sort (6144 * ceil(log2 6144) = 79,872 comparisons, keys
+-- <= 262 bytes) stays inside the ledger's root-map sort allowance
+-- (4 * 2048 * 11 = 90,112 comparisons). Each marker-only ID adds one
+-- finalization row (slice 8) and one index node (slice 64):
+--   58,622,488 + ceil(4096 / 8) + ceil(4096 / 64) = 58,623,064.
+local ADMISSION_MAX_PUMPS = 58623064
 
 -- CATALOG_AUTHORITY_BUDGET_V1: complete-root totals.
 local BUDGET = {
@@ -84,7 +92,12 @@ local BUDGET = {
     indexMemberships=172032, indexEdges=1386496, indexNodes=1562634,
     indexBytes=61009920, cursorMetadata=326024,
     evidenceRowsPerRecord=256, stacksPerRecord=10000,
-    ordinaryCopies=79, lockedCopies=6, totalCopies=85,
+    -- The loadout envelope of LoadoutEvidence.SemanticLimits: 79 ordinary
+    -- copies; a locked row holds at most lockedRowStacks copies (the per-row
+    -- wire ceiling). Occupied locked records are bounded by the live capacity,
+    -- which a record does not carry, so the row and stack ceilings above are
+    -- the locked role's only bound here.
+    ordinaryCopies=79, lockedRowStacks=120,
     objectKeys=64, denseEntries=256, nestedNodes=2000, depth=6,
     aliasForms=28, recordBytes=32768, unknownBytesPerRow=4096,
     unknownTables=16, tombstoneTables=16, tombstoneEntries=64,
@@ -92,6 +105,33 @@ local BUDGET = {
     activeCandidates=1, cursorsPerFamily=1, oneCallRows=8,
     oneCallBytes=32768, oneCallNodes=2000,
 }
+-- Capacity envelope V2 (owner decision of 2026-09-24). Three identity
+-- categories, each with its own limit, instead of one shared 2048:
+--   rows        distinct build identities, saved and shipped builds together
+--   tombstones  removal-marker keys (one raw map; also rootMapKeys)
+--   barriers    retention-marker keys (one raw map; also rootMapKeys)
+-- A typed ID may belong to several categories; it is one identity. The total
+-- of distinct identities therefore cannot exceed rows + tombstones + barriers.
+-- Raw map entries are a separate dimension: four maps of at most rootMapKeys
+-- each (rootMapEdges = 4 * 2048), with saved and shipped copies of one build
+-- counted twice there.
+BUDGET.identities = BUDGET.rows + BUDGET.tombstones + BUDGET.barriers
+-- The serving source witness records every raw entry of the selected maps.
+-- It was sized for 2048 rows only (edges/nodes/bytesInspected). Its limits
+-- are now derived per raw entry and per map:
+--   saved builds    rows       * (edges/rows, nodes/rows, bytesInspected/rows)
+--   shipped builds  rows       * the same per-row maxima (overlap is raw)
+--   removal markers tombstones * (tombstoneEdges/tombstones edges,
+--                   tombstoneTables nodes, tombstoneBytes/tombstones bytes)
+--   retention       barriers   * (barrierEdges/barriers edges,
+--                   barrierNodes/barriers nodes, barrierBytes/barriers bytes)
+--   root keys       rootKeyBytes; five root values and the map tables.
+BUDGET.witnessEdges = 2 * BUDGET.edges + BUDGET.tombstoneEdges
+    + BUDGET.barrierEdges + BUDGET.rootMapEdges + 16
+BUDGET.witnessNodes = 2 * BUDGET.nodes + BUDGET.tombstones * BUDGET.tombstoneTables
+    + BUDGET.barrierNodes + 16
+BUDGET.witnessBytes = 2 * BUDGET.bytesInspected + BUDGET.tombstoneBytes
+    + BUDGET.barrierBytes + BUDGET.rootKeyBytes + 4096
 
 -- Per-pump frontier slices. A pump stops at the first exhausted slice.
 local SLICE = {
@@ -142,6 +182,11 @@ local FIELD = {
     lockedFingerprint={kind="string", max=4096},
     lockedEvidenceSource={kind="string", max=64},
     userTitle={kind="string", max=1024},
+    -- Optional: the exact generated description of a Saved Build mirror and
+    -- the userTitle it was written under (CommunityController). Provenance
+    -- only; not a summary or wire field, and it grants nothing. Its writer
+    -- (SavedDescriptionWitness) uses the same 2048 and writes at most 1181.
+    generatedDescriptionWitness={kind="string", max=2048},
     buildId={kind="id"}, recordBuildId={kind="id"}, publishedBuildId={kind="id"},
     sourceSavedBuildId={kind="id"},
     sourceIdentity={kind="string", max=256}, provenanceIdentity={kind="string", max=256},
@@ -174,10 +219,15 @@ local VALID_CLASS = {
     DEATHKNIGHT=true,SHAMAN=true,MAGE=true,WARLOCK=true,DRUID=true,
 }
 
+-- true: a required field of an exact V1 removal marker. "optional": present
+-- only when the removed row carried it (MASTER-RC-016: its unknown evidence
+-- travels with the marker, see TombstoneRecord); a reloaded marker with it is
+-- still exact.
 local TOMBSTONE_V1_FIELDS = {
     schemaVersion=true, typedId=true, ownerKey=true, sourceKind=true,
     sourceIdentity=true, targetRowGeneration=true, targetRowProvenance=true,
     receiptRevision=true, receiptAtServerTime=true, remoteStampEvidence=true,
+    unknownEvidence="optional",
 }
 local BARRIER_V1_FIELDS = {
     schemaVersion=true, typedId=true, evictedCatalogGeneration=true,
@@ -244,6 +294,7 @@ local ST = {
         cursorRowsInspected=0, maxCursorRowsPerCall=0,
         cursorCopyNodes=0, cursorCopyBytes=0, cursorCopyPending=0,
         maxCursorCopyNodesPerCall=0, maxCursorCopyBytesPerCall=0,
+        rowWalks=0, verdictReuses=0, reuseCompareMismatches=0,
     },
 }
 
@@ -379,23 +430,27 @@ local function NewCounters()
     return {totals=totals, maxPerPump=maxPerPump, pumps=0}
 end
 
+-- A budget is exhausted once any counter reaches its slice. Charge is the only
+-- writer of a budget and never lowers a counter, so it records the first
+-- crossing in `exhausted` (not a counter name), and Exhausted, checked before
+-- every unit of work, reads it instead of scanning every counter.
 local function NewBudget()
-    local budget = {}
+    local budget = {exhausted=false}
     for _, key in ipairs(COUNTER_KEYS) do budget[key] = 0 end
     return budget
 end
 
 local function Exhausted(budget)
-    for _, key in ipairs(COUNTER_KEYS) do
-        local slice = SLICE[key]
-        if slice and budget[key] >= slice then return true end
-    end
-    return false
+    return budget.exhausted
 end
 
 local function Charge(work, key, amount)
     amount = amount or 1
-    work.budget[key] = work.budget[key] + amount
+    local budget = work.budget
+    local used = budget[key] + amount
+    budget[key] = used
+    local slice = SLICE[key]
+    if slice and used >= slice then budget.exhausted = true end
     local totals = work.counters.totals
     totals[key] = totals[key] + amount
     work.progress = true
@@ -793,6 +848,18 @@ local function NewWalker(raw, options)
     }
 end
 
+-- Outside the loadout envelope: more ordinary copies than the game holds, or
+-- a locked row above the per-row ceiling.
+local function OutsideSemanticEnvelope(rows, ordinary)
+    if ordinary > BUDGET.ordinaryCopies then return true end
+    for _, row in ipairs(rows or {}) do
+        if row.locked and (tonumber(row.stacks) or 0) > BUDGET.lockedRowStacks then
+            return true
+        end
+    end
+    return false
+end
+
 local function GroupTuples(walker)
     local sorted = walker.sort.items
     local grouped, index = {}, 0
@@ -860,8 +927,10 @@ local function WalkRow(walker, work)
         if not grouped then return RowFail(walker, reason) end
         walker.grouped = grouped
         walker.semantic = {ordinary=ordinary, locked=locked, total=total}
-        if ordinary > BUDGET.ordinaryCopies or locked > BUDGET.lockedCopies
-            or total > BUDGET.totalCopies then
+        -- Diagnostic only, never part of the published semantic record: the
+        -- shape these counts were taken from.
+        walker.semanticRepresentation = "inline"
+        if OutsideSemanticEnvelope(grouped, ordinary) then
             return RowFail(walker, "SEMANTIC_ENVELOPE")
         end
         walker.stage = "complete"
@@ -930,15 +999,27 @@ end
 -- Resolve pool-only evidence through the shared evidence owner. The catalog
 -- never touches the evidence store itself; a resolved record is re-proved
 -- under the same semantic envelope as inline evidence.
-local function ResolveEvidence(known, options)
+-- `reads`, when given, receives every pool read and its outcome, which a
+-- later mutation re-runs before it reuses the verdict (Candidate.Reuse.Try).
+-- The second result is true when the pool could not be read reliably (no
+-- evidence owner, or a failing read): such a verdict is never reused.
+local function ResolveEvidence(known, options, reads)
     local evidence = Nexus and Nexus.LoadoutEvidence
-    if not (evidence and type(evidence.Resolve) == "function") then return nil end
+    if not (evidence and type(evidence.Resolve) == "function") then
+        return nil, known.evidenceKey ~= nil or known.lockedEvidenceKey ~= nil
+    end
+    local unstable = false
     local rows = {}
     local candidateOptions = options and options.candidateEvidence
         and {useCandidate=true} or nil
     if type(known.evidenceKey) == "string" and known.evidenceKey ~= "" then
         local ok, resolved = pcall(evidence.Resolve, known.evidenceKey, nil,
             candidateOptions)
+        if not ok then unstable = true end
+        if reads then
+            reads[#reads + 1] = {key=known.evidenceKey, options=candidateOptions,
+                resolved=ok and type(resolved) == "table"}
+        end
         if ok and type(resolved) == "table" then
             for _, row in ipairs(resolved) do
                 rows[#rows + 1] = {spellId=row.spellId, quality=row.quality,
@@ -951,6 +1032,11 @@ local function ResolveEvidence(known, options)
         if candidateOptions then lockedOptions.useCandidate = true end
         local ok, resolved = pcall(evidence.Resolve, known.lockedEvidenceKey, nil,
             lockedOptions)
+        if not ok then unstable = true end
+        if reads then
+            reads[#reads + 1] = {key=known.lockedEvidenceKey, options=lockedOptions,
+                resolved=ok and type(resolved) == "table"}
+        end
         if ok and type(resolved) == "table" then
             for _, row in ipairs(resolved) do
                 rows[#rows + 1] = {spellId=row.spellId, quality=row.quality,
@@ -958,7 +1044,7 @@ local function ResolveEvidence(known, options)
             end
         end
     end
-    return #rows > 0 and rows or nil
+    return #rows > 0 and rows or nil, unstable
 end
 
 local function SemanticOf(rows)
@@ -971,16 +1057,18 @@ local function SemanticOf(rows)
     return {ordinary=ordinary, locked=locked, total=total}
 end
 
+-- The second result is true when the evidence owner was unavailable or
+-- failed: such a verdict is never reused.
 local function Completeness(snapshotLike)
     local evidence = Nexus and Nexus.LoadoutEvidence
     if not (evidence and type(evidence.OrdinaryCompleteness) == "function") then
-        return {complete=false, reason="unavailable", echoCount=0}
+        return {complete=false, reason="unavailable", echoCount=0}, true
     end
     local resolver = type(evidence.PublicOrdinaryCompleteness) == "function"
         and evidence.PublicOrdinaryCompleteness or evidence.OrdinaryCompleteness
     local ok, verdict = pcall(resolver, snapshotLike)
-    if ok and type(verdict) == "table" then return verdict end
-    return {complete=false, reason="malformed", echoCount=0}
+    if ok and type(verdict) == "table" then return verdict, false end
+    return {complete=false, reason="malformed", echoCount=0}, true
 end
 
 -- Derive every authority field from the admitted source. Input claims such as
@@ -1058,8 +1146,13 @@ local function BuildSnapshot(walker, slot, source, options)
     -- resolves independently: an absent inline array is replaced by its own
     -- reference, and the union is re-proved against the semantic envelope.
     local wantsInline, wantsLockedRole = #inline == 0, #lockedArray == 0
+    -- Every evidence-pool read of this walk and its outcome are recorded; a
+    -- later mutation re-runs them before it reuses the verdict.
+    walker.poolReads = walker.poolReads or {}
     if wantsInline or wantsLockedRole then
-        local resolvedRows = ResolveEvidence(known, options)
+        local resolvedRows, unstable = ResolveEvidence(known, options,
+            walker.poolReads)
+        if unstable then walker.poolUnstable = true end
         for _, row in ipairs(resolvedRows or {}) do
             local isLocked = row.origin == "lockedArray"
             if (isLocked and wantsLockedRole) or (not isLocked and wantsInline) then
@@ -1068,9 +1161,9 @@ local function BuildSnapshot(walker, slot, source, options)
         end
         if resolvedRows then
             local semantic = SemanticOf(canonical)
-            if semantic.ordinary > BUDGET.ordinaryCopies
-                or semantic.locked > BUDGET.lockedCopies
-                or semantic.total > BUDGET.totalCopies then
+            walker.semanticRepresentation = "referenced"
+            if OutsideSemanticEnvelope(canonical, semantic.ordinary)
+                or semantic.total > BUDGET.stacksPerRecord then
                 return nil, "SEMANTIC_ENVELOPE", semantic
             end
             walker.semantic = semantic
@@ -1109,11 +1202,21 @@ local function BuildSnapshot(walker, slot, source, options)
     -- The evidence owner classifies completeness from the exact admitted
     -- inline record, including a cross-role row, so its fixed reason is
     -- preserved instead of being reduced to "unavailable".
-    local verdict = Completeness({
+    local verdict, completenessUnstable = Completeness({
         echoes=#inline > 0 and inline or (hadInline and {} or nil),
         fingerprint=snapshot.fingerprint,
         evidenceKey=#inline == 0 and snapshot.evidenceKey or nil,
     })
+    if completenessUnstable then walker.poolUnstable = true end
+    -- With no inline rows, completeness resolves the reference from the
+    -- committed pool (Evidence.OrdinaryCompleteness); "unresolved" is the
+    -- only outcome of a failed read.
+    if #inline == 0 and type(snapshot.evidenceKey) == "string"
+        and snapshot.evidenceKey ~= "" then
+        walker.poolReads[#walker.poolReads + 1] = {key=snapshot.evidenceKey,
+            options=nil, resolved=not (type(verdict) == "table"
+                and verdict.reason == "unresolved")}
+    end
     local complete = type(verdict) == "table" and verdict.complete == true
     local computedFingerprint = OrdinaryFingerprint(ordinary)
     if complete and type(snapshot.fingerprint) == "string"
@@ -1227,8 +1330,8 @@ local function ClassifyTombstone(raw, slot, work)
         for key in pairs(raw) do
             if not TOMBSTONE_V1_FIELDS[key] then exact = false; break end
         end
-        for key in pairs(TOMBSTONE_V1_FIELDS) do
-            if raw[key] == nil then exact = false end
+        for key, required in pairs(TOMBSTONE_V1_FIELDS) do
+            if required == true and raw[key] == nil then exact = false end
         end
     end
     if exact then
@@ -1250,6 +1353,11 @@ local function ClassifyBarrier(raw, slot, work)
         view.state = "BARRIER_CURRENT_DENY"
         view.receiptAtServerTime = tonumber(raw.receiptAtServerTime) or 0
         view.revision = tonumber(raw.receiptRevision) or 0
+        -- Age evidence (see BarrierExpired): the saved local creation time,
+        -- or none yet when the marker was written with an untrusted clock.
+        view.createdAt = FiniteInteger(raw.receiptAtServerTime, 1, MAX_SAFE_INTEGER)
+        view.ageKind = view.createdAt and "local"
+            or (raw.receiptAtServerTime == 0 and "untimed" or nil)
         return view
     end
     if type(raw) ~= "table" then
@@ -1257,6 +1365,10 @@ local function ClassifyBarrier(raw, slot, work)
         Charge(work, "barrierBytes", ScalarBytes(raw))
         view.state = "BARRIER_OPAQUE_BLOCK_ALL"
         view.revision = tonumber(raw) or 0
+        -- The numeric marker an older retention owner wrote (upstream 1.96.x,
+        -- Better-Nexus test.18): the evicted build's own stamp. It is a
+        -- recognized legacy marker, but that stamp is not local age.
+        if FiniteInteger(raw, 1, MAX_SAFE_INTEGER) then view.ageKind = "legacy" end
         return view
     end
     local bounded = BoundedShape(raw, work, "barrierEdges", "barrierBytes",
@@ -1288,11 +1400,17 @@ local function ClassifyBarrier(raw, slot, work)
         end
         view.readmittedAtServerTime = observed
         view.receiptAtServerTime = tonumber(raw.receiptAtServerTime) or 0
+        -- Age evidence (see BarrierExpired): the saved local creation time,
+        -- or none yet when the marker was written with an untrusted clock.
+        view.createdAt = FiniteInteger(raw.receiptAtServerTime, 1, MAX_SAFE_INTEGER)
+        view.ageKind = view.createdAt and "local"
+            or (raw.receiptAtServerTime == 0 and "untimed" or nil)
         return view
     end
     view.state = "BARRIER_OPAQUE_BLOCK_ALL"
     return view
 end
+
 
 ------------------------------------------------------------------------
 -- Selection and verdict construction
@@ -1537,120 +1655,6 @@ local function RemoveBucket(index, map, bucketKey, key)
     if bucket.count == 0 then map[bucketKey] = nil end
 end
 
-local function IndexRemove(index, rows, key)
-    local membership = index.memberships[key]
-    if not membership then return end
-    local exactBucket = membership.exact
-        and OwnBucket(index, index.exact, membership.exact) or nil
-    if exactBucket and exactBucket.ids[key] then
-        local field = membership.exactAuto and "autoCount" or "explicitCount"
-        exactBucket[field] = math.max(0, (exactBucket[field] or 0) - 1)
-    end
-    RemoveBucket(index, index.exact, membership.exact, key)
-    if exactBucket and index.exact[membership.exact] and exactBucket.winnerKey == key then
-        RecomputeExactWinner(rows, exactBucket)
-    end
-    RemoveBucket(index, index.fingerprints, membership.fingerprint, key)
-    RemoveBucket(index, index.titles, membership.title, key)
-    RemoveBucket(index, index.saved, membership.saved, key)
-    for _, spellKey in ipairs(membership.spells or {}) do
-        RemoveBucket(index, index.spells, spellKey, key)
-    end
-    local owner = membership.classOwner
-        and OwnBucket(index, index.ownerClasses, membership.classOwner) or nil
-    if owner and owner.ids[key] then
-        local class = owner.ids[key]
-        owner.ids[key] = nil
-        owner.count = owner.count - 1
-        owner.classes[class] = (owner.classes[class] or 1) - 1
-        if owner.classes[class] <= 0 then owner.classes[class] = nil end
-        if owner.count <= 0 then index.ownerClasses[membership.classOwner] = nil end
-    end
-    if membership.author then
-        local authorBucket = OwnBucket(index, index.authors, membership.author)
-        if authorBucket then
-            authorBucket[key] = nil
-            if next(authorBucket) == nil then index.authors[membership.author] = nil end
-        end
-    end
-    index.memberships[key] = nil
-end
-
-local function IndexAdd(index, rows, verdict, work)
-    local key = verdict.typedKey
-    local snapshot = verdict.snapshot
-    if not snapshot then return end
-    local membership = {}
-    local savedKind = verdict.savedKind
-    local exact = savedKind == "ordinary" and verdict.complete
-        and verdict.exactFingerprint or nil
-    local exactBucket = AddBucket(index, index.exact, exact, key, work, rows)
-    membership.exact = exact
-    membership.exactAuto = snapshot.autoDps == true
-    if exactBucket then
-        local field = membership.exactAuto and "autoCount" or "explicitCount"
-        exactBucket[field] = (exactBucket[field] or 0) + 1
-        if BetterExactCandidate(verdict.id, verdict, exactBucket.winnerId,
-            exactBucket.winnerKey and rows[exactBucket.winnerKey]) then
-            exactBucket.winnerKey, exactBucket.winnerId = key, verdict.id
-        end
-    end
-    if savedKind == "ordinary" and verdict.verifiedOwner then
-        local class = NormalizedClass(snapshot.class)
-        if class then
-            local owner = OwnBucket(index, index.ownerClasses, verdict.verifiedOwner)
-            if not owner then
-                owner = {ids={}, classes={}, count=0}
-                index.owned[owner] = true
-                index.ownerClasses[verdict.verifiedOwner] = owner
-            end
-            if owner.ids[key] == nil then
-                owner.ids[key] = class
-                owner.classes[class] = (owner.classes[class] or 0) + 1
-                owner.count = owner.count + 1
-                if work then Charge(work, "indexEdges", 1) end
-            end
-            membership.classOwner = verdict.verifiedOwner
-        end
-    end
-    local authorKey = AuthorKey(snapshot.author)
-    if authorKey then
-        local authorBucket = OwnBucket(index, index.authors, authorKey)
-        if not authorBucket then
-            authorBucket = {}
-            index.owned[authorBucket] = true
-            index.authors[authorKey] = authorBucket
-        end
-        authorBucket[key] = true
-        membership.author = authorKey
-        if work then Charge(work, "indexEdges", 1) end
-    end
-    local author = RelatedText(snapshot.author)
-    if author ~= "" then
-        if savedKind == "saved" then
-            membership.saved = RelatedKey(author, "saved")
-            AddBucket(index, index.saved, membership.saved, key, work, rows)
-        else
-            local fingerprint = verdict.relatedFingerprint
-            membership.fingerprint = RelatedKey(author, fingerprint)
-            membership.title = RelatedKey(author,
-                RelatedText(snapshot.title or snapshot.serverTitle))
-            membership.spells = {}
-            local spells = FingerprintSpells(fingerprint)
-            for _, spellId in ipairs(spells) do
-                local spellKey = RelatedKey(author, tostring(spellId))
-                if spellKey then
-                    membership.spells[#membership.spells + 1] = spellKey
-                    AddBucket(index, index.spells, spellKey, key, work, rows)
-                end
-            end
-            AddBucket(index, index.fingerprints, membership.fingerprint, key, work, rows)
-            AddBucket(index, index.titles, membership.title, key, work, rows)
-        end
-    end
-    index.memberships[key] = membership
-end
-
 ------------------------------------------------------------------------
 -- Root token, drift detection, published root
 ------------------------------------------------------------------------
@@ -1670,24 +1674,73 @@ local function ExactGeneration(value)
     return math.floor(value) == value
 end
 
+-- One candidate settles one ticket, except a receiver batch, which settles one
+-- ticket per member: a member refused while it was prepared keeps its own
+-- refusal, every other member takes the candidate's outcome, and each ticket
+-- is settled exactly once here.
 local function SettleMutationTicket(handle, state, committed, reason, deferCallback)
-    local ticket = handle.ticket or {}
-    ticket.state, ticket.committed = state, committed
-    ticket.reason, ticket.pumps = reason, handle.pumps
-    if committed then
-        ticket.generation = ST.generation
-        ticket.database, ticket.bundle = ST.db, ST.durableBundle
-        ticket.storedAs = handle.storedAs
+    local function SettleOneTicket(ticket, ticketState, ticketCommitted,
+                                   ticketReason, storedAs)
+        ticket.state, ticket.committed = ticketState, ticketCommitted
+        ticket.reason, ticket.pumps = ticketReason, handle.pumps
+        if ticketCommitted then
+            ticket.generation = ST.generation
+            ticket.database, ticket.bundle = ST.db, ST.durableBundle
+            ticket.storedAs = storedAs or handle.storedAs
+        end
+        if not ticketCommitted then ticket.detail = handle.failureDetail end
+        ST.mutationTickets[ticket] = nil
+        local callback = ticket.completionCallback
+        ticket.completionCallback = nil
+        return callback
     end
-    ST.mutationTickets[ticket] = nil
-    local callback = ticket.completionCallback
-    ticket.completionCallback = nil
-    if deferCallback then return ticket, callback end
-    if callback and not pcall(callback, ticket) then
-        ST.debugStats.mutationCompletionFailures =
-            ST.debugStats.mutationCompletionFailures + 1
+    local function RunTicketCallback(ticket, callback)
+        if callback and not pcall(callback, ticket) then
+            ST.debugStats.mutationCompletionFailures =
+                ST.debugStats.mutationCompletionFailures + 1
+        end
     end
-    return ticket
+    local members = handle.batch and handle.batch.members
+    if not members then
+        local ticket = handle.ticket or {}
+        local callback = SettleOneTicket(ticket, state, committed, reason)
+        if deferCallback then return ticket, callback end
+        RunTicketCallback(ticket, callback)
+        return ticket
+    end
+    local settled = {}
+    for _, member in ipairs(members) do
+        local ticket = member.ticket
+        if ticket and ST.mutationTickets[ticket] ~= nil then
+            local memberState, memberCommitted, memberReason =
+                state, committed, reason
+            if member.outcome == "failed" then
+                memberState, memberCommitted, memberReason =
+                    "failed", false, member.reason
+            end
+            settled[#settled + 1] = {ticket=ticket,
+                callback=SettleOneTicket(ticket, memberState, memberCommitted,
+                    memberReason, member.storedAs)}
+        end
+    end
+    -- The candidate's own ticket carries no receiver callback; settling it
+    -- keeps the registry free of a ticket nobody can complete.
+    local own = handle.ticket
+    if own and ST.mutationTickets[own] ~= nil then
+        SettleOneTicket(own, state, committed, reason)
+    end
+    local first = own or (settled[1] and settled[1].ticket) or {}
+    if deferCallback then
+        return first, function()
+            for _, row in ipairs(settled) do
+                RunTicketCallback(row.ticket, row.callback)
+            end
+        end
+    end
+    for _, row in ipairs(settled) do
+        RunTicketCallback(row.ticket, row.callback)
+    end
+    return first
 end
 
 -- Latch the outer deny-only state. It publishes no candidate, permits no read
@@ -2119,13 +2172,15 @@ local function ReleaseSupersededCursors()
     for token, state in pairs(registry) do
         if state.servingGeneration ~= ST.servingGeneration then
             local family = state.kind
-            if sentinel[family] then
+            local slot = state.slot or family
+            if sentinel[slot] then
                 drop[#drop + 1] = token
             else
-                sentinel[family] = true
+                sentinel[slot] = true
                 -- The sentinel keeps no root wrapper, no accumulator, and no
                 -- page state: only enough to refuse once with STALE_CURSOR.
-                registry[token] = {kind=family, stale=true,
+                -- One per slot: a fixed named reader keeps its own.
+                registry[token] = {kind=family, slot=slot, stale=true,
                     servingGeneration=state.servingGeneration}
                 ST.debugStats.cursorSentinels = ST.debugStats.cursorSentinels + 1
             end
@@ -2181,9 +2236,9 @@ end
 -- the Lua 5.1 200 file-level local ceiling, so the capture and recheck helpers
 -- are fields of one table rather than two more locals.
 local Witness = {
-    EDGE_MAXIMUM=BUDGET.edges,
-    NODE_MAXIMUM=BUDGET.nodes,
-    BYTE_MAXIMUM=BUDGET.bytesInspected,
+    EDGE_MAXIMUM=BUDGET.witnessEdges,
+    NODE_MAXIMUM=BUDGET.witnessNodes,
+    BYTE_MAXIMUM=BUDGET.witnessBytes,
     DEPTH_MAXIMUM=BUDGET.depth + 2,
 }
 
@@ -2217,6 +2272,16 @@ end
 -- the evidence entries map receives its own detached top-level map.
 local Candidate, Cursor = {}, {}
 Candidate.EvidenceCandidateStore = EvidenceCandidateStore
+
+-- Is `db` a saved root the Store owner keeps read-only (future, unverified or
+-- malformed saved format)? Such a root is admitted and served, but nothing is
+-- ever committed into it. The verdict is the Store's own; it is not re-derived.
+function Candidate.ReadOnlySource(db)
+    local internals = Nexus and Nexus.MainInternals
+    local verdict = type(internals) == "table" and internals.SavedRootReadOnlyV1
+    return type(db) == "table" and type(verdict) == "function"
+        and verdict(db) ~= nil or false
+end
 
 function Candidate.SourceValue(db, source, field)
     if field == "dpsAuthority" then
@@ -2351,7 +2416,8 @@ function Candidate.PumpBundle(handle, work)
 end
 
 function Candidate.NewMutation(root, items, reason, deferred, notifyScope,
-                               existingHandle, bundleOverrides, publishPlan)
+                               existingHandle, bundleOverrides, publishPlan,
+                               verdictReuse)
     local generation, why = Generation.Next(ST, "durableBundleGeneration")
     if not generation then return nil, why end
     local overrides = {}
@@ -2379,6 +2445,7 @@ function Candidate.NewMutation(root, items, reason, deferred, notifyScope,
     handle.bundleClass, handle.bundleGeneration = "current", ST.durableBundleGeneration
     handle.bundleWrite, handle.source = true, ST.durableBundle
     handle.slots, handle.slotVector, handle.slotCount = {}, {}, 0
+    handle.buildSlots = 0
     handle.mapIndex, handle.mapCursor, handle.rootMapEdges = 1, nil, 0
     handle.verdicts, handle.index, handle.rowIndex = {}, NewIndex(), 0
     handle.mutationStates = {}
@@ -2386,6 +2453,13 @@ function Candidate.NewMutation(root, items, reason, deferred, notifyScope,
     handle.sessionTombstones = setmetatable({}, {__mode="k"})
     handle.sessionBarriers = setmetatable({}, {__mode="k"})
     handle.put = nil
+    -- Ordinary Put and PutBatch (never deferred repair, maintenance or a
+    -- removal): capture the final bundle's witness before the row walk, so
+    -- that unchanged rows may reuse the published verdicts (ProcessRows).
+    handle.captureFirst = verdictReuse == true and not deferred
+    handle.earlyWitness, handle.sourceWitness = nil, nil
+    handle.reuseSetup, handle.reuse, handle.reusableKeys = nil, nil, nil
+    handle.rowsOwnerKey = nil
     handle.bundleBuilder = Candidate.NewBundle(ST.db, ST.durableBundle,
         generation, overrides, nil, items)
     handle.sessionCopy = {source=ST.sessionTombstones,
@@ -2720,7 +2794,18 @@ local function TokenDrifted(token)
     local db = token.databaseIdentity
     if type(db) ~= "table" then return "SOURCE_DRIFT" end
     local bundle = rawget(db, "authorityBundle")
-    if bundle ~= token.bundleIdentity then return "SOURCE_DRIFT" end
+    if bundle ~= token.bundleIdentity then
+        -- A read-only saved root is served from its session-only admission
+        -- bundle (ST.sessionBundle, set in PublishRoot), which is never
+        -- written into the root; the root's own slot must still hold exactly
+        -- what it held when that bundle was admitted.
+        local session = ST.sessionBundle
+        if not (session and session.db == db and session.durable == bundle
+            and session.bundle == token.bundleIdentity) then
+            return "SOURCE_DRIFT"
+        end
+        bundle = session.bundle
+    end
     local source = type(bundle) == "table" and bundle or db
     if rawget(source, "communityBuilds") ~= token.overlayIdentity
         or rawget(source, "syncTombstones") ~= token.tombstoneIdentity
@@ -2896,6 +2981,45 @@ function Catalog.PendingRebindDatabaseV1()
     return type(NexusDB) == "table" and NexusDB or ST.db
 end
 
+-- True while a mutation candidate is in flight against the exact database and
+-- shipped builds the pending rebind would bind. Catalog.Init then only resumes
+-- that mutation, so a coordinator must not re-initialize a dependent owner in
+-- this turn: an open evidence candidate belongs to that in-flight transaction,
+-- and its publish plan already counts the candidate's appends. An admission
+-- candidate (the rebind's own work) does not wait. A pure read.
+function Catalog.RebindWaitsForCandidateV1()
+    local reason = ST.rebindRequired
+    if not reason or ST.candidate == nil
+        or ST.candidate.mode ~= "mutation" then return false end
+    if reason == "OWNER_REBIND_REQUIRED" then return true end
+    local nextDb = type(NexusDB) == "table" and NexusDB or ST.db
+    local nextBundle = type(Nexus.BundledBuilds) == "table"
+        and Nexus.BundledBuilds or ST.bundled
+    return nextDb == ST.db and nextBundle == ST.bundled
+end
+
+-- The coordinator rebind turn re-initializes the evidence pool, and
+-- LoadoutEvidence.Init discards any open evidence candidate. An open
+-- maintenance walk (BeginCatalogMaintenance until CommitMaintenance) owns that
+-- candidate, so the walk is released with it first: the same displacement a
+-- direct product mutation applies in MutationGate. Otherwise the walk's next
+-- intern goes into the live pool and advances the append revision the
+-- admitted root binds (ROOT_INVALIDATED / SOURCE_DRIFT, no recovery). The
+-- walk's owner finds its handle no longer open and restarts from the next
+-- published root. No mutation or admission candidate is released here:
+-- ST.activeMaintenance is never set while one exists (BeginCatalogMaintenance
+-- requires none; CommitMaintenance, MutationGate and BeginRootAdmission clear
+-- it).
+function Catalog.ReleaseMaintenanceForRebindV1()
+    local displaced = ST.activeMaintenance
+    if not displaced then return false end
+    displaced.state = "cancelled"
+    ST.maintenanceRegistry[displaced] = nil
+    ST.activeMaintenance = nil
+    EvidenceCancelCandidate()
+    return true
+end
+
 function Catalog.PumpAuthorityRebindV1(database, bundle, requestedReason)
     local reason = ST.rebindRequired or requestedReason
     if not reason then return {rebound=false} end
@@ -2910,10 +3034,21 @@ function Catalog.PumpAuthorityRebindV1(database, bundle, requestedReason)
     end
     if type(database) == "table" then nextDb = database end
     if type(bundle) == "table" then nextBundle = bundle end
+    -- Against the same source, Init only resumes an in-flight mutation. That
+    -- is not the requested rebind, so the request stays pending until the
+    -- mutation settles: then the next turn re-admits when the root no longer
+    -- matches its source (for example after a genuine drift), or finds it
+    -- current and does nothing more. An admission candidate is the rebind's
+    -- own work: its request ends with its terminal result (MASTER-RC-006), so
+    -- a failed re-admission is never started again by the same request.
+    local resumesCandidate = ST.candidate ~= nil
+        and ST.candidate.mode == "mutation" and nextDb == ST.db
+        and nextBundle == ST.bundled
     local summary = Catalog.Init(nextDb, nextBundle)
     -- MASTER-RC-006: Init advances exactly one slice. Preserve the one pending
     -- request until a later coordinator turn reaches a terminal result.
-    if type(summary) == "table" and summary.state == "pending" then
+    if (type(summary) == "table" and summary.state == "pending")
+        or resumesCandidate then
         ST.rebindRequired = ST.rebindRequired or reason
     end
     return {rebound=true, reason=reason, summary=summary,
@@ -2934,7 +3069,14 @@ local function MutationGate(maintenanceHandle)
         ST.activeMaintenance = nil
         EvidenceCancelCandidate()
     end
-    if ST.rebindRequired then Catalog.PumpAuthorityRebindV1() end
+    -- A rebind that would only resume the in-flight mutation is not driven
+    -- from here: PumpAuthorityRebindV1 keeps that request for a coordinator
+    -- turn anyway, and pumping the mutation from inside a caller could
+    -- publish it before that caller has stored its own write (a DPS record
+    -- whose build page is created here, for example).
+    if ST.rebindRequired and not Catalog.RebindWaitsForCandidateV1() then
+        Catalog.PumpAuthorityRebindV1()
+    end
     if ST.candidate then return nil, ST.candidate.mode == "mutation"
         and "ROOT_MUTATION_PENDING" or "ROOT_ADMISSION_PENDING" end
     return Gate()
@@ -2981,7 +3123,7 @@ local function NewAdmission(db)
     if not binding then return nil, why end
     local handle = {
         mode="admission", phase="capture", counters=NewCounters(),
-        slots={}, slotVector={}, slotCount=0, mapIndex=1, mapCursor=nil,
+        slots={}, slotVector={}, slotCount=0, buildSlots=0, mapIndex=1, mapCursor=nil,
         rootMapEdges=0, verdicts={}, index=NewIndex(),
         rowIndex=0, indexIndex=0, counts=nil, mapCounts={},
         pumps=0, failure=nil, token=CaptureToken(db, nil, false),
@@ -2997,6 +3139,123 @@ local MAP_ORDER = {"overlay", "bundled", "tombstone", "barrier"}
 local function AdmissionFail(handle, reason)
     handle.phase, handle.failure = "failed", reason
     return "failed"
+end
+
+-- Session-only record of the last collection refusal: which map, which
+-- counter (keys in one map "map-keys", distinct build identities
+-- "distinct-builds", distinct identities of every kind "distinct-slots", or
+-- raw keys of all maps "root-map-edges"), the count at the moment of refusal
+-- (limit + 1; later keys are not counted), the limit, the phase and whether
+-- the saved bundle or the legacy table was the active source, with the keys
+-- read from each map and the distinct build identities seen so far (lower
+-- bounds: the maps after the refusing one were not read). Scalars only; no
+-- keys, names or record contents. Never saved.
+function Candidate.NoteLimit(handle, map, counter, count, limit, reason)
+    local counts = {}
+    for _, name in ipairs(MAP_ORDER) do
+        counts[name] = tonumber(handle.mapCounts and handle.mapCounts[name]) or 0
+    end
+    ST.lastLimit = {reason=reason, map=map, counter=counter, count=count,
+        limit=limit, phase="collect", mode=handle.mode,
+        source=handle.sourceKind or (handle.mode == "mutation" and "bundle") or "unknown",
+        overlay=counts.overlay, bundled=counts.bundled,
+        tombstone=counts.tombstone, barrier=counts.barrier,
+        builds=tonumber(handle.buildSlots) or 0}
+    if handle.mode == "mutation" then
+        Candidate.NoteSaturation(ST.lastLimit)
+    end
+end
+
+-- Runtime saturation of an admitted catalog: a change that would take a
+-- category above its limit is refused, and the published root, its rows and
+-- the Leaderboard stay as they are. Session-only, scalars only; one record
+-- that counts refusals instead of one entry per refusal, with one counter per
+-- category: builds, removal markers (tombstones), retention markers
+-- (barriers), and every identity or raw key together (catalog).
+function Candidate.NoteSaturation(fact)
+    local now = type(GetTime) == "function" and tonumber(GetTime()) or 0
+    local record = ST.saturation
+    if type(record) ~= "table" then
+        record = {refused=0, firstAt=now, refusedBuilds=0, refusedTombstones=0,
+            refusedBarriers=0, refusedCatalog=0}
+        ST.saturation = record
+    end
+    local field = "refusedBuilds"
+    if fact.counter == "distinct-slots" or fact.counter == "root-map-edges" then
+        field = "refusedCatalog"
+    elseif fact.map == "tombstone" then
+        field = "refusedTombstones"
+    elseif fact.map == "barrier" then
+        field = "refusedBarriers"
+    end
+    record.refused = record.refused + 1
+    record[field] = record[field] + 1
+    record.lastAt = now
+    record.reason, record.map, record.counter = fact.reason, fact.map, fact.counter
+    record.count, record.limit = fact.count, fact.limit
+end
+
+-- Cheap capacity pre-checks against the published root, so a full catalog
+-- refuses a new identity without a whole mutation. The collection check stays
+-- the authority; these only avoid futile work and record the refusal.
+function Candidate.AddsBuildIdentity(existing)
+    return not (existing and (existing.overlayRaw ~= nil or existing.bundledRaw ~= nil))
+end
+
+-- The refusal reason, and its scalar facts, when one more entry of the
+-- category would take the published count plus the transaction's signed
+-- reservation above the limit; nil when it fits. Records nothing. A negative
+-- reservation is room that earlier operations of the same transaction free
+-- (expired retention markers); the commit's full collection re-checks every
+-- limit on the resulting maps.
+function Candidate.CapacityFull(root, category, reserved)
+    local counts = type(root) == "table" and type(root.counts) == "table"
+        and root.counts or {}
+    local spec
+    if category == "builds" then
+        spec = {counts.builds, BUDGET.rows, "ROOT_SLOT_LIMIT", "overlay", "distinct-builds"}
+    elseif category == "tombstones" then
+        spec = {counts.tombstones, BUDGET.tombstones, "TOMBSTONE_SET_LIMIT", "tombstone", "map-keys"}
+    else
+        spec = {counts.barriers, BUDGET.barriers, "BARRIER_SET_LIMIT", "barrier", "map-keys"}
+    end
+    local used = (tonumber(spec[1]) or 0) + (tonumber(reserved) or 0)
+    if used < spec[2] then return nil end
+    return spec[3], {reason=spec[3], map=spec[4], counter=spec[5],
+        count=used + 1, limit=spec[2]}
+end
+
+-- CapacityFull, and the refusal is recorded. Call it only after every check
+-- that gives a record its own reason, so only a change that would otherwise
+-- be accepted is counted as refused because the category is full.
+function Candidate.CapacityRefusal(root, category, reserved)
+    local full, fact = Candidate.CapacityFull(root, category, reserved)
+    if full then Candidate.NoteSaturation(fact) end
+    return full
+end
+
+-- Number of runtime capacity refusals this session. No allocation.
+function Catalog.SaturationRefusals()
+    local record = ST.saturation
+    return type(record) == "table" and record.refused or 0
+end
+
+-- Read-only copy of the saturation record, or nil. Starts no work.
+function Catalog.SaturationSummary()
+    local record = ST.saturation
+    if type(record) ~= "table" then return nil end
+    local copy = {}
+    for key, value in pairs(record) do copy[key] = value end
+    return copy
+end
+
+-- Read-only copy of that record, or nil. Touches no root, cursor or gate.
+function Catalog.LastLimitSummary()
+    local last = ST.lastLimit
+    if type(last) ~= "table" then return nil end
+    local copy = {}
+    for key, value in pairs(last) do copy[key] = value end
+    return copy
 end
 
 local function CollectRootMap(handle, work)
@@ -3019,6 +3278,12 @@ local function CollectRootMap(handle, work)
         Charge(work, "rootMapEdges", 1)
         handle.rootMapEdges = handle.rootMapEdges + 1
         if handle.rootMapEdges > BUDGET.rootMapEdges then
+            -- The raw key budget of all four maps, charged per key read. Each
+            -- map has its own 2048-key limit, so this total (8192) is a
+            -- defensive stop that those checks normally reach first. It is the
+            -- same kind of saved-capacity verdict, so it records the same facts.
+            Candidate.NoteLimit(handle, name, "root-map-edges", handle.rootMapEdges,
+                BUDGET.rootMapEdges, "ROOT_MAP_LIMIT")
             return AdmissionFail(handle, "ROOT_MAP_LIMIT")
         end
         local typedKey, kind = TypedKey(key)
@@ -3028,6 +3293,8 @@ local function CollectRootMap(handle, work)
         local limitReason = name == "tombstone" and "TOMBSTONE_SET_LIMIT"
             or name == "barrier" and "BARRIER_SET_LIMIT" or "ROOT_SLOT_LIMIT"
         if handle.mapCounts[name] > BUDGET.rootMapKeys then
+            Candidate.NoteLimit(handle, name, "map-keys", handle.mapCounts[name],
+                BUDGET.rootMapKeys, limitReason)
             return AdmissionFail(handle, limitReason)
         end
         local slot = handle.slots[typedKey]
@@ -3035,10 +3302,25 @@ local function CollectRootMap(handle, work)
             slot = {key=typedKey, id=key, kind=kind}
             handle.slots[typedKey] = slot
             handle.slotCount = handle.slotCount + 1
-            if handle.slotCount > BUDGET.rows then
+            -- Defensive: the three category limits already bound this total.
+            if handle.slotCount > BUDGET.identities then
+                Candidate.NoteLimit(handle, name, "distinct-slots", handle.slotCount,
+                    BUDGET.identities, limitReason)
                 return AdmissionFail(handle, limitReason)
             end
             handle.slotVector[handle.slotCount] = slot
+        end
+        -- A build identity is a typed ID with a saved or a shipped copy, valid
+        -- or not: its content is judged later and never hides it from this
+        -- count. Saved and shipped copies of one ID are one identity.
+        if (name == "overlay" or name == "bundled") and not slot.buildCounted then
+            slot.buildCounted = true
+            handle.buildSlots = handle.buildSlots + 1
+            if handle.buildSlots > BUDGET.rows then
+                Candidate.NoteLimit(handle, name, "distinct-builds", handle.buildSlots,
+                    BUDGET.rows, "ROOT_SLOT_LIMIT")
+                return AdmissionFail(handle, "ROOT_SLOT_LIMIT")
+            end
         end
         slot[name] = rawget(map, key)
     end
@@ -3079,6 +3361,7 @@ local function AdmitSlot(handle, slot, work)
         slot.admissionOptions = handle.mode == "mutation"
             and {candidateEvidence=true} or {}
         slot.walker = NewWalker(raw, slot.admissionOptions)
+        ST.debugStats.rowWalks = ST.debugStats.rowWalks + 1
         Charge(work, "rows", 1)
     end
     local status = WalkRow(slot.walker, work)
@@ -3087,12 +3370,246 @@ local function AdmitSlot(handle, slot, work)
         slot.admissionOptions or {})
 end
 
+------------------------------------------------------------------------
+-- Row verdict reuse (ordinary Put and PutBatch mutations only).
+--
+-- A verdict published by the previous root P is reused for a row this
+-- mutation does not touch when every input of that verdict is proven
+-- unchanged; anything uncertain is walked in full, as before.
+-- * P was published by a capture-first mutation (reuseBasis): its witness
+--   was captured before its row walk and verified after it, so each of its
+--   verdicts was derived from exactly the witnessed source.
+-- * The mutation-start source verify proved the live bundle equal to P's
+--   witness; this mutation captured its own witness before this walk, and
+--   its final witness-verify covers the walk.
+-- * The row's raw tables are the same identities as in P's verdict, and
+--   their witnessed subtrees are equal in P's witness and this capture.
+-- * Every evidence-pool read of the verdict's walk is re-run and gives the
+--   same outcome. The pool is content-addressed and self-verifying
+--   (Evidence.Resolve accepts an entry only when its canonical fingerprint
+--   is the key), so a read that resolves again yields the same rows; an
+--   entry edited in place no longer resolves and the row is walked.
+-- * No removal or retention marker (session state, owner), and the owner key
+--   equals the one P's walk used. Database, bundle, map, baseline, binding
+--   and evidence revision identities are bound by the token (TokenDrifted at
+--   mutation start and at publication).
+------------------------------------------------------------------------
+
+Candidate.Reuse = {enabled=true}
+
+function Candidate.Reuse.RootNodes(witness)
+    local nodes = {}
+    for _, root in ipairs(type(witness) == "table" and witness.roots or {}) do
+        if type(root) == "table" and type(root.edge) == "table"
+            and root.edge.kind == "table" then
+            nodes[root.name] = root.edge.node
+        end
+    end
+    return nodes
+end
+
+function Candidate.Reuse.Setup(handle)
+    handle.reuseSetup = true
+    handle.reusableKeys = {}
+    handle.rowsOwnerKey = CurrentOwnerKey()
+    local root = handle.originalRoot
+    -- A candidate evidence store that is still being copied answers reads
+    -- from a partial view and advances its copy on every read: no reuse.
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    if not (evidence and type(evidence.CandidateStorePending) == "function")
+        or evidence.CandidateStorePending() then
+        return
+    end
+    if not (Candidate.Reuse.enabled and handle.earlyWitness == true
+        and type(root) == "table" and root.reuseBasis == true
+        and type(root.reusableKeys) == "table" and type(root.rows) == "table"
+        and root.reuseOwnerKey ~= nil and root.reuseOwnerKey == handle.rowsOwnerKey
+        and type(root.token) == "table"
+        and type(root.token.sourceWitness) == "table"
+        and type(handle.sourceWitness) == "table") then
+        return
+    end
+    local touched = {}
+    for _, item in ipairs(handle.items or {}) do
+        if type(item.slot) ~= "table" or item.slot.key == nil then return end
+        touched[item.slot.key] = true
+        for _, write in ipairs(item.writes or {}) do
+            if write.id ~= nil then
+                local typedKey = TypedKey(write.id)
+                if not typedKey then return end
+                touched[typedKey] = true
+            end
+        end
+    end
+    handle.reuse = {root=root, touched=touched,
+        oldWitness=root.token.sourceWitness, newWitness=handle.sourceWitness,
+        oldRoots=Candidate.Reuse.RootNodes(root.token.sourceWitness),
+        newRoots=Candidate.Reuse.RootNodes(handle.sourceWitness)}
+end
+
+-- The witness edges of one raw row in both witnesses, or nil when either is
+-- absent or of another kind.
+function Candidate.Reuse.RowEdges(reuse, rootName, id)
+    local oldRoot, newRoot = reuse.oldRoots[rootName], reuse.newRoots[rootName]
+    local oldRecord = oldRoot and reuse.oldWitness.nodes[oldRoot]
+    local newRecord = newRoot and reuse.newWitness.nodes[newRoot]
+    if type(oldRecord) ~= "table" or type(newRecord) ~= "table" then return nil end
+    return oldRecord.edges[id], newRecord.edges[id]
+end
+
+function Candidate.Reuse.SameEdge(left, right)
+    if type(left) ~= "table" or type(right) ~= "table" then return false end
+    if left.kind ~= right.kind then return false end
+    if left.kind == "table" then return nil end
+    if left.value == right.value then return true end
+    return left.kind == "number" and left.value ~= left.value
+        and right.value ~= right.value
+end
+
+-- A resumable comparison of one row's witnessed subtrees: equal node
+-- identities, counts, metatable edges and every edge. Charged per node and
+-- per edge against the slice allowance.
+function Candidate.Reuse.NewCompare(reuse, slot)
+    local compare = {reuse=reuse, frames={}, oldToNew={}, newToOld={}}
+    for _, pair in ipairs({{"communityBuilds", slot.overlay}, {"bundledBuilds", slot.bundled}}) do
+        local oldEdge, newEdge = Candidate.Reuse.RowEdges(reuse, pair[1], slot.id)
+        if pair[2] == nil then
+            if oldEdge ~= nil or newEdge ~= nil then return nil end
+        else
+            if oldEdge == nil or newEdge == nil then return nil end
+            local same = Candidate.Reuse.SameEdge(oldEdge, newEdge)
+            if same == false then return nil end
+            if same == nil then
+                compare.frames[#compare.frames + 1] = {old=oldEdge.node, new=newEdge.node}
+            end
+        end
+    end
+    return compare
+end
+
+function Candidate.Reuse.PumpCompare(compare, work)
+    local old, new = compare.reuse.oldWitness.nodes, compare.reuse.newWitness.nodes
+    while true do
+        local frame = compare.frames[#compare.frames]
+        if not frame then return "equal" end
+        if Exhausted(work.budget) then return "pending" end
+        if not frame.opened then
+            frame.opened = true
+            local mapped, reverse = compare.oldToNew[frame.old], compare.newToOld[frame.new]
+            if mapped ~= nil or reverse ~= nil then
+                if mapped ~= frame.new or reverse ~= frame.old then return "different" end
+                compare.frames[#compare.frames] = nil
+            else
+                local oldRecord, newRecord = old[frame.old], new[frame.new]
+                if type(oldRecord) ~= "table" or type(newRecord) ~= "table"
+                    or not rawequal(oldRecord.identity, newRecord.identity)
+                    or oldRecord.count ~= newRecord.count then
+                    return "different"
+                end
+                if oldRecord.metatable ~= nil or newRecord.metatable ~= nil then
+                    return "different"
+                end
+                compare.oldToNew[frame.old], compare.newToOld[frame.new] = frame.new, frame.old
+                frame.oldRecord, frame.newRecord = oldRecord, newRecord
+                Charge(work, "nodes", 1)
+            end
+        else
+            local key, oldEdge = next(frame.oldRecord.edges, frame.cursor)
+            if key == nil then
+                compare.frames[#compare.frames] = nil
+            else
+                frame.cursor = key
+                Charge(work, "edges", 1)
+                local same = Candidate.Reuse.SameEdge(oldEdge, frame.newRecord.edges[key])
+                if same == false then return "different" end
+                if same == nil then
+                    compare.frames[#compare.frames + 1] = {
+                        old=oldEdge.node, new=frame.newRecord.edges[key].node}
+                end
+            end
+        end
+    end
+end
+
+-- Re-run the recorded pool reads; true when every outcome is the same.
+function Candidate.Reuse.SameReads(reads, work)
+    if type(reads) ~= "table" then return false end
+    if #reads == 0 then return true end
+    local evidence = Nexus and Nexus.LoadoutEvidence
+    if not (evidence and type(evidence.Resolve) == "function") then return false end
+    for _, read in ipairs(reads) do
+        local ok, resolved = pcall(evidence.Resolve, read.key, nil, read.options)
+        if not ok then return false end
+        local again = type(resolved) == "table"
+        Charge(work, "evidenceRows", again and math.max(1, #resolved) or 1)
+        if again ~= read.resolved then return false end
+    end
+    return true
+end
+
+function Candidate.Reuse.CopyVerdict(verdict)
+    local copy = {}
+    for key, value in pairs(verdict) do copy[key] = value end
+    return copy
+end
+
+-- A reused verdict, "pending", or nil when the row must be walked.
+function Candidate.Reuse.Try(handle, slot, work)
+    local reuse = handle.reuse
+    local compare = slot.reuseCompare
+    if not compare then
+        Charge(work, "nodes", 1)
+        if CurrentOwnerKey() ~= handle.rowsOwnerKey
+            or reuse.touched[slot.key] or not reuse.root.reusableKeys[slot.key]
+            or slot.tombstone ~= nil or slot.barrier ~= nil then
+            return nil
+        end
+        local previous = reuse.root.rows[slot.key]
+        if type(previous) ~= "table" or previous.tombstone ~= nil
+            or previous.barrier ~= nil
+            or not rawequal(previous.overlayRaw, slot.overlay)
+            or not rawequal(previous.bundledRaw, slot.bundled) then
+            return nil
+        end
+        compare = Candidate.Reuse.NewCompare(reuse, slot)
+        if not compare then
+            ST.debugStats.reuseCompareMismatches = ST.debugStats.reuseCompareMismatches + 1
+            return nil
+        end
+        compare.previous = previous
+        slot.reuseCompare = compare
+    end
+    local state = Candidate.Reuse.PumpCompare(compare, work)
+    if state == "pending" then return "pending" end
+    slot.reuseCompare = nil
+    if state == "equal" and not Candidate.Reuse.SameReads(
+        reuse.root.reusableKeys[slot.key], work) then
+        state = "different"
+    end
+    if state ~= "equal" then
+        ST.debugStats.reuseCompareMismatches = ST.debugStats.reuseCompareMismatches + 1
+        return nil
+    end
+    ST.debugStats.verdictReuses = ST.debugStats.verdictReuses + 1
+    return Candidate.Reuse.CopyVerdict(compare.previous)
+end
+
 local function ProcessRows(handle, work)
+    if handle.captureFirst and not handle.reuseSetup then Candidate.Reuse.Setup(handle) end
     while handle.rowIndex <= handle.slotCount do
         if Exhausted(work.budget) then return "pending" end
         local slot = handle.slotVector[handle.rowIndex]
-        local verdict = AdmitSlot(handle, slot, work)
-        if not verdict then return "pending" end
+        local verdict, reused
+        if handle.reuse and slot.walker == nil then
+            verdict = Candidate.Reuse.Try(handle, slot, work)
+            if verdict == "pending" then return "pending" end
+            reused = verdict ~= nil
+        end
+        if not verdict then
+            verdict = AdmitSlot(handle, slot, work)
+            if not verdict then return "pending" end
+        end
+        local walker = slot.walker
         slot.walker = nil
         if slot.barrier ~= nil then
             verdict.barrier = ClassifyBarrier(slot.barrier, slot, work)
@@ -3105,6 +3622,21 @@ local function ProcessRows(handle, work)
             and handle.mutationStates[slot.key] or nil
         if verdict.snapshot and mutationState == "READMITTED" then
             verdict.state = mutationState
+        end
+        -- Reusable by the next ordinary mutation (with the pool reads to
+        -- re-run): reused here, or an admitted verdict of the row walker (an
+        -- invalid row's reason can depend on key order) with a reliable pool
+        -- and no removal or retention marker or readmission state. A row this
+        -- mutation readmits is therefore walked again by the next one.
+        if handle.reusableKeys then
+            if reused then
+                handle.reusableKeys[slot.key] = handle.reuse.root.reusableKeys[slot.key]
+            elseif walker ~= nil and verdict.snapshot ~= nil
+                and not walker.poolUnstable
+                and slot.tombstone == nil and slot.barrier == nil
+                and mutationState == nil then
+                handle.reusableKeys[slot.key] = walker.poolReads or {}
+            end
         end
         handle.verdicts[slot.key] = verdict
         handle.rowIndex = handle.rowIndex + 1
@@ -3393,6 +3925,15 @@ local function PublishRoot(handle)
     local db = handle.token.databaseIdentity
     local drift = TokenDrifted(handle.token)
     if drift then return AdmissionFail(handle, drift) end
+    -- A maintenance owner's precondition on the source its payload overrides
+    -- were prepared from (Catalog.CommitMaintenance publicationGuard). This is
+    -- the last point before the durable bundle is replaced.
+    if handle.mode == "mutation" and type(handle.publicationGuard) == "function" then
+        local guardOk, current = pcall(handle.publicationGuard)
+        if not (guardOk and current == true) then
+            return AdmissionFail(handle, "PUBLICATION_SOURCE_CHANGED")
+        end
+    end
     local publishPlan = handle.publishPlan
     if type(publishPlan) ~= "table" then
         publishPlan = handle.mode == "mutation"
@@ -3421,6 +3962,15 @@ local function PublishRoot(handle)
     end
     handle.token = CaptureToken(db, handle.finalBundle,
         handle.sourceWitness, future, handle.mode == "mutation")
+    -- A capture-first root is a reuse source for the next ordinary mutation,
+    -- bound to the owner its row walk saw (unchanged at publication).
+    local reuseBasis, reusableKeys, reuseOwnerKey = nil, nil, nil
+    if handle.earlyWitness == true and type(handle.reusableKeys) == "table" then
+        reuseBasis, reusableKeys = true, handle.reusableKeys
+        if handle.rowsOwnerKey ~= nil and handle.rowsOwnerKey == CurrentOwnerKey() then
+            reuseOwnerKey = handle.rowsOwnerKey
+        end
+    end
     local catalogRoot = {
         generation=future.generation, token=handle.token, rows=handle.verdicts,
         slots=handle.slots, slotVector=handle.slotVector, slotCount=handle.slotCount,
@@ -3429,6 +3979,7 @@ local function PublishRoot(handle)
         catalogVersion=handle.catalogVersion,
         schemaVersion=handle.metaVersion or STORAGE_SCHEMA_VERSION,
         migrated=handle.needsMigration, redundantRemoved=#handle.prune,
+        reuseBasis=reuseBasis, reusableKeys=reusableKeys, reuseOwnerKey=reuseOwnerKey,
     }
     local durableGeneration = tonumber(handle.finalBundle.transactionGeneration)
         or ST.durableBundleGeneration
@@ -3443,11 +3994,24 @@ local function PublishRoot(handle)
         sealedServing.generation = ST.servingGeneration + 1
     end
 
+    -- A read-only saved root (future, unverified or malformed saved format) is
+    -- never written: its admission bundle stays session-only, so the next
+    -- session admits the same saved input again, including legacy rows another
+    -- version added meanwhile. A mutation never reaches this point for such a
+    -- root (CommitBatch refuses it); this is the last guard.
+    local sessionOnly = handle.bundleWrite and Candidate.ReadOnlySource(db)
+    if sessionOnly and handle.mode == "mutation" then
+        return AdmissionFail(handle, "SAVED_FORMAT_READ_ONLY")
+    end
+
     -- Protected section: all allocation, copying, witness work, counter work,
     -- and callback work is complete. The durable and serving assignments are
     -- adjacent. Nothing between them can inspect or publish a partial graph.
     local ok = pcall(function()
-        if handle.bundleWrite and not CommitDurableBundle(db, handle.finalBundle) then
+        if sessionOnly then
+            ST.sessionBundle = {db=db, bundle=handle.finalBundle,
+                durable=rawget(db, "authorityBundle")}
+        elseif handle.bundleWrite and not CommitDurableBundle(db, handle.finalBundle) then
             error("AUTHORITY_BUNDLE_VERIFICATION_FAILED", 0)
         end
         if sealed then
@@ -3469,7 +4033,7 @@ local function PublishRoot(handle)
         ST.sessionTombstones = handle.sessionTombstones
         ST.sessionBarriers = handle.sessionBarriers
     end
-    if handle.bundleWrite then
+    if handle.bundleWrite and not sessionOnly then
         ST.debugStats.bundleWrites = ST.debugStats.bundleWrites + 1
     end
     if not sealed then
@@ -3517,6 +4081,13 @@ local function PublishRoot(handle)
         local released, releaseWhy = Candidate.ReleaseClaim(handle.claim, true)
         if not released then return AdmissionFail(handle, releaseWhy) end
     end
+    if handle.mode == "mutation" and handle.claims then
+        for _, claim in ipairs(handle.claims) do
+            local released, releaseWhy = Candidate.ReleaseClaim(claim, true)
+            if not released then return AdmissionFail(handle, releaseWhy) end
+        end
+        handle.claims = {}
+    end
     if handle.completion == "put" then
         ST.debugStats.putChanges = ST.debugStats.putChanges + 1
     elseif handle.completion == "maintenance" then
@@ -3536,6 +4107,20 @@ local function PumpAdmission(handle)
             handle, work)
         if prepared == "failed" then
             result = AdmissionFail(handle, prepareWhy)
+        elseif prepared == "pending" then
+            result = "pending"
+        else
+            result = "ok"
+        end
+    end
+    if handle.phase == "batch-prepare" then
+        local prepared, prepareWhy = Candidate.PumpBatchPutPreparation(handle,
+            work)
+        if prepared == "failed" then
+            result = AdmissionFail(handle, prepareWhy)
+        elseif prepared == "noop" then
+            ClosePump(work)
+            return "noop"
         elseif prepared == "pending" then
             result = "pending"
         else
@@ -3653,7 +4238,42 @@ local function PumpAdmission(handle)
         else
             local configured, why = Candidate.ConfigureMutationAdmission(handle)
             if not configured then result = AdmissionFail(handle, why)
-            else result = "ok" end
+            else
+                if handle.captureFirst then handle.phase = "mutation-capture" end
+                result = "ok"
+            end
+        end
+    end
+    if handle.phase == "mutation-capture" and result ~= "pending" then
+        -- Ordinary Put and PutBatch capture the final bundle's witness before
+        -- the row walk; the final witness-verify then spans the walk, so every
+        -- verdict this root publishes was derived from the witnessed source.
+        handle.witnessHandle = handle.witnessHandle
+            or Witness.NewCapture(handle.finalBundle)
+        local remaining = {edges=SLICE.edges - work.budget.edges,
+            nodes=SLICE.nodes - work.budget.nodes,
+            bytes=SLICE.bytesInspected - work.budget.bytesInspected}
+        local witnessResult = remaining.edges > 0 and remaining.nodes > 0
+            and remaining.bytes > 0
+            and Witness.Pump(handle.witnessHandle, remaining)
+            or {state="pending", edges=0, nodes=0, bytes=0}
+        if (witnessResult.edges or 0) > 0 then
+            Charge(work, "edges", witnessResult.edges)
+        end
+        if (witnessResult.nodes or 0) > 0 then
+            Charge(work, "nodes", witnessResult.nodes)
+        end
+        if (witnessResult.bytes or 0) > 0 then
+            Charge(work, "bytesInspected", witnessResult.bytes)
+        end
+        if witnessResult.state == "failed" then
+            result = AdmissionFail(handle, witnessResult.reason)
+        elseif witnessResult.state == "complete" then
+            handle.sourceWitness = handle.witnessHandle.witness
+            handle.witnessHandle, handle.earlyWitness = nil, true
+            handle.phase, result = "collect", "ok"
+        else
+            result = "pending"
         end
     end
     if handle.phase == "capture" then
@@ -3686,6 +4306,7 @@ local function PumpAdmission(handle)
         -- bundle's LEGACY_BUNDLE_MIGRATION_REQUIRED route (line 374).
         local source = bundleClass == "absent" and db or bundleRaw
         handle.source = source
+        handle.sourceKind = bundleClass == "absent" and "legacy" or "bundle"
         local classification, reason, _, version =
             ClassifyMetadata(rawget(source, "buildCatalog"))
         if classification == "invalid" then
@@ -3849,7 +4470,7 @@ local function SummaryOf(handle, state, reason)
         schemaVersion=state == "ROOT_READ_ONLY_FUTURE_SCHEMA"
             and (handle and handle.futureSchema) or STORAGE_SCHEMA_VERSION,
         catalogVersion=tostring(ST.bundled and ST.bundled.catalogVersion or "unversioned"),
-        readOnly=state ~= "ROOT_ADMITTED",
+        readOnly=state ~= "ROOT_ADMITTED" or Candidate.ReadOnlySource(ST.db),
         state=state, reason=reason,
         generation=ST.generation,
         pumps=handle and handle.pumps or 0,
@@ -3949,6 +4570,7 @@ function Catalog.BeginRootAdmission(database, bundle)
         return {state=ST.rootState, reason="GENERATION_EXHAUSTED", pumps=0}
     end
     ST.db, ST.bundled, ST.baseline = db, bundled, baseline
+    if ST.sessionBundle and ST.sessionBundle.db ~= db then ST.sessionBundle = nil end
     PublishInvalidServing()
     ST.rootState, ST.rootReason = "ROOT_ADMISSION_PENDING", nil
     ST.activeClaim, ST.activeCursors, ST.activeMaintenance = nil, {}, nil
@@ -3971,6 +4593,21 @@ function Candidate.PreparationWork(handle)
     return amount
 end
 
+-- Passive current-step counters. Only the three row walks that already hold
+-- their own index against the fixed slot vector report a total; every other
+-- phase returns nil, so no caller can present a guessed or counted size.
+function Candidate.StepProgress(handle)
+    if not handle then return nil end
+    local total, done = handle.slotCount
+    if handle.phase == "rows" then done = (handle.rowIndex or 1) - 1
+    elseif handle.phase == "finalize-scan" then done = (handle.finalizeIndex or 1) - 1
+    elseif handle.phase == "index" then done = handle.indexIndex
+    else return nil end
+    if type(total) ~= "number" or type(done) ~= "number" or total < 1
+        or done < 0 or done > total then return nil end
+    return done, total
+end
+
 -- Scalar, read-only dependency description. The separate empty identity has
 -- no authority fields; editing it cannot change a candidate. Neither this
 -- query nor identity comparison admits, invalidates or advances any root.
@@ -3987,6 +4624,7 @@ function Catalog.ManualPreparationStatus()
         and handle.originalRoot == root and token == root.token
         and handle.preparationIdentity ~= nil
     local witness = handle and (handle.witnessHandle or handle.sourceVerifyHandle)
+    local stepDone, stepTotal = Candidate.StepProgress(handle)
     return {ready=agrees and ST.rootState == "ROOT_ADMITTED" and handle == nil or false,
         relevant=relevant or false, ownerAgrees=agrees or false,
         reason=not agrees and "OWNER_OR_GENERATION_MISMATCH"
@@ -3999,6 +4637,7 @@ function Catalog.ManualPreparationStatus()
         index=handle and handle.indexIndex or 0,
         witnessRoot=witness and witness.rootIndex or 0,
         witnessDepth=witness and #witness.frames or 0,
+        stepDone=stepDone, stepTotal=stepTotal,
         binding=ST.bindingGeneration, generation=ST.generation},
         relevant and handle.preparationIdentity or nil
 end
@@ -4195,6 +4834,15 @@ function Catalog.DebugStats()
     return stats
 end
 
+-- Test and diagnostics switch: false keeps the capture-first route of
+-- ordinary Put and PutBatch but walks every row (the full-rebuild oracle).
+-- Returns the previous setting.
+function Catalog.DebugSetVerdictReuse(enabled)
+    local previous = Candidate.Reuse.enabled
+    Candidate.Reuse.enabled = enabled ~= false
+    return previous
+end
+
 function Catalog.SchemaVersion()
     return STORAGE_SCHEMA_VERSION
 end
@@ -4288,8 +4936,13 @@ function Catalog.Status()
         invalidCount=counts.invalid or 0,
         futureCount=counts.future or 0,
         barrierCount=counts.barriers or 0,
+        -- Capacity use against the three category limits (envelope V2).
+        buildIdentityCount=counts.builds or 0,
+        buildIdentityLimit=BUDGET.rows, tombstoneLimit=BUDGET.tombstones,
+        barrierLimit=BUDGET.barriers,
         catalogVersion=tostring(ST.bundled and ST.bundled.catalogVersion or "unversioned"),
-        readOnly=root == nil,
+        -- A read-only saved root is served but never written.
+        readOnly=root == nil or Candidate.ReadOnlySource(ST.db),
         state=ST.rootState, reason=ST.rootReason,
         generation=ST.generation,
     }
@@ -4409,22 +5062,6 @@ function Catalog.TombstoneSnapshot()
     end, CompatTombstone)
 end
 
-function Catalog.ForEach(visitor)
-    if type(visitor) ~= "function" then return 0 end
-    local all, why = Catalog.All()
-    if not all then return 0, why end
-    local servingGeneration = ST.servingGeneration
-    local count = 0
-    for id, record in pairs(all) do
-        count = count + 1
-        visitor(id, record)
-        if ST.servingGeneration ~= servingGeneration then
-            return count, "STALE_CURSOR"
-        end
-    end
-    return count
-end
-
 function Catalog.SyncState(id)
     local root = Gate()
     local verdict = root and VerdictOf(root, id) or nil
@@ -4455,7 +5092,8 @@ function Catalog.BarrierState(id)
     return {state=barrier.state, blocked=true, revision=barrier.revision,
         recordedAt=barrier.recordedAt,
         receiptAtServerTime=barrier.receiptAtServerTime,
-        readmittedAtServerTime=barrier.readmittedAtServerTime}
+        readmittedAtServerTime=barrier.readmittedAtServerTime,
+        ageKind=barrier.ageKind, createdAt=barrier.createdAt}
 end
 
 -- Stateless generation-bound steps over the immutable overlay and tombstone
@@ -4511,10 +5149,17 @@ function Catalog.SyncDeltaNext(cursor)
     return verdict.id, record, false
 end
 
-function Catalog.TombstoneNext(cursor)
+-- Removal-marker walk. `reader` names an independent walk slot for the two
+-- multi-frame consumers ("build-hash-cache", "sync-candidate"), so the
+-- synchronous retention sweep in the shared slot never invalidates their
+-- walk and they never invalidate each other's; any other value is the shared
+-- slot. The (id, view, done) shape is unchanged.
+function Catalog.TombstoneNext(cursor, reader)
     local root = Gate()
     if not root then return nil, nil, true end
-    local walk, guardWhy = LegacyWalkGuard("tombstone", cursor)
+    local family = (reader == "build-hash-cache" or reader == "sync-candidate")
+        and ("tombstone:" .. reader) or "tombstone"
+    local walk, guardWhy = LegacyWalkGuard(family, cursor)
     if guardWhy then return nil, guardWhy, true end
     local verdict = VectorStep(root.tombstoneKeys, walk, root)
     if not verdict then return nil, nil, true end
@@ -4589,9 +5234,11 @@ function Candidate.BeginAdmissionFinalization(handle)
         {owner=ST, key="semanticGeneration", amount=1},
         {owner=ST, key="servingGeneration", amount=1},
     }
-    if handle.mode == "mutation" and handle.claim then
+    local claimCount = (handle.claim and 1 or 0)
+        + (handle.claims and #handle.claims or 0)
+    if handle.mode == "mutation" and claimCount > 0 then
         publishPlan[#publishPlan + 1] = {
-            owner=ST, key="reservationEpoch", amount=1,
+            owner=ST, key="reservationEpoch", amount=claimCount,
         }
     end
     if handle.bundleClass == "absent" or needsMigration then
@@ -4604,7 +5251,10 @@ function Candidate.BeginAdmissionFinalization(handle)
     handle.publishPlan = publishPlan
     handle.meta, handle.metaVersion = meta, metaVersion
     handle.catalogVersion, handle.needsMigration = catalogVersion, needsMigration
+    -- builds: distinct build identities (saved and shipped), the category
+    -- that the rows limit bounds; fixed by collection and unchanged by prune.
     handle.counts = {bundled=handle.mapCounts.bundled or 0,
+        builds=handle.buildSlots or 0,
         overlay=0, tombstones=0, barriers=0, available=0, invalid=0, future=0}
     handle.overlayKeys, handle.tombstoneKeys, handle.barrierKeys = {}, {}, {}
     handle.finalizeIndex, handle.prune, handle.pruneIndex = 1, {}, 1
@@ -4759,7 +5409,14 @@ end
 
 function Candidate.BeginAdmissionBundle(handle)
     if handle.mode == "mutation" then
-        handle.phase = "witness-capture"
+        if handle.earlyWitness then
+            -- Captured before the row walk (mutation-capture); verify it now.
+            handle.witnessHandle = Witness.BeginVerify(handle.sourceWitness,
+                handle.finalBundle)
+            handle.phase = "witness-verify"
+        else
+            handle.phase = "witness-capture"
+        end
         return true
     end
     if handle.bundleClass ~= "absent" and not handle.needsMigration then
@@ -5124,7 +5781,8 @@ local function DetachedVerdict(verdict)
 end
 
 local function CommitBatch(root, items, reason, deferred, notifyScope,
-                           existingHandle, bundleOverrides, counterPlan)
+                           existingHandle, bundleOverrides, counterPlan,
+                           verdictReuse)
     local drift = TokenDrifted(root.token)
     if drift then
         EvidenceCancelCandidate()
@@ -5132,6 +5790,13 @@ local function CommitBatch(root, items, reason, deferred, notifyScope,
         return false, drift
     end
     local db = root.token.databaseIdentity
+    -- A read-only saved root is never written: every commit into it (Share,
+    -- received rows, removal and retention markers, maintenance) is refused
+    -- before anything is prepared, and the served root stays as it is.
+    if Candidate.ReadOnlySource(db) then
+        EvidenceCancelCandidate()
+        return false, "SAVED_FORMAT_READ_ONLY"
+    end
     -- The occupied bundle is the sole durable authority payload. Every commit
     -- reads its current payload from that bundle and never from the exact PR #68
     -- legacy locations, which after occupancy are neither input nor storage.
@@ -5172,7 +5837,8 @@ local function CommitBatch(root, items, reason, deferred, notifyScope,
     end
     Generation.PrepareReceiptRecords(items)
     local handle, handleWhy = Candidate.NewMutation(root, items, reason,
-        deferred, notifyScope, existingHandle, bundleOverrides, publishPlan)
+        deferred, notifyScope, existingHandle, bundleOverrides, publishPlan,
+        verdictReuse)
     if not handle then
         EvidenceCancelCandidate()
         return false, handleWhy
@@ -5190,10 +5856,10 @@ local function CommitBatch(root, items, reason, deferred, notifyScope,
 end
 
 local function CommitSlot(root, slot, verdict, rawWrites, reason, deferred,
-                          receiptRecords)
+                          receiptRecords, verdictReuse)
     return CommitBatch(root, {{slot=slot, verdict=verdict, writes=rawWrites,
         receiptRecords=receiptRecords}},
-        reason, deferred)
+        reason, deferred, nil, nil, nil, nil, verdictReuse)
 end
 
 local function SlotFor(root, id)
@@ -5247,7 +5913,9 @@ function Candidate.ReleasePreparedPutClaim(handle)
 end
 
 function Candidate.FinishPreparedPutWithoutCommit(handle, success, value)
-    EvidenceCancelCandidate()
+    -- A batch member refuses only itself: the candidate's staged evidence
+    -- belongs to the whole batch, and the batch cancels it if it fails.
+    if not handle.batchMember then EvidenceCancelCandidate() end
     local released, releaseWhy = Candidate.ReleasePreparedPutClaim(handle)
     if not released then return "failed", releaseWhy end
     handle.storedAs = handle.put and handle.put.storedAs or value
@@ -5290,6 +5958,14 @@ function Candidate.PumpPutPreparation(handle, work)
             local verdict = FinishRowVerdict(put.walker, put.slot, "overlay",
                 put.options)
             if verdict.state ~= "ADMITTED" then
+                -- Scalar facts only, for the caller's own refusal message.
+                local semantic = verdict.semantic
+                if type(semantic) == "table" then
+                    handle.failureDetail = {ordinary=semantic.ordinary,
+                        locked=semantic.locked, total=semantic.total,
+                        representation=put.walker
+                            and put.walker.semanticRepresentation or nil}
+                end
                 return Candidate.FinishPreparedPutWithoutCommit(handle, false,
                     verdict.reason)
             end
@@ -5305,6 +5981,13 @@ function Candidate.PumpPutPreparation(handle, work)
                 and (verdict.verifiedOwner or put.options.source == "remote") then
                 return Candidate.FinishPreparedPutWithoutCommit(handle, false,
                     "PROVENANCE_COLLISION")
+            end
+            -- A valid record for a new build while the catalog is full: now
+            -- refused and recorded, before any destination or commit work.
+            if put.capacityFull then
+                Candidate.NoteSaturation(put.capacityFact)
+                return Candidate.FinishPreparedPutWithoutCommit(handle, false,
+                    put.capacityFull)
             end
             local destination, destinationWhy = BuildDestination(verdict,
                 put.walker, existingRow and existingRow.source == "overlay"
@@ -5407,7 +6090,8 @@ function Candidate.PumpPutPreparation(handle, work)
             if not handle.ticket then return "prepared" end
             local claim, storedAs = put.claim, put.storedAs
             local outcome, commitWhy = CommitBatch(put.root, {put.item},
-                "build put", handle.deferred, nil, handle)
+                "build put", handle.deferred, nil, handle, nil, nil,
+                not handle.deferred)
             if type(outcome) ~= "table" then
                 return Candidate.FinishPreparedPutWithoutCommit(handle, false,
                     commitWhy)
@@ -5423,17 +6107,28 @@ function Candidate.PumpPutPreparation(handle, work)
     return "pending"
 end
 
-local function PutInternal(record, options, claim, deferred)
+-- Identity, slot, reservation and claim decisions for ONE record, exactly as
+-- a single put makes them. Every receiver batch member is prepared through
+-- this same function, so no record reaches the catalog through a shortcut
+-- that skips these checks.
+function Candidate.PreparePut(root, record, options, claim, deferred, reservedBuilds)
     local carriedUnknown
-    ST.debugStats.putCalls = ST.debugStats.putCalls + 1
-    local root, why = MutationGate()
-    if not root then return false, why end
     if type(record) ~= "table" or record.id == nil then
         return false, "build id required"
     end
     options = type(options) == "table" and options or {}
     local slot, existing, slotWhy = SlotFor(root, record.id)
     if not slot then return false, slotWhy end
+    -- A record for a new build identity while the catalog already holds the
+    -- limit takes no allocation reservation and never reaches a commit. The
+    -- refusal is given after the reservation, row and owner checks (see the
+    -- "finish" phase), so a suppressed, malformed or unowned record keeps its
+    -- own reason and is not counted as refused because the catalog is full.
+    local addsBuild = Candidate.AddsBuildIdentity(existing)
+    local full, fullFact
+    if addsBuild then
+        full, fullFact = Candidate.CapacityFull(root, "builds", reservedBuilds)
+    end
     local readmitTombstone = false
     if claim then
         local ok, entryOrWhy = ConsumeClaim(claim, slot.key,
@@ -5458,7 +6153,7 @@ local function PutInternal(record, options, claim, deferred)
         if existing and existing.state == "READ_ONLY_FUTURE_SCHEMA" then
             return false, "FUTURE_SCHEMA_RESERVATION"
         end
-        if Occupancy(existing) == "VACANT" then
+        if Occupancy(existing) == "VACANT" and not full then
             local superseded, supersedeWhy = SupersedeActiveClaim()
             if not superseded then return false, supersedeWhy end
             local issued, issueWhy = IssueClaim("allocation", slot.key, record.id)
@@ -5477,6 +6172,18 @@ local function PutInternal(record, options, claim, deferred)
     local handle = Candidate.NewPutPreparation(root, record, options, claim,
         deferred,
         candidateSlot, existing, readmitTombstone, carriedUnknown)
+    handle.put.addsBuild, handle.put.capacityFull, handle.put.capacityFact =
+        addsBuild, full, fullFact
+    return handle
+end
+
+local function PutInternal(record, options, claim, deferred)
+    ST.debugStats.putCalls = ST.debugStats.putCalls + 1
+    local root, why = MutationGate()
+    if not root then return false, why end
+    local handle, prepareWhy = Candidate.PreparePut(root, record, options,
+        claim, deferred)
+    if not handle then return false, prepareWhy end
     local work = NewWork(handle.counters)
     local prepared, prepareWhy = Candidate.PumpPutPreparation(handle, work)
     ClosePump(work)
@@ -5490,7 +6197,7 @@ local function PutInternal(record, options, claim, deferred)
     end
     local put = handle.put
     local ok, commitWhy = CommitSlot(root, put.item.slot, put.item.verdict,
-        put.item.writes, "build put", deferred)
+        put.item.writes, "build put", deferred, nil, not deferred)
     if type(ok) == "table" and ok.state == "pending" then
         ST.candidate.claim = put.claim
         ST.candidate.completion = "put"
@@ -5504,6 +6211,119 @@ local function PutInternal(record, options, claim, deferred)
     if not ok then return false, commitWhy end
     ST.debugStats.putChanges = ST.debugStats.putChanges + 1
     return true, put.storedAs
+end
+
+-- A finite, frozen batch of validated records published as ONE catalog
+-- mutation. Membership is fixed when the batch is created: a record that
+-- arrives later waits for a later batch instead of enlarging or restarting
+-- this candidate. Each member is prepared by PreparePutHandle and the ordinary
+-- row walk, keeps its own ticket, storage answer and refusal reason, and the
+-- admitted members are published together by the existing multi-item commit.
+-- The batch holds each member's allocation reservation until publication, in
+-- handle.claims; it is the only holder, because one candidate owns the
+-- mutation gate for its whole life.
+Candidate.BATCH_MAX_MEMBERS = 64
+
+function Candidate.NewBatchPutPreparation(root, members, deferred)
+    return {
+        mode="mutation", phase="batch-prepare", counters=NewCounters(), pumps=1,
+        preparationIdentity={}, failure=nil, token=root.token,
+        originalRoot=root, ticket=nil, reason="receiver batch",
+        deferred=deferred, notifyScope="all", completion="put",
+        storedAs="overlay", claims={},
+        batch={members=members, index=1, items={}, admitted=0, refused=0},
+    }
+end
+
+function Candidate.PumpBatchPutPreparation(handle, work)
+    local batch = handle.batch
+    while batch.index <= #batch.members do
+        if Exhausted(work.budget) then return "pending" end
+        local member = batch.members[batch.index]
+        if member.outcome then
+            batch.index = batch.index + 1
+        elseif not member.sub then
+            -- Members are prepared one after another, so batch.addedBuilds is
+            -- the number of new builds already admitted into this batch.
+            local sub, prepareWhy = Candidate.PreparePut(handle.originalRoot,
+                member.record, member.options, nil, handle.deferred,
+                batch.addedBuilds or 0)
+            if sub then
+                sub.batchMember = true
+                member.sub = sub
+            else
+                member.outcome = "failed"
+                member.reason = prepareWhy or "ROOT_CONSTRUCTION_FAILED"
+                batch.refused, batch.index = batch.refused + 1, batch.index + 1
+            end
+        else
+            local prepared, why = Candidate.PumpPutPreparation(member.sub, work)
+            if prepared == "pending" then return "pending" end
+            if prepared == "prepared" then
+                local put = member.sub.put
+                if put.claim then
+                    handle.claims[#handle.claims + 1] = put.claim
+                    if ST.activeClaim == put.claim then ST.activeClaim = nil end
+                    put.claim = nil
+                end
+                member.outcome, member.storedAs = "admitted", put.storedAs
+                if put.addsBuild then batch.addedBuilds = (batch.addedBuilds or 0) + 1 end
+                batch.items[#batch.items + 1] = put.item
+                batch.admitted = batch.admitted + 1
+            elseif prepared == "noop" then
+                member.outcome, member.storedAs = "noop", why
+            else
+                member.outcome = "failed"
+                member.reason = why or "ROOT_CONSTRUCTION_FAILED"
+                batch.refused = batch.refused + 1
+            end
+            batch.index = batch.index + 1
+        end
+    end
+    if #batch.items == 0 then return "noop" end
+    local outcome, commitWhy = CommitBatch(handle.originalRoot, batch.items,
+        "receiver batch", handle.deferred, handle.notifyScope, handle, nil, nil,
+        not handle.deferred)
+    if type(outcome) ~= "table" then
+        return "failed", commitWhy or "ROOT_CONSTRUCTION_FAILED"
+    end
+    return "ready"
+end
+
+-- Public: commit several validated records in one bounded catalog mutation.
+-- requests[i] = {record=<validated record>, options=<put options>}. The answer
+-- is one ticket per request, in the same order, or false and a reason when no
+-- candidate could be created at all.
+function Catalog.PutBatch(requests)
+    if type(requests) ~= "table" then return false, "batch required" end
+    local count = #requests
+    if count == 0 then return false, "empty batch" end
+    if count > Candidate.BATCH_MAX_MEMBERS then
+        return false, "BATCH_TOO_LARGE"
+    end
+    local root, why = MutationGate()
+    if not root then return false, why end
+    ST.debugStats.putCalls = ST.debugStats.putCalls + count
+    local members, tickets, seen = {}, {}, {}
+    for index = 1, count do
+        local request = requests[index]
+        local member = {ticket={state="pending", committed=false, pumps=0}}
+        local record = type(request) == "table" and request.record or nil
+        local typedKey = type(record) == "table" and record.id ~= nil
+            and TypedKey(record.id) or nil
+        if type(request) ~= "table" then
+            member.outcome, member.reason = "failed", "build id required"
+        elseif typedKey ~= nil and seen[typedKey] then
+            member.outcome, member.reason = "failed", "DUPLICATE_BATCH_MEMBER"
+        else
+            if typedKey ~= nil then seen[typedKey] = true end
+            member.record, member.options = request.record, request.options
+        end
+        ST.mutationTickets[member.ticket] = true
+        members[index], tickets[index] = member, member.ticket
+    end
+    ST.candidate = Candidate.NewBatchPutPreparation(root, members, false)
+    return nil, "ROOT_MUTATION_PENDING", tickets
 end
 
 function Catalog.Put(record, options)
@@ -5601,17 +6421,6 @@ function Catalog.RemoveOverlay(id)
     return true
 end
 
-function Catalog.RemoveOverlayBatch(ids)
-    local root, why = MutationGate()
-    if not root then return 0, why end
-    if type(ids) ~= "table" then return 0, "build id list required" end
-    local removed = 0
-    for _, id in ipairs(ids) do
-        if Catalog.RemoveOverlay(id) then removed = removed + 1 end
-    end
-    return removed
-end
-
 local function TombstoneRecord(slot, existing, tombstone)
     local snapshot = existing.snapshot
     return {
@@ -5663,6 +6472,9 @@ function Catalog.SetTombstone(id, tombstone, options)
         return false, sourceKind == "remote" and "REMOTE_OWNER_REQUIRED"
             or "LOCAL_OWNER_REQUIRED"
     end
+    -- A removal that needs a new removal marker while that map is full is
+    -- refused after the owner proof, so only a removal the sender may make
+    -- is counted as refused because the map is full.
     local current = CurrentOwnerKey()
     if sourceKind == "local" then
         -- Local deletion requires current local-owner proof for the admitted
@@ -5674,6 +6486,8 @@ function Catalog.SetTombstone(id, tombstone, options)
         if not owns then
             return false, "LOCAL_OWNER_REQUIRED"
         end
+        local full = Candidate.CapacityRefusal(root, "tombstones", 0)
+        if full then return false, full end
         local record = TombstoneRecord(slot, existing, tombstone)
         if not record then return false, "GENERATION_EXHAUSTED" end
         local verdict = NewVerdict(slot, "TOMBSTONED", "TOMBSTONE_CURRENT_DENY")
@@ -5726,6 +6540,8 @@ function Catalog.SetTombstone(id, tombstone, options)
     if not (owner and Identity.TransportOwns(owner, options.sender)) then
         return false, "REMOTE_OWNER_REQUIRED"
     end
+    local full = Candidate.CapacityRefusal(root, "tombstones", 0)
+    if full then return false, full end
     local payload = {stamp=stamp, author=author,
         ownerKey=type(tombstone.ownerKey) == "string" and tombstone.ownerKey or owner,
         ownerVerified=tombstone.ownerVerified == true or nil}
@@ -5835,8 +6651,15 @@ function Catalog.MaintenanceEvictOverlay(handle, id)
     if existing.tombstone then return false, "TOMBSTONE_RESERVATION" end
     if existing.state == "READ_ONLY_FUTURE_SCHEMA" then return false, "FUTURE_SCHEMA_RESERVATION" end
     if not existing.snapshot then return false, "INVALID_RESERVATION" end
+    -- An eviction needs its retention marker. When the marker map is full the
+    -- eviction is not staged at all: no partial eviction, no futile commit.
+    if not existing.barrier then
+        local full = Candidate.CapacityRefusal(root, "barriers", handle.barrierDelta)
+        if full then return false, full end
+    end
     local barrier, barrierWhy = BarrierRecord(slot, existing)
     if not barrier then return false, barrierWhy end
+    if not existing.barrier then handle.barrierDelta = (handle.barrierDelta or 0) + 1 end
     handle.seen[slot.key] = true
     handle.ops[#handle.ops + 1] = {kind="evict", slot=slot, existing=existing,
         barrier=barrier}
@@ -5871,31 +6694,41 @@ function Catalog.MaintenanceRetireTombstone(handle, id)
     return true
 end
 
-local function BarrierExpired(barrier)
-    if barrier.state == "BARRIER_OPAQUE_BLOCK_ALL" then
+-- A retention marker expires 30 days after its trusted local age: the saved
+-- local creation time of a current-format marker, or the locally recorded
+-- first observation (firstSeen, kept by the retention owner) of an untimed or
+-- legacy marker. Missing, invalid or future age, and an untrusted clock, never
+-- expire anything. A full catalog is not a reason to expire a marker early.
+local function BarrierExpired(barrier, firstSeen)
+    local kind = barrier.ageKind
+    if kind ~= "local" and kind ~= "untimed" and kind ~= "legacy" then
         return false, "BARRIER_RESERVATION_BLOCK_ALL"
     end
     local now = TrustedServerTime()
     if not now then return false, "TIME_UNTRUSTED" end
-    local observed = barrier.state == "BARRIER_CURRENT_DENY"
-        and (tonumber(barrier.receiptAtServerTime) or 0)
-        or (tonumber(barrier.readmittedAtServerTime) or 0)
-    if observed <= 0 or now - observed < BARRIER_AGE then
-        return false, "BARRIER_NOT_EXPIRED"
-    end
+    local observed = kind == "local" and barrier.createdAt
+        or FiniteInteger(firstSeen, 1, MAX_SAFE_INTEGER)
+    if not observed then return false, "BARRIER_AGE_UNKNOWN" end
+    if observed > now then return false, "BARRIER_AGE_INVALID" end
+    if now - observed < BARRIER_AGE then return false, "BARRIER_NOT_EXPIRED" end
     return true
 end
 
-function Catalog.MaintenanceExpireBarrier(handle, id)
+-- Expiring a retention marker removes only that suppression: no build,
+-- score, Wishlist or assignment is removed, no row is restored, and a removal
+-- marker on the same ID stays in force. firstSeen is required only for an
+-- untimed or legacy marker.
+function Catalog.MaintenanceExpireBarrier(handle, id, firstSeen)
     local root, why = MaintenanceOpen(handle)
     if not root then return false, why end
     local slot, existing, slotWhy = SlotFor(root, id)
     if not slot then return false, slotWhy end
     if not (existing and existing.barrier) then return false, "BARRIER_ABSENT" end
-    local expired, expiredWhy = BarrierExpired(existing.barrier)
+    local expired, expiredWhy = BarrierExpired(existing.barrier, firstSeen)
     if not expired then return false, expiredWhy end
     if handle.seen[slot.key] then return false, "DUPLICATE_TARGET" end
     handle.seen[slot.key] = true
+    handle.barrierDelta = (handle.barrierDelta or 0) - 1
     handle.ops[#handle.ops + 1] = {kind="expire", slot=slot, existing=existing}
     return true
 end
@@ -5925,11 +6758,18 @@ function Catalog.MaintenanceReplaceRow(handle, id, record, options)
         handle.failed = "PROVENANCE_COLLISION"
         return false, "PROVENANCE_COLLISION"
     end
+    -- An insert is a new build identity: while the catalog is full it is not
+    -- staged, so no commit starts only to be refused by the full collection.
+    if inserting then
+        local full = Candidate.CapacityRefusal(root, "builds", handle.buildDelta)
+        if full then return false, full end
+    end
     local destination, destinationWhy = BuildDestination(verdict, walker, existing)
     if not destination then
         handle.failed = destinationWhy
         return false, destinationWhy
     end
+    if inserting then handle.buildDelta = (handle.buildDelta or 0) + 1 end
     verdict.state = inserting and "ADMITTED" or "READMITTED"
     verdict.bundledRaw = existing and existing.bundledRaw or BundledRawFor(slot)
     verdict.overlayRaw = destination
@@ -6055,7 +6895,13 @@ function Candidate.PumpMaintenancePreparation(handle, work)
     return "pending"
 end
 
-function Catalog.CommitMaintenance(handle, bundleOverrides)
+-- publicationGuard (optional): a function the maintenance owner binds to the
+-- source its bundleOverrides were prepared from. It is called at the actual
+-- publication point of this commit; unless it returns true, the publication
+-- is refused with PUBLICATION_SOURCE_CHANGED (the published root stays
+-- admitted and nothing is written), so the owner prepares again from the
+-- current source instead of publishing an older copy over an accepted write.
+function Catalog.CommitMaintenance(handle, bundleOverrides, publicationGuard)
     local root, why = MaintenanceOpen(handle)
     if not root then return false, why end
     handle.state = "committing"
@@ -6096,6 +6942,9 @@ function Catalog.CommitMaintenance(handle, bundleOverrides)
     end
     local candidate = Candidate.NewMaintenancePreparation(
         root, handle, bundleOverrides)
+    if type(publicationGuard) == "function" then
+        candidate.publicationGuard = publicationGuard
+    end
     ST.candidate = candidate
     local outcome = Catalog.PumpRootAdmission()
     if candidate.ticket.state == "committed" then
@@ -6105,23 +6954,6 @@ function Catalog.CommitMaintenance(handle, bundleOverrides)
         return false, candidate.ticket.reason
     end
     return nil, "ROOT_MUTATION_PENDING", candidate.ticket
-end
-
-function Catalog.RemoveTombstonesBatch(ids)
-    local root, why = MutationGate()
-    if not root then return 0, why end
-    if type(ids) ~= "table" then return 0, "tombstone id list required" end
-    local removed = 0
-    for _, id in ipairs(ids) do
-        local handle = Catalog.BeginCatalogMaintenance({database=ST.db, operation="retention"})
-        if handle and Catalog.MaintenanceRetireTombstone(handle, id)
-            and Catalog.CommitMaintenance(handle) then
-            removed = removed + 1
-        elseif handle then
-            Catalog.CancelMaintenance(handle)
-        end
-    end
-    return removed
 end
 
 ------------------------------------------------------------------------
@@ -6223,12 +7055,16 @@ function Cursor.CopyStep(state, verdict)
     return nil, state.copyVerdict, false
 end
 
-local function BeginCursor(family, state)
+-- `slot` names the one active cursor a new cursor supersedes. It is the
+-- family itself, except for the fixed named readers below, which own one
+-- slot each so concurrent long walks cannot cancel each other.
+local function BeginCursor(family, state, slot)
     local root, why = Gate()
     if not root then return nil, why end
     local sequence, sequenceWhy = Generation.Advance(ST, "cursorSequence")
     if not sequence then return nil, sequenceWhy end
-    local previous = ST.activeCursors[family]
+    slot = slot or family
+    local previous = ST.activeCursors[slot]
     if previous then ST.cursorRegistry[previous] = nil end
     local token = {kind=family, cursorId=sequence, generation=ST.generation}
     state = state or {}
@@ -6236,10 +7072,11 @@ local function BeginCursor(family, state)
     -- against. It holds no root wrapper, so a superseded root is released at
     -- publication instead of being pinned by an unused retained token.
     state.kind, state.generation = family, ST.generation
+    state.slot = slot
     state.servingGeneration = ST.servingGeneration
     state.nextIndex, state.exhausted = 1, false
     ST.cursorRegistry[token] = state
-    ST.activeCursors[family] = token
+    ST.activeCursors[slot] = token
     ST.debugStats.cursorsBegun = ST.debugStats.cursorsBegun + 1
     return token
 end
@@ -6253,7 +7090,8 @@ local function CursorState(token, family)
         -- A stale-once sentinel refuses exactly once and then leaves the
         -- registry; its next use is INVALID_CURSOR.
         ST.cursorRegistry[token] = nil
-        if ST.activeCursors[family] == token then ST.activeCursors[family] = nil end
+        local slot = state.slot or family
+        if ST.activeCursors[slot] == token then ST.activeCursors[slot] = nil end
         return nil, "STALE_CURSOR"
     end
     return state, nil, root
@@ -6318,6 +7156,21 @@ function Catalog.BeginRecordCursor()
     return BeginCursor("record")
 end
 
+-- Passive position of a live record cursor: rows already passed and the
+-- fixed row count of the root it reads. No registry, drift or root change;
+-- a stale or foreign token simply has no position.
+function Catalog.RecordCursorProgress(token)
+    local state = type(token) == "table" and ST.cursorRegistry[token] or nil
+    local root = ServingCatalogRoot()
+    if not state or state.kind ~= "record" or not root or state.stale
+        or state.servingGeneration ~= ST.servingGeneration
+        or state.generation ~= ST.generation
+        or type(root.slotCount) ~= "number" or root.slotCount < 1 then
+        return nil
+    end
+    return math.min(root.slotCount, math.max(0, state.nextIndex - 1)), root.slotCount
+end
+
 function Catalog.RecordCursorNext(token)
     local state, why, root = CursorState(token, "record")
     if not state then return nil, why end
@@ -6325,8 +7178,21 @@ function Catalog.RecordCursorNext(token)
     return Cursor.RecordPage(state, root, Admitted)
 end
 
-function Catalog.BeginSummaryCursor()
-    return BeginCursor("summary")
+-- Fixed named summary readers. Each owns one independent slot, so the
+-- Community list walk, the hash warm-up, the ranked retention scan and the
+-- Sync diagnostic page never supersede each other's multi-frame walk (the
+-- first two could livelock on a multi-frame catalog; the retention scan was
+-- ended by the hash cache's probe and by the diagnostic page). The allowlist
+-- is fixed and small, so the slot registry stays bounded: any other caller,
+-- or an unknown name, keeps the shared "summary" slot unchanged.
+Cursor.summaryReaders = {
+    community=true, ["build-hash-cache"]=true, retention=true, diagnostic=true,
+}
+
+function Catalog.BeginSummaryCursor(reader)
+    local slot = Cursor.summaryReaders[reader] == true
+        and ("summary:" .. reader) or nil
+    return BeginCursor("summary", nil, slot)
 end
 
 function Catalog.SummaryCursorNext(token)
@@ -6541,6 +7407,35 @@ function Catalog.FindExactFingerprint(fingerprint)
     local verdict = ExactWinner(root, fingerprint)
     if not verdict then return nil, nil, nil end
     return verdict.id, PublicRecord(verdict), verdict.source
+end
+
+-- Every admitted complete ordinary row with this exact ordinary fingerprint
+-- (the rows the exact index ranks for ExactWinner), as typed ids in a fixed
+-- order; ids only, no record copies. `limit` bounds the answer (default: the
+-- one-call collection limit): a bucket with more rows is refused as a whole
+-- with CURSOR_REQUIRED, never truncated, so a caller can only ever see the
+-- complete candidate set or an explicit refusal. Record linking reads this
+-- instead of walking the whole collection through the record cursor.
+function Catalog.ExactFingerprintIds(fingerprint, limit)
+    local root = Gate()
+    if not root then return nil, "catalog authority unavailable" end
+    ST.debugStats.exactLookups = ST.debugStats.exactLookups + 1
+    if type(fingerprint) ~= "string" or fingerprint == "" then return {} end
+    limit = math.max(1, math.floor(tonumber(limit) or BUDGET.oneCallRows))
+    local bucket = root.index.exact[fingerprint]
+    if not bucket then return {} end
+    if (tonumber(bucket.count) or #bucket.idVector) > limit then
+        return nil, "CURSOR_REQUIRED"
+    end
+    local ids = {}
+    for _, key in ipairs(bucket.idVector) do
+        local verdict = root.rows[key]
+        if verdict then ids[#ids + 1] = verdict.id end
+    end
+    table.sort(ids, function(left, right)
+        return Identity.CompareTypedIds(left, right) < 0
+    end)
+    return ids
 end
 
 function Catalog.ValidateLegacyFingerprintClaim(rawId, record)

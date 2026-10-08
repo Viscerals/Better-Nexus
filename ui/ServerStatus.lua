@@ -9,7 +9,17 @@ Nexus.ServerStatus = M
 local rootFrame
 local scanner
 local elapsed = 0
-local hideHooked = false
+-- #33: the frames that already carry the OnShow hook. The client chains
+-- hooks and never removes them, so the guard is the frame OBJECT, not a flag
+-- that a world entry resets. Weak keys: a frame the game discards is not kept.
+local hookedFrames = setmetatable({}, { __mode = "k" })
+-- The exact widget THIS module hid, or nil. Holding the frame rather than a
+-- flag answers both questions at once: whether we are the reason something is
+-- hidden, and WHICH something. It is deliberately not cleared when the world
+-- changes -- a widget we took away and have not given back is still ours to
+-- give back, and client frames survive a zone change -- but a different frame
+-- object is not the one we hid and is never given back on its behalf.
+local suppressedFrame = nil
 local cachedSummary = { mode = nil, tier = nil, ash = nil, gain = nil, intensity = nil, intensityLevel = nil, raw = "" }
 local cachedSignature = ""
 
@@ -72,7 +82,30 @@ local function GetAllSourceTexts()
     return out
 end
 
-local function ParseSummary(texts)
+-- The Soul Ash balance from the HUD's own named field, read before any text
+-- scan: the provider's soulPointsText (PlayerRunUI.GetUIElements), else the
+-- root frame's field of that name. nil: the HUD names no such field. false: it
+-- does, and the field does not hold a plain balance (a percentage or any other
+-- text is never taken as the balance). Read under protection: these are
+-- another addon's tables.
+local function NamedSoulAsh()
+    local ok, field = pcall(function()
+        local pe = _G.ProjectEbonhold
+        local ui = type(pe) == "table" and pe.PlayerRunUI or nil
+        local elements = type(ui) == "table" and type(ui.GetUIElements) == "function"
+            and ui.GetUIElements() or nil
+        local named = type(elements) == "table" and elements.soulPointsText or nil
+        if named == nil and rootFrame then named = rootFrame.soulPointsText end
+        return named
+    end)
+    if not ok or field == nil then return nil end
+    local text = SafeText(field)
+    return text and text:match("^%d[%d,]*$") or false
+end
+
+-- `namedAsh` (NamedSoulAsh): the named field's balance, false when the named
+-- field holds no balance, nil when there is none and the texts are scanned.
+local function ParseSummary(texts, namedAsh)
     local clean = Strip(table.concat(texts or {}, "  "))
 
     local tier = clean:match("[Hh][Cc]%s*([1-5])")
@@ -90,11 +123,19 @@ local function ParseSummary(texts)
     local gain = clean:match("([%+%-]%d+%%)")
         or clean:match("[Mm]ultiplier%s*[:%-]?%s*([%+%-]?%d+%%)")
 
-    local ash = clean:match("[Ss]oul%s*[Aa]sh[e]?[s]?%s*[:%-]?%s*([%d,]+)")
-    if not ash then
+    local ash
+    if namedAsh ~= nil then
+        ash = namedAsh or nil
+    else
+        ash = clean:match("[Ss]oul%s*[Aa]sh[e]?[s]?%s*[:%-]?%s*([%d,]+)")
+    end
+    if not ash and namedAsh == nil then
         -- The compact server HUD often exposes only the edit-box number. Pick
-        -- a plausible integer, excluding percentages, tier values and versions.
-        for token in clean:gmatch("%f[%d]([%d,]+)%f[^%d,]") do
+        -- a plausible integer, excluding percentages, signed values, tier
+        -- values and versions: a multiplier such as "+150%" is never a
+        -- balance.
+        local unsigned = clean:gsub("[%+%-]?[%d,%.]+%%", " "):gsub("[%+%-][%d,]+", " ")
+        for token in unsigned:gmatch("%f[%d]([%d,]+)%f[^%d,]") do
             local digits = token:gsub(",", "")
             if #digits >= 3 and tonumber(digits) then
                 ash = token
@@ -148,53 +189,221 @@ local function GetSelectedDifficultySummary()
     return nil
 end
 
+-- The game's Intensity constants (ProjectEbonhold.Constants: MAX_INTENSITY
+-- and INTENSITY_LEVEL_1..5). Used only when each is a finite number, the five
+-- levels rise strictly from above zero, and the maximum is at least level 5;
+-- otherwise nil: no level or maximum is made up.
+local function IntensityConstants()
+    local ok, maximum, thresholds = pcall(function()
+        local pe = _G.ProjectEbonhold
+        local constants = type(pe) == "table" and pe.Constants or nil
+        if type(constants) ~= "table" then return nil end
+        local levels, previous = {}, 0
+        for i = 1, 5 do
+            local value = constants["INTENSITY_LEVEL_" .. i]
+            if type(value) ~= "number" or value ~= value or value >= math.huge
+                or value <= previous then return nil end
+            levels[i], previous = value, value
+        end
+        local top = constants.MAX_INTENSITY
+        if type(top) ~= "number" or top ~= top or top >= math.huge
+            or top < previous then return nil end
+        return top, levels
+    end)
+    if not ok or not maximum then return nil, nil end
+    return maximum, thresholds
+end
+
+-- The current Intensity (never negative), its level -- the highest constant
+-- threshold reached, as the game's own HUD counts it -- and the constants. With
+-- valid constants the value is held to their maximum; without them the level,
+-- the maximum and the thresholds are unknown (nil) and the value is as read.
 local function ReadIntensity()
     local data = _G.EbonholdIntensityData
     if type(data) ~= "table" then return nil, nil end
     local value = tonumber(data.intensity)
-    if not value then return nil, nil end
-    value = math.max(0, math.min(500, value))
-    local level = math.floor(value / 100)
-    if level > 5 then level = 5 end
-    return value, level
+    if not value or value ~= value or value >= math.huge or value <= -math.huge then
+        return nil, nil
+    end
+    value = math.max(0, value)
+    local maximum, thresholds = IntensityConstants()
+    if not maximum then return value, nil end
+    value = math.min(maximum, value)
+    local level = 0
+    for i = 1, 5 do
+        if value >= thresholds[i] then level = i end
+    end
+    return value, level, maximum, thresholds
+end
+
+-- The table the HUD mode is kept in: the saved root, or for a read-only saved
+-- root the Store owner's session-only table (starting with the saved mode).
+local MODE_SAVED_KEYS = {"soulAshHudMode"}
+local function ModeRoot()
+    NexusDB = NexusDB or {}
+    local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
+    local root = type(writable) == "function"
+        and writable(NexusDB, MODE_SAVED_KEYS) or nil
+    return type(root) == "table" and root or NexusDB
 end
 
 local function EnsureDefaultMode()
-    NexusDB = NexusDB or {}
-    if NexusDB.soulAshHudMode ~= "server" and NexusDB.soulAshHudMode ~= "nexus" then
-        NexusDB.soulAshHudMode = "nexus"
+    local root = ModeRoot()
+    if root.soulAshHudMode ~= "server" and root.soulAshHudMode ~= "nexus" then
+        root.soulAshHudMode = "nexus"
     end
 end
 
 local function UsingNexusHud()
     EnsureDefaultMode()
-    return NexusDB.soulAshHudMode == "nexus"
+    return ModeRoot().soulAshHudMode == "nexus"
 end
 
+-- The same answer WITHOUT normalizing the stored value. EnsureDefaultMode
+-- writes the default into the profile, which is right when this owner is
+-- applying the preference and wrong when something is merely reading it: a
+-- support report must not store a setting just by describing one.
+local function SavedModeIsNexus()
+    local saved = type(NexusDB) == "table" and ModeRoot().soulAshHudMode or nil
+    return saved ~= "server"
+end
+
+-- Can the Nexus HUD actually display right now? Asked of the panel owner,
+-- which is the only place that knows whether a render has committed. A panel
+-- that is merely hidden -- by the player, or by an open dialog -- is still
+-- able to display and still counts as the replacement; a panel that has never
+-- committed, has failed, or was never loaded does not.
+--
+-- Protected, and false when unknown: if this owner cannot get an answer, the
+-- stock widget keeps its place rather than being hidden on an assumption.
+-- The READ is inside the protection, not only the call: another addon can
+-- replace this global with a table whose __index raises, and this runs on a
+-- timer, so an unprotected field access would raise once a second.
+local function PanelFacts()
+    local ok, facts = pcall(function()
+        local panel = Nexus and Nexus.Panel
+        if type(panel) ~= "table" then return nil end
+        if type(panel.VisibilityFacts) ~= "function" then
+            -- An older or partially loaded panel: only its own visibility is
+            -- knowable, and that is enough to prove it is displaying.
+            if type(panel.IsShown) == "function" then
+                local shown = panel.IsShown() == true
+                return {ready = shown, committed = shown}
+            end
+            return nil
+        end
+        local raw = panel.VisibilityFacts()
+        if type(raw) ~= "table" then return nil end
+        -- The two scalars are copied out INSIDE the protection, and the
+        -- foreign table is never handed to a caller. Returning it would put
+        -- every later field read outside this pcall, which is how the same
+        -- hazard came back once already: the rule is not "protect the call",
+        -- it is "never let a foreign table out of here".
+        return {ready = raw.ready == true, committed = raw.committed == true}
+    end)
+    if not ok then return nil end
+    return facts
+end
+
+local function ReplacementAvailable()
+    local facts = PanelFacts()
+    return facts ~= nil and facts.ready == true
+end
+
+-- Whether the replacement is positively GONE, which is a stronger statement
+-- than "not available right now". A panel part-way through applying a render
+-- is briefly unavailable while its committed model still stands; treating
+-- that instant as gone would hand the stock widget back and take it away
+-- again on the next scan.
+local function ReplacementGone()
+    local facts = PanelFacts()
+    return facts == nil or facts.committed ~= true
+end
+
+-- Whether the stock widget should be standing aside for the Nexus HUD. Both
+-- halves must hold: the player asked for the Nexus HUD, and that HUD can
+-- display. Nothing here is decided from the mode alone.
+local function ReplacingServerHud()
+    return UsingNexusHud() and ReplacementAvailable()
+end
+
+-- Returns whether the frame really did what was asked. A widget with no Hide,
+-- or one whose Hide raises, has NOT been taken away by us, and claiming it
+-- would later "give back" something we never had.
 local function SetShown(frame, shown)
-    if not frame then return end
+    if not frame then return false end
     if shown then
-        if type(frame.Show) == "function" then pcall(frame.Show, frame) end
+        local done = false
+        if type(frame.Show) == "function" then done = pcall(frame.Show, frame) end
         if type(frame.SetAlpha) == "function" then pcall(frame.SetAlpha, frame, 1) end
         if type(frame.EnableMouse) == "function" then pcall(frame.EnableMouse, frame, true) end
-    else
-        if type(frame.Hide) == "function" then pcall(frame.Hide, frame) end
+        return done
     end
+    if type(frame.Hide) ~= "function" then return false end
+    return pcall(frame.Hide, frame)
 end
 
 local function ApplyVisibility()
     if not rootFrame then return end
-    local hideServer = UsingNexusHud()
 
-    -- The confirmed Project Ebonhold root is the complete stock widget.
-    -- Hide/show it as one unit; never touch unrelated global addon frames.
-    SetShown(rootFrame, not hideServer)
+    -- Four states. The stock widget is hidden only while a replacement is
+    -- really taking its place; it is shown because the player asked for it;
+    -- it is GIVEN BACK when this module hid it for a replacement that can no
+    -- longer display; and otherwise it is left exactly as it is. That last
+    -- case matters: forcing it to show every second would fight the game and
+    -- would override a player who closed it themselves.
+    if ReplacingServerHud() then
+        -- The confirmed Project Ebonhold root is the complete stock widget.
+        -- Hide/show it as one unit; never touch unrelated global addon frames.
+        -- Only a hide that actually took something away is remembered as
+        -- ours: hiding an already-hidden widget takes nothing, and claiming
+        -- it would let a later give-back put back something the player -- or
+        -- the game -- had closed for their own reasons.
+        --
+        -- That question is asked ONCE, on the scan that takes the widget
+        -- away. This branch runs every second while the replacement is
+        -- displaying, and on every later scan the widget is hidden BECAUSE
+        -- WE HID IT; re-asking would make the module forget its own hide one
+        -- second after making it, and the give-back would never fire again.
+        if suppressedFrame ~= rootFrame then
+            local wasShown = nil
+            if type(rootFrame.IsShown) == "function" then
+                local okShown, value = pcall(rootFrame.IsShown, rootFrame)
+                if okShown then wasShown = value and true or false end
+            end
+            local hid = SetShown(rootFrame, false)
+            suppressedFrame = (hid and wasShown ~= false) and rootFrame or nil
+        else
+            SetShown(rootFrame, false)
+        end
+    elseif not UsingNexusHud() then
+        SetShown(rootFrame, true)
+        suppressedFrame = nil
+    elseif suppressedFrame == rootFrame and ReplacementGone() then
+        -- We took THIS widget away for a replacement, and the replacement is
+        -- gone: a committed render failed, or the panel stopped being able to
+        -- display. Give it back ONCE and stop claiming it, so nothing is
+        -- forced every second and a later hide is not fought. A different
+        -- widget object -- after a zone change, or a rebuild by the game --
+        -- is not one we hid, so it is left alone.
+        SetShown(rootFrame, true)
+        suppressedFrame = nil
+    end
 
     local hookTarget = rootFrame
-    if hookTarget and not hideHooked and type(hookTarget.HookScript) == "function" then
-        hideHooked = true
+    if hookTarget and not hookedFrames[hookTarget]
+        and type(hookTarget.HookScript) == "function" then
+        hookedFrames[hookTarget] = true
         hookTarget:HookScript("OnShow", function(self)
-            if UsingNexusHud() then self:Hide() end
+            -- The same question as above: a widget that comes back while no
+            -- replacement can display is left where the game put it. A hide
+            -- here takes a widget that was just shown away, so it is ours to
+            -- give back, exactly like the scanner's own hide: recorded only
+            -- when it really happened, and only for the current widget.
+            if ReplacingServerHud() then
+                local hid = SetShown(self, false)
+                if hid and self == rootFrame then suppressedFrame = self end
+            end
         end)
     end
 end
@@ -208,7 +417,6 @@ function M.Init()
     scanner:RegisterEvent("PLAYER_ENTERING_WORLD")
     scanner:SetScript("OnEvent", function()
         rootFrame = nil
-        hideHooked = false
     end)
     scanner:SetScript("OnUpdate", function(_, dt)
         elapsed = elapsed + (tonumber(dt) or 0)
@@ -217,14 +425,15 @@ function M.Init()
 
         if not rootFrame then FindFrames() end
         ApplyVisibility()
-        local summary = ParseSummary(GetAllSourceTexts())
+        local summary = ParseSummary(GetAllSourceTexts(), NamedSoulAsh())
         local selectedDifficulty = GetSelectedDifficultySummary()
         if selectedDifficulty and selectedDifficulty.tier then
             summary.tier = selectedDifficulty.tier
             summary.mode = selectedDifficulty.mode or selectedDifficulty.tier
         end
-        summary.intensity, summary.intensityLevel = ReadIntensity()
-        local sig = table.concat({ tostring(summary.mode), tostring(summary.tier), tostring(summary.ash), tostring(summary.gain), tostring(summary.intensity), tostring(summary.intensityLevel), tostring(UsingNexusHud()) }, "|")
+        summary.intensity, summary.intensityLevel, summary.intensityMax,
+            summary.intensityThresholds = ReadIntensity()
+        local sig = table.concat({ tostring(summary.mode), tostring(summary.tier), tostring(summary.ash), tostring(summary.gain), tostring(summary.intensity), tostring(summary.intensityLevel), tostring(summary.intensityMax), tostring(UsingNexusHud()) }, "|")
         if sig ~= cachedSignature then
             cachedSignature = sig
             cachedSummary = summary
@@ -236,14 +445,15 @@ end
 function M.GetSummary()
     if cachedSignature == "" then
         if not rootFrame then FindFrames() end
-        cachedSummary = ParseSummary(GetAllSourceTexts())
+        cachedSummary = ParseSummary(GetAllSourceTexts(), NamedSoulAsh())
         local selectedDifficulty = GetSelectedDifficultySummary()
         if selectedDifficulty and selectedDifficulty.tier then
             cachedSummary.tier = selectedDifficulty.tier
             cachedSummary.mode = selectedDifficulty.mode or selectedDifficulty.tier
         end
-        cachedSummary.intensity, cachedSummary.intensityLevel = ReadIntensity()
-        cachedSignature = table.concat({ tostring(cachedSummary.mode), tostring(cachedSummary.tier), tostring(cachedSummary.ash), tostring(cachedSummary.gain), tostring(cachedSummary.intensity), tostring(cachedSummary.intensityLevel), tostring(UsingNexusHud()) }, "|")
+        cachedSummary.intensity, cachedSummary.intensityLevel,
+            cachedSummary.intensityMax, cachedSummary.intensityThresholds = ReadIntensity()
+        cachedSignature = table.concat({ tostring(cachedSummary.mode), tostring(cachedSummary.tier), tostring(cachedSummary.ash), tostring(cachedSummary.gain), tostring(cachedSummary.intensity), tostring(cachedSummary.intensityLevel), tostring(cachedSummary.intensityMax), tostring(UsingNexusHud()) }, "|")
     end
     return cachedSummary
 end
@@ -257,106 +467,111 @@ function M.IsUsingNexusHud()
     return UsingNexusHud()
 end
 
+-- Whether the stock widget is currently standing aside, and why or why not.
+-- Read-only, bounded, and derived from owners that are already running: it
+-- starts nothing, rescans nothing and writes nothing.
+function M.VisibilityFacts()
+    local detected = rootFrame ~= nil
+    local shown = nil
+    if detected and type(rootFrame.IsShown) == "function" then
+        local ok, value = pcall(rootFrame.IsShown, rootFrame)
+        if ok then shown = value and true or false end
+    end
+    local alpha = nil
+    if detected and type(rootFrame.GetAlpha) == "function" then
+        local ok, value = pcall(rootFrame.GetAlpha, rootFrame)
+        if ok then alpha = tonumber(value) end
+    end
+    local nexusMode = SavedModeIsNexus()
+    local available = ReplacementAvailable()
+    return {
+        mode = nexusMode and "nexus" or "server",
+        detected = detected,
+        stockShown = shown,
+        stockAlpha = alpha,
+        replacementAvailable = available,
+        replacing = nexusMode and available or false,
+    }
+end
+
 function M.SetMode(mode)
-    NexusDB = NexusDB or {}
-    NexusDB.soulAshHudMode = mode == "server" and "server" or "nexus"
+    ModeRoot().soulAshHudMode = mode == "server" and "server" or "nexus"
     ApplyVisibility()
     if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
 end
 
-local function CollectClickableChildren(frame, out, seen, depth)
-    out = out or {}
-    seen = seen or {}
-    depth = depth or 0
-    if not frame or seen[frame] or depth > 8 then return out end
-    seen[frame] = true
+-- #32: no stock click handler is found by searching. Project Ebonhold creates
+-- HardmodeFrame only inside its own toggle, which also asks the server for the
+-- current tier and Soul Ash pool and rebuilds the panel; it publishes the one
+-- control that runs that toggle as ProjectEbonhold.HardmodeButton, a child of
+-- the run HUD's header. Nexus calls that control's handler and nothing else,
+-- and only when the button really sits in ProjectEbonholdPlayerRunFrame.
+-- HardmodeFrame:Show() alone would open nothing before the first toggle and
+-- show stale data after it, so it is never used to open the panel.
+local hardcoreUnavailableNoted = false
 
-    if type(frame.GetScript) == "function" then
-        local ok, onClick = pcall(frame.GetScript, frame, "OnClick")
-        if ok and type(onClick) == "function" then
-            out[#out + 1] = frame
-        end
-    end
-
-    if type(frame.GetChildren) == "function" then
-        local ok, children = pcall(function() return { frame:GetChildren() } end)
-        if ok then
-            for i = 1, #children do
-                CollectClickableChildren(children[i], out, seen, depth + 1)
-            end
-        end
-    end
-    return out
+-- The published Hardcore control, or nil. Every read of the foreign tables is
+-- protected: another addon can replace these globals with anything.
+local function HardcoreControl()
+    local ok, onClick, button = pcall(function()
+        local pe = _G.ProjectEbonhold
+        if type(pe) ~= "table" then return nil end
+        local b = pe.HardmodeButton
+        local root = _G.ProjectEbonholdPlayerRunFrame
+        if type(b) ~= "table" or type(root) ~= "table" then return nil end
+        local header = b:GetParent()
+        if type(header) ~= "table" or header:GetParent() ~= root then return nil end
+        local fn = b:GetScript("OnClick")
+        if type(fn) ~= "function" then return nil end
+        return fn, b
+    end)
+    if not ok then return nil end
+    return onClick, button
 end
 
-local function ClickServerDifficultyControl()
-    if not rootFrame then FindFrames() end
-    if not rootFrame then return false end
-
-    local buttons = CollectClickableChildren(rootFrame)
-    local rootLeft = type(rootFrame.GetLeft) == "function" and rootFrame:GetLeft() or nil
-    local rootBottom = type(rootFrame.GetBottom) == "function" and rootFrame:GetBottom() or nil
-    local rootWidth = type(rootFrame.GetWidth) == "function" and rootFrame:GetWidth() or 0
-    local rootHeight = type(rootFrame.GetHeight) == "function" and rootFrame:GetHeight() or 0
-
-    table.sort(buttons, function(a, b)
-        local function score(btn)
-            local x, y = nil, nil
-            if type(btn.GetCenter) == "function" then x, y = btn:GetCenter() end
-            local sx, sy = 0, 0
-            if x and rootLeft and rootWidth > 0 then sx = (x - rootLeft) / rootWidth end
-            if y and rootBottom and rootHeight > 0 then sy = (y - rootBottom) / rootHeight end
-            -- The stock Hardcore skull control is the upper-right clickable
-            -- child of ProjectEbonholdPlayerRunFrame. Prefer that location.
-            return sx * 100 + sy * 25
-        end
-        return score(a) > score(b)
+local function HardcoreShown()
+    local ok, shown = pcall(function()
+        local hard = _G.HardmodeFrame
+        return type(hard) == "table" and hard:IsShown() and true or false
     end)
+    return ok and shown or false
+end
 
-    for i = 1, #buttons do
-        local button = buttons[i]
-        local ok, onClick = pcall(button.GetScript, button, "OnClick")
-        if ok and type(onClick) == "function" then
-            local clicked = pcall(onClick, button, "LeftButton")
-            if clicked then
-                local hard = _G.HardmodeFrame
-                if hard and type(hard.IsShown) == "function" and hard:IsShown() then
-                    return true
-                end
-            end
-        end
-    end
-    return false
+-- An error raised inside the stock toggle is still reported, not swallowed.
+local function ReportError(err)
+    local handler = type(geterrorhandler) == "function" and geterrorhandler() or nil
+    if type(handler) == "function" then pcall(handler, err) end
 end
 
 function M.OpenHardcoreMenu()
-    local hard = _G.HardmodeFrame
-    if hard and type(hard.IsShown) == "function" and hard:IsShown() then
-        if type(hard.Hide) == "function" then pcall(hard.Hide, hard) end
-        return true
+    local wasShown = HardcoreShown()
+    local onClick, button = HardcoreControl()
+    if onClick then
+        -- The stock toggle: opens with a fresh request, or closes when open.
+        -- What counts is whether the panel changed, even if the toggle
+        -- raised after showing it.
+        local ok, err = pcall(onClick, button, "LeftButton")
+        if not ok then ReportError(err) end
+        if HardcoreShown() ~= wasShown then return true end
     end
-
-    -- Use the stock Project Ebonhold button's own click handler first. The
-    -- server initializes and opens its Hardcore panel through this control;
-    -- simply calling HardmodeFrame:Show() bypasses that setup on some clients.
-    if ClickServerDifficultyControl() then return true end
-
-    -- Safe fallback for clients where the panel is already initialized but the
-    -- stock child button cannot be resolved.
-    hard = _G.HardmodeFrame
-    if hard and type(hard.Show) == "function" then
-        local ok = pcall(hard.Show, hard)
-        if ok then
-            if type(hard.Raise) == "function" then pcall(hard.Raise, hard) end
+    if wasShown then
+        -- Closing needs no identified control; nothing is requested or built.
+        if pcall(function() local hard = _G.HardmodeFrame; hard:Hide() end)
+            and not HardcoreShown() then
             return true
         end
+    end
+    if not hardcoreUnavailableNoted and type(print) == "function" then
+        hardcoreUnavailableNoted = true
+        pcall(print, "|cff7fd5ffNexus:|r The Hardcore menu is not available yet. "
+            .. "Choose 'Use Server Difficulty / Soul Ash HUD' in the Nexus menu "
+            .. "and open it from the server HUD.")
     end
     return false
 end
 
 function M.Rescan()
     rootFrame = nil
-    hideHooked = false
     cachedSignature = ""
     local found = FindFrames()
     ApplyVisibility()

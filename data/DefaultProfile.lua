@@ -44,6 +44,11 @@ DefaultProfile.defaultSettings = {
     -- fully on. Existing saves simply lack this key (nil), which is
     -- exactly as falsy as `false` -- no SETTINGS_VERSION bump needed.
     autoLockEchoes = false,
+    -- Rolling strategy selector: "adaptive" (experimental, the default) or
+    -- "released" (the explicit rollback). docs/ADAPTIVE_ROLLING.md.
+    rollingPolicy = "adaptive",
+    -- Automatic local roll recording. On unless exactly false; local only.
+    rollTrace = true,
     updateNotifications = true, -- chat + persistent panel notice; manual install only
     -- Community persistence is a local cache over the immutable bundled
     -- catalog. Ranked pruning is opt-in; when disabled, build and DPS content

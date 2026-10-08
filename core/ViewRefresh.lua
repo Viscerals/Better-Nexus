@@ -6,13 +6,31 @@ local ViewRefresh = {}
 Nexus.ViewRefresh = ViewRefresh
 
 local REFRESH_KEY = "ui.data-views.refresh"
+-- Longest a receive window may hold the data views back. During continuous
+-- Sync activity they refresh from committed data at least this often.
+local MAX_RECEIVE_DEFER = 5
+-- Minimum time between two view refreshes: a burst of accepted records is
+-- coalesced into at most one refresh per interval (leading edge).
+local MIN_REFRESH_INTERVAL = 0.5
 local initialized = false
 local schedulerReady = false
 local deferredCommunity = false
 local communityOwnsDeferred = false
 local deferredLeaderboard = false
 local deferredPanel = false
+local deferredSince = nil
+local lastRefreshAt = nil
 local RefreshViews
+
+local function Clock()
+    if type(GetTime) == "function" then
+        local ok, value = pcall(GetTime)
+        value = ok and tonumber(value) or nil
+        if value and value == value and value < math.huge
+            and value > -math.huge then return value end
+    end
+    return 0
+end
 
 local function RecordError(source, err)
     local errors = Nexus and Nexus.Errors
@@ -28,6 +46,12 @@ local function SafeRefresh(source, callback)
     return ok
 end
 
+-- A repair refusal repeats on every refresh until its cause changes (a newer
+-- saved repair schema stays refused for the whole session). The error log
+-- keeps few entries, so each distinct refusal is recorded once per session;
+-- recording it on every refresh pushed every earlier error out of the log.
+local recordedRepairRefusals = {}
+
 local function RequestLegacyRepair(reason)
     local repair = Nexus and Nexus.LegacyQualificationRepair
     if not (repair and type(repair.Request) == "function") then
@@ -35,8 +59,12 @@ local function RequestLegacyRepair(reason)
     end
     local ok, ready, err = pcall(repair.Request, reason)
     if not ok or ready == false then
-        RecordError("ViewRefresh.LegacyQualificationRepair",
-            ok and err or ready)
+        local refusal = ok and err or ready
+        local key = tostring(refusal)
+        if not recordedRepairRefusals[key] then
+            recordedRepairRefusals[key] = true
+            RecordError("ViewRefresh.LegacyQualificationRepair", refusal)
+        end
         return false, "failed"
     end
     return true, err
@@ -94,7 +122,10 @@ local function RunRefreshViews()
     -- the receive window closes instead of rebuilding the same represented
     -- state for every packet group.
     local receiving, remaining = ReceiveState()
-    if receiving and CanDefer() then
+    local now = Clock()
+    if receiving and deferredSince == nil then deferredSince = now end
+    local deferLeft = deferredSince and (deferredSince + MAX_RECEIVE_DEFER - now) or 0
+    if receiving and CanDefer() and deferLeft > 0 then
         local community = Nexus.CommunityBuilds
         if community and (type(community.MarkDataDirty) == "function"
             or type(community.Refresh) == "function") then
@@ -115,18 +146,20 @@ local function RunRefreshViews()
         if Nexus.Panel and type(Nexus.Panel.Refresh) == "function" then
             deferredPanel = true
         end
-        ScheduleAfterReceive(remaining)
+        ScheduleAfterReceive(math.min(remaining, deferLeft))
         return true
     end
+    -- The window closed, or it has held the views back for MAX_RECEIVE_DEFER:
+    -- refresh now from committed data. A still-open window starts its next
+    -- bounded deferral from here.
+    deferredSince = receiving and now or nil
 
     local hadDeferred = deferredCommunity or deferredLeaderboard or deferredPanel
-    local repairReady, repairState = RequestLegacyRepair(
-        hadDeferred and "sync" or "refresh")
-    if repairReady and (repairState == "scheduled"
-        or repairState == "coalesced") and CanDefer() then
-        ScheduleAfterReceive(0)
-        return true
-    end
+    -- Maintenance is requested, never waited for: the views show committed,
+    -- admitted data only, and a repair publishes its recovered builds itself
+    -- when its pass completes.
+    RequestLegacyRepair(hadDeferred and "sync" or "refresh")
+    lastRefreshAt = now
     if hadDeferred then
         local refreshCommunity = deferredCommunity and not communityOwnsDeferred
         local refreshLeaderboard, refreshPanel = deferredLeaderboard, deferredPanel
@@ -171,7 +204,21 @@ function ViewRefresh.Request()
     local scheduler = Nexus.Scheduler
     if initialized and schedulerReady and scheduler
         and type(scheduler.After) == "function" then
-        return scheduler.After(REFRESH_KEY, 0.05, RefreshViews)
+        -- Coalesce: keep a refresh that is already due no later than this
+        -- one would be; otherwise schedule it earlier. A pending refresh is
+        -- never pushed later, so a burst of revisions cannot starve it, and
+        -- two refreshes are at least MIN_REFRESH_INTERVAL apart.
+        local now = Clock()
+        local delay = 0.05
+        if lastRefreshAt then
+            delay = math.max(delay, lastRefreshAt + MIN_REFRESH_INTERVAL - now)
+        end
+        local pending = type(scheduler.Pending) == "function"
+            and scheduler.Pending(REFRESH_KEY) or nil
+        if pending and tonumber(pending.due) and pending.due <= now + delay then
+            return true
+        end
+        return scheduler.After(REFRESH_KEY, delay, RefreshViews)
     end
     RefreshViews()
     return true

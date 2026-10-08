@@ -26,30 +26,35 @@ local installed = false
 local hooked = false
 local provider                -- dataProvider() -> { sections={ {title,lines={}} }, version }
 local ourTab, panel, scroll, child
-local rowButtons, rowFrames = {}, {}
 local associationPanel
 local scanFrame, associationVisible = nil, false
 local wishlistPicker, wishlistPickerRows = nil, {}
 local HideWishlistPicker
-local pendingOpenLoadoutsUntil = 0
 local theirTabCount = 0
-local stockTabs = {}
 local linePool, linesUsed = {}, 0
 
-local function SafeGetScript(frame, scriptName)
-    if not frame or type(frame.GetScript) ~= "function" then return nil end
-    if type(frame.HasScript) == "function" then
-        local ok, has = pcall(frame.HasScript, frame, scriptName)
-        if ok and not has then return nil end
-    end
-    local ok, fn = pcall(frame.GetScript, frame, scriptName)
-    if ok and type(fn) == "function" then return fn end
-    return nil
-end
-
-local ASSET = "Interface\\AddOns\\ProjectEbonhold\\assets\\"
+local ASSET ="Interface\\AddOns\\ProjectEbonhold\\assets\\"
 local NOTE1 = "Compares the assigned Wishlist with the ACTIVE Saved Build."
 local NOTE2 = "|cff8a8a8aSet associations in My Builds. Saved Build activation requires the server's supported level and state.|r"
+-- Assignment only records the target. The automatic save (Auto ON, autoSave,
+-- Ratchet.Dominates) is what may replace the active Saved Build. A changed
+-- assignment marks the projection dirty, so at level 80 with a finished run
+-- the save check runs again at once against the new Wishlist.
+local ASSIGN_NOTE = "Assigning by itself does not change any Saved Build."
+-- An empty numbered Saved Build holds no Wishlist of its own and refuses an
+-- assignment. The name the Journal shows beside it is the retained first-run
+-- Wishlist, which the gear opens for editing without a destination. These
+-- wordings say that; no action behind them changes.
+local EMPTY_SLOT_ASSIGN = "This Saved Build is empty, so assigning a Wishlist to it is refused until it holds Echoes. "
+    .. ASSIGN_NOTE
+local EMPTY_SLOT_SELECTOR = "This Saved Build is empty, so no Wishlist can be assigned to it until it holds Echoes. "
+    .. "A name shown here is the first-run Wishlist, not an assignment to this Saved Build. " .. ASSIGN_NOTE
+local AUTO_SAVE_WARNING = "With Auto ON, Nexus may replace the active Saved Build with a finished run that "
+    .. "has more overall Wishlist progress, or equal progress after cleanup or an even swap of requested "
+    .. "copies. At level 80 after a finished run, Auto checks again right away when you change the assignment. "
+    .. "Saving edits to the assigned Wishlist can also lead to a replacement without a new run."
+local AUTO_SAVE_ORBS = "The replaced build may hold an Echo you value, even one obtained with Orbs: "
+    .. "Orb investment is not compared. Keep Auto OFF to leave the Saved Build unchanged."
 
 ------------------------------------------------------------------------
 -- Text lines
@@ -174,132 +179,6 @@ local function NormalizedText(frame)
     return FrameText(frame):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
-local function FindButtonByText(root, wanted)
-    local match
-    local function Walk(f, depth)
-        if match or not f or depth > 10 then return end
-        local objectType = f.GetObjectType and f:GetObjectType() or ""
-        if objectType == "Button" then
-            local txt = NormalizedText(f)
-            for line in txt:gmatch("[^\n]+") do
-                line = line:gsub("^%s+", ""):gsub("%s+$", "")
-                if line == wanted then match = f; return end
-            end
-        end
-        if f.GetChildren then
-            local kids = { f:GetChildren() }
-            for i = 1, #kids do Walk(kids[i], depth + 1) end
-        end
-    end
-    Walk(root, 0)
-    return match
-end
-
-local function IsLoadoutCard(frame)
-    if not frame or not frame.GetWidth or not frame.GetHeight then return false end
-    local w, h = tonumber(frame:GetWidth()) or 0, tonumber(frame:GetHeight()) or 0
-    if w < 420 or w > 700 or h < 82 or h > 180 then return false end
-    local txt = NormalizedText(frame)
-    if txt:find("Empty slot %d+") then return true end
-    if txt:find("Save Build", 1, true) then return true end
-    -- A populated card normally has LOADOUT plus its echo icons / overflow menu.
-    if txt:find("LOADOUT", 1, true) and (txt:find("...", 1, true) or h >= 95) then return true end
-    return false
-end
-
-local function CollectCards(root)
-    local found, seen = {}, {}
-
-    local function AddCandidate(frame)
-        local f = frame
-        for _ = 1, 7 do
-            if not f then break end
-            if f.GetWidth and f.GetHeight then
-                local w, h = tonumber(f:GetWidth()) or 0, tonumber(f:GetHeight()) or 0
-                -- Stock loadout cards on this client are wide, shallow panels.
-                -- Find the first ancestor with card-like dimensions instead of
-                -- relying on the card parent itself exposing all child text.
-                if w >= 430 and w <= 680 and h >= 80 and h <= 190 then
-                    if not seen[f] then
-                        seen[f] = true
-                        found[#found + 1] = f
-                    end
-                    return
-                end
-            end
-            f = f.GetParent and f:GetParent() or nil
-        end
-    end
-
-    local function Walk(f, depth)
-        if not f or depth > 14 then return end
-
-        if f.GetRegions then
-            local regs = { f:GetRegions() }
-            for i = 1, #regs do
-                local r = regs[i]
-                if r and r.GetText then
-                    local ok, text = pcall(r.GetText, r)
-                    if ok and type(text) == "string" then
-                        text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-                        text = text:gsub("^%s+", ""):gsub("%s+$", "")
-                        if text == "LOADOUT" or text:match("^Empty slot %d+$") then
-                            AddCandidate(r.GetParent and r:GetParent() or f)
-                        end
-                    end
-                end
-            end
-        end
-
-        if f.GetObjectType and f:GetObjectType() == "Button" and f.GetText then
-            local ok, text = pcall(f.GetText, f)
-            if ok and type(text) == "string" then
-                text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-                text = text:gsub("^%s+", ""):gsub("%s+$", "")
-                if text == "LOADOUT" or text:match("^Empty slot %d+$") then
-                    AddCandidate(f)
-                end
-            end
-        end
-
-        if f.GetChildren then
-            local kids = { f:GetChildren() }
-            for i = 1, #kids do Walk(kids[i], depth + 1) end
-        end
-    end
-
-    Walk(root, 0)
-
-    -- Fallback for alternate client revisions where card text is only
-    -- discoverable through recursive frame text.
-    if #found == 0 then
-        local fallbackSeen = {}
-        local function Fallback(f, depth)
-            if not f or depth > 12 then return end
-            if IsLoadoutCard(f) and not fallbackSeen[f] then
-                fallbackSeen[f] = true
-                found[#found + 1] = f
-                return
-            end
-            if f.GetChildren then
-                local kids = { f:GetChildren() }
-                for i = 1, #kids do Fallback(kids[i], depth + 1) end
-            end
-        end
-        Fallback(root, 0)
-    end
-
-    table.sort(found, function(a, b)
-        local at, bt = (a.GetTop and a:GetTop()) or 0, (b.GetTop and b:GetTop()) or 0
-        if at == bt then
-            local al, bl = (a.GetLeft and a:GetLeft()) or 0, (b.GetLeft and b:GetLeft()) or 0
-            return al < bl
-        end
-        return at > bt
-    end)
-    return found
-end
-
 local function HasVisibleText(root, wanted)
     local found = false
     local function Walk(f, depth)
@@ -383,70 +262,6 @@ local function FindLoadoutsTab(journal)
     return exact
 end
 
-local function ClickLoadoutsTab(journal)
-    if IsLoadoutsVisible(journal) then return true end
-    local tab = FindLoadoutsTab(journal)
-    if not tab then return false end
-    if tab.Click then
-        local ok = pcall(tab.Click, tab)
-        if ok then return true end
-    end
-    local click = SafeGetScript(tab, "OnClick")
-    if type(click) == "function" then
-        return pcall(click, tab, "LeftButton")
-    end
-    return false
-end
-
-local function FindButtonByText(root, wanted)
-    local found
-    local function Walk(frame, depth)
-        if found or not frame or depth > 18 then return end
-        if frame.GetText then
-            local ok, text = pcall(frame.GetText, frame)
-            if ok and type(text) == "string" and text:lower() == wanted:lower() then
-                found = frame
-                return
-            end
-        end
-        if frame.GetChildren then
-            local kids = { frame:GetChildren() }
-            for i = 1, #kids do Walk(kids[i], depth + 1) end
-        end
-    end
-    Walk(root, 0)
-    return found
-end
-
-local function ClickFrame(frame)
-    if not frame then return false end
-    if frame.Click then
-        local ok = pcall(frame.Click, frame)
-        if ok then return true end
-    end
-    local click = SafeGetScript(frame, "OnClick")
-    if type(click) == "function" then
-        return pcall(click, frame, "LeftButton")
-    end
-    return false
-end
-
-local function OpenNexusWishlistEditor(journal)
-    -- The stock New Wishlist button is not consistently addressable across
-    -- Project Ebonhold UI revisions. Nexus owns a reliable editor, so use it
-    -- directly and close the journal to avoid overlapping full-size panels.
-    if associationPanel then associationPanel:Hide() end
-    if journal and journal.Hide then pcall(journal.Hide, journal) end
-    local editor = Nexus and Nexus.WishlistEditor
-    if editor and type(editor.NewWishlist) == "function" then
-        pcall(editor.NewWishlist)
-    elseif editor and type(editor.Show) == "function" then
-        pcall(editor.Show)
-    else
-        print("|cffff6060Nexus:|r Wishlist Editor is unavailable.")
-    end
-end
-
 local function ShortName(name, maxLen)
     name = tostring(name or "")
     maxLen = tonumber(maxLen) or 28
@@ -456,463 +271,56 @@ end
 
 
 
-local function PlainText(text)
-    text = tostring(text or "")
-    text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-    text = text:gsub("^%s+", ""):gsub("%s+$", "")
-    return text
-end
-
-local function IsDescendantOf(frame, ancestor)
-    local cur = frame
-    for _ = 1, 20 do
-        if not cur then return false end
-        if cur == ancestor then return true end
-        cur = cur.GetParent and cur:GetParent() or nil
-    end
-    return false
-end
-
-local function FrameText(frame)
-    if not frame then return "" end
-    if frame.GetText then
-        local ok, text = pcall(frame.GetText, frame)
-        if ok and text and text ~= "" then return PlainText(text) end
-    end
-    if frame.GetRegions then
-        local regions = { frame:GetRegions() }
-        for i = 1, #regions do
-            local r = regions[i]
-            if r and r.GetText then
-                local ok, text = pcall(r.GetText, r)
-                if ok and text and text ~= "" then return PlainText(text) end
-            end
+-- The selector sits in the Journal header near the screen top, so its tall
+-- ANCHOR_TOP tooltip does not fit above it and the screen clamp moves it down
+-- over the picker area. The open picker (TOOLTIP strata, higher level) then
+-- covers the warning. While the picker is open, place the tooltip beside the
+-- picker instead: right when there is room, else on the side with more room.
+-- GameTooltip strata, level and parent are not changed.
+local function ShowSelectorTooltip(selector)
+    local besidePicker = wishlistPicker and wishlistPicker:IsShown()
+    GameTooltip:SetOwner(selector, besidePicker and "ANCHOR_NONE" or "ANCHOR_TOP")
+    GameTooltip:AddLine("Automation Wishlist", 0.35, 0.8, 1)
+    GameTooltip:AddLine(associationPanel and associationPanel.emptySlot and EMPTY_SLOT_SELECTOR
+        or ("Assigns a wishlist reference to the Saved Build currently selected in the server dropdown. "
+        .. ASSIGN_NOTE), 0.82, 0.82, 0.82, true)
+    GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, 0.82, 0.25, true)
+    GameTooltip:AddLine(AUTO_SAVE_ORBS, 1, 0.82, 0.25, true)
+    GameTooltip:Show()
+    if not besidePicker then return end
+    local gap = 4
+    local left, right = wishlistPicker:GetLeft(), wishlistPicker:GetRight()
+    if not (left and right) then
+        -- Picker layout not resolved yet (it was just shown). Its TOPLEFT is
+        -- the selector's BOTTOMLEFT, and the hovered selector is laid out.
+        local selectorLeft = selector:GetLeft()
+        if selectorLeft then
+            left = selectorLeft * (selector:GetEffectiveScale() or 1) / (wishlistPicker:GetEffectiveScale() or 1)
+            right = left + (wishlistPicker:GetWidth() or 0)
         end
     end
-    return ""
-end
-
-local function FindVisibleWishlistMenuButton(wishlistName)
-    wishlistName = PlainText(wishlistName)
-    if wishlistName == "" then return nil end
-
-    local headerY
-    local candidates = {}
-    local seen = {}
-
-    local function CenterY(obj)
-        if not obj or not obj.GetCenter then return nil end
-        local ok, _, y = pcall(obj.GetCenter, obj)
-        if ok then return y end
-        return nil
-    end
-
-    local function AddCandidate(button, y, score)
-        if not button or seen[button] then return end
-        if IsDescendantOf(button, associationPanel) then return end
-        if button.IsShown and not button:IsShown() then return end
-        seen[button] = true
-        candidates[#candidates + 1] = { frame = button, y = y or CenterY(button), score = score or 0 }
-    end
-
-    -- Blizzard-style dropdown entries are normally named DropDownListNButtonN.
-    -- Prefer those concrete buttons over climbing from a FontString, which can
-    -- accidentally resolve to the entire dropdown container.
-    for list = 1, 4 do
-        for index = 1, 64 do
-            local button = _G["DropDownList" .. list .. "Button" .. index]
-            if button and (not button.IsShown or button:IsShown()) then
-                local text = FrameText(button)
-                local y = CenterY(button)
-                if text == "Wishlists" and y then
-                    if not headerY or y > headerY then headerY = y end
-                elseif text == wishlistName then
-                    AddCandidate(button, y, 100)
-                end
-            end
-        end
-    end
-
-    -- Custom server menus may not use Blizzard dropdown names. Scan visible
-    -- BUTTON frames directly and require the button itself to own the label.
-    local frame = EnumerateFrames and EnumerateFrames() or nil
-    while frame do
-        local shown = not frame.IsShown or frame:IsShown()
-        if shown and not IsDescendantOf(frame, associationPanel) then
-            local objectType = frame.GetObjectType and frame:GetObjectType() or ""
-            local text = FrameText(frame)
-            local y = CenterY(frame)
-            if text == "Wishlists" and y then
-                if not headerY or y > headerY then headerY = y end
-            elseif objectType == "Button" and text == wishlistName then
-                local name = frame.GetName and frame:GetName() or ""
-                local score = 50
-                if type(name) == "string" and string.find(name, "DropDown", 1, true) then score = score + 20 end
-                if SafeGetScript(frame, "OnClick") then score = score + 10 end
-                AddCandidate(frame, y, score)
-            end
-        end
-        frame = EnumerateFrames and EnumerateFrames(frame) or nil
-    end
-
-    local best
-    for i = 1, #candidates do
-        local c = candidates[i]
-        -- Wishlist entries are below the Wishlists header. Reject the
-        -- same-named Saved Build above that header whenever the header exists.
-        local belowWishlistHeader = not headerY or (c.y and c.y < headerY)
-        if belowWishlistHeader then
-            if not best
-                or c.score > best.score
-                or (c.score == best.score and c.y and best.y and c.y > best.y) then
-                best = c
-            end
-        end
-    end
-    return best and best.frame or nil
-end
-
-local function ButtonBounds(frame)
-    if not frame then return nil end
-    local ok1, left = pcall(frame.GetLeft, frame)
-    local ok2, right = pcall(frame.GetRight, frame)
-    local ok3, bottom = pcall(frame.GetBottom, frame)
-    local ok4, top = pcall(frame.GetTop, frame)
-    if ok1 and ok2 and ok3 and ok4 and left and right and bottom and top then
-        return left, right, bottom, top
-    end
-    return nil
-end
-
-local function IsLikelyEditControl(frame, row)
-    if not frame or frame == row or IsDescendantOf(frame, associationPanel) then return false end
-    if frame.IsShown and not frame:IsShown() then return false end
-    local objectType = frame.GetObjectType and frame:GetObjectType() or ""
-    if objectType ~= "Button" then return false end
-
-    local rl, rr, rb, rt = ButtonBounds(row)
-    local fl, fr, fb, ft = ButtonBounds(frame)
-    if not (rl and fl) then return false end
-
-    local rowY = (rb + rt) * 0.5
-    local frameY = (fb + ft) * 0.5
-    if math.abs(frameY - rowY) > 15 then return false end
-    if fr < rl - 6 or fl > rr + 46 then return false end
-
-    local w = frame.GetWidth and frame:GetWidth() or 0
-    local h = frame.GetHeight and frame:GetHeight() or 0
-    if w > 48 or h > 38 then return false end
-
-    local text = string.lower(PlainText(FrameText(frame)))
-    if text == "edit" or text == "design" or text == "modify" then return true end
-
-    local name = frame.GetName and string.lower(tostring(frame:GetName() or "")) or ""
-    if name:find("edit", 1, true) or name:find("design", 1, true) then return true end
-
-    -- Icon-only controls beside a wishlist row are the server's row actions.
-    -- Require an actual click handler so decorative textures are ignored.
-    local click = SafeGetScript(frame, "OnClick")
-    return type(click) == "function"
-end
-
-local function FindWishlistEditControl(row)
-    if not row then return nil end
-
-    -- First prefer explicit children/siblings named Edit or Design.
-    local explicit, fallback
-    local frame = EnumerateFrames and EnumerateFrames() or nil
-    local visited = 0
-    while frame and visited < 2500 do
-        visited = visited + 1
-        if IsLikelyEditControl(frame, row) then
-            local text = string.lower(PlainText(FrameText(frame)))
-            local name = frame.GetName and string.lower(tostring(frame:GetName() or "")) or ""
-            if text == "edit" or text == "design"
-                or name:find("edit", 1, true) or name:find("design", 1, true) then
-                explicit = frame
-                break
-            end
-            if not fallback then fallback = frame end
-        end
-        frame = EnumerateFrames and EnumerateFrames(frame) or nil
-    end
-    return explicit -- a nearby icon without an Edit/Design identity is not authority
-end
-
-local function ProbeAdd(event, detail)
-    if Nexus and type(Nexus.UIProbeAdd) == "function" then
-        Nexus.UIProbeAdd(event, detail)
-    end
-end
-
-local function ScriptFlags(frame)
-    local names = { "OnClick", "OnMouseUp", "OnMouseDown", "OnEnter", "OnLeave", "OnShow", "OnHide", "OnUpdate" }
-    local out = {}
-    for i = 1, #names do
-        local n = names[i]
-        local fn = SafeGetScript(frame, n)
-        if type(fn) == "function" then out[#out + 1] = n end
-    end
-    return table.concat(out, ",")
-end
-
-local function RegionSummary(frame)
-    local out = {}
-    if not frame or not frame.GetRegions then return "" end
-    local regions = { frame:GetRegions() }
-    for i = 1, #regions do
-        local r = regions[i]
-        local typ = r and r.GetObjectType and r:GetObjectType() or "?"
-        local text = r and r.GetText and PlainText(r:GetText() or "") or ""
-        local tex = r and r.GetTexture and tostring(r:GetTexture() or "") or ""
-        out[#out + 1] = typ .. "{text=" .. text .. ",tex=" .. tex .. "}"
-    end
-    return table.concat(out, ";")
-end
-
-local function FrameDebugSummary(frame, tag)
-    if not frame then return tostring(tag) .. "=nil" end
-    local name = frame.GetName and tostring(frame:GetName() or "") or ""
-    local typ = frame.GetObjectType and tostring(frame:GetObjectType() or "") or ""
-    local parent = frame.GetParent and frame:GetParent() or nil
-    local pname = parent and parent.GetName and tostring(parent:GetName() or "") or tostring(parent or "")
-    local left, right, bottom, top = ButtonBounds(frame)
-    local text = PlainText(FrameText(frame))
-    return table.concat({
-        tostring(tag or "frame"),
-        "name=" .. name,
-        "type=" .. typ,
-        "parent=" .. pname,
-        "text=" .. tostring(text or ""),
-        "shown=" .. tostring(frame.IsShown and frame:IsShown()),
-        "enabled=" .. tostring(frame.IsEnabled and frame:IsEnabled()),
-        "bounds=" .. table.concat({ tostring(left), tostring(right), tostring(bottom), tostring(top) }, ","),
-        "scripts=" .. ScriptFlags(frame),
-        "regions=" .. RegionSummary(frame),
-    }, "|")
-end
-
-local function CaptureWishlistDesignEnvironment(row, phase)
-    ProbeAdd("DESIGN_DEBUG_ROW", FrameDebugSummary(row, phase))
-
-    if row and row.GetChildren then
-        local children = { row:GetChildren() }
-        for i = 1, #children do
-            ProbeAdd("DESIGN_DEBUG_CHILD", FrameDebugSummary(children[i], phase .. ".child" .. i))
-        end
-    end
-
-    local rl, rr, rb, rt = ButtonBounds(row)
-    local frame = EnumerateFrames and EnumerateFrames() or nil
-    local count = 0
-    while frame and count < 80 do
-        local fl, fr, fb, ft = ButtonBounds(frame)
-        if rl and fl and frame ~= row and not IsDescendantOf(frame, associationPanel) then
-            local cy = (fb + ft) * 0.5
-            local ry = (rb + rt) * 0.5
-            if math.abs(cy - ry) <= 24 and fr >= rl - 20 and fl <= rr + 100 then
-                count = count + 1
-                ProbeAdd("DESIGN_DEBUG_NEARBY", FrameDebugSummary(frame, phase .. ".near" .. count))
-            end
-        end
-        frame = EnumerateFrames and EnumerateFrames(frame) or nil
-    end
-
-    local globals = {}
-    for key, value in pairs(_G) do
-        if type(key) == "string" then
-            local low = string.lower(key)
-            if (low:find("wishlist", 1, true) or low:find("echo", 1, true))
-                and (low:find("edit", 1, true) or low:find("design", 1, true) or low:find("loadout", 1, true)) then
-                local vt = type(value)
-                if vt == "function" or vt == "table" then
-                    globals[#globals + 1] = key .. "=" .. vt
-                end
-            end
-        end
-    end
-    table.sort(globals)
-    ProbeAdd("DESIGN_DEBUG_GLOBALS", table.concat(globals, ";"))
-end
-
-local function TooltipLinesFor(frame)
-    if not frame then return "" end
-    local enter = SafeGetScript(frame, "OnEnter")
-    if type(enter) ~= "function" then return "" end
-    local oldOwner = GameTooltip and GameTooltip:GetOwner() or nil
-    pcall(enter, frame)
-    local lines = {}
-    for i = 1, 12 do
-        local fs = _G["GameTooltipTextLeft" .. i]
-        local text = fs and fs.GetText and fs:GetText() or nil
-        if text and text ~= "" then lines[#lines + 1] = PlainText(text) end
-    end
-    local leave = SafeGetScript(frame, "OnLeave")
-    if type(leave) == "function" then pcall(leave, frame) end
-    if GameTooltip and GameTooltip:GetOwner() == frame then GameTooltip:Hide() end
-    return table.concat(lines, " | ")
-end
-
-local designActionBusy = false
-
-local function VisibleFrameText(frame)
-    if not frame or (frame.IsShown and not frame:IsShown()) then return "" end
-    local text = PlainText(FrameText(frame))
-    if text ~= "" then return text end
-    if frame.GetRegions then
-        local regions = { frame:GetRegions() }
-        for i = 1, #regions do
-            local r = regions[i]
-            if r and r.GetText then
-                local ok, value = pcall(r.GetText, r)
-                value = ok and PlainText(value) or ""
-                if value ~= "" then return value end
-            end
-        end
-    end
-    return ""
-end
-
-local function FindMoreActionsControl(row)
-    if not row then return nil end
-    local rl, rr, rb, rt = ButtonBounds(row)
-    if not rl then return nil end
-    local ry = (rb + rt) * 0.5
-    local best
-    local frame = EnumerateFrames and EnumerateFrames() or nil
-    local visited = 0
-    while frame and visited < 2500 do
-        visited = visited + 1
-        if frame ~= row and not IsDescendantOf(frame, associationPanel)
-            and (not frame.IsShown or frame:IsShown())
-            and frame.GetObjectType and frame:GetObjectType() == "Button" then
-            local fl, fr, fb, ft = ButtonBounds(frame)
-            if fl and math.abs(((fb + ft) * 0.5) - ry) <= 14
-                and fl >= rr - 20 and fl <= rr + 80 then
-                local w = frame.GetWidth and frame:GetWidth() or 0
-                local h = frame.GetHeight and frame:GetHeight() or 0
-                if w <= 54 and h <= 42 and SafeGetScript(frame, "OnClick") then
-                    local text = string.lower(VisibleFrameText(frame))
-                    local name = string.lower(tostring(frame.GetName and frame:GetName() or ""))
-                    local score = 10
-                    if text == "..." or text == "..." then score = score + 100 end
-                    if name:find("more", 1, true) or name:find("action", 1, true)
-                        or name:find("option", 1, true) or name:find("menu", 1, true) then
-                        score = score + 60
-                    end
-                    if score > 10 and (not best or score > best.score) then
-                        best = { frame = frame, score = score }
-                    end
-                end
-            end
-        end
-        frame = EnumerateFrames and EnumerateFrames(frame) or nil
-    end
-    return best and best.frame or nil
-end
-
-local function FindVisibleEditMenuItem()
-    local best
-    local function scoreText(text)
-        text = string.lower(PlainText(text))
-        if text == "edit wishlist" then return 300 end
-        if text == "edit" then return 280 end
-        if text == "design wishlist" then return 260 end
-        if text == "design" or text == "modify" then return 240 end
-        if text:find("edit", 1, true) and text:find("wishlist", 1, true) then return 220 end
-        return nil
-    end
-    local function consider(frame, bonus)
-        if not frame or IsDescendantOf(frame, associationPanel) then return end
-        if frame.IsShown and not frame:IsShown() then return end
-        local points = scoreText(VisibleFrameText(frame))
-        if not points then return end
-        local owner = frame
-        for _ = 1, 5 do
-            if not owner then return end
-            if owner.GetObjectType and owner:GetObjectType() == "Button" and SafeGetScript(owner, "OnClick") then break end
-            owner = owner.GetParent and owner:GetParent() or nil
-        end
-        if not owner or not SafeGetScript(owner, "OnClick") then return end
-        local score = points + (bonus or 0)
-        if not best or score > best.score then best = { frame = owner, score = score } end
-    end
-    -- The server uses dropdown-style buttons for the secondary actions menu.
-    for list = 1, 8 do
-        for index = 1, 96 do consider(_G["DropDownList" .. list .. "Button" .. index], 100) end
-    end
-    -- One bounded pass for custom menu buttons. Never call their OnEnter scripts.
-    local frame = EnumerateFrames and EnumerateFrames() or nil
-    local seen = 0
-    while frame and seen < 2500 do
-        if frame.GetObjectType and frame:GetObjectType() == "Button" then consider(frame, 0) end
-        frame = EnumerateFrames and EnumerateFrames(frame) or nil
-        seen = seen + 1
-    end
-    return best and best.frame or nil
-end
-
-local function FinishDesignAction(ok, reason)
-    designActionBusy = false
-    if ok then
-        print("|cff66ff66Nexus:|r Opened wishlist editor.")
+    local screenRight = UIParent:GetRight() or UIParent:GetWidth() or 0
+    -- Tooltip width in UIParent units (the picker is a scale-1 UIParent child).
+    local width = (GameTooltip:GetWidth() or 0) * (GameTooltip:GetEffectiveScale() or 1)
+        / (UIParent:GetEffectiveScale() or 1)
+    local roomRight = right and (screenRight - right) or math.huge
+    local roomLeft = left or 0
+    GameTooltip:ClearAllPoints()
+    if roomRight < width + gap and roomLeft > roomRight then
+        GameTooltip:SetPoint("TOPRIGHT", wishlistPicker, "TOPLEFT", -gap, 0)
     else
-        print("|cffff6060Nexus:|r Could not open wishlist editor (" .. tostring(reason or "unknown") .. ").")
+        GameTooltip:SetPoint("TOPLEFT", wishlistPicker, "TOPRIGHT", gap, 0)
     end
 end
 
-local function OpenWishlistRowDesigner(row)
-    if not row then FinishDesignAction(false, "missing_row") return end
-
-    local enter = SafeGetScript(row, "OnEnter")
-    if type(enter) == "function" then pcall(enter, row) end
-
-    -- One bounded lookup after hover. No fast OnUpdate scanner and no global tooltip probing.
-    C_Timer.After(0.12, function()
-        local more = FindMoreActionsControl(row)
-        if not more then FinishDesignAction(false, "more_actions_missing") return end
-        ProbeAdd("DESIGN_MORE_ACTIONS", FrameDebugSummary(more, "found"))
-        if not ClickFrame(more) then FinishDesignAction(false, "more_actions_click_failed") return end
-
-        C_Timer.After(0.15, function()
-            local edit = FindVisibleEditMenuItem()
-            if not edit then
-                ProbeAdd("DESIGN_EDIT_MISSING", "More actions opened, but no visible Edit menu item was found")
-                FinishDesignAction(false, "edit_item_missing")
-                return
-            end
-            ProbeAdd("DESIGN_EDIT_ITEM", FrameDebugSummary(edit, "found"))
-            local ok = ClickFrame(edit)
-            FinishDesignAction(ok, ok and "opened" or "edit_click_failed")
-        end)
-    end)
-end
-
-local function OpenServerWishlistDesigner(linked)
-    if designActionBusy then
-        print("|cffffcc66Nexus:|r Wishlist editor action is already running.")
-        return
+-- The picker opens and closes on a selector click while the mouse stays on
+-- the selector: place its shown tooltip again for the new picker state.
+local function RefreshSelectorTooltip()
+    local selector = associationPanel and associationPanel.selector
+    if selector and selector:IsVisible() and GameTooltip:IsShown()
+        and GameTooltip:GetOwner() == selector then
+        ShowSelectorTooltip(selector)
     end
-    if not linked or not linked.name or linked.name == "" then
-        print("|cffff6060Nexus:|r Associate a wishlist first.")
-        return
-    end
-    designActionBusy = true
-    local dd = _G["ProjectEbonholdEchoJournalLoadoutDDButton"]
-        or _G["ProjectEbonholdEchoJournalLoadoutDD"]
-    if not ClickFrame(dd) then FinishDesignAction(false, "loadout_menu_failed") return end
-
-    -- Give the server menu time to populate, then perform exactly one row lookup.
-    C_Timer.After(0.18, function()
-        local button = FindVisibleWishlistMenuButton(linked.name)
-        if not button then FinishDesignAction(false, "wishlist_row_missing") return end
-        OpenWishlistRowDesigner(button)
-    end)
-
-    -- Hard safety release in case the server UI disappears during the action.
-    C_Timer.After(2.5, function()
-        if designActionBusy then FinishDesignAction(false, "timed_out") end
-    end)
 end
 
 local function EnsureAssociationPanel(journal)
@@ -959,6 +367,8 @@ local function EnsureAssociationPanel(journal)
         associationPanel.selector.text:SetPoint("LEFT", 9, 0)
         associationPanel.selector.text:SetPoint("RIGHT", -25, 0)
         associationPanel.selector.text:SetJustifyH("LEFT")
+        -- One line inside the 21 px selector; the picker lists complete names.
+        if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(associationPanel.selector.text, nil, 21) end
         associationPanel.selector.arrow = associationPanel.selector:CreateTexture(nil, "ARTWORK")
         associationPanel.selector.arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
         associationPanel.selector.arrow:SetSize(16, 16)
@@ -991,17 +401,19 @@ local function EnsureAssociationPanel(journal)
 
         associationPanel.design:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Edit assigned Wishlist", 0.35, 0.8, 1)
-            GameTooltip:AddLine("Open the Wishlist assigned to this Saved Build. This does not activate another build.", 0.82, 0.82, 0.82, true)
+            if associationPanel and associationPanel.emptySlot then
+                GameTooltip:AddLine("Edit first-run Wishlist", 0.35, 0.8, 1)
+                GameTooltip:AddLine("Open the first-run Wishlist for editing. This Saved Build is empty and has no Wishlist of its own, so nothing is assigned to it. This does not activate another build.", 0.82, 0.82, 0.82, true)
+            else
+                GameTooltip:AddLine("Edit assigned Wishlist", 0.35, 0.8, 1)
+                GameTooltip:AddLine("Open the Wishlist assigned to this Saved Build. This does not activate another build.", 0.82, 0.82, 0.82, true)
+            end
             GameTooltip:Show()
         end)
         associationPanel.design:SetScript("OnLeave", function() GameTooltip:Hide() end)
         associationPanel.selector:SetScript("OnEnter", function(self)
             if self.SetBackdropBorderColor then self:SetBackdropBorderColor(0.42, 0.72, 0.95, 1) end
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Automation Wishlist", 0.35, 0.8, 1)
-            GameTooltip:AddLine("Assigns a wishlist reference to the Saved Build currently selected in the server dropdown.", 0.82, 0.82, 0.82, true)
-            GameTooltip:Show()
+            ShowSelectorTooltip(self)
         end)
         associationPanel.selector:SetScript("OnLeave", function(self)
             if self.SetBackdropBorderColor then self:SetBackdropBorderColor(0.25, 0.31, 0.38, 0.95) end
@@ -1024,14 +436,36 @@ end
 
 local function HideRowButtons()
     if associationPanel then associationPanel:Hide() end
-    for _, row in pairs(rowButtons) do row:Hide() end
 end
 
 HideWishlistPicker = function()
-    if wishlistPicker then wishlistPicker:Hide() end
+    if wishlistPicker and wishlistPicker:IsShown() then
+        wishlistPicker:Hide()
+        RefreshSelectorTooltip()
+    end
 end
 
-local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A)
+-- Display only: which picker row is the resolved assignment. The resolver
+-- copies the stored assignmentId onto the live server row it found, but the
+-- picker lists fresh live rows that carry none. So: equal assignmentIds on both
+-- sides decide; a row stamped with another assignment is never selected;
+-- otherwise the current resolved server slot and content key must both match.
+-- Equal contents in another slot, or a name, identify nothing.
+local function IsAssignedPickerRow(linked, c)
+    if type(linked) ~= "table" or type(c) ~= "table" then return false end
+    if linked.assignmentId and c.assignmentId then
+        return linked.assignmentId == c.assignmentId
+    end
+    if c.assignmentId then return false end
+    local slot = tonumber(linked.slot)
+    return slot ~= nil and slot == tonumber(c.slot)
+        and type(linked.key) == "string" and linked.key ~= "" and linked.key == c.key
+end
+
+-- `emptySlot` is the empty-Saved-Build context `active` and `loadoutName` were taken
+-- in. The picker's tooltips use it, not the live Journal context, so their words
+-- always describe the target its click handlers act on while it stays open.
+local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A, emptySlot)
     if not wishlistPicker then
         wishlistPicker = CreateFrame("Frame", "NexusWishlistOnlyPicker", UIParent)
         wishlistPicker:SetFrameStrata("TOOLTIP")
@@ -1093,6 +527,8 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 row.nameButton:SetPoint("LEFT", 0, 0); row.nameButton:SetPoint("RIGHT", -28, 0); row.nameButton:SetHeight(rowH-2)
                 row.nameButton.text = row.nameButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 row.nameButton.text:SetPoint("LEFT", 6, 0); row.nameButton.text:SetPoint("RIGHT", -4, 0); row.nameButton.text:SetJustifyH("LEFT")
+                -- One line per row; a shortened name is complete in the row tooltip.
+                if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(row.nameButton.text, nil, rowH-2) end
                 row.nameButton:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
                 row.gear = CreateFrame("Button", nil, row)
                 row.gear:SetFrameLevel(row:GetFrameLevel() + 2)
@@ -1112,9 +548,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 wishlistPickerRows[i] = row
             end
             row:ClearAllPoints(); row:SetPoint("TOPLEFT", 6, -24 - (i-1)*rowH)
-            local selected = linked and ((linked.assignmentId and c.assignmentId
-                and linked.assignmentId==c.assignmentId) or (not linked.assignmentId
-                and not c.assignmentId and linked.key and cKey and linked.key==cKey))
+            local selected = IsAssignedPickerRow(linked, c)
             local editor=Nexus.WishlistEditor
             local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or "choose locked targets"
             local evidenceSuffix = c.lockEvidenceStatus == "unavailable"
@@ -1181,6 +615,23 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 end
             end
             row.nameButton:SetScript("OnClick", AssociateWishlistOnly)
+            row.nameButton:SetScript("OnEnter", function(self)
+                -- Anchor at the row edge: the name button ends 28 px inside
+                -- the picker, which shares the TOOLTIP strata.
+                GameTooltip:SetOwner(self:GetParent() or self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine("Assign Wishlist", .35, .8, 1)
+                GameTooltip:AddLine("Target: " .. tostring(loadoutName or ""), 1, 1, 1, true)
+                GameTooltip:AddLine(emptySlot and EMPTY_SLOT_ASSIGN
+                    or ("Sets this Wishlist as the target for this loadout. " .. ASSIGN_NOTE),
+                    .82, .82, .82, true)
+                GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, .82, .25, true)
+                GameTooltip:AddLine(AUTO_SAVE_ORBS, 1, .82, .25, true)
+                if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Shortened(self.text) then
+                    GameTooltip:AddLine(self.text:GetText(), 1, 1, 1, true)
+                end
+                GameTooltip:Show()
+            end)
+            row.nameButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
             row.gear:SetScript("OnClick", OpenWishlistEditorOnly)
             row:Show()
         end
@@ -1196,7 +647,10 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             row:SetScript("OnEnter",function(self)
                 GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
                 GameTooltip:AddLine("Unassign Wishlist",1,1,1)
-                GameTooltip:AddLine("Keeps the Wishlist; stops using it for this loadout.",.8,.8,.8,true)
+                GameTooltip:AddLine(self.emptySlot
+                    and "This Saved Build has no Wishlist of its own. This does not remove the first-run Wishlist."
+                    or "Keeps the Wishlist; stops using it for this loadout.",.8,.8,.8,true)
+                GameTooltip:AddLine("Does not change or restore the Saved Build.",.8,.8,.8,true)
                 GameTooltip:Show()
             end)
             row:SetScript("OnLeave",function()GameTooltip:Hide()end)
@@ -1204,6 +658,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             wishlistPicker.clearRow = row
         end
         row:SetFrameLevel(wishlistPicker:GetFrameLevel() + 2)
+        row.emptySlot = emptySlot
         row:ClearAllPoints(); row:SetPoint("TOPLEFT",6,-24-#wishes*rowH); row:SetPoint("RIGHT",-6,0)
         row:SetScript("OnClick", function()
             if tonumber(active) and tonumber(active) > 0 then A.ClearLoadoutWishlist(active)
@@ -1213,6 +668,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
         row:Show()
     end
     wishlistPicker:Show()
+    RefreshSelectorTooltip()
 end
 
 local function RefreshAssociationRows()
@@ -1229,9 +685,17 @@ local function RefreshAssociationRows()
     local activeRow = slots.bySlot and slots.bySlot[active]
     local populated = activeRow and type(activeRow.echoes) == "table" and #activeRow.echoes > 0
     local firstRun = active < 1 or active > maxSlots or not populated
+    -- A numbered Saved Build that holds no Echoes (see EMPTY_SLOT_*).
+    local emptySlot = firstRun and active >= 1 and active <= maxSlots
 
     local host = EnsureAssociationPanel(journal)
-    local wishes = A.GetWishlistCandidates and A.GetWishlistCandidates() or {}
+    host.emptySlot = emptySlot
+    -- The scanner calls this every 0.75 s while the Journal is open. The
+    -- Wishlist candidates are the most expensive adapter read of a refresh
+    -- and only the picker shows them, so they are read when the picker
+    -- opens (below), as the store is at that moment. The slots and the
+    -- assignment are still read on every refresh: the label and the
+    -- selector follow every change, announced or not.
     local linked = firstRun and (A.GetFirstRunWishlist and A.GetFirstRunWishlist())
         or (A.GetLoadoutWishlist and A.GetLoadoutWishlist(active))
     local loadoutName = (active < 1 or active > maxSlots) and "No Saved Build selected"
@@ -1275,7 +739,8 @@ local function RefreshAssociationRows()
 
     host.selector:SetScript("OnClick", function(self)
         if wishlistPicker and wishlistPicker:IsShown() then HideWishlistPicker(); return end
-        ShowWishlistPicker(self, wishes, linked, active, loadoutName, A)
+        local wishes = A.GetWishlistCandidates and A.GetWishlistCandidates() or {}
+        ShowWishlistPicker(self, wishes, linked, active, loadoutName, A, emptySlot)
     end)
     host.newWishlist:SetScript("OnClick", function()
         HideWishlistPicker()
@@ -1340,6 +805,63 @@ end
 -- Install
 ------------------------------------------------------------------------
 
+-- Advisor tab attachment. The tab is always anchored to another frame, never
+-- to screen coordinates, so it moves with whatever window carries the journal.
+-- Client evidence (echo_journal.lua): the journal is reparented into
+-- CollectionsJournal on first embed, that reparenting resets its children's
+-- frame levels, and the hub hides the journal's own numbered tabs there. The
+-- hub's replacement navigation is not in the available client evidence, so no
+-- hub control is named or searched for here.
+local Attach = {mode = "none", hookedTabs = {}, hookedJournal = nil}
+
+-- The last numbered tab the client still shows, else the journal frame, which
+-- is the one host known to be on screen whenever the Advisor tab is.
+function Attach.Resolve(journal)
+    local last
+    for i = 1, theirTabCount do
+        local t = _G["ProjectEbonholdEchoJournalTab" .. i]
+        if t and t.IsShown and t:IsShown() then last = t end
+    end
+    if last then return last, "journal-tabs" end
+    return journal, "journal-frame"
+end
+
+-- Idempotent. Changes the anchor only when the resolved target changed, and
+-- reasserts the frame levels every time because a reparent resets them.
+function Attach.Apply()
+    local journal = _G["ProjectEbonholdEchoJournal"]
+    if not (journal and ourTab) then return false end
+    local target, mode = Attach.Resolve(journal)
+    if Attach.target ~= target or Attach.mode ~= mode then
+        ourTab:ClearAllPoints()
+        if mode == "journal-tabs" then
+            -- Same row as their tabs, standard -16 overlap after the last one.
+            ourTab:SetPoint("TOPLEFT", target, "TOPRIGHT", -16, 0)
+        else
+            -- Their tab row hangs 12 below the journal's bottom edge and starts
+            -- at its left. The right end of that same edge is used instead.
+            ourTab:SetPoint("RIGHT", journal, "BOTTOMRIGHT", -12, -12)
+        end
+        Attach.target, Attach.mode = target, mode
+    end
+    ourTab:SetFrameLevel(mode == "journal-tabs" and target:GetFrameLevel()
+        or journal:GetFrameLevel() + 2)
+    if panel then panel:SetFrameLevel(journal:GetFrameLevel() + 10) end
+    return true
+end
+
+-- For the diagnostic snapshot and the native drag/reopen check.
+function M.AttachmentStatus()
+    local journal = _G["ProjectEbonholdEchoJournal"]
+    local parent = journal and journal.GetParent and journal:GetParent() or nil
+    return {
+        installed = installed, mode = Attach.mode,
+        anchor = Attach.target and Attach.target.GetName and Attach.target:GetName() or "none",
+        journalParent = parent and parent.GetName and parent:GetName() or "none",
+        hubNavigation = "not in client evidence; not used",
+    }
+end
+
 local function Install()
     local journal = _G["ProjectEbonholdEchoJournal"]
     local jScroll = _G["ProjectEbonholdEchoJournalScroll"]
@@ -1354,30 +876,37 @@ local function Install()
         n = n + 1
     end
     theirTabCount = n
-    local lastTab = _G["ProjectEbonholdEchoJournalTab" .. n]
 
-    ourTab = CreateFrame("Button", "NexusJournalTab",
+    -- A second Install after a partial failure reuses every frame and hook.
+    ourTab = ourTab or CreateFrame("Button", "NexusJournalTab",
         journal, "CharacterFrameTabButtonTemplate")
     ourTab:SetText("Nexus Advisor")
-    -- Same row as their tabs, standard -16 overlap after the last one.
-    ourTab:ClearAllPoints()
-    ourTab:SetPoint("TOPLEFT", lastTab, "TOPRIGHT", -16, 0)
-    ourTab:SetFrameLevel(lastTab:GetFrameLevel())
+    Attach.target, Attach.mode = nil, "none"
+    Attach.Apply()
     -- A fresh template tab shows BOTH texture sets until its state is
     -- set; without this it renders as a mangled sliver.
     pcall(function() PanelTemplates_TabResize(ourTab, 0) end)
     pcall(function() PanelTemplates_DeselectTab(ourTab) end)
     ourTab:Show()
-    ourTab:SetScript("OnClick", function() pcall(SelectOurTab) end)
+    -- A second click closes the Advisor again. When the host hides the
+    -- numbered tabs, no stock tab click is left to do that.
+    ourTab:SetScript("OnClick", function()
+        pcall(function()
+            if panel and panel:IsShown() then DeselectOurTab(true) else SelectOurTab() end
+        end)
+    end)
 
     -- Their tab numbering differs between client revisions. Never assume
     -- Tab1 is Loadouts: inspect the clicked tab after the stock handler runs.
-    stockTabs = {}
     for i = 1, theirTabCount do
         local t = _G["ProjectEbonholdEchoJournalTab" .. i]
         if t then
-            stockTabs[#stockTabs + 1] = t
-            if t.HookScript then
+            if t.HookScript and not Attach.hookedTabs[t] then
+                Attach.hookedTabs[t] = true
+                -- The host hides or restores these tabs at its own time.
+                -- Event-driven: no scan and no per-frame work.
+                t:HookScript("OnHide", function() pcall(Attach.Apply) end)
+                t:HookScript("OnShow", function() pcall(Attach.Apply) end)
                 t:HookScript("OnClick", function()
                     pcall(function()
                         DeselectOurTab(false)
@@ -1391,9 +920,13 @@ local function Install()
     -- Some client builds use bottom navigation buttons that are not named
     -- ProjectEbonholdEchoJournalTabN. The scanner determines visibility from
     -- actual loadout cards, so opening/rebuilding the journal remains safe.
-    if journal.HookScript then
+    if journal.HookScript and Attach.hookedJournal ~= journal then
+        Attach.hookedJournal = journal
         journal:HookScript("OnShow", function()
             pcall(function()
+                -- The host may have embedded the journal or hidden its tabs
+                -- since the last open.
+                Attach.Apply()
                 DeselectOurTab(false)
                 associationVisible = true
             end)
@@ -1405,22 +938,26 @@ local function Install()
     -- title bar: the per-tab top sections belong to THEIR tabs and
     -- their switcher rightly ignores our tab -- so we occlude rather
     -- than fight their state. EnableMouse blocks click-through.
-    panel = CreateFrame("Frame", "NexusJournalPanel", journal)
-    panel:SetPoint("TOPLEFT", journal, "TOPLEFT", 10, -32)
-    panel:SetPoint("BOTTOMRIGHT", journal, "BOTTOMRIGHT", -8, 8)
+    if not panel then
+        panel = CreateFrame("Frame", "NexusJournalPanel", journal)
+        panel:SetPoint("TOPLEFT", journal, "TOPLEFT", 10, -32)
+        panel:SetPoint("BOTTOMRIGHT", journal, "BOTTOMRIGHT", -8, 8)
+        panel:EnableMouse(true)
+        local bg = panel:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetTexture(ASSET .. "UI-Background-Rock")
+    end
     panel:SetFrameLevel(journal:GetFrameLevel() + 10)
-    panel:EnableMouse(true)
-    local bg = panel:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetTexture(ASSET .. "UI-Background-Rock")
 
-    scroll = CreateFrame("ScrollFrame", "NexusJournalScroll",
-        panel, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 4, -6)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26, 4)
-    child = CreateFrame("Frame", nil, scroll)
-    child:SetSize(292, 100)
-    scroll:SetScrollChild(child)
+    if not scroll then
+        scroll = CreateFrame("ScrollFrame", "NexusJournalScroll",
+            panel, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 4, -6)
+        scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26, 4)
+        child = CreateFrame("Frame", nil, scroll)
+        child:SetSize(292, 100)
+        scroll:SetScrollChild(child)
+    end
 
     panel:Hide()
 end
@@ -1433,7 +970,10 @@ local function OnJournalLifecycle()
         if not installed and pcall(Install) then
             installed = true
         end
-        if installed then DeselectOurTab(true) end
+        if installed then
+            Attach.Apply()
+            DeselectOurTab(true)
+        end
     end)
 end
 
@@ -1507,7 +1047,10 @@ function M.OpenBuilds()
     local function finish()
         pcall(function()
             if not installed and pcall(Install) then installed = true end
-            if installed then DeselectOurTab(false) end
+            if installed then
+                Attach.Apply()
+                DeselectOurTab(false)
+            end
             RefreshAssociationRows()
         end)
     end
@@ -1528,6 +1071,9 @@ function M.DebugSnapshot()
     local lines = {}
     lines[#lines + 1] = "journal=" .. tostring(journal ~= nil) .. " shown=" .. tostring(journal and journal:IsShown() or false)
     lines[#lines + 1] = "loadoutsVisible=" .. tostring(visible) .. " tab=" .. tostring(tabText)
+    local attachment = M.AttachmentStatus()
+    lines[#lines + 1] = "advisorTab mode=" .. tostring(attachment.mode) .. " anchor=" .. tostring(attachment.anchor)
+        .. " journalParent=" .. tostring(attachment.journalParent) .. " hubNavigation=" .. attachment.hubNavigation
     lines[#lines + 1] = "associationPanel=" .. tostring(associationPanel ~= nil)
         .. " shown=" .. tostring(associationPanel and associationPanel:IsShown() or false)
     if slots then

@@ -55,7 +55,7 @@ for label,run in pairs({verified=verified,unverified=unverified})do
   assert(not state.hasFlag,'runtime passes no saved-verification flag to the policy: '..label)
   assert(state.queue==0,'runtime passes no inferred queue: '..label)
   assert(state.requested==2,'real compiled requestedCounts reach the policy: '..label)
-  assert(state.action.planner=='pilot103','the one ordinary planner decides: '..label)
+  assert(state.action.planner=='echoweaver','the one ordinary planner decides: '..label)
  end
  assert(run.seen.predicted==0 and run.seen.historical==0,'no future offer is inferred and the historical model is never called: '..label)
  assert(not run.notes:lower():find('guaranteed queue',1,true) and run.notes:find('no future random roll is assumed',1,true),'Journal estimate assumes no future offer: '..label)

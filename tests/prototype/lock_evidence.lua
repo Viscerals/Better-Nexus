@@ -10,7 +10,7 @@ for i=1,79 do
  total[#total+1]={spellId=id,quality=2,stacks=1,locked=false}
 end
 for i,id in ipairs(locks) do
- H.AddEcho(id,'Permanent '..i,qualities[i],5)
+ H.AddEcho(id,'Locked '..i,qualities[i],5)
  total[#total+1]={spellId=id,quality=qualities[i],stacks=1,locked=false}
  H.locked[#H.locked+1]={spellId=id,stacks=1}
 end
@@ -155,7 +155,7 @@ check(A.WishlistEvidenceState(explicit)=='actionable' and explicit.evidenceSourc
 check(A.SetLoadoutWishlist(1,101,explicit)==true,'valid explicitly designed targets still assign')
 reset();H.locked=nil
 for i=85,80,-1 do H.perks.serverBuildSlots[101].echoes[i]=nil end
-check(A.SetLoadoutWishlist(1,101,findPlan())==true,'ordinary-only target does not require permanent-lock data')
+check(A.SetLoadoutWishlist(1,101,findPlan())==true,'ordinary-only target does not require locked-Echo data')
 reset();H.perks.serverActiveSlot=0
 local first=findPlan()
 local okFirst,whyFirst=A.SetFirstRunWishlist(101,first)
@@ -171,12 +171,12 @@ H.perks.serverBuildSlots[1].echoes[85]=nil
 H.perks.serverBuildSlots[101].echoes=H.Clone(H.perks.serverBuildSlots[1].echoes)
 H.locked[1].stacks=2;H.locked[6]=nil
 local counted=findPlan();local on,ln=roleCounts(counted.echoes)
-check(on==79 and ln==6,'shared ordinary/permanent spell is split by counts')
+check(on==79 and ln==6,'shared ordinary/locked spell is split by counts')
 local a,b=0,0
 for _,e in ipairs(counted.echoes)do if e.spellId==locks[1] then
  if e.locked then b=b+e.stacks else a=a+e.stacks end
 end end
-check(a==1 and b==2,'two permanent copies do not consume the ordinary copy')
+check(a==1 and b==2,'two locked copies do not consume the ordinary copy')
 
 -- Read-only discovery and editor opening never rewrite raw mirrors or history.
 reset();local raw=H.Clone(H.perks.serverBuildSlots);local lockcopy=H.Clone(H.locked)

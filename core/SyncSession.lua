@@ -53,6 +53,11 @@ function Session.New(options)
         and options.cancelRequest or function() return false end
     local noteRequestOutcome = type(options.noteRequestOutcome) == "function"
         and options.noteRequestOutcome or function() end
+    -- Request size is decided before queue admission, with the transport's own
+    -- escaped-wire measure and limit (see RequestSyncOnce).
+    local escapedLen = type(options.escapedLen) == "function" and options.escapedLen
+        or function(text) return #text + select(2, text:gsub("|", "")) end
+    local requestLimit = tonumber(options.chatLimit) or 255
     local currentClaimBuildHash = type(options.currentClaimBuildHash) == "function"
         and options.currentClaimBuildHash or options.currentBuildHash
 
@@ -84,6 +89,29 @@ function Session.New(options)
     }
     local knownPeers = {}
     local M = {}
+    local manualGrantCounter = 0
+
+    -- The saved Sync mode (core/SyncModePolicy.lua through Sync); "automatic"
+    -- for every profile that does not carry an accepted Off/Manual choice.
+    local function SyncMode()
+        return type(options.syncMode) == "function" and options.syncMode()
+            or "automatic"
+    end
+    local function SyncModeText(mode)
+        return type(options.syncModeText) == "function"
+            and options.syncModeText(mode) or nil
+    end
+
+    -- The permission an explicit manual Sync Now holds: the grant string of
+    -- the active manual convergence, which ends at its existing fixed
+    -- absolute lifetime (never restarted by pending work).
+    local function ManualGrant()
+        if autoConverge.active == true and autoConverge.mode == "manual"
+            and now() < Number(autoConverge.absoluteUntil) then
+            return autoConverge.manualGrant
+        end
+        return nil
+    end
 
     local function OutcomeSnapshot()
         return {
@@ -98,6 +126,9 @@ function Session.New(options)
             lastReason=requestOutcome.lastReason or "none",
             terminalReason=requestOutcome.terminalReason or "none",
             queueOutcome=requestOutcome.queueOutcome or "none",
+            requestLength=requestOutcome.requestLength,
+            requestLimit=requestOutcome.requestLimit,
+            requestVersionForm=requestOutcome.requestVersionForm,
         }
     end
 
@@ -435,6 +466,39 @@ function Session.New(options)
         return true
     end
 
+    -- One user-requested completion of a stored build whose locked roles are
+    -- unknown (docs/P1_7_LOCKED_ROLE_WIRE.md). It reuses the exact-ID loadout
+    -- request; the owner's same-revision full answer states the roles. Never
+    -- queued twice for one build while unsent, never retried automatically.
+    function M.QueueRolesRequest(buildId)
+        if not options.validIdentifier(buildId) then return false end
+        local prior = requestedLoadouts[buildId]
+        if type(prior) == "table" and not prior.sent then
+            if prior.replacement then return false end
+            prior.roles = true
+            return true
+        end
+        local depth = RecoveryCount()
+        if depth >= maxRecoveryQueue then return false end
+        local recovery = {
+            buildId=tostring(buildId),at=now(),sent=false,roles=true,
+        }
+        requestedLoadouts[buildId] = recovery
+        recoveryTail = recoveryTail + 1
+        recoveryQueue[recoveryTail] = recovery
+        return true
+    end
+
+    -- "queued", "sent" (and when) or "unsent" (and why) for a requested
+    -- roles completion; nil when none is held. A read only.
+    function M.RolesRequestState(buildId)
+        local recovery = requestedLoadouts[buildId]
+        if type(recovery) ~= "table" or not recovery.roles then return nil end
+        if recovery.unsent then return "unsent", recovery.unsent end
+        if recovery.sentAt then return "sent", recovery.sentAt end
+        return "queued"
+    end
+
     function M.PumpRecovery(elapsed)
         recoveryTicker = recoveryTicker + Number(elapsed)
         if recoveryTicker < 1.5 then return end
@@ -453,7 +517,15 @@ function Session.New(options)
         local requestId = type(recovery) == "table" and recovery.requestId
             or nil
         local build = options.catalogGet(buildId)
-        if type(recovery) == "table" and recovery.replacement
+        local mode, grant = SyncMode(), ManualGrant()
+        if mode == "off" or (mode == "manual" and not grant) then
+            -- A follow-up the saved mode refuses is not queued behind the
+            -- refusal; it ends here like any unsendable recovery.
+            log("SYNC", "recovery for '%s' not requested: saved Sync mode %s",
+                tostring(buildId), mode)
+            if type(recovery) == "table" then recovery.unsent = "mode" end
+        elseif type(recovery) == "table" and (recovery.replacement
+                or recovery.roles)
             or not (build and type(build.echoes) == "table"
             and #build.echoes > 0) then
             local contextual = type(requestId) == "string"
@@ -465,22 +537,39 @@ function Session.New(options)
                     myName(), tostring(buildId))
             local transportRequestId = contextual and requestId
                 or "loadout-" .. tostring(buildId)
+            local metadata = {
+                requester=myName(),
+                requestId=transportRequestId,
+                buildId=tostring(buildId),queueClass="request",
+                enqueuedAt=now(),expiresAt=now() + maxReceiveAge,
+                manualGrant=grant,
+            }
+            -- Our locked-role capability travels just before our request,
+            -- under its metadata (same queue, route and permission).
+            -- A user-requested roles completion states it once (the owner
+            -- may have restarted and lost our entry since the last
+            -- interval); a retry while the request cannot be queued does not
+            -- force it again.
+            if type(options.advertiseCapability) == "function" then
+                local force = type(recovery) == "table"
+                    and recovery.roles == true and not recovery.capsForced
+                local ok, advertised = pcall(options.advertiseCapability,
+                    metadata, force)
+                if force and ok and advertised then recovery.capsForced = true end
+            end
             local queued, queueWhy = (options.enqueueControl or options.enqueue)(
-                wire, {
-                    requester=myName(),
-                    requestId=transportRequestId,
-                    buildId=tostring(buildId),queueClass="request",
-                    enqueuedAt=now(),expiresAt=now() + maxReceiveAge,
-                })
+                wire, metadata)
             if not queued then
                 -- Queue pressure is transient; an invalid maximum-field wire is
                 -- deterministic and must not retry forever every 1.5 seconds.
                 if queueWhy ~= "invalid packet" then return end
                 log("SYNC", "legacy loadout request '%s' exceeded wire bounds",
                     tostring(buildId))
+                if type(recovery) == "table" then recovery.unsent = "wire" end
             else
                 if type(recovery) == "table" then
                     recovery.sent, recovery.at = true, now()
+                    recovery.sentAt = recovery.at
                 end
                 receiveWindowUntil = math.max(receiveWindowUntil,
                     now() + inflightGrace)
@@ -532,11 +621,50 @@ function Session.New(options)
             requester=myName(),
             requestId=requestId,transferId=requestId,queueClass="request",
             enqueuedAt=current,expiresAt=expiresAt,attempts=0,
+            manualGrant=ManualGrant(),
         }
-        local queued, why = (options.enqueueControl or options.enqueue)(string.format(
-            "%s|%s|%s|%s|%s|%s", options.requestCode, myName(),
-            buildHash, dpsHash, requestId,
-            tostring(options.requestVersion())), metadata)
+        -- One request, one representation, chosen BEFORE admission. The full
+        -- advertised version (for example 1.20.0-beta.1+test.9032) is used when
+        -- the escaped request fits the transport limit. Otherwise the plain
+        -- release version (1.20.0-beta.1, prerelease kept, build metadata
+        -- removed) is used; peers parse both, and since the update-notice
+        -- correction the metadata is diagnostic only. Sender, hashes, request
+        -- ID, field order and separators never change. A request that still
+        -- does not fit is refused here with its measured length; it is never
+        -- truncated and never retried in another form.
+        local function Build(version)
+            return string.format("%s|%s|%s|%s|%s|%s", options.requestCode,
+                myName(), buildHash, dpsHash, requestId, tostring(version))
+        end
+        local fullVersion = tostring(options.requestVersion())
+        local message, form = Build(fullVersion), "full"
+        local length = escapedLen(message)
+        if length > requestLimit then
+            local plain = type(options.requestPlainVersion) == "function"
+                and options.requestPlainVersion() or nil
+            if type(plain) == "string" and plain ~= "" and plain ~= fullVersion then
+                local compact = Build(plain)
+                local compactLength = escapedLen(compact)
+                log("SYNC", "sync request %d>%d bytes with version %s; plain version %s gives %d",
+                    length, requestLimit, fullVersion, plain, compactLength)
+                message, form, length = compact, "plain", compactLength
+            end
+        end
+        requestOutcome.requestLength = length
+        requestOutcome.requestLimit = requestLimit
+        requestOutcome.requestVersionForm = form
+        if length > requestLimit then
+            SetQueueOutcome("oversize")
+            SetTerminal("queue_rejected")
+            log("SYNC", "sync request refused before sending: %d>%d bytes (%s version)",
+                length, requestLimit, form)
+            return false, string.format("sync request too long (%d>%d bytes)",
+                length, requestLimit), "oversize"
+        end
+        if type(options.advertiseCapability) == "function" then
+            pcall(options.advertiseCapability, metadata)
+        end
+        local queued, why = (options.enqueueControl or options.enqueue)(message, metadata)
         if not queued then
             SetQueueOutcome(tostring(why or ""):find("full", 1, true)
                 and "full" or "dropped")
@@ -602,8 +730,8 @@ function Session.New(options)
     end
 
     local function BeginConvergencePass(mode, bypassCooldown)
-        local ok, why = RequestSyncOnce(bypassCooldown)
-        if ok ~= true then return ok, why end
+        local ok, why, refusal = RequestSyncOnce(bypassCooldown)
+        if ok ~= true then return ok, why, refusal end
         autoConverge.mode = mode or autoConverge.mode
         autoConverge.pass = autoConverge.pass + 1
         autoConverge.started = now()
@@ -688,8 +816,16 @@ function Session.New(options)
         end
     end
 
+    function M.ManualGrant() return ManualGrant() end
+
     function M.RequestSync()
         local current = now()
+        if SyncMode() == "off" then
+            -- The user's saved choice is not turned on silently.
+            log("SYNC", "sync request refused: saved Sync mode is Off")
+            return false, SyncModeText("off")
+                or "Sync is Off: your saved Sync mode is Off."
+        end
         if autoConverge.active
             and current >= Number(autoConverge.absoluteUntil) then
             autoConverge.active = false
@@ -722,6 +858,8 @@ function Session.New(options)
         autoConverge.stable = 0
         autoConverge.terminal = nil
         autoConverge.mode = "manual"
+        manualGrantCounter = manualGrantCounter + 1
+        autoConverge.manualGrant = "manual-" .. tostring(manualGrantCounter)
         autoConverge.peerProgress = false
         autoConverge.peerEquivalent = false
         autoConverge.absoluteUntil = current + maxConvergenceAge
@@ -735,6 +873,8 @@ function Session.New(options)
 
     function M.UpdateAutoSync(elapsed)
         if not autoSyncPending then return end
+        -- Saved Off or Manual: no automatic login Sync is started.
+        if SyncMode() ~= "automatic" then return end
         autoSyncElapsed = autoSyncElapsed + Number(elapsed)
         if autoSyncElapsed < autoSyncDelay or not options.isConnected() then
             return
@@ -748,8 +888,15 @@ function Session.New(options)
         autoConverge.peerProgress = false
         autoConverge.peerEquivalent = false
         autoConverge.absoluteUntil = now() + maxConvergenceAge
-        local ok, why = BeginConvergencePass("automatic", false)
-        if ok == false then
+        local ok, why, refusal = BeginConvergencePass("automatic", false)
+        if ok == false and refusal == "oversize" then
+            -- The same data gives the same size: no automatic retry loop. The
+            -- next login or a manual Sync Now builds the request again.
+            autoConverge.active = false
+            autoConverge.terminal = "request too long"
+            log("SYNC", "automatic login convergence stopped: %s",
+                tostring(why or "request too long"))
+        elseif ok == false then
             autoSyncPending = true
             autoSyncElapsed = autoSyncDelay - 1
             log("SYNC", "automatic login convergence deferred: %s",
@@ -759,6 +906,21 @@ function Session.New(options)
 
     function M.UpdateAutoConvergence()
         if not autoConverge.active then return end
+        local mode = SyncMode()
+        if mode == "off" or (mode == "manual" and autoConverge.mode ~= "manual") then
+            -- The saved mode no longer permits this convergence: end it with
+            -- the existing cancellation, truthfully; nothing is recalled.
+            local old = pendingRequest
+            autoConverge.active = false
+            autoConverge.terminal = "sync mode " .. mode
+            pendingRequest, pendingHashRequest = nil, nil
+            receiveWindowUntil, receiveAbsoluteUntil = 0, 0
+            if old then cancelRequest(old.id, myName()) end
+            SetQueueOutcome("dropped")
+            SetTerminal("sync_mode")
+            log("SYNC", "convergence stopped: saved Sync mode %s", mode)
+            return
+        end
         if ExpireActiveConvergence() then return end
         local current = now()
         if pendingHashRequest or pendingRequest or M.IsReceiving() then return end
@@ -793,7 +955,13 @@ function Session.New(options)
                 maxPasses)
             return
         end
-        local ok, why = BeginConvergencePass(autoConverge.mode, false)
+        local ok, why, refusal = BeginConvergencePass(autoConverge.mode, false)
+        if ok == false and refusal == "oversize" then
+            autoConverge.active = false
+            autoConverge.terminal = "request too long"
+            log("SYNC", "convergence stopped: %s", tostring(why or "request too long"))
+            return
+        end
         if not ok then
             autoConverge.started = current
             log("SYNC", "next convergence pass deferred: %s",
@@ -914,6 +1082,7 @@ function Session.New(options)
 
     function M.SendStatusTo(target)
         if not target or target == "" then return false end
+        if SyncMode() == "off" then return false, SyncModeText("off") end
         local token = BuildStatusToken()
         if not token then return false end
         local message = "WLRQ|" .. myName() .. "|dev|" .. token

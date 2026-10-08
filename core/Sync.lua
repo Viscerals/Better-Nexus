@@ -26,9 +26,8 @@
 --   • Conservative paced queued sends; full loadouts sync in-band
 --   • Eight build and DPS hash buckets: resend only changed subsets
 --   • Responder claims: identical peers elect one sender; unique peers contribute
---   • Hot-build window (120s): a build posted while no peer is listening
---     is still included in the next BroadcastMine so the peer catches it
---     on their next Sync Now
+--   • Hot-build window (120s): a build this client broadcast keeps its
+--     evidence pinned for the responder window, then is forgotten
 --   • Max 999 chunks per build (enforced before queuing)
 
 Nexus = Nexus or {}
@@ -52,11 +51,14 @@ local CODE_DELETE     = "WLRD"
 local CODE_DPS        = "WLDS" -- legacy build-id DPS
 local CODE_DPS2       = "WLD2" -- exact-set DPS chunks
 local CODE_PRESENCE   = "WLNP" -- lightweight Nexus peer/version presence
+-- WLCP: locked-role wire capability (docs/P1_7_LOCKED_ROLE_WIRE.md).
+-- Released peers drop this unknown code before parsing it. (No new chunk
+-- local: the main chunk is at Lua's 200-local limit.)
 local PEER_PROTOCOL_CODES = {
     [CODE_BUILD]=true, [CODE_INDEX]=true, [CODE_LOADOUT_REQ]=true,
     [CODE_LOADOUT_CLAIM]=true, [CODE_REQUEST]=true, [CODE_CLAIM]=true,
     [CODE_BUCKET_CLAIM]=true, [CODE_DELETE]=true, [CODE_DPS]=true,
-    [CODE_DPS2]=true, [CODE_PRESENCE]=true,
+    [CODE_DPS2]=true, [CODE_PRESENCE]=true, WLCP=true,
 }
 local CHAT_LIMIT      = 255    -- WoW SendChatMessage hard cap
 local CHAT_SAFETY     = 8      -- conservative margin
@@ -128,17 +130,15 @@ local Codec, Adapter, Transport, Compatibility, Reconciler, Inbound
 local Diagnostics, Session
 local channelIndex
 local seenRemoteIds  = {}   -- id -> lastModified we already hold
-local tombstones     = {}   -- id -> stamp; never resurrect
-local hotBuilds      = {}   -- id -> { build, t }; recently posted, include in answers
+local hotBuilds      = {}   -- id -> { build, t }; broadcast builds, pinned for HOT_WINDOW
+local hotBuildCheckedAt = 0 -- the last once-per-second hot-build expiry check
 local registeredHotBuildEvidenceOwner
-local pendingDeletes = {}   -- local tombstone ids awaiting direct notification
-local pendingDeleteTicker = 0
 local pendingShare          -- one immutable, session-only Share summary
 local pendingShareTicker = 0
 local Operation = {
     latestShare=nil,latestDelete=nil,active={},activeShares={},
     activeDeletes={},shareById={},deleteById={},recent={},recentNext=1,
-    recentCap=64,sequence=0,deleteCursor=nil,deleteDiscoveryComplete=false,
+    recentCap=64,sequence=0,deleteDiscoveryComplete=true,
     counters={
         queued="operationQueued",attempted="operationAttempted",
         requeued="operationRequeued",
@@ -162,9 +162,15 @@ local Responder = {state={hotBuildGeneration=0}, Work={}}
 -- Session-only owner of validated inbound items that the catalog refused
 -- without a ticket because another transaction owned admission. It is a field
 -- because this chunk is at the Lua limit of 200 local variables.
-Responder.Admission = {order={}, byKey={}, count=0, maxTotal=64, maxPerSender=16}
+-- order/byKey/count are the items still waiting. inFlight holds the members of
+-- the batch that is currently inside the catalog candidate: they have left the
+-- queue but are not settled, so they keep counting against the same bounds and
+-- no new arrival gains an unaccounted allowance while a batch runs.
+-- The behaviour is installed by core/SyncAdmission.lua below (see "Deferred
+-- inbound admission").
+Responder.Admission = {order={}, byKey={}, count=0, maxTotal=64, maxPerSender=16,
+    inFlight={}, inFlightCount=0}
 local catalogMutationIdentity
-local PendingDeleteCount
 
 local function Catalog()
     return Nexus and Nexus.BuildCatalog
@@ -200,6 +206,34 @@ function Responder.Work.ForgetHotBuild(id)
     Responder.state.hotBuildGeneration =
         (Responder.state.hotBuildGeneration or 0) + 1
     return true
+end
+
+-- A broadcast build stays hot for HOT_WINDOW seconds after its broadcast and
+-- then leaves; nothing keeps it pinned for the rest of the session. The pin
+-- is not what keeps the build's queued transfer intact: AdmitBuild
+-- serializes the whole build into the queued packets before it pins the
+-- build, and Transport owns those strings until they are sent or expire
+-- (PENDING_MAX_AGE, longer than this window). The pin only reports the
+-- build's evidence reference to the evidence reference provider for the
+-- responder window; its expiry releases that reference and nothing else
+-- (tests/prototype/sync_hot_build_release.lua). Checked once a second.
+local function ExpireHotBuilds()
+    local now = Now()
+    if now - hotBuildCheckedAt < 1 then return 0 end
+    hotBuildCheckedAt = now
+    local expired = 0
+    for id, hot in pairs(hotBuilds) do
+        local posted = type(hot) == "table" and tonumber(hot.t) or nil
+        if posted == nil or now - posted > HOT_WINDOW then
+            hotBuilds[id] = nil
+            expired = expired + 1
+        end
+    end
+    if expired > 0 then
+        Responder.state.hotBuildGeneration =
+            (Responder.state.hotBuildGeneration or 0) + 1
+    end
+    return expired
 end
 
 local function EnsureHotBuildEvidenceProvider()
@@ -245,7 +279,8 @@ local function BindCatalogCompletion(ticket, callback)
         local committed = outcome.committed == true and outcome.state == "committed"
             and outcome.database == database and catalog.BoundDatabase() == database
             and rawget(database, "authorityBundle") == outcome.bundle
-        callback(committed, committed and outcome.storedAs or outcome.reason)
+        callback(committed, committed and outcome.storedAs or outcome.reason,
+            outcome.detail)
     end)
 end
 
@@ -481,7 +516,7 @@ function Sync.WorkState()
         requestRelated=requestTransport.requestRelated
             + requestIncoming.total,
         requestOutstandingTransfers=requestTransport.outstandingTransfers,
-        pendingDeletes=PendingDeleteCount(),
+        pendingDeletes=0, -- MASTER-RC-019: no delete ever acquires retry ownership
         pendingDeleteDiscovery=Operation.deleteDiscoveryComplete and 0 or 1,
         pendingShares=pendingShare and 1 or 0,
         deferredAdmissions=Responder.Admission.count,
@@ -987,6 +1022,9 @@ function Sync.Stats()
     -- Expose the current session's separate readiness state without inventing
     -- a queued request or expanding that transport enum.
     stats.preparingRequest = Session.StatusSnapshot().queueOutcome == "preparing"
+    local hot = 0
+    for _ in pairs(hotBuilds) do hot = hot + 1 end
+    stats.hotBuilds, stats.hotWindow = hot, HOT_WINDOW
     return stats
 end
 
@@ -1047,6 +1085,13 @@ Transport = TransportFactory.New({
     resolveChannel=ResolveSendChannel,
     channelLabel=function() return channelIndex end,
     sendChat=function(...) return SendChatMessage(...) end,
+    -- The saved Sync mode (core/SyncModePolicy.lua): the same decision the
+    -- wire asks again at submission.
+    permit=function(metadata)
+        local policy=Nexus.SyncModePolicy
+        if not policy then return true end
+        return policy.Allows("packet",metadata)
+    end,
     canDispatch=function(payload,metadata)
         local wire=Nexus.SyncWire
         if not wire or wire.suspended then return false end
@@ -1060,6 +1105,15 @@ Transport = TransportFactory.New({
             return false
         end
         return ChatFrame_AddMessageEventFilter(event, filter)
+    end,
+    -- One frame, made at the transport's one InstallFilters call, registered
+    -- for exactly the event asked for; it passes the event's arguments on.
+    listenEvent=function(event, handler)
+        if type(CreateFrame) ~= "function" then return false end
+        local frame = CreateFrame("Frame")
+        frame:RegisterEvent(event)
+        frame:SetScript("OnEvent", function(_, _, ...) handler(...) end)
+        return true
     end,
     observe=ObserveTransport,
 })
@@ -1171,6 +1225,11 @@ Reconciler = ReconcilerFactory.New({
                 buildId=tostring(entry.buildId),queueClass="claim",
                 enqueuedAt=Now(),expiresAt=Now() + PENDING_MAX_AGE,
             })
+    end,
+    permitResponse=function(requester, buildId)
+        local policy=Nexus.SyncModePolicy
+        if not policy then return true end
+        return policy.Allows("packet",{requester=requester,buildId=buildId})
     end,
     publishResponseClaim=function(entry)
         return Transport.EnqueueControl(string.format(
@@ -1407,6 +1466,12 @@ local function PumpPendingShare(elapsed)
         status.queueReason = "queued after retry"
         status.retryOutcome = "admitted"
         Operation.Transition(status, "queued", "bounded retry admitted")
+        -- Same follow-up permission as a first-time admission, with the
+        -- Share's own (unchanged) expiry.
+        if Nexus.SyncModePolicy then
+            Nexus.SyncModePolicy.NoteExplicitShare(status.id,
+                pending.metadata and pending.metadata.expiresAt)
+        end
         pendingShare = nil
         PeerObserve("share_queue", {id=status.id,outcome="admitted",
             reason="bounded retry",queue=Transport.Snapshot().control})
@@ -1505,6 +1570,11 @@ local function BroadcastSummary(build, options)
     if status then
         status.queueReason = "queued"
         Operation.Transition(status, "queued", "transport admitted")
+        -- Under a saved Manual mode, peers fetching this shared record are
+        -- answered until this Share's own expiry.
+        if Nexus.SyncModePolicy then
+            Nexus.SyncModePolicy.NoteExplicitShare(status.id, metadata.expiresAt)
+        end
     end
     LogEvent("TX","queuing summary '%s' (%d chars, no Echo list)", tostring(build.title), EscapedLen(msg))
     return true, "queued", Operation.Copy(status)
@@ -1515,7 +1585,17 @@ function Sync.GetShareStatus(id)
     local status = id ~= nil and Operation.shareById[tostring(id)]
         or Operation.latestShare
     if type(status) ~= "table" then return nil end
-    return Operation.Copy(status)
+    local copy = Operation.Copy(status)
+    -- Responses prepared for this build that carried its locked targets, and
+    -- those that carried the ordinary targets only (older requesters).
+    -- Prepared is not received: nothing here claims peer storage.
+    local roles = type(copy) == "table" and Responder.LockedRoleOutcomes
+        and Responder.LockedRoleOutcomes[tostring(copy.id)] or nil
+    if roles then
+        copy.lockedRolesFull = roles.full
+        copy.lockedRolesOrdinaryOnly = roles.ordinaryOnly
+    end
+    return copy
 end
 
 -- DeleteWireMessage, the WLRD encoder, was removed with its last caller. The
@@ -1538,58 +1618,19 @@ end
 -- and the retry pump removed, nothing enqueues a delete, so the envelope had
 -- no remaining caller.
 
--- Pending deletes are a session-only fixed-shape map. A durable `pending`
--- field on a tombstone is opaque evidence and grants no retry authority.
---
--- MASTER-RC-019. `MarkDeletePending` was removed with the retry pump below:
--- architecture line 4856 makes the originating local delete an unconditional
--- zero-wire refusal, so nothing populates this map any more and
--- `PendingDeleteCount()` honestly reports zero. The map, its clear entry and
--- its count are kept because `Sync.WorkState()` is a public surface that must
--- keep reporting them.
-local function ClearPendingDelete(id)
-    pendingDeletes[id] = nil
-end
+-- MASTER-RC-019. The originating local delete is an unconditional zero-wire
+-- refusal (architecture line 4856) and the responder path encodes no
+-- withdrawal either, so no delete ever acquires retry ownership. The retry
+-- pump, its session map, its discovery and its count were dead and are gone;
+-- `Sync.WorkState()` keeps reporting the public fields, which were always
+-- zero. A durable `pending` field on a tombstone is opaque evidence and grants
+-- no retry authority. Remote withdrawal stays unsupported until the protocol
+-- carries a comparable edit/delete order.
 
-PendingDeleteCount = function()
-    local count = 0
-    for id in pairs(pendingDeletes) do
-        if LocalOwnsTomb(CatalogTombstoneView(id)) then
-            count = count + 1
-        end
-    end
-    return count
-end
-
-function Operation.DiscoverPendingDeletes()
-    -- Persisted pending markers never restore session delete work.
-    Operation.deleteDiscoveryComplete = true
-    return 0
-end
-
-local function PumpPendingDeletes(elapsed)
-    pendingDeleteTicker = pendingDeleteTicker + (tonumber(elapsed) or 0)
-    if pendingDeleteTicker < 1 then return end
-    pendingDeleteTicker = 0
-    -- MASTER-RC-019. The retry-pump CONSUMER that used to live here -- expiry
-    -- and drop transitions, owner selection, and the retry
-    -- Transport.Enqueue(DeleteWireMessage(...)) -- was unreachable once the
-    -- originating local delete became an unconditional zero-wire refusal
-    -- (architecture line 4856): `MarkDeletePending` had exactly one caller, in
-    -- the enqueue tail that refusal replaced, so `pendingDeletes` can never be
-    -- non-empty and every branch past this point was dead.
-    --
-    -- Discovery is kept: it is reachable, it publishes
-    -- `Operation.deleteDiscoveryComplete`, and it honestly returns zero.
-    -- The RESPONDER path no longer encodes a withdrawal either: answering a
-    -- peer's reconciliation request emitted the WLRD that the originating
-    -- operation had refused as REMOTE_TOMBSTONE_ORDER_UNPROVEN. Both paths are
-    -- now zero-wire. Remote withdrawal stays unsupported until the protocol
-    -- carries a comparable edit/delete order.
-    Operation.DiscoverPendingDeletes(32)
-end
-
-Sync._pendingDeleteScheduled = false
+-- Whether the scheduler owns the once-per-second Share retry pump (then the
+-- update turn skips it). On the module table: this chunk is near the Lua 5.1
+-- limit of 200 locals and the field is read by the step table below.
+Sync._pendingShareScheduled = false
 
 function Sync.RequestDataViewRefresh()
     local refresh = Nexus and Nexus.ViewRefresh
@@ -1605,366 +1646,54 @@ end
 -- Deferred inbound admission
 ------------------------------------------------------------------------
 
--- Catalog.Put answers `false` plus a root-pending reason, and no ticket, when
--- another transaction owns admission. Nothing was accepted, so that is not a
--- pending operation. It is also not a verdict on the item. The validated item
--- is retained here, bounded and session-only, and is submitted once when
--- ordinary admission is available again. The complete inbound handler runs
--- again at that point, so owner, revision, pending-replacement and tombstone
--- state are rechecked against the then-current catalog. Only the ticket that
--- submission returns may report success; expiry, overflow, reset and a
--- changed catalog scope settle as the same storage refusal the item would
--- have received before.
---
--- Each item has one fixed deadline, PENDING_MAX_AGE from its own arrival.
--- Other catalog work never extends it. An item whose turn does not come in
--- that time fails as a storage refusal, even while the catalog keeps working.
-function Responder.Admission.Busy(stored, why)
-    return stored == false and (why == "ROOT_MUTATION_PENDING"
-        or why == "ROOT_ADMISSION_PENDING")
+-- The owner lives in core/SyncAdmission.lua, a verbatim move out of this
+-- chunk, which is at the Lua 5.1 limit of 200 local variables. The factory
+-- installs the Responder.Admission functions onto the state table created
+-- above. Session and the catalog mutation identity are bound after this
+-- point, so they are handed over as accessors.
+if not (Nexus.SyncInternals and type(Nexus.SyncInternals.Admission) == "table"
+    and type(Nexus.SyncInternals.Admission.New) == "function") then
+    error("Nexus SyncAdmission must load before Sync")
 end
+Nexus.SyncInternals.Admission.New({
+    responder=Responder,
+    sync=Sync,
+    stats=stats,
+    now=Now,
+    catalog=Catalog,
+    currentOwnerKey=CurrentOwnerKey,
+    mutationIdentity=function() return catalogMutationIdentity end,
+    transport=Transport,
+    reconciler=Reconciler,
+    session=function() return Session end,
+    bindCatalogCompletion=BindCatalogCompletion,
+    logEvent=LogEvent,
+    peerObserve=PeerObserve,
+    pendingTtl=PENDING_TTL,
+    pendingMaxAge=PENDING_MAX_AGE,
+    responseElectionDelay=RESPONSE_ELECTION_DELAY,
+})
 
-function Responder.Admission.Remove(entry)
-    if Responder.Admission.byKey[entry.key] ~= entry then return false end
-    Responder.Admission.byKey[entry.key] = nil
-    for index, candidate in ipairs(Responder.Admission.order) do
-        if candidate == entry then
-            table.remove(Responder.Admission.order, index)
-            break
-        end
+-- Read-only view of the retained inbound items: one bounded row per queued
+-- entry, in queue order. It starts no work, submits nothing, settles nothing
+-- and changes no counter, so a diagnostic or a test can report exclusive
+-- queued/in-flight/terminal categories without driving admission.
+function Sync.AdmissionSnapshot()
+    local current, rows = Now(), {}
+    for index, entry in ipairs(Responder.Admission.order) do
+        rows[index] = {kind=entry.kind, id=entry.id, sender=entry.sender,
+            stamp=entry.stamp, direct=entry.direct,
+            enqueuedAt=entry.enqueuedAt, expiresAt=entry.expiresAt,
+            age=current - entry.enqueuedAt}
     end
-    Responder.Admission.count = #Responder.Admission.order
-    return true
-end
-
-function Responder.Admission.Fail(entry, counter, detail)
-    if not Responder.Admission.Remove(entry) then return false end
-    if counter then
-        stats.storageRejected = (stats.storageRejected or 0) + 1
-        stats[counter] = (stats[counter] or 0) + 1
+    local flying = {}
+    for index, member in ipairs(Responder.Admission.inFlight) do
+        flying[index] = {key=member.key, sender=member.sender}
     end
-    Responder.NoteContextOutcome(entry.context, "rejected", "storage")
-    PeerObserve("receiver_commit", {id=entry.id,peer=entry.sender,
-        outcome="store_failed",reason=detail})
-    LogEvent("RX", "REJECT deferred %s '%s': %s", tostring(entry.kind),
-        tostring(entry.id), tostring(detail))
-    entry.settle(false, false, "storage")
-    return true
-end
-
--- The scope an item was validated in: this Sync session, this catalog owner,
--- its bound database and binding generation, and the local player. An item is
--- never submitted into any other scope.
-function Responder.Admission.Scope()
-    local catalog = Catalog()
-    local preparation = catalog
-        and type(catalog.ManualPreparationStatus) == "function"
-        and catalog.ManualPreparationStatus() or nil
-    return {
-        identity=catalogMutationIdentity,catalog=catalog,
-        database=catalog and type(catalog.BoundDatabase) == "function"
-            and catalog.BoundDatabase() or nil,
-        savedVariables=NexusDB,
-        binding=preparation and preparation.binding or nil,
-        owner=CurrentOwnerKey(),
-    }
-end
-
-function Responder.Admission.SameScope(entry)
-    local scope, current = entry.scope, Responder.Admission.Scope()
-    for _, key in ipairs({"identity", "catalog", "database", "savedVariables",
-        "binding", "owner"}) do
-        if scope[key] ~= current[key] then return false end
-    end
-    return current.catalog ~= nil and current.database ~= nil
-end
-
--- Returns "deferred", "duplicate", "rejected" or "overflow". One entry per
--- kind and ID: an older or equal revision never displaces the retained one,
--- and a different owner claim cannot take over its place in the queue.
-function Responder.Admission.Defer(fields)
-    local key = tostring(fields.kind) .. ":" .. type(fields.id) .. ":"
-        .. tostring(fields.id)
-    -- Settle cancelled and expired items first. An item retained in an earlier
-    -- scope is not a prior claim in this one: it must not make a fresh valid
-    -- receipt a duplicate, refuse its owner, or count against the bounds.
-    Responder.Admission.Expire()
-    local prior = Responder.Admission.byKey[key]
-    if prior then
-        if prior.owner ~= fields.owner then
-            Responder.NoteContextOutcome(fields.context, "rejected", "ownership")
-            return "rejected"
-        end
-        local promotes = fields.stamp == prior.stamp
-            and fields.direct == true and prior.direct ~= true
-            and fields.digest == prior.digest
-        if fields.stamp < prior.stamp then
-            Responder.NoteContextOutcome(fields.context, "duplicate", "stale")
-            return "duplicate"
-        end
-        if fields.stamp == prior.stamp and not promotes then
-            local same = fields.digest == prior.digest
-            Responder.NoteContextOutcome(fields.context,
-                same and "duplicate" or "rejected",
-                same and "duplicate" or "integrity")
-            return same and "duplicate" or "rejected"
-        end
-        Responder.Admission.Remove(prior)
-        stats.admissionSuperseded = (stats.admissionSuperseded or 0) + 1
-        Responder.NoteContextOutcome(prior.context, "duplicate", "stale")
-        prior.settle(true, false)
-    end
-    local fromSender = 0
-    for _, candidate in ipairs(Responder.Admission.order) do
-        if candidate.sender == fields.sender then fromSender = fromSender + 1 end
-    end
-    if Responder.Admission.count >= Responder.Admission.maxTotal
-        or fromSender >= Responder.Admission.maxPerSender then
-        stats.admissionOverflow = (stats.admissionOverflow or 0) + 1
-        return "overflow"
-    end
-    local current = Now()
-    local entry = {
-        key=key,kind=fields.kind,id=fields.id,stamp=fields.stamp,
-        owner=fields.owner,direct=fields.direct == true,digest=fields.digest,
-        sender=fields.sender,context=fields.context,run=fields.run,
-        settle=fields.settle,enqueuedAt=current,
-        expiresAt=current + PENDING_MAX_AGE,
-        scope=Responder.Admission.Scope(),
-    }
-    Responder.Admission.byKey[key] = entry
-    Responder.Admission.order[#Responder.Admission.order + 1] = entry
-    Responder.Admission.count = #Responder.Admission.order
-    stats.admissionDeferred = (stats.admissionDeferred or 0) + 1
-    PeerObserve("receiver_commit", {id=fields.id,peer=fields.sender,
-        outcome="deferred",reason="catalog admission pending"})
-    LogEvent("RX", "DEFER %s '%s': catalog admission pending",
-        tostring(fields.kind), tostring(fields.id))
-    return "deferred"
-end
-
-function Responder.Admission.Expire()
-    if Responder.Admission.count == 0 then return end
-    local current, index = Now(), 1
-    while Responder.Admission.order[index] do
-        local entry = Responder.Admission.order[index]
-        if not Responder.Admission.SameScope(entry) then
-            -- A changed player, database or binding cancels the item. It is
-            -- never carried into the new scope.
-            Responder.Admission.Fail(entry, "admissionCancelled",
-                "catalog scope changed")
-        elseif current >= entry.expiresAt then
-            Responder.Admission.Fail(entry, "admissionExpired",
-                "catalog admission wait expired")
-        else
-            index = index + 1
-        end
-    end
-end
-
--- A submission makes the catalog busy, and the lifecycle then withholds every
--- full Sync turn until that transaction ends. Transport only sends in a full
--- turn, so a queue that submits in every ready turn leaves outbound traffic,
--- including the user's explicit Sync Now request, with no turn at all.
--- Outbound and deferred inbound work therefore alternate, and the outbound
--- unit is a whole transfer, never a single chunk: a catalog transaction
--- between two chunks outlasts the chunks' own deadline.
---  * Sync's paced owners (response election, recovery, send pacing) only
---    accumulate time in full turns. After the catalog becomes ready they get
---    one continuous RESPONSE_ELECTION_DELAY window before any submission, or
---    they would never produce the outbound work that is then owed.
---  * A started multi-chunk transfer is never interrupted.
---  * While a response or loadout is pending, admission yields: its election
---    and bucket delays accumulate only in full turns, and a unit sent for
---    other work is not its turn. While only valid outbound traffic waits,
---    one whole unit must be transmitted between two submissions. Outbound
---    goes first.
---  * Apart from a started transfer, admission never yields to owed work for
---    more than PENDING_TTL of continuous ready time, so sustained outbound
---    work cannot hold deferred inbound work until its deadline.
--- The catalog stays ready in the meantime, so ordinary send pacing decides
--- when a transmission happens. Admission yields only to a transmission
--- that can actually happen: when the channel is absent, a throttle pause is
--- active, or the wire itself reports a persistent blocker (suspended, combat,
--- no throttle library), no send is possible and the catalog is not left
--- idle. Nothing is dropped, reordered or extended: each item keeps its fixed
--- deadline.
-function Responder.Admission.OutboundOwed()
-    if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
-        return false
-    end
-    -- The same owner Transport asks before every dispatch.
-    local wire = Nexus.SyncWire
-    if not wire or type(wire.Blocked) ~= "function" or wire.Blocked() then
-        return false
-    end
-    local progress = Transport.OutboundProgress()
-    if progress.midTransfer then return true end
-    local current = Now()
-    local readySince = Responder.Admission.readySince or current
-    local pending = (tonumber(Reconciler.Counts().total) or 0) > 0
-    local owed = progress.waiting > 0 or pending
-    -- The yield cap runs from the first turn in which retained items
-    -- yielded to owed work within this continuous ready period. Idle ready
-    -- time before the work existed does not spend it; a later arrival or a
-    -- later request does not restart it. Newly owed work is served first,
-    -- as at the first submission: a unit sent for earlier work is not its
-    -- turn.
-    if not owed then
-        Responder.Admission.yieldSince = nil
-        Responder.Admission.unitsAtSubmission = nil
-    else
-        Responder.Admission.yieldSince = math.max(
-            Responder.Admission.yieldSince or current, readySince)
-    end
-    if current - readySince < RESPONSE_ELECTION_DELAY then return true end
-    if not owed then return false end
-    if current - Responder.Admission.yieldSince >= PENDING_TTL then
-        return false
-    end
-    -- A pending response or loadout has not had its turn because some other
-    -- unit was sent: its election and bucket delays accumulate only in full
-    -- turns. It is served first, inside the cap above.
-    if pending then return true end
-    return progress.unitsSent == (Responder.Admission.unitsAtSubmission or -1)
-        or Responder.Admission.unitsAtSubmission == nil
-end
-
--- A validated inbound item that finds the catalog ready normally takes it at
--- once. While the user's explicit manual request is still unsent, that write
--- costs the request its turn: every commit invalidates the hash walk the
--- request waits for, the lifecycle withholds every full Sync turn until the
--- catalog and the hash are both ready, and at a large catalog the request
--- expires unsent behind a chain of direct writes. The lifecycle already gives
--- a pending Share the next admission turn; this gives the same to a manual
--- request. The item is not refused, dropped or delayed beyond its own
--- deadline: it enters this same bounded, scoped owner, keeps its validation,
--- fixed deadline, scope capture and FIFO place, and is submitted by the pump
--- after the request's transmission. The hold is bounded by the request's own
--- fixed lifetime, and it never waits for a transmission the wire cannot make.
--- A full owner refuses a held item exactly as it refuses one that found the
--- catalog busy: a counted storage refusal, never a silent drop.
-function Responder.Admission.RequestHold()
-    if not (Session and type(Session.ManualRequestUnsent) == "function"
-        and Session.ManualRequestUnsent()) then return false end
-    if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
-        return false
-    end
-    local wire = Nexus.SyncWire
-    if not wire or type(wire.Blocked) ~= "function" or wire.Blocked() then
-        return false
-    end
-    return true
-end
-
--- The same turn is owed to a peer's transaction. A received reconciliation
--- or loadout request is answered only in a full Sync turn, and it expires
--- after PENDING_TTL without one; a queued loadout recovery request is sent
--- only in a full turn. On a busy channel every ready moment of the catalog
--- was taken by the next valid inbound record, so a responder never reached
--- a turn and the exact full record was never serialized. While such work is
--- owed and the wire can send, a valid inbound item is retained in this same
--- bounded owner instead. Nothing is refused that would not be refused for a
--- busy catalog, and no lifetime changes. Owed work is a pending response or
--- loadout, a started transfer, valid queued outbound packets, or a queued
--- recovery request that has not reached the wire.
--- Retention is only the entry and has no clock of its own: the pump below
--- decides when the item is submitted, with its whole-unit alternation and
--- its PENDING_TTL yield cap. A transaction already in flight when the
--- request arrives is never cut short; if it outlasts PENDING_TTL the request
--- still expires.
-function Responder.Admission.Owed()
-    local progress = Transport.OutboundProgress()
-    if progress.midTransfer or progress.waiting > 0
-        or (tonumber(Reconciler.Counts().total) or 0) > 0 then return true end
-    -- A queued recovery request reaches the wire only in a full turn.
-    local session = Session and type(Session.WorkSnapshot) == "function"
-        and Session.WorkSnapshot() or nil
-    return session ~= nil and (tonumber(session.recovery) or 0) > 0
-end
-
-function Responder.Admission.OwedHold()
-    if not Sync.IsConnected() or Transport.ThrottleRemaining() > 0 then
-        return false
-    end
-    local wire = Nexus.SyncWire
-    if not wire or type(wire.Blocked) ~= "function" or wire.Blocked() then
-        return false
-    end
-    return Responder.Admission.Owed()
-end
-
--- FIFO place. An item that finds the catalog ready while older items are
--- still retained queues behind them; a direct write would overtake them at
--- every ready moment and leave them to expire behind newer traffic. A busy
--- catalog is asked as before and gives its ordinary refusal.
-function Responder.Admission.Behind()
-    if Responder.Admission.count == 0 then return false end
-    local catalog = Catalog()
-    local preparation = catalog
-        and type(catalog.ManualPreparationStatus) == "function"
-        and catalog.ManualPreparationStatus() or nil
-    return preparation ~= nil and preparation.ready == true
-end
--- Full Sync turns are continuous while the catalog is ready. A gap means the
--- lifecycle withheld them, so the continuous ready window starts again.
-function Responder.Admission.NoteTurn()
-    local current = Now()
-    if not Responder.Admission.turnAt or current - Responder.Admission.turnAt > 1 then
-        Responder.Admission.readySince = current
-    end
-    Responder.Admission.turnAt = current
-end
-
--- Runs only behind the lifecycle's full catalog readiness gate, after the
--- transport turn. The passive status read means a still-busy catalog receives
--- no further Put call.
-function Responder.Admission.Pump()
-    if Responder.Admission.count == 0 then
-        Responder.Admission.yieldSince = nil
-        Responder.Admission.unitsAtSubmission = nil
-        return
-    end
-    Responder.Admission.Expire()
-    if Responder.Admission.OutboundOwed() then
-        stats.admissionYielded = (stats.admissionYielded or 0) + 1
-        return
-    end
-    local catalog = Catalog()
-    while Responder.Admission.order[1] do
-        local preparation = catalog
-            and type(catalog.ManualPreparationStatus) == "function"
-            and catalog.ManualPreparationStatus() or nil
-        if preparation and preparation.ready ~= true then return end
-        local entry = Responder.Admission.order[1]
-        -- Rechecked at the point of submission, after Expire above, because
-        -- an earlier entry in this same turn can change nothing about scope
-        -- but a rebind can complete between turns.
-        if not Responder.Admission.SameScope(entry) then
-            Responder.Admission.Fail(entry, "admissionCancelled",
-                "catalog scope changed")
-        else
-            local outcome = entry.run(entry)
-            if outcome == "busy" then return end
-            if outcome == "ticket" then
-                -- One accepted submission per turn; the next one waits for a
-                -- whole transmitted unit while outbound work is owed.
-                Responder.Admission.unitsAtSubmission =
-                    Transport.OutboundProgress().unitsSent
-            end
-        end
-        Responder.Admission.Remove(entry)
-    end
-end
-
-function Responder.Admission.Reset()
-    while Responder.Admission.order[1] do
-        Responder.Admission.Fail(Responder.Admission.order[1], nil, "explicit reset")
-    end
-    Responder.Admission.order, Responder.Admission.byKey, Responder.Admission.count = {}, {}, 0
-    Responder.Admission.unitsAtSubmission = nil
-    Responder.Admission.readySince, Responder.Admission.turnAt = nil, nil
-    Responder.Admission.yieldSince = nil
+    return {count=Responder.Admission.count, entries=rows,
+        inFlight=Responder.Admission.inFlightCount, inFlightEntries=flying,
+        maxTotal=Responder.Admission.maxTotal,
+        maxPerSender=Responder.Admission.maxPerSender}
 end
 
 local function StoreSummary(data, transportSender, context, onComplete,
@@ -2156,6 +1885,27 @@ local function StoreSummary(data, transportSender, context, onComplete,
         return true, true
     end
     local function Submit()
+        -- Inside a receiver batch the validated record joins the batch instead
+        -- of starting a catalog mutation of its own. Everything above this
+        -- point has already run for this item: schema, ownership, tombstone,
+        -- revision and freshness checks included.
+        local collector = Responder.Admission.collector
+        if collector and deferredEntry then
+            collector[#collector + 1] = {
+                record=record,
+                options={source="remote", sender=transportSender},
+                key=deferredEntry.key, sender=deferredEntry.sender,
+                entry=deferredEntry,
+                complete=function(ok, why)
+                    if type(onComplete) == "function" then
+                        onComplete(Complete(ok, why))
+                    else
+                        Complete(ok, why)
+                    end
+                end,
+            }
+            return nil, "ROOT_MUTATION_PENDING"
+        end
         local stored, storedAs, ticket = CatalogPut(record, {source="remote",
             sender=transportSender})
         if stored == nil and storedAs == "ROOT_MUTATION_PENDING" then
@@ -2228,6 +1978,97 @@ function Sync.RequestLoadout(buildId)
     return false, queued and "queued for background recovery" or "awaiting sync"
 end
 
+-- Locked-role completion for one stored build, on a deliberate user action
+-- only (docs/P1_7_LOCKED_ROLE_WIRE.md). The record must be a remote build of
+-- an independently verified owner whose locked roles are unknown. One exact-ID
+-- request is queued with our capability stated; only the owner's own
+-- same-revision full answer can enrich it (ShouldStore "roles"; a relay's
+-- answer is refused). Nothing is sent from rendering, and nothing retries:
+-- a new request needs a new click after the previous one ended. Memory only.
+Sync.RolesRequests = {byId={}, count=0, max=32, timeout=60}
+
+function Sync.RequestLockedRoles(buildId)
+    local wireId, why = WireBuildId(buildId)
+    if not wireId then return false, "refused", tostring(why or "invalid build ID") end
+    local key = tostring(buildId)
+    local build = CatalogGet(buildId)
+    if type(build) ~= "table" or type(build.echoes) ~= "table"
+        or #build.echoes == 0 then
+        return false, "refused", "the build's Echo list is not in your library"
+    end
+    if LocalOwnsStoredBuild(build) then
+        return false, "refused", "this is your own build"
+    end
+    if not Identity.VerifiedOwnerKey(build) then
+        return false, "refused", "the build owner is not verified"
+    end
+    if Responder.Caps.KnownLockedRoles(build) ~= nil then
+        return false, "complete", "the locked Echo roles are already known"
+    end
+    local requests = Sync.RolesRequests
+    local entry = requests.byId[key]
+    if entry and Sync.LockedRolesRequestStatus(buildId) == "pending" then
+        return false, "pending", "a request for this build is already waiting"
+    end
+    local policy = Nexus and Nexus.SyncModePolicy
+    local mode = policy and policy.Mode and policy.Mode() or "automatic"
+    if mode == "off" then
+        return false, "refused", "Sync is Off"
+    end
+    if mode == "manual" and not Session.ManualGrant() then
+        return false, "refused",
+            "Sync is in Manual mode. Press Sync Now, then request again"
+    end
+    if not Sync.IsConnected() then
+        return false, "offline", "not connected to the Nexus sync channel"
+    end
+    if not Session.QueueRolesRequest(buildId) then
+        return false, "refused", "the request queue is full"
+    end
+    if not entry then
+        if requests.count >= requests.max then
+            local oldest, stamp
+            for id, value in pairs(requests.byId) do
+                if not stamp or value.at < stamp then oldest, stamp = id, value.at end
+            end
+            if oldest then requests.byId[oldest] = nil; requests.count = requests.count - 1 end
+        end
+        requests.count = requests.count + 1
+    end
+    requests.byId[key] = {state="pending", at=Now()}
+    LogEvent("SYNC", "user requested the locked roles of '%s'", key)
+    return true, "pending"
+end
+
+-- nil when no request was made; otherwise "pending", "complete", "refused"
+-- or "timeout" with a factual reason. The reply time counts from the actual
+-- send (a busy queue may hold the request first). Reading never sends.
+function Sync.LockedRolesRequestStatus(buildId)
+    local requests = Sync.RolesRequests
+    local entry = buildId ~= nil and requests.byId[tostring(buildId)] or nil
+    if not entry then return nil end
+    local build = CatalogGet(buildId)
+    if type(build) == "table"
+        and Responder.Caps.KnownLockedRoles(build) ~= nil then
+        return "complete"
+    end
+    if entry.state ~= "pending" then return entry.state, entry.reason end
+    local sent, detail = Session.RolesRequestState(buildId)
+    if sent == "unsent" then
+        entry.state, entry.reason = "refused", detail == "mode"
+            and "the saved Sync mode did not allow the request"
+            or "the request could not be sent"
+    elseif sent == "sent" and Now() - detail >= requests.timeout then
+        entry.state, entry.reason = "timeout",
+            "no reply with the locked Echo roles arrived"
+    elseif sent ~= "sent" and Now() - entry.at >= 2 * requests.timeout then
+        entry.state, entry.reason = "timeout",
+            "the request could not be sent before the time limit"
+    end
+    if entry.state ~= "pending" then return entry.state, entry.reason end
+    return "pending"
+end
+
 function Sync.RequestFullLoadoutSync()
     -- Backward-compatible API: use one normal hash reconciliation instead of
     -- broadcasting one request per missing build.
@@ -2296,6 +2137,174 @@ function Responder.ResolveBuild(build)
     return build
 end
 
+------------------------------------------------------------------------
+-- Locked-role wire capability (#73; docs/P1_7_LOCKED_ROLE_WIRE.md)
+------------------------------------------------------------------------
+-- A peer states "lv1" in WLCP|sender|caps|nonce next to its own requests.
+-- The state is memory only, keyed by the transport sender (the inbound owner
+-- has already required that the message's sender field is that sender), and
+-- expires; a reload clears it. It is advertised support for the
+-- representation, never trusted authorship: every owner, provenance, size
+-- and semantic check of a transfer stays unchanged. No version string is read.
+-- All state and helpers live in one table: the main chunk is at Lua's
+-- 200-local limit.
+Responder.Caps = {
+    code="WLCP", token="lv1", ttl=900, advertiseInterval=300, maxPeers=128,
+    readvertiseSpacing=30, readvertise=false,
+    peers={}, count=0, seen={}, seenCount=0, nonce=nil, lastAdvert=nil,
+    outcomes={}, outcomeCount=0,
+}
+Responder.LockedRoleOutcomes = Responder.Caps.outcomes
+
+function Responder.Caps.Nonce()
+    local caps = Responder.Caps
+    if not caps.nonce then
+        -- From the clocks, not math.random: taking random numbers here would
+        -- shift every later random draw (for example request IDs).
+        local wall = type(time) == "function" and tonumber(time()) or 0
+        local up = math.floor((tonumber(Now()) or 0) * 1000)
+        caps.nonce = string.format("s%07x%06x", wall % 268435456, up % 16777216)
+    end
+    return caps.nonce
+end
+
+function Responder.NoteCapability(sender, advertised, nonce)
+    local caps = Responder.Caps
+    local key = NormalizePeerName(sender)
+    if not key or key == "" then return false end
+    local supports = false
+    for token in tostring(advertised or ""):gmatch("[^,]+") do
+        if token == caps.token then supports = true end
+    end
+    local entry = caps.peers[key]
+    if not supports then
+        -- The peer now states no support (for example after a downgrade).
+        if entry then caps.peers[key] = nil; caps.count = caps.count - 1 end
+        return true
+    end
+    -- A peer we did not know, or one with a new session nonce (it restarted),
+    -- may not know our capability either: our next request states it again.
+    if not entry or entry.nonce ~= tostring(nonce) then caps.readvertise = true end
+    if not entry then
+        if caps.count >= caps.maxPeers then
+            local oldest, stamp
+            for name, value in pairs(caps.peers) do
+                if not stamp or value.at < stamp then oldest, stamp = name, value.at end
+            end
+            if oldest then caps.peers[oldest] = nil; caps.count = caps.count - 1 end
+        end
+        caps.count = caps.count + 1
+    end
+    caps.peers[key] = {lv=1, nonce=tostring(nonce), at=Now()}
+    return true
+end
+
+function Responder.PeerSupportsLockedRoles(requester)
+    local caps = Responder.Caps
+    local key = type(requester) == "string" and NormalizePeerName(requester)
+    local entry = key and caps.peers[key]
+    if not entry then return false end
+    if Now() - entry.at > caps.ttl then
+        caps.peers[key] = nil; caps.count = caps.count - 1
+        return false
+    end
+    return true
+end
+
+-- Activity from a peer without a current capability entry (a new peer, or
+-- one that restarted and lost ours): our next request states the capability
+-- again, not earlier than readvertiseSpacing after the last advertisement.
+-- Once per peer per ttl, so an older peer that never advertises does not
+-- keep the shorter spacing.
+function Responder.NotePeerActivity(sender)
+    local caps = Responder.Caps
+    if Responder.PeerSupportsLockedRoles(sender) then return end
+    local key = NormalizePeerName(sender)
+    if not key or key == "" then return end
+    local stamp = caps.seen[key]
+    if stamp and Now() - stamp <= caps.ttl then return end
+    if not stamp then
+        if caps.seenCount >= caps.maxPeers then caps.seen, caps.seenCount = {}, 0 end
+        caps.seenCount = caps.seenCount + 1
+    end
+    caps.seen[key] = Now()
+    caps.readvertise = true
+end
+
+-- Enqueued just before one of our own requests, with a copy of that
+-- request's metadata: the same queue, route and Sync-mode permission. Once
+-- per interval, or again after readvertiseSpacing when a new or restarted
+-- peer was seen; nothing is sent on its own schedule.
+-- force: one user-requested roles completion (one advertisement per
+-- deliberate request; see Sync.RequestLockedRoles).
+function Responder.AdvertiseCapability(metadata, force)
+    local caps = Responder.Caps
+    local current = Now()
+    local since = caps.lastAdvert and current - caps.lastAdvert or nil
+    local due = force == true or since == nil
+        or since >= caps.advertiseInterval
+        or (caps.readvertise and since >= caps.readvertiseSpacing)
+    if not due then
+        return false
+    end
+    local copy = {}
+    for key, value in pairs(type(metadata) == "table" and metadata or {}) do
+        copy[key] = value
+    end
+    copy.requestId = "caps-" .. caps.Nonce()
+    local message = string.format("%s|%s|%s|%s", caps.code, MyName(),
+        caps.token, caps.Nonce())
+    local queued = Transport.EnqueueControl(message, copy)
+    if queued then caps.lastAdvert = current; caps.readvertise = false end
+    return queued and true or false
+end
+
+-- The record's own locked-role state: its complete locked set (possibly
+-- empty) when known, or nil when unknown. Inline slot-4 rows are the older
+-- representation and are never restated.
+function Responder.Caps.KnownLockedRoles(build)
+    if type(build) ~= "table" then return nil end
+    for _, echo in ipairs(build.echoes or {}) do
+        if echo.locked then return nil end
+    end
+    if type(build.lockedEchoes) == "table" and #build.lockedEchoes > 0 then
+        return build.lockedEchoes
+    end
+    if build.lockedAuthorityProven == true then return {} end
+    return nil
+end
+
+-- A response states the locked set only to a requester that advertised the
+-- capability, and only when this record knows it: a relay never
+-- reconstructs roles it did not receive.
+function Responder.LockedRolesFor(build, responseContext)
+    local requester = type(responseContext) == "table"
+        and responseContext.requester or nil
+    if not requester or not Responder.PeerSupportsLockedRoles(requester) then
+        return nil
+    end
+    return Responder.Caps.KnownLockedRoles(build)
+end
+
+-- Bounded per-build counts of prepared responses for records with locked
+-- targets: with them, or ordinary targets only (an older requester).
+function Responder.NoteLockedRoleOutcome(build, lockedRoles)
+    local caps = Responder.Caps
+    local known = caps.KnownLockedRoles(build)
+    if not known or #known == 0 then return end
+    local key = tostring(build.id or "")
+    if key == "" then return end
+    local entry = caps.outcomes[key]
+    if not entry then
+        if caps.outcomeCount >= 64 then return end
+        entry = {full=0, ordinaryOnly=0}
+        caps.outcomes[key] = entry
+        caps.outcomeCount = caps.outcomeCount + 1
+    end
+    if lockedRoles then entry.full = entry.full + 1
+    else entry.ordinaryOnly = entry.ordinaryOnly + 1 end
+end
+
 function Responder.PrepareBuild(build, responseMode, responseContext, source)
     build = Responder.ResolveBuild(build)
     if not RelayEligible(build, source) then return nil, "relay unauthorized" end
@@ -2310,7 +2319,9 @@ function Responder.PrepareBuild(build, responseMode, responseContext, source)
     if responseMode then
         Reconciler.NoteStat("buildSerializations", 1)
     end
-    local payload = CompactEncode(build)
+    local lockedRoles = responseMode
+        and Responder.LockedRolesFor(build, responseContext) or nil
+    local payload = CompactEncode(build, lockedRoles)
     local json = Codec.JSONEncode(payload)
     local b64 = Codec.Base64Encode(json)
     if #b64 > MAX_BYTES then
@@ -2339,6 +2350,7 @@ function Responder.PrepareBuild(build, responseMode, responseContext, source)
         version=Operation.ShareVersion(build),
     }
     PreparedWireCost(prepared, responseMode, false)
+    if responseMode then Responder.NoteLockedRoleOutcome(build, lockedRoles) end
     return prepared
 end
 
@@ -2426,122 +2438,11 @@ function Sync.BroadcastBuild(build)
     return Responder.AdmitBuild(prepared, false)
 end
 
-function Responder.Work.BroadcastCatalogRecord(build, sent)
-    if type(build) ~= "table" then return 0 end
-    sent[build.id] = true
-    if build.legacyRecovered == true and build.ownerVerified ~= true then
-        return 0
-    end
-    return BroadcastSummary(build) and 1 or 0
-end
-
-function Responder.Work.HotBuildCountWithin(limit)
-    local count = 0
-    for _ in pairs(hotBuilds) do
-        count = count + 1
-        if count > limit then return nil end
-    end
-    return count
-end
-
-function Responder.Work.BroadcastSmallRoot(records, now)
-    local sent, expired, count = {}, {}, 0
-    for _, build in pairs(records) do
-        count = count + Responder.Work.BroadcastCatalogRecord(build, sent)
-    end
-    for id, hot in pairs(hotBuilds) do
-        if now - hot.t > HOT_WINDOW then
-            expired[#expired + 1] = id
-        elseif not sent[id] then
-            local current = CatalogGet(id)
-            if current and RelayEligible(current) then
-                if BroadcastSummary(current) then count = count + 1 end
-            else
-                expired[#expired + 1] = id
-            end
-        end
-    end
-    for _, id in ipairs(expired) do Responder.Work.ForgetHotBuild(id) end
-    return count
-end
-
-function Responder.Work.PumpBroadcastMine()
-    local job = Responder.state.broadcastMineJob
-    if not job then return true end
-    if job.phase == "records" then
-        local page, err = job.catalog.RecordCursorNext(job.cursor)
-        if err or type(page) ~= "table" then
-            Responder.state.broadcastMineJob = nil
-            return false, err or "catalog cursor unavailable"
-        end
-        if page.done then
-            job.phase, job.hotCursor = "hot", nil
-            job.hotGeneration = Responder.state.hotBuildGeneration or 0
-            return false, "pending"
-        end
-        if type(page.record) == "table" then
-            job.count = job.count
-                + Responder.Work.BroadcastCatalogRecord(page.record, job.sent)
-        end
-        return false, "pending"
-    end
-
-    -- The traversal key remains present until the next key is obtained. Any
-    -- external hot-set mutation changes the generation before `next` runs.
-    if job.hotGeneration ~= (Responder.state.hotBuildGeneration or 0) then
-        Responder.state.broadcastMineJob = nil
-        return false, "hot build set changed"
-    end
-    local id, hot = next(hotBuilds, job.hotCursor)
-    if job.removeHot then
-        Responder.Work.ForgetHotBuild(job.removeHot)
-        job.hotGeneration = Responder.state.hotBuildGeneration or 0
-        job.removeHot = nil
-    end
-    if id == nil then
-        local count = job.count
-        Responder.state.broadcastMineJob = nil
-        return true, count
-    end
-    job.hotCursor = id
-    if job.now - hot.t > HOT_WINDOW then
-        job.removeHot = id
-    elseif not job.sent[id] then
-        local current = CatalogGet(id)
-        if current and RelayEligible(current) then
-            if BroadcastSummary(current) then job.count = job.count + 1 end
-        else
-            job.removeHot = id
-        end
-    end
-    return false, "pending"
-end
-
-function Sync.BroadcastMine()
-    local now = Now()
-    local catalog = Catalog()
-    if not catalog then return 0 end
-    if Responder.state.broadcastMineJob then return nil, "pending" end
-
-    -- Preserve immediate behavior only when both collections fit the public
-    -- one-call frontier. A sparse maximum root refuses before traversal.
-    local records, why = type(catalog.All) == "function" and catalog.All()
-    if type(records) == "table"
-        and Responder.Work.HotBuildCountWithin(8) ~= nil then
-        return Responder.Work.BroadcastSmallRoot(records, now)
-    end
-    if records == nil and why ~= "CURSOR_REQUIRED" then return 0, why end
-    if type(catalog.BeginRecordCursor) ~= "function"
-        or type(catalog.RecordCursorNext) ~= "function" then
-        return 0, "catalog cursor unavailable"
-    end
-    local cursor, cursorWhy = catalog.BeginRecordCursor()
-    if not cursor then return 0, cursorWhy or "catalog cursor unavailable" end
-    Responder.state.broadcastMineJob = {catalog=catalog, cursor=cursor,
-        sent={}, count=0,
-        phase="records", now=now}
-    return nil, "pending"
-end
+-- The whole-library "BroadcastMine" sweep (every catalog record plus the hot
+-- set as summaries) had no caller left: the library reaches peers through
+-- hash-bucket reconciliation, and a single posted or changed build through
+-- its own Share summary. The hot-build expiry it carried now runs on its own
+-- (ExpireHotBuilds).
 
 -- Response candidates are the mutable overlay/tombstone delta only. Immutable
 -- release baselines arrive with addon releases; mixed-version peers can request
@@ -2665,9 +2566,7 @@ function Responder.SendNextBuild(bucketState, responseBudget)
     if admitted then
         bucketState.progress[item.token] = "admitted"
         bucketState.cursor = bucketState.cursor + 1
-        if item.kind == "tomb" then
-            ClearPendingDelete(item.id, item.tomb)
-        else
+        if item.kind ~= "tomb" then
             stats.overlaySent = (stats.overlaySent or 0) + 1
         end
         return 1, bucketState.cursor > #candidates,
@@ -3198,7 +3097,6 @@ function Sync.BroadcastDelete(build, onLocalComplete)
         if not status then return false, operationWhy end
         Operation.latestDelete = status
         Operation.Transition(status, "rejected", "REMOTE_TOMBSTONE_ORDER_UNPROVEN")
-        ClearPendingDelete(id, tomb)
         return false, "REMOTE_TOMBSTONE_ORDER_UNPROVEN", Operation.Copy(status)
     end
     local function Complete(tombStored, tombStoreWhy)
@@ -3238,7 +3136,8 @@ end
 -- Incoming
 ------------------------------------------------------------------------
 
-local function ShouldStore(id, lastMod, author, ownerKey, transportSender)
+local function ShouldStore(id, lastMod, author, ownerKey, transportSender,
+        incomingFingerprint, incomingRolesKnown)
     if not AllowsRemoteRevision(author, lastMod, id) then
         return false, "retention floor"
     end
@@ -3268,11 +3167,24 @@ local function ShouldStore(id, lastMod, author, ownerKey, transportSender)
         return true, "loadout"
     end
     if (tonumber(lastMod) or 0) > known then return true, "updated" end
+    -- The same revision with its locked roles stated may complete a record
+    -- that arrived ordinary-only (roles unknown). It never replaces known
+    -- roles, and the ordinary content must be the same.
+    -- docs/P1_7_LOCKED_ROLE_WIRE.md
+    if incomingRolesKnown and existing
+        and (tonumber(lastMod) or 0) == known
+        and existing.lockedAuthorityProven ~= true
+        and not (type(existing.lockedEchoes) == "table"
+            and #existing.lockedEchoes > 0)
+        and type(incomingFingerprint) == "string"
+        and existing.fingerprint == incomingFingerprint then
+        return true, "roles"
+    end
     return false, "duplicate"
 end
 
 local function StoreReceivedBuild(payload, ownerVerified, relaySender,
-        matchedReplacement, canonicalFingerprint, onComplete)
+        matchedReplacement, canonicalFingerprint, onComplete, deferredEntry)
     local existing = CatalogGet(payload.id)
     -- A matching current summary makes an absent link authoritative. Legacy
     -- unsolicited full payloads retain the established local-link fallback.
@@ -3300,6 +3212,18 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender,
         ownerVerified=ownerVerified and true or false,
         relaySender=not ownerVerified and relaySender or nil,
     }
+    -- Locked roles only as the payload states them (lv=1): the complete set,
+    -- possibly empty. Without that statement they stay unknown (no field),
+    -- never zero and never taken from an earlier revision.
+    if type(payload.lockedRoles) == "table" then
+        local rows = {}
+        for _, echo in ipairs(payload.lockedRoles) do
+            rows[#rows + 1] = {spellId=echo.spellId, quality=echo.quality,
+                stacks=echo.stacks, locked=true}
+        end
+        record.lockedEchoes = rows
+        record.lockedAuthorityProven = true
+    end
     local function Complete(stored, storedAs)
         if not stored then return false, storedAs end
         if storedAs == "baseline" then
@@ -3310,6 +3234,18 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender,
         stats.received = stats.received + 1
         RequestRetention("full build received")
         return true, storedAs
+    end
+    -- Inside a receiver batch this validated record joins the batch instead
+    -- of starting a mutation of its own. Every check above has already run.
+    local collector = Responder.Admission.collector
+    if collector and deferredEntry then
+        collector[#collector + 1] = {
+            record=record, options={source="remote", sender=relaySender},
+            key=deferredEntry.key, sender=deferredEntry.sender,
+            entry=deferredEntry,
+            complete=function(ok, why) onComplete(Complete(ok, why)) end,
+        }
+        return nil, "ROOT_MUTATION_PENDING"
     end
     local stored, storedAs, ticket = CatalogPut(record, {source="remote",
         sender=relaySender})
@@ -3323,9 +3259,9 @@ local function StoreReceivedBuild(payload, ownerVerified, relaySender,
 end
 
 local function CommitReceivedBuild(payload, transportSender, context,
-        onComplete, deferredEntry)
+        onComplete, deferredEntry, channelOwnerSender)
     local directOwner = Identity.TransportOwns(
-        payload.ownerKey, transportSender)
+        payload.ownerKey, channelOwnerSender or transportSender)
     local existing, existingSource = CatalogGet(payload.id)
     if existing and Identity.SavedMirrorKind(existing) ~= "ordinary" then
         Responder.NoteContextOutcome(context, "rejected", "ownership")
@@ -3335,6 +3271,26 @@ local function CommitReceivedBuild(payload, transportSender, context,
     local payloadOwner = Identity.CanonicalOwnerKey(payload.ownerKey)
     local replacingUnverified = existing and directOwner
         and CanPromoteStoredOwner(existing, payloadOwner)
+    -- The peer trace displays a short name. Record the authority boundary
+    -- separately without retaining that name, the owner key or payload.
+    pcall(function()
+        local debugOwner = Nexus and Nexus.PeerDebug
+        if not (debugOwner and type(debugOwner.IsEnabled) == "function"
+            and debugOwner.IsEnabled()) then return end
+        local claim = existing and Identity.CanonicalOwnerKey(existing.claimedOwnerKey)
+        local stored = existing and Identity.CanonicalOwnerKey(existing.ownerKey)
+        PeerObserve("owner_boundary", {
+            rawSenderQualified=Identity.CanonicalOwnerFromTransport(transportSender) ~= nil,
+            localRealmAvailable=CurrentOwnerKey() ~= nil,
+            directOwner=directOwner == true,
+            claimMatches=payloadOwner ~= nil and (claim or stored) == payloadOwner,
+            storedOwnerConflict=claim ~= nil and stored ~= nil and claim ~= stored,
+            existingVerified=Identity.VerifiedOwnerKey(existing) ~= nil,
+            sourceKind=not existingSource and "none"
+                or existingSource == "bundled" and "bundled"
+                or existingSource == "overlay" and "overlay" or "other",
+        })
+    end)
     local pending = Session.PendingReplacement(payload.id)
     local matchedReplacement = false
     local replacementFingerprint = BuildFingerprint(payload)
@@ -3401,7 +3357,8 @@ local function CommitReceivedBuild(payload, transportSender, context,
         allowed, why = true, "owner-verified"
     else
         allowed, why = ShouldStore(payload.id, payload.lastModified,
-            payload.author, payload.ownerKey, transportSender)
+            payload.author, payload.ownerKey, transportSender,
+            replacementFingerprint, payload.lockedRoles ~= nil)
     end
     if not allowed then
         if why == "deleted" then
@@ -3479,12 +3436,12 @@ local function CommitReceivedBuild(payload, transportSender, context,
     end
     local function Submit()
         return StoreReceivedBuild(
-            payload, directOwner, transportSender, matchedReplacement,
+            payload, directOwner, channelOwnerSender or transportSender, matchedReplacement,
             replacementFingerprint, function(completed, completedWhy)
                 local accepted = Complete(completed, completedWhy)
                 if type(onComplete) == "function" then onComplete(accepted) end
                 return accepted
-            end)
+            end, deferredEntry)
     end
     local held = not deferredEntry and (Responder.Admission.RequestHold()
         or Responder.Admission.OwedHold())
@@ -3505,13 +3462,14 @@ local function CommitReceivedBuild(payload, transportSender, context,
             owner=payloadOwner or "",direct=directOwner == true,
             digest=tostring(HashText(replacementFingerprint) or "") .. "|"
                 .. tostring(HashText(payload.link) or ""),
+            rolesKnown=type(payload.lockedRoles) == "table",
             sender=transportSender,context=context,
             settle=function(accepted)
                 if type(onComplete) == "function" then onComplete(accepted) end
             end,
             run=function(entry)
                 local accepted, pendingWhy = CommitReceivedBuild(payload,
-                    transportSender, context, onComplete, entry)
+                    transportSender, context, onComplete, entry, channelOwnerSender)
                 if accepted == nil and pendingWhy == "ADMISSION_BUSY" then
                     return "busy"
                 end
@@ -3725,7 +3683,11 @@ Inbound = InboundFactory.New({
         dpsLegacy=CODE_DPS,
         dps=CODE_DPS2,
         build=CODE_BUILD,
+        capability="WLCP",
     },
+    noteCapability=function(sender, caps, nonce)
+        return Responder.NoteCapability(sender, caps, nonce)
+    end,
     peerCodes=PEER_PROTOCOL_CODES,
     bucketCount=BUILD_BUCKETS,
     maxWireBytes=MAX_WIRE_BYTES,
@@ -3869,7 +3831,7 @@ Inbound = InboundFactory.New({
         end
         return valid and true or false
     end,
-    commitDps=function(record, sender, relayed, context)
+    commitDps=function(record, sender, relayed, context, channelOwnerSender)
         local dps = Nexus and Nexus.DpsCapture
         local receiver = relayed and dps and dps.ReceiveRelayedRecord
             or dps and dps.ReceiveRecord
@@ -3877,7 +3839,13 @@ Inbound = InboundFactory.New({
             Responder.NoteContextOutcome(context, "rejected", "storage")
             return false
         end
-        local ok, accepted, rejectionReason = pcall(receiver, record, sender)
+        local authoritySender = channelOwnerSender or sender
+        if channelOwnerSender and not relayed then
+            authoritySender = Identity.NativeChannelDpsOwnerSender(
+                channelOwnerSender, record.o or record.ownerKey)
+        end
+        local ok, accepted, rejectionReason = pcall(receiver, record,
+            authoritySender, channelOwnerSender)
         if not (ok and accepted) then
             local key = relayed and "dpsRelayRejected" or "dpsDirectRejected"
             stats[key] = (stats[key] or 0) + 1
@@ -3896,14 +3864,22 @@ Inbound = InboundFactory.New({
             relay=relayed and true or false})
         -- Never reuse payload-supplied authority hints for automatic egress.
         -- Only an exact transport-to-owner bridge may enter the established
-        -- direct-owner redistribution path.
-        if not relayed and Identity.TransportOwns(
-                record.o or record.ownerKey, sender) then
+        -- direct-owner redistribution path, and only for this client's own
+        -- record (its channel echo): a remote owner's record is that owner's
+        -- to redistribute, and BroadcastDpsRecord would refuse it as
+        -- "owner_sender" after validating it in full.
+        if not relayed and IsLocalTransportSender(sender)
+            and Identity.TransportOwns(record.o or record.ownerKey, sender) then
             Sync.BroadcastDpsRecord(record)
         end
+        -- The build a record names is relayed only when this client owns it.
+        -- A receiver that relayed a held remote build after every accepted
+        -- record made every peer resend the same complete build; a peer that
+        -- lacks it asks for it through its own request instead.
         local buildId = record.b or record.buildId
         local build = buildId and CatalogGet(buildId)
-        if build and type(build.echoes) == "table" and #build.echoes > 0 then
+        if build and LocalOwnsStoredBuild(build)
+            and type(build.echoes) == "table" and #build.echoes > 0 then
             pcall(Sync.BroadcastBuild, build)
         end
         Responder.NoteContextOutcome(context, "updated", "accepted")
@@ -3932,6 +3908,7 @@ Session = SessionFactory.New({
     maxRecoveryQueue=MAX_RECOVERY_QUEUE,
     maxKnownPeers=MAX_KNOWN_PEERS,
     chatLimit=CHAT_LIMIT,
+    escapedLen=EscapedLen,
     requestCode=CODE_REQUEST,
     loadoutRequestCode=CODE_LOADOUT_REQ,
     now=Now,
@@ -3968,6 +3945,19 @@ Session = SessionFactory.New({
         end
         return (Nexus and Nexus.VERSION) or "0.0.0-dev"
     end,
+    requestPlainVersion=function()
+        -- The release version without build metadata (the form every peer
+        -- has always parsed, as test.9027 sent it). Used only when the full
+        -- request would exceed the transport limit.
+        if Nexus and type(Nexus.ReleaseIdentity) == "function" then
+            local ok, identity = pcall(Nexus.ReleaseIdentity)
+            if ok and type(identity) == "table" and ValidVersion(identity.version)
+                and not tostring(identity.version):find("+", 1, true) then
+                return identity.version
+            end
+        end
+        return nil
+    end,
     statusVersion=function()
         return (Nexus and Nexus.VERSION) or "?"
     end,
@@ -3980,6 +3970,10 @@ Session = SessionFactory.New({
     enqueueControl=function(message, metadata)
         return Transport.EnqueueControl(message, metadata)
     end,
+    -- Our locked-role capability, next to our own requests only.
+    advertiseCapability=function(metadata, force)
+        return Responder.AdvertiseCapability(metadata, force)
+    end,
     cancelRequest=function(requestId, requester)
         return Transport.CancelRequest(requestId, requester)
     end,
@@ -3990,7 +3984,6 @@ Session = SessionFactory.New({
     transportHasPending=function() return Transport.HasPending() end,
     inboundHasPending=function() return Inbound.HasPending() end,
     reconcilerHasPending=function() return Reconciler.HasPending() end,
-    pendingDeleteCount=PendingDeleteCount,
     rejectRecoveryOverflow=RejectRecoveryOverflow,
     isConnected=function() return Sync.IsConnected() end,
     isRequestChannelPresent=function()
@@ -4000,7 +3993,22 @@ Session = SessionFactory.New({
     end,
     ensureChannel=function() return Sync.EnsureChannel() end,
     sendWhisper=function(message, target)
+        -- The diagnostic probe whisper bypasses the queue and the wire, so it
+        -- asks the saved Sync mode itself (refused under Off).
+        local policy=Nexus.SyncModePolicy
+        if policy then
+            local allowed, why = policy.Allows("whisper")
+            if not allowed then return false, why end
+        end
         return SendChatMessage(message, "WHISPER", nil, target)
+    end,
+    syncMode=function()
+        local policy=Nexus.SyncModePolicy
+        return policy and policy.Mode() or "automatic"
+    end,
+    syncModeText=function(mode)
+        local policy=Nexus.SyncModePolicy
+        return policy and policy.Text(mode) or nil
     end,
 })
 
@@ -4009,6 +4017,39 @@ function Sync.HandleIncoming(text, sender)
     pcall(Sync.NoteChannelTraffic)
     local accepted,reason=Inbound.HandleIncoming(text,sender)
     if accepted and Nexus.SyncWire then Nexus.SyncWire.ObservePeer(sender) end
+    if accepted then pcall(Responder.NotePeerActivity, sender) end
+    return accepted,reason
+end
+
+-- Called only after MainLifecycle admits CHAT_MSG_CHANNEL for wrbuildssync.
+-- Task 037: the owner confirms that this current server's channel is realm-
+-- local, with no cross-realm channels. Revisit this assumption if that changes.
+-- Qualify only the game event's bare sender for full-build and DPS owner admission.
+-- Keep the raw sender for diagnostics, peer/session state and other messages.
+-- Unknown entry points and addon whispers never receive this authority.
+function Sync.HandleNativeChannelIncoming(text, sender)
+    if not Identity.ValidPlayer(sender) then return false end
+    local channelOwnerSender
+    if not sender:find("-", 1, true) then
+        if type(text) == "string" and text:match("^WLD2|") then
+            channelOwnerSender = Identity.NativeChannelSender(sender)
+        else
+            -- Full-build admission keeps its established context rules. This
+            -- correction is bounded to native exact DPS evidence.
+            local realm = GetNormalizedRealmName and GetNormalizedRealmName()
+            if not realm or realm == "" then realm = GetRealmName and GetRealmName() end
+            local owner = type(realm) == "string" and Identity.OwnerKey(sender, realm)
+            local qualified = owner and not owner:match("@unknown$")
+                and (sender .. "-" .. owner:match("@(.+)$")) or nil
+            channelOwnerSender = qualified
+                and Identity.CanonicalOwnerFromTransport(qualified) and qualified or nil
+        end
+        if not channelOwnerSender then return false end
+    end
+    pcall(Sync.NoteChannelTraffic)
+    local accepted,reason=Inbound.HandleIncoming(text,sender,channelOwnerSender)
+    if accepted and Nexus.SyncWire then Nexus.SyncWire.ObservePeer(sender) end
+    if accepted then pcall(Responder.NotePeerActivity, sender) end
     return accepted,reason
 end
 
@@ -4039,7 +4080,7 @@ function Sync.GetLeaderboardSyncStatus()
         requestRelated=requestTransport.requestRelated
             + requestIncoming.total,
         requestOutstandingTransfers=requestTransport.outstandingTransfers,
-        pendingDeletes=PendingDeleteCount(),
+        pendingDeletes=0, -- MASTER-RC-019: no delete ever acquires retry ownership
         pendingDeleteDiscovery=Operation.deleteDiscoveryComplete and 0 or 1,
         pendingShares=pendingShare and 1 or 0,
         deferredAdmissions=Responder.Admission.count,
@@ -4072,6 +4113,7 @@ end
 function Sync.Housekeep()
     -- Passive expiry only: a deferred inbound item is never submitted here.
     Responder.Admission.Expire()
+    ExpireHotBuilds()
     Operation.housekeeping = true
     local ok, err = pcall(Transport.Housekeep)
     Operation.housekeeping = false
@@ -4096,31 +4138,206 @@ function Sync.PumpPreparedShare(elapsed)
     if not ok then error(err, 0) end
 end
 
-function Sync.OnUpdate(elapsed)
-    Responder.Admission.NoteTurn()
-    Responder.Admission.Expire()
-    Inbound.CleanExpired()
-    ProcessPendingResponses(elapsed)
-    Session.PumpRecovery(elapsed)
-    Responder.Work.PumpBroadcastMine()
-    if not Sync._pendingDeleteScheduled then
-        PumpPendingDeletes(elapsed)
-        PumpPendingShare(elapsed)
+-- Attribution for a long update, at the owner that already has one.
+--
+-- The instrumented "sync.update" path wraps EVERY step below, so a large
+-- maximum says one update was long and nothing about which step was long: the
+-- admission drive's slice allowance covers only the preparation slices inside
+-- Responder.Admission.Pump, while transport preparation, serialization,
+-- inbound decoding and the view refresh sit outside it.
+--
+-- Measuring every step on every update would be its own cost, so the
+-- phases are timed only AFTER an update was actually slow, for a bounded
+-- window of updates. In the ordinary case this is two clock reads per update.
+-- These are scalars for a support report, not a profiler and not a claim about
+-- frames per second.
+-- Held on the module table, not in a local: this chunk is already at the Lua
+-- 5.1 limit for locals in one file.
+Sync._phases = {thresholdMs = 50, window = 20, stats = {},
+    armed = 0, slowUpdates = 0, lastTotal = nil, maxTotal = nil}
+
+function Sync._phases.clock()
+    if type(debugprofilestop) ~= "function" then return nil end
+    local ok, value = pcall(debugprofilestop)
+    if ok and type(value) == "number" then return value end
+    return nil
+end
+
+function Sync._phases.record(name, started)
+    if not started then return end
+    local finished = Sync._phases.clock()
+    if not finished then return end
+    local elapsed = finished - started
+    if elapsed < 0 then return end
+    local row = Sync._phases.stats[name]
+    if not row then row = {count=0, maxMs=0, lastMs=0}; Sync._phases.stats[name] = row end
+    row.count = row.count + 1
+    row.lastMs = elapsed
+    if elapsed > row.maxMs then row.maxMs = elapsed end
+end
+
+-- name -> the phase's own maximum and last measurement, plus how many updates
+-- crossed the slow threshold. Empty until an update was slow.
+function Sync.PhaseStats()
+    local phases = Sync._phases
+    if type(phases) ~= "table" then return {phases={}} end
+    local out = {slowUpdates=rawget(phases, "slowUpdates"), armed=rawget(phases, "armed"),
+        thresholdMs=rawget(phases, "thresholdMs"), lastUpdateMs=rawget(phases, "lastTotal"),
+        maxUpdateMs=rawget(phases, "maxTotal"), phases={}}
+    local stats = rawget(phases, "stats")
+    for name, row in pairs(type(stats) == "table" and stats or {}) do
+        if type(row) == "table" then
+            out.phases[name] = {count=rawget(row, "count"), maxMs=rawget(row, "maxMs"),
+                lastMs=rawget(row, "lastMs")}
+        end
     end
-    Session.PrepareTransport()
-    if Nexus.SyncWire then Nexus.SyncWire.PumpHandshake() end
-    Transport.Pump(elapsed)
-    if Sync.FlushStatusReply then Sync.FlushStatusReply() end
-    Session.UpdateAutoSync(elapsed)
-    Session.UpdateAutoConvergence()
-    Session.UpdateJoinRetry(elapsed)
+    return out
+end
+
+function Sync.ResetPhaseStats()
+    local phases = Sync._phases
+    if type(phases) ~= "table" then return false end
+    rawset(phases, "stats", {})
+    rawset(phases, "armed", 0)
+    rawset(phases, "slowUpdates", 0)
+    rawset(phases, "lastTotal", nil)
+    rawset(phases, "maxTotal", nil)
+    return true
+end
+
+-- The ordered steps of one update, built ONCE at load. Naming them in a table
+-- instead of wrapping each call in a closure per update keeps the un-armed
+-- path free of per-frame allocation: an ordinary update reads the clock twice
+-- and calls these functions directly.
+Sync._phases.steps = {
+    {name = "admission.turn", run = function()
+        Responder.Admission.NoteTurn()
+        Responder.Admission.Expire()
+        Inbound.CleanExpired()
+        ExpireHotBuilds()
+    end},
+    {name = "responses", run = function(elapsed) ProcessPendingResponses(elapsed) end},
+    {name = "recovery", run = function(elapsed) Session.PumpRecovery(elapsed) end},
+    {name = "share", run = function(elapsed) PumpPendingShare(elapsed) end,
+        skip = function() return Sync._pendingShareScheduled end},
+    {name = "transport.prepare", run = function() Session.PrepareTransport() end},
+    {name = "handshake", run = function()
+        if Nexus.SyncWire then Nexus.SyncWire.PumpHandshake() end
+    end},
+    {name = "transport.pump", run = function(elapsed) Transport.Pump(elapsed) end},
+    {name = "status.reply", run = function()
+        if Sync.FlushStatusReply then Sync.FlushStatusReply() end
+    end},
+    {name = "auto.sync", run = function(elapsed)
+        Session.UpdateAutoSync(elapsed)
+        Session.UpdateAutoConvergence()
+        Session.UpdateJoinRetry(elapsed)
+    end},
     -- After the request, response and transport turn above, never before it.
-    Responder.Admission.Pump()
+    {name = "admission.pump", run = function() Responder.Admission.Pump() end},
     -- A refresh can initiate legacy catalog repair. Release it only after
     -- the already-ready update, not before its transport validation work.
-    if Operation.housekeepingRefreshPending then
-        Operation.housekeepingRefreshPending = false
-        pcall(Sync.RequestDataViewRefresh)
+    {name = "view.refresh", run = function() pcall(Sync.RequestDataViewRefresh) end,
+        skip = function()
+            if not Operation.housekeepingRefreshPending then return true end
+            Operation.housekeepingRefreshPending = false
+            return false
+        end},
+}
+
+-- Kept beside the table, so a replaced Sync._phases cannot take the steps with
+-- it: the update still runs every step in order.
+Sync._defaultSteps = Sync._phases.steps
+
+function Sync.OnUpdate(elapsed)
+    -- The phase state lives on the module table because this chunk is at the
+    -- Lua 5.1 local limit, which makes it writable from outside. Measurement
+    -- must never be able to stop the update, so it is read defensively once
+    -- and skipped entirely if anything replaced it.
+    -- Every field of that table is read with rawget and written with rawset,
+    -- so a metatable on it cannot raise on the guard line and stop all sync.
+    local phases = Sync._phases
+    if type(phases) ~= "table" or type(rawget(phases, "clock")) ~= "function"
+        or type(rawget(phases, "record")) ~= "function" then
+        phases = nil
+    end
+    -- The steps ARE the update, so they are never taken from the measurement
+    -- table while the list built at load is intact: emptying, replacing or
+    -- decoying Sync._phases.steps changes nothing. The copy there is read only
+    -- if the load-time list itself was lost.
+    -- STATED LIMIT, not a protection claim: both references are fields of the
+    -- module table, so whichever is read first wins, and whatever replaces
+    -- Sync._defaultSteps replaces the work. The list cannot be held in an
+    -- upvalue instead: this chunk is AT the Lua 5.1 limit of 200 locals in one
+    -- function, and even a block-scoped local here fails to compile
+    -- ("core/Sync.lua: main function has more than 200 local variables").
+    -- What is closed is the measurement path; an addon that overwrites another
+    -- addon's module fields can stop that addon, and always could.
+    local steps = Sync._defaultSteps
+    if type(steps) ~= "table" or #steps == 0 then
+        steps = phases and rawget(phases, "steps") or nil
+        if type(steps) ~= "table" then steps = nil end
+    end
+    -- Every clock and record call goes through pcall: a raising clock is a
+    -- measurement failure, and a measurement failure must never be a sync
+    -- failure. One raise disables measurement for this update and no more.
+    local function readClock()
+        if not phases then return nil end
+        local ok, value = pcall(rawget(phases, "clock"))
+        if ok and type(value) == "number" then return value end
+        phases = nil
+        return nil
+    end
+    local updateStarted = readClock()
+    local detail = phases and (tonumber(rawget(phases, "armed")) or 0) > 0
+        and updateStarted ~= nil
+    for index = 1, steps and #steps or 0 do
+        -- rawget on the LIST too, not only on the entry: `#` ignores __len in
+        -- Lua 5.1, so a list with a hole below its length reaches __index, and
+        -- a raising one there would raise out of the update on every frame.
+        local entry = rawget(steps, index)
+        -- rawget for the same reason as the phase table: a step entry carrying
+        -- a metatable must not raise on the guard line and stop every step
+        -- after it. Its `run` is called directly, so a failing step is still a
+        -- real failure of that step and reaches the owner isolation.
+        local run = type(entry) == "table" and rawget(entry, "run") or nil
+        if type(run) == "function" then
+            local skipped = false
+            local skip = rawget(entry, "skip")
+            if type(skip) == "function" then
+                local okSkip, result = pcall(skip)
+                skipped = okSkip and result and true or false
+            end
+            if not skipped then
+                local started = detail and readClock() or nil
+                run(elapsed)
+                if started and phases then
+                    pcall(rawget(phases, "record"), rawget(entry, "name"), started)
+                end
+            end
+        end
+    end
+    if phases and updateStarted then
+        local finished = readClock()
+        if finished then
+            local total = finished - updateStarted
+            local threshold = tonumber(rawget(phases, "thresholdMs")) or 50
+            if total >= 0 then
+                rawset(phases, "lastTotal", total)
+                local highest = tonumber(rawget(phases, "maxTotal"))
+                if not highest or total > highest then
+                    rawset(phases, "maxTotal", total)
+                end
+                if total >= threshold then
+                    rawset(phases, "slowUpdates",
+                        (tonumber(rawget(phases, "slowUpdates")) or 0) + 1)
+                    rawset(phases, "armed", tonumber(rawget(phases, "window")) or 20)
+                else
+                    local armed = tonumber(rawget(phases, "armed")) or 0
+                    if armed > 0 then rawset(phases, "armed", armed - 1) end
+                end
+            end
+        end
     end
 end
 
@@ -4168,28 +4385,25 @@ function Sync.Init(codec, adapter)
     if pendingShare and type(pendingShare.status) == "table" then
         Operation.Transition(pendingShare.status, "reset", "explicit reset")
     end
-    for _, status in pairs(pendingDeletes) do
-        if type(status) == "table" then
-            Operation.Transition(status, "reset", "explicit reset")
-        end
-    end
     Responder.Admission.Reset()
     Inbound.Reset()
     Session.Reset()
     Compatibility.Reset()
     Reconciler.Reset()
+    if Nexus.SyncModePolicy then
+        Nexus.SyncModePolicy.Reset()
+        Nexus.SyncModePolicy.Bind(Session.ManualGrant, MyName)
+    end
     preparedDpsProofs = setmetatable({}, {__mode="k"})
     hotBuilds = {}  -- clear on init
+    hotBuildCheckedAt = 0
     Responder.state.hotBuildGeneration =
         (Responder.state.hotBuildGeneration or 0) + 1
-    Responder.state.broadcastMineJob = nil
     EnsureHotBuildEvidenceProvider()
-    pendingDeletes = {}
-    pendingDeleteTicker = 0
     pendingShare = nil
     pendingShareTicker = 0
     Operation.active, Operation.activeShares, Operation.activeDeletes = {}, {}, {}
-    Sync._pendingDeleteScheduled = false
+    Sync._pendingShareScheduled = false
     -- Keep login initialization constant-time. Existing build timestamps are
     -- resolved lazily in ShouldStore instead of walking the entire library
     -- during PLAYER_ENTERING_WORLD.
@@ -4213,18 +4427,18 @@ function Sync.Init(codec, adapter)
         catalog.RequestAuthorityRebindV1("SOURCE_REBIND_REQUIRED")
     end
     -- Tombstone authority is served only by the catalog's published root;
-    -- Sync never binds the raw SavedVariables tombstone table again.
-    tombstones = {}
-    Operation.deleteCursor = nil
+    -- Sync never binds the raw SavedVariables tombstone table.
     Operation.deleteDiscoveryComplete = true
+    -- The retained Share's once-per-second local-save retry runs from the
+    -- scheduler, so it progresses while the full update turn is withheld
+    -- (catalog or hashes not ready); the update turn then skips it.
     local scheduler = Nexus and Nexus.Scheduler
     if scheduler and scheduler.IsInitialized and scheduler.IsInitialized()
         and type(scheduler.Every) == "function" then
-        local scheduled = scheduler.Every("sync.pending-deletes", 1, function()
-            PumpPendingDeletes(1)
+        local scheduled = scheduler.Every("sync.pending-share", 1, function()
             PumpPendingShare(1)
         end)
-        Sync._pendingDeleteScheduled = scheduled == true
+        Sync._pendingShareScheduled = scheduled == true
     end
     Transport.InstallFilters()
     Sync.EnsureChannel()

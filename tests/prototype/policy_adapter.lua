@@ -9,8 +9,11 @@
 -- The root is NEXUS_POLICY_ROOT or the current directory, so the same adapter
 -- drives the immutable test.9020 baseline and a corrected candidate.
 local Adapter={}
+-- The free-slot support list the production state carried for the historical
+-- scoring engine: test-only now (the engine is gone from logic/Policy.lua).
+local Historical=dofile('tests/prototype/historical_model_support.lua')
 local PURE={'data\\DefaultProfile.lua','core\\EchoCatalogSource.lua','logic\\Model.lua','logic\\Strategy.lua','logic\\Ratchet.lua',
- 'logic\\WishlistPilot.lua','logic\\OrbPolicy.lua','logic\\Policy.lua'}
+ 'logic\\EchoWeaver.lua','logic\\OrbPolicy.lua','logic\\Policy.lua'}
 function Adapter.Load(root)
  root=(root or os.getenv('NEXUS_POLICY_ROOT') or '.'):gsub('\\','/')
  local toc=assert(io.open(root..'/Nexus.toc','rb')):read('*a')
@@ -22,7 +25,7 @@ function Adapter.Load(root)
  end
  Nexus=nil
  for _,entry in ipairs(order)do dofile(root..'/'..entry:gsub('\\','/'))end
- assert(Nexus.WishlistPilot and Nexus.Policy and Nexus.Strategy and Nexus.Ratchet and Nexus.Model and Nexus.EchoCatalogSource,'pure rolling modules loaded')
+ assert(Nexus.EchoWeaver and Nexus.Policy and Nexus.Strategy and Nexus.Ratchet and Nexus.Model and Nexus.EchoCatalogSource,'pure rolling modules loaded')
  Adapter.root,Adapter.order=root,order
  return Nexus
 end
@@ -163,11 +166,13 @@ function Adapter.State(input)
   activeEchoes=row.echoes or {},queue=queue,flags=flags,level=level,catalog=catalog,
   horizon=input.horizon,
   canFreeze=input.allowFreeze==true and (level<80 or (type(input.horizon)=='number' and input.horizon>1)),
-  support=Nexus.Model.Support(catalog,owned,level,input.disabledLevers or {},plan,Nexus.DefaultProfile.params),
+  support=Historical.Support(catalog,owned,level,input.disabledLevers or {},plan,Nexus.DefaultProfile.params),
   params=Nexus.DefaultProfile.params,
   searchRefused={banish=false,reroll=input.allowReroll~=true},
   rerollBudget={consecutive=0,consecutiveLimit=3,bracketSpent=0,bracketLimit=4,reserve=5},
-  pending=input.pending,pendingAction=input.pendingAction}
+  pending=input.pending,pendingAction=input.pendingAction,
+  -- nil = the default policy (adaptive); 'released' pins released-nexus-1.
+  rollingPolicy=input.rollingPolicy}
  if legacyRuntime or input.forceVerifiedFlag~=nil then
   state.snapshotVerified=input.forceVerifiedFlag==nil and verified or input.forceVerifiedFlag
  end

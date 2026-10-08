@@ -1,0 +1,10 @@
+## Interface: 30300
+## Title: Nexus Support Reports
+## Notes: Storage only. Creates the separate SavedVariables file a Nexus support report is attached from. No gameplay logic and no dependency on Nexus.
+## Author: Valentine
+## Version: 1.20.0-beta.1
+## SavedVariables: NexusSupportDB
+## LoadOnDemand: 1
+## X-Nexus-Component: support-storage
+
+Storage.lua

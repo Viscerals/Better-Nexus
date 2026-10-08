@@ -7,6 +7,22 @@ function T.Load()
   end
  end
 end
+-- Some regressions need catalog work that is still pending after a long wait:
+-- a Share that must send while a commit is unfinished, a deferred item whose
+-- turn never comes before its deadline, a viewer that must show several real
+-- phases. Since the shared timed drive advances an eligible candidate through
+-- several bounded slices per update, those windows close too quickly to be
+-- observed unless the catalog is paced as it is when no usable timing source
+-- exists: one slice per update, the documented fallback. These fixtures select
+-- that supported pacing deliberately; the behaviour they assert (ordering,
+-- fixed deadlines, one send, truthful phases) does not depend on the pacing.
+function T.SingleSlicePacing()
+ local real=debugprofilestop
+ NEXUS_TEST_NO_PROFILE_CLOCK=true
+ debugprofilestop=nil
+ return function() NEXUS_TEST_NO_PROFILE_CLOCK=nil;debugprofilestop=real end
+end
+
 function T.Profile(n,pool)
  local db={communityBuilds={},loadoutEvidence={schemaVersion=1,entries={}},
   settings={autoPick=false},chars={}}

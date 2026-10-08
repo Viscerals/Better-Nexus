@@ -1,6 +1,220 @@
-# Nexus — internal module contracts (v1.19.4)
+# Nexus — internal module contracts
 
-Binding interface spec for all modules. Authored from `WISHLIST_REALIZER_BUILD_PROMPT.md`
+## Status of this document
+
+This file has two parts.
+
+1. **Current rolling and Orb contract** (next section). It is authoritative. It
+   describes the production path of the current source. Where any later section
+   conflicts with it, the current contract wins.
+2. **Historical v1.19.4 module contracts** (all sections after it). They were
+   written as the binding interface spec for v1.19.4. They are kept as history.
+   Sections marked **HISTORICAL** describe the obsolete predicted-guarantee
+   model. No production path uses that model. Do not implement from those
+   sections, and do not restore guarantees to satisfy them.
+
+## Current rolling and Orb contract (authoritative)
+
+- **No inferred guarantee.** There are no guaranteed future Echo rolls. A saved
+  or verified build is evidence of identity, contents and ownership only. It
+  predicts no future offer. `isGuaranteed` on a board card is an observed flag of
+  the current offer: that card cannot be banished or frozen. It implies nothing
+  about a later board.
+- **`Ratchet.PredictQueue()`** always returns `{ entries = {}, inferred = false }`.
+  The old model exists only as `Ratchet.HistoricalGuaranteeQueue` for historical
+  fixtures. The production state (`core/AutomationRuntime.lua`) supplies an empty
+  queue.
+- **`Policy.Decide(state)`** returns a wait when `state.ordinaryBoardAllowed ==
+  false`. Otherwise every ordinary board goes to
+  `EchoWeaver.DecideNexus(state)`. `state.snapshotVerified`, `state.queue` and
+  `state.flags` select no planner and change no decision. The historical
+  scoring engine described in the `logic/Policy.lua` section below was
+  unreachable (the production TOC always loads EchoWeaver) and has been
+  removed from the file; without the planner, `Policy.Decide` answers a wait.
+  `Model.Support` and the draw-distribution helpers (`BuildDistribution`,
+  `EmaxK`, `EmaxGivenK`, `WithoutKey`, `FreeDist`) fed only that engine and
+  now live in the test-only `tests/prototype/historical_model_support.lua`, which the
+  policy adapter uses; `Model.Delta` stays in `logic/Model.lua`.
+- **`EchoWeaver.Decide(input)`** is the pure ordinary planner. Without
+  `input.policy` it follows the base strategy. `DecideNexus` passes `EchoWeaver.NEXUS_POLICY`, whose options
+  are deliberate, documented differences (`docs/ROLLING_ORB_REVIEW_EADFF8A.md`).
+  Exact `plan.requestedCounts` per spell ID, rolled plus permanent ownership,
+  actual charges and the per-action permissions are its inputs. Actions:
+  `take`, `freeze`, `banish`, `reroll`, `wait`. Action `index` is 1-based.
+- **Ordinary-board gate.** `GameAdapter.OrdinaryBoardAllowed()` guards `Take`,
+  `Banish`, `Reroll`, `Freeze` and automatic rolling. It blocks while Orb mode
+  owns or has an unresolved action. When an `OrbService` exists it also requires
+  the known, not-pending state from `OrbAdapter.ServiceState()`. One explicit
+  legacy capability case keeps ordinary rolling: `NO_ORB_SERVICE` (the client
+  has no `OrbService` at all). Every case of an existing service other than
+  known and not pending blocks: unknown state, a pending offer, a service
+  without an `IsStateKnown` member (`MISSING_STATE`), a malformed service or
+  member, a non-boolean return, a thrown callback or a throwing read. (Until
+  2026-09-21 a service without `IsStateKnown` was permitted as `PENDING_ONLY`;
+  the user's R1 requirement names only an absent `OrbService` as the exception,
+  so that permit was removed.) The automation loop evaluates again when this gate
+  changes.
+- **Orb mode** is specified in `docs/ORB_MEMORY_MODE.md`. All Orb mutation sits
+  behind `GameAdapter.Orbs`. An unresolved Orb action is never retried, refunded
+  or erased. Recovery after reload is passive. The only exit is the player's
+  explicit Continue (`docs/ORB_RECOVERY_CONTINUE.md`), for a spend this client
+  observed (the one-Orb decrement seen with the offer; no server reply carries a
+  spend identity, so Nexus never states it as server-confirmed; the saved
+  receipt keeps its compatibility field `spendConfirmed`, and the passive
+  `RecoveryView` reports `spendObserved`) with
+  no usable recorded outcome and the original offer gone: it keeps the spent
+  count, the limit and the configured maximum, archives the saved receipt
+  unchanged in the character row key `orbRecoveryArchive`, sends no spend and no
+  choice (only the read-only refresh requests that Recheck also sends) and is
+  never automatic. A passive observer of the game's own addon-message prefix
+  feeds its strict check; it registers no handler, replaces nothing and sends
+  nothing.
+- **Passive readiness diagnostics.** `GameAdapter.OwnershipTrustView()` and
+  `OrbRuntime.ReadinessView()` return a new table of scalars and fixed codes.
+  The first holds the current generation facts and, separately, what the last
+  normal `Owned()` and `LockedOwned()` evaluations sampled (each with its own
+  time). The second holds what the last Orb window read (`OrbRuntime.Status`)
+  observed. Only those normal reads record them, in memory. The accessors read
+  no game state and send, save or change nothing. `OrbAdapter.Read()` may
+  return a third value, the stage code of its refusal, for that observation
+  only. No decision, gate or count reads any of this. The support report shows
+  it as bounded `key=value` blocks with ages. An age is the time of a read, not
+  proof of a fresh server response. A locked rejection code labels the evidence
+  and does not mean that an Echo was removed. One exception concerns wording
+  only: at the trust gate with rolled ownership trusted (stage `trust_locked`),
+  `OrbAdapter.Read()` compares the `diagnosticSerial` of the
+  `GameAdapter.LockedOwned()` read it just made (a diagnostics-only scalar:
+  that read's serial) with `OwnershipTrustView().lockedSerial`. Only when they
+  are equal and that sample's `lockedRejection` is `over_cap` does the refusal
+  text say that Nexus rejected the locked Echo data: it names the occupied
+  records and the live capacity of that same read when it lists more records
+  than the capacity, or says a locked record is above the limit Nexus
+  supports. A missing serial and a stale, mismatched, failing or unreadable
+  sample keep the shared wait text. The refusal, its stage and every gate are
+  the same either way; nothing is read from the game, requested or saved for
+  the text.
+- **Occupied locked records.** The client mirrors each SS18 entry flagged
+  locked as one record with its own locked stack; granted copies of the same
+  spell can be held beside it. The native journal's client-side lock gate
+  compares the record count (not copies) with `GetMaximumPermanentEchoes`,
+  which keeps its last positive value. Not established: one record per spell,
+  every held copy in that record, or server enforcement of the record bound.
+  Nexus treats record partitions and a spell held in both roles as data.
+  `GameAdapter.LockedOwned()` counts each table with a recognized ID as one
+  occupied record and returns `occupied`, `records` (one `{spellId, stacks}`
+  per record) and the `capacity` it was held to, beside the exact `bySpell`
+  copies (never clamped). It trusts the records when they are structurally
+  valid and no more than the live capacity, or, while the capacity is unknown,
+  no more than the record ceiling (256; the capacity then stays unavailable to
+  actions, `MaxPermanentEchoes()` is nil). A record above the 120-copy row
+  ceiling is `over_cap`. A record's own `maxStack` bounds nothing: the native
+  SS18 parser stores `stack` and `maxStack` independently, and whether the
+  server holds one to the other (or retunes it) is unknown. A retained positive
+  capacity is used as stated; its freshness is not observable and is not
+  claimed. The Echo snapshot's locked field includes the record partition and
+  the capacity, so equal per-spell copies in another partition are a change.
+  `Model.LockedProjection` admits only a read that states its occupancy, and
+  AutoLock counts records: one lock occupies one record, whatever its copies,
+  and a spell that is already locked is never locked again for more copies
+  (LockPerk sends the spellId only). Elsewhere three different bounds apply,
+  and none is a guessed capacity:
+  - Resource ceilings: durable evidence, the catalog, DPS records and a stated
+    `lv = 1` locked set carry no capacity and normalize rows, so they hold the
+    locked role to `LoadoutEvidence.SemanticLimits` (256 locked rows, 120
+    copies in one row, 10000 copies in all, beside 79 ordinary copies).
+  - The DPS wire, unchanged and narrower: each received DPS Echo list,
+    ordinary or locked, holds at most 120 entries and 120 copies in all
+    (`DpsCapture` `ValidWireEchoList`).
+  - The authored plan envelope, 79 ordinary and six locked target copies (85
+    in all): the Wishlist design (`WishlistModel`), a Share
+    (`LoadoutEvidence.PlanLimits`) and an EBH1 code (`Codec`).
+  The peer wire format is unchanged; released (test.9049) peers keep their 79 /
+  6 / 85 envelope, refuse inline slot-4 locked copies above six and ignore a
+  stated `lv = 1` set, and new responders send a stated set only to
+  `lv1`-capable requesters. A trusted representation is not a claim that the
+  server accepts a given loadout.
+- **Wishlist editor locked targets.** The editor holds a new locked target to
+  two separate rules (`WishlistModel` `LockBudgetRefusal`). Design: the plan's
+  own target copies -- its designed rows (a tagged row one copy, a queued
+  target its copies), the new target and, once each, the fulfilled targets the
+  final design keeps -- stay within the authored six. Slots: the trusted
+  projection's occupied records, plus one record for each designed spell that
+  holds none, stay within the live capacity, or within six while the capacity
+  is unknown. A replacement frees the replaced spell's records and drops its
+  fulfilled target from the design, as `PlanLockCommit` and the draft export
+  do; current locked Echoes the plan does not target are occupancy, never
+  design. Each refusal names its rule. A plan without locked targets carries
+  the current locked Echoes as the locked rows of its EBH1 code only while
+  their copies fit six; otherwise the code holds the ordinary plan and the
+  export says that the locks are left out. A code the codec would empty
+  (outside 79 / 6 / 85, or no Echo at all) is refused with its reason and never
+  shown. Neither rule claims what the server accepts. The design rule also
+  bounds whole plans (`DesignCopies`): a Copy whose locked rows hold more than
+  six copies is refused before it replaces the draft, and Save refuses a draft
+  whose own final design holds more than six copies before any confirmation or
+  upload and keeps no retry; occupied records, the live capacity and maxStack
+  do not enter it.
+- **Equal rolled contents, several retained designs.** A server mirror carries
+  ordinary rows only, so a plan without its own design reads the content-key
+  bucket (`lockDesignTargetsBySlot[key]`) only while the retained designs of
+  those contents agree (`WishlistRoles.DesignAmbiguous`: the bucket, every
+  stored assignment, the first-run plan and the removal history, compared by
+  canonical target token; a legacy empty bucket `{}` from before W4 is a
+  zero-target design and counts). When the bucket exists and two of them
+  differ, none is chosen: `AssignedWishlist` reads `unavailable` with a note,
+  AutoLock reads no targets, and the Wishlist Editor fills in no locked target
+  and says so (a save then keeps only the targets set there). An explicit
+  picker selection of a plain row carries a design only through
+  `WishlistRoles.SelectedDesign`: the clicked row is still the row the picker
+  showed, exactly one retained design is attributable to its name and
+  contents, `ResolveSaved` puts that plan on exactly the clicked row, and the
+  bucket's design (an empty legacy bucket included) is that design or the
+  design of a valid plan of another name; a design that only the bucket holds
+  is never carried. Moved-identity, missing-mirror and slot-number-only
+  selections borrow nothing and stay unavailable. Upgrade: such a design-less
+  assignment read `ready` with the bucket in earlier builds (also when the
+  bucket was its own design) and reads `unavailable` now, until it is
+  reassigned, restored or given targets; no profile, provenance or schema is
+  migrated. Residual limit, present since this rule was added (f53f5ed): the
+  removal history keeps five records, so once a differing design has left all
+  retained data the plain plan reads the bucket again. Removing that needs
+  durable per-plan design provenance, a saved-format change that is not made.
+- **Locked shape capture.** `GameAdapter.LockedShapeView()` returns a new table
+  for the last normal `LockedOwned()` read that refused a table, or
+  `observed=false` since load. Protected hooks inside that read's own parse
+  record it (`ReadLockedPerks(raw, sink)`; `LockedFingerprint` passes no
+  collector): no second walk, no second getter call, memory only. A failing
+  hook ends the capture as `status=failed` and never changes the parse. The
+  header holds `serial` (the existing `projectionStatus.locked.calls` of that
+  read), `at`, `age`, `sampledGeneration`, `currentGeneration`, `first`,
+  `copies`, `ids` (that read's `bySpell` keys), `status` (`captured`,
+  `truncated` past 64 tables, `failed`) and `rows`. `current` and `laterReads`
+  compare `serial` with `OwnershipTrustView().lockedSerial`, which the Orb
+  observation copies as `lockedSerial` (its report block prints
+  `locked.serial`). Each row, at most 64 in pre-order, holds
+  seven integers or fixed codes: parent row `p`, key class `k`, anonymous ID
+  class `c`, copies added `n`, the ID and count alias bits the parser read
+  (`im`, `cm`) and defect bits `e`. No key, ID, name, value or table reference
+  is kept. The prepared file report shows it as the bounded `Locked shape`
+  block; the copied summary does not. A repeated ID class, a count or a nesting
+  is structure, not a native meaning; a later read or a newer generation is
+  context, not proof of a change. No decision, gate or count reads any of this.
+- **Version.** The release identity lives in `data/Release.lua` and `Nexus.toc`,
+  not in this file.
+- **Tests.** The maintained offline suite is `tools/run_prototype_tests.py` with
+  `tests/prototype/`. No-guarantee behaviour: `rolling_no_guarantee`,
+  `rolling_no_guarantee_runtime`, `policy_compare`, through the maintained
+  adapter `tests/prototype/policy_adapter.lua`.
+
+# Historical v1.19.4 module contracts
+
+Everything below is the v1.19.4 text. It is unchanged except for the
+**HISTORICAL** markers. Data shapes that the current code still produces (catalog,
+wishlist, owned, board, charges, slots) remain a useful description. Version
+strings, the `flags` and `queue` shapes, `Ratchet.PredictQueue`, the
+`Policy.Decide` rules and the `tests (mine)` section are historical.
+
+Binding interface spec for all modules (as of v1.19.4). Authored from `WISHLIST_REALIZER_BUILD_PROMPT.md`
 + `WISHLIST_REALIZER_SPEC_ADDENDUM.md` + `WISHLIST_REALIZER_DESIGN.md` (the addendum wins
 conflicts). Every `logic/*` and `data/*` file: plain Lua 5.1, NO WoW API, NO
 SavedVariables, NO `ProjectEbonhold.*` — loadable under bare LuaJIT. All cross-module
@@ -34,7 +248,10 @@ wishlist = nil | {           -- nil => advisor-only mode
   byFamily = { [familyKey] = { targetStacks=n, wishedQuality=n, spellId=n } },
 }
 
-owned = {                    -- granted ∪ locked ∪ adapter-recorded picks
+owned = {                    -- the granted mirror only: rolled stacks. Locked
+                             -- Echoes are separate (LockedOwned). A submitted
+                             -- Select is intent, never owned, until the mirror
+                             -- shows it (#62); it holds InFlight() meanwhile
   bySpell  = { [spellId] = count },
   byFamily = { [familyKey] = count },
   synced = bool,             -- false => engine must not auto-act at level > 1
@@ -56,11 +273,13 @@ slots = nil | {              -- nil => SS 540 not arrived
   activeSlot = n,            -- 0 = none
 }
 
+-- HISTORICAL: these flags belong to the obsolete guarantee model. The current
+-- planner reads neither of them.
 flags = { DISABLE_SUPPRESSES_GUARANTEE = true|false,  -- true (user-confirmed) unless runtime-demoted
           REROLL_HOLDS_GUARANTEED = true|false|nil }  -- nil = conservative
 
 plan = Strategy.Compile output (below).
-queue = Ratchet.PredictQueue output (below).
+queue = Ratchet.PredictQueue output (below).  -- HISTORICAL: now always empty, inferred=false
 ```
 
 ## logic/Model.lua — `Nexus.Model`
@@ -110,6 +329,10 @@ Fork from EchoOptimizer/logic/Model.lua VERBATIM: `NormName`, `StripRaritySuffix
 
 ## logic/Ratchet.lua — `Nexus.Ratchet`
 
+> **HISTORICAL (PredictQueue, RunsEstimate queue input).** The predicted queue
+> below is the obsolete guarantee model. The current `Ratchet.PredictQueue()`
+> takes no meaningful input and returns an empty queue. See the current contract.
+
 - `Ratchet.PredictQueue(activeEchoes, owned, plan, flags, disabledLevers, catalog)` →
   `{ entries = { { spellId, family, wanted=bool }, ... } }` in given order, skipping
   entries whose FAMILY is owned (family-aware subtraction, addendum §B2), and — iff
@@ -127,6 +350,11 @@ Fork from EchoOptimizer/logic/Model.lua VERBATIM: `NormName`, `StripRaritySuffix
   (rate unmeasured)"; never fabricate a number labeled as fact.
 
 ## logic/Policy.lua — `Nexus.Policy`
+
+> **HISTORICAL.** Rules 1-7 below describe the guarantee-based scoring of
+> v1.19.4 (guaranteed card, `wantedInQueue`, "guarantee already exhausted").
+> Production routes every ordinary board to `EchoWeaver.DecideNexus`. See the
+> current contract. Do not reintroduce these rules.
 
 - `Policy.Decide(state)` where `state = { board, owned, charges, plan, queue, flags,
   level, horizon, support, params }` → action:
@@ -159,6 +387,10 @@ Fork from EchoOptimizer/logic/Model.lua VERBATIM: `NormName`, `StripRaritySuffix
 
 ## data/DefaultProfile.lua — `Nexus.DefaultProfile`
 
+> **HISTORICAL in part.** `defaultFlags` and the reroll scoring params belong to
+> the obsolete guarantee model. The current planner reads the per-action
+> permissions (`autoBanish`, `autoReroll`, `autoFreeze`) and no guarantee flag.
+
 Pure table: `params` (coverage=100, qualityBonus=2, anchorUnlock=150, diversity=5,
 duplicate=-5, filler=-15, rerollCost=8, rerollHoldThreshold=25), `defaultSettings`
 (autoPick=true, autoActivate=true, autoDisable=true, autoSave=true, autoBanish=true,
@@ -169,7 +401,8 @@ anchorSpellId=nil, leverOptOut={}), `defaultFlags` (DISABLE_SUPPRESSES_GUARANTEE
 
 `Store.Init()` (wholesale-replace on version change, sibling pattern), `Store.Settings()`,
 `Store.State()` (per-char keyed subtable: tomeTogglePending per lever w/ timestamps,
-priorAutoAccept, flagDemotions, recordedPicks for the current session). Char key from
+priorAutoAccept, flagDemotions, and a legacy recordedPicks field that is kept for
+round-tripping but no longer written or read, #62). Char key from
 `UnitName("player")` guarded — if unavailable, defer (never latch "Unknown").
 
 ## core/GameAdapter.lua — `Nexus.GameAdapter` (sole IO; my file)
@@ -201,7 +434,13 @@ run-boundary, self-check demotion hook).
   (presentation-layer exception, documented) but NEVER PerkService — all data through
   the provider callback.
 
-## Post-review amendments (binding, from the pre-deploy adversarial pass)
+## Post-review amendments (from the v1.19.4 pre-deploy adversarial pass)
+
+> The index-base, signature, latch-watchdog and run-boundary items still describe
+> the current adapter. The `DISABLE_SUPPRESSES_GUARANTEE` self-check item is
+> **HISTORICAL**: that flag belongs to the obsolete guarantee model and changes
+> no current decision. The undemote command still exists and only clears those
+> legacy flag demotions.
 
 - **Index bases:** `Policy` `action.index` is **1-based** into `board.cards`;
   `GameAdapter.Banish(index0)` takes the client's **0-based** perk index. `Main`
@@ -230,6 +469,9 @@ run-boundary, self-check demotion hook).
 - `Panel.Toggle()` exists. `/wr undemote` clears flag demotions.
 
 ## tests (mine)
+
+> **HISTORICAL.** `tests/harness.lua` and `tests/run_integration.lua` are not the
+> maintained suite. See "Tests" in the current contract.
 
 `tests/harness.lua` (stub extensions per design §10) + `tests/run_integration.lua`
 (scenario asserts). Run: `luajit tests/run_integration.lua` from the addon root; exits

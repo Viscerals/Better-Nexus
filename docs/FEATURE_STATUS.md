@@ -5,7 +5,7 @@ P1.4 source. It is not a new merge of the user's separate T3 branch.
 
 | Feature | Status |
 |---|---|
-| Ordinary LoadoutPilot-derived rolling, Snapshot distinctions, resource guards | Retained; original 10,000-case policy comparison and real-action tests retained |
+| Ordinary EchoWeaver rolling, Snapshot distinctions, resource guards | Retained; real-action and engine tests retained. The earlier offline comparison with an outside addon is retired (2026-09-24). |
 | Wishlist retry fix, ownership-cache fix, explicit/current-lock-default role handling | Retained; prior editor/reload regressions retained |
 | Startup, local tools during shared loading, current-phase progress display | Retained; existing startup tests and readiness behavior retained |
 | Community, DPS, Leaderboard and existing Sync | Retained; terminology updated, underlying storage/transport/ranking not redesigned |
@@ -21,4 +21,4 @@ P1.4 source. It is not a new merge of the user's separate T3 branch.
 
 See P1_5_TERMINOLOGY_IMPLEMENTATION.md for all approved IDs, ORB_MEMORY_MODE.md
 for the actual lifecycle and adaptations, and README-PROTOTYPE.md for the current
-user procedure. Older P1.x notes are preserved as historical evidence.
+user procedure. Older P1.x notes are historical evidence; those that described the retired outside comparison are in Git history only (since 2026-09-24).

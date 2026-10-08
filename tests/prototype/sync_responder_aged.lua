@@ -71,13 +71,20 @@ for step=1,2400 do
  P.Step()
  -- Admission (the pump submits the item) is distinct from catalog commit.
  if first and not admittedAt and (run.Stats(A).admissionResolved or 0)>resolvedBefore then admittedAt=A.H.now end
+ -- FIFO: the later arrival must never be stored while the older one is not.
+ -- A receiver batch may publish both in the same commit; it may not overtake.
+ if later and A.e.Nexus.BuildCatalog.Get(later) then
+  assert(A.e.Nexus.BuildCatalog.Get(first),'the later arrival never overtook the older one')
+ end
  if first and A.e.Nexus.BuildCatalog.Get(first) then break end
 end
 assert(admittedAt,'the retained summary was admitted by the pump')
 local yielded,committed=admittedAt-firstAt,A.H.now-firstAt
 assert(yielded<=30+transfer+.1,string.format('admitted within the unchanged 30-second yield cap plus one started transfer (%.1fs), although %d requests arrived meanwhile: %.1f',transfer,n,yielded))
 assert(A.e.Nexus.BuildCatalog.Get(first),'the admitted summary then committed')
-assert(later and A.e.Nexus.BuildCatalog.Get(later)==nil,'the later arrival kept its place behind the older one')
+local laterRow=later and A.e.Nexus.BuildCatalog.Get(later)
+assert(later and (laterRow==nil or A.e.Nexus.BuildCatalog.Get(first)~=nil),
+ 'the later arrival kept its place: it is stored only together with or after the older one')
 assert(n>=3 and A.e.Nexus.Sync.ResponseStats().entryPreparations>scheduled.entryPreparations,'fixture: requests kept arriving and the responder kept serving them')
 print(string.format('PASS sustained owed work: retained summary admitted after %.1fs (fixed bound %.1fs), committed after %.1fs, %d requests arriving; FIFO order kept',yielded,30+transfer,committed,n))
 

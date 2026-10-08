@@ -17,8 +17,9 @@ core\EchoCatalogSource.lua
 logic\Model.lua
 logic\Strategy.lua
 logic\Ratchet.lua
-logic\WishlistPilot.lua
+logic\EchoWeaver.lua
 logic\OrbPolicy.lua
+logic\OrbGuidance.lua
 logic\Policy.lua
 core\Revisions.lua
 core\Identity.lua
@@ -30,9 +31,12 @@ core\DataRetention.lua
 core\BuildHashCache.lua
 core\Store.lua
 core\Errors.lua
+core\SupportIncidents.lua
+core\SupportReport.lua
 core\Scheduler.lua
 core\DiagnosticHistory.lua
 core\DiagnosticLogs.lua
+core\RollRecorder.lua
 core\PeerDebug.lua
 core\ViewRefresh.lua
 core\Updates.lua
@@ -41,6 +45,7 @@ core\WishlistModel.lua
 core\WishlistController.lua
 core\SyncProtocol.lua
 third_party\ChatThrottleLib.lua
+core\SyncModePolicy.lua
 core\SyncWire.lua
 core\SyncTransport.lua
 core\SyncCompatibility.lua
@@ -48,6 +53,7 @@ core\SyncReconciler.lua
 core\SyncInbound.lua
 core\SyncDiagnostics.lua
 core\SyncSession.lua
+core\SyncAdmission.lua
 core\Sync.lua
 core\DpsCapture.lua
 core\LegacyDataMigration.lua
@@ -61,7 +67,9 @@ core\OrbRuntime.lua
 ui\VirtualList.lua
 ui\Theme.lua
 ui\Help.lua
+ui\OrbHistory.lua
 ui\OrbPanel.lua
+ui\SupportReport.lua
 ui\LayoutMetrics.lua
 ui\Readout.lua
 ui\ServerStatus.lua

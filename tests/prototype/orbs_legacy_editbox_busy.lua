@@ -24,8 +24,10 @@ H.Result(410002,2);Nexus.OrbPanel.Refresh()
 assert(not M.Status().pending and f.limit.mouseEnabled and f.limit.keyboardEnabled,'settled Stop restores idle editing')
 assert(H.Count('orb-spend')==1,'Stop/refresh must not submit another spend')
 f.limit:SetText('1');f.start:Click();H.Offer();H.Result(410002,2);Nexus.OrbPanel.Refresh()
-assert(M.Status().state=='LIMIT' and not M.Status().pending,'actual limit state reached')
-unchanged('maximum reached')
-f.stop:Click();assert(f.limit.mouseEnabled and f.limit.keyboardEnabled,'explicit Stop releases the completed budget')
+-- A settled maximum finishes the run: the next run's maximum is editable at
+-- once, and Stop is not needed to release the completed budget.
+assert(M.Status().state=='FINISHED' and not M.Status().pending,'actual settled completion reached')
+assert(f.limit.mouseEnabled and f.limit.keyboardEnabled,'a finished run unlocks the next maximum')
+assert(not f.stop:IsEnabled(),'Stop is disabled once the run is finished')
 assert(H.Count('orb-spend')==2 and H.Count('take')==2,'only the two explicit synthetic Starts submitted')
 print('PASS strict legacy EditBox running/paused/ready/selection/stopped/settled/limit locks and allowance')
