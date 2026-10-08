@@ -805,9 +805,9 @@ end
 -- capture is deferred with its counts retained instead of writing a record
 -- the catalog must reject - and instead of replacing a valid earlier record
 -- with a derived one that cannot be true. Locked copies are held copies of
--- occupied records, bounded in the game by the live capacity, which a record
--- does not carry: here a locked row is held to the owner's row ceilings
--- (LoadoutEvidence.SemanticLimits), not to a copy count.
+-- occupied records, counted by the native journal's client lock gate against
+-- the capacity, which no record carries: here a locked row is held to the
+-- owner's row ceilings (LoadoutEvidence.SemanticLimits), not to a copy count.
 local function CaptureEnvelopeVerdict(ordinary, locked)
     local evidence = Nexus and Nexus.LoadoutEvidence
     local limits = evidence and type(evidence.SemanticLimits) == "function"

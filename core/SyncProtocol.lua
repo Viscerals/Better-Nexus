@@ -36,8 +36,8 @@ function Protocol.New(options)
     -- Issue #22: the loadout envelope is owned by LoadoutEvidence and reused
     -- here. It is separate from the parser ceiling `maxBuildEchoes`; neither
     -- limit substitutes for the other. A locked copy count is not a bound:
-    -- the game bounds occupied locked records by the live capacity, which a
-    -- payload does not carry, and a locked row is already held to the 120-copy
+    -- the native journal's client lock gate counts locked records against the
+    -- capacity, which no payload carries; a locked row is held to the 120-copy
     -- per-row ceiling (NetworkEcho). The format is unchanged. Older peers
     -- keep their own 79/6/85 envelope: they refuse inline locked copies above
     -- six and ignore a stated set (docs/P1_7_LOCKED_ROLE_WIRE.md).

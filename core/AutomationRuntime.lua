@@ -2055,8 +2055,8 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
             end
         elseif (tonumber(lockedBySpell[id]) or 0) > 0 then
             -- Locked already, with fewer copies than the target. LockPerk
-            -- names only the spell and the game keeps the stack a record was
-            -- locked with: no lock can add copies to it, so none is sent.
+            -- sends only the spellId, and the native journal refuses to lock
+            -- an already-locked Echo, so Nexus submits no lock to add copies.
             trace[#trace + 1] =
                 "  -> already locked with fewer copies than the target; a lock cannot add copies to its record"
         elseif haveN >= targetCopies then
