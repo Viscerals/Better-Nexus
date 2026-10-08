@@ -461,7 +461,9 @@ scenario('P4 locked rejection codes',function()
   {'conflicting count names',function() return {{spellId=410007,stack=1,count=2}} end,false,0,'conflicting_alias'},
   {'cycle',function() local t={{spellId=410007}};t[2]=t;return t end,false,1,'cycle'},
   {'depth',function() local d={spellId=410007};for i=1,9 do d={d} end;return d end,false,0,'depth'},
-  {'over the limit',function() return {{spellId=410007,stacks=7}} end,false,7,'over_cap'},
+  -- One record above its own stated maxStack (records, not copies, meet the
+  -- live capacity).
+  {'over the limit',function() return {{spellId=410007,stacks=7,maxStack=1}} end,false,7,'over_cap'},
   {'scalar leaf',function() return {{spellId=410007},{note='x'}} end,false,1,'scalar_leaf'},
  }
  for _,c in ipairs(cases) do
@@ -482,7 +484,7 @@ scenario('P4 locked rejection codes',function()
   end
  end
  -- A changed raw table is not re-read: the view keeps the last evaluation.
- H.locked={{spellId=410007,stacks=7}}
+ H.locked={{spellId=410007,stacks=7,maxStack=1}}
  local before=trustView()
  if before then expect(before.lockedRejection=='scalar_leaf','P4: until LockedOwned() runs again the view keeps the last evaluation',before.lockedRejection) end
  A.LockedOwned()

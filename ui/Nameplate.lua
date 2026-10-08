@@ -28,7 +28,8 @@ Nexus.Nameplate = M
 local function FmtDps(dps)
     if not dps or dps <= 0 then return nil end
     if dps >= 1000000 then return string.format("%.2fM", dps / 1000000) end
-    return string.format("%dk", math.floor(dps / 1000))
+    if dps >= 1000 then return string.format("%dk", math.floor(dps / 1000)) end
+    return tostring(math.floor(dps))
 end
 
 local function OrdinalSuffix(n)

@@ -71,7 +71,9 @@ end
 lines('Rolled copies: 79/79','Locked targets: 6/6  \226\128\162  85 Echo/quality entries')
 H.locked={{spellId=200080,stacks=5},{spellId=200081,stacks=1}}
 H.Notify();A.Poll();r.Refresh()
-lines('Currently locked: 6/6  \226\128\162  Rolled copies: 79/79','Locked targets: 6/6  \226\128\162  85 Echo/quality entries')
+-- Two occupied locked records (holding 5 and 1 copies) occupy two of the six
+-- slots: "Currently locked" counts records, not the six held copies.
+lines('Currently locked: 2/6  \226\128\162  Rolled copies: 79/79','Locked targets: 6/6  \226\128\162  85 Echo/quality entries')
 H.locked={};H.Notify();A.Poll();r.Refresh()
 local function visible()
  local t={};for _,row in ipairs(area.children)do

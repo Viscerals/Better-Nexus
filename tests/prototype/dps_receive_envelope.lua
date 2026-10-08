@@ -1,8 +1,10 @@
 -- #22: a received DPS record is held to the same supported envelope as a
--- local capture (79 ordinary, 6 locked, 85 total Echo copies). A loadout
--- outside it is not a loadout the game can hold, so the record is refused
--- with the integrity reason, is not stored, and is not listed. The direct
--- owner path and the relay path share one admission, so both are checked.
+-- local capture (79 ordinary Echo copies; locked rows within the row
+-- ceilings, since occupied locked records are bounded by the live capacity a
+-- record does not carry). A loadout outside it is not a loadout the game can
+-- hold, so the record is refused with the integrity reason, is not stored,
+-- and is not listed. The direct owner path and the relay path share one
+-- admission, so both are checked.
 --
 -- Everything here is SYNTHETIC.
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
@@ -57,7 +59,6 @@ check(Listed(41000),'and listed')
 -- 2. Records outside the envelope, from their own sender.
 local cases={
  {name='Overord',ordinary=80,locked=0,dps=42000,why='80 ordinary copies'},
- {name='Overlock',ordinary=79,locked=7,dps=43000,why='7 locked copies'},
  {name='Overboth',ordinary=84,locked=6,dps=44000,why='84 + 6 copies'},
 }
 for _,c in ipairs(cases) do
@@ -69,9 +70,22 @@ for _,c in ipairs(cases) do
  check(not Listed(c.dps),'and it is not listed ('..c.why..')')
 end
 
--- 2b. The envelope counts COPIES, not rows: 78 ordinary rows where one row
--- holds 3 copies (80 copies), and 6 locked rows where one holds 2 copies
--- (7 copies), are both outside it.
+-- 2a. Locked copies are held copies of occupied locked records, which the
+-- game bounds by the character's live capacity; a record does not carry it.
+-- 79 ordinary copies with 7 locked copies (six records, one holding two) is
+-- such a loadout: it is accepted and listed, not refused for its copies.
+do
+ local before=Integrity()
+ local accepted=D.ReceiveRecord(Wire('Overlock',79,7,43000),'Overlock-'..fx.realm)
+ Settle()
+ check(accepted==true and Integrity()==before,'a 79 + 7 locked-copy record is not refused for integrity: '..tostring(accepted))
+ check(Listed(43000),'and it is listed')
+end
+
+-- 2b. The ordinary envelope counts COPIES, not rows: 78 ordinary rows where
+-- one row holds 3 copies (80 copies) are outside it. Six locked rows where one
+-- holds 2 copies (7 copies) are occupied records holding their stacks, inside
+-- it.
 local function Stacked(name,dps,ordinaryRows,extraCount,lockedRows,lockedExtra)
  stamp=stamp+1
  local e=Rows(L.ORDINARY_POOL_FIRST,L.ORDINARY_POOL_SIZE,ordinaryRows-1)
@@ -87,7 +101,6 @@ local function Stacked(name,dps,ordinaryRows,extraCount,lockedRows,lockedExtra)
 end
 for _,c in ipairs({
  {name='Stackord',wire=function() return Stacked('Stackord',47000,78,3,0,0) end,dps=47000,why='78 rows holding 80 ordinary copies'},
- {name='Stacklock',wire=function() return Stacked('Stacklock',48000,79,1,6,2) end,dps=48000,why='6 locked rows holding 7 copies'},
 }) do
  local before=Integrity()
  local accepted=D.ReceiveRecord(c.wire(),c.name..'-'..fx.realm)
@@ -95,6 +108,13 @@ for _,c in ipairs({
  check(accepted==false,'a record with '..c.why..' is refused: '..tostring(accepted))
  check(Integrity()==before+1,'with the integrity reason ('..c.why..')')
  check(not Listed(c.dps),'and it is not listed ('..c.why..')')
+end
+do
+ local before=Integrity()
+ local accepted=D.ReceiveRecord(Stacked('Stacklock',48000,79,1,6,2),'Stacklock-'..fx.realm)
+ Settle()
+ check(accepted==true and Integrity()==before,'a record with 6 locked rows holding 7 copies is accepted: '..tostring(accepted))
+ check(Listed(48000),'and it is listed (6 locked rows holding 7 copies)')
 end
 
 -- 3. The relay path has the same admission: a relayed record outside the

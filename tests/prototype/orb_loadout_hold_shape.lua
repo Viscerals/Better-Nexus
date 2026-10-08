@@ -45,7 +45,7 @@ do
  local H,M,A,O=World({slot=102,charges=0})
  local lines=Lines()
  check(lines[1]=='Orb action: unresolved after a reload; state=RECOVERY; recovery=CHECKING; waiting for=none','A1: early first line: '..tostring(lines[1]))
- check(lines[2]=='  spend confirmed=yes; choice=none; selected=none; source='..SOURCE..'; game pick in flight=unknown; loadout change recorded=yes; automatic refresh=not requested',
+ check(lines[2]=='  client-observed spend=yes; choice=none; selected=none; source='..SOURCE..'; game pick in flight=unknown; loadout change recorded=yes; automatic refresh=not requested',
   'A1: early second line: '..tostring(lines[2]))
  check(View().loadoutChanged==true and Nexus.Store.State().orbRefinement.pending.originalSlot==101,'A1: the hold and the recorded original slot 101 are in the receipt before the first read')
  check(M.Status().limit==219 and M.Status().spent==170 and M.Status().reserved==0,'A1: the counters are the receipt\'s own (170 of 219)')
@@ -65,7 +65,7 @@ for _,case in ipairs(READY)do
  local lines=Lines()
  -- 101 is the recorded original slot: with slot data it is the SAME loadout, and the receipt's own latch still holds.
  check(lines[1]=='Orb action: unresolved after a reload; state=PAUSED; recovery=PAUSED; waiting for=loadout','A2 '..case.name..': ready first line: '..tostring(lines[1]))
- check(lines[2]=='  spend confirmed=yes; choice=none; selected=none; source='..SOURCE..'; game pick in flight=no; loadout change recorded=yes; automatic refresh=not requested',
+ check(lines[2]=='  client-observed spend=yes; choice=none; selected=none; source='..SOURCE..'; game pick in flight=no; loadout change recorded=yes; automatic refresh=not requested',
   'A2 '..case.name..': ready second line: '..tostring(lines[2]))
  check(not M.Resume() and not M.Prepare() and M.BlocksOrdinary()==true,'A2 '..case.name..': no Resume, no new run, ordinary rolling blocked')
  -- a return to slot 101, a Recheck, a Stop and a reload do not change it

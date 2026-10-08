@@ -54,7 +54,10 @@ local function signature(counts)
 end
 -- A refusal returns nil, its text, nil and a fixed code (unavailable, shape or
 -- verify) that names the refusal for the readiness diagnostics only.
-local function readCounts(raw,cat)
+-- `maxCopies` bounds one row and the total: 85 for rolled copies; for locked
+-- records the trusted read's own bound (the records it held to the capacity,
+-- each within the per-record ceiling).
+local function readCounts(raw,cat,maxCopies)
     if type(raw)~="table" or getmetatable(raw) then return nil,"Echo ownership is unavailable.",nil,"unavailable" end
     local counts,rows,total={},0,0
     local function record(e)
@@ -63,8 +66,8 @@ local function readCounts(raw,cat)
         local c=id and cat.rows[id]
         local q=e.quality;if q==nil and c then q=c.quality end
         if not integer(id,1) or not c or not integer(q,0) or q>255
-            or not integer(n,1) or n>85 then return false end
-        total=total+n;if total>85 then return false end
+            or not integer(n,1) or n>maxCopies then return false end
+        total=total+n;if total>maxCopies then return false end
         local k=tostring(id)..":"..tostring(q);counts[k]=(counts[k] or 0)+n
         return true
     end
@@ -88,12 +91,13 @@ local function hostPending(pe)
 end
 -- The text of the trust refusal when rolled ownership is trusted and the
 -- normal locked read just made was refused (stage trust_locked). Only when the
--- passive sample of exactly that read (the same diagnostic serial) says its
--- count passed the six-copy limit (over_cap) does the text name Nexus's count
--- rejection. A missing serial and a stale, mismatched, failing or unreadable
--- sample keep the shared wait. The text is all this decides: the refusal, its
--- stage and every gate are the same either way, and nothing is read from the
--- game, requested, saved or changed for it.
+-- passive sample of exactly that read (the same diagnostic serial) says it
+-- passed a bound (over_cap: more occupied records than the live capacity, or a
+-- record above its copy limit) does the text name Nexus's rejection; the
+-- numbers come from that same read. A missing serial and a stale, mismatched,
+-- failing or unreadable sample keep the shared wait. The text is all this
+-- decides: the refusal, its stage and every gate are the same either way, and
+-- nothing is read from the game, requested, saved or changed for it.
 local function lockedTrustRefusal(locked)
     local ok,overCap=pcall(function()
         local serial=locked.diagnosticSerial
@@ -103,7 +107,11 @@ local function lockedTrustRefusal(locked)
             and view.lockedSynced==false and view.lockedRejection=="over_cap"
     end)
     if ok and overCap==true then
-        return "Nexus rejected the current locked Echo data: it lists more than 6 locked copies, above the limit Nexus supports."
+        local occupied,capacity=locked.occupied,locked.capacity
+        if integer(occupied,1) and integer(capacity,1) and occupied>capacity then
+            return string.format("Nexus rejected the current locked Echo data: it lists %d occupied locked records, more than the %d locked slots the game reports.",occupied,capacity)
+        end
+        return "Nexus rejected the current locked Echo data: a locked record is above the limit Nexus supports."
     end
     return "Waiting for current rolled and locked Echo data from the server."
 end
@@ -193,9 +201,16 @@ function O.Read()
     end
     local okG,rawG=call(svc,"GetGrantedPerks");local okL,rawL=call(svc,"GetLockedPerks")
     if not okG or not okL then return nil,"Echo ownership could not be read.","call" end
-    local granted,err,totalG,whyG=readCounts(rawG,cat);if not granted then return nil,err,"granted_"..whyG end
-    local locks,errL,totalL,whyL=readCounts(rawL,cat);if not locks then return nil,errL,"locked_"..whyL end
-    if totalG>79 or totalL>6 then return nil,"The current rolled/locked Echo counts exceed the supported limits.","limits" end
+    local granted,err,totalG,whyG=readCounts(rawG,cat,85);if not granted then return nil,err,"granted_"..whyG end
+    -- The locked records were trusted above against the live capacity (or the
+    -- record ceiling) and the per-record ceiling: their copies are bounded by
+    -- that read, not by a copy count. Every held copy is kept.
+    local lockedBound=0
+    for _,r in ipairs(type(locked.records)=="table" and locked.records or {}) do
+        lockedBound=lockedBound+(integer(r.stacks,1) and r.stacks or 0)
+    end
+    local locks,errL,totalL,whyL=readCounts(rawL,cat,math.max(lockedBound,1));if not locks then return nil,errL,"locked_"..whyL end
+    if totalG>79 or totalL>lockedBound then return nil,"The current rolled/locked Echo counts exceed the supported limits.","limits" end
     local sig=signature(granted)
     if observations.grantedRef~=rawG or observations.grantedSig~=sig then
         observations.serial=observations.serial+1;observations.grantedRef=rawG;observations.grantedSig=sig

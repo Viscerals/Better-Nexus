@@ -97,16 +97,21 @@ function R.Fixture(H,T)
  local X={PLAN='ZQ plan alpha',BASE_GRANTED=H.Clone(H.granted)}
  -- Five native-shaped locked records: GetLockedPerks keys one array per Echo
  -- name (as in orb_stacked_copies); each record is {spellId, quality, stacks}.
+ -- The game compares OCCUPIED RECORDS, not copies, with the live capacity
+ -- (locked_shape_support T.CAPACITY), and a record holds its Echo's stack.
+ -- X.Over() states a live capacity of four for the five records (one record
+ -- over the cap); X.AtCap() a capacity of five (full occupancy, the cap
+ -- itself). Their held copies stay exact either way.
  X.HELD={{410003,0},{410004,3},{410005,0},{410006,3},{410007,2}}
- X.OVER={1,1,1,3,1}   -- seven held copies: one more than the six-copy cap
- X.AT_CAP={1,1,1,2,1} -- six held copies: the cap itself
+ X.OVER={1,1,1,3,1}   -- seven held copies in five records, at capacity four
+ X.AT_CAP={1,1,1,2,1} -- six held copies in five records, at capacity five
  function X.Records(copies)
   local t={}
   for i,r in ipairs(X.HELD) do t[H.names[r[1]]]={{spellId=r[1],quality=r[2],stacks=copies[i]}} end
   return t
  end
- function X.Over() return X.Records(X.OVER) end
- function X.AtCap() return X.Records(X.AT_CAP) end
+ function X.Over() T.CAPACITY=4;return X.Records(X.OVER) end
+ function X.AtCap() T.CAPACITY=5;return X.Records(X.AT_CAP) end
  -- The same native shape within the cap, with one record whose ID is invalid.
  function X.Invalid()
   local t=X.AtCap()
@@ -121,7 +126,7 @@ function R.Fixture(H,T)
  function X.Trusted()
   H.holdGrantedResponse=nil;O.known=true;H.playerLevel=40
   H.granted=H.Clone(X.BASE_GRANTED);A.Owned()
-  H.locked={};A.LockedOwned()
+  T.CAPACITY=6;H.locked={};A.LockedOwned()
  end
  -- An active populated Saved Build whose Wishlist resolves through its
  -- association, so that the Orb read reaches its trust gate (as in

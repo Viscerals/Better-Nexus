@@ -35,6 +35,10 @@ function Transport.New(options)
     local sendChat = assert(options.sendChat, "sendChat callback required")
     local addMessageFilter = assert(options.addMessageFilter,
         "addMessageFilter callback required")
+    -- Optional: registers a handler for a game event (not a chat message)
+    -- with the owner's event frame. Absent, events are not observed.
+    local listenEvent = type(options.listenEvent) == "function"
+        and options.listenEvent or nil
     local observe = type(options.observe) == "function"
         and options.observe or function() end
     -- The saved Sync mode decision (core/SyncModePolicy.lua), asked before
@@ -684,7 +688,16 @@ function Transport.New(options)
             return false, text, ...
         end
         pcall(addMessageFilter, "CHAT_MSG_SYSTEM", QuietWaitNotice)
-        pcall(addMessageFilter, "UI_ERROR_MESSAGE", QuietWaitNotice)
+        -- A UI error is an event (3.3.5: the message is its first argument),
+        -- never a chat message: the client runs message filters only for
+        -- CHAT_MSG events, so a filter registered for it never ran. A frame
+        -- registered for the event sees it. The same attribution to a recent
+        -- attempt applies; the error itself is left to the game to show.
+        if listenEvent then
+            pcall(listenEvent, "UI_ERROR_MESSAGE", function(message)
+                T.NoteTransportNotice(message)
+            end)
+        end
     end
 
     local function Pop(isControl, selectedIndex)

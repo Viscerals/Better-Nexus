@@ -117,7 +117,7 @@ do
  check(line and line:find('unresolved after a reload',1,true) and line:find('recovery=WAIT_RESULT',1,true)
   and line:find('waiting for=fresh',1,true),'C: the summary states the unresolved Orb action and its requirement: '..tostring(line))
  local detail=Nexus.SupportReport.Summary():match('Orb action:[^\n]*\n([^\n]*)')
- check(detail and detail:find('spend confirmed=yes',1,true) and detail:find('choice=sent,observed',1,true)
+ check(detail and detail:find('client-observed spend=yes',1,true) and detail:find('choice=sent,observed',1,true)
   and detail:find('selected=410002:2',1,true) and detail:find('automatic refresh=requested',1,true)
   and detail:find('loadout change recorded=no',1,true),'C: the second line gives the evidence state: '..tostring(detail))
  check(not Nexus.SupportReport.Summary():find('PrototypeTester',1,true),'C: no character name in the summary')
@@ -239,7 +239,7 @@ do
  local runtime=Nexus.OrbRuntime;local real=runtime.RecoveryView
  local POISON='SENTINEL'..string.char(1)..string.char(10)..string.char(7)..'|cffff0000|r'..string.rep('Z',300)
  runtime.RecoveryView=function()return {pending=true,restored=POISON,state=POISON,recovery=POISON,gate=POISON,
-  spendConfirmed=POISON,choiceSent=POISON,choiceObserved=true,selectedKey=POISON,removed=POISON,
+  spendObserved=POISON,choiceSent=POISON,choiceObserved=true,selectedKey=POISON,removed=POISON,
   loadoutChanged=POISON,pickInFlight=POISON,autoRefresh=POISON} end
  local summary=Nexus.SupportReport.Summary()
  local first=OrbLine(summary);local second=summary:match('Orb action:[^\n]*\n([^\n]*)')
@@ -247,7 +247,7 @@ do
  for _,l in ipairs({first,second})do
   check(not l:find('[%z\1-\31]') and #l<400 and not l:find(string.rep('Z',30),1,true),'C2: bounded, no control bytes: '..#l)
  end
- check(second:find('spend confirmed=no',1,true) and second:find('game pick in flight=unknown',1,true)
+ check(second:find('client-observed spend=no',1,true) and second:find('game pick in flight=unknown',1,true)
   and second:find('automatic refresh=not requested',1,true) and first:find('in this session',1,true),
   'C2: a non-boolean flag is never reported as yes: '..first..' / '..second)
  runtime.RecoveryView=function()error('hostile owner')end

@@ -183,6 +183,21 @@ NAMES += ['saved_mirror_description_provenance']
 NAMES += ['long_description_boundary_probe']
 NAMES += ['saved_mirror_pipe_resubmit']
 NAMES += ['saved_mirror_pipe_controls']
+# Ten-group repair batch regressions (SETUP/EXPECT/GUARD; EXPECT fails at 8c by design).
+NAMES += ['batch_class_capture_publication','batch_class_saved_import']
+NAMES += ['batch_description_unseeded_edit']
+NAMES += ['batch_locked_units_trust','batch_locked_units_envelopes','batch_locked_units_autolock']
+NAMES += ['batch_locked_units_autolock_gates','batch_locked_units_display']
+NAMES += ['batch_intensity_constants']
+NAMES += ['batch_design_reassignment']
+NAMES += ['batch_orb_spend_wording']
+NAMES += ['batch_feedback_event_wiring']
+NAMES += ['batch_hud_named_fields']
+NAMES += ['batch_saved_locked_mirror']
+NAMES += ['batch_journal_fallback_argument','batch_low_score_display','batch_slot_range_observation']
+# Supplement r2: dynamic capacity, record partitions, locked partial target, wire records, restored Orb wording.
+NAMES += ['batch_locked_capacity_trust','batch_locked_capacity_autolock','batch_locked_capacity_display']
+NAMES += ['batch_autolock_locked_partial_target','batch_locked_wire_records','batch_orb_restored_wording']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

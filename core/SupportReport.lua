@@ -146,7 +146,7 @@ local function limits()
         -- A partial answer is reported as far as it goes, never as "nil".
         if ok and type(value) == "table" then
             return {ordinary = value.ordinary or "not stated",
-                locked = value.locked or "not stated",
+                lockedRowStacks = value.lockedRowStacks or "not stated",
                 total = value.total or "not stated"}
         end
     end
@@ -783,7 +783,9 @@ function M.OrbLines()
                 .. "; state=" .. safeText(view.state or "unknown", 24)
                 .. "; recovery=" .. safeText(view.recovery or "none", 24)
                 .. "; waiting for=" .. safeText(view.gate or "none", 24),
-            "  spend confirmed=" .. yes(view.spendConfirmed)
+            -- The one-Orb decrement this client saw with the offer; no server
+            -- reply identifies a spend, so it is not stated as confirmed.
+            "  client-observed spend=" .. yes(view.spendObserved)
                 .. "; choice=" .. (#choice > 0 and table.concat(choice, ",") or "none")
                 .. "; selected=" .. safeText(view.selectedKey or "none", 24)
                 .. "; source=" .. safeText(view.removed or "none", 24)
@@ -826,9 +828,11 @@ function M.Summary(selection)
     add("Build: " .. buildLabel() .. "; character alias: " .. alias(playerName()))
     local semantic = limits()
     if semantic then
-        add("Supported envelope: " .. safeText(semantic.ordinary, 16) .. " ordinary, "
-            .. safeText(semantic.locked, 16) .. " locked, "
-            .. safeText(semantic.total, 16) .. " total copies")
+        -- Locked copies have no fixed limit: occupied locked records are
+        -- bounded by the character's live capacity, which is not stated here.
+        add("Supported envelope: " .. safeText(semantic.ordinary, 16) .. " ordinary copies; "
+            .. safeText(semantic.lockedRowStacks, 16) .. " copies in one locked row; "
+            .. safeText(semantic.total, 16) .. " copies in all")
     end
     add("Session incidents retained: " .. #incidents)
     -- A failed start-up goes ABOVE the incident and inside the kept part of the

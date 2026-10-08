@@ -602,12 +602,23 @@ end
 -- over_cap, scalar_leaf), or nil when the view is valid.
 -- `sink` (diagnostics only): a LockedShape collector. Only LockedOwned() passes
 -- one; without it the parse is the same.
-local function ReadLockedPerks(raw, sink)
+-- The game keeps ONE record per locked Echo holding its whole stack, and
+-- bounds occupied records (not copies) by GetMaximumPermanentEchoes. Each
+-- table with a recognized ID is one occupied record; its copies stay exact.
+-- `limits` (LockedReadLimits): `records`, the live capacity when it is known
+-- (else the record ceiling), and `rowStacks`, the per-record copy ceiling. A
+-- record past `records`, or holding more copies than rowStacks or its own
+-- stated maxStack, is over_cap. The fourth and fifth returns are the
+-- occupied record count and the records ({spellId, stacks}, read order; not
+-- kept past the bound).
+local function ReadLockedPerks(raw, sink, limits)
     local bySpell = {}
     local seenTables = {}
     local malformed = false
     local rejection = nil
-    local totalCopies = 0
+    local occupied, records = 0, {}
+    local maxRecords = limits and limits.records or 256
+    local maxStacks = limits and limits.rowStacks or 120
 
     local function Reject(code)
         malformed = true
@@ -674,8 +685,19 @@ local function ReadLockedPerks(raw, sink)
         if hasId and idValid and countValid then
             n = hasCount and count or 1
             bySpell[id] = (bySpell[id] or 0) + n
-            totalCopies = totalCopies + n
-            if totalCopies > 6 then why = "over_cap"; Reject(why) end
+            occupied = occupied + 1
+            if occupied <= maxRecords then
+                records[occupied] = {spellId=id, stacks=n}
+            end
+            -- The record's own stated maximum (the native SS18 maxStack), read
+            -- only when it is a whole positive number.
+            local stated = tonumber(rawget(value, "maxStack"))
+            if stated and (stated ~= stated or stated < 1 or stated >= math.huge
+                or stated ~= math.floor(stated)) then stated = nil end
+            if occupied > maxRecords or n > maxStacks
+                or (stated and n > stated) then
+                why = "over_cap"; Reject(why)
+            end
             -- Do not `return` here -- if this table ALSO nests further locked
             -- entries as children (an id field alongside a child array, rather
             -- than instead of one), those must still be walked, not skipped.
@@ -699,7 +721,23 @@ local function ReadLockedPerks(raw, sink)
     end
 
     Walk(raw, 0)
-    return bySpell, not malformed, rejection
+    return bySpell, not malformed, rejection, occupied, records
+end
+
+-- The bounds of one locked read: the live capacity when the service states
+-- one, else the record ceiling; the per-record copy ceiling. The ceilings are
+-- the envelope owner's locked row ceilings (LoadoutEvidence.SemanticLimits),
+-- resource bounds that never stand in for the capacity.
+local function LockedReadLimits(capacity)
+    local owner = Nexus and Nexus.LoadoutEvidence
+    local ok, limits = false, nil
+    if owner and type(owner.SemanticLimits) == "function" then
+        ok, limits = pcall(owner.SemanticLimits)
+    end
+    limits = ok and type(limits) == "table" and limits or {}
+    local ceiling = tonumber(limits.lockedRows) or 256
+    return {records=capacity and math.min(capacity, ceiling) or ceiling,
+        rowStacks=tonumber(limits.lockedRowStacks) or 120}
 end
 
 -- The only raw type classes a locked sample reports (Lua type names).
@@ -726,6 +764,11 @@ function A.LockedOwned()
     projectionStatus.locked.calls = projectionStatus.locked.calls + 1
     -- This read's serial (diagnostics only): the counter as it left it.
     local serial = projectionStatus.locked.calls
+    -- The live capacity bounds the occupied records of this read; it is read
+    -- first. Unknown (nil) leaves the record ceiling as the only bound: the
+    -- records stay trusted, and the capacity stays unavailable to actions.
+    local capacity = A.MaxPermanentEchoes()
+    local limits = LockedReadLimits(capacity)
     local svc = PS()
     -- SafeCall written out, so that the diagnostic sample can tell a getter
     -- that raised (or is missing) from one that answered nil.
@@ -740,7 +783,8 @@ function A.LockedOwned()
     local madeShape, shape = false, nil
     if type(locked) == "table" then madeShape, shape = pcall(LockedShape.New) end
     if not madeShape then shape = nil end
-    local bySpell, valid, rejection = ReadLockedPerks(locked, shape)
+    local bySpell, valid, rejection, occupied, records =
+        ReadLockedPerks(locked, shape, limits)
     local byFamily, copies, ids = {}, 0, 0
     for id, n in pairs(bySpell) do
         projectionStatus.locked.spells = projectionStatus.locked.spells + 1
@@ -784,8 +828,19 @@ function A.LockedOwned()
     -- caller can tell whether the passive sample (OwnershipTrustView) belongs
     -- to exactly this read. It selects refusal wording (OrbAdapter.Read) and
     -- nothing else; no decision, gate or count reads it.
+    -- occupied: the occupied locked records this read counted, and records:
+    -- one {spellId, stacks} per record within the bound, ordered by spell and
+    -- stack (read order is not a meaning). capacity: the live capacity it was
+    -- held to, or nil when unknown. Only a synced read is authority.
+    local recordList = {}
+    for i = 1, #records do recordList[i] = records[i] end
+    table.sort(recordList, function(left, right)
+        if left.spellId ~= right.spellId then return left.spellId < right.spellId end
+        return left.stacks < right.stacks
+    end)
     return { bySpell = bySpell, byFamily = byFamily, synced = synced,
-        diagnosticSerial = serial }
+        diagnosticSerial = serial, occupied = occupied, records = recordList,
+        capacity = capacity }
 end
 
 -- Confirmed live via /nexus sniff, 2026-08-01: the server exposes the real
@@ -1538,12 +1593,62 @@ function WishlistRoles.ResolveSaved(saved, candidates)
     return fallback
 end
 
+-- Whether the retained permanent designs of one rolled-content key differ.
+-- A server mirror carries rolled rows only, so a plain mirror of that content
+-- cannot say which design it means. The content-key bucket, every stored
+-- assignment, the first-run plan and the removal history are retained
+-- designs; when the bucket exists and two of them differ, none is chosen for
+-- the mirror (not the first saved, the newest or any other guess). Designs are
+-- compared by their canonical target token.
+function WishlistRoles.DesignAmbiguous(state, key)
+    if type(state) ~= "table" or type(key) ~= "string" or key == "" then return false end
+    local buckets = state.lockDesignTargetsBySlot
+    if type(buckets) ~= "table" or buckets[key] == nil then return false end
+    A._assignmentTargetModel = A._assignmentTargetModel or Nexus.WishlistModel.New()
+    local tokenOf = A._assignmentTargetModel.TargetMapToken
+    local first
+    local function Differs(design)
+        if design == nil or design == false then return false end
+        local token = tokenOf(design) or "invalid"
+        if first == nil then first = token; return false end
+        return token ~= first
+    end
+    local function RecordDiffers(saved)
+        if type(saved) ~= "table"
+            or (saved.designRows == nil and saved.designTargets == nil) then return false end
+        local savedKey = saved.key
+        if type(savedKey) ~= "string" then
+            local candidate = CandidateFromStoredRecord(saved)
+            savedKey = candidate and candidate.key
+        end
+        if savedKey ~= key then return false end
+        local design = saved.designTargets
+        if saved.designRows ~= nil then design = WishlistRoles.DecodeDesign(saved.designRows) end
+        return Differs(design)
+    end
+    if Differs(buckets[key]) or RecordDiffers(state.firstRunWishlist) then return true end
+    for _, saved in pairs(type(state.loadoutWishlists) == "table" and state.loadoutWishlists or {}) do
+        if RecordDiffers(saved) then return true end
+    end
+    for _, retained in ipairs(type(state.forgottenWishlists) == "table" and state.forgottenWishlists or {}) do
+        if type(retained) == "table" and RecordDiffers(retained.record) then return true end
+    end
+    return false
+end
+
 function WishlistRoles.Wishlist(candidate, source, hasQuality)
     local wishlist=EchoesToWishlist(candidate.echoes,candidate.name,source,hasQuality,candidate.slot)
     if wishlist then
         wishlist.assignmentId=candidate.assignmentId
         wishlist.designTargets=WishlistRoles.CopyDesign(candidate.designTargets)
         wishlist.mirrorUnavailable=candidate.mirrorUnavailable
+        -- A plan without its own design would read the content-key bucket;
+        -- when retained designs of that content differ, it reads none.
+        if candidate.designTargets==nil then
+            local state=Store and Store.State and Store.State() or nil
+            wishlist.designAmbiguous=WishlistRoles.DesignAmbiguous(state,
+                A.WishlistKey(wishlist.entries)) or nil
+        end
     end
     return wishlist
 end
@@ -2298,12 +2403,17 @@ local function ReadLoadoutWishlistState(loadoutSlot)
     if expectedKey == nil or expectedKey == "" then
         evidenceState = "association-mismatch"
     end
-    return candidate, evidenceState, key
+    -- The fourth value: the declared Saved Build range of this same slots
+    -- read (GetServerMaxSlots, a whole number of at least 1; else five).
+    return candidate, evidenceState, key,
+        PositiveInteger(slots and slots.maxSlots) or 5
 end
 
-local function RememberLoadoutWishlistState(loadoutSlot, key, evidenceState)
+-- Observations are kept for the declared Saved Build range only (the same
+-- bound every loadout writer uses), never for a slot outside it.
+local function RememberLoadoutWishlistState(loadoutSlot, key, evidenceState, maxSlots)
     loadoutSlot = tonumber(loadoutSlot)
-    if not loadoutSlot or loadoutSlot < 1 or loadoutSlot > 5
+    if not loadoutSlot or loadoutSlot < 1 or loadoutSlot > (maxSlots or 5)
         or type(key) ~= "string" or key == "" then
         if loadoutSlot then wishlistEvidenceObservations[loadoutSlot] = nil end
         return
@@ -2323,14 +2433,14 @@ local function RememberLoadoutWishlistState(loadoutSlot, key, evidenceState)
 end
 
 function A.GetLoadoutWishlistState(loadoutSlot)
-    local candidate, evidenceState, key =
+    local candidate, evidenceState, key, maxSlots =
         ReadLoadoutWishlistState(loadoutSlot)
-    RememberLoadoutWishlistState(loadoutSlot, key, evidenceState)
+    RememberLoadoutWishlistState(loadoutSlot, key, evidenceState, maxSlots)
     return candidate, evidenceState, key
 end
 
 -- Runs only after a semantic slot/active/locked-evidence change and only when
--- a presentation reader previously observed an association. The table is bounded by the five
+-- a presentation reader previously observed an association. The table is bounded by the declared
 -- loadout slots; ordinary 0.2-second Poll calls do no Wishlist traversal.
 local function RefreshWishlistEvidenceTransitions()
     if next(wishlistEvidenceObservations) == nil then return false end
@@ -3060,7 +3170,17 @@ function A.AssignedWishlist()
     -- read it, and CommitLockDesignTargets stores a new table inside the
     -- mutation entry, so the snapshot holds the same targets. A future caller
     -- that edits that table in place must do so through the mutation entry.
-    if targets==nil then targets=state.lockDesignTargetsBySlot and state.lockDesignTargetsBySlot[result.key] end
+    if targets==nil then
+        -- Equal rolled contents cannot name one of two different retained
+        -- designs: none is substituted, and the assignment is not ready until
+        -- the intended plan is assigned or restored, or its targets are set.
+        if w.designAmbiguous then
+            result.state="unavailable"
+            result.note="More than one saved locked-target design exists for this Wishlist's rolled contents. Nexus does not choose one: assign or restore the intended plan, or set its locked targets in the Wishlist Editor."
+            return result
+        end
+        targets=state.lockDesignTargetsBySlot and state.lockDesignTargetsBySlot[result.key]
+    end
     if targets~=nil then
         A._assignmentTargetModel=A._assignmentTargetModel or Nexus.WishlistModel.New()
         local rows=A._assignmentTargetModel.TargetMapEntries(targets,A.Catalog())
@@ -4228,10 +4348,15 @@ local function GrantedFingerprint(raw, catalog)
     return CountsFingerprint(counts)
 end
 
-local function LockedFingerprint(raw)
+-- The occupied records are part of the locked state: the same per-spell
+-- copies held in another partition of records occupy other slots. The
+-- records are compared as a sorted multiset, so read order is no change. The
+-- capacity the records were held to is part of it too: it decides trust.
+local function LockedFingerprint(raw, capacity)
     if raw == nil then return "nil" end
     if type(raw) ~= "table" then return nil, "locked:not-table" end
-    local ok, counts, valid = pcall(ReadLockedPerks, raw)
+    local ok, counts, valid, _, occupied, records = pcall(ReadLockedPerks, raw,
+        nil, LockedReadLimits(capacity))
     if not ok or type(counts) ~= "table" or not valid then
         return nil, "locked:read"
     end
@@ -4240,7 +4365,14 @@ local function LockedFingerprint(raw)
             return nil, "locked:value"
         end
     end
-    return CountsFingerprint(counts)
+    local parts = {}
+    for i = 1, #records do
+        parts[i] = tostring(records[i].spellId) .. "x" .. tostring(records[i].stacks)
+    end
+    table.sort(parts)
+    return CountsFingerprint(counts) .. "|records:" .. tostring(occupied)
+        .. ":" .. table.concat(parts, ",")
+        .. "|capacity:" .. tostring(capacity or "unknown")
 end
 
 local function DiscoveryFingerprint(raw, catalog)
@@ -4475,7 +4607,7 @@ local function CaptureEchoSnapshot()
         (not okGranted and grantedError) or catalogError,
         GrantedFingerprint, granted, catalog)
     local lockedSig = Accept("locked", locked, not okLocked and lockedError or nil,
-        LockedFingerprint, locked)
+        LockedFingerprint, locked, A.MaxPermanentEchoes())
     local discoveredSig = Accept("discovery", discovered,
         (not okDiscovered and discoveredError) or catalogError,
         DiscoveryFingerprint, discovered, catalog)

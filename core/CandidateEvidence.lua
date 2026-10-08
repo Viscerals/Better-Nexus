@@ -9,7 +9,6 @@ Nexus.CandidateEvidence = Evidence
 local CURRENT_KIND = "candidate-typed-v1"
 local LEGACY_KIND = "leaderboard-typed-v1"
 local MAX_ORDINARY = 79
-local MAX_LOCKED = 6
 local validationSnapshots = setmetatable({}, {__mode="k"})
 
 local LOCKED_DISAGREEMENT =
@@ -45,6 +44,22 @@ local function NonNegativeInteger(value)
     return value
 end
 
+-- The locked role's row ceilings, from the envelope owner
+-- (LoadoutEvidence.SemanticLimits). A locked pool is held copies of occupied
+-- records, not a fixed copy count: the live record bound needs the
+-- character's capacity, which evidence does not carry. Without the owner the
+-- documented values stand.
+local function LockedRowLimits()
+    local owner = Nexus and Nexus.LoadoutEvidence
+    local ok, limits = false, nil
+    if owner and type(owner.SemanticLimits) == "function" then
+        ok, limits = pcall(owner.SemanticLimits)
+    end
+    limits = ok and type(limits) == "table" and limits or {}
+    return tonumber(limits.lockedRows) or 256,
+        tonumber(limits.lockedRowStacks) or 120
+end
+
 local function NormalizePool(source, lockedRole, allowOrdinaryOverflow,
     markLockedRole)
     if type(source) ~= "table" then
@@ -68,6 +83,13 @@ local function NormalizePool(source, lockedRole, allowOrdinaryOverflow,
     if not lockedRole and entries == 0 then
         return nil, "ordinary Echo evidence is still syncing"
     end
+    local maxLockedRows, maxLockedRowStacks
+    if lockedRole then
+        maxLockedRows, maxLockedRowStacks = LockedRowLimits()
+        if entries > maxLockedRows then
+            return nil, "locked Echo evidence has more rows than Nexus reads"
+        end
+    end
     local out, total = {}, 0
     for index = 1, entries do
         local row = source[index]
@@ -87,8 +109,8 @@ local function NormalizePool(source, lockedRole, allowOrdinaryOverflow,
                 .. " Echo evidence is invalid"
         end
         total = total + stacks
-        if lockedRole and total > MAX_LOCKED then
-            return nil, "locked Echo evidence exceeds the six-copy limit"
+        if lockedRole and stacks > maxLockedRowStacks then
+            return nil, "a locked Echo row holds more copies than Nexus reads"
         end
         if not lockedRole and not allowOrdinaryOverflow
             and total > MAX_ORDINARY then
@@ -995,8 +1017,8 @@ function Evidence.DpsSummary(dummyRows, lkRows)
 end
 
 -- Public normalization seam for consumers that need to materialize the same
--- locked-role envelope. CandidateEvidence remains the single owner of the
--- six-copy limit and returns defensive rows with explicit provenance.
+-- locked-role envelope (the row ceilings of LoadoutEvidence.SemanticLimits)
+-- and returns defensive rows with explicit provenance.
 function Evidence.NormalizeLockedEchoes(source)
     return NormalizePool(source, true, false, true)
 end

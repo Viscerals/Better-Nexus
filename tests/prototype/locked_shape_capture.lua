@@ -67,15 +67,19 @@ local REFUSED={
   build=function() local t=six();t[7]=E(410001,{quality=1});return t end,
   rows={ROOT,'1.i.1.1.1.0.0','1.i.2.1.1.0.0','1.i.3.1.1.0.0','1.i.4.1.1.0.0','1.i.5.1.1.0.0','1.i.6.1.1.0.0',
    '1.i.1.1.1.0.16'}},
+ -- A record is over the cap when it holds more copies than its own stated
+ -- maxStack (the native record shape), or when more records are occupied
+ -- than the live capacity (T.CAPACITY); stackOver names the rows of the first.
  {name='one entry with stacks=7',first='over_cap',copies=7,ids=1,bySpell={[410007]=7},
-  build=function() return {E(410007,{quality=2,stacks=7})} end,
-  rows={ROOT,'1.i.1.7.1.2.16'}},
+  build=function() return {E(410007,{quality=2,stacks=7,maxStack=1})} end,
+  rows={ROOT,'1.i.1.7.1.2.16'},stackOver={[2]=true}},
  {name='a counted wrapper over same-ID members',first='over_cap',copies=8,ids=1,bySpell={[410003]=8},
-  build=function() return {{entryId=410003,count=4,members={E(410003),E(410003),E(410003),E(410003)}}} end,
-  rows={ROOT,'1.i.1.4.32.4.0','2.s.0.0.0.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.16','3.i.1.1.1.0.16'}},
+  build=function() return {{entryId=410003,count=4,maxStack=3,members={E(410003),E(410003),E(410003),E(410003)}}} end,
+  rows={ROOT,'1.i.1.4.32.4.16','2.s.0.0.0.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.0'},
+  stackOver={[2]=true}},
  {name='a counted record with a different-ID detail',first='over_cap',copies=7,ids=2,bySpell={[410004]=5,[410005]=2},
-  build=function() return {E(410004,{stacks=5,detail=E(410005,{stacks=2})})} end,
-  rows={ROOT,'1.i.1.5.1.2.0','2.s.2.2.1.2.16'}},
+  build=function() return {E(410004,{stacks=5,maxStack=2,detail=E(410005,{stacks=2})})} end,
+  rows={ROOT,'1.i.1.5.1.2.16','2.s.2.2.1.2.0'},stackOver={[2]=true}},
  {name='two separate same-ID entries and a leaf',first='scalar_leaf',copies=2,ids=1,bySpell={[410001]=2},
   build=function() return {E(410001,{quality=1}),E(410001,{quality=1}),{note='ZQ_NOTE_MARKER 410002'}} end,
   rows={ROOT,'1.i.1.1.1.0.0','1.i.1.1.1.0.0','1.i.0.0.0.0.32'}},
@@ -207,7 +211,7 @@ T.scenario('C1 refused locked reads',function()
    tag..': the sampled generation is the current one',facts(w,{'sampledGeneration','currentGeneration'}))
   expect(w.status=='captured',tag..': complete (status=captured)',w.status)
   if f.rows then T.expectRows(tag,v,f.rows) else f.check(tag,v) end
-  T.expectConsistent(tag,v)
+  T.expectConsistent(tag,v,f.stackOver)
   captured[f.name]=v and H.Clone(v) or nil
  end
 end)

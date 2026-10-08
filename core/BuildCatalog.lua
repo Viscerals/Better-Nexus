@@ -92,7 +92,12 @@ local BUDGET = {
     indexMemberships=172032, indexEdges=1386496, indexNodes=1562634,
     indexBytes=61009920, cursorMetadata=326024,
     evidenceRowsPerRecord=256, stacksPerRecord=10000,
-    ordinaryCopies=79, lockedCopies=6, totalCopies=85,
+    -- The loadout envelope of LoadoutEvidence.SemanticLimits: 79 ordinary
+    -- copies; a locked row holds at most lockedRowStacks copies (the per-row
+    -- wire ceiling). Occupied locked records are bounded by the live capacity,
+    -- which a record does not carry, so the row and stack ceilings above are
+    -- the locked role's only bound here.
+    ordinaryCopies=79, lockedRowStacks=120,
     objectKeys=64, denseEntries=256, nestedNodes=2000, depth=6,
     aliasForms=28, recordBytes=32768, unknownBytesPerRow=4096,
     unknownTables=16, tombstoneTables=16, tombstoneEntries=64,
@@ -843,6 +848,18 @@ local function NewWalker(raw, options)
     }
 end
 
+-- Outside the loadout envelope: more ordinary copies than the game holds, or
+-- a locked row above the per-row ceiling.
+local function OutsideSemanticEnvelope(rows, ordinary)
+    if ordinary > BUDGET.ordinaryCopies then return true end
+    for _, row in ipairs(rows or {}) do
+        if row.locked and (tonumber(row.stacks) or 0) > BUDGET.lockedRowStacks then
+            return true
+        end
+    end
+    return false
+end
+
 local function GroupTuples(walker)
     local sorted = walker.sort.items
     local grouped, index = {}, 0
@@ -913,8 +930,7 @@ local function WalkRow(walker, work)
         -- Diagnostic only, never part of the published semantic record: the
         -- shape these counts were taken from.
         walker.semanticRepresentation = "inline"
-        if ordinary > BUDGET.ordinaryCopies or locked > BUDGET.lockedCopies
-            or total > BUDGET.totalCopies then
+        if OutsideSemanticEnvelope(grouped, ordinary) then
             return RowFail(walker, "SEMANTIC_ENVELOPE")
         end
         walker.stage = "complete"
@@ -1146,9 +1162,8 @@ local function BuildSnapshot(walker, slot, source, options)
         if resolvedRows then
             local semantic = SemanticOf(canonical)
             walker.semanticRepresentation = "referenced"
-            if semantic.ordinary > BUDGET.ordinaryCopies
-                or semantic.locked > BUDGET.lockedCopies
-                or semantic.total > BUDGET.totalCopies then
+            if OutsideSemanticEnvelope(canonical, semantic.ordinary)
+                or semantic.total > BUDGET.stacksPerRecord then
                 return nil, "SEMANTIC_ENVELOPE", semantic
             end
             walker.semantic = semantic

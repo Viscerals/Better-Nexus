@@ -1188,8 +1188,15 @@ local function EnsureEditPopup()
     saveBtn:SetSize(112,22); saveBtn:SetPoint("BOTTOMRIGHT",-18,16); saveBtn:SetText("Save Details")
     p._saveBtn = saveBtn
     saveBtn:SetScript("OnClick",function()
+        local description = editDescBox:_NexusRawText()
+        -- A stored description the box could not seed is unchanged while the
+        -- box stays empty: no description is submitted and the stored one is
+        -- kept. Text the owner types replaces it under the usual rules.
+        if p._nexusDescriptionUnseeded and description == "" then
+            description = nil
+        end
         if not ControllerInstance().UpdateEditDraft(
-            editTitleBox:_NexusRawText(), editDescBox:_NexusRawText()) then return end
+            editTitleBox:_NexusRawText(), description) then return end
         local ok, err, outcome = ControllerInstance().CommitEditDraft()
         if ok then print("|cff4dff80Nexus:|r " .. tostring(outcome and outcome.message or "Build details saved locally.")); ClearEditDescriptionFocus(); p:Hide(); M.Refresh()
         else print("|cffff6060Nexus:|r "..tostring(err)) end
@@ -1227,11 +1234,16 @@ function M.ToggleEditPopup(id)
     end
     editTitleBox:_NexusSetRawText(prepared.title)
     editTitleBox:HighlightText(0, 0)
-    editDescBox:_NexusSetRawText(prepared.description)
+    -- The box holds 2000 bytes; a longer stored description is not seeded.
+    editPopup._nexusDescriptionUnseeded = editDescBox:_NexusSetRawText(
+        prepared.description) == nil and prepared.description ~= "" or nil
     editDescBox:SetCursorPosition(#editDescBox:GetText())
     editPopup._editDescScroll:SetVerticalScroll(0)
     editPopup:ClearAllPoints(); editPopup:SetPoint("CENTER")
     editPopup:Show()
+    if editPopup._nexusDescriptionUnseeded then
+        print("|cffffd200Nexus:|r The stored description is not shown here: the Edit dialog holds 2000 bytes. Save Details keeps it unless you type a new description.")
+    end
 end
 
 local function EnsureDetailPanel(parent)

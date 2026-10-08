@@ -569,6 +569,9 @@ local function LockDesignTargetsFor(wishlist, knownKey)
     if type(wishlist)=="table" and wishlist.designTargets~=nil then
         return wishlist.designTargets
     end
+    -- Retained designs of this rolled content differ (GameAdapter): no
+    -- content-key bucket stands in for the one the player meant.
+    if type(wishlist)=="table" and wishlist.designAmbiguous then return nil end
     local runRoot = RunRoot()
     local legacy = runRoot and runRoot.lockDesignTargets
     if type(legacy) == "table" then
@@ -1374,6 +1377,11 @@ local function AutoLockRecordMatches(record, descriptor)
             tonumber(record.lockedRevision),record.lockedToken)
 end
 
+-- The identity of the locked state an attempt was prepared against: the
+-- copies by spell and, when a spell is held in more than one record, the
+-- record partition (the same copies in other records occupy other slots).
+-- One record per locked Echo, the game's own shape, keeps the copies-only
+-- form of earlier builds.
 local function AutoLockLockedToken(locked)
     if type(locked) ~= "table" or locked.synced ~= true
         or type(locked.bySpell) ~= "table" then return nil end
@@ -1386,7 +1394,25 @@ local function AutoLockLockedToken(locked)
         parts[#parts + 1] = tostring(spellId) .. "x" .. tostring(count)
     end
     table.sort(parts)
-    return #parts > 0 and table.concat(parts, ",") or "0"
+    local token = #parts > 0 and table.concat(parts, ",") or "0"
+    local records, perSpell, split = locked.records, {}, false
+    if type(records) == "table" then
+        local rows = {}
+        for index = 1, #records do
+            local row = records[index]
+            local spellId = type(row) == "table" and AutoLockInteger(row.spellId)
+            local stacks = type(row) == "table" and AutoLockInteger(row.stacks)
+            if not spellId or not stacks then return nil end
+            perSpell[spellId] = (perSpell[spellId] or 0) + 1
+            if perSpell[spellId] > 1 then split = true end
+            rows[index] = tostring(spellId) .. "x" .. tostring(stacks)
+        end
+        if split then
+            table.sort(rows)
+            token = token .. "|records:" .. table.concat(rows, ",")
+        end
+    end
+    return token
 end
 
 local function AutoLockDescriptors(targets, wishlistKey, catalog)
@@ -1824,9 +1850,12 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         tostring(LockSlotKey(wishlist, wishlistKey)), targetCount)
     if targetCount == 0 then return end
 
-    local lockedBySpell, lockedCount =
+    -- lockedCount is the number of OCCUPIED locked records: the game compares
+    -- records, not copies, with its capacity, and one record holds an Echo's
+    -- whole stack (one lock occupies one record slot, whatever its copies).
+    local lockedBySpell, lockedCount, recordsBySpell =
         options.wishlistModel.LockedSpellCounts(locked)
-    if not lockedBySpell then
+    if not lockedBySpell or not lockedCount then
         trace[#trace + 1] = "authoritative locked-state counts are invalid"
         return
     end
@@ -1840,7 +1869,7 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         used=lockedCount,maximum=maxSlots or 0,known=maxSlots ~= nil,
         source=capacitySource,synced=locked and locked.synced == true or false,
     }
-    trace[#trace + 1] = string.format("locked: %d/%s source=%s synced=%s revision=%s",
+    trace[#trace + 1] = string.format("locked records: %d/%s source=%s synced=%s revision=%s",
         lockedCount,tostring(maxSlots or "unknown"),tostring(capacitySource),
         tostring(lastAutoLockCapacity.synced),tostring(lockedRevision))
     if not lastAutoLockCapacity.synced or lockedRevision == nil
@@ -1952,9 +1981,10 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
             Print(string.format(
                 "|cff4dff80Nexus:|r unlocked %s -- %s is acquired and ready to replace it.",
                 EchoName(oldId), EchoName(newId)))
-            local removedCopies = tonumber(lockedBySpell[oldId]) or 0
+            local removedRecords = tonumber(recordsBySpell
+                and recordsBySpell[oldId]) or 1
             lockedBySpell[oldId] = nil
-            lockedCount = math.max(0, lockedCount - removedCopies)
+            lockedCount = math.max(0, lockedCount - removedRecords)
             return true
         elseif err ~= "spacing" then
             Print(string.format("|cffff6060Nexus:|r couldn't unlock %s: %s",
@@ -2023,10 +2053,15 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
                 UnlockReplacement(replaces, id)
                 mutationAttempted = true
             end
+        elseif (tonumber(lockedBySpell[id]) or 0) > 0 then
+            -- Locked already, with fewer copies than the target. LockPerk
+            -- names only the spell and the game keeps the stack a record was
+            -- locked with: no lock can add copies to it, so none is sent.
+            trace[#trace + 1] =
+                "  -> already locked with fewer copies than the target; a lock cannot add copies to its record"
         elseif haveN >= targetCopies then
-            local currentCopies = tonumber(lockedBySpell[id]) or 0
-            local neededCopies = math.max(0, targetCopies - currentCopies)
-            if lockedCount + neededCopies <= maxSlots then
+            -- One lock occupies one more record, whatever its copies.
+            if lockedCount + 1 <= maxSlots then
                 if not record and not outstanding and not uncertainTerminal
                     and not mutationAttempted then
                     record = NewAutoLockRecord(descriptor, wishlistKey,

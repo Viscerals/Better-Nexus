@@ -44,7 +44,8 @@ section('1 the button and the window',function()
  f.cont:Click()
  local w=assert(NexusOrbContinue,'its own window');check(w:IsShown(),'the window opens')
  H.Advance(.5)
- check(w.body:GetText():find('confirmed spend',1,true) and w.body:GetText():find('No spend and no choice',1,true),'it explains what Continue is: '..w.body:GetText())
+ -- The intro names the client-observed spend (no server reply confirms a spend).
+ check(w.body:GetText():find('spend observed by this client',1,true) and w.body:GetText():find('No spend and no choice',1,true),'it explains what Continue is: '..w.body:GetText())
  check(w.check:IsEnabled() and not w.go:IsEnabled(),'only Check is available at first')
  check(server.requests==reqs and #H.sent==sent and H.Count('orb-spend')==0 and H.Count('take')==0,'opening it sent and spent nothing')
  -- no receipt: no button

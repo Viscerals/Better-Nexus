@@ -73,14 +73,26 @@ end
 -- Permanent locked-Echo evidence
 ------------------------------------------------------------------------
 
+local function WholeNumber(value, minimum)
+    value = tonumber(value)
+    if not value or value ~= value or value < minimum or value >= math.huge
+        or value ~= math.floor(value) then return nil end
+    return value
+end
+
 -- One pure admission boundary for every consumer of GetLockedPerks-derived
--- authority. With a catalog, the supplied family projection must exactly
--- equal the family totals derived from canonical spell IDs. Without one,
--- callers receive only the validated defensive spell totals.
-function Model.LockedProjection(locked, catalog, maximumCopies)
+-- authority. Locked ownership is the held copies of OCCUPIED RECORDS: the
+-- adapter's trusted read already held its records to the live capacity (or
+-- the record ceiling) and each record to the per-record ceiling, so no copy
+-- count bounds it here and every copy is kept. The read must state its
+-- occupied records, one row per record, holding exactly its per-spell
+-- copies; occupancy is never inferred from distinct IDs or copies. With a
+-- catalog, the supplied family projection must exactly equal the family
+-- totals derived from canonical spell IDs. The result keeps the copies, the
+-- occupied count, the records and the live capacity the read was held to.
+function Model.LockedProjection(locked, catalog)
     if type(locked) ~= "table" or locked.synced ~= true
         or type(locked.bySpell) ~= "table" then return nil end
-    maximumCopies = tonumber(maximumCopies) or 6
     local bySpell, seen, total = {}, {}, 0
     for spellIdKey, countValue in pairs(locked.bySpell) do
         local spellId, copies = tonumber(spellIdKey), tonumber(countValue)
@@ -91,8 +103,29 @@ function Model.LockedProjection(locked, catalog, maximumCopies)
             or seen[spellId] then return nil end
         seen[spellId] = true
         total = total + copies
-        if total > maximumCopies then return nil end
         bySpell[spellId] = copies
+    end
+    local occupied = WholeNumber(locked.occupied, 0)
+    local rows = locked.records
+    if not occupied or type(rows) ~= "table" or #rows ~= occupied then
+        return nil
+    end
+    local records, recordsBySpell, held = {}, {}, {}
+    for index = 1, occupied do
+        local row = rows[index]
+        local spellId = type(row) == "table" and WholeNumber(row.spellId, 1)
+        local stacks = type(row) == "table" and WholeNumber(row.stacks, 1)
+        if not spellId or not stacks or not bySpell[spellId] then return nil end
+        records[index] = {spellId=spellId, stacks=stacks}
+        recordsBySpell[spellId] = (recordsBySpell[spellId] or 0) + 1
+        held[spellId] = (held[spellId] or 0) + stacks
+    end
+    for spellId, copies in pairs(bySpell) do
+        if held[spellId] ~= copies then return nil end
+    end
+    local capacity = locked.capacity ~= nil and WholeNumber(locked.capacity, 1)
+    if locked.capacity ~= nil and (not capacity or occupied > capacity) then
+        return nil
     end
 
     local byFamily = {}
@@ -114,7 +147,9 @@ function Model.LockedProjection(locked, catalog, maximumCopies)
             if tonumber(locked.byFamily[family]) ~= copies then return nil end
         end
     end
-    return {synced=true,bySpell=bySpell,byFamily=byFamily,total=total}
+    return {synced=true,bySpell=bySpell,byFamily=byFamily,total=total,
+        occupied=occupied,records=records,recordsBySpell=recordsBySpell,
+        capacity=capacity or nil}
 end
 
 ------------------------------------------------------------------------

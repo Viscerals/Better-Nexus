@@ -614,9 +614,12 @@ local function EnsureFrame()
         if Nexus.JournalTab and Nexus.JournalTab.OpenBuilds then
             Nexus.JournalTab.OpenBuilds()
         else
+            -- The journal's Show(tab) is a dot-call whose argument is a tab
+            -- index; no tab is established here, so none is passed (the
+            -- journal opens its current tab).
             local pe = _G["ProjectEbonhold"]
             if pe and pe.EchoJournal and pe.EchoJournal.Show then
-                pcall(pe.EchoJournal.Show, pe.EchoJournal)
+                pcall(pe.EchoJournal.Show)
             end
         end
     end)
@@ -685,17 +688,27 @@ local function EnsureFrame()
         worldStatusBox.intensityTicks[i] = tick
     end
 
+    -- The ticks mark the game's level thresholds 1-4 on the bar scaled to its
+    -- maximum (worldStatusBox._intensityScale, from the validated constants
+    -- of ServerStatus). Without a known scale there are no ticks.
     local function PositionIntensityTicks()
         local bar = worldStatusBox and worldStatusBox.intensityBar
         if not bar then return end
         local width = tonumber(bar:GetWidth()) or 0
         if width <= 0 then return end
+        local scale = worldStatusBox._intensityScale
         for i = 1, 4 do
             local tick = worldStatusBox.intensityTicks[i]
-            tick:ClearAllPoints()
-            local x = math.floor((width * i / 5) + 0.5)
-            tick:SetPoint("TOPLEFT", bar, "TOPLEFT", x, 0)
-            tick:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, 0)
+            local threshold = scale and tonumber(scale.thresholds[i])
+            if threshold then
+                tick:ClearAllPoints()
+                local x = math.floor((width * threshold / scale.max) + 0.5)
+                tick:SetPoint("TOPLEFT", bar, "TOPLEFT", x, 0)
+                tick:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, 0)
+                tick:Show()
+            else
+                tick:Hide()
+            end
         end
     end
     worldStatusBox.PositionIntensityTicks = PositionIntensityTicks
@@ -720,8 +733,13 @@ local function EnsureFrame()
         if ss.ash then GameTooltip:AddLine("Soul Ash: " .. tostring(ss.ash):gsub(",",""), 1, 1, 1) end
         if ss.gain then GameTooltip:AddLine("Soul Ash Multiplier: " .. tostring(ss.gain), 0.2, 1, 0.2) end
         if ss.intensity ~= nil then
-            GameTooltip:AddLine("Intensity: " .. tostring(math.floor(tonumber(ss.intensity) or 0)) .. " / 500", 1, 0.55, 0.25)
-            GameTooltip:AddLine("Intensity Level: " .. tostring(tonumber(ss.intensityLevel) or 0), 0.85, 0.75, 0.65)
+            -- The maximum and level come from the game's validated constants;
+            -- without them neither is stated.
+            local maximum = tonumber(ss.intensityMax)
+            local level = tonumber(ss.intensityLevel)
+            GameTooltip:AddLine("Intensity: " .. tostring(math.floor(tonumber(ss.intensity) or 0))
+                .. (maximum and (" / " .. tostring(math.floor(maximum))) or ""), 1, 0.55, 0.25)
+            GameTooltip:AddLine("Intensity Level: " .. (level and tostring(level) or "unknown"), 0.85, 0.75, 0.65)
         end
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("Click to open the Hardcore difficulty panel.", 1, 0.82, 0, true)
@@ -975,9 +993,11 @@ local function EnsureFrame()
         if Nexus.JournalTab and Nexus.JournalTab.OpenBuilds then
             Nexus.JournalTab.OpenBuilds()
         else
+            -- Show(tab) is a dot-call taking a tab index; no tab is passed
+            -- (the journal opens its current tab).
             local pe = _G["ProjectEbonhold"]
             if pe and pe.EchoJournal and pe.EchoJournal.Show then
-                pcall(pe.EchoJournal.Show, pe.EchoJournal)
+                pcall(pe.EchoJournal.Show)
             end
         end
     end)
@@ -2051,12 +2071,24 @@ local function ApplyModel(model, signatures, roll)
         worldStatusText:SetText("|cffff6b5f" .. difficulty .. "|r")
         worldStatusAsh:SetText((complete and "|cff8ec9d6Soul Ash  |r" or "|cffb8b8b8Ash |r") .. "|cffffffff" .. ashFmt .. "|r")
         worldStatusGain:SetText(ss.gain and ("|cff35e635" .. ss.gain .. "|r") or "")
-        local intensity = math.max(0, math.min(500, tonumber(ss.intensity) or 0))
-        local intensityLevel = tonumber(ss.intensityLevel) or math.floor(intensity / 100)
-        worldStatusBox.intensityBar:SetMinMaxValues(0, 500)
-        worldStatusBox.intensityBar:SetValue(intensity)
+        -- The bar is scaled to the game's validated maximum. Without valid
+        -- constants, or without a reading, it has no truthful scale and stays
+        -- hidden; the tooltip still states the raw value.
+        local maximum = tonumber(ss.intensityMax)
+        local thresholds = type(ss.intensityThresholds) == "table"
+            and ss.intensityThresholds or nil
         worldStatusBox.intensityText:SetText("")
-        worldStatusBox.intensityBar:Show()
+        if ss.intensity ~= nil and maximum and maximum > 0 and thresholds then
+            worldStatusBox._intensityScale = {max=maximum, thresholds=thresholds}
+            worldStatusBox.intensityBar:SetMinMaxValues(0, maximum)
+            worldStatusBox.intensityBar:SetValue(
+                math.max(0, math.min(maximum, tonumber(ss.intensity) or 0)))
+            worldStatusBox.PositionIntensityTicks()
+            worldStatusBox.intensityBar:Show()
+        else
+            worldStatusBox._intensityScale = nil
+            worldStatusBox.intensityBar:Hide()
+        end
         worldStatusBox:Show()
     else
         worldStatusText:SetText("")

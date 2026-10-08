@@ -27,7 +27,7 @@ local HELD_CHOICE_DELAY=5
 local SESSION_INTERRUPTED="Session interrupted. Orb spending will not restart automatically."
 -- The record and its spending exposure stay, and the only exit is the player's own Continue (035).
 local KEPT=" The record and its spending exposure are kept."
-local NO_EXIT=" Besides a matching result, the only exit is the player's explicit Continue in /nexus orbs. It is offered only for an action with a confirmed spend and no recorded outcome, once its offer is gone, after a read-only check; Nexus never continues by itself."
+local NO_EXIT=" Besides a matching result, the only exit is the player's explicit Continue in /nexus orbs. It is offered only for an action whose spend the client observed (one Orb fewer with its offer) and no recorded outcome, once its offer is gone, after a read-only check; Nexus never continues by itself."
 -- The game's lifecycle as this owner's frame saw it (local facts only; they say
 -- nothing about the server). epoch counts every loading transition (leave or
 -- enter). phase: "l" between leaving and entering a world, "r" from entering (and
@@ -1049,7 +1049,7 @@ local function recoverObserve(s,p)
     return "UNOBSERVABLE",observing
 end
 -- Player-confirmed continuation, phase one (035) ----------------------------------
--- For ONE bounded class: a restored receipt with a confirmed spend, no usable recorded
+-- For ONE bounded class: a restored receipt whose spend this client observed, no usable recorded
 -- outcome (hasChoiceEvidence is false) and the original offer gone. The player may choose
 -- to Continue with an UNCONFIRMED outcome. Continue never settles the old action, never
 -- claims a verified Echo result, never refunds, repeats or chooses, never changes the spent
@@ -1387,7 +1387,7 @@ function RC.unreadable()
 end
 -- The text of each state. Plain statements: what was observed, what Continue does, and what
 -- stays uncertain. None of it says a result was verified.
-local RC_INTRO="An earlier Orb action has a confirmed spend and no recorded outcome, and its offer is gone. Continue lets you go on without that outcome. First Nexus checks the game's current state read-only: it asks the game twice for the Orb count (and for your Echoes) and waits for each answer. No spend and no choice is sent, only those read-only questions. You then confirm, or cancel."
+local RC_INTRO="An earlier Orb action has a spend observed by this client (one Orb fewer with its offer; the game reports no server confirmation of it) and no recorded outcome, and its offer is gone. Continue lets you go on without that outcome. First Nexus checks the game's current state read-only: it asks the game twice for the Orb count (and for your Echoes) and waits for each answer. No spend and no choice is sent, only those read-only questions. You then confirm, or cancel."
 local RC_CHECKING="Checking the game's current state. Nexus asked the game for the Orb count (and for your Echoes) and waits for an answer observed after that request began; it asks a second time after the first. No spend and no choice is sent, only these read-only questions. Any change in the game, or a loading screen, cancels this check."
 local RC_CONFIRM="Continue with an unconfirmed Orb outcome? The earlier Orb action counts %d of its approved %d Orb(s) as spent. Nexus did not see which Echo, if any, you received, and the game gives no way to check. If you continue: the spent count stays; the original record is saved unchanged; nothing is refunded, repeated or chosen; Nexus stops blocking rolling; a new Orb run needs its own approval and every normal check. Risk you accept: Nexus cannot prove that the server is finished with the old action. Two answers that arrived after Nexus asked do not prove that no older answer is still on its way. A late result would show up as an ordinary change, and Nexus will not link it to the old record."
 local RC_DONE="Continued with an unconfirmed outcome. The earlier Orb action is saved unchanged in the archive and its spent Orb stays counted. Nothing was refunded, repeated or chosen. A new Orb run needs its own approval and every normal check."
@@ -1395,7 +1395,7 @@ local RC_REFUSALS={
     no_receipt="There is no unresolved Orb action.",
     not_restored="This action belongs to this session. Continue is offered only after a reload, for an action that has no recorded outcome.",
     running="An Orb run is active. Pause or stop it first.",
-    spend_unconfirmed="The spend of the earlier Orb action was never confirmed, so Continue does not apply.",
+    spend_unconfirmed="This client never observed the spend of the earlier Orb action (one Orb fewer with its offer), so Continue does not apply.",
     choice_recorded="A choice is recorded for the earlier Orb action, so Continue does not apply to it. Nexus can confirm that action only from its matching result.",
     unreadable="The game's current state cannot be read right now. Nothing was changed. Try again in a moment.",
     other_character="The earlier Orb action belongs to another character.",
@@ -1790,9 +1790,9 @@ function M.BlockReason(subject)
     if p and p.restored and not run.running then
         local r=run.recovery or {}
         if CAN_PROGRESS[r.kind] or (CAN_PROGRESS_OBSERVING[r.kind] and r.observing) then
-            return subject.." is blocked: an earlier Orb action is unresolved after a reload. Nexus only observes it and sends nothing. The block ends when that action is confirmed or, if it has a confirmed spend and no recorded outcome, when you choose Continue. Open /nexus orbs for the current instruction."
+            return subject.." is blocked: an earlier Orb action is unresolved after a reload. Nexus only observes it and sends nothing. The block ends when that action is confirmed or, if this client observed its spend and it has no recorded outcome, when you choose Continue. Open /nexus orbs for the current instruction."
         end
-        return subject.." is blocked: an earlier Orb action cannot be confirmed. If it has a confirmed spend and no recorded outcome, Continue in /nexus orbs ends this block after a read-only check and your confirmation; Nexus does not clear it by itself. Open /nexus orbs for details."
+        return subject.." is blocked: an earlier Orb action cannot be confirmed. If this client observed its spend and it has no recorded outcome, Continue in /nexus orbs ends this block after a read-only check and your confirmation; Nexus does not clear it by itself. Open /nexus orbs for details."
     end
     if run.running then return subject.." is paused: Orb refinement owns the current action." end
     if p then return subject.." is blocked: a submitted Orb action is unresolved. Finish its offer in the game; Nexus confirms it only from the matching result. If it cannot be confirmed, reload the game: Continue in /nexus orbs may then apply." end
@@ -2175,7 +2175,10 @@ function M.RecoveryView()
         rawPickDropped=pickInt(p.pickDropped,0,PICK_COUNT_MAX) or 0,rawPickMatching=pickMatching,rawPickUsed=pickUsed,
         rawPickUnsaved=run.pickDirty==true,
         recovery=p.restored and run.recovery and run.recovery.kind or nil,gate=gate and gate.gate or nil,
-        spendConfirmed=p.spendConfirmed==true,choiceSent=p.choiceMayHaveBeenSent==true,choiceObserved=p.choiceObserved==true,
+        -- The receipt field spendConfirmed (kept for saved-data compatibility)
+        -- records the one-Orb decrement this client saw with the offer. No
+        -- server reply names a spend, so the passive view calls it observed.
+        spendObserved=p.spendConfirmed==true,choiceSent=p.choiceMayHaveBeenSent==true,choiceObserved=p.choiceObserved==true,
         selectedKey=p.selectedKey,removed=p.removed,loadoutChanged=p.loadoutChanged==true,
         pickInFlight=run.pickInFlight,autoRefresh=run.autoRefreshAt~=nil,
         originalSlot=originalState=="recorded" and slotValue(p.originalSlot) or nil,originalSlotState=originalState,

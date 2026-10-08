@@ -144,8 +144,9 @@ function Controller.New(options)
                             tostring(detail.total))
                         if limits then
                             reason = reason .. string.format(
-                                "; at most %d ordinary, %d locked, %d total are stored",
-                                limits.ordinary, limits.locked, limits.total)
+                                "; at most %d ordinary copies, and %d copies in one locked row, are stored",
+                                tonumber(limits.ordinary) or 79,
+                                tonumber(limits.lockedRowStacks) or 120)
                         end
                         reason = reason .. ". Nothing was saved and the source is unchanged"
                     end
@@ -1383,17 +1384,55 @@ function Controller.New(options)
         savedImportStats.finalizations = savedImportStats.finalizations + 1
         local slot, live, old = current.slot, current.live, current.old
         local echoes, total = current.echoes, current.total
+        -- The server states each row's role (locked 0|1). Ordinary rows form
+        -- the mirror's identity; an explicitly locked row stays locked
+        -- (lockedEchoes) and is never an ordinary copy. Nothing more is
+        -- inferred: no locked design and no role for an ordinary row.
+        local ordinary, lockedRows = {}, {}
+        for _, e in ipairs(echoes) do
+            if e.locked then
+                lockedRows[#lockedRows + 1] = e
+            else
+                ordinary[#ordinary + 1] = e
+            end
+        end
+        if #lockedRows > 0 then
+            -- A role is taken only from a row the adapter read in full, and a
+            -- locked row only as the locked-evidence owner admits it (whole
+            -- finite ID and copies within the row ceiling, a whole quality).
+            -- Anything else refuses the slot before it is marked seen, so its
+            -- mirror retires as for any malformed source.
+            local evidence = Nexus and Nexus.CandidateEvidence
+            if live.roleSourceValid == false or not (evidence
+                and type(evidence.NormalizeLockedEchoes) == "function") then
+                return
+            end
+            local admitted = evidence.NormalizeLockedEchoes(lockedRows)
+            if not admitted then return end
+            lockedRows = {}
+            for index, row in ipairs(admitted) do
+                lockedRows[index] = {
+                    spellId=row.spellId,quality=row.quality,stacks=row.stacks,
+                }
+            end
+        end
+        -- Only locked rows: no ordinary identity can be formed. The prior
+        -- mirror is kept as it is (neither retired nor rewritten).
+        if #ordinary == 0 then
+            if old then job.seen[current.id] = true end
+            return
+        end
         -- A present server slot is not automatically a valid Saved Build.
         -- Establish complete ordinary evidence before protecting the prior
-        -- mirror from cleanup; locked/malformed replacements must retire it.
-        if not RefreshBuildIdentity({echoes=echoes}) then return end
+        -- mirror from cleanup; malformed replacements must retire it.
+        if not RefreshBuildIdentity({echoes=ordinary}) then return end
         job.seen[current.id] = true
                 -- These slots belong to the character currently being viewed. The
                 -- current/server class is therefore authoritative for an unpublished
                 -- Saved Build. Only a verified published record may override it.
                 -- Echo-only inference is a last-resort fallback because partial locked
                 -- snapshots can contain mostly shared Echoes and resemble another class.
-        local currentClass = (select(2, UnitClass and UnitClass("player"))) or nil
+        local currentClass = CurrentClass()
         local class = (related and related.class) or live.class
             or currentClass or InferBuildClass(echoes) or "UNKNOWN"
                 -- Do not preserve a stale record link after validation fails. A bad
@@ -1419,10 +1458,12 @@ function Controller.New(options)
             tostring(job.slots.activeSlot == slot),
         }
         for _, e in ipairs(echoes) do
+            -- A locked row is marked, so a role change is a change; an
+            -- ordinary row keeps the earlier form.
             signatureParts[#signatureParts + 1] = table.concat({
                 tostring(e.spellId or 0),tostring(e.quality or ""),
                 tostring(e.stacks or 1),
-            }, ":")
+            }, ":") .. (e.locked and ":L" or "")
         end
         local signature = table.concat(signatureParts, "|")
         local desiredPublishedId = published and published.id or nil
@@ -1449,7 +1490,8 @@ function Controller.New(options)
                             or published.lastModified or published.postedAt) or nil,
                         author=job.me, ownerKey=localOwner,
                         ownerVerified=localOwner and true or false,
-                        class=class, echoes=echoes,
+                        class=class, echoes=ordinary,
+                        lockedEchoes=#lockedRows > 0 and lockedRows or nil,
                         postedAt=(old and old.postedAt) or stamp, lastModified=stamp,
                         isMine=localOwner ~= nil, importedSavedBuild=true, serverSlot=slot,
                         recordBuildId=recordBuildId,
@@ -1794,7 +1836,7 @@ function Controller.New(options)
     local function ShareRoles(wl, rows)
         local evidence = Nexus and Nexus.LoadoutEvidence
         if not (evidence and type(evidence.SemanticEnvelope) == "function"
-            and type(evidence.SemanticLimits) == "function") then
+            and type(evidence.PlanLimits) == "function") then
             return nil, "Echo role validation is unavailable", "role validator unavailable"
         end
         local label = tostring(wl and wl.name ~= "" and wl.name or "This source")
@@ -2046,7 +2088,10 @@ function Controller.New(options)
                     "permanent roles differ from the saved plan"
             end
         end
-        local limits = evidence.SemanticLimits()
+        -- A Share publishes a plan: its locked rows become locked targets of
+        -- whoever imports it, and the authored target design holds six copies.
+        -- That plan envelope, not the evidence ceilings, bounds a Share.
+        local limits = evidence.PlanLimits()
         local function Counts()
             local o = evidence.SemanticEnvelope(ordinary)
             local l = evidence.SemanticEnvelope(locked, {forceLocked=true})
@@ -2937,8 +2982,8 @@ function Controller.New(options)
         if s.localSaved ~= true then
             local why = tostring(s.queueReason or "local save failed")
             local evidence = Nexus and Nexus.LoadoutEvidence
-            local limits = evidence and type(evidence.SemanticLimits) == "function"
-                and evidence.SemanticLimits() or nil
+            local limits = evidence and type(evidence.PlanLimits) == "function"
+                and evidence.PlanLimits() or nil
             if why == "SEMANTIC_ENVELOPE" and limits then
                 why = string.format("the local catalog refused %d ordinary and %d locked Echo copies; "
                     .. "a Share holds at most %d ordinary, %d locked and %d total",
@@ -3424,8 +3469,15 @@ function Controller.New(options)
         -- Only text the owner changes is owner-written: a save that re-submits
         -- the served title and description (Save Link) changes no text.
         local descriptionChanged = nextDescription ~= tostring(b.description or "")
+        -- Description text the owner writes keeps the Edit dialog's 2000
+        -- bytes. The stored description re-submitted unchanged was admitted
+        -- under the catalog field's 4000 bytes; the dialog does not seed one
+        -- it cannot show and then submits none, and such a save keeps it.
+        local descriptionLimit = descriptionChanged and 2000 or 4000
         if #nextTitle > 80 then return false, "title is too long" end
-        if #nextDescription > 2000 then return false, "description is too long" end
+        if #nextDescription > descriptionLimit then
+            return false, "description is too long"
+        end
         if not Identity.ValidDisplayText(nextTitle, 80, false) then
             return false, "title contains unsafe text"
         end
@@ -3437,7 +3489,7 @@ function Controller.New(options)
         -- differs from the display rule only by allowing "|".
         local descriptionRule = descriptionChanged
             and Identity.ValidDisplayText or Identity.ValidWireText
-        if not descriptionRule(nextDescription, 2000, true, true) then
+        if not descriptionRule(nextDescription, descriptionLimit, true, true) then
             return false, "description contains unsafe text"
         end
         local nextLink = b.link

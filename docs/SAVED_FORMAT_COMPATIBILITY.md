@@ -74,6 +74,21 @@ A server Wishlist name can contain a literal `|`, and the generated description 
 
 Limits: a description edit still keeps the title the edit saved, as before. A description that the owner retyped to exactly the generated text counts as unchanged. Only offline synthetic tests cover this (`saved_mirror_title_only_description`, `saved_mirror_description_provenance`); there is no native save and reload evidence.
 
+A stored description longer than the Edit dialog's 2000 bytes (the catalog field holds 4000) is not seeded into the dialog. A Save that leaves the description box empty submits no description, and Edit Build keeps the stored one unchanged under the catalog field's 4000 bytes and the wire-text rule; the dialog says so when it opens. Text the owner types replaces it under the 2000-byte display-text rule, as before. Deleting such a description is an explicit controller edit (`description = ""`). Only offline synthetic tests cover this (`batch_description_unseeded_edit`).
+
+## Locked rows: occupied records, and Saved Build mirrors
+
+The game keeps one locked record per Echo holding that Echo's whole stack, and bounds occupied records (not copies) by the live capacity (CONTRACTS.md, Occupied locked records). Records of this build (DPS records, catalog records, received builds) can therefore hold more than six locked copies, for example five records holding 1, 1, 1, 3 and 1. The catalog holds a locked row to 120 copies and a record to its existing 256-row and 10000-copy ceilings. No field, schema, storage or protocol version changed.
+
+A Saved Build mirror keeps a row the server marks locked (`locked = 1`) in `lockedEchoes`, never as an ordinary copy. A slot that holds only locked rows forms no ordinary identity: its earlier mirror is kept unchanged instead of being retired. A removed slot still retires its mirror, and a malformed row still refuses the slot.
+
+| Case | Behavior |
+|---|---|
+| An older build (79 / 6 / 85 envelope) | It refuses a stored or received record with more than six locked copies (`SEMANTIC_ENVELOPE`), as it refused such a record before; a downgrade may therefore not load such records. An older peer refuses an inline payload with more than six locked copies and ignores a stated locked set. |
+| A Share | Unchanged: a shared plan keeps the authored envelope of 79 ordinary and six locked target copies (`LoadoutEvidence.PlanLimits`). |
+
+Only offline synthetic tests cover this; whether the server accepts a given combined count is not claimed.
+
 ## Upgrading from a build that kept the data read-only
 
 test.9033 and earlier kept formats 3 to 5 read-only. In that state the Store built no Store-data wrapper. The catalog still saved its data bundle, with an empty Store-data placeholder in it. test.9034 and test.9035 then refused that placeholder: start-up failed with `STORE_INVALID`, and the displayed reason had no further detail. This is reproduced on the exact sources: synthetic format-5 data started on test.9033 (`487eaa9`), then on test.9035 (`753e384`).

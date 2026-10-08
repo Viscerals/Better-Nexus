@@ -110,6 +110,15 @@ local function NormalizeClass(class)
     return class and VALID_CLASS[class] and class or nil
 end
 
+-- The current character's class token: UnitClass returns the localized name
+-- first and the token second. A missing API, a missing token or one Nexus
+-- does not know is nil; nothing is guessed.
+local function CurrentClassToken()
+    if type(UnitClass) ~= "function" then return nil end
+    local ok, _, token = pcall(UnitClass, "player")
+    return ok and NormalizeClass(token) or nil
+end
+
 local Adapter, Sync
 -- Response cursors may be retained by Sync across module reinitialization.
 -- A monotonic binding generation prevents a same-digest/same-revision profile
@@ -795,7 +804,10 @@ end
 -- can only come from two sources that describe different moments, so the
 -- capture is deferred with its counts retained instead of writing a record
 -- the catalog must reject - and instead of replacing a valid earlier record
--- with a derived one that cannot be true.
+-- with a derived one that cannot be true. Locked copies are held copies of
+-- occupied records, bounded in the game by the live capacity, which a record
+-- does not carry: here a locked row is held to the owner's row ceilings
+-- (LoadoutEvidence.SemanticLimits), not to a copy count.
 local function CaptureEnvelopeVerdict(ordinary, locked)
     local evidence = Nexus and Nexus.LoadoutEvidence
     local limits = evidence and type(evidence.SemanticLimits) == "function"
@@ -805,22 +817,26 @@ local function CaptureEnvelopeVerdict(ordinary, locked)
     -- "number < nil"; the documented values fill the gaps.
     limits = {
         ordinary = tonumber(limits.ordinary) or 79,
-        locked = tonumber(limits.locked) or 6,
-        total = tonumber(limits.total) or 85,
+        lockedRows = tonumber(limits.lockedRows) or 256,
+        lockedRowStacks = tonumber(limits.lockedRowStacks) or 120,
+        total = tonumber(limits.total) or 10000,
     }
-    local ordinaryCopies, lockedCopies = 0, 0
+    local ordinaryCopies, lockedCopies, lockedRows = 0, 0, 0
+    local lockedOver = false
     for _, e in ipairs(type(ordinary) == "table" and ordinary or {}) do
         ordinaryCopies = ordinaryCopies + (tonumber(e.count or e.stacks) or 1)
     end
     for _, e in ipairs(type(locked) == "table" and locked or {}) do
-        lockedCopies = lockedCopies + (tonumber(e.count or e.stacks) or 1)
+        local copies = tonumber(e.count or e.stacks) or 1
+        lockedCopies, lockedRows = lockedCopies + copies, lockedRows + 1
+        if copies > limits.lockedRowStacks then lockedOver = true end
     end
     local total = ordinaryCopies + lockedCopies
     local counts = {ordinary=ordinaryCopies, locked=lockedCopies, total=total}
     if ordinaryCopies > limits.ordinary then
         return false, counts, limits, "ordinary copies above the supported envelope"
     end
-    if lockedCopies > limits.locked then
+    if lockedOver or lockedRows > limits.lockedRows then
         return false, counts, limits, "locked copies above the supported envelope"
     end
     if total > limits.total then
@@ -3840,7 +3856,7 @@ local function CommitSession(category)
 
     if not existing or dpsFloor > (tonumber(existing.dps) or 0) then
         local stamp = (time and time()) or 0
-        local localClass = select(2, UnitClass and UnitClass("player")) or "UNKNOWN"
+        local localClass = CurrentClassToken() or "UNKNOWN"
         -- Capture locked perks (permanent baseline echoes) at record time
         -- so the leaderboard can display the full 85-echo picture.
         local lockedSnap = nil
@@ -4016,7 +4032,8 @@ local function CommitSession(category)
             "|cff7fd5ffNexus:|r |cff4dff80New best for '%s' (%s): %s DPS!|r%s",
             tostring(setLabel), catLabel,
             dpsFloor >= 1000000 and string.format("%.2fM", dpsFloor / 1000000)
-            or string.format("%dk", math.floor(dpsFloor / 1000)),
+            or dpsFloor >= 1000 and string.format("%dk", math.floor(dpsFloor / 1000))
+            or tostring(dpsFloor),
             StorageReadOnly() and " |cffffc040(session only: saved data is read-only, so this record is not kept after a reload)|r" or ""))
 
         -- Global comparison is only meaningful when the exact current Echo
@@ -4219,9 +4236,10 @@ local function ReceiveRecord(record, transportSender, relayed, nativeChannelSend
         return RejectReceive("schema")
     end
     local incomingLocked = NormalizeEchoes(rawLocked)
-    -- #22: a received record is held to the same 79 ordinary / 6 locked /
-    -- 85 total envelope as a local capture. A loadout outside it cannot be
-    -- held in the game, so it is neither stored nor listed nor relayed.
+    -- #22: a received record is held to the same envelope as a local capture
+    -- (79 ordinary copies; locked rows within the row ceilings). A loadout
+    -- outside it cannot be held in the game, so it is neither stored nor
+    -- listed nor relayed.
     if not CaptureEnvelopeVerdict(echoes, incomingLocked) then
         return RejectReceive("integrity")
     end

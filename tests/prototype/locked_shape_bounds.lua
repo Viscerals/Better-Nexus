@@ -104,7 +104,7 @@ local function run(tag,f)
   facts(w,{'first','copies','ids'}))
  expect(w.status==f.status and w.rows==f.rowCount,tag..': status='..f.status..' with '..f.rowCount..' rows',facts(w,{'status','rows'}))
  if f.rows then T.expectRows(tag,v,f.rows) end
- if f.status=='captured' then T.expectConsistent(tag,v) end
+ if f.status=='captured' then T.expectConsistent(tag,v,f.stackOver) end
  return v,l,d
 end
 
@@ -166,12 +166,14 @@ local SHAPES={
   rowCount=64,build=function() local t={};for i=1,40 do t[i]={ZQ_ITEM=E(200000+i)} end;return t end,rows=nestedRows()},
  {name='one entry with 5000 dynamic keys',first='over_cap',copies=7,ids=1,bySpell={[410001]=7},walked=2,status='captured',
   rowCount=2,
+  -- A record above its own stated maxStack is over the cap (records, not
+  -- copies, meet the live capacity).
   build=function()
-   local e=E(410001,{stacks=7})
+   local e=E(410001,{stacks=7,maxStack=4})
    for i=1,5000 do e['ZQ_DYN_'..i..' Disposable A']='ZQ_VAL_'..i..' 410002' end
    return {e}
   end,
-  rows={ROOT,'1.i.1.7.1.2.16'}},
+  rows={ROOT,'1.i.1.7.1.2.16'},stackOver={[2]=true}},
 }
 
 -- B1. Deep, shared, cyclic, large and wide sources: the parser's answers are

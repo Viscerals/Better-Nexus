@@ -11,6 +11,12 @@
 local H=dofile('tests/prototype/orbs_support.lua')
 local A=H.A
 local T={}
+-- The live locked capacity of these fixtures (GetMaximumPermanentEchoes).
+-- The game compares OCCUPIED RECORDS with it (one record per locked Echo,
+-- holding its stack), so a fixture is over the cap when it holds more records
+-- than this, or a record above its own stated maxStack. A test may change it.
+T.CAPACITY=6
+ProjectEbonhold.PerkService.GetMaximumPermanentEchoes=function() return T.CAPACITY end
 -- The builtins as loaded, kept before a test replaces a global to count or probe.
 local realPcall,realPairs,realNext=pcall,pairs,next
 T.realPcall,T.realPairs,T.realNext=realPcall,realPairs,realNext
@@ -268,21 +274,26 @@ function T.expectRows(tag,v,want)
  T.expect(#got==#want,tag..': '..#want..' rows',#got)
  for i,w in ipairs(want) do T.expect(got[i]==w,tag..': row '..i..' is '..w,got[i]) end
 end
--- The consistency of a complete capture (TEST_CONTRACT.md, section 4).
-function T.expectConsistent(tag,v)
- local total,classes,distinct,bad=0,{},0,{}
+-- The consistency of a complete capture (TEST_CONTRACT.md, section 4). Each
+-- counted row is one occupied record. It carries over_cap exactly when the
+-- running record count passes the live capacity (T.CAPACITY), or when it is
+-- in `stackOver`: the rows whose copies pass their own stated maxStack.
+function T.expectConsistent(tag,v,stackOver)
+ local total,records,classes,distinct,bad=0,0,{},0,{}
  for i,r in ipairs(T.rowList(v)) do
   local n=T.count(r.n) and r.n or 0
   if n>0 then
-   total=total+n
+   total=total+n;records=records+1
    if r.c~=nil and not classes[r.c] then classes[r.c]=true;distinct=distinct+1 end
   end
-  if T.has(r.e,T.DEFECT.over_cap)~=(n>0 and total>6) then bad[#bad+1]=i end
+  local over=n>0 and (records>T.CAPACITY or (stackOver~=nil and stackOver[i]==true))
+  if T.has(r.e,T.DEFECT.over_cap)~=over then bad[#bad+1]=i end
  end
  local isTable=type(v)=='table'
  T.expect(isTable and total==v.copies,tag..': the copies of the rows add up to the copy total',total)
  T.expect(isTable and distinct==v.ids,tag..': the counted rows carry exactly ids distinct classes',distinct)
- T.expect(isTable and #bad==0,tag..': a counted row carries over_cap exactly when the running total passes six',table.concat(bad,','))
+ T.expect(isTable and #bad==0,tag..': a counted row carries over_cap exactly when the running record count passes the live capacity or its copies pass its own maxStack',
+  table.concat(bad,','))
 end
 
 function T.serialize(v,seen)

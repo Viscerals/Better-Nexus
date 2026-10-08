@@ -342,7 +342,9 @@ end)
 -- R7. Malformed locked counts are kept by the getter while it reports false
 -- trust; the report shows both and neither erases nor widens trust.
 scenario('R7 locked copies over the limit',function()
- H.locked={{spellId=410007,stacks=7}}
+ -- One record holding more copies than its own stated maxStack: over the cap
+ -- (occupied records, not copies, meet the live capacity).
+ H.locked={{spellId=410007,stacks=7,maxStack=1}}
  local locked=A.LockedOwned()
  expect(locked.synced==false and locked.bySpell[410007]==7,'R7: fixture: the getter keeps the parsed count and reports false trust')
  local s=observe()

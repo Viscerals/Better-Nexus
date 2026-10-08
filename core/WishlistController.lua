@@ -144,12 +144,16 @@ function Controller.New(options)
         return AccountRoot()
     end
 
+    -- Current locked ownership: exact copies by spell, the occupied records
+    -- (one row each) and the live capacity they were held to (nil: unknown).
     local function TrustedLockedProjection()
         if Adapter and Adapter.LockedOwned then
             local locked = Adapter.LockedOwned()
-            local bySpell = DraftModel.LockedSpellCounts(locked)
-            if bySpell then
-                return {synced=true,bySpell=bySpell}
+            local projection = DraftModel.LockedProjection(locked)
+            if projection then
+                return {synced=true,bySpell=projection.bySpell,
+                    occupied=projection.occupied,records=projection.records,
+                    capacity=projection.capacity}
             end
         end
         return nil

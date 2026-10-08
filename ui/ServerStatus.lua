@@ -82,7 +82,30 @@ local function GetAllSourceTexts()
     return out
 end
 
-local function ParseSummary(texts)
+-- The Soul Ash balance from the HUD's own named field, read before any text
+-- scan: the provider's soulPointsText (PlayerRunUI.GetUIElements), else the
+-- root frame's field of that name. nil: the HUD names no such field. false: it
+-- does, and the field does not hold a plain balance (a percentage or any other
+-- text is never taken as the balance). Read under protection: these are
+-- another addon's tables.
+local function NamedSoulAsh()
+    local ok, field = pcall(function()
+        local pe = _G.ProjectEbonhold
+        local ui = type(pe) == "table" and pe.PlayerRunUI or nil
+        local elements = type(ui) == "table" and type(ui.GetUIElements) == "function"
+            and ui.GetUIElements() or nil
+        local named = type(elements) == "table" and elements.soulPointsText or nil
+        if named == nil and rootFrame then named = rootFrame.soulPointsText end
+        return named
+    end)
+    if not ok or field == nil then return nil end
+    local text = SafeText(field)
+    return text and text:match("^%d[%d,]*$") or false
+end
+
+-- `namedAsh` (NamedSoulAsh): the named field's balance, false when the named
+-- field holds no balance, nil when there is none and the texts are scanned.
+local function ParseSummary(texts, namedAsh)
     local clean = Strip(table.concat(texts or {}, "  "))
 
     local tier = clean:match("[Hh][Cc]%s*([1-5])")
@@ -100,11 +123,19 @@ local function ParseSummary(texts)
     local gain = clean:match("([%+%-]%d+%%)")
         or clean:match("[Mm]ultiplier%s*[:%-]?%s*([%+%-]?%d+%%)")
 
-    local ash = clean:match("[Ss]oul%s*[Aa]sh[e]?[s]?%s*[:%-]?%s*([%d,]+)")
-    if not ash then
+    local ash
+    if namedAsh ~= nil then
+        ash = namedAsh or nil
+    else
+        ash = clean:match("[Ss]oul%s*[Aa]sh[e]?[s]?%s*[:%-]?%s*([%d,]+)")
+    end
+    if not ash and namedAsh == nil then
         -- The compact server HUD often exposes only the edit-box number. Pick
-        -- a plausible integer, excluding percentages, tier values and versions.
-        for token in clean:gmatch("%f[%d]([%d,]+)%f[^%d,]") do
+        -- a plausible integer, excluding percentages, signed values, tier
+        -- values and versions: a multiplier such as "+150%" is never a
+        -- balance.
+        local unsigned = clean:gsub("[%+%-]?[%d,%.]+%%", " "):gsub("[%+%-][%d,]+", " ")
+        for token in unsigned:gmatch("%f[%d]([%d,]+)%f[^%d,]") do
             local digits = token:gsub(",", "")
             if #digits >= 3 and tonumber(digits) then
                 ash = token
@@ -158,15 +189,51 @@ local function GetSelectedDifficultySummary()
     return nil
 end
 
+-- The game's Intensity constants (ProjectEbonhold.Constants: MAX_INTENSITY
+-- and INTENSITY_LEVEL_1..5). Used only when each is a finite number, the five
+-- levels rise strictly from above zero, and the maximum is at least level 5;
+-- otherwise nil: no level or maximum is made up.
+local function IntensityConstants()
+    local ok, maximum, thresholds = pcall(function()
+        local pe = _G.ProjectEbonhold
+        local constants = type(pe) == "table" and pe.Constants or nil
+        if type(constants) ~= "table" then return nil end
+        local levels, previous = {}, 0
+        for i = 1, 5 do
+            local value = constants["INTENSITY_LEVEL_" .. i]
+            if type(value) ~= "number" or value ~= value or value >= math.huge
+                or value <= previous then return nil end
+            levels[i], previous = value, value
+        end
+        local top = constants.MAX_INTENSITY
+        if type(top) ~= "number" or top ~= top or top >= math.huge
+            or top < previous then return nil end
+        return top, levels
+    end)
+    if not ok or not maximum then return nil, nil end
+    return maximum, thresholds
+end
+
+-- The current Intensity (never negative), its level -- the highest constant
+-- threshold reached, as the game's own HUD counts it -- and the constants. With
+-- valid constants the value is held to their maximum; without them the level,
+-- the maximum and the thresholds are unknown (nil) and the value is as read.
 local function ReadIntensity()
     local data = _G.EbonholdIntensityData
     if type(data) ~= "table" then return nil, nil end
     local value = tonumber(data.intensity)
-    if not value then return nil, nil end
-    value = math.max(0, math.min(500, value))
-    local level = math.floor(value / 100)
-    if level > 5 then level = 5 end
-    return value, level
+    if not value or value ~= value or value >= math.huge or value <= -math.huge then
+        return nil, nil
+    end
+    value = math.max(0, value)
+    local maximum, thresholds = IntensityConstants()
+    if not maximum then return value, nil end
+    value = math.min(maximum, value)
+    local level = 0
+    for i = 1, 5 do
+        if value >= thresholds[i] then level = i end
+    end
+    return value, level, maximum, thresholds
 end
 
 -- The table the HUD mode is kept in: the saved root, or for a read-only saved
@@ -329,8 +396,14 @@ local function ApplyVisibility()
         hookedFrames[hookTarget] = true
         hookTarget:HookScript("OnShow", function(self)
             -- The same question as above: a widget that comes back while no
-            -- replacement can display is left where the game put it.
-            if ReplacingServerHud() then self:Hide() end
+            -- replacement can display is left where the game put it. A hide
+            -- here takes a widget that was just shown away, so it is ours to
+            -- give back, exactly like the scanner's own hide: recorded only
+            -- when it really happened, and only for the current widget.
+            if ReplacingServerHud() then
+                local hid = SetShown(self, false)
+                if hid and self == rootFrame then suppressedFrame = self end
+            end
         end)
     end
 end
@@ -352,14 +425,15 @@ function M.Init()
 
         if not rootFrame then FindFrames() end
         ApplyVisibility()
-        local summary = ParseSummary(GetAllSourceTexts())
+        local summary = ParseSummary(GetAllSourceTexts(), NamedSoulAsh())
         local selectedDifficulty = GetSelectedDifficultySummary()
         if selectedDifficulty and selectedDifficulty.tier then
             summary.tier = selectedDifficulty.tier
             summary.mode = selectedDifficulty.mode or selectedDifficulty.tier
         end
-        summary.intensity, summary.intensityLevel = ReadIntensity()
-        local sig = table.concat({ tostring(summary.mode), tostring(summary.tier), tostring(summary.ash), tostring(summary.gain), tostring(summary.intensity), tostring(summary.intensityLevel), tostring(UsingNexusHud()) }, "|")
+        summary.intensity, summary.intensityLevel, summary.intensityMax,
+            summary.intensityThresholds = ReadIntensity()
+        local sig = table.concat({ tostring(summary.mode), tostring(summary.tier), tostring(summary.ash), tostring(summary.gain), tostring(summary.intensity), tostring(summary.intensityLevel), tostring(summary.intensityMax), tostring(UsingNexusHud()) }, "|")
         if sig ~= cachedSignature then
             cachedSignature = sig
             cachedSummary = summary
@@ -371,14 +445,15 @@ end
 function M.GetSummary()
     if cachedSignature == "" then
         if not rootFrame then FindFrames() end
-        cachedSummary = ParseSummary(GetAllSourceTexts())
+        cachedSummary = ParseSummary(GetAllSourceTexts(), NamedSoulAsh())
         local selectedDifficulty = GetSelectedDifficultySummary()
         if selectedDifficulty and selectedDifficulty.tier then
             cachedSummary.tier = selectedDifficulty.tier
             cachedSummary.mode = selectedDifficulty.mode or selectedDifficulty.tier
         end
-        cachedSummary.intensity, cachedSummary.intensityLevel = ReadIntensity()
-        cachedSignature = table.concat({ tostring(cachedSummary.mode), tostring(cachedSummary.tier), tostring(cachedSummary.ash), tostring(cachedSummary.gain), tostring(cachedSummary.intensity), tostring(cachedSummary.intensityLevel), tostring(UsingNexusHud()) }, "|")
+        cachedSummary.intensity, cachedSummary.intensityLevel,
+            cachedSummary.intensityMax, cachedSummary.intensityThresholds = ReadIntensity()
+        cachedSignature = table.concat({ tostring(cachedSummary.mode), tostring(cachedSummary.tier), tostring(cachedSummary.ash), tostring(cachedSummary.gain), tostring(cachedSummary.intensity), tostring(cachedSummary.intensityLevel), tostring(cachedSummary.intensityMax), tostring(UsingNexusHud()) }, "|")
     end
     return cachedSummary
 end

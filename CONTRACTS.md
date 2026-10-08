@@ -57,7 +57,11 @@ This file has two parts.
 - **Orb mode** is specified in `docs/ORB_MEMORY_MODE.md`. All Orb mutation sits
   behind `GameAdapter.Orbs`. An unresolved Orb action is never retried, refunded
   or erased. Recovery after reload is passive. The only exit is the player's
-  explicit Continue (`docs/ORB_RECOVERY_CONTINUE.md`), for a confirmed spend with
+  explicit Continue (`docs/ORB_RECOVERY_CONTINUE.md`), for a spend this client
+  observed (the one-Orb decrement seen with the offer; no server reply carries a
+  spend identity, so Nexus never states it as server-confirmed; the saved
+  receipt keeps its compatibility field `spendConfirmed`, and the passive
+  `RecoveryView` reports `spendObserved`) with
   no usable recorded outcome and the original offer gone: it keeps the spent
   count, the limit and the configured maximum, archives the saved receipt
   unchanged in the character row key `orbRecoveryArchive`, sends no spend and no
@@ -82,11 +86,40 @@ This file has two parts.
   `GameAdapter.LockedOwned()` read it just made (a diagnostics-only scalar:
   that read's serial) with `OwnershipTrustView().lockedSerial`. Only when they
   are equal and that sample's `lockedRejection` is `over_cap` does the refusal
-  text say that Nexus rejected the locked Echo data because it lists more than
-  6 locked copies. A missing serial and a stale, mismatched, failing or
-  unreadable sample keep the shared wait text. The refusal, its stage and every
-  gate are the same either way; nothing is read from the game, requested or
-  saved for the text.
+  text say that Nexus rejected the locked Echo data: it names the occupied
+  records and the live capacity of that same read when it lists more records
+  than the capacity, or says a locked record is above the limit Nexus
+  supports. A missing serial and a stale, mismatched, failing or unreadable
+  sample keep the shared wait text. The refusal, its stage and every gate are
+  the same either way; nothing is read from the game, requested or saved for
+  the text.
+- **Occupied locked records.** The game keeps one locked record per Echo,
+  holding that Echo's whole stack, and bounds occupied RECORDS (not copies) by
+  `GetMaximumPermanentEchoes`, a positive server value that can change.
+  `GameAdapter.LockedOwned()` counts each table with a recognized ID as one
+  occupied record and returns `occupied`, `records` (one `{spellId, stacks}`
+  per record) and the `capacity` it was held to, beside the exact `bySpell`
+  copies (never clamped). It trusts the records when they are structurally
+  valid and no more than the live capacity, or, while the capacity is unknown,
+  no more than the record ceiling (256; the capacity then stays unavailable to
+  actions, `MaxPermanentEchoes()` is nil). A record above its own stated
+  `maxStack` or the 120-copy row ceiling is `over_cap`. A retained positive
+  capacity is used as stated; its freshness is not observable and is not
+  claimed. The Echo snapshot's locked field includes the record partition and
+  the capacity, so equal per-spell copies in another partition are a change.
+  `Model.LockedProjection` admits only a read that states its occupancy, and
+  AutoLock counts records: one lock occupies one record, whatever its copies,
+  and a spell that is already locked is never locked again for more copies
+  (LockPerk sends the spellId only). Durable evidence, the catalog, DPS records
+  and the peer wire carry no capacity and normalize rows, so they hold the
+  locked role to resource ceilings (`LoadoutEvidence.SemanticLimits`: 256 rows,
+  120 copies in one row) and never to a guessed capacity. The authored
+  locked-target design keeps six copies (WishlistModel; `PlanLimits` for a
+  Share). The peer wire format is unchanged; released (test.9049) peers keep
+  their 79 / 6 / 85 envelope, refuse inline slot-4 locked copies above six and
+  ignore a stated `lv = 1` set, and new responders send a stated set only to
+  `lv1`-capable requesters. A trusted representation is not a claim that the
+  server accepts a given loadout.
 - **Locked shape capture.** `GameAdapter.LockedShapeView()` returns a new table
   for the last normal `LockedOwned()` read that refused a table, or
   `observed=false` since load. Protected hooks inside that read's own parse

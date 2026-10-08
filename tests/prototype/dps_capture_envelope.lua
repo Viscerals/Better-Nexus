@@ -29,9 +29,13 @@ local A,D=Nexus.GameAdapter,Nexus.DpsCapture
 local support=assert(Nexus.SupportIncidents,'the incident owner is loaded')
 local Evidence=Nexus.LoadoutEvidence
 local limits=Evidence.SemanticLimits()
-check(limits.ordinary==79 and limits.locked==6 and limits.total==85,
- 'the supported envelope is 79 ordinary, 6 locked, 85 total: '
- ..limits.ordinary..'/'..limits.locked..'/'..limits.total)
+-- Locked copies have no fixed count: occupied locked records are bounded by
+-- the live capacity, which a record does not carry, so a locked row is held
+-- to the row ceilings (256 rows, 120 copies in one row) instead.
+check(limits.ordinary==79 and limits.locked==nil and limits.lockedRows==256
+ and limits.lockedRowStacks==120 and limits.total==10000,
+ 'the supported envelope is 79 ordinary copies, locked rows within 256 rows of 120 copies, 10000 copies in all: '
+ ..tostring(limits.ordinary)..'/'..tostring(limits.lockedRows)..'/'..tostring(limits.lockedRowStacks)..'/'..tostring(limits.total))
 
 -- A training dummy as the target, so the real capture path classifies the
 -- session the way it does in the client.
@@ -169,18 +173,23 @@ check((Nexus.lastDpsNote or ''):find('deferred',1,true)==nil,
 -- 1f. The three envelope sentences are prose the player reads in /nexus dps,
 -- not diagnostic codes, so they state the one player-facing vocabulary.
 local verdict=assert(D._CaptureEnvelopeVerdict,'the envelope verdict is reachable')
-local function Why(count,locked)
+-- `stacks`: the copies of each locked row (default 1).
+local function Why(count,locked,stacks)
  local rows={}
  for i=1,count do rows[#rows+1]={spellId=300000+i,quality=2,stacks=1} end
  local lockedRows={}
- for i=1,(locked or 0) do lockedRows[#lockedRows+1]={spellId=310000+i,quality=3,stacks=1} end
+ for i=1,(locked or 0) do lockedRows[#lockedRows+1]={spellId=310000+i,quality=3,stacks=stacks or 1} end
  local _,_,_,why=verdict(rows,lockedRows)
  return tostring(why)
 end
 check(Why(80,0):find('ordinary copies above the supported envelope',1,true)~=nil,
  'the ordinary sentence: '..Why(80,0))
-check(Why(1,7):find('locked copies above the supported envelope',1,true)~=nil,
- 'the locked sentence says locked, not permanent: '..Why(1,7))
+-- Seven locked records are a loadout of a capacity-7 character: occupied
+-- records, not a six-copy count, bound the locked role. A locked row above
+-- the 120-copy row ceiling is the locked sentence's case now.
+check(Why(1,7)=='nil','seven single locked records are inside the envelope: '..Why(1,7))
+check(Why(1,1,121):find('locked copies above the supported envelope',1,true)~=nil,
+ 'the locked sentence says locked, not permanent: '..Why(1,1,121))
 -- The third sentence needs a total below ordinary+locked, which the supported
 -- envelope never is, so the authority states one for this check only.
 local realLimits=Evidence.SemanticLimits
@@ -189,12 +198,12 @@ local totalWhy=Why(9,2)
 Evidence.SemanticLimits=realLimits
 check(totalWhy:find('total copies above the supported envelope',1,true)~=nil,
  'the total sentence: '..totalWhy)
-check(Evidence.SemanticLimits().total==85,'the real limits are back: '..Evidence.SemanticLimits().total)
+check(Evidence.SemanticLimits().total==10000,'the real limits are back: '..Evidence.SemanticLimits().total)
 -- A coherent capture states NO sentence at all; asserting on tostring(nil)
 -- would test the word "nil" and pass whatever the code said.
 local okVerdict,_,_,noWhy=verdict({{spellId=300001,quality=2,stacks=1}},{})
 check(okVerdict==true and noWhy==nil,'a capture inside the envelope states no refusal')
-for _,line in ipairs({Why(80,0),Why(1,7),totalWhy}) do
+for _,line in ipairs({Why(80,0),Why(1,1,121),totalWhy}) do
  check(not line:lower():find('permanent',1,true),
   'no envelope sentence still says permanent: '..line)
 end
@@ -306,7 +315,7 @@ check(incident.counts and incident.counts.ordinary==85,
  'the failure-time ordinary count is retained: '..tostring(incident.counts and incident.counts.ordinary))
 check(incident.counts.locked==6 and incident.counts.total==91,
  'with the locked and total counts: '..incident.counts.locked..'/'..incident.counts.total)
-check(incident.limits.ordinary==79 and incident.limits.total==85,
+check(incident.limits.ordinary==79 and incident.limits.total==10000,
  'and the limits that were enforced: '..incident.limits.ordinary..'/'..incident.limits.total)
 check(incident.committed==false,'it states that nothing committed')
 check(incident.scope and incident.scope:find('no personal, public or catalog write',1,true),

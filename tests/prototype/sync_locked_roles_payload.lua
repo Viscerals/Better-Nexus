@@ -78,11 +78,16 @@ do
  local got=Deliver(NEW,Payload(NEW,{lv=1,le={{200001,1,1}}}))
  check(got and Key(got.echoes)=='200001:1:3,200002:2:1' and Key(got.lockedEchoes)=='200001:1:1','dual role: the same ID stays in both roles')
 end
--- 6. Refused payloads: nothing stored, for each malformed form.
+-- 6. Refused payloads: nothing stored, for each malformed form. A stated set
+-- is occupied locked records holding their copies: the live capacity bounds
+-- the records and a payload does not carry it, so the parser ceilings bound
+-- a stated set (256 rows, 120 copies in one row), not a six-copy count.
+local tooManyRows={}
+for i=1,257 do tooManyRows[i]={200000+((i-1)%90)+1,1,1} end
 local refused={
  {'rows without lv',{le={{200085,1,1}}}},
- {'seven locked rows',{lv=1,le={{200085,1,1},{200086,1,1},{200087,1,1},{200088,1,1},{200089,1,1},{200090,1,1},{200084,1,1}}}},
- {'locked copies over 6',{lv=1,le={{200085,1,4},{200086,1,3}}}},
+ {'a stated set above the 256-row ceiling',{lv=1,le=tooManyRows}},
+ {'a stated row above the 120-copy ceiling',{lv=1,le={{200085,1,121},{200086,1,3}}}},
  {'a slot-4 value in a locked row',{lv=1,le={{200085,1,1,1}}}},
  {'zero copies',{lv=1,le={{200085,1,0}}}},
  {'quality over 255',{lv=1,le={{200085,256,1}}}},
@@ -97,12 +102,17 @@ do
  -- A stated set never mixes with inline slot-4 rows.
  local got=Deliver(NEW,Payload(NEW,{lv=1,le={{200085,1,1}}},{{200001,1,3},{200086,2,1,1}}))
  check(got==nil,'refused: lv=1 together with an inline locked row')
- -- The combined envelope: 79 ordinary copies plus 6 stated locked copies fit
- -- (85); 79 ordinary plus 7 would not (refused above as copies over 6).
+ -- The envelope: 79 ordinary copies with a stated locked set. Six copies fit;
+ -- so do seven records, and two records holding 4 + 3 copies (occupied
+ -- records holding their stacks, as a capacity-7 character may hold).
  local ordinary={}
  for i=1,79 do ordinary[#ordinary+1]={200000+i,1,1} end
  local ok=Deliver(NEW,Payload(NEW,{lv=1,le={{200085,1,6}}},ordinary))
- check(ok and #ok.echoes==79 and Key(ok.lockedEchoes)=='200085:1:6','the 79 / 6 / 85 envelope holds with the stated set')
+ check(ok and #ok.echoes==79 and Key(ok.lockedEchoes)=='200085:1:6','the 79 ordinary envelope holds with a stated set of 6 copies')
+ local seven=Deliver(NEW,Payload(NEW,{lv=1,le={{200085,1,1},{200086,2,1},{200087,3,1},{200088,0,1},{200089,1,1},{200090,2,1},{200084,0,1}}}))
+ check(seven and seven.lockedAuthorityProven==true and #seven.lockedEchoes==7,'seven stated locked records are stored')
+ local stacked=Deliver(NEW,Payload(NEW,{lv=1,le={{200085,1,4},{200086,2,3}}}))
+ check(stacked and Key(stacked.lockedEchoes)=='200085:1:4,200086:2:3','two stated records holding 4 + 3 copies are stored')
 end
 
 -- 7. Capability messages: only a well-formed WLCP from the transport sender,

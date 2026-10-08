@@ -214,16 +214,21 @@ local function TargetMapToken(targets, catalog)
     return table.concat(parts, "|")
 end
 
+-- Current locked ownership is occupied records holding exact copies
+-- (Model.LockedProjection); MAX_LOCK_SLOTS is the authored target design and
+-- never bounds it. Returns the copies by spell, the occupied record count and
+-- the records by spell.
 local function LockedSpellCounts(locked)
     local owner = Nexus.Model and Nexus.Model.LockedProjection
-    local projection = owner and owner(locked, nil, MAX_LOCK_SLOTS) or nil
+    local projection = owner and owner(locked, nil) or nil
     return projection and projection.bySpell or nil,
-        projection and projection.total or nil
+        projection and projection.occupied or nil,
+        projection and projection.recordsBySpell or nil
 end
 
 local function LockedProjection(locked, catalog)
     local owner = Nexus.Model and Nexus.Model.LockedProjection
-    return owner and owner(locked, catalog, MAX_LOCK_SLOTS) or nil
+    return owner and owner(locked, catalog) or nil
 end
 
 local function TargetEnvelopeFields(value)

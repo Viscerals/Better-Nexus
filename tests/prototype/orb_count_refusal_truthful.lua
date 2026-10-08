@@ -1,6 +1,8 @@
 -- Orb count refusal, part 1 of 2 (regression-first): a truthful refusal text.
 -- When the current normal LockedOwned() read is refused only because it holds
--- more than six locked copies (its sample's rejection code is over_cap) while
+-- more occupied locked records than the live capacity (its sample's rejection
+-- code is over_cap; the batch repair moved the cap from six copies to the
+-- capacity in records, see orb_count_refusal_support X.Over) while
 -- rolled ownership and the assignment are ready, the Orb read refuses at its
 -- trust gate. At b704660 it answers with the shared trust-gate text "Waiting
 -- for current rolled and locked Echo data from the server." (core/OrbAdapter.lua,
@@ -15,8 +17,8 @@
 -- trust_locked; no progress and Start unavailable; the locked counts, their
 -- sample and the projection counters; the readiness codes and the report block,
 -- which carries no refusal text; Orb action ownership; every spend, choice and
--- lock gate, the ordinary-board gate and EchoWeaver's locked wait; the six-copy
--- cap itself (the same records holding six copies are trusted); the work of the
+-- lock gate, the ordinary-board gate and EchoWeaver's locked wait; the cap
+-- itself (the same five records at full occupancy are trusted); the work of the
 -- read (exactly the game getters and entries of the plain refusal of a malformed
 -- table, and no request, send or save); and the diagnostic accessors, which read
 -- no game state and send or save nothing. This is not a slots-versus-stacks
@@ -153,9 +155,10 @@ C.scenario('P1 the over-cap refusal',function()
  X.Trusted()
 end)
 
--- P2. The six-copy cap itself is unchanged: the same five records holding six
--- copies are trusted and the Orb read passes its trust gate.
-C.scenario('P2 the six-copy cap is unchanged',function()
+-- P2. The cap itself: the same five records (holding six copies) at a live
+-- capacity of five, full occupancy, are trusted and the Orb read passes its
+-- trust gate.
+C.scenario('P2 full occupancy is not over the cap',function()
  X.Trusted()
  local l=T.read(X.AtCap())
  C.guard(l~=nil and l.synced==true and T.sig(l.bySpell)==T.sig(X.Want(X.AT_CAP)),

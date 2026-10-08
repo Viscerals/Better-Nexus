@@ -1040,6 +1040,113 @@ local function HideEditorTransients()
     end
 end
 
+-- Locked strip slot `i`, made once (fields on M, so Renderer.New and the
+-- frame builder gain no local or upvalue). The strip holds the six authored
+-- target cells; RefreshView adds a slot for each occupied record, or live
+-- capacity, beyond them.
+function M.EnsureLockedIcon(i)
+    if lockedIcons[i] then return lockedIcons[i] end
+    -- Each slot sits right of the one before it, which is made first.
+    local previous = i > 1 and M.EnsureLockedIcon(i - 1) or nil
+    local btn = CreateFrame("Button", nil, frame)
+    btn:SetSize(18, 18)
+    if i == 1 then
+        btn:SetPoint("LEFT", lockedLabel, "RIGHT", 8, 0)
+    else
+        btn:SetPoint("LEFT", previous, "RIGHT", 4, 0)
+    end
+    btn.icon = btn:CreateTexture(nil, "ARTWORK")
+    btn.icon:SetAllPoints(btn)
+    btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:SetScript("OnEnter", function(self)
+        if self.slotState == "empty" then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine("Empty locked Echo slot", 1, 1, 1)
+            GameTooltip:AddLine("Click to choose an Echo to pursue for it.", 0.8, 0.8, 0.8, true)
+            GameTooltip:Show()
+        elseif self.spellId then
+            ShowEchoTooltip(self, self.spellId, "ANCHOR_RIGHT")
+            if self.slotState == "designed" then
+                GameTooltip:AddLine("Planned locked target, not currently in this slot. Click to remove this target.", 1, 0.85, 0.3, true)
+                GameTooltip:Show()
+            elseif self.slotState == "locked" then
+                if self.beingReplaced then
+                    GameTooltip:AddLine("A replacement is planned for this slot (the gold icon). "
+                        .. "Automatic replacement needs both Automation and locked-Echo slot management ON; "
+                        .. "otherwise change it manually when available. Remove the gold target to cancel.", 1, 0.6, 0.4, true)
+                else
+                    GameTooltip:AddLine("Left-click: find in catalog", 0.8, 0.8, 0.8, true)
+                    GameTooltip:AddLine("Right-click: design a replacement for this slot", 0.8, 0.8, 0.8, true)
+                end
+                GameTooltip:Show()
+            end
+        end
+    end)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- GameAdapter.LockPerk/UnlockPerk (confirmed live via /nexus sniff,
+    -- 2026-08-01) actually perform the lock/unlock -- this only lets
+    -- the player START pursuing a replacement now, while the current
+    -- one stays locked and useful; Main.lua's TryAutoLock unlocks the
+    -- old one and locks the new one in automatically once it's owned.
+    btn:SetScript("OnClick", function(self, mouseButton)
+        if self.slotState == "locked" and mouseButton == "RightButton" then
+            if self.spellId then
+                Controller.ToggleReplacementAssignment(self.spellId)
+                requestRefresh()
+            end
+            return
+        end
+        if self.slotState == "empty" then
+            Controller.ToggleEmptyAssignment()
+            requestRefresh()
+            return
+        end
+        if self.slotState == "designed" then
+            if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
+            return
+        end
+        if not self.spellId then return end
+        local cat = View and View.Catalog and View.Catalog()
+        local row = cat and cat.rows and cat.rows[self.spellId]
+        if row and row.name and searchBox then
+            searchBox:SetText(row.name)
+        end
+    end)
+    btn:Hide()
+    lockedIcons[i] = btn
+    return btn
+end
+
+-- "Needed" icon of locked slot `i`: directly above that slot's icon
+-- (anchored to its TOP, not a same-row neighbor) -- only shown for a column
+-- whose current Echo has an active replacement designed, so "what you have
+-- vs. what you're working toward" reads as a simple stacked pair instead of
+-- two unrelated icons sitting side by side.
+function M.EnsureLockedNeedIcon(i)
+    if lockedNeedIcons[i] then return lockedNeedIcons[i] end
+    local btn = CreateFrame("Button", nil, frame)
+    btn:SetSize(14, 14)
+    btn:SetPoint("BOTTOM", M.EnsureLockedIcon(i), "TOP", 0, 2)
+    btn.icon = btn:CreateTexture(nil, "ARTWORK")
+    btn.icon:SetAllPoints(btn)
+    btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+    btn.icon:SetVertexColor(1, 0.85, 0.3)
+    btn:SetScript("OnEnter", function(self)
+        if not self.spellId then return end
+        ShowEchoTooltip(self, self.spellId, "ANCHOR_TOP")
+        GameTooltip:AddLine("Designed to replace the Echo below -- click to un-assign.", 1, 0.85, 0.3, true)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    btn:SetScript("OnClick", function(self)
+        if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
+    end)
+    btn:Hide()
+    lockedNeedIcons[i] = btn
+    return btn
+end
+
 local function EnsureFrame()
     if frame then return frame end
     local function SafeDisplay(value, maxBytes, allowEmpty, allowLineBreaks)
@@ -1303,102 +1410,12 @@ local function EnsureFrame()
     lockedLabel:Hide()
 
     lockedIcons = {}
-    for i = 1, 6 do
-        local btn = CreateFrame("Button", nil, frame)
-        btn:SetSize(18, 18)
-        if i == 1 then
-            btn:SetPoint("LEFT", lockedLabel, "RIGHT", 8, 0)
-        else
-            btn:SetPoint("LEFT", lockedIcons[i - 1], "RIGHT", 4, 0)
-        end
-        btn.icon = btn:CreateTexture(nil, "ARTWORK")
-        btn.icon:SetAllPoints(btn)
-        btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        btn:SetScript("OnEnter", function(self)
-            if self.slotState == "empty" then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine("Empty locked Echo slot", 1, 1, 1)
-                GameTooltip:AddLine("Click to choose an Echo to pursue for it.", 0.8, 0.8, 0.8, true)
-                GameTooltip:Show()
-            elseif self.spellId then
-                ShowEchoTooltip(self, self.spellId, "ANCHOR_RIGHT")
-                if self.slotState == "designed" then
-                    GameTooltip:AddLine("Planned locked target, not currently in this slot. Click to remove this target.", 1, 0.85, 0.3, true)
-                    GameTooltip:Show()
-                elseif self.slotState == "locked" then
-                    if self.beingReplaced then
-                        GameTooltip:AddLine("A replacement is planned for this slot (the gold icon). "
-                            .. "Automatic replacement needs both Automation and locked-Echo slot management ON; "
-                            .. "otherwise change it manually when available. Remove the gold target to cancel.", 1, 0.6, 0.4, true)
-                    else
-                        GameTooltip:AddLine("Left-click: find in catalog", 0.8, 0.8, 0.8, true)
-                        GameTooltip:AddLine("Right-click: design a replacement for this slot", 0.8, 0.8, 0.8, true)
-                    end
-                    GameTooltip:Show()
-                end
-            end
-        end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        -- GameAdapter.LockPerk/UnlockPerk (confirmed live via /nexus sniff,
-        -- 2026-08-01) actually perform the lock/unlock -- this only lets
-        -- the player START pursuing a replacement now, while the current
-        -- one stays locked and useful; Main.lua's TryAutoLock unlocks the
-        -- old one and locks the new one in automatically once it's owned.
-        btn:SetScript("OnClick", function(self, mouseButton)
-            if self.slotState == "locked" and mouseButton == "RightButton" then
-                if self.spellId then
-                    Controller.ToggleReplacementAssignment(self.spellId)
-                    requestRefresh()
-                end
-                return
-            end
-            if self.slotState == "empty" then
-                Controller.ToggleEmptyAssignment()
-                requestRefresh()
-                return
-            end
-            if self.slotState == "designed" then
-                if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
-                return
-            end
-            if not self.spellId then return end
-            local cat = View and View.Catalog and View.Catalog()
-            local row = cat and cat.rows and cat.rows[self.spellId]
-            if row and row.name and searchBox then
-                searchBox:SetText(row.name)
-            end
-        end)
-        btn:Hide()
-        lockedIcons[i] = btn
-    end
-
-    -- "Needed" row: directly above each locked-slot icon (anchored to its
-    -- TOP, not a same-row neighbor) -- only shown for a column whose
-    -- current Echo has an active replacement designed, so "what you have
-    -- vs. what you're working toward" reads as a simple stacked pair
-    -- instead of two unrelated icons sitting side by side.
+    for i = 1, 6 do M.EnsureLockedIcon(i) end
     lockedNeedIcons = {}
-    for i = 1, 6 do
-        local btn = CreateFrame("Button", nil, frame)
-        btn:SetSize(14, 14)
-        btn:SetPoint("BOTTOM", lockedIcons[i], "TOP", 0, 2)
-        btn.icon = btn:CreateTexture(nil, "ARTWORK")
-        btn.icon:SetAllPoints(btn)
-        btn.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-        btn.icon:SetVertexColor(1, 0.85, 0.3)
-        btn:SetScript("OnEnter", function(self)
-            if not self.spellId then return end
-            ShowEchoTooltip(self, self.spellId, "ANCHOR_TOP")
-            GameTooltip:AddLine("Designed to replace the Echo below -- click to un-assign.", 1, 0.85, 0.3, true)
-            GameTooltip:Show()
-        end)
-        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        btn:SetScript("OnClick", function(self)
-            if self.draftKey then ToggleDesignLock(self.draftKey); requestRefresh() end
-        end)
-        btn:Hide()
-        lockedNeedIcons[i] = btn
+    for i = 1, 6 do M.EnsureLockedNeedIcon(i) end
+    -- RefreshView reaches the slot builders through the frame (no upvalue).
+    frame._nexusLockedSlot = function(i)
+        return M.EnsureLockedIcon(i), M.EnsureLockedNeedIcon(i)
     end
 
     -- Auto-lock opt-in: off by default (controller-owned preference,
@@ -1410,6 +1427,7 @@ local function EnsureFrame()
     autoLockCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
     autoLockCheck:SetSize(22, 22)
     autoLockCheck:SetPoint("LEFT", lockedIcons[6], "RIGHT", 26, 0)
+    autoLockCheck._nexusAnchorSlot = 6
     autoLockCheck:SetScript("OnClick", function(self)
         Controller.SetAutoLockEnabled(self:GetChecked() and true or false)
     end)
@@ -1743,25 +1761,34 @@ local function RefreshView(catalogRevision)
     -- loop further down (so an already-locked Echo shows "Locked" instead
     -- of an addable status there too), and the footer count -- one live
     -- source of truth instead of the load-time-only lastLockedSkipped.
-    local lockedBySpell = {}
+    -- Current locked ownership is OCCUPIED RECORDS: one slot per record,
+    -- holding that Echo's whole stack. lockedCount counts records, never
+    -- copies. The stated maximum is the live capacity when the game reports
+    -- one; otherwise the six authored target cells, and none once more
+    -- records than that are occupied.
+    local lockedBySpell, lockedRecords, lockedCapacity = {}, {}, nil
     if View and View.LockedOwned then
         local locked = View.LockedOwned()
         if locked and locked.synced == true
-            and type(locked.bySpell) == "table" then
+            and type(locked.bySpell) == "table"
+            and type(locked.records) == "table" then
             lockedBySpell = locked.bySpell
+            lockedRecords = locked.records
+            lockedCapacity = tonumber(locked.capacity)
         end
     end
-    local lockedCount = 0
+    local lockedCount = #lockedRecords
     for _, count in pairs(lockedBySpell) do
         count = tonumber(count)
         if not count or count <= 0 or count >= math.huge
             or count ~= math.floor(count) then
-            lockedBySpell = {}
+            lockedBySpell, lockedRecords = {}, {}
             lockedCount = 0
             break
         end
-        lockedCount = lockedCount + count
     end
+    local lockedMaximum = lockedCapacity
+        or (lockedCount <= MAX_LOCK_SLOTS and MAX_LOCK_SLOTS or nil)
 
     -- Reconcile "awaiting lock" against reality: the moment LockedOwned()
     -- confirms one of these is actually locked, it belongs in the strip
@@ -1809,13 +1836,10 @@ local function RefreshView(catalogRevision)
     -- replacing anything (bound for a genuinely open slot) fills the next
     -- open column in the bottom row instead.
     if lockedLabel and lockedIcons then
-        local realIds, realSlots = {}, {}
-        for id in pairs(lockedBySpell) do realIds[#realIds + 1] = id end
-        table.sort(realIds)
-        for _, id in ipairs(realIds) do
-            for _ = 1, lockedBySpell[id] do
-                realSlots[#realSlots + 1] = id
-            end
+        -- One slot per occupied record (the records come ordered by spell).
+        local realSlots = {}
+        for _, record in ipairs(lockedRecords) do
+            realSlots[#realSlots + 1] = record.spellId
         end
 
         -- Replacement pairing reads straight off each draft entry's own
@@ -1858,14 +1882,33 @@ local function RefreshView(catalogRevision)
             end
         end
 
-        -- Always show all MAX_LOCK_SLOTS slots, not just however many are
-        -- currently locked -- an account with 5/6 locked was rendering as
-        -- "Locked (5):" with no visible hint a 6th slot even existed.
-        lockedLabel:SetText(string.format("Locked (%d/%d):", lockedCount, MAX_LOCK_SLOTS))
+        -- Always show at least the MAX_LOCK_SLOTS authored target cells, not
+        -- just however many are currently locked -- an account with 5/6
+        -- locked was rendering as "Locked (5):" with no visible hint a 6th
+        -- slot even existed. More occupied records, or a higher live
+        -- capacity, add slots; eight fit beside the AutoLock option.
+        local slotCount = math.min(8, math.max(MAX_LOCK_SLOTS, #realSlots,
+            lockedCapacity or 0))
+        lockedLabel:SetText(lockedMaximum
+            and string.format("Locked (%d/%d):", lockedCount, lockedMaximum)
+            or string.format("Locked (%d):", lockedCount))
         lockedLabel:Show()
+        for i = slotCount + 1, #lockedIcons do
+            lockedIcons[i]:Hide()
+            if lockedNeedIcons[i] then lockedNeedIcons[i]:Hide() end
+        end
+        if autoLockCheck and autoLockCheck._nexusAnchorSlot ~= slotCount then
+            frame._nexusLockedSlot(slotCount)
+            autoLockCheck:ClearAllPoints()
+            autoLockCheck:SetPoint("LEFT", lockedIcons[slotCount], "RIGHT", 26, 0)
+            autoLockCheck._nexusAnchorSlot = slotCount
+        end
         local fi = 1
-        for i = 1, MAX_LOCK_SLOTS do
+        for i = 1, slotCount do
             local btn, needBtn = lockedIcons[i], lockedNeedIcons[i]
+            if not btn or not needBtn then
+                btn, needBtn = frame._nexusLockedSlot(i)
+            end
             local id = realSlots[i]
             if id then
                 local row = catalog and catalog.rows and catalog.rows[id]
@@ -2313,7 +2356,10 @@ local function RefreshView(catalogRevision)
         end
     end
     local footerParts = {}
-    if lockedCount > 0 then footerParts[#footerParts + 1] = "Currently locked: " .. lockedCount .. "/6" end
+    if lockedCount > 0 then
+        footerParts[#footerParts + 1] = "Currently locked: " .. lockedCount
+            .. (lockedMaximum and ("/" .. lockedMaximum) or "")
+    end
     footerParts[#footerParts + 1] = "Rolled copies: " .. PendingTotal() .. "/79"
     local totalDesigned = designedCount + toLockCount
     local targetParts = { "Locked targets: " .. totalDesigned .. "/6" }

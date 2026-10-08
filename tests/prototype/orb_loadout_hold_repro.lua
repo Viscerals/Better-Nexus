@@ -21,8 +21,10 @@ local S=dofile('tests/prototype/orb_loadout_hold_support.lua')
 -- The accepted pause text of the hold, word for word (a diagnostic change must not touch it).
 local PAUSE_TEXT="The original loadout cannot be verified after a loadout change or an incomplete older receipt. Ownership responses do not identify the original loadout. Pending exposure is retained; no retry is allowed."
 
-local FIELDS={'pending','restored','state','recovery','gate','spendConfirmed','choiceSent','choiceObserved','selectedKey','removed','loadoutChanged','pickInFlight','autoRefresh'}
-local REPORTED={pending=true,restored=true,state='PAUSED',recovery='PAUSED',gate='loadout',spendConfirmed=true,
+-- The passive view states the one-Orb decrement as a client-observed spend
+-- (spendObserved); the receipt keeps its saved field spendConfirmed.
+local FIELDS={'pending','restored','state','recovery','gate','spendObserved','choiceSent','choiceObserved','selectedKey','removed','loadoutChanged','pickInFlight','autoRefresh'}
+local REPORTED={pending=true,restored=true,state='PAUSED',recovery='PAUSED',gate='loadout',spendObserved=true,
  choiceSent=false,choiceObserved=false,selectedKey=nil,loadoutChanged=true,pickInFlight=false,autoRefresh=false}
 local function Signature(view,source)
  local out={}
@@ -51,7 +53,7 @@ for index,cause in ipairs(S.CAUSES)do
  check(M.Status().reason==PAUSE_TEXT,name..': the hold text is exactly the accepted one: '..tostring(M.Status().reason))
  local lines=OrbLines()
  check(lines[1]=='Orb action: unresolved after a reload; state=PAUSED; recovery=PAUSED; waiting for=loadout',name..': first support line: '..tostring(lines[1]))
- check(lines[2]=='  spend confirmed=yes; choice=none; selected=none; source='..key..'; game pick in flight=no; loadout change recorded=yes; automatic refresh=not requested',
+ check(lines[2]=='  client-observed spend=yes; choice=none; selected=none; source='..key..'; game pick in flight=no; loadout change recorded=yes; automatic refresh=not requested',
   name..': second support line: '..tostring(lines[2]))
  lineOne[#lineOne+1]=lines[1];lineTwo[#lineTwo+1]=(lines[2]:gsub('source=%S+;','source=X;'))
 
@@ -88,7 +90,7 @@ for index,cause in ipairs(S.CAUSES)do
   name..': a choice made while the hold is set is not recorded for the earlier action')
  check(after.loadoutChanged==true and M.Status().pending and not M.Resume() and not M.Prepare() and M.BlocksOrdinary()==true,
   name..': the exact result does not settle it')
- check(Nexus.OrbRuntime.RecoveryView().spendConfirmed==true and M.Status().spent+M.Status().reserved==1,name..': the spend stays counted once')
+ check(Nexus.OrbRuntime.RecoveryView().spendObserved==true and M.Status().spent+M.Status().reserved==1,name..': the spend stays counted once')
  -- Nothing was invented.
  check(after.originalSlot==before.originalSlot,name..': the original slot is not inferred or filled in (still '..tostring(before.originalSlot)..')')
  check(after.offerKey==before.offerKey and after.removed==before.removed and after.chargesBefore==before.chargesBefore

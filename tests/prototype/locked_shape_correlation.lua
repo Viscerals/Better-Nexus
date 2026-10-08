@@ -41,7 +41,9 @@ local function six()
 end
 local function sixPlus() local t=six();t[7]=E(410001,{quality=1});return t end
 local function seven() local t=six();t[7]=E(410007,{quality=2});return t end
-local function stack7() return {E(410007,{quality=2,stacks=7})} end
+-- One record above its own stated maxStack: over the cap (occupied records,
+-- not copies, meet the live capacity; locked_shape_support T.CAPACITY).
+local function stack7() return {E(410007,{quality=2,stacks=7,maxStack=1})} end
 local function facts(t,keys)
  if type(t)~='table' then return printable(t) end
  local out={}

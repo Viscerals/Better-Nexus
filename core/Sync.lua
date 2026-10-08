@@ -1106,6 +1106,15 @@ Transport = TransportFactory.New({
         end
         return ChatFrame_AddMessageEventFilter(event, filter)
     end,
+    -- One frame, made at the transport's one InstallFilters call, registered
+    -- for exactly the event asked for; it passes the event's arguments on.
+    listenEvent=function(event, handler)
+        if type(CreateFrame) ~= "function" then return false end
+        local frame = CreateFrame("Frame")
+        frame:RegisterEvent(event)
+        frame:SetScript("OnEvent", function(_, _, ...) handler(...) end)
+        return true
+    end,
     observe=ObserveTransport,
 })
 

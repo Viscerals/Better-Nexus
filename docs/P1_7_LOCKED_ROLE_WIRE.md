@@ -47,6 +47,18 @@ Two optional top-level keys in the existing compact JSON object:
   refusal list), so they store the ordinary targets only, exactly as from an
   ordinary-only payload.
 
+Current contract (later correction; the design above is kept as history): the
+79 / 6 / 85 envelope no longer bounds evidence or the wire. They keep 79
+ordinary copies and hold the locked role, a stated `le` set included, to
+resource ceilings of at most 256 rows of up to 120 copies each, with a
+10000-copy total where a total is checked; the live occupied-record capacity
+is absent from evidence and payloads. Authored Share and design plans keep
+79 / 6 / 85 (`LoadoutEvidence.PlanLimits`). The wire format is unchanged;
+released (test.9049) peers keep their six-copy acceptance limit and ignore a
+stated `lv = 1` set, storing ordinary targets only. CONTRACTS.md (Occupied
+locked records) is authoritative; no server acceptance of a combined count is
+claimed.
+
 ## Who receives what
 
 | Direction | Outcome |

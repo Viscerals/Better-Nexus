@@ -1152,22 +1152,46 @@ function Evidence.SchemaVersion()
 end
 
 -- Package B / issue #22: one canonical owner for the Project Ebonhold loadout
--- envelope. Parser/resource ceilings (MAX_ENTRIES, MAX_TOTAL_STACKS) stay a
--- separate contract; these limits describe a valid game loadout and are
--- reused by every trust boundary instead of duplicating literals.
-local SEMANTIC_LIMITS = {ordinary=79, locked=6, total=85}
+-- envelope, reused by every trust boundary instead of duplicating literals.
+-- Rolled (ordinary) copies are a game bound: at most 79. Locked copies are
+-- not a fixed count. The game bounds occupied locked RECORDS by the
+-- character's live capacity (GetMaximumPermanentEchoes, a positive server
+-- value that can change), and one record holds its Echo's whole stack.
+-- Evidence and wire rows carry neither that capacity nor the native records
+-- (rows are normalized), so their locked role is held to resource ceilings
+-- only, never to a guessed capacity: at most lockedRowStacks copies in one
+-- row (the per-row wire ceiling, SyncProtocol) and lockedRows rows
+-- (MAX_ENTRIES). total is the parser's copy ceiling (MAX_TOTAL_STACKS).
+-- The live record bound itself is GameAdapter's (LockedOwned). The authored
+-- locked-target design keeps its six copies (WishlistModel); PlanLimits
+-- states that design envelope for a Share.
+local LOCKED_ROW_STACKS = 120
+local SEMANTIC_LIMITS = {ordinary=79, lockedRows=MAX_ENTRIES,
+    lockedRowStacks=LOCKED_ROW_STACKS, total=MAX_TOTAL_STACKS}
+local PLAN_LIMITS = {ordinary=79, locked=6, total=85}
 
 function Evidence.SemanticLimits()
-    return {ordinary=SEMANTIC_LIMITS.ordinary, locked=SEMANTIC_LIMITS.locked,
+    return {ordinary=SEMANTIC_LIMITS.ordinary,
+        lockedRows=SEMANTIC_LIMITS.lockedRows,
+        lockedRowStacks=SEMANTIC_LIMITS.lockedRowStacks,
         total=SEMANTIC_LIMITS.total}
+end
+
+-- The authored plan envelope: a shared plan's locked rows are permanent
+-- design targets, which a Wishlist holds to six copies.
+function Evidence.PlanLimits()
+    return {ordinary=PLAN_LIMITS.ordinary, locked=PLAN_LIMITS.locked,
+        total=PLAN_LIMITS.total}
 end
 
 -- Count stack copies by role. Rows are `{spellId, quality, stacks, locked}`
 -- shapes or `{count}` aliases; every stack copy counts once, so duplicate
--- segmentation cannot change the total. Returns a fixed-shape verdict.
+-- segmentation cannot change the total. A locked row is also held to the
+-- row ceilings above. Returns a fixed-shape verdict.
 function Evidence.SemanticEnvelope(rows, options)
     options = type(options) == "table" and options or {}
-    local ordinary, locked, total = 0, 0, 0
+    local ordinary, locked, total, lockedRows = 0, 0, 0, 0
+    local lockedOver = false
     for _, row in ipairs(type(rows) == "table" and rows or {}) do
         if type(row) ~= "table" then
             return {valid=false, reason="malformed", ordinary=ordinary,
@@ -1184,11 +1208,19 @@ function Evidence.SemanticEnvelope(rows, options)
         end
         local isLocked = options.forceLocked == true
             or row.locked == true or row.locked == 1
-        if isLocked then locked = locked + stacks else ordinary = ordinary + stacks end
+        if isLocked then
+            locked, lockedRows = locked + stacks, lockedRows + 1
+            if stacks > SEMANTIC_LIMITS.lockedRowStacks
+                or lockedRows > SEMANTIC_LIMITS.lockedRows then
+                lockedOver = true
+            end
+        else
+            ordinary = ordinary + stacks
+        end
         total = total + stacks
     end
-    local valid = ordinary <= SEMANTIC_LIMITS.ordinary
-        and locked <= SEMANTIC_LIMITS.locked and total <= SEMANTIC_LIMITS.total
+    local valid = not lockedOver and ordinary <= SEMANTIC_LIMITS.ordinary
+        and total <= SEMANTIC_LIMITS.total
     return {valid=valid, reason=valid and "valid" or "SEMANTIC_ENVELOPE",
         ordinary=ordinary, locked=locked, total=total}
 end
