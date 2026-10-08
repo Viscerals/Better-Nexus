@@ -357,13 +357,52 @@ local function ReplacedSpells(pending, pendingLock, fulfilledTargets, replacing)
     return replaced
 end
 
+-- The plan's own locked target copies, as the design policy counts them: each
+-- designed row's copies (a lock-intent row one, a queued target its stacks),
+-- one for `newSpellId` when one is given, and once each the fulfilled targets
+-- the final design keeps (held, not replaced, not designed again;
+-- PlanLockCommit). `held` is the current locked copies by spell and
+-- `replacingSpellId` the locked Echo whose replacement is being chosen now.
+-- Returns the copies and the designed spells.
+local function DesignCopies(pending, pendingLock, fulfilledTargets, held,
+    replacingSpellId, newSpellId)
+    pending = type(pending) == "table" and pending or {}
+    pendingLock = type(pendingLock) == "table" and pendingLock or {}
+    fulfilledTargets = type(fulfilledTargets) == "table" and fulfilledTargets or {}
+    held = type(held) == "table" and held or {}
+    local replaced = ReplacedSpells(pending, pendingLock, fulfilledTargets,
+        replacingSpellId)
+    local designed, copies = {}, 0
+    local function Design(spellId, n)
+        local id = PositiveInteger(spellId)
+        if id then designed[id] = true end
+        copies = copies + n
+    end
+    for _, row in pairs(pending) do
+        if type(row) == "table" and row.lockIntent then Design(row.spellId, 1) end
+    end
+    for _, row in pairs(pendingLock) do
+        if type(row) == "table" then
+            Design(row.spellId, PositiveInteger(row.stacks) or 1)
+        end
+    end
+    if newSpellId ~= nil then Design(newSpellId, 1) end
+    for spellId, value in pairs(fulfilledTargets) do
+        local id = PositiveInteger(spellId)
+        local n = id and TargetCopies(value, id)
+        if n and not designed[id] and not replaced[id]
+            and (PositiveInteger(held[id]) or 0) >= n then
+            copies = copies + n
+        end
+    end
+    return copies, designed
+end
+
 -- The editor's locked-target budget has two separate rules. Returns the rule a
 -- new target of `newSpellId` breaks ("design" or "slots"), or nil.
--- * Design policy: the plan's own locked target copies stay within
---   MAX_LOCK_SLOTS, the authored six-copy design: each designed row's copies
---   (a lock-intent row one, a queued target its stacks), the new target's
---   one, and once each the fulfilled targets the final design keeps (held,
---   not replaced, not designed again; PlanLockCommit).
+-- * Design policy: the plan's own locked target copies with the new target's
+--   one (DesignCopies) stay within MAX_LOCK_SLOTS, the authored six-copy
+--   design.
 -- * Slot occupancy: the occupied RECORDS of the trusted locked projection,
 --   except those of a freed spell, plus one record for each designed spell
 --   that holds none (a record holds a whole stack), stay within the live
@@ -379,38 +418,12 @@ local function LockBudgetRefusal(pending, pendingLock, options, newSpellId)
     pendingLock = type(pendingLock) == "table" and pendingLock or {}
     local projection = type(options.lockedProjection) == "table"
         and options.lockedProjection or {}
-    local held = type(projection.bySpell) == "table" and projection.bySpell or {}
     local records = type(projection.recordsBySpell) == "table"
         and projection.recordsBySpell or {}
-    local fulfilled = type(options.fulfilledTargets) == "table"
-        and options.fulfilledTargets or {}
     local freed = FreedSpells(pending, pendingLock, options.replacingSpellId)
-    local replaced = ReplacedSpells(pending, pendingLock, fulfilled,
-        options.replacingSpellId)
-
-    local designed, copies = {}, 0
-    local function Design(spellId, n)
-        local id = PositiveInteger(spellId)
-        if id then designed[id] = true end
-        copies = copies + n
-    end
-    for _, row in pairs(pending) do
-        if type(row) == "table" and row.lockIntent then Design(row.spellId, 1) end
-    end
-    for _, row in pairs(pendingLock) do
-        if type(row) == "table" then
-            Design(row.spellId, PositiveInteger(row.stacks) or 1)
-        end
-    end
-    Design(newSpellId, 1)
-    for spellId, value in pairs(fulfilled) do
-        local id = PositiveInteger(spellId)
-        local n = id and TargetCopies(value, id)
-        if n and not designed[id] and not replaced[id]
-            and (PositiveInteger(held[id]) or 0) >= n then
-            copies = copies + n
-        end
-    end
+    local copies, designed = DesignCopies(pending, pendingLock,
+        options.fulfilledTargets, projection.bySpell, options.replacingSpellId,
+        newSpellId)
     if copies > MAX_LOCK_SLOTS then return "design" end
 
     local occupied = 0
@@ -628,12 +641,8 @@ local function NormalizeCandidateEvidence(ordinaryEchoes, lockedEchoes, options)
         or type(evidence.NormalizeLockedEchoes) ~= "function" then
         return nil, "locked Echo evidence validator is unavailable"
     end
-    local normalizedLocked, lockedReason = evidence.NormalizeLockedEchoes(
-        lockedEchoes)
+    local normalizedLocked = evidence.NormalizeLockedEchoes(lockedEchoes)
     if not normalizedLocked then
-        if tostring(lockedReason):find("six-copy", 1, true) then
-            return nil, lockedReason
-        end
         return nil, "locked Echo evidence is invalid"
     end
 
@@ -647,6 +656,16 @@ local function NormalizeCandidateEvidence(ordinaryEchoes, lockedEchoes, options)
         explicitRows[id] = explicitRows[id] or {}
         explicitRows[id][#explicitRows[id] + 1] = CopyEntry(echo)
         explicitCount = explicitCount + stacks
+    end
+    -- Locked rows stay valid evidence above six copies (CandidateEvidence
+    -- bounds rows and the copies in one row), but each becomes this draft's
+    -- design, a queued or a fulfilled target that nothing replaces, and a plan
+    -- designs at most MAX_LOCK_SLOTS locked target copies. Refused before any
+    -- draft is formed, so a Copy keeps the draft it would replace.
+    if explicitCount > MAX_LOCK_SLOTS then
+        return nil, string.format("the locked Echoes hold %d copies, more than "
+            .. "the %d locked target copies a plan designs", explicitCount,
+            MAX_LOCK_SLOTS)
     end
 
     -- Local locked ownership must not consume or suppress an ordinary role
@@ -1158,6 +1177,7 @@ function Factory.New()
     Model.MaxStack = MaxStack
     Model.EchoListTotal = EchoListTotal
     Model.PendingTotal = PendingTotal
+    Model.DesignCopies = DesignCopies
     Model.LockBudgetRefusal = LockBudgetRefusal
     Model.TargetCopies = TargetCopies
     Model.TargetReplacement = TargetReplacement

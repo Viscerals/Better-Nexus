@@ -1508,6 +1508,26 @@ function Controller.New(options)
         }) end
     end
 
+    -- The plan's design policy at Save, the design rule of LockBudgetRefusal
+    -- (WishlistModel DesignCopies): the draft's own final design -- one copy
+    -- per lock intent, each queued target's copies, and once each the
+    -- fulfilled targets the commit keeps (held, not replaced, not designed
+    -- again; PlanLockCommit) -- holds at most six locked target copies. A plan
+    -- rule only: occupied records, the live capacity and maxStack do not enter
+    -- it. A refusal keeps no retry: a queued upload is discarded with it.
+    -- Returns the copies when it refuses.
+    local function DesignLimitRefusal()
+        local copies = DraftModel.DesignCopies(state.pending, state.pendingLock,
+            state.fulfilledDraftTargets, LockedBySpell())
+        if copies <= MAX_LOCK_SLOTS then return nil end
+        state.applyRetry = nil
+        notify(string.format(
+            "|cffff6060Nexus:|r Not saved: this plan's locked targets hold %d copies, and a plan "
+                .. "designs at most %d locked target copies -- untag one first. Nothing was uploaded "
+                .. "or assigned; your edits are kept.", copies, MAX_LOCK_SLOTS))
+        return copies
+    end
+
     local function TryApply(slot, name, echoes, guard)
         -- An upload may be delayed by the service's spacing guard. The confirmed
         -- draft must still be current BEFORE sending, not merely before opening
@@ -1544,6 +1564,10 @@ function Controller.New(options)
             NotSavedStaleSlot(staleSlot, staleWhy)
             return false, "stale_slot"
         end
+        -- The last check before the upload: a confirmed Save, a direct payload
+        -- and a spaced retry all pass here, so a design above six is never
+        -- uploaded and keeps no retry.
+        if DesignLimitRefusal() then return false, "design_limit" end
         -- The editor this upload belongs to: a callback during the host call can
         -- open another one, and the upload is bookkept against this one only.
         local submitting = state.editingContext
@@ -1758,6 +1782,7 @@ function Controller.New(options)
             notify("|cffff6060Nexus:|r pending list is empty -- add something first.")
             return nil, "empty"
         end
+        if DesignLimitRefusal() then return nil, "design_limit" end
         local emptySlot = EmptyDestination()
         if emptySlot then
             NotSavedEmptyDestination(emptySlot)

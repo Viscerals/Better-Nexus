@@ -144,7 +144,12 @@ This file has two parts.
   their copies fit six; otherwise the code holds the ordinary plan and the
   export says that the locks are left out. A code the codec would empty
   (outside 79 / 6 / 85, or no Echo at all) is refused with its reason and never
-  shown. Neither rule claims what the server accepts.
+  shown. Neither rule claims what the server accepts. The design rule also
+  bounds whole plans (`DesignCopies`): a Copy whose locked rows hold more than
+  six copies is refused before it replaces the draft, and Save refuses a draft
+  whose own final design holds more than six copies before any confirmation or
+  upload and keeps no retry; occupied records, the live capacity and maxStack
+  do not enter it.
 - **Equal rolled contents, several retained designs.** A server mirror carries
   ordinary rows only, so a plan without its own design reads the content-key
   bucket (`lockDesignTargetsBySlot[key]`) only while the retained designs of

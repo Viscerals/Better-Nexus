@@ -40,6 +40,14 @@
 -- lockedRows 256 and lockedRowStacks 120 and the report line names them.
 -- GUARD (holds at 3bc6d88): ordinary 79 and total 10000 stay retained; an
 -- older producer's {79, 6, 85} limits still read "limits 79/6/85".
+-- Build Library detail (standards review r2, STD-R2-02). GUARD (holds at
+-- 1756f4d; existing behaviour): D the record P7 admitted through the actual
+-- catalog (79 ordinary, seven single locked records), opened with
+-- CB.ShowBuild as batch_description_unseeded_edit opens a record, reads
+-- "LOCKED ECHOES  +1 more locked" with exactly six locked icons drawn; the P6
+-- record (six rows) reads "LOCKED ECHOES" with six icons; no game action.
+-- SETUP: both records are served and the detail pane opens. No layout change
+-- and no envelope or fixture limit is relaxed.
 local B=dofile('tests/prototype/batch_repair_support.lua')
 local C=B.Checker('batch_locked_units_envelopes')
 local printable=B.printable
@@ -180,6 +188,43 @@ C.scenario('I incident limits keep the locked row ceilings',function()
  local old=Counted(support.Latest())
  C.guard(old~=nil and old:find('(limits 79/6/85)',1,true)~=nil,'I: an older producer\'s limits still read 79/6/85',old)
  support.Clear()
+end)
+
+C.scenario('D Build Library detail of seven and six locked records',function()
+ local CB=Nexus.CommunityBuilds
+ local actions=#H.actions
+ C.setup(CAT.Get('synthetic-env-79-seven')~=nil and CAT.Get('synthetic-env-79-six')~=nil,
+  'D: the catalog serves the P7 (seven locked rows) and P6 (six rows) records')
+ local function Panel() local f=NexusCommunityBuildsFrame;return f and f._detailPanel end
+ -- The record's detail pane: its locked label, and the locked icons shown.
+ local function Detail(id)
+  CB.ShowBuild(id)
+  B.Until(H,function() local p=Panel();return p and p:IsShown() and p._nexusShownId==id end,2000)
+  local p=Panel()
+  if not (p and p:IsShown() and p._nexusShownId==id) then return nil end
+  local icons=0
+  for _,ic in ipairs(p.lockedIcons or {}) do if ic:IsShown() then icons=icons+1 end end
+  return {label=B.Plain(p.lockedLabel:GetText() or ''),shown=p.lockedLabel:IsShown(),icons=icons,
+   slots=#(p.lockedIcons or {})}
+ end
+ CB.Show()
+ local seven=Detail('synthetic-env-79-seven')
+ C.setup(seven~=nil,'D7: the Build Library detail pane opens the seven-row record')
+ if seven then
+  print('OBSERVED','D7 label='..seven.label,'shown='..printable(seven.shown),'icons='..seven.icons..'/'..seven.slots)
+  C.guard(seven.shown and seven.label=='LOCKED ECHOES  +1 more locked',
+   'D7: the detail reports the one locked row it does not draw',seven.label)
+  C.guard(seven.icons==6 and seven.slots==6,'D7: exactly six locked icons are drawn',seven.icons..'/'..seven.slots)
+ end
+ local six=Detail('synthetic-env-79-six')
+ C.setup(six~=nil,'D6: the detail pane opens the six-row record')
+ if six then
+  print('OBSERVED','D6 label='..six.label,'shown='..printable(six.shown),'icons='..six.icons..'/'..six.slots)
+  C.guard(six.shown and six.label=='LOCKED ECHOES' and six.icons==6,
+   'D6: a six-row record reports no further locked row and draws its six icons',six.label)
+ end
+ C.guard(#H.actions==actions,'D: no game action',#H.actions-actions)
+ print('OBSERVED','D fake sends='..#H.sent)
 end)
 
 C.finish('(records bound the locked envelope; copies preserved; refusals unchanged)')
