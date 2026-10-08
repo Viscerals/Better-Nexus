@@ -3,6 +3,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
 import json
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,11 @@ class Page(HTMLParser):
         for key in ('href', 'src'):
             if key in data:
                 self.refs.append(data[key])
+
+release = json.loads((ROOT / 'release-source.json').read_text(encoding='utf-8'))
+match = re.fullmatch(r'v1\.20\.0-beta\.1-test\.([1-9]\d*)', release['tag_name'])
+assert match and release['prerelease'] is True
+current_test = int(match.group(1))
 
 pages = {p: Page(p.read_text(encoding='utf-8')) for p in SITE.rglob('*.html')}
 errors, checked, external = [], 0, set()
@@ -57,13 +63,15 @@ for file, page in pages.items():
 for file in SITE.rglob('*'):
     if file.suffix in ('.html', '.js', '.css', '.json', '.svg'):
         text = file.read_text(encoding='utf-8')
-        for bad in ('test.9093', 'test.9094', 'ebb-hero', 'Lzra2000', 'ACSJPB'):
+        for number in re.findall(r'test\.(\d+)', text):
+            if int(number) > current_test:
+                errors.append(f'{file.relative_to(SITE)}: unpublished future test.{number}')
+        for bad in ('ebb-hero', 'Lzra2000', 'ACSJPB'):
             if bad in text:
                 errors.append(f'{file.relative_to(SITE)}: unwanted token {bad}')
 
-release = json.loads((ROOT / 'release-source.json').read_text(encoding='utf-8'))
 download_html = (SITE / 'releases/index.html').read_text(encoding='utf-8')
-assert release['tag_name'] == 'v1.20.0-beta.1-test.9092'
+assert release['tag_name'] in download_html
 for asset in release['assets']:
     if asset['browser_download_url'] not in download_html:
         errors.append('Download asset does not match recorded public release')

@@ -2,6 +2,21 @@
 
 This page summarizes published changes in original wording. The versioned GitHub release is the full record.
 
+## Public test.9093
+
+**1.20.0-beta.1 · 8 October 2026 · EXPERIMENTAL PRERELEASE**
+
+- **Wishlist progress and data:** Refresh after loadout swaps; preserve authored descriptions and links; retain explicit selected design identity; refuse over-limit locked-target Copy and Save before accepting them.
+- **Locked Echo evidence:** Distinguish record slots from copies held in stacks, use observed capacity conservatively, and preserve validated locked Saved Build mirrors.
+- **Orbs:** Improve readiness refusal diagnostics and assigned-Wishlist guidance; describe spending as client-observed rather than server-confirmed; handle bounded native-error feedback.
+- **DPS and sharing:** Restore supported historical DPS into the served authority payload and improve current-class capture/import while preserving evidence guards.
+- **Interface:** Repair leaderboard selection/tooltips/menu states, link drafts, log paging, Wishlist menu cleanup, name markers, Saved Build labels and HUD hide ownership. Use validated client Intensity constants, Journal fallback and declared slot ranges; display low integer DPS.
+
+!!! warning "Native validation remains open"
+    The hosted and retained offline checks use simulated services. The reported live Orb server-data wait is not proven resolved, and actual client/server legality, spending, native UI timing and peer/error delivery remain unverified. Preserve your saved data; no wipe is required.
+
+[Full test.9093 notes →](https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9093)
+
 ## Public test.9092
 
 **1.20.0-beta.1 · 5 October 2026**
@@ -31,6 +46,6 @@ These are cumulative published highlights, not a promise that every native edge 
 
 - [All published releases](https://github.com/Viscerals/Better-Nexus/releases)
 - [Inherited changelog in the source repository](https://github.com/Viscerals/Better-Nexus/blob/main/CHANGELOG.md)
-- [Download test.9092](index.md)
+- [Download test.9093](index.md)
 
 The historical changelog and development source can differ from the current package. Use the release tag and package identity for a precise report.

@@ -7,7 +7,7 @@ Keep your plans and history. Replace the addon code, while preserving the saved 
 
 ## 1. Get the public package
 
-Use the [test.9092 download page](../releases/index.md). The release package is a ZIP with the player addons. The repository’s green **Code** button downloads source, which is not the player release package.
+Use the [test.9093 download page](../releases/index.md). The release package is a ZIP with the player addons. The repository’s green **Code** button downloads source, which is not the player release package.
 
 This is an experimental beta. Check the complete build label rather than relying on the shared `1.20.0-beta.1` addon version alone.
 
@@ -42,7 +42,7 @@ Do not clear old Wishlists, recovery markers, or unresolved entries to make a be
 
 1. Enable **Nexus** and **NexusSupport** in the client’s AddOns list.
 2. Keep **Automation OFF** while checking navigation, Wishlists, and saved builds.
-3. Open `/nexus help` for the in-game guide. Confirm the loaded build is **test.9092** in the startup/build information or report.
+3. Open `/nexus help` for the in-game guide. Confirm the loaded build is **test.9093** in the startup/build information or report.
 4. Review your active loadout and Wishlist assignment before enabling any automatic actions.
 5. Disable competing Echo pickers before using Nexus automation. A separate LoadoutPilot is not required to run Nexus.
 
@@ -60,4 +60,4 @@ A local restore cannot undo currency or Orbs already spent, changed owned Echoes
 
 Next: [Create or import your first Wishlist →](first-wishlist.md)
 
-Source: [public repository installation guide](https://github.com/Viscerals/Better-Nexus/blob/v1.20.0-beta.1-test.9092/README.md) and [published test.9092 notes](https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9092).
+Source: [public repository installation guide](https://github.com/Viscerals/Better-Nexus/blob/v1.20.0-beta.1-test.9093/README.md) and [published test.9093 notes](https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9093).

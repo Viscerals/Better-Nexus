@@ -31,6 +31,6 @@ Get the addon installed safely, give it a Wishlist to work toward, and learn whe
 </div>
 
 !!! info "Public beta, limited support"
-    This guide describes the public **1.20 beta / test.9092**. It is experimental. The maintainer has stepped back from regular support; see the [support note](../support.md) before requesting help.
+    This guide describes the public **1.20 beta / test.9093**. It is experimental. The maintainer has stepped back from regular support; see the [support note](../support.md) before requesting help.
 
 Need help without leaving the game? Open the read-only guide with `/nexus help`.

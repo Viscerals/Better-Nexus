@@ -50,7 +50,7 @@ for source in SITE.rglob('*'):
 metadata = {
     'kind': 'documentation-website',
     'canonical_url': 'https://viscerals.github.io/Better-Nexus/',
-    'public_addon_release': 'v1.20.0-beta.1-test.9092',
+    'public_addon_release': json.loads((ROOT / 'release-source.json').read_text(encoding='utf-8'))['tag_name'],
     'commit': os.environ.get('GITHUB_SHA', 'local'),
     'run_id': os.environ.get('GITHUB_RUN_ID', 'local'),
     'repository': os.environ.get('GITHUB_REPOSITORY', 'Viscerals/Better-Nexus'),
