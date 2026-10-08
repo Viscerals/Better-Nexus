@@ -34,6 +34,18 @@ Before release:
 
 Only a package built with `--public` announces its test number to other clients. Internal and review packages must never be built with `--public`.
 
+## Public release checklist
+
+Use this checklist for each explicitly authorized public release. It records a manual workflow; it does not authorize later releases or create a scheduled task. One named release owner coordinates publication and announcements, checks existing receipts first, and prevents duplicate posts.
+
+1. Verify the newest published public test and same-series tags, then select a strictly newer number. Pin the reviewed clean source commit, preserve historical packages, and follow the repository's normal PR and required CI controls. Record the actual tested commit/tree and separate offline validation from native client/server evidence.
+2. Build the public package with `--public`; verify tag, label, announced identity, ZIP content, and SHA-256 with the existing release checker. State **EXPERIMENTAL** and the material limitations in release notes. Publish the GitHub release only within the user's explicit authorization, as a prerelease. Verify the remote tag target, prerelease flag, asset name, and checksum of the downloaded asset; retain the release URL and CI receipts.
+3. Update the existing GitHub Pages website's version, package download, and release information through its established deployment workflow. Preserve unrelated content. Verify the completed deployment and actual public page content, and record the canonical URL and deployed commit.
+4. Prepare the **Discord announcement and a separate actual Ko-fi post** together, using the established destinations and style. Include the verified release and documentation links, experimental labeling, a concise change list, and appropriate caveats. Present the exact drafts and destinations for user review. A Ko-fi link in another announcement does not satisfy the Ko-fi post step.
+5. Publish each announcement only after the required explicit approval, using one assigned operator. Check for a prior matching post first. Record separate verified receipts for **GitHub**, **GitHub Pages**, **Discord**, and **Ko-fi**, including destination, message/post URL, version, timestamp, and outcome. An unsent draft or requested action is not a completed publication receipt. Report any remaining destination as pending.
+
+Do not introduce an automation, new integration, credential change, or broader standing permission as part of this checklist. Keep private support evidence and personal recovery data out of public source, packages, notes, and model inputs.
+
 ## Incident response
 
 On suspected takeover, unauthorized release, or credential compromise:
