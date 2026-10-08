@@ -60,10 +60,12 @@ section('2 check, ready, continue',function()
  local original=H.Clone(R.Saved())
  SlashCmdList.NEXUS('orbs');local f=NexusOrbPanel
  f.cont:Click();local w=NexusOrbContinue
+ server.mode='hold'
  w.check:Click()
  check(server.requests>=1,'Check asks the game (read-only)')
  H.Advance(.3)
  check(w.body:GetText():find('Checking',1,true) and not w.go:IsEnabled() and not w.check:IsEnabled(),'while checking: only the cancel is live')
+ server.mode='auto'
  check(Until(H,function() return w.go:IsEnabled() end),'the Continue button becomes available only when the check is ready')
  check(w.body:GetText():find('unconfirmed',1,true) and w.body:GetText():find('not prove',1,true),'the window carries the full consent text')
  check(#w.body:GetText()<1500,'bounded text')
