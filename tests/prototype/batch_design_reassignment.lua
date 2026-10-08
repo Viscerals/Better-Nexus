@@ -20,18 +20,29 @@
 -- saves (their fake uploads are setup), synthetic server slots; the Journal
 -- picker is the real one, with a positive control that it assigns an
 -- unambiguous plan in this fixture.
+-- N (the journal_picker_layers shape): the same two designs saved as two
+-- plans of different names, D1 'Named one' kept on Saved Build 1 (and in the
+-- bucket), D2 'Named two' Unassigned from Saved Build 2. The explicit
+-- first-run selection of the plain 'Named two' mirror resolves (GUARD, as at
+-- 8c) with exactly D2, never D1 (EXPECT). R: the same row, renamed to
+-- 'Named one' after the picker opened (contents unchanged), borrows no
+-- retained design. F: the A shape chosen in the first-run context stays
+-- unresolved like A (no first-run exception).
 local B=dofile('tests/prototype/batch_repair_support.lua')
 local C=B.Checker('batch_design_reassignment')
 local printable=B.printable
 
-local function Setup(label,firsts)
+-- `names` (optional): one plan name per save; save i is then made in its own
+-- Saved Build i and mirrored at server slot 100+i. Without it every save is
+-- the first-run plan 'Same rolled contents', mirrored at slot 101 by the last.
+local function Setup(label,firsts,names)
  Nexus=nil;SlashCmdList=nil;NexusDB=nil;WishlistRealizerDB=nil
  local H=dofile('tests/prototype/harness.lua')
  for i=86,91 do H.AddEcho(200000+i,'Synthetic extra '..i,i%4,1) end
  H.Boot()
  local A=Nexus.GameAdapter
  local function State() return Nexus.Store.State() end
- local function Save(first)
+ local function Save(first,name)
   local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=Nexus.Store,
    accountRoot=function() return {} end,notify=function() end})
   c.Initialize(A);c.BeginNewWishlist()
@@ -39,18 +50,27 @@ local function Setup(label,firsts)
   for i=1,79 do rows[#rows+1]={spellId=200000+i,quality=i%4,stacks=1,locked=false} end
   for i=first,first+5 do rows[#rows+1]={spellId=200000+i,quality=i%4,stacks=1,locked=true} end
   C.setup(c.LoadPendingEchoes(rows),label..': the real controller admits the plan with targets from '..(200000+first))
-  local draft=c.PrepareApply('Same rolled contents')
+  local draft=c.PrepareApply(name)
   C.setup(draft~=nil and c.AcceptApply(draft)==true,label..': the real controller saves it')
   H.now=H.now+4;H.Advance(.2,.05)
   return draft or {}
  end
  local drafts={}
- for i,first in ipairs(firsts) do drafts[i]=Save(first) end
+ for i,first in ipairs(firsts) do
+  if names then
+   H.perks.serverBuildSlots[i]={name=i==1 and 'Saved synthetic' or 'Saved synthetic '..i,verified=true,
+    echoes={{spellId=200010,quality=2,stacks=1}}}
+   H.perks.serverActiveSlot=i;H.Notify();A.Poll()
+  end
+  drafts[i]=Save(first,names and names[i] or 'Same rolled contents')
+ end
  local key=A.WishlistKey(drafts[1].echoes or {})
  for i=2,#drafts do C.setup(A.WishlistKey(drafts[i].echoes or {})==key,label..': the saves have the same rolled-content key') end
  H.perks.serverBuildSlots[1]={name='Saved synthetic',verified=true,echoes={{spellId=200010,quality=2,stacks=1}}}
  H.perks.serverActiveSlot=1
- H.perks.serverBuildSlots[101]={name=drafts[#drafts].name,verified=false,echoes=H.Clone(drafts[#drafts].echoes)}
+ for i,draft in ipairs(names and drafts or {drafts[#drafts]}) do
+  H.perks.serverBuildSlots[100+i]={name=draft.name,verified=false,echoes=H.Clone(draft.echoes)}
+ end
  H.Notify();A.Poll()
  local buckets=State().lockDesignTargetsBySlot or {}
  local bucket=buckets[key]
@@ -171,6 +191,73 @@ C.scenario('L one retained design keeps the legacy sidecar path',function()
  local after=f.A.AssignedWishlist()
  C.guard(ok==true and after.state=='ready' and Has(after,80)==6,
   'L: with a single retained design the reassigned mirror still uses it',printable(ok)..' '..printable(after.state)..' '..Has(after,80))
+end)
+
+-- N and R: 'Named two' (D2) is Unassigned from Saved Build 2, then the
+-- first-run context. Returns the fixture, D2's identity, Saved Build 1's
+-- record and the plain 'Named two' picker candidate.
+local function NamedFirstRun(label)
+ local f=Setup(label,{80,86},{'Named one','Named two'})
+ local kept=Association(f)
+ C.setup(kept~=nil and kept.name=='Named one',label..': Saved Build 1 holds Named one (D1)')
+ f.H.perks.serverActiveSlot=2;f.H.Notify();f.A.Poll()
+ local identity=((f.State().loadoutWishlists or {})[2] or {}).assignmentId
+ C.setup(identity~=nil and f.A.ClearLoadoutWishlist(2)==true and Offered(f,identity),
+  label..': Named two (D2) is Unassigned from Saved Build 2 and kept in the removal history')
+ f.H.perks.serverActiveSlot=0;f.H.Notify();f.A.Poll()
+ local live
+ for _,c in ipairs(f.A.GetWishlistCandidates()) do if c.slot==102 then live=c end end
+ C.setup(live~=nil and live.designTargets==nil and live.name=='Named two',label..': the plain Named two mirror is offered')
+ return f,identity,B.Dump(kept),live
+end
+local function Kept(label,f,identity,kept)
+ C.guard(Offered(f,identity),label..': D2 is still offered in the removal history')
+ C.guard(B.Dump((f.State().lockDesignTargetsBySlot or {})[f.key])==f.bucketDump,
+  label..': the D1 content-key bucket is unchanged')
+ C.guard(B.Dump(Association(f))==kept,label..': Saved Build 1 keeps Named one exactly')
+ local writes=0
+ for _,kind in ipairs({'lock','unlock','take','reroll','orb-spend'}) do writes=writes+B.Count(f.H,kind) end
+ C.guard(writes==0,label..': no lock, unlock, choice or spend call',writes)
+end
+
+C.scenario('N two named plans, explicit first-run selection after Unassign',function()
+ local f,identity,kept,live=NamedFirstRun('N')
+ if not live then return end
+ local ok,why=f.A.SetFirstRunWishlist(102,live)
+ local after=f.A.AssignedWishlist()
+ local d1,d2=Has(after,80),Has(after,86)
+ print('OBSERVED','N first-run selection',printable(ok),printable(why),'state='..printable(after.state),'D1 targets='..d1,'D2 targets='..d2)
+ C.guard(ok==true and after.state=='ready' and after.activeSlot==0 and after.name=='Named two',
+  'N: the explicit first-run selection of the only plan of that name resolves',printable(after.state))
+ C.expect(d2==6 and d1==0,'N: it carries that plan\'s own design D2, never the bucket\'s D1',d2..'/'..d1)
+ Kept('N',f,identity,kept)
+end)
+
+C.scenario('R a row renamed after the picker opened borrows no design',function()
+ local f,identity,kept,live=NamedFirstRun('R')
+ if not live then return end
+ -- Same slot, same contents, now the other plan's name (and the only row of it).
+ f.H.perks.serverBuildSlots[101]=nil
+ f.H.perks.serverBuildSlots[102].name='Named one'
+ f.H.Notify();f.A.Poll()
+ local ok,why=f.A.SetFirstRunWishlist(102,live)
+ local after=f.A.AssignedWishlist()
+ local d1,d2=Has(after,80),Has(after,86)
+ print('OBSERVED','R renamed selection',printable(ok),printable(why),'state='..printable(after.state),'D1 targets='..d1,'D2 targets='..d2)
+ C.expect(d1==0 and d2==0 and (ok~=true or after.state~='ready'),
+  'R: the renamed row borrows no retained design (refused or not ready)',printable(after.state)..' D1='..d1..' D2='..d2)
+ Kept('R',f,identity,kept)
+end)
+
+C.scenario('F two designs, first-run selection of the plain mirror after Unassign',function()
+ local f=Setup('F',{80,86})
+ local identity=AssignThenUnassign('F',f)
+ f.H.perks.serverActiveSlot=0;f.H.Notify();f.A.Poll()
+ local live=Live(f)
+ C.setup(live~=nil and live.designTargets==nil,'F: the plain server mirror stays selectable')
+ local ok,why=f.A.SetFirstRunWishlist(101,live)
+ print('OBSERVED','F first-run selection',printable(ok),printable(why))
+ After('F',f,ok~=true,identity)
 end)
 
 C.finish('(equal rolled content never substitutes a stale or guessed design)')

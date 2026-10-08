@@ -1636,6 +1636,63 @@ function WishlistRoles.DesignAmbiguous(state, key)
     return false
 end
 
+-- The design an explicit selection of a plain server row carries when its
+-- rolled contents alone are ambiguous (DesignAmbiguous). A retained design is
+-- kept under its plan's name and contents, and ResolveSaved puts it only on
+-- the unique live row of that name and contents. So the clicked row is that
+-- plan when it is still the row the picker showed (same name and contents),
+-- ResolveSaved puts that plan's validated stored record on exactly this row,
+-- and every other retained design that could be this plan's is the same one.
+-- The content-key bucket names no plan: it must be that design, or the design
+-- of a valid retained plan of another name. Otherwise -- a row renamed since
+-- the picker opened, two designs for this plan, a bucket no retained plan
+-- explains, a record only its stored key ties to these contents -- nil, and
+-- the read stays unavailable. Read-only; the records DesignAmbiguous counts.
+function WishlistRoles.SelectedDesign(state, clicked, selected, live)
+    if type(clicked) ~= "table" or type(selected) ~= "table"
+        or selected.designTargets ~= nil
+        or not WishlistRoles.DesignAmbiguous(state, selected.key) then return nil end
+    local key, name, slot = selected.key, tostring(selected.name or ""), tonumber(selected.slot)
+    local content = WishlistRoles.Content(selected.echoes)
+    if name == "" or not slot or not content or clicked.key ~= key
+        or tostring(clicked.name or "") ~= name
+        or WishlistRoles.Content(clicked.echoes) ~= content then return nil end
+    A._assignmentTargetModel = A._assignmentTargetModel or Nexus.WishlistModel.New()
+    local tokenOf = A._assignmentTargetModel.TargetMapToken
+    local own, agreed, others = nil, nil, {}
+    local function Agrees(saved)
+        if type(saved) ~= "table"
+            or (saved.designRows == nil and saved.designTargets == nil) then return true end
+        local candidate = CandidateFromStoredRecord(saved)
+        local savedKey = saved.key
+        if type(savedKey) ~= "string" then savedKey = candidate and candidate.key end
+        if savedKey ~= key then return true end
+        local design = candidate and candidate.designTargets
+        local token = type(design) == "table" and tokenOf(design) or nil
+        -- A valid plan of another name is another plan.
+        if token and candidate.name ~= "" and candidate.name ~= name then
+            others[token] = true
+            return true
+        end
+        -- Anything else could be this plan's: one design only.
+        if not token or (agreed ~= nil and token ~= agreed) then return false end
+        agreed = token
+        local resolved = WishlistRoles.ResolveSaved(saved, live)
+        if resolved and tonumber(resolved.slot) == slot then own = design end
+        return true
+    end
+    if not Agrees(state.firstRunWishlist) then return nil end
+    for _, saved in pairs(type(state.loadoutWishlists) == "table" and state.loadoutWishlists or {}) do
+        if not Agrees(saved) then return nil end
+    end
+    for _, retained in ipairs(type(state.forgottenWishlists) == "table" and state.forgottenWishlists or {}) do
+        if type(retained) == "table" and not Agrees(retained.record) then return nil end
+    end
+    local bucket = tokenOf(state.lockDesignTargetsBySlot[key])
+    if own == nil or not bucket or (bucket ~= agreed and not others[bucket]) then return nil end
+    return WishlistRoles.CopyDesign(own)
+end
+
 function WishlistRoles.Wishlist(candidate, source, hasQuality)
     local wishlist=EchoesToWishlist(candidate.echoes,candidate.name,source,hasQuality,candidate.slot)
     if wishlist then
@@ -2087,8 +2144,17 @@ local function SelectWishlistCandidate(wishlistSlot, candidate)
         local moved, matches = nil, 0
         for _, current in ipairs(live) do
             if tonumber(current.slot) == wishlistSlot then
-                if current.key == snapshot.key then return Select(current) end
-                return nil, "wishlist changed; refresh and try again"
+                if current.key ~= snapshot.key then
+                    return nil, "wishlist changed; refresh and try again"
+                end
+                -- The clicked row can still be exactly one retained plan of
+                -- these contents; the selection then keeps that plan's design.
+                local selected, why = Select(current)
+                if selected and selected.designTargets == nil then
+                    selected.designTargets = WishlistRoles.SelectedDesign(
+                        Store and Store.State and Store.State() or nil, snapshot, selected, live)
+                end
+                return selected, why
             end
             if current.key == snapshot.key then
                 moved, matches = current, matches + 1
