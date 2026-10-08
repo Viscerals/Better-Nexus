@@ -30,6 +30,10 @@ match = re.fullmatch(r'v1\.20\.0-beta\.1-test\.([1-9]\d*)', release['tag_name'])
 assert match and release['prerelease'] is True
 current_test = int(match.group(1))
 
+home_html = (SITE / 'index.html').read_text(encoding='utf-8')
+home_release_numbers = re.findall(r'test\.(\d+)', home_html, flags=re.I)
+assert len(home_release_numbers) >= 2 and {int(n) for n in home_release_numbers} == {current_test}, 'Homepage current release labels differ from recorded release'
+
 pages = {p: Page(p.read_text(encoding='utf-8')) for p in SITE.rglob('*.html')}
 errors, checked, external = [], 0, set()
 for file, page in pages.items():
