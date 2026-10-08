@@ -41,9 +41,9 @@ local function six()
 end
 local function sixPlus() local t=six();t[7]=E(410001,{quality=1});return t end
 local function seven() local t=six();t[7]=E(410007,{quality=2});return t end
--- One record above its own stated maxStack: over the cap (occupied records,
+-- One record above the 120-copy row ceiling: over the cap (occupied records,
 -- not copies, meet the live capacity; locked_shape_support T.CAPACITY).
-local function stack7() return {E(410007,{quality=2,stacks=7,maxStack=1})} end
+local function stack121() return {E(410007,{quality=2,stacks=121})} end
 local function facts(t,keys)
  if type(t)~='table' then return printable(t) end
  local out={}
@@ -72,7 +72,7 @@ local Q={}
 T.scenario('Q1 a refused read is the current capture',function()
  trusted()
  H.now=H.now+10
- local l,d,err=T.read(stack7())
+ local l,d,err=T.read(stack121())
  local t=T.trust() or {}
  guard(l~=nil and l.synced==false and t.lockedRejection=='over_cap','Q1: fixture: the normal read is refused (over_cap)',
   err or t.lockedRejection)
@@ -99,7 +99,7 @@ T.scenario('Q2 a later accepted read',function()
  guard(l~=nil and l.synced==true and t.lockedSynced==true and t.lockedRejection=='none','Q2: fixture: the later read is trusted',
   err or t.lockedRejection)
  local w=T.shape() or {}
- expect(w.serial==Q.s1 and w.at==Q.t1 and w.current==false and w.laterReads==1 and w.age==30 and w.copies==7 and w.ids==1,
+ expect(w.serial==Q.s1 and w.at==Q.t1 and w.current==false and w.laterReads==1 and w.age==30 and w.copies==121 and w.ids==1,
   'Q2: the capture keeps its read, time and facts: current=no, one later read, age 30',
   facts(w,{'serial','at','current','laterReads','age','copies','ids'}))
  expect(t.lockedSerial==d.serial and Q.s1~=nil and d.serial==Q.s1+1,'Q2: the ownership sample is the later read, one serial on',
@@ -226,7 +226,7 @@ T.scenario('Q7 the Orb window read and the capture',function()
   printable(rt['locked.serial'])..' / '..printable(st.serial))
  local at0=r.at
  H.now=H.now+10
- local _,d2=T.read(stack7())
+ local _,d2=T.read(stack121())
  local r2=T.readiness() or {}
  local w2=T.shape() or {}
  guard(r2.at==at0 and r2.stage=='trust_locked' and r2.age==10,'Q7: the Orb observation is kept as it was, 10 s old',

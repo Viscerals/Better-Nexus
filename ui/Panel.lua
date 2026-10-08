@@ -288,7 +288,7 @@ local function CreateToLockWidgets(f)
         if #toLockNamesCache == 0 then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:AddLine("Locked targets remaining", 1, 1, 1)
-        GameTooltip:AddLine("These targets are planned for your six locked Echo slots.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine("These targets are planned for your locked Echo slots (a plan designs at most six target copies).", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine("Acquire the exact requested Echo and quality first.", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine("Owned copies still need to be placed in locked Echo slots.", 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine("Current locked Echo slots and card Freeze are separate.", 0.9, 0.9, 0.9, true)

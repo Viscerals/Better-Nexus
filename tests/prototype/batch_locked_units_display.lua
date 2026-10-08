@@ -17,6 +17,16 @@
 -- it is preserved unchanged in this test phase and must be decided by root.
 -- SETUP: real TOC boot, real WishlistModel/Controller/Renderer, injected Store
 -- as in wishlist_footer_layout.lua; synthetic locked records only.
+-- EBH1 export of a plan without locked targets (standards review r1,
+-- STD-R1-02), through the real editor's import and its export dialog. The
+-- export appended every held locked copy to such a plan, and above six copies
+-- the code's envelope emptied its Echo list (a code that imports nowhere).
+-- EXPECT (fails at 3bc6d88): EX7 with five records holding seven copies the
+-- export is a code that imports, holding the 79 ordinary copies and no
+-- locked row, and the dialog and the chat say the held locked Echoes are not
+-- in it; EX0 a draft with nothing to export offers no code and the dialog
+-- says why. GUARD (holds at 3bc6d88): EX6 six single records are still
+-- appended as the plan's six locked rows (the codec's 79/6/85 is unchanged).
 local B=dofile('tests/prototype/batch_repair_support.lua')
 local C=B.Checker('batch_locked_units_display')
 local printable=B.printable
@@ -82,6 +92,60 @@ C.scenario('K controls',function()
  C.guard(strip:find('Locked (0/',1,true)~=nil and footer:find('Currently locked',1,true)==nil and count==0,
   'K0: no locked records show none',strip..' / '..footer)
  C.guard(footer:find('Locked targets: 0/6',1,true)~=nil,'K0: the authored-target footer is unchanged design policy',footer)
+end)
+
+-- The real export dialog over the real editor's draft, with the given held
+-- records; the dialog's prompt is a font string, as the client's is.
+local editor=Nexus.WishlistEditor
+local function ExportShown(label,records)
+ H.locked=H.Clone(records);H.Notify();A.Poll()
+ local prompt=CreateFrame('Frame',nil,UIParent):CreateFontString()
+ prompt:SetText('Your current wishlist + locked Echoes, as an EBH1 string.')
+ local box=CreateFrame('EditBox',nil,UIParent)
+ local lines,ok,err=B.CapturePrint(function()
+  StaticPopupDialogs.NEXUS_EXPORT_WISHLIST.OnShow({editBox=box,text=prompt})
+ end)
+ local code=box._nexusExplicitExportText
+ local parsed=type(code)=='string' and code~='' and Nexus.Codec.DecodeEBH1(code) or nil
+ local ordinary,locked=0,0
+ for _,e in ipairs(parsed and parsed.entries or {}) do
+  if e.locked then locked=locked+e.stacks else ordinary=ordinary+e.stacks end
+ end
+ local x={ok=ok,err=err,code=code,box=box:GetText(),parsed=parsed,ordinary=ordinary,locked=locked,
+  prompt=B.Plain(prompt:GetText() or ''),said=B.Plain(table.concat(lines,' | '))}
+ print('OBSERVED',label,'code bytes='..printable(code and #code),'imports='..printable(parsed~=nil),
+  'ordinary='..ordinary,'locked='..locked,'prompt='..x.prompt)
+ return x
+end
+
+C.scenario('EX export of a plan without locked targets',function()
+ local rows={}
+ for i=1,79 do rows[i]={spellId=200000+i,quality=i%4,stacks=1,locked=false} end
+ H.locked={};H.Notify();A.Poll()
+ B.CapturePrint(function()
+  editor.ImportEBH1String(Nexus.Codec.EncodeEBH1(rows,'MAGE','Synthetic export'),'Synthetic export')
+ end)
+ local draft=editor.DebugDraftState()
+ C.setup(draft.pending==79 and draft.pendingLock==0 and draft.fulfilled==0,
+  'EX: the real editor holds a 79-copy plan without locked targets',draft.pending)
+ local x=ExportShown('EX7',{R(200080,1),R(200081,1),R(200082,1),R(200083,3),R(200084,1)})
+ C.expect(x.ok and x.parsed~=nil and x.ordinary==79 and x.locked==0,
+  'EX7: with seven held locked copies the export is a code that imports, holding the 79 ordinary copies',
+  printable(x.code)..' '..printable(x.err))
+ C.expect(x.prompt:find('not in this code',1,true)~=nil and x.said:find('not in this code',1,true)~=nil,
+  'EX7: the dialog and the chat say the held locked Echoes are not in the code',x.prompt..' | '..x.said)
+ x=ExportShown('EX6',{R(200080,1),R(200081,1),R(200082,1),R(200083,1),R(200084,1),R(200085,1)})
+ C.guard(x.ok and x.parsed~=nil and x.ordinary==79 and x.locked==6,
+  'EX6: six held single records are still appended as the plan\'s six locked rows',x.ordinary..'/'..x.locked)
+end)
+
+C.scenario('EX0 an export with nothing to export',function()
+ B.CapturePrint(function() editor.NewWishlist() end)
+ C.setup(editor.DebugDraftState().pending==0,'EX0: the real editor holds an empty new draft')
+ local x=ExportShown('EX0',{})
+ C.expect(x.ok and x.code=='' and x.box=='' and x.prompt:find('Export unavailable',1,true)~=nil
+  and x.said:find('no Echoes to export',1,true)~=nil,'EX0: no code is offered and the dialog says why',
+  printable(x.code)..' | '..x.prompt)
 end)
 
 C.guard(#H.actions==actions,'no game action',#H.actions-actions)

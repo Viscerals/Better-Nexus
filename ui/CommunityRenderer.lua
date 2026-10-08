@@ -1378,7 +1378,8 @@ local function EnsureDetailPanel(parent)
     p.echoLabel = body:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     p.echoLabel:SetText("Echoes:")
 
-    -- Locked echo row (permanent baseline, up to 6)
+    -- Locked echo row (permanent baseline): six icons; the label counts any
+    -- further locked rows
     p.lockedLabel = body:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     p.lockedLabel:SetText("LOCKED ECHOES")
 
@@ -1812,6 +1813,11 @@ local function RefreshDetailPanel(buildId, listPending)
     end
     if detailPanel.lockedIcons then
         if lockedEchoes and #lockedEchoes > 0 then
+            -- A record can hold more locked rows (occupied records) than the
+            -- six icons; the label counts the ones not drawn.
+            local more = #lockedEchoes - #detailPanel.lockedIcons
+            detailPanel.lockedLabel:SetText(more > 0
+                and ("LOCKED ECHOES  +" .. more .. " more locked") or "LOCKED ECHOES")
             detailPanel.lockedLabel:Show()
             detailPanel.echoLabel:Hide()
             for i, ic in ipairs(detailPanel.lockedIcons) do

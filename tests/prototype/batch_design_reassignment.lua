@@ -28,6 +28,14 @@
 -- 'Named one' after the picker opened (contents unchanged), borrows no
 -- retained design. F: the A shape chosen in the first-run context stays
 -- unresolved like A (no first-run exception).
+-- E (standards review r1, STD-R1-04): the A state opened in the actual
+-- Wishlist Editor (the remedy the unavailable note names). EXPECT (fails at
+-- 3bc6d88): the draft is filled with no locked target from the content-key
+-- bucket, and the editor says why. GUARD (holds at 3bc6d88): the editor opens
+-- the plan with its 79 rolled copies; the assignment, the D1 bucket and D2 in
+-- the removal history are unchanged and the assignment still reads
+-- unavailable; opening makes no game write. A save would then keep only the
+-- targets the player sets (not exercised here).
 local B=dofile('tests/prototype/batch_repair_support.lua')
 local C=B.Checker('batch_design_reassignment')
 local printable=B.printable
@@ -258,6 +266,32 @@ C.scenario('F two designs, first-run selection of the plain mirror after Unassig
  local ok,why=f.A.SetFirstRunWishlist(101,live)
  print('OBSERVED','F first-run selection',printable(ok),printable(why))
  After('F',f,ok~=true,identity)
+end)
+
+C.scenario('E the editor opens the ambiguous plain plan',function()
+ local f=Setup('E',{80,86})
+ local identity=AssignThenUnassign('E',f)
+ local live=Live(f)
+ C.setup(live~=nil and live.designTargets==nil,'E: the plain server mirror stays selectable')
+ C.setup(f.A.SetLoadoutWishlist(1,101,live)==true and f.A.AssignedWishlist().state=='unavailable',
+  'E: the plain mirror is assigned and reads unavailable (two retained designs)')
+ local record=B.Dump(Association(f))
+ local actions=#f.H.actions
+ local lines,ok,err=B.CapturePrint(function() Nexus.WishlistEditor.Show() end)
+ C.setup(ok,'E: the actual editor opens',err)
+ local draft=Nexus.WishlistEditor.DebugDraftState()
+ local said=B.Plain(table.concat(lines,' | '))
+ print('OBSERVED','E editor draft pending='..printable(draft.pending),'pendingLock='..printable(draft.pendingLock),
+  'fulfilled='..printable(draft.fulfilled))
+ C.guard(draft.pending==79,'E: the editor opens the plan with its 79 rolled copies',draft.pending)
+ C.expect(draft.pendingLock==0 and draft.fulfilled==0,'E: no locked target is filled in from the content-key bucket',
+  printable(draft.pendingLock)..'/'..printable(draft.fulfilled))
+ C.expect(said:find('no locked targets were filled in',1,true)~=nil,'E: the editor says why no targets were filled in',said)
+ C.guard(B.Dump(Association(f))==record and f.A.AssignedWishlist().state=='unavailable',
+  'E: opening the editor changes no assignment; it still reads unavailable')
+ C.guard(Offered(f,identity),'E: D2 is still offered in the removal history')
+ C.guard(B.Dump((f.State().lockDesignTargetsBySlot or {})[f.key])==f.bucketDump,'E: the D1 content-key bucket is unchanged')
+ C.guard(#f.H.actions==actions,'E: opening the editor makes no game write',#f.H.actions-actions)
 end)
 
 C.finish('(equal rolled content never substitutes a stale or guessed design)')

@@ -205,7 +205,15 @@ local function counts(line, label, value, limit)
     if type(limit) == "table" then
         text = text .. " (limits " .. safeText(limit.ordinary or "not stated", 16) .. "/"
             .. safeText(limit.locked or "not stated", 16) .. "/"
-            .. safeText(limit.total or "not stated", 16) .. ")"
+            .. safeText(limit.total or "not stated", 16)
+        -- The locked row ceilings, where the incident retained them: they
+        -- bound the locked role where no locked copy count does.
+        if limit.lockedRows ~= nil or limit.lockedRowStacks ~= nil then
+            text = text .. "; locked rows " .. safeText(limit.lockedRows or "not stated", 16)
+                .. ", " .. safeText(limit.lockedRowStacks or "not stated", 16)
+                .. " copies in one locked row"
+        end
+        text = text .. ")"
     end
     line[#line + 1] = text
 end
@@ -218,16 +226,17 @@ local INCIDENT_FIELDS = {"id", "kind", "reason", "producer", "origin",
     "operation", "ticket", "build", "category", "representation", "scope",
     "detail", "occurrences", "firstAt", "lastAt", "committed", "affectedOmitted"}
 local COUNT_FIELDS = {"ordinary", "locked", "total"}
+local LIMIT_FIELDS = {"ordinary", "locked", "total", "lockedRows", "lockedRowStacks"}
 local function incidentShape(value)
     if type(value) ~= "table" then return nil end
     local out = {}
     local ok = pcall(function()
         for _, field in ipairs(INCIDENT_FIELDS) do out[field] = value[field] end
-        for _, name in ipairs({"counts", "limits"}) do
+        for name, fields in pairs({counts = COUNT_FIELDS, limits = LIMIT_FIELDS}) do
             local source = value[name]
             if type(source) == "table" then
                 local copy = {}
-                for _, field in ipairs(COUNT_FIELDS) do copy[field] = source[field] end
+                for _, field in ipairs(fields) do copy[field] = source[field] end
                 out[name] = copy
             end
         end

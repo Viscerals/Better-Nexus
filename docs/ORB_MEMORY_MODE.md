@@ -97,8 +97,9 @@ text says that it cannot be confirmed and that Recheck cannot settle it.
 The offer and the choice are also recorded at the moment of a manual choice
 (event-driven, through the same read-only observer), so the observation does not
 depend on the timed reads. Besides the exact matching result, the only exit from a block is the player's explicit
-Continue for an action with a confirmed spend and no recorded outcome whose offer
-is gone (`docs/ORB_RECOVERY_CONTINUE.md`); a block that has no such exit says so.
+Continue for an action with a spend this client observed (one Orb fewer with its
+offer) and no recorded outcome whose offer is gone
+(`docs/ORB_RECOVERY_CONTINUE.md`); a block that has no such exit says so.
 
 After a reload or login the client shows its load-time default active slot
 (0, "none") until the server sends its build-slot data; `GetServerBuildSlots()`
@@ -160,8 +161,8 @@ the game still holds this action's choice five seconds after the loading screen,
 the status says so, names the recorded Echo, and says that /reload ends the
 wait and that only that Echo can confirm the action afterwards. After the
 reload, while the recorded offer is still open, the recovery status names the
-same Echo, also when the Orb balance moved after a confirmed spend (the same
-recorded offer still belongs to the action). It is text only; any other offer
+same Echo, also when the Orb balance moved after a spend this client observed
+(the same recorded offer still belongs to the action). It is text only; any other offer
 stays unmatched.
 
 The support summary and the prepared support report state the unresolved Orb

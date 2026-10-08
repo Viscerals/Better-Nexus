@@ -239,12 +239,14 @@ StaticPopupDialogs["WISHLISTREALIZER_CREATE_WISHLIST"] = {
     timeout = 0, whileDead = true, hideOnEscape = true,
 }
 
+-- The code of the open draft, or nil and why there is none. The second value
+-- of a code is what it leaves out (the controller's note), or nil.
 local function ExportEBH1String()
     local Codec = Nexus and Nexus.Codec
     if not (Codec and Codec.EncodeEBH1) then
         return nil, "export codec unavailable"
     end
-    local entries = wishlistController.ExportEntries()
+    local entries, note = wishlistController.ExportEntries()
     local classToken = ""
     if UnitClass then
         local _, eng = UnitClass("player")
@@ -252,7 +254,39 @@ local function ExportEBH1String()
     end
     local nameText = wishlistRenderer and wishlistRenderer.NameText()
     local name = wishlistController.ExportName(nameText)
-    return Codec.EncodeEBH1(entries, classToken, name)
+    local code = Codec.EncodeEBH1(entries, classToken, name)
+    -- EncodeEBH1 empties the Echo list of a plan outside the code's envelope
+    -- (79 rolled copies, 6 locked target copies, 85 entries) and of a plan
+    -- with no Echo; such a code imports nowhere, so none is offered.
+    if type(code) ~= "string" or code:sub(1, 6) == "EBH1::" then
+        return nil, #(entries or {}) == 0 and "this wishlist has no Echoes to export"
+            or "this plan does not fit an export code (at most 79 rolled copies, 6 locked target copies and 85 entries)"
+    end
+    return code, note
+end
+
+-- The export dialog's prompt says what this code is. The client's StaticPopup
+-- dialog keeps its prompt in a font string (`text`, which the native dialogs'
+-- own OnShow handlers rewrite); without one only the chat line is given.
+local function ExportPrompt(dialog, text)
+    local label = type(dialog) == "table" and dialog.text or nil
+    if type(label) == "table" and type(label.SetText) == "function" then
+        label:SetText(text)
+    end
+end
+
+-- No importable code: the copy box is claimed and left empty, and the dialog
+-- and the chat say why instead of offering text that imports nowhere.
+local function RefuseExplicitCopy(dialog, reason)
+    local box = type(dialog) == "table" and dialog.editBox or nil
+    if box then
+        ClaimWireEditBox(box)
+        box._nexusExplicitExportText = ""
+        box:SetText("")
+    end
+    local text = "Export unavailable: " .. tostring(reason or "this plan cannot be exported") .. "."
+    ExportPrompt(dialog, text)
+    print("|cffff6060Nexus:|r " .. text)
 end
 
 local function LoadImportedWishlist(parsed, chosenName)
@@ -363,7 +397,7 @@ function RolePicker.UseOwned(automatic)
     local selected,remaining={},{}
     for id,copies in pairs(locked.bySpell) do
         id=tonumber(id)
-        if not id or id<1 or id~=math.floor(id) or type(copies)~="number" or copies<1 or copies~=math.floor(copies) or copies>6 then
+        if not id or id<1 or id~=math.floor(id) or type(copies)~="number" or copies<1 or copies~=math.floor(copies) then
             RolePicker.Message("The current locked Echo list is incomplete. Choose the intended targets manually.")
             return false
         end
@@ -371,8 +405,10 @@ function RolePicker.UseOwned(automatic)
     end
     local ownedTotal=0
     for _,copies in pairs(remaining) do ownedTotal=ownedTotal+copies end
+    -- Held copies beyond the plan envelope are valid ownership, not incomplete
+    -- data; the suggestion just cannot use them.
     if ownedTotal>6 then
-        RolePicker.Message("The server reports more than six locked copies. No targets were guessed.")
+        RolePicker.Message("Your locked Echoes hold more than the six target copies a plan designs. No targets were suggested; choose the intended targets manually.")
         return false
     end
     local count=0
@@ -492,7 +528,7 @@ function RolePicker.Ensure()
     f.title=label("GameFontNormal",20,-18,570)
     local help=label("GameFontHighlightSmall",20,-44,570)
     help:SetHeight(40)
-    help:SetText("Choose which copies are planned for the six locked Echo slots.\nThis edits only the Wishlist plan; your character's Echoes are unchanged.")
+    help:SetText("Choose which copies this plan targets for locked Echo slots (at most six).\nThis edits only the Wishlist plan; your character's Echoes are unchanged.")
     f.count=label("GameFontNormal",20,-83,570)
     f.rows={}
     for n=1,RolePicker.visibleRows do
@@ -646,7 +682,19 @@ StaticPopupDialogs["NEXUS_EXPORT_WISHLIST"] = {
     editBoxWidth = 350,
     maxLetters = IMPORT_MAX_LETTERS,
     OnShow = function(self)
-        SetExplicitCopyText(self.editBox, (ExportEBH1String()) or "")
+        local code, why = ExportEBH1String()
+        if not code then
+            RefuseExplicitCopy(self, why)
+            return
+        end
+        SetExplicitCopyText(self.editBox, code)
+        if why then
+            -- What the code leaves out (current locked Echoes above the plan's
+            -- six locked target copies).
+            ExportPrompt(self, "Your current wishlist as an EBH1 string; " .. why
+                .. ".\nCtrl+A, Ctrl+C to copy:")
+            print("|cffff9040Nexus:|r " .. why .. ".")
+        end
         self.editBox:HighlightText()
         self.editBox:SetFocus()
     end,

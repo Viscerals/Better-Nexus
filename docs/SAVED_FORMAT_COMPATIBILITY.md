@@ -89,6 +89,20 @@ A Saved Build mirror keeps a row the server marks locked (`locked = 1`) in `lock
 
 Only offline synthetic tests cover this; whether the server accepts a given combined count is not claimed.
 
+## Equal rolled contents and several retained designs
+
+A server mirror carries ordinary rows only, and the content-key bucket (`lockDesignTargetsBySlot[key]`) names no plan. A plan without its own design therefore reads that bucket only while every retained design of the same rolled contents agrees: the bucket, each stored assignment, the first-run plan and the removal history, compared by their canonical target token (CONTRACTS.md, "Equal rolled contents, several retained designs"). An empty bucket `{}` left by a build before W4 (`docs/W4_EMPTY_LOCK_BUCKETS.md`) is a zero-target design and counts like any other. No field, schema, storage or protocol version changed, and nothing is migrated.
+
+| Case | Behavior |
+|---|---|
+| Upgrade of a profile holding a design-less assignment whose content key has a bucket and a differing retained design (a W4 empty bucket included) | Earlier builds read it `ready` with the bucket's targets, also when the bucket was the plan's own design. It now reads `unavailable` with a note and AutoLock reads no targets, until the intended plan is assigned, restored or given targets. Both designs and the history are kept. |
+| Opening that plan in the Wishlist Editor | No locked target is filled in from the bucket, and the editor says so. Nothing is written until the player saves; the save keeps only the targets set there. |
+| Explicit reselection of the plain row (Journal or selector picker) | It carries a design only when exactly one retained design is attributable to the clicked name and contents, that plan resolves onto exactly the clicked row, and the bucket's design (an empty bucket included) is that design or the design of a valid plan of another name. A design that only the bucket holds is never carried. |
+| A selection whose identity moved to another row, whose mirror is missing, or that names only a slot number | No design is borrowed; the assignment stays `unavailable`. These are conservative refusals. |
+| A differing design that later leaves all retained data | The removal history keeps five records. Once the other design has left the bucket, the assignments, the first-run plan and that history, the plain plan reads the bucket again. This residual limit exists since the rule was added (f53f5ed), not since the 8c baseline; removing it needs durable per-plan design provenance, a saved-format change that is not made. |
+
+Only offline synthetic tests cover this (`batch_design_reassignment`, `journal_picker_layers`).
+
 ## Upgrading from a build that kept the data read-only
 
 test.9033 and earlier kept formats 3 to 5 read-only. In that state the Store built no Store-data wrapper. The catalog still saved its data bundle, with an empty Store-data placeholder in it. test.9034 and test.9035 then refused that placeholder: start-up failed with `STORE_INVALID`, and the displayed reason had no further detail. This is reproduced on the exact sources: synthetic format-5 data started on test.9033 (`487eaa9`), then on test.9035 (`753e384`).
@@ -172,7 +186,7 @@ The copy does not change the original plain-name row, so the other addon can sti
 | `accountCharacters` (`name@realm` rows) | Same key format; kept. This build does not add or update ledger rows for these formats. |
 | `chars["Name"]` rows | Copied with established ownership as described above; otherwise kept unread. |
 | `loadoutWishlists[slot]` = `{slot, key, name, echoes}` | Readable. If a Wishlist lists the same Echo in two separate rows, the two versions compute its key differently. That assignment is kept but is not used until it is assigned again. |
-| `lockDesignTargetsBySlot[key]` = `{[spellId]=true or replaced spellId}` | Readable, with the same key caveat. |
+| `lockDesignTargetsBySlot[key]` = `{[spellId]=true or replaced spellId}` | Readable, with the same key caveat. A plan without its own design reads it only while the retained designs of those rolled contents agree (see "Equal rolled contents and several retained designs"). |
 | `tomeTogglePending`, `flagDemotions`, `recordedPicks`, unknown fields | Carried unchanged. |
 | Account and DPS storage | The older account/DPS converter is not started for these formats. Its commit replaces those tables and keeps no archive. DPS storage is handled as in test.9033. |
 

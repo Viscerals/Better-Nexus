@@ -20,6 +20,16 @@
 -- unavailable to actions; no consequential call is made by any read.
 -- SETUP: real TOC boot with the synthetic Orb/Perk services of orbs_support;
 -- capacity comes only from the synthetic GetMaximumPermanentEchoes.
+-- A record's own maxStack (standards review r1, STD-R1-03): the native SS18
+-- parser stores `stack` and `maxStack` independently (perks_service.lua
+-- 300-314) and whether the server holds one to the other is unknown
+-- (EBH-Q05), so a stated maxStack is data, not a trust bound.
+-- EXPECT (fails at 3bc6d88): X a record holding 2 copies that states
+-- maxStack 1, at capacity 6, is trusted with both copies (trust view, model
+-- projection in one record, Orb read).
+-- GUARD (holds at 3bc6d88): X121 a 121-copy record stays refused although it
+-- states maxStack 200 (the 120-copy row ceiling); X7 the same 2-copy record as
+-- a seventh record at capacity 6 stays refused (capacity).
 local B=dofile('tests/prototype/batch_repair_support.lua')
 local C=B.Checker('batch_locked_units_trust')
 local printable=B.printable
@@ -122,6 +132,27 @@ C.scenario('M malformed counts and shapes',function()
  node.spellId,node.stack=410001,1
  H.locked={deep};l=A.LockedOwned()
  C.guard(l.synced==false,'M: nesting deeper than eight stays refused')
+end)
+
+C.scenario('X a record above its own stated maxStack',function()
+ capacity=6
+ local over={spellId=410005,stack=2,maxStack=1,quality=0}
+ local l,t=Read({Record(410001,1,1),over})
+ print('OBSERVED','X synced='..printable(l.synced),'rejection='..printable(t.lockedRejection),'copies='..printable(t.lockedCopies))
+ C.expect(l.synced==true and t.lockedSynced==true and t.lockedRejection=='none',
+  'X: a record holding 2 copies that states maxStack 1 is trusted',t.lockedRejection)
+ C.expect(l.bySpell[410005]==2 and Copies(l.bySpell)==3 and t.lockedCopies==3,
+  'X: both copies of that record are kept',Copies(l.bySpell))
+ local p=model.LockedProjection(l,A.Catalog())
+ C.expect(p~=nil and p.bySpell[410005]==2 and p.recordsBySpell[410005]==1 and p.occupied==2,
+  'X: the model projection keeps them in one occupied record',p and p.occupied)
+ local s,_,stage=O.Read()
+ C.expect(s~=nil and stage==nil and s.locked and s.locked['410005:0']==2,'X: the Orb read keeps the two copies',stage)
+ l=Read({Record(410001,1,1),{spellId=410005,stack=121,maxStack=200,quality=0}})
+ C.guard(l.synced==false,'X121: a 121-copy record stays refused although it states maxStack 200 (row ceiling)')
+ local seven={Record(410001,1,1),Record(410002,1,2),Record(410003,1,0),Record(410004,1,3),Record(410007,1,2),Record(410008,1,1),over}
+ l=Read(seven)
+ C.guard(l.synced==false,'X7: the same record as a seventh record at capacity 6 stays refused (capacity)')
 end)
 
 H.locked=H.Clone(FIVE)

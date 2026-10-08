@@ -186,8 +186,12 @@ check(Why(80,0):find('ordinary copies above the supported envelope',1,true)~=nil
  'the ordinary sentence: '..Why(80,0))
 -- Seven locked records are a loadout of a capacity-7 character: occupied
 -- records, not a six-copy count, bound the locked role. A locked row above
--- the 120-copy row ceiling is the locked sentence's case now.
-check(Why(1,7)=='nil','seven single locked records are inside the envelope: '..Why(1,7))
+-- the 120-copy row ceiling is the locked sentence's case now. The verdict is
+-- asserted itself (see the rule below on tostring(nil)).
+local sevenLocked={}
+for i=1,7 do sevenLocked[i]={spellId=310000+i,quality=3,stacks=1} end
+local sevenOk,_,_,sevenWhy=verdict({{spellId=300001,quality=2,stacks=1}},sevenLocked)
+check(sevenOk==true and sevenWhy==nil,'seven single locked records are inside the envelope: '..tostring(sevenWhy))
 check(Why(1,1,121):find('locked copies above the supported envelope',1,true)~=nil,
  'the locked sentence says locked, not permanent: '..Why(1,1,121))
 -- The third sentence needs a total below ordinary+locked, which the supported

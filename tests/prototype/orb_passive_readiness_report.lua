@@ -342,17 +342,17 @@ end)
 -- R7. Malformed locked counts are kept by the getter while it reports false
 -- trust; the report shows both and neither erases nor widens trust.
 scenario('R7 locked copies over the limit',function()
- -- One record holding more copies than its own stated maxStack: over the cap
- -- (occupied records, not copies, meet the live capacity).
- H.locked={{spellId=410007,stacks=7,maxStack=1}}
+ -- One record above the 120-copy row ceiling: over the cap (occupied
+ -- records, not copies, meet the live capacity).
+ H.locked={{spellId=410007,stacks=121}}
  local locked=A.LockedOwned()
- expect(locked.synced==false and locked.bySpell[410007]==7,'R7: fixture: the getter keeps the parsed count and reports false trust')
+ expect(locked.synced==false and locked.bySpell[410007]==121,'R7: fixture: the getter keeps the parsed count and reports false trust')
  local s=observe()
  expect(COUNT_REFUSAL.TrustRefusal(s.error),'R7: fixture: trust gate',s.error)
  local t=checkBlock('R7',prepared(),{TRUST,type(s.error)=='string' and s.error~='' and s.error or TRUST})
  if t then
   is('R7',t,'stage','trust_locked')
-  is('R7',t,'locked.synced','no');is('R7',t,'locked.copies','7');is('R7',t,'locked.rejection','over_cap')
+  is('R7',t,'locked.synced','no');is('R7',t,'locked.copies','121');is('R7',t,'locked.rejection','over_cap')
  end
 end)
 

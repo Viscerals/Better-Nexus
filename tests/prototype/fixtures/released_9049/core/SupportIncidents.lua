@@ -102,19 +102,6 @@ local function counts(value)
     return out
 end
 
--- The limits a refusal was held to: the fields of counts, and the locked row
--- ceilings (lockedRows, lockedRowStacks) that bound the locked role where no
--- locked copy count does (LoadoutEvidence.SemanticLimits). Scalars only.
-local function limitsOf(value)
-    local out = counts(value)
-    if type(value) ~= "table" then return out end
-    local rows, stacks = count(value.lockedRows), count(value.lockedRowStacks)
-    if rows == nil and stacks == nil then return out end
-    out = out or {}
-    out.lockedRows, out.lockedRowStacks = rows, stacks
-    return out
-end
-
 -- Affected tuples are retained ONLY when the caller already has them at the
 -- failing boundary, and only up to the per-incident limit. There is no lookup
 -- and no scan here; a longer list is truncated and says so.
@@ -219,13 +206,6 @@ local function sameCounts(a, b)
     return true
 end
 
-local function sameLimits(a, b)
-    if not sameCounts(a, b) then return false end
-    if a and b and (a.lockedRows ~= b.lockedRows
-        or a.lockedRowStacks ~= b.lockedRowStacks) then return false end
-    return true
-end
-
 -- Only a genuine repeat is one incident with a count. A write that did NOT
 -- commit is never folded into one that did, a deferral on one encounter is not
 -- a deferral on another, and two explanations, limits, source readings or
@@ -238,7 +218,7 @@ local function sameIncident(a, b)
         or a.build ~= b.build or a.representation ~= b.representation
         or a.scope ~= b.scope or a.committed ~= b.committed then return false end
     if not sameCounts(a.counts, b.counts) then return false end
-    if not sameLimits(a.limits, b.limits) then return false end
+    if not sameCounts(a.limits, b.limits) then return false end
     if signature(a.readiness) ~= signature(b.readiness) then return false end
     if signature(a.affected) ~= signature(b.affected) then return false end
     return true
@@ -252,8 +232,7 @@ end
 --   operation   the owner's operation label; ticket: its identity when it has one
 --   build       source build label; category: the owner's own category
 --   representation "inline" | "referenced" | "unknown"
---   counts/limits  {ordinary, locked, total}; limits also keep the locked
---               row ceilings {lockedRows, lockedRowStacks} when stated
+--   counts/limits  {ordinary, locked, total}
 --   readiness   scalar map of capture-time source generations/readiness
 --   affected    tuples already available at the boundary
 --   committed   true/false: whether the write this incident describes committed
@@ -279,7 +258,7 @@ function M.Record(kind, fields)
         category = text(fields.category),
         representation = text(fields.representation) or "unknown",
         counts = counts(fields.counts),
-        limits = limitsOf(fields.limits),
+        limits = counts(fields.limits),
         readiness = generations(fields.readiness),
         affected = affected,
         affectedOmitted = omitted,

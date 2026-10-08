@@ -102,24 +102,74 @@ This file has two parts.
   copies (never clamped). It trusts the records when they are structurally
   valid and no more than the live capacity, or, while the capacity is unknown,
   no more than the record ceiling (256; the capacity then stays unavailable to
-  actions, `MaxPermanentEchoes()` is nil). A record above its own stated
-  `maxStack` or the 120-copy row ceiling is `over_cap`. A retained positive
+  actions, `MaxPermanentEchoes()` is nil). A record above the 120-copy row
+  ceiling is `over_cap`. A record's own `maxStack` bounds nothing: the native
+  SS18 parser stores `stack` and `maxStack` independently, and whether the
+  server holds one to the other (or retunes it) is unknown. A retained positive
   capacity is used as stated; its freshness is not observable and is not
   claimed. The Echo snapshot's locked field includes the record partition and
   the capacity, so equal per-spell copies in another partition are a change.
   `Model.LockedProjection` admits only a read that states its occupancy, and
   AutoLock counts records: one lock occupies one record, whatever its copies,
   and a spell that is already locked is never locked again for more copies
-  (LockPerk sends the spellId only). Durable evidence, the catalog, DPS records
-  and the peer wire carry no capacity and normalize rows, so they hold the
-  locked role to resource ceilings (`LoadoutEvidence.SemanticLimits`: 256 rows,
-  120 copies in one row) and never to a guessed capacity. The authored
-  locked-target design keeps six copies (WishlistModel; `PlanLimits` for a
-  Share). The peer wire format is unchanged; released (test.9049) peers keep
-  their 79 / 6 / 85 envelope, refuse inline slot-4 locked copies above six and
-  ignore a stated `lv = 1` set, and new responders send a stated set only to
+  (LockPerk sends the spellId only). Elsewhere three different bounds apply,
+  and none is a guessed capacity:
+  - Resource ceilings: durable evidence, the catalog, DPS records and a stated
+    `lv = 1` locked set carry no capacity and normalize rows, so they hold the
+    locked role to `LoadoutEvidence.SemanticLimits` (256 locked rows, 120
+    copies in one row, 10000 copies in all, beside 79 ordinary copies).
+  - The DPS wire, unchanged and narrower: each received DPS Echo list,
+    ordinary or locked, holds at most 120 entries and 120 copies in all
+    (`DpsCapture` `ValidWireEchoList`).
+  - The authored plan envelope, 79 ordinary and six locked target copies (85
+    in all): the Wishlist design (`WishlistModel`), a Share
+    (`LoadoutEvidence.PlanLimits`) and an EBH1 code (`Codec`).
+  The peer wire format is unchanged; released (test.9049) peers keep their 79 /
+  6 / 85 envelope, refuse inline slot-4 locked copies above six and ignore a
+  stated `lv = 1` set, and new responders send a stated set only to
   `lv1`-capable requesters. A trusted representation is not a claim that the
   server accepts a given loadout.
+- **Wishlist editor locked targets.** The editor holds a new locked target to
+  two separate rules (`WishlistModel` `LockBudgetRefusal`). Design: the plan's
+  own target copies -- its designed rows (a tagged row one copy, a queued
+  target its copies), the new target and, once each, the fulfilled targets the
+  final design keeps -- stay within the authored six. Slots: the trusted
+  projection's occupied records, plus one record for each designed spell that
+  holds none, stay within the live capacity, or within six while the capacity
+  is unknown. A replacement frees the replaced spell's records and drops its
+  fulfilled target from the design, as `PlanLockCommit` and the draft export
+  do; current locked Echoes the plan does not target are occupancy, never
+  design. Each refusal names its rule. A plan without locked targets carries
+  the current locked Echoes as the locked rows of its EBH1 code only while
+  their copies fit six; otherwise the code holds the ordinary plan and the
+  export says that the locks are left out. A code the codec would empty
+  (outside 79 / 6 / 85, or no Echo at all) is refused with its reason and never
+  shown. Neither rule claims what the server accepts.
+- **Equal rolled contents, several retained designs.** A server mirror carries
+  ordinary rows only, so a plan without its own design reads the content-key
+  bucket (`lockDesignTargetsBySlot[key]`) only while the retained designs of
+  those contents agree (`WishlistRoles.DesignAmbiguous`: the bucket, every
+  stored assignment, the first-run plan and the removal history, compared by
+  canonical target token; a legacy empty bucket `{}` from before W4 is a
+  zero-target design and counts). When the bucket exists and two of them
+  differ, none is chosen: `AssignedWishlist` reads `unavailable` with a note,
+  AutoLock reads no targets, and the Wishlist Editor fills in no locked target
+  and says so (a save then keeps only the targets set there). An explicit
+  picker selection of a plain row carries a design only through
+  `WishlistRoles.SelectedDesign`: the clicked row is still the row the picker
+  showed, exactly one retained design is attributable to its name and
+  contents, `ResolveSaved` puts that plan on exactly the clicked row, and the
+  bucket's design (an empty legacy bucket included) is that design or the
+  design of a valid plan of another name; a design that only the bucket holds
+  is never carried. Moved-identity, missing-mirror and slot-number-only
+  selections borrow nothing and stay unavailable. Upgrade: such a design-less
+  assignment read `ready` with the bucket in earlier builds (also when the
+  bucket was its own design) and reads `unavailable` now, until it is
+  reassigned, restored or given targets; no profile, provenance or schema is
+  migrated. Residual limit, present since this rule was added (f53f5ed): the
+  removal history keeps five records, so once a differing design has left all
+  retained data the plain plan reads the bucket again. Removing that needs
+  durable per-plan design provenance, a saved-format change that is not made.
 - **Locked shape capture.** `GameAdapter.LockedShapeView()` returns a new table
   for the last normal `LockedOwned()` read that refused a table, or
   `observed=false` since load. Protected hooks inside that read's own parse

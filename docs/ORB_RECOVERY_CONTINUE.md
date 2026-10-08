@@ -86,8 +86,10 @@ fallback to the game's local pending flag.
 
 ## Part 2c: Continue (core/OrbRuntime.lua, ui/OrbPanel.lua)
 
-The class: a restored receipt, a confirmed spend, no usable recorded outcome
-(`hasChoiceEvidence` is false) and the original offer gone.
+The class: a restored receipt, a spend this client observed (one Orb fewer with
+its offer; the receipt keeps it in its compatibility field `spendConfirmed`, and
+no server reply confirms it), no usable recorded outcome (`hasChoiceEvidence` is
+false) and the original offer gone.
 
 The check (a session-only state machine, driven by the passive recovery pass):
 

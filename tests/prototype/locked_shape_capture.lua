@@ -67,19 +67,21 @@ local REFUSED={
   build=function() local t=six();t[7]=E(410001,{quality=1});return t end,
   rows={ROOT,'1.i.1.1.1.0.0','1.i.2.1.1.0.0','1.i.3.1.1.0.0','1.i.4.1.1.0.0','1.i.5.1.1.0.0','1.i.6.1.1.0.0',
    '1.i.1.1.1.0.16'}},
- -- A record is over the cap when it holds more copies than its own stated
- -- maxStack (the native record shape), or when more records are occupied
- -- than the live capacity (T.CAPACITY); stackOver names the rows of the first.
- {name='one entry with stacks=7',first='over_cap',copies=7,ids=1,bySpell={[410007]=7},
-  build=function() return {E(410007,{quality=2,stacks=7,maxStack=1})} end,
-  rows={ROOT,'1.i.1.7.1.2.16'},stackOver={[2]=true}},
- {name='a counted wrapper over same-ID members',first='over_cap',copies=8,ids=1,bySpell={[410003]=8},
-  build=function() return {{entryId=410003,count=4,maxStack=3,members={E(410003),E(410003),E(410003),E(410003)}}} end,
-  rows={ROOT,'1.i.1.4.32.4.16','2.s.0.0.0.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.0'},
-  stackOver={[2]=true}},
- {name='a counted record with a different-ID detail',first='over_cap',copies=7,ids=2,bySpell={[410004]=5,[410005]=2},
-  build=function() return {E(410004,{stacks=5,maxStack=2,detail=E(410005,{stacks=2})})} end,
-  rows={ROOT,'1.i.1.5.1.2.16','2.s.2.2.1.2.0'},stackOver={[2]=true}},
+ -- A record is over the cap when more records are occupied than the live
+ -- capacity (T.CAPACITY) or when it holds more copies than the 120-copy row
+ -- ceiling; a record's own copies below that are no refusal.
+ {name='one entry with stacks=121',first='over_cap',copies=121,ids=1,bySpell={[410007]=121},
+  build=function() return {E(410007,{quality=2,stacks=121})} end,
+  rows={ROOT,'1.i.1.121.1.2.16'}},
+ {name='a counted wrapper over same-ID members',first='over_cap',copies=12,ids=1,bySpell={[410003]=12},
+  build=function()
+   return {{entryId=410003,count=6,members={E(410003),E(410003),E(410003),E(410003),E(410003),E(410003)}}}
+  end,
+  rows={ROOT,'1.i.1.6.32.4.0','2.s.0.0.0.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.0','3.i.1.1.1.0.0',
+   '3.i.1.1.1.0.0','3.i.1.1.1.0.16'}},
+ {name='a counted record with a different-ID detail',first='over_cap',copies=126,ids=2,bySpell={[410004]=5,[410005]=121},
+  build=function() return {E(410004,{stacks=5,detail=E(410005,{stacks=121})})} end,
+  rows={ROOT,'1.i.1.5.1.2.0','2.s.2.121.1.2.16'}},
  {name='two separate same-ID entries and a leaf',first='scalar_leaf',copies=2,ids=1,bySpell={[410001]=2},
   build=function() return {E(410001,{quality=1}),E(410001,{quality=1}),{note='ZQ_NOTE_MARKER 410002'}} end,
   rows={ROOT,'1.i.1.1.1.0.0','1.i.1.1.1.0.0','1.i.0.0.0.0.32'}},
@@ -211,7 +213,7 @@ T.scenario('C1 refused locked reads',function()
    tag..': the sampled generation is the current one',facts(w,{'sampledGeneration','currentGeneration'}))
   expect(w.status=='captured',tag..': complete (status=captured)',w.status)
   if f.rows then T.expectRows(tag,v,f.rows) else f.check(tag,v) end
-  T.expectConsistent(tag,v,f.stackOver)
+  T.expectConsistent(tag,v)
   captured[f.name]=v and H.Clone(v) or nil
  end
 end)
@@ -252,11 +254,11 @@ local function nearestCountedAncestor(rows,i)
  return nil
 end
 T.scenario('C3 representations',function()
- local seven,sixPlus,stack7='seven distinct entries','six entries and a separate same-ID entry','one entry with stacks=7'
+ local seven,sixPlus,stack121='seven distinct entries','six entries and a separate same-ID entry','one entry with stacks=121'
  local function joined(name) return table.concat(T.rowTexts(captured[name]),'|') end
- local a,b,c=joined(seven),joined(sixPlus),joined(stack7)
+ local a,b,c=joined(seven),joined(sixPlus),joined(stack121)
  expect(a~='' and b~='' and c~='' and a~=b and a~=c and b~=c,
-  'C3: the three over-cap fixtures (same first rejection, same 7 copies, same gate) give three different captures')
+  'C3: the three over-cap fixtures (same first rejection, same gate) give three different captures')
  local rows=rowsOf(seven)
  local n,classes,seen=0,0,{}
  for _,r in ipairs(rows) do
@@ -273,10 +275,10 @@ T.scenario('C3 representations',function()
  local pair=repeated[1]
  expect(#repeated==1 and rows[pair[1]].p==rows[pair[2]].p and rows[pair[1]].n==1 and rows[pair[2]].n==1,
   'C3 '..sixPlus..': one ID class repeats, on two separate one-copy rows of the same container',#repeated)
- rows=rowsOf(stack7)
+ rows=rowsOf(stack121)
  local big=0
- for _,r in ipairs(rows) do if counted(r) and r.n==7 and T.has(r.cm,T.COUNT_BIT.stacks) then big=big+1 end end
- expect(#rows==2 and big==1,'C3 '..stack7..': one counted row of seven copies by the stacks alias',#rows..'/'..big)
+ for _,r in ipairs(rows) do if counted(r) and r.n==121 and T.has(r.cm,T.COUNT_BIT.stacks) then big=big+1 end end
+ expect(#rows==2 and big==1,'C3 '..stack121..': one counted row of 121 copies by the stacks alias',#rows..'/'..big)
  -- Nested counting: the same class below a counted ancestor whose count equals
  -- the sum below it (an aggregate-shaped wrapper), against a different class
  -- whose count does not (a detail-shaped record). Neither is a native meaning.
@@ -296,10 +298,10 @@ T.scenario('C3 representations',function()
   return out
  end
  local w=nested('a counted wrapper over same-ID members')[2]
- expect(w~=nil and w.same and w.sum==4 and w.n==4,'C3 counted wrapper: four same-class members below a counted row of four (entryId, count)',
+ expect(w~=nil and w.same and w.sum==6 and w.n==6,'C3 counted wrapper: six same-class members below a counted row of six (entryId, count)',
   w and (tostring(w.same)..' '..w.sum..'/'..w.n))
  local d=nested('a counted record with a different-ID detail')[2]
- expect(d~=nil and d.same==false and d.sum==2 and d.n==5,'C3 detail record: a different class below a counted row, counts 5 and 2',
+ expect(d~=nil and d.same==false and d.sum==121 and d.n==5,'C3 detail record: a different class below a counted row, counts 5 and 121',
   d and (tostring(d.same)..' '..d.sum..'/'..d.n))
  local copiesRows,stackRows=rowsOf('two separate same-ID entries and a leaf'),rowsOf('one entry with stacks=2 and a leaf')
  local twoRows,oneRow=0,0

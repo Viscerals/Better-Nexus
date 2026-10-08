@@ -267,7 +267,8 @@ When it is blocked:
   the game's offer window and matches the saved record, choose in that window.
   Nexus confirms it only from the exact matching result, and only for the Echo
   it proposed (the Orb window names it). An action that ended unobserved cannot
-  be confirmed. For an action with a confirmed spend and no recorded outcome whose
+  be confirmed. For an action with a spend this client observed (one Orb fewer
+  with its offer; no server reply confirms a spend) and no recorded outcome whose
   offer is gone, the player may choose Continue in the Orb window after a read-only
   check (`docs/ORB_RECOVERY_CONTINUE.md`); besides the exact matching result,
   nothing else clears the block.

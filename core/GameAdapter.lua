@@ -607,8 +607,10 @@ end
 -- table with a recognized ID is one occupied record; its copies stay exact.
 -- `limits` (LockedReadLimits): `records`, the live capacity when it is known
 -- (else the record ceiling), and `rowStacks`, the per-record copy ceiling. A
--- record past `records`, or holding more copies than rowStacks or its own
--- stated maxStack, is over_cap. The fourth and fifth returns are the
+-- record past `records`, or holding more copies than rowStacks, is over_cap.
+-- A record's own maxStack bounds nothing here: the native SS18 parser stores
+-- stack and maxStack independently, and whether the server holds one to the
+-- other (or retunes it) is unknown. The fourth and fifth returns are the
 -- occupied record count and the records ({spellId, stacks}, read order; not
 -- kept past the bound).
 local function ReadLockedPerks(raw, sink, limits)
@@ -689,13 +691,7 @@ local function ReadLockedPerks(raw, sink, limits)
             if occupied <= maxRecords then
                 records[occupied] = {spellId=id, stacks=n}
             end
-            -- The record's own stated maximum (the native SS18 maxStack), read
-            -- only when it is a whole positive number.
-            local stated = tonumber(rawget(value, "maxStack"))
-            if stated and (stated ~= stated or stated < 1 or stated >= math.huge
-                or stated ~= math.floor(stated)) then stated = nil end
-            if occupied > maxRecords or n > maxStacks
-                or (stated and n > stated) then
+            if occupied > maxRecords or n > maxStacks then
                 why = "over_cap"; Reject(why)
             end
             -- Do not `return` here -- if this table ALSO nests further locked
@@ -1722,6 +1718,14 @@ function A.WishlistKey(echoes)
     return WishlistIdentity(echoes)
 end
 
+-- Read-only: whether the retained locked-target designs of one rolled-content
+-- key differ (WishlistRoles.DesignAmbiguous). The editor asks before it fills
+-- a plan without its own design from the content-key bucket.
+function A.WishlistDesignAmbiguous(key)
+    local state = Store and Store.State and Store.State() or nil
+    return WishlistRoles.DesignAmbiguous(state, key) == true
+end
+
 function A.WishlistEvidenceState(candidate, expectedKey)
     return ClassifyWishlistEvidence(candidate, expectedKey)
 end
@@ -2444,23 +2448,27 @@ local function ReadLoadoutWishlistState(loadoutSlot)
     loadoutSlot = tonumber(loadoutSlot)
     if not loadoutSlot then return nil, "identity-unavailable", nil end
     local slots = A.Slots()
+    -- The fourth value of every answer below: the declared Saved Build range
+    -- of this same slots read (GetServerMaxSlots, a whole number of at least
+    -- 1; else five).
+    local maxSlots = PositiveInteger(slots and slots.maxSlots) or 5
     if not IsPopulatedLoadout(loadoutSlot, slots) then
-        return nil, "identity-unavailable", nil
+        return nil, "identity-unavailable", nil, maxSlots
     end
     local state = Store and Store.State and Store.State()
     local links = state and state.loadoutWishlists
     local saved = links and links[loadoutSlot]
-    if saved == nil then return nil, "identity-unavailable", nil end
-    if type(saved) ~= "table" then return nil, "invalid-schema", nil end
+    if saved == nil then return nil, "identity-unavailable", nil, maxSlots end
+    if type(saved) ~= "table" then return nil, "invalid-schema", nil, maxSlots end
     if saved.key ~= nil and type(saved.key) ~= "string" then
-        return nil, "invalid-schema", nil
+        return nil, "invalid-schema", nil, maxSlots
     end
 
     local expectedKey = saved.key
     local candidate=WishlistRoles.ResolveSaved(saved,LiveWishlistCandidates(slots))
     if not candidate then
         return nil, expectedKey and expectedKey ~= ""
-            and "invalid-schema" or "association-mismatch", expectedKey
+            and "invalid-schema" or "association-mismatch", expectedKey, maxSlots
     end
 
     candidate = ResolveWishlistEvidence(candidate, slots, loadoutSlot)
@@ -2469,10 +2477,7 @@ local function ReadLoadoutWishlistState(loadoutSlot)
     if expectedKey == nil or expectedKey == "" then
         evidenceState = "association-mismatch"
     end
-    -- The fourth value: the declared Saved Build range of this same slots
-    -- read (GetServerMaxSlots, a whole number of at least 1; else five).
-    return candidate, evidenceState, key,
-        PositiveInteger(slots and slots.maxSlots) or 5
+    return candidate, evidenceState, key, maxSlots
 end
 
 -- Observations are kept for the declared Saved Build range only (the same

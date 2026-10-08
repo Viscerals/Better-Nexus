@@ -33,6 +33,13 @@
 -- The peer wire is covered by batch_locked_wire_records.lua.
 -- SETUP: real TOC boot (format-5 profile) for the catalog; the evidence
 -- owners are called through their public functions. Synthetic IDs only.
+-- Incident limits (standards review r1, STD-R1-09): a refusal held to the
+-- locked row ceilings keeps them, as its producers hand them over (DpsCapture
+-- the capture verdict's limits; the catalog refusal LoadoutEvidence
+-- SemanticLimits). EXPECT (fails at 3bc6d88): I the retained limits keep
+-- lockedRows 256 and lockedRowStacks 120 and the report line names them.
+-- GUARD (holds at 3bc6d88): ordinary 79 and total 10000 stay retained; an
+-- older producer's {79, 6, 85} limits still read "limits 79/6/85".
 local B=dofile('tests/prototype/batch_repair_support.lua')
 local C=B.Checker('batch_locked_units_envelopes')
 local printable=B.printable
@@ -144,6 +151,35 @@ C.scenario('P actual BuildCatalog admission',function()
  ok,why=Put('synthetic-env-absurd',Ordinary(10),Locked({1000}))
  C.guard(ok~=true and CAT.Get('synthetic-env-absurd')==nil,'Px: an absurd locked stack (1000) is refused',why)
  C.guard(#H.actions==actions and #H.sent==sent,'P: no game or network action')
+end)
+
+C.scenario('I incident limits keep the locked row ceilings',function()
+ local support,report=Nexus.SupportIncidents,Nexus.SupportReport
+ local function Counted(incident)
+  for _,text in ipairs(report.IncidentLines(incident)) do
+   if text:find('Counted at refusal',1,true) then return text end
+  end
+ end
+ support.Clear()
+ local ok,counts,limits,why=Capture(1,{121})
+ C.setup(ok==false and type(limits)=='table','I: the actual capture verdict refuses a 121-copy locked row',why)
+ support.Record('capture-deferred',{reason='SEMANTIC_ENVELOPE',producer='DPS record capture',origin='local',
+  operation='personal record capture',representation='inline',counts=counts,limits=limits,committed=false})
+ local kept=support.Latest() or {}
+ local l=kept.limits or {}
+ local line=Counted(kept)
+ print('OBSERVED','I limits',printable(l.ordinary),printable(l.lockedRows),printable(l.lockedRowStacks),printable(l.total),
+  'line='..printable(line))
+ C.guard(l.ordinary==79 and l.total==10000,'I: the ordinary and total limits are retained',printable(l.ordinary)..'/'..printable(l.total))
+ C.expect(l.lockedRows==256 and l.lockedRowStacks==120,'I: the locked row ceilings the refusal was held to are retained',
+  printable(l.lockedRows)..'/'..printable(l.lockedRowStacks))
+ C.expect(line~=nil and line:find('locked rows 256',1,true)~=nil and line:find('120 copies in one locked row',1,true)~=nil,
+  'I: the report names the locked row ceilings',line)
+ support.Record('catalog-refusal',{reason='SEMANTIC_ENVELOPE',producer='saved-build capture',origin='local',
+  counts={ordinary=81,locked=6,total=87},limits={ordinary=79,locked=6,total=85},committed=false})
+ local old=Counted(support.Latest())
+ C.guard(old~=nil and old:find('(limits 79/6/85)',1,true)~=nil,'I: an older producer\'s limits still read 79/6/85',old)
+ support.Clear()
 end)
 
 C.finish('(records bound the locked envelope; copies preserved; refusals unchanged)')

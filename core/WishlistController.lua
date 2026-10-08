@@ -145,7 +145,8 @@ function Controller.New(options)
     end
 
     -- Current locked ownership: exact copies by spell, the occupied records
-    -- (one row each) and the live capacity they were held to (nil: unknown).
+    -- (one row each, and their count by spell) and the live capacity they
+    -- were held to (nil: unknown).
     local function TrustedLockedProjection()
         if Adapter and Adapter.LockedOwned then
             local locked = Adapter.LockedOwned()
@@ -153,6 +154,7 @@ function Controller.New(options)
             if projection then
                 return {synced=true,bySpell=projection.bySpell,
                     occupied=projection.occupied,records=projection.records,
+                    recordsBySpell=projection.recordsBySpell,
                     capacity=projection.capacity}
             end
         end
@@ -388,8 +390,8 @@ function Controller.New(options)
         end
         if metrics.lockBudgetExceeded > 0 then
             notify(string.format(
-                "|cffff6060Nexus:|r this build asks for %d more locked-design Echoes than the account's "
-                    .. "%d locked Echo slots can ever hold -- they were left out entirely, not just queued.",
+                "|cffff6060Nexus:|r this build asks for %d more locked-design Echoes than the "
+                    .. "%d locked target copies a plan designs -- they were left out entirely, not just queued.",
                 metrics.lockBudgetExceeded, MAX_LOCK_SLOTS))
         end
     end
@@ -711,8 +713,21 @@ function Controller.New(options)
         -- Ordinary-only server uploads still need their separate local designs.
         local withCommitted = prepared
         if not typedRoles or #lockedEchoes==0 then
-            withCommitted = DraftModel.ApplyCommittedTargets(prepared,
-                LockDesignTargets(), {catalog = catalog, lockedBySpell = lockedBySpell})
+            -- A plan without its own design reads the content-key bucket,
+            -- except when the retained designs of these rolled contents differ
+            -- (GameAdapter WishlistDesignAmbiguous): then none is filled in,
+            -- and a save keeps only the targets the player sets here.
+            if designTargets == nil and Adapter
+                and type(Adapter.WishlistDesignAmbiguous) == "function"
+                and Adapter.WishlistDesignAmbiguous(state.currentLockKey) then
+                state.currentDesignTargets = {}
+                notify("|cffff9040Nexus:|r More than one saved locked-target design exists for these "
+                    .. "rolled contents, so no locked targets were filled in. Set this plan's locked "
+                    .. "targets here; nothing is saved until you save.")
+            else
+                withCommitted = DraftModel.ApplyCommittedTargets(prepared,
+                    LockDesignTargets(), {catalog = catalog, lockedBySpell = lockedBySpell})
+            end
         end
         state.pending = withCommitted.pending
         state.pendingLock = withCommitted.pendingLock
@@ -756,26 +771,46 @@ function Controller.New(options)
         TouchPresentation()
     end
 
+    -- A refused locked target names the rule that refused it (WishlistModel
+    -- LockBudgetRefusal): the plan's authored design of six target copies, or
+    -- the locked Echo slots -- occupied records and planned targets against
+    -- the live capacity, or the six authored cells while the game states none.
+    local function NotifyLockBudget(outcome, locked)
+        if outcome == "lock_full" then
+            notify(string.format(
+                "|cffff6060Nexus:|r a plan designs at most %d locked target copies -- untag one first.",
+                MAX_LOCK_SLOTS))
+            return
+        end
+        local capacity = locked and tonumber(locked.capacity)
+        notify(capacity and string.format(
+            "|cffff6060Nexus:|r all %d locked Echo slots the game reports are occupied or planned -- "
+                .. "untag a target, or right-click a locked Echo to plan its replacement.", capacity)
+            or string.format(
+            "|cffff6060Nexus:|r the game has not stated its locked Echo slots, so at most %d occupied "
+                .. "or planned are counted -- untag a target, or right-click a locked Echo to plan its replacement.",
+            MAX_LOCK_SLOTS))
+    end
+
     function M.ToggleDesignLock(rowKey)
         if not rowKey then return "invalid" end
         local resolved = DraftModel.ResolveDraftKey(state.pending, rowKey)
         local localOnly = state.pendingLock[rowKey]
             or (resolved and state.pending[resolved].lockIntent)
         if not localOnly and not resolved then return "unchanged" end
-        local lockedBySpell = localOnly and {} or LockedBySpell()
+        local locked = not localOnly and TrustedLockedProjection() or nil
         local nextPending, nextLock, nextReplacing, outcome =
             DraftModel.ToggleDesignLock(state.pending, state.pendingLock, rowKey, {
-                lockedBySpell = lockedBySpell,
+                lockedProjection = locked,
+                fulfilledTargets = state.fulfilledDraftTargets,
                 replacingSpellId = state.replacingSpellId,
             })
         if outcome == "normal_full" then
             notify("|cffff6060Nexus:|r the normal wishlist is already full -- remove another Echo before moving this locked target back into it.")
             return outcome
         end
-        if outcome == "lock_full" then
-            notify(string.format(
-                "|cffff6060Nexus:|r only %d Echoes can be locked in total -- untag one first.",
-                MAX_LOCK_SLOTS))
+        if outcome == "lock_full" or outcome == "slots_full" then
+            NotifyLockBudget(outcome, locked)
         end
         state.pending, state.pendingLock, state.replacingSpellId =
             nextPending, nextLock, nextReplacing
@@ -801,11 +836,12 @@ function Controller.New(options)
         local rowKey = DraftModel.DraftKey(data.spellId, catalog)
         local localOnly = (state.pending[rowKey] and state.pending[rowKey].lockIntent)
             or state.pendingLock[family]
-        local lockedBySpell = localOnly and {} or LockedBySpell()
+        local locked = not localOnly and TrustedLockedProjection() or nil
         local nextPending, nextLock, nextReplacing, outcome =
             DraftModel.AssignLockSlot(state.pending, state.pendingLock, data, {
                 catalog = catalog,
-                lockedBySpell = lockedBySpell,
+                lockedProjection = locked,
+                fulfilledTargets = state.fulfilledDraftTargets,
                 replacingSpellId = state.replacingSpellId,
             })
         state.pending, state.pendingLock, state.replacingSpellId =
@@ -817,10 +853,8 @@ function Controller.New(options)
         elseif outcome == "already" then
             notify("|cff4dff80Nexus:|r " .. tostring(data.name)
                 .. " is already designed for a locked slot.")
-        elseif outcome == "lock_full" then
-            notify(string.format(
-                "|cffff6060Nexus:|r only %d Echoes can be locked in total.",
-                MAX_LOCK_SLOTS))
+        elseif outcome == "lock_full" or outcome == "slots_full" then
+            NotifyLockBudget(outcome, locked)
         elseif outcome == "queued" then
             notify("|cff4dff80Nexus:|r added " .. tostring(data.name)
                 .. " as a locked-slot target. It is pursued separately from the 79-copy wishlist.")
@@ -1266,6 +1300,16 @@ function Controller.New(options)
         -- corrupts the exported role split (and can exceed the six-copy limit).
         for _, echo in ipairs(planned) do
             if echo.locked == true then return planned end
+        end
+        -- A plan without locked targets carries the current locked Echoes as
+        -- its locked rows only while their copies fit the six locked target
+        -- copies a plan (and an EBH1 code) holds. Above that the ordinary plan
+        -- is exported without them; the second value says so.
+        local held = 0
+        for _, copies in pairs(lockedBySpell) do held = held + (tonumber(copies) or 0) end
+        if held > MAX_LOCK_SLOTS then
+            return planned, string.format("your current locked Echoes hold %d copies, more than the %d "
+                .. "locked target copies a plan carries, so they are not in this code", held, MAX_LOCK_SLOTS)
         end
         return DraftModel.ExportEntries(state.pending, state.pendingLock,
             lockedBySpell, catalog, state.fulfilledDraftTargets)

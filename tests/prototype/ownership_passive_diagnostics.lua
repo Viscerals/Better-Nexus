@@ -452,13 +452,13 @@ scenario('S2 independent ages',function()
    facts(again,{'ownedAt','lockedObserved','lockedRawType','ownedSampledGeneration'}))
  end
  H.now=H.now+40
- -- One record holding more copies than its own stated maxStack: over the cap
- -- (occupied records, not copies, meet the live capacity).
- H.locked={{spellId=410007,stacks=7,maxStack=1}}
+ -- One record above the 120-copy row ceiling: over the cap (occupied
+ -- records, not copies, meet the live capacity).
+ H.locked={{spellId=410007,stacks=121}}
  A.LockedOwned()
  local t1=trustView()
  if t1 then
-  expect(t1.lockedAt==T0+40 and t1.lockedAge==0 and t1.lockedRejection=='over_cap' and t1.lockedCopies==7,
+  expect(t1.lockedAt==T0+40 and t1.lockedAge==0 and t1.lockedRejection=='over_cap' and t1.lockedCopies==121,
    'S2 locked read: the locked sample is new',facts(t1,{'lockedAt','lockedAge','lockedRejection','lockedCopies'}))
   expect(t1.ownedAt==T0 and t1.ownedAge==40 and t1.ownedSynced==true,'S2 locked read: the ordinary sample keeps its own time and facts',
    facts(t1,{'ownedAt','ownedAge','ownedSynced'}))
@@ -601,7 +601,7 @@ scenario('S5 locked shapes',function()
   {'thread',function() return coroutine.create(function() end) end,false,0,set({'not_table'}),set({'thread'})},
   {'invalid sibling',locksWithSibling,false,3,set({'invalid_value'}),set({'table'})},
   {'conflicting count names',function() return {{spellId=410007,stack=1,count=2}} end,false,0,set({'conflicting_alias'}),set({'table'})},
-  {'over the limit',function() return {{spellId=410007,stacks=7,maxStack=1}} end,false,7,set({'over_cap'}),set({'table'})},
+  {'over the limit',function() return {{spellId=410007,stacks=121}} end,false,121,set({'over_cap'}),set({'table'})},
   {'cycle',function() local t={{spellId=410007}};t[2]=t;return t end,false,1,set({'cycle'}),set({'table'})},
   {'depth',function() local d={spellId=410007};for _=1,9 do d={d} end;return d end,false,0,set({'depth'}),set({'table'})},
   {'scalar leaf',function() return {{spellId=410007},{note='ZQ_LEAF_MARKER'}} end,false,1,set({'scalar_leaf'}),set({'table'})},

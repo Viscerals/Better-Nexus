@@ -1000,6 +1000,10 @@ RenderDetail = function(row)
     local locked=lockedResolution.status=="ok"
         and lockedResolution.lockedEchoes or nil
     if locked and #locked>0 then detail.lockedTitle:Show() else detail.lockedTitle:Hide() end
+    -- Six icons fit the strip; a record can hold more locked rows (occupied
+    -- records), and the heading counts the ones not drawn.
+    local lockedMore=locked and #locked-#detail.lockedIcons or 0
+    detail.lockedTitle:SetText(lockedMore>0 and ("LOCKED ECHOES  +"..lockedMore.." more locked") or "LOCKED ECHOES")
     for i,btn in ipairs(detail.lockedIcons) do local e=locked and locked[i]; if e then btn.icon:SetTexture(SpellIcon(e.spellId)); btn.tip=e.spellId; btn:Show() else btn.tip=nil; btn:Hide() end end
     local echoes=row.echoes or b.echoes or {}; local shown=math.min(#echoes,#detail.icons); local total=0
     for _,e in ipairs(echoes) do total=total+(tonumber(e.stacks or e.count) or 1) end
