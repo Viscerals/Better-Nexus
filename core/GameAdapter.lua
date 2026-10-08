@@ -602,8 +602,8 @@ end
 -- over_cap, scalar_leaf), or nil when the view is valid.
 -- `sink` (diagnostics only): a LockedShape collector. Only LockedOwned() passes
 -- one; without it the parse is the same.
--- The game keeps ONE record per locked Echo holding its whole stack, and
--- bounds occupied records (not copies) by GetMaximumPermanentEchoes. Each
+-- Each locked SS18 entry is one client record with its own stack, and the
+-- native journal's client lock gate counts records against the capacity. Each
 -- table with a recognized ID is one occupied record; its copies stay exact.
 -- `limits` (LockedReadLimits): `records`, the live capacity when it is known
 -- (else the record ceiling), and `rowStacks`, the per-record copy ceiling. A

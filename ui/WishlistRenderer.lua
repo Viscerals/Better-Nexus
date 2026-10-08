@@ -1762,7 +1762,7 @@ local function RefreshView(catalogRevision)
     -- of an addable status there too), and the footer count -- one live
     -- source of truth instead of the load-time-only lastLockedSkipped.
     -- Current locked ownership is OCCUPIED RECORDS: one slot per record,
-    -- holding that Echo's whole stack. lockedCount counts records, never
+    -- each holding its own locked stack. lockedCount counts records, never
     -- copies. The stated maximum is the live capacity when the game reports
     -- one; otherwise the six authored target cells, and none once more
     -- records than that are occupied.

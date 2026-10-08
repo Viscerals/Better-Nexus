@@ -1380,7 +1380,7 @@ end
 -- The identity of the locked state an attempt was prepared against: the
 -- copies by spell and, when a spell is held in more than one record, the
 -- record partition (the same copies in other records occupy other slots).
--- One record per locked Echo, the game's own shape, keeps the copies-only
+-- With one mirrored record per locked spell, the token keeps the copies-only
 -- form of earlier builds.
 local function AutoLockLockedToken(locked)
     if type(locked) ~= "table" or locked.synced ~= true
@@ -1850,9 +1850,9 @@ local function TryAutoLock(owned, catalog, slots, wishlist, targets, wishlistKey
         tostring(LockSlotKey(wishlist, wishlistKey)), targetCount)
     if targetCount == 0 then return end
 
-    -- lockedCount is the number of OCCUPIED locked records: the game compares
-    -- records, not copies, with its capacity, and one record holds an Echo's
-    -- whole stack (one lock occupies one record slot, whatever its copies).
+    -- lockedCount is the number of OCCUPIED locked records: the native
+    -- journal's client lock gate compares records, not copies, with the
+    -- capacity; here too a lock needs one record slot, whatever its copies.
     local lockedBySpell, lockedCount, recordsBySpell =
         options.wishlistModel.LockedSpellCounts(locked)
     if not lockedBySpell or not lockedCount then

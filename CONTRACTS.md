@@ -93,9 +93,13 @@ This file has two parts.
   sample keep the shared wait text. The refusal, its stage and every gate are
   the same either way; nothing is read from the game, requested or saved for
   the text.
-- **Occupied locked records.** The game keeps one locked record per Echo,
-  holding that Echo's whole stack, and bounds occupied RECORDS (not copies) by
-  `GetMaximumPermanentEchoes`, a positive server value that can change.
+- **Occupied locked records.** The client mirrors each SS18 entry flagged
+  locked as one record with its own locked stack; granted copies of the same
+  spell can be held beside it. The native journal's client-side lock gate
+  compares the record count (not copies) with `GetMaximumPermanentEchoes`,
+  which keeps its last positive value. Not established: one record per spell,
+  every held copy in that record, or server enforcement of the record bound.
+  Nexus treats record partitions and a spell held in both roles as data.
   `GameAdapter.LockedOwned()` counts each table with a recognized ID as one
   occupied record and returns `occupied`, `records` (one `{spellId, stacks}`
   per record) and the `capacity` it was held to, beside the exact `bySpell`

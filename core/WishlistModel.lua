@@ -405,7 +405,7 @@ end
 --   design.
 -- * Slot occupancy: the occupied RECORDS of the trusted locked projection,
 --   except those of a freed spell, plus one record for each designed spell
---   that holds none (a record holds a whole stack), stay within the live
+--   that holds none (a record carries its own stack), stay within the live
 --   capacity the projection states; while it states none, within the six
 --   authored cells.
 -- `options.lockedProjection` is the trusted locked projection

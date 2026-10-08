@@ -78,7 +78,7 @@ A stored description longer than the Edit dialog's 2000 bytes (the catalog field
 
 ## Locked rows: occupied records, and Saved Build mirrors
 
-The game keeps one locked record per Echo holding that Echo's whole stack, and bounds occupied records (not copies) by the live capacity (CONTRACTS.md, Occupied locked records). Records of this build (DPS records, catalog records, received builds) can therefore hold more than six locked copies, for example five records holding 1, 1, 1, 3 and 1. The catalog holds a locked row to 120 copies and a record to its existing 256-row and 10000-copy ceilings. No field, schema, storage or protocol version changed.
+The client mirrors each SS18 entry flagged locked as one record with its own locked stack, and the native journal's client-side lock gate compares the record count (not copies) with `GetMaximumPermanentEchoes`, which keeps its last positive value (CONTRACTS.md, Occupied locked records). Records of this build (DPS records, catalog records, received builds) can therefore hold more than six locked copies, for example five records holding 1, 1, 1, 3 and 1. Not established: one record per spell, every held copy in that record, or server enforcement of the record bound. The catalog holds a locked row to 120 copies and a record to its existing 256-row and 10000-copy ceilings. No field, schema, storage or protocol version changed.
 
 A Saved Build mirror keeps a row the server marks locked (`locked = 1`) in `lockedEchoes`, never as an ordinary copy. A slot that holds only locked rows forms no ordinary identity: its earlier mirror is kept unchanged instead of being retired. A removed slot still retires its mirror, and a malformed row still refuses the slot.
 

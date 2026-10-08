@@ -1154,9 +1154,9 @@ end
 -- Package B / issue #22: one canonical owner for the Project Ebonhold loadout
 -- envelope, reused by every trust boundary instead of duplicating literals.
 -- Rolled (ordinary) copies are a game bound: at most 79. Locked copies are
--- not a fixed count. The game bounds occupied locked RECORDS by the
--- character's live capacity (GetMaximumPermanentEchoes, a positive server
--- value that can change), and one record holds its Echo's whole stack.
+-- not a fixed count: each locked SS18 entry is one client record with its
+-- own stack, and the native journal's client lock gate counts records
+-- against GetMaximumPermanentEchoes (it keeps its last positive value).
 -- Evidence and wire rows carry neither that capacity nor the native records
 -- (rows are normalized), so their locked role is held to resource ceilings
 -- only, never to a guessed capacity: at most lockedRowStacks copies in one
