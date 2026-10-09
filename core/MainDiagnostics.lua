@@ -477,24 +477,39 @@ local function LogText_Mismatch()
     return table.concat(out, "\n")
 end
 
--- Reconciliation view for the "imported an 85-Echo build" scenario: Nexus has
--- no server API to lock/unlock an Echo (GameAdapter only exposes the
--- read-only LockedOwned), so this cannot swap anything automatically -- it
--- exists to tell the player exactly what to change by hand in the native
--- lock UI: which of their current locked Echoes this wishlist doesn't want,
--- and which wishlist Echoes don't fit the 79 cap because of it.
+-- Passive Locked Echoes page: the locked Echoes the game reports beside the
+-- assigned Wishlist -- which of them it does not want, and which of its
+-- Echoes may not fit the 79 rolled-copy plan cap (no server rule is claimed).
+-- It only reads. Lock/unlock writes exist (GameAdapter.LockPerk/UnlockPerk),
+-- but only the optional locked-Echo slot automation calls them
+-- (AutomationRuntime TryAutoLock, behind its own option and checks).
+-- The read goes through Model.LockedProjection, like the Slot actions trace
+-- and the editor strip: occupied records (one slot each) against the live
+-- capacity, or unknown when the game states none, with held copies apart.
+-- An untrusted or unreadable read is named unavailable; nothing is listed or
+-- compared from it.
 local function LogText_Locked()
     local catalog = Adapter.Catalog()
-    local lockedOwned = Adapter.LockedOwned and Adapter.LockedOwned()
-    local lockedBySpell = (lockedOwned and lockedOwned.bySpell) or {}
+    local locked = Model.LockedProjection(Adapter.LockedOwned and Adapter.LockedOwned())
     local out = {}
 
-    local lockedIds, lockedCopies = {}, 0
-    for id,n in pairs(lockedBySpell) do lockedIds[#lockedIds + 1] = id; lockedCopies=lockedCopies+(tonumber(n) or 0) end
+    if not locked then
+        out[#out + 1] = "CURRENTLY LOCKED ECHOES -- unavailable: the game's locked-Echo state could not be read or is not trusted right now (display only; optional locked-Echo slot automation is controlled separately)"
+        out[#out + 1] = ""
+        out[#out + 1] = "Nothing is listed or compared with the Wishlist until the game reports a trusted locked state."
+        return table.concat(out, "\n")
+    end
+    local lockedBySpell = locked.bySpell
+
+    local lockedIds = {}
+    for id in pairs(lockedBySpell) do lockedIds[#lockedIds + 1] = id end
     table.sort(lockedIds)
     out[#out + 1] = string.format(
-        "CURRENTLY LOCKED ECHOES -- %d/6 (display only; optional locked-Echo slot automation is controlled separately)",
-        lockedCopies)
+        "CURRENTLY LOCKED ECHOES -- %s holding %d %s%s (display only; optional locked-Echo slot automation is controlled separately)",
+        locked.capacity and string.format("%d/%d occupied slots", locked.occupied, locked.capacity)
+            or string.format("%d occupied slots", locked.occupied),
+        locked.total, locked.total == 1 and "copy" or "copies",
+        locked.capacity and "" or "; slot capacity unknown")
     for _, id in ipairs(lockedIds) do
         local row = catalog and catalog.rows and catalog.rows[id]
         out[#out + 1] = string.format("  %s x%d (id=%d)", (row and row.name) or "?", tonumber(lockedBySpell[id]) or 0, id)

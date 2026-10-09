@@ -1084,11 +1084,13 @@ function M.EnsureLockedIcon(i)
         end
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    -- GameAdapter.LockPerk/UnlockPerk (confirmed live via /nexus sniff,
-    -- 2026-08-01) actually perform the lock/unlock -- this only lets
-    -- the player START pursuing a replacement now, while the current
-    -- one stays locked and useful; Main.lua's TryAutoLock unlocks the
-    -- old one and locks the new one in automatically once it's owned.
+    -- Right-click on a real slot only starts (or cancels) planning its
+    -- replacement; nothing is locked or unlocked here and the current Echo
+    -- stays locked. Only the optional locked-Echo slot automation
+    -- (AutomationRuntime TryAutoLock: Automation and its separate option ON,
+    -- the replacement owned, a stable Saved Build association for the unlock,
+    -- and its other checks) may later unlock the old Echo and lock the new
+    -- one through GameAdapter.LockPerk/UnlockPerk.
     btn:SetScript("OnClick", function(self, mouseButton)
         if self.slotState == "locked" and mouseButton == "RightButton" then
             if self.spellId then
@@ -1397,13 +1399,17 @@ local function EnsureFrame()
         newWishlist()
     end)
 
-    -- Locked Echoes strip: the account's up to 6 permanent picks, PLUS an
-    -- editable picker for slots that aren't really locked yet. Nexus has no
-    -- server API to lock/unlock -- a real slot stays read-only (click jumps
-    -- the search to it) -- but an empty or designed slot is fully editable
-    -- right here: click empty to assign a target, click a gold (designed)
-    -- slot to un-assign it. This is the dedicated slot picker requested in
-    -- place of a lock toggle scattered across every row of the pick list.
+    -- Locked Echoes strip: one slot per occupied locked record the game
+    -- reports (RefreshView shows at least the six authored target cells, and
+    -- more, up to eight, for more records or a higher live capacity), plus an
+    -- editable picker for slots that are not locked yet. The strip never
+    -- locks or unlocks: a real slot's left-click jumps the search to it and
+    -- its right-click plans a replacement; click an empty slot to assign a
+    -- target and a gold (designed) slot to un-assign it. Lock/unlock writes
+    -- happen only in the optional locked-Echo slot automation
+    -- (AutomationRuntime TryAutoLock, through GameAdapter.LockPerk/UnlockPerk)
+    -- and its checks. This is the dedicated slot picker requested in place of
+    -- a lock toggle scattered across every row of the pick list.
     lockedLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     lockedLabel:SetPoint("TOPLEFT", 540, -130)
     lockedLabel:SetText("Locked:")
@@ -1419,7 +1425,7 @@ local function EnsureFrame()
     end
 
     -- Auto-lock opt-in: off by default (controller-owned preference,
-    -- see DefaultProfile.lua and Main.lua's TryAutoLock). Deliberately
+    -- see DefaultProfile.lua and AutomationRuntime.lua's TryAutoLock). Deliberately
     -- separate from the main automation switch -- a player may want full
     -- board automation without also handing Nexus this specific, more
     -- consequential write action (LockPerk/UnlockPerk). Sits in the open
@@ -1826,8 +1832,9 @@ local function RefreshView(catalogRevision)
 
     -- Locked Echoes strip: the dedicated slot picker. Real locked slots
     -- come from View.LockedOwned/GetLockedPerks; when both automation
-    -- switches are enabled, core/Main.lua reconciles them with LockPerk and
-    -- UnlockPerk. Each real-locked column gets its
+    -- switches are enabled, core/AutomationRuntime.lua (TryAutoLock) may
+    -- reconcile them with LockPerk and UnlockPerk, within its checks. Each
+    -- real-locked column gets its
     -- own STABLE position; a designed replacement for it (right-click, or
     -- auto-paired on import -- see LoadPendingEchoes) renders directly
     -- ABOVE that exact column in lockedNeedIcons, not beside it, so
