@@ -14,7 +14,21 @@ local FPS=60;local DT=1/FPS
 
 local function Boot(early)
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
- local H=dofile('tests/prototype/harness.lua');H.pendingRolls=400;H.Boot()
+ local H=dofile('tests/prototype/harness.lua');H.pendingRolls=400
+ -- This fixture compares simulated action times, so bootstrap must start
+ -- the same poll phase on every boot. Charge only bootstrap profiler reads
+ -- a logical 0.125 ms. Keep the normal valid-clock timed startup path.
+ -- Action/beat/latch/grant assertions below still use simulated GetTime().
+ -- After boot the runtime profiler again measures elapsed host CPU time.
+ local realProfiler=debugprofilestop
+ assert(type(realProfiler)=='function','rolling fixture needs a valid profiler')
+ local profilerNow=realProfiler()
+ debugprofilestop=function() profilerNow=profilerNow+0.125;return profilerNow end
+ H.Boot()
+ -- Preserve monotonicity across the clock seam; offsets cancel from every
+ -- later duration. The harness creates a fresh real profiler on each boot.
+ local offset=profilerNow-realProfiler()
+ debugprofilestop=function() return realProfiler()+offset end
  H.run.totalRerolls,H.run.remainingBanishes,H.run.totalFreezes=900,900,900
  if early==false then Nexus.EarlyPollDisabled=true end
  assert(Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Latency',{{spellId=200001,quality=1,stacks=3},{spellId=200002,quality=2,stacks=3}}))
