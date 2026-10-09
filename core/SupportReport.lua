@@ -1208,7 +1208,8 @@ local SELECT_OUTCOMES = codeSet({"proven", "voided"})
 local SELECT_BOARDS = codeSet({"same", "moved", "missing"})
 local EFFECTIVE_STATES = codeSet({"off", "paused", "waiting", "rechecking", "ready"})
 
--- Ages are as of the adapter's last poll of that Select (no clock read here).
+-- Ages are measured from the send (no clock read here): to its resolution
+-- for a resolved row, to the adapter's last poll of it for the unresolved one.
 local function selectRow(label, row)
     if type(row) ~= "table" then return label .. ": unknown" end
     local age = "unknown"
@@ -1228,8 +1229,8 @@ local function selectRow(label, row)
         .. " watchdog expired=" .. factFlag(row.latchDeadAt ~= nil)
         .. " outside same-spell Selects=" .. factCount(row.competing)
         .. " world entries=" .. factCount(row.entries)
-        .. " rechecks sent=" .. factCount(row.rechecks)
-        .. " age at last poll=" .. age
+        .. " rechecks requested for it=" .. factCount(row.rechecks)
+        .. (row.resolvedAt ~= nil and " resolved after=" or " age at last poll=") .. age
         .. (row.outcome ~= nil and (" outcome=" .. factCode(row.outcome, SELECT_OUTCOMES)) or "")
 end
 
@@ -1242,7 +1243,7 @@ local function selectRecoveryLines()
     if ok and type(effective) == "table" then
         out[#out + 1] = "Auto: selected=" .. factFlag(effective.selected)
             .. " effective=" .. factCode(effective.state, EFFECTIVE_STATES)
-            .. " rechecks sent=" .. factCount(effective.rechecks)
+            .. " rechecks requested this session (all own Selects)=" .. factCount(effective.rechecks)
         out[#out + 1] = "Auto reason: " .. safeText(effective.reason, 240)
     else
         out[#out + 1] = "Auto: effective state unavailable (the runtime did not answer)"

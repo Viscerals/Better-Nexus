@@ -1054,13 +1054,21 @@ local function EnsureFrame()
         GameTooltip:AddLine("search action is available. Later improvement is not guaranteed.", 0.75, 0.75, 0.75, true)
         -- The button is the selection; this is what it is doing now, from
         -- the last committed model (memory only: waiting, rechecking,
-        -- paused or ready, with the reason).
+        -- paused or ready, with the reason). The reason is in the player's
+        -- wording (UserText) and cut on a UTF-8 character boundary
+        -- (Identity.Utf8Prefix). Both are reached through the Nexus global,
+        -- not new upvalues: EnsureFrame is at the 60-upvalue ceiling.
         local effective = type(M._lastModel) == "table" and M._lastModel.effective
         if type(effective) == "table" and type(effective.state) == "string" then
+            local reason = type(effective.reason) == "string" and effective.reason or nil
+            if reason and Nexus.UserText then reason = Nexus.UserText.Message(reason) end
+            if reason then
+                reason = Nexus.Identity and Nexus.Identity.Utf8Prefix
+                    and Nexus.Identity.Utf8Prefix(reason, 600) or ""
+            end
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("Now: " .. effective.state
-                .. (type(effective.reason) == "string"
-                    and (" -- " .. effective.reason:sub(1, 240)) or ""), 1, 0.82, 0, true)
+                .. ((reason and reason ~= "") and (" -- " .. reason) or ""), 1, 0.82, 0, true)
         end
         GameTooltip:Show()
     end)

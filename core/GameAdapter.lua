@@ -68,13 +68,15 @@ local staticDirty = false
 local lastBoardSig
 local boardNotificationPending = false
 local inFlightKind, inFlightSig, pendingOwnPick, pendingOwnBaseline
--- A Select whose board has moved on but whose grant the mirror has not shown
--- yet: {spellId=, baseline=}. Boards auto-chain and the granted mirror can
--- lag the next board by one pick, so this keeps the Select "in flight" --
--- blocking a duplicate Select and every dependent action -- until the mirror
--- shows that spell's count above the baseline taken at submission. It is
--- intent, never ownership: Owned() reads the granted mirror only. It used to
--- be recordedPicks, which Owned() merged into ownership (issue #62).
+-- The adapter's own Select after its client latch cleared -- whatever the
+-- board did (moved on, stayed the same or went away) -- while its exact grant
+-- is not proven: the same table as selectRecovery.record, in phase "grant".
+-- Boards auto-chain and the granted mirror can lag the next board by one
+-- pick, and a cleared latch is no result either way, so this keeps the Select
+-- "in flight" -- blocking a duplicate Select and every dependent action --
+-- until ConfirmAwaitingGrant proves its grant or a run boundary voids it. It
+-- is intent, never ownership: Owned() reads the granted mirror only. It used
+-- to be recordedPicks, which Owned() merged into ownership (issue #62).
 local awaitingGrant = nil
 -- The adapter's own Select from its submission until its exact grant is
 -- proven or a run boundary voids it; awaitingGrant is this same record once
@@ -139,8 +141,12 @@ local serviceHooksInstalled = {
     RequestReroll = false,
 }
 local tomeMutationPausedUntil = 0
--- per-latch watchdog: a client latch stuck >10s with no reply is DEAD for
--- the session (per-action, like the client itself); never a whole-loop stall
+-- per-latch watchdog: a client latch stuck >10s with no reply is DEAD until
+-- it clears (per-action, like the client itself) and no longer stalls the
+-- whole loop -- except the adapter's own Select, which stays held with its
+-- provenance, and a voided Select's flag, which holds every Echo action until
+-- it clears (WatchLatches). A dead Select flag is still a set flag: it keeps
+-- Select admission closed (A.Take), as a dead Freeze flag keeps Freeze closed.
 local latchSince, deadLatch = {}, {}
 local slotsRetryAt, slotsRetries = nil, 0
 local slotsRefreshAt = 0
@@ -1012,9 +1018,12 @@ function A.RunBoundaryReset()
     -- The dead run's own Select is void, not granted: its wait ends with its
     -- result unknown. Voiding it opens nothing: a client Select flag still
     -- set at that moment (live or past the watchdog), or a Perks table that
-    -- cannot be read, keeps Select admission closed until a readable table
-    -- shows no flag (ResolveInFlight then finds no record to wait for). With
-    -- no own Select, a client latch is handled as before.
+    -- cannot be read, re-arms the in-flight marker, which holds every Echo
+    -- action (Take, Banish, Freeze, Reroll, Orb actions) until a readable
+    -- table shows no flag (ResolveInFlight then finds no record to wait for).
+    -- That flag is "a selection pending", not proof that the voided Select
+    -- is the one still pending. With no own Select, a client latch is handled
+    -- as before.
     if selectRecovery.record then
         FinishOwnSelect("voided")
         local p = PerksTbl()
@@ -3667,8 +3676,8 @@ local function WatchLatches()
                 deadLatch[kind] = true
                 -- The adapter's Select tracking is never released here: the
                 -- own Select keeps its provenance, and a flag left by one a
-                -- run boundary voided keeps Select admission closed until it
-                -- clears. Other kinds keep the per-action release.
+                -- run boundary voided keeps every Echo action held (InFlight)
+                -- until it clears. Other kinds keep the per-action release.
                 local held = kind == "select" and inFlightKind == "select"
                 local own = held and selectRecovery.record
                 if own then own.latchDeadAt = now end
@@ -3679,7 +3688,10 @@ local function WatchLatches()
                 -- set. Not a claim that the server stayed silent. For the own
                 -- Select the grant clause comes from this poll's count sample
                 -- (ConfirmAwaitingGrant runs first): a matching grant can be
-                -- visible while the flag stays set.
+                -- visible while the flag stays set. Read refreshes are named
+                -- only while they could settle it (A.RecheckSelect). A flag
+                -- left by a voided Select holds every Echo action (InFlight),
+                -- and it is "a selection pending", not proof of which one.
                 if callbacks and callbacks.OnStatus then
                     local seen = own and (own.count or 0) > (own.baseline or 0)
                     local text
@@ -3689,11 +3701,15 @@ local function WatchLatches()
                             .. (seen and " although a matching grant is visible"
                                 or " and its grant is not visible yet")
                             .. ". Nexus sends nothing new and waits"
-                            .. (seen and " for the flag to clear."
-                                or "; it rechecks granted data while Auto is ON.")
+                            .. ((own.competing or 0) > 0
+                                    and "; another selection of the same Echo was seen, so no grant can settle it"
+                                or seen and " for the flag to clear"
+                                or "; while Auto is ON it re-reads the granted Echoes")
+                            .. ". The game gives no receipt for a selection, so this"
+                            .. " wait can last until a new run."
                     elseif held then
-                        text = "Select: the client's pending flag is still set after 10s"
-                            .. " with no result observed; no new Select is sent until it clears."
+                        text = "Select: the game still shows a selection pending after 10s"
+                            .. " with no result observed; Nexus sends no Echo action until it clears."
                     else
                         text = kind .. ": the client's pending flag is still set after 10s"
                             .. " with no result observed -- no longer waited on"
@@ -3810,7 +3826,9 @@ local function ConfirmAwaitingGrant()
     elseif count <= base then
         own.wait = "grant"
     elseif own.run ~= ownedGeneration then
-        own.wait = "run"   -- not this run's grant (a run boundary voids it first)
+        -- Defensive: not this run's grant. RunBoundaryReset voids the record
+        -- before the generation changes, so this is not expected to occur.
+        own.wait = "run"
     else
         FinishOwnSelect("proven")
         boardDirty = true
@@ -3901,11 +3919,16 @@ end
 -- unresolved own Select as ordinal, phase, spellId, wait, rechecks, overdue
 -- -- or nil. phase "latch": the client's latch still holds it (live, or past
 -- the watchdog); "grant": the latch cleared and it waits for its grant. wait,
--- as of the last poll: "latch", "latch_after_grant" (a matching grant is
--- visible, a Select flag is still set), "grant" or "ambiguous" (an outside
--- Select of the same spell was seen). overdue: it has outlived the normal
--- answer window (its watchdog expired, a world entry passed, or a poll saw
--- RECHECK_AFTER seconds since the send). No clock or client read here.
+-- as of the last poll: "latch" (a selection is pending -- its own flag, or
+-- after that cleared another selection's flag -- and no matching grant is
+-- visible), "latch_after_grant" (a matching grant is visible, a Select flag
+-- is still set), "latch_unknown" (the Perks table cannot be read), "grant"
+-- (no flag, no matching grant yet), "ambiguous" (an outside Select of the
+-- same spell was seen; nothing settles it) or "run" (defensive: a grant of
+-- another run). overdue: it has outlived the normal answer window (its
+-- watchdog expired, a world entry passed, or a poll saw RECHECK_AFTER seconds
+-- since the send). rechecks: read refreshes requested for it, not answers.
+-- No clock or client read here.
 function A.SelectUnresolved()
     local own = selectRecovery.record
     if not own then return nil end
@@ -4004,6 +4027,14 @@ function A.Take(spellId)
     if not allowed then return false, reason end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
     if A.InFlight() then return false, "in flight" end
+    -- Native Select admission: only a readable Perks table whose Select field
+    -- is nil admits a Select, checked before the client is called. A flag the
+    -- watchdog declared dead is still a set flag (only the whole-loop gate
+    -- stops waiting on it), and an unreadable table is not a cleared one.
+    -- Nothing is sent and no client field is written.
+    local perks = PerksTbl()
+    if type(perks) ~= "table" then return false, "the game's selection state cannot be read" end
+    if perks.pendingSelectSpellId ~= nil then return false, "a selection is pending in the game" end
     local board = A.Board()
     if not board then return false, "no board" end
     local found = nil
@@ -5156,7 +5187,15 @@ local function InstallHooks()
                         own.competing = (own.competing or 0) + 1
                     end
                 end
-                if not selfCalling and not inFlightKind then
+                -- A call that is not the adapter's own (selfCalling) is the
+                -- player's input: the user-acting pause and the decision-log
+                -- entry. Not while the adapter's own action is in flight --
+                -- except an own Select held past its watchdog, whose marker
+                -- the watchdog used to release here (the same rule in the
+                -- three hooks below). Input never ends or settles the
+                -- unresolved Select; the competing count above is separate.
+                if not selfCalling and (not inFlightKind
+                    or (inFlightKind == "select" and deadLatch.select)) then
                     externalActionSeen = true
                     ownedProjectionRevision = ownedProjectionRevision + 1
                     A._lastUserAction = { kind = "SelectPerk",
@@ -5171,7 +5210,8 @@ local function InstallHooks()
         hooksecurefunc(svc, "BanishPerk", function(arg1)
             pcall(function()
                 boardDirty = true
-                if not selfCalling and not inFlightKind then
+                if not selfCalling and (not inFlightKind
+                    or (inFlightKind == "select" and deadLatch.select)) then
                     externalActionSeen = true
                     A._lastUserAction = { kind = "BanishPerk",
                         arg = tonumber(arg1), t = GetTime() }
@@ -5185,7 +5225,8 @@ local function InstallHooks()
         hooksecurefunc(svc, "FreezePerk", function(arg1)
             pcall(function()
                 boardDirty = true
-                if not selfCalling and not inFlightKind then
+                if not selfCalling and (not inFlightKind
+                    or (inFlightKind == "select" and deadLatch.select)) then
                     externalActionSeen = true
                     A._lastUserAction = { kind = "FreezePerk",
                         arg = tonumber(arg1), t = GetTime() }
@@ -5199,7 +5240,8 @@ local function InstallHooks()
         hooksecurefunc(svc, "RequestReroll", function()
             pcall(function()
                 boardDirty = true
-                if not selfCalling and not inFlightKind then
+                if not selfCalling and (not inFlightKind
+                    or (inFlightKind == "select" and deadLatch.select)) then
                     externalActionSeen = true
                     A._lastUserAction = { kind = "RequestReroll",
                         t = GetTime() }

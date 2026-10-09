@@ -193,6 +193,16 @@ When it is blocked:
 
 - “Waiting for the game to confirm the last Echo action.” — an action was sent
   and has no confirmed result yet. Do not choose again or reload; wait.
+- “Auto waiting” — Auto stays ON and holds its actions for such a result, or for
+  an action the game still shows pending. “Auto rechecking” — it also asks the
+  game again for your granted Echoes, at a slow pace and only while that could
+  settle the wait; a request is not an answer and nothing is resent. Point at
+  the Auto button to see what Auto is doing now and why.
+- The game gives Nexus no receipt for an Echo selection. If the matching grant
+  never appears, or another selection of the same Echo makes it impossible to
+  tell which one was granted, Nexus keeps waiting until a new run. Turning Auto
+  off and on does not end that wait. A reload ends Nexus's tracking of it without
+  learning or cancelling the result.
 - “No Echo choice is showing.” — no choice is on screen now. It does not mean the
   run is finished, and it is not a reason to retry.
 - “Auto ON — paused” — Auto stays ON but is not acting; point at the **...**

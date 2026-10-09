@@ -578,8 +578,10 @@ do
  assert(not tostring(why):find('no confirmed result',1,true),'the hold is gone: '..tostring(why))
  assert(Nexus.RecomputeStats().actionLifecycle.confirmed==0,'nothing is recorded as confirmed')
 end
--- 21. A Take that the client refused is never recorded as confirmed by a
--- grant from the player's own Select of the same spell (level 80).
+-- 21. A refused Take is never recorded as confirmed by a grant from the
+-- player's own Select of the same spell (level 80). The player's Select flag
+-- is still set past its watchdog, so the adapter refuses the automatic Take
+-- before calling the client (a set Select flag is never Select admission).
 do
  local H=Boot();H.run=NOCHARGES
  H.playerLevel=80;H.granted=Granted(77,false);Nexus.GameAdapter.RequestGranted();H.Advance(1)
@@ -587,7 +589,7 @@ do
  assert(H.service.SelectPerk(200001),'the player Select is accepted');H.attempts=0
  SlashCmdList.NEXUS('auto');H.Advance(12)
  local l=Nexus.RecomputeStats().lastActionLifecycle
- assert(H.attempts==1 and l.actionType=='take' and l.state=='rejected','precondition: the automatic Take was refused: '..tostring(l.state))
+ assert(H.attempts==0 and l.actionType=='take' and l.state=='rejected','precondition: the automatic Take was refused before any client call: '..tostring(l.state)..', attempts='..H.attempts)
  H.perks.pendingSelectSpellId=nil;H.Board({});H.Notify();Grant(H,200001);H.Advance(3)
  H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
  l=Nexus.RecomputeStats().lastActionLifecycle
