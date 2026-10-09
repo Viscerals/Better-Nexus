@@ -242,7 +242,7 @@ html:has(body[data-md-color-scheme="default"]) { background: #f9f8fc; color-sche
 [data-md-color-scheme="slate"] .md-footer-meta { background: #17181c; }
 [data-md-color-scheme="slate"] .md-tabs__link--active { color: #c1addc; }
 [data-md-color-scheme="slate"] .md-typeset a:hover { color: #dcc6f2; }
-[data-md-color-scheme="slate"] .md-typeset .headerlink { color: var(--md-default-fg-color--light); }
+.md-typeset .headerlink { color: var(--md-default-fg-color--light); }
 .md-header__button:focus-visible { outline: 3px solid #977adf; outline-offset: 2px; }
 [data-md-color-scheme="slate"] :is(a, button, .md-header__button):focus-visible { outline-color: #c6a8ea; }
 [data-md-color-scheme="slate"] .md-typeset .md-button { border-color: #b8a3d6; color: #c1addc; }
