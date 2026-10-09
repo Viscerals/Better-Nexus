@@ -110,32 +110,40 @@ do
  check(A.InFlight()==true,'and it stays unresolved')
 end
 
--- 4. Refusal: the latch clears and the same board stays. Nothing was granted
--- and nothing is pending any more.
+-- 4. The latch clears and the same board stays. That is not a proven
+-- refusal: no supported signal says the server refused (or granted) it. So
+-- it is still not owned, it is not sent again, and it stays unresolved --
+-- held -- until its exact grant or a run boundary. (This section used to
+-- treat the same board as a refusal and release it; that was an inference.)
 do
  Boot(30)
  ShowBoard(BOARD)
  Submit(X)
  Resolve('same')
- check(Owned(X)==0,'a refused Select is not owned')
- check(A.InFlight()==false,'and it is released, so the next action may proceed')
+ check(Owned(X)==0,'a Select whose latch cleared on the same board is not owned')
+ check(A.InFlight()==true,'and it is not taken as refused: it stays unresolved')
+ check(select(2,A.Take(X))=='in flight','so the same Select is not sent again')
+ Grant(X,2)
+ check(Owned(X)==1 and A.InFlight()==false,'its exact grant, when it comes, settles it')
 end
 
 -- 5. Time passes. Elapsed time is never grant evidence.
--- (a) The latch is held with no reply. The adapter's existing watchdog
--- declares a latch dead after 10 s -- some refusals arrive with no reply at
--- all, and a held latch would otherwise stop automation for the session --
--- and releases it. Released is not granted: it is still not owned.
+-- (a) The latch is held with no reply. The adapter's watchdog declares the
+-- latch dead after 10 s, but for the adapter's own Select an expired watchdog
+-- is not a result either way: the Select keeps its provenance and stays in
+-- flight (it is never resent), and it is still not owned. (This section used
+-- to expect the watchdog to release it, which lost the Select's provenance.)
 do
  Boot(30)
  ShowBoard(BOARD)
  Submit(X)
  H.Advance(60)
  check(Owned(X)==0,'a minute with the latch held does not make it owned')
- check(A.InFlight()==false,
-  'and the existing no-reply watchdog has released it rather than stall automation')
+ check(A.InFlight()==true,
+  'and the watchdog does not release the own Select: an expired watchdog is not a result')
  Resolve(NEXT)
  check(Owned(X)==0,'a late board change after that still does not make it owned')
+ check(A.InFlight()==true,'and the Select still waits for its grant')
 end
 -- (b) The board moved on and then time passes with no grant. The wait for
 -- the grant is not ended by time: the Select stays in flight, so nothing can

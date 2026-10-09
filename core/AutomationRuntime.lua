@@ -371,8 +371,11 @@ local refusedRerollSig = nil
 -- its own current reads. worldPending: everything that still waited for the
 -- server at the leave (a runtime intent, marked crossedWorld, and every
 -- adapter latch) holds actions after the settle too, until player input, a
--- run boundary or, when a single Take was pending, its own grant. An entry
--- with no observed leave is not classified and revokes Auto.
+-- run boundary or, when a single Take was pending, its own grant -- for the
+-- adapter's own Select, its exact settlement (GameAdapter
+-- ConfirmAwaitingGrant). Player input ends this hold only: the adapter keeps
+-- its own unresolved Select in flight whatever Auto does. An entry with no
+-- observed leave is not classified and revokes Auto.
 local actionHold = { externalUntil = 0, worldLeaving = false,
     worldSettleUntil = nil, worldSettle = 3, worldPending = nil,
     -- Rolling-policy selection and the open decision's recorder link. Kept on
@@ -380,7 +383,12 @@ local actionHold = { externalUntil = 0, worldLeaving = false,
     -- first read; `inForce` changes only while no action intent exists.
     rolling = { set = false, inForce = nil, requested = nil, switches = 0,
         decisionId = nil, sig = nil, sessionMarked = false,
-        lastPolicy = nil, lastFallback = nil } }
+        lastPolicy = nil, lastFallback = nil },
+    -- The adapter's own unresolved Select, on this table for the same
+    -- reason: `seen` is the newest resolved local ordinal already handled;
+    -- `requests`/`lastAt` count the read-only rechecks the adapter sent for
+    -- this runtime. Memory only. Helpers: SelectPoll, SelectWait, Effective.
+    select = { seen = 0, requests = 0, lastAt = nil } }
 
 -- SAVE state
 local savedThisVisit = false
@@ -489,9 +497,14 @@ local function AutoAllowed()
         actionHold.worldSettleUntil = nil
     end
     if actionHold.worldPending then
+        -- Auto off and on ends this hold, but not the adapter's own
+        -- unresolved Select: the text must not promise more than that.
+        local ownSelect = Adapter.SelectUnresolved and Adapter.SelectUnresolved()
         return false, "no confirmed result for "
             .. actionHold.worldPending.label
-            .. " sent before the loading screen -- turn Auto off and on to continue"
+            .. " sent before the loading screen -- "
+            .. (ownSelect and "the Select waits for its exact grant (rechecked; nothing is resent)"
+                or "turn Auto off and on to continue")
     end
     if GetTime() < actionHold.externalUntil then return false, "user acting" end
     if Adapter.RivalDetected() then return false, "Another Echo automation addon is loaded -- disable it" end
@@ -2236,9 +2249,17 @@ local function ResolveActionIntent(board)
     end
     local now = GetTime()
     if intent.state == "submitted" then
+        -- A Take whose client latch cleared on the same board is uncertain:
+        -- not refused and not granted. The adapter keeps that Select in
+        -- flight (phase "grant") until its exact grant, so InFlight alone no
+        -- longer shows the clear.
+        local _, phase, ownSpell = nil, nil, nil
+        if Adapter.SelectUnresolved then _, phase, ownSpell = Adapter.SelectUnresolved() end
         if now >= (intent.expiresAt or math.huge) then
             FinishActionIntent("expired", "confirmation_timeout", true)
-        elseif not Adapter.InFlight() then
+        elseif not Adapter.InFlight() or (phase == "grant"
+            and intent.action.type == "take"
+            and ownSpell == tonumber(intent.action.spellId)) then
             FinishActionIntent("uncertain", "latch_cleared_same_board", true)
         end
     elseif intent.state == "uncertain"
@@ -2362,8 +2383,12 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         if autoEnabled and actionHold.worldPending then
             heldOk, heldWhy = AutoAllowed()
         end
-        SetStatus(heldOk and "waiting for board"
-            or ("auto paused: " .. tostring(heldWhy)))
+        -- An overdue own Select holds between boards too (memory only).
+        local selectWait, _, _, selectOverdue = actionHold.SelectWait()
+        if not (autoEnabled and selectOverdue) then selectWait = nil end
+        SetStatus(not heldOk and ("auto paused: " .. tostring(heldWhy))
+            or selectWait and ("waiting: " .. selectWait)
+            or "waiting for board")
         local preparePerformance, prepareStarted = BeginPhase("overlayPrepare")
         local model = { status = statusLine, cards = {}, recommendation = "",
             progress = BuildProgress(plan, owned, slots, catalog,
@@ -2378,8 +2403,11 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             local gateOk, gateWhy = true, nil
             if Adapter.OrdinaryBoardAllowed then gateOk, gateWhy = Adapter.OrdinaryBoardAllowed() end
             if not heldOk then model.paused = tostring(heldWhy)
-            elseif not gateOk then model.paused = tostring(gateWhy) end
+            elseif not gateOk then model.paused = tostring(gateWhy)
+            elseif selectWait then model.paused = selectWait end
         end
+        model.effective = {}
+        model.effective.state, model.effective.reason = actionHold.Effective()
         if Nexus.OrbGuidance then
             model.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
                 model.progress, (actionIntent and (actionIntent.state == "submitted"
@@ -2649,6 +2677,11 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         }
     end
     local okAuto, autoWhy = MeasurePhase("preauthorize", AutoAllowed)
+    -- An own Select that outlived its normal answer window holds every
+    -- action (adapter in flight) even when this gate passes, for example
+    -- after Auto off and on: the HUD must not present that as acting.
+    local selectWait, _, _, selectOverdue = actionHold.SelectWait()
+    if not selectOverdue then selectWait = nil end
     local recommendation = action.reason or action.type or ""
     if type(action.steps) == "table" and #action.steps > 0 then
         local lines = {}
@@ -2671,9 +2704,12 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
         recommendation = recommendation,
         auto = autoEnabled,
         -- Auto stays ON; this only says it is not acting now, and why.
-        paused = autoEnabled and not okAuto and tostring(autoWhy) or nil,
+        paused = autoEnabled and (not okAuto and tostring(autoWhy)
+            or selectWait) or nil,
         version = Nexus.VERSION,
     }
+    panelModel.effective = {}
+    panelModel.effective.state, panelModel.effective.reason = actionHold.Effective()
     if Nexus.OrbGuidance then
         panelModel.orbGuidance = Nexus.OrbGuidance.Project(Nexus.OrbGuidance.Observe(
             panelModel.progress, (actionIntent and (actionIntent.state == "submitted"
@@ -2701,6 +2737,12 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
             FinishActionIntent("superseded", "authorization_changed", false)
         end
         if not okAuto then SetStatus("auto paused: " .. autoWhy) end
+        return
+    end
+    -- An overdue own Select: say so and prepare nothing while it holds. After
+    -- its exact settlement the next step decides afresh at the normal beat.
+    if selectWait then
+        SetStatus("waiting: " .. selectWait)
         return
     end
     if actionIntent and actionIntent.boardSignature == board.signature then
@@ -2731,12 +2773,15 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
                 forcedTakesBySpell[fid] = (forcedTakesBySpell[fid] or 0) + 1
             end
         end
-        -- The granted count before the send: a later rise is this Take's
-        -- result (the ConfirmAwaitingGrant rule), used at a loading screen.
+        -- The granted count before the send (diagnostic context). This
+        -- Take's result is the adapter's exact settlement of its Select,
+        -- found by the adapter's local ordinal (not a server token).
         intent.grantBaseline = Adapter.GrantedCount(immutable.spellId)
         local ok, err = Adapter.Take(immutable.spellId)
         if ok then
             lastDecision = immutable
+            intent.selectOrdinal = Adapter.SelectUnresolved
+                and Adapter.SelectUnresolved() or nil
             MarkIntentSubmitted(intent)
         else
             intent.mutationAttempted = true
@@ -3244,14 +3289,17 @@ end
 
 local function DispatchLevelStep(level, plan, slots, owned, flags,
                                  disabledLevers, static, locked)
-    -- The one supported result after a loading screen: a Take's grant in the
-    -- granted mirror, by the rule of the adapter's ConfirmAwaitingGrant. The
-    -- leave sets spellId only when that Select was the one pending item (and
-    -- the crossed intent's own spell). Checked here, before every level
-    -- path, so the hold and its intent end together.
+    -- The one supported result after a loading screen: the adapter's exact
+    -- settlement of its own tracked Select. The leave sets ordinal only when
+    -- that Select was the one pending item (and the crossed intent's own
+    -- spell); the settlement is its count rise above the pre-send count with
+    -- a readable Perks table showing no Select flag and no outside Select of
+    -- that spell seen (GameAdapter ConfirmAwaitingGrant). A rise alone, a
+    -- cleared flag alone or a player's latch is not. Checked here, before
+    -- every level path, so the hold and its intent end together.
     local held = actionHold.worldPending
-    if held and held.spellId and held.baseline
-        and Adapter.GrantedCount(held.spellId) > held.baseline then
+    if held and held.ordinal and Adapter.SelectOutcome
+        and Adapter.SelectOutcome(held.ordinal) == "proven" then
         actionHold.worldPending = nil
         if actionIntent and actionIntent.crossedWorld then
             FinishActionIntent("confirmed", "grant_observed", false)
@@ -3537,6 +3585,145 @@ local function ClearStepRetry()
     stepRetry.levelEvents = 0
 end
 
+-- The adapter's own unresolved Select. Table fields, not locals: this
+-- factory is at Lua 5.1's 200-local limit.
+--
+-- SelectWait: memory only (no client read, no request). Why the adapter's
+-- own Select still holds automation, or nil; then its wait, its recheck count
+-- and whether it is overdue (GameAdapter.SelectUnresolved). It names a wait,
+-- never a result: a read refresh is not an answer, and Auto off/on is not a
+-- grant. Player-facing text: spell IDs and local ordinals stay in the
+-- support report and the roll record.
+actionHold.SelectWait = function()
+    if not Adapter.SelectUnresolved then return nil end
+    local ordinal, _, _, wait, rechecks, overdue = Adapter.SelectUnresolved()
+    if not ordinal then return nil end
+    local why = wait == "latch_after_grant"
+            and "its grant is visible but the game still shows a selection pending"
+        or wait == "ambiguous"
+            and "another selection of the same Echo was seen, so no grant can be attributed to it; it stays unresolved until a supported result or a new run"
+        or wait == "grant"
+            and "the game's pending flag cleared; its grant is not visible yet"
+        or wait == "latch_unknown"
+            and "the game's pending flag cannot be read right now"
+        or "the game still shows it pending; no result observed yet"
+    return "waiting for the result of the Echo selection already sent: " .. why
+        .. " -- nothing is resent", wait, rechecks, overdue
+end
+
+-- SelectPoll: once per poll, right after GameAdapter.Poll (RunUpdate). It
+-- first keeps this poll's clock for the memory-only readers (Effective).
+-- (1) The adapter has just resolved an own Select that outlived its
+-- watchdog, crossed a world entry or was rechecked: a bounded roll-record
+-- boundary notes it, and a proven one gives a prepared intent decided while
+-- it waited a new intent beat, so the next action is a fresh decision on the
+-- current board and ownership at the normal spacing, never a replay. The
+-- crossed intent and the world hold end in DispatchLevelStep. (2) While one
+-- is unresolved, the adapter may send its paced read-only granted refresh
+-- (GameAdapter.RecheckSelect) when the ordinary exclusions allow it: Auto ON,
+-- no loading screen, settle over, adapter ready, no player action pause, no
+-- rival addon, no client auto-accept, Orb state allowing ordinary rolling.
+-- They are read here, not through AutoAllowed: that gate ends the settle,
+-- and its world hold is exactly what these rechecks serve. Auto OFF sends
+-- nothing; ON resumes it; neither retires the unresolved Select.
+actionHold.SelectPoll = function()
+    local sel = actionHold.select
+    sel.now = GetTime()
+    -- Also for Effective: whether the adapter holds any action (an own
+    -- Select, any live client latch) as of this poll.
+    sel.inFlight = type(Adapter.InFlight) == "function" and Adapter.InFlight() == true
+    if Adapter.LastSelectOutcome then
+        local ordinal, outcome, recovered = Adapter.LastSelectOutcome()
+        if ordinal and ordinal > sel.seen then
+            sel.seen = ordinal
+            if recovered and outcome == "proven" and actionIntent
+                and actionIntent.state == "prepared" then
+                actionIntent.readyAt = GetTime() + ACTION_INTENT_BEAT
+                RequestStepAt(actionIntent.readyAt)
+            end
+            local recorder = Nexus.RollRecorder
+            if recovered and recorder and Adapter.SelectRecoveryFacts then
+                local facts = Adapter.SelectRecoveryFacts()
+                local row = facts.outcomes[#facts.outcomes] or {}
+                recorder.Boundary("select_recovery", string.format(
+                    "%s L#%d spell %d pre %d now %d e%d r%d", tostring(outcome),
+                    ordinal, tonumber(row.spellId) or 0, tonumber(row.baseline) or 0,
+                    tonumber(row.count) or 0, tonumber(row.entries) or 0,
+                    tonumber(row.rechecks) or 0))
+            end
+        end
+    end
+    if not autoEnabled or actionHold.worldLeaving or not Adapter.RecheckSelect
+        or not (Adapter.SelectUnresolved and Adapter.SelectUnresolved()) then
+        return
+    end
+    local settle = actionHold.worldSettleUntil
+    if (settle and sel.now < settle) or not Adapter.Ready()
+        or sel.now < (actionHold.externalUntil or 0)
+        or Adapter.RivalDetected() or Adapter.AutoAcceptOn()
+        or (type(Adapter.OrdinaryBoardAllowed) == "function"
+            and not Adapter.OrdinaryBoardAllowed()) then
+        return
+    end
+    if Adapter.RecheckSelect() then
+        sel.requests = sel.requests + 1
+        sel.lastAt = sel.now
+        -- One step per recheck (so at the recheck pacing): the HUD shows the
+        -- rechecking state now, not at the next fallback recompute.
+        RequestStepAt(sel.now)
+    end
+end
+
+-- Effective: memory only, for the HUD, M.EffectiveState and the support
+-- report. The Auto selection is autoEnabled; this says what it is doing now
+-- and why. It reads no client data, no clock, requests nothing and calls no
+-- gate (AutoAllowed reads the game and ends the settle): runtime state, the
+-- last poll's clock and in-flight fact (SelectPoll), the last step's status
+-- and the adapter's memory-only Select facts. state: "off" (not selected),
+-- "paused" (loading screen, settle, a world hold that needs player input,
+-- player acting, or the last step's pause), "waiting" (for a sent action's
+-- result, a refused action's board, or a pending client action), "rechecking"
+-- (waiting while read-only refreshes are being sent) or "ready" (nothing
+-- known here holds it; each action still makes its own checks).
+actionHold.Effective = function()
+    local now = actionHold.select.now or 0
+    local wait, kind, rechecks = actionHold.SelectWait()
+    local intent = actionIntent and actionIntent.state
+    local state, reason
+    if not autoEnabled then
+        state, reason = "off", "Auto is OFF: no rechecks and no automatic actions"
+            .. (wait and ("; " .. wait) or "")
+    elseif actionHold.worldLeaving then
+        state, reason = "paused", "loading screen (waiting for world entry)"
+    elseif actionHold.worldSettleUntil and now < actionHold.worldSettleUntil then
+        state, reason = "paused", "settling after world entry"
+    elseif wait then
+        state = ((rechecks or 0) > 0 and (kind == "grant" or kind == "latch"))
+            and "rechecking" or "waiting"
+        reason = wait
+    elseif actionHold.worldPending then
+        -- No grant path ends this hold; player input does: a pause.
+        state, reason = "paused", "no confirmed result for "
+            .. tostring(actionHold.worldPending.label)
+            .. " sent before the loading screen -- turn Auto off and on to continue"
+    elseif intent == "submitted" or intent == "uncertain" or intent == "expired" then
+        state, reason = "waiting", "waiting for the result of the automatic "
+            .. tostring(actionIntent.action.type) .. " (" .. intent .. ")"
+    elseif intent == "rejected" then
+        state, reason = "waiting", "the game refused the last automatic "
+            .. tostring(actionIntent.action.type) .. " on this choice; waiting for a new one"
+    elseif actionHold.select.inFlight then
+        state, reason = "waiting", "the game still shows an Echo action pending"
+    elseif now < (actionHold.externalUntil or 0) then
+        state, reason = "paused", "user acting"
+    elseif statusLine:sub(1, 13) == "auto paused: " then
+        state, reason = "paused", statusLine:sub(14)
+    else
+        state, reason = "ready", "nothing known here holds it"
+    end
+    return state, reason
+end
+
     local M = {}
 
     function M.Initialize()
@@ -3562,6 +3749,16 @@ end
         -- An expired intent is not a confirmed one: it still counts.
         if state == "submitted" or state == "uncertain" or state == "expired" then return state end
         return nil
+    end
+    -- Memory only (HUD, support report): the Auto selection, the effective
+    -- state and its reason (actionHold.Effective), and the read-only
+    -- rechecks sent for this runtime. Reads no client data, requests nothing
+    -- and calls no authorization gate.
+    function M.EffectiveState()
+        local state, reason = actionHold.Effective()
+        local sel = actionHold.select
+        return { selected = autoEnabled == true, state = state, reason = reason,
+            rechecks = sel.requests, lastRecheckAt = sel.lastAt }
     end
     -- Read-only: true between a loading screen's start and its world entry.
     function M.WorldLeaving() return actionHold.worldLeaving == true end
@@ -3637,14 +3834,14 @@ end
             elseif sent and not actionIntent.crossedWorld
                 and not sameSpellLatch
                 and actionIntent.action.type == "take"
-                and actionIntent.grantBaseline
-                and Adapter.GrantedCount(actionIntent.action.spellId)
-                    > actionIntent.grantBaseline then
-                -- Its grant is already visible (for example at level 80,
-                -- where no StepRun resolves it) and no other request for the
-                -- same spell is pending: this is its result. A Take that was
-                -- never sent, or one with another same-spell request pending,
-                -- cannot be matched to a grant.
+                and actionIntent.selectOrdinal and Adapter.SelectOutcome
+                and Adapter.SelectOutcome(actionIntent.selectOrdinal) == "proven" then
+                -- The adapter has already settled its Select exactly (for
+                -- example at level 80, where no StepRun resolves it) and no
+                -- other request for the same spell is pending: this is its
+                -- result. A Take that was never sent, one with another
+                -- same-spell request seen, or a bare count rise cannot be
+                -- matched to a grant.
                 FinishActionIntent("confirmed", "grant_observed", false)
             elseif sent then
                 actionIntent.crossedWorld = true
@@ -3655,27 +3852,34 @@ end
             -- already have recorded the action as a result, or the player
             -- sent it. A later watchdog release of a latch is not a result.
             -- A grant can end the hold only when a single Select is pending
-            -- and, with a crossed intent, it is that Take's own tracked
-            -- request (not another latch for the same spell). A later leave
-            -- adds its items to an open hold, and keeps the grant release
-            -- only if that same Select is still all that is pending.
+            -- and it is the adapter's own tracked request (an ordinal; with a
+            -- crossed intent, that Take's own spell), and then only by the
+            -- adapter's exact settlement of it (DispatchLevelStep). A
+            -- player's Select latch has no such provenance: no grant ends its
+            -- hold, player input or a run boundary does. A later leave adds
+            -- its items to an open hold, and keeps the grant release only if
+            -- that same Select is still all that is pending.
             local crossed = actionIntent and actionIntent.crossedWorld
             local held = actionHold.worldPending
             if held or crossed or #pendingNow > 0 then
                 local only = #pendingNow == 1 and pendingNow[1] or nil
                 local byGrant = only and only.kind == "select"
-                    and only.spellId and only.baseline
+                    and only.spellId and only.baseline and only.ordinal
+                    and only.source ~= "latch"
                     and (not crossed or (actionIntent.action.type == "take"
-                        and only.source ~= "latch"
                         and tonumber(actionIntent.action.spellId) == only.spellId))
+                -- `ordinal`: the adapter's own Select keeps its local
+                -- provenance, so only that request's settlement ends the hold.
                 if not held then
                     held = { kinds = {}, label = "",
                         spellId = byGrant and only.spellId or nil,
-                        baseline = byGrant and only.baseline or nil }
+                        baseline = byGrant and only.baseline or nil,
+                        ordinal = byGrant and only.ordinal or nil }
                     actionHold.worldPending = held
                 elseif held.spellId and #pendingNow > 0
-                    and not (byGrant and only.spellId == held.spellId) then
-                    held.spellId, held.baseline = nil, nil
+                    and not (byGrant and only.spellId == held.spellId
+                        and only.ordinal == held.ordinal) then
+                    held.spellId, held.baseline, held.ordinal = nil, nil, nil
                 end
                 -- Requests per kind, for a truthful reason. A crossed Take is
                 -- the adapter's own tracked Select ("own"/"grant") when one is
@@ -3878,6 +4082,10 @@ end
             RecordError("GameAdapter.Poll", errPoll)
             return
         end
+        -- The adapter's own unresolved Select: its outcome edge and the paced
+        -- read-only rechecks (actionHold.SelectPoll). Never a resend.
+        local okSelect, errSelect = pcall(actionHold.SelectPoll)
+        if not okSelect then RecordError("AutomationRuntime.SelectPoll", errSelect) end
 
         local boardDirty, slotsDirty, dataDirty, autoLockDirty =
             false, false, false, false
@@ -4080,6 +4288,10 @@ end
         end
         return RunUpdate(elapsed)
     end
+
+    -- For passive readers (support report) that must neither create nor step
+    -- a runtime: the newest instance answers M.EffectiveState (memory only).
+    Nexus.AutomationEffectiveState = M.EffectiveState
 
     return M
 end

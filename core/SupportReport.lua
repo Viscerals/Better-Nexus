@@ -1193,6 +1193,79 @@ local function lockedShapeLines()
     return out
 end
 
+-- The adapter's own ordinary Select from its submission until its exact
+-- grant is proven or a run boundary voids it (GameAdapter.SelectRecoveryFacts:
+-- at most one unresolved and the last four resolved), and the Auto selection
+-- with its effective state (AutomationEffectiveState). Memory only, as last
+-- observed: nothing is read from the game and nothing is requested. A
+-- "local #" counts this session's own submissions -- provenance, never a
+-- server token -- and a recheck is a read refresh this session sent, never a
+-- server answer or acknowledgement.
+local SELECT_PHASES = codeSet({"latch", "grant"})
+local SELECT_WAITS = codeSet({"latch", "latch_after_grant", "latch_unknown",
+    "grant", "ambiguous", "run"})
+local SELECT_OUTCOMES = codeSet({"proven", "voided"})
+local SELECT_BOARDS = codeSet({"same", "moved", "missing"})
+local EFFECTIVE_STATES = codeSet({"off", "paused", "waiting", "rechecking", "ready"})
+
+-- Ages are as of the adapter's last poll of that Select (no clock read here).
+local function selectRow(label, row)
+    if type(row) ~= "table" then return label .. ": unknown" end
+    local age = "unknown"
+    local at = row.resolvedAt or row.sampledAt
+    if type(at) == "number" and type(row.sentAt) == "number" and at >= row.sentAt then
+        age = factAge(math.floor(at - row.sentAt))
+    end
+    return label .. ": local #" .. factCount(row.ordinal)
+        .. " spell=" .. factCount(row.spellId)
+        .. " quality=" .. factCount(row.quality)
+        .. " pre-send count=" .. factCount(row.baseline)
+        .. " last count=" .. factCount(row.count)
+        .. " phase=" .. factCode(row.phase, SELECT_PHASES)
+        .. " wait=" .. factCode(row.wait, SELECT_WAITS)
+        .. " board at flag clear=" .. (row.board == nil and "none"
+            or factCode(row.board, SELECT_BOARDS))
+        .. " watchdog expired=" .. factFlag(row.latchDeadAt ~= nil)
+        .. " outside same-spell Selects=" .. factCount(row.competing)
+        .. " world entries=" .. factCount(row.entries)
+        .. " rechecks sent=" .. factCount(row.rechecks)
+        .. " age at last poll=" .. age
+        .. (row.outcome ~= nil and (" outcome=" .. factCode(row.outcome, SELECT_OUTCOMES)) or "")
+end
+
+local function selectRecoveryLines()
+    local out = {}
+    local ok, effective = pcall(function()
+        local fn = Nexus.AutomationEffectiveState
+        return type(fn) == "function" and fn() or nil
+    end)
+    if ok and type(effective) == "table" then
+        out[#out + 1] = "Auto: selected=" .. factFlag(effective.selected)
+            .. " effective=" .. factCode(effective.state, EFFECTIVE_STATES)
+            .. " rechecks sent=" .. factCount(effective.rechecks)
+        out[#out + 1] = "Auto reason: " .. safeText(effective.reason, 240)
+    else
+        out[#out + 1] = "Auto: effective state unavailable (the runtime did not answer)"
+    end
+    local view = accessorFacts("GameAdapter", "SelectRecoveryFacts",
+        {"submitted", "unresolved", "outcomes"})
+    if not view then
+        out[#out + 1] = "Select: unavailable (the adapter did not answer)"
+        return out
+    end
+    out[#out + 1] = "Select: own submissions this session=" .. factCount(view.submitted)
+        .. " (a local # is provenance in this session, not a server token;"
+        .. " a recheck is a read refresh sent, not a server answer)"
+    out[#out + 1] = view.unresolved ~= nil and selectRow("Select unresolved", view.unresolved)
+        or "Select unresolved: none"
+    if type(view.outcomes) == "table" then
+        for index = math.min(#view.outcomes, 4), 1, -1 do
+            out[#out + 1] = selectRow("Select resolved", view.outcomes[index])
+        end
+    end
+    return out
+end
+
 ------------------------------------------------------------------------
 -- Detached preparation for the file route
 ------------------------------------------------------------------------
@@ -1447,6 +1520,11 @@ function M.Step(job)
             {name = "locked shape", build = function()
                 local out = {"-- locked shape (memory only; structure as observed, not refreshed) --"}
                 for _, line in ipairs(lockedShapeLines()) do out[#out + 1] = line end
+                return out
+            end},
+            {name = "select recovery", build = function()
+                local out = {"-- ordinary Select recovery (memory only; facts as observed, not refreshed) --"}
+                for _, line in ipairs(selectRecoveryLines()) do out[#out + 1] = line end
                 return out
             end},
         }

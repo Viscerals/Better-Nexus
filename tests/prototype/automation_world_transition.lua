@@ -446,9 +446,14 @@ end
 -- the same spell: the automatic Take waits for its grant and the player
 -- clicks another copy of that spell (a live latch). One grant does not end
 -- the hold, the watchdog release of the player's latch does not erase it,
--- and a second zone keeps it. Player input ends it without recording a
--- confirmation. Control: the automatic Take alone is one request (its local
--- tracking and its latch are not counted twice) and its grant resumes.
+-- and a second zone keeps it. Player input ends that hold without recording
+-- a confirmation, but not the adapter's own Select, which waits for its exact
+-- settlement: for a different spell once the player's Select flag has
+-- cleared; for the same spell never (the player's Select of that spell makes
+-- any grant ambiguous for good -- no supported receipt says which request it
+-- answered -- so automation stays held). Control: the automatic Take alone is
+-- one request (its local tracking and its latch are not counted twice) and
+-- its grant resumes.
 local function Grant(H,id)
  local g=H.Clone(H.granted) or {};local k='Echo '..(id-200000);g[k]=g[k] or {}
  table.insert(g[k],{spellId=id});H.granted=g;H.Notify()
@@ -476,7 +481,10 @@ for _,v in ipairs({{'same spell',200001},{'different spell',200030},{'single aut
   local ok,why=H.Allowed()
   assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for 2 take requests',1,true),
    v[1]..': one grant does not end the hold: '..tostring(why)..', attempts='..H.attempts)
-  assert(not Nexus.GameAdapter.InFlight(),v[1]..': reached: granted once, and the player latch is dead')
+  -- The player's Select flag stays set (past its watchdog), so the adapter's
+  -- own Select is not settled by the visible grant either.
+  assert(Nexus.GameAdapter.InFlight() and H.perks.pendingSelectSpellId==v[2],
+   v[1]..': reached: granted once; the player flag is still set and the own Select stays held')
   H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(5)
   ok,why=H.Allowed()
   assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for 2 take requests',1,true),
@@ -489,7 +497,16 @@ for _,v in ipairs({{'same spell',200001},{'different spell',200030},{'single aut
   -- leave), so no intent is resolved; nothing may be recorded as confirmed.
   assert(l.state~='confirmed' and Nexus.RecomputeStats().actionLifecycle.confirmed==confirmed,
    v[1]..': the acknowledgement records no confirmation: '..tostring(l.state)..'/'..tostring(l.reason))
-  H.Advance(1.5);assert(H.attempts==2,v[1]..': automation continues after the acknowledgement, attempts='..H.attempts)
+  H.Advance(1.5)
+  assert(H.attempts==1 and Nexus.GameAdapter.InFlight(),
+   v[1]..': the acknowledgement does not retire the own Select while a Select flag is set, attempts='..H.attempts)
+  H.perks.pendingSelectSpellId=nil;H.Notify();H.Advance(1.5) -- the player's Select flag clears
+  if v[2]==200001 then
+   assert(H.attempts==1 and Nexus.GameAdapter.InFlight(),
+    v[1]..': the same-spell overlap stays ambiguous; nothing is sent, attempts='..H.attempts)
+  else
+   assert(H.attempts==2,v[1]..': its exact grant with the flag clear lets automation continue, attempts='..H.attempts)
+  end
  end
 end
 

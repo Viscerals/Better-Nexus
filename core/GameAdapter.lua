@@ -76,6 +76,34 @@ local inFlightKind, inFlightSig, pendingOwnPick, pendingOwnBaseline
 -- intent, never ownership: Owned() reads the granted mirror only. It used to
 -- be recordedPicks, which Owned() merged into ownership (issue #62).
 local awaitingGrant = nil
+-- The adapter's own Select from its submission until its exact grant is
+-- proven or a run boundary voids it; awaitingGrant is this same record once
+-- the client's latch has cleared. Memory only and bounded: `record` is the
+-- one unresolved Select (no second one is sent while it is in flight) and
+-- `outcomes` keeps the last few resolved ones. `ordinal` counts this
+-- session's own submissions: local provenance, never a server token. A
+-- watchdog expiry, a loading screen, a cleared latch or any board is not its
+-- result (ConfirmAwaitingGrant). The RECHECK fields pace the read-only
+-- granted refreshes the runtime asks for while Auto is ON and the world has
+-- settled (A.RecheckSelect): an early burst, then a slow cadence.
+local selectRecovery = { ordinal = 0, record = nil, outcomes = {},
+    RECHECK_AFTER = 10, EARLY = 3, EARLY_SPACING = 4, SLOW_SPACING = 25,
+    MAX_OUTCOMES = 4 }
+
+-- Ends the own Select's wait and keeps its facts in `outcomes`: "proven"
+-- (ConfirmAwaitingGrant saw its exact grant) or "voided" (a run boundary
+-- ended it with its result unknown). There is no "refused": no supported
+-- signal proves a refusal.
+local function FinishOwnSelect(outcome)
+    local own = selectRecovery.record
+    if not own then return end
+    selectRecovery.record = nil
+    if awaitingGrant == own then awaitingGrant = nil end
+    own.outcome, own.resolvedAt = outcome, GetTime()
+    local outcomes = selectRecovery.outcomes
+    outcomes[#outcomes + 1] = own
+    while #outcomes > selectRecovery.MAX_OUTCOMES do table.remove(outcomes, 1) end
+end
 local ownedProjectionRevision = 0
 local lockedProjectionRevision = 0
 local leverProjectionRevision = 0
@@ -981,9 +1009,24 @@ end
 -- are void, and we re-request granted so the fresh run's owned set loads.
 -- Sync trust is handled per-level in A.Owned (no fragile snapshot compare).
 function A.RunBoundaryReset()
+    -- The dead run's own Select is void, not granted: its wait ends with its
+    -- result unknown. Voiding it opens nothing: a client Select flag still
+    -- set at that moment (live or past the watchdog), or a Perks table that
+    -- cannot be read, keeps Select admission closed until a readable table
+    -- shows no flag (ResolveInFlight then finds no record to wait for). With
+    -- no own Select, a client latch is handled as before.
+    if selectRecovery.record then
+        FinishOwnSelect("voided")
+        local p = PerksTbl()
+        if type(p) ~= "table" or p.pendingSelectSpellId ~= nil then
+            inFlightKind, inFlightSig = "select", nil
+        elseif inFlightKind == "select" then
+            inFlightKind, inFlightSig = nil, nil
+        end
+    end
     awaitingGrant = nil
     ownedProjectionRevision = ownedProjectionRevision + 1
-    pendingOwnPick = nil
+    pendingOwnPick, pendingOwnBaseline = nil, nil
     ownedGeneration = ownedGeneration + 1
     ownedConfirmedGeneration = -1
     ownedRequestGeneration = -1
@@ -996,7 +1039,10 @@ function A.RunBoundaryReset()
     A.RequestGranted()
 end
 
-function A.RequestGranted()
+-- `selectRecheck`: a read refresh for an unresolved own Select
+-- (A.RecheckSelect). It is the same request, but it does not use up the
+-- bounded owned-sync retries below.
+function A.RequestGranted(selectRecheck)
     local svc = PS()
     if svc and svc.RequestGrantedPerks then
         if ownedRequestGeneration ~= ownedGeneration then
@@ -1007,7 +1053,8 @@ function A.RequestGranted()
         end
         SafeCall(svc.RequestGrantedPerks)
         ownedRequestAt = GetTime()
-        ownedRetries = ownedRetries + 1
+        if not selectRecheck then ownedRetries = ownedRetries + 1 end
+        return true
     end
 end
 
@@ -3602,10 +3649,13 @@ end
 
 -- stuck-latch watchdog: the client's latches have NO timeout and some
 -- refusals arrive with no reply at all (a user-clicked freeze the server
--- ignores would otherwise halt automation forever). A latch stuck >10s is
--- declared dead for the session -- per-ACTION, mirroring the client's own
--- failure mode -- and excluded from the whole-loop gate. Never writes the
--- client's fields; recovers if the latch does clear later.
+-- ignores would otherwise halt automation forever). A latch still set after
+-- 10s is declared dead -- per-ACTION, mirroring the client's own failure
+-- mode -- and excluded from the whole-loop gate. Never writes the client's
+-- fields; recovers if the latch does clear later. The adapter's own Select
+-- is the exception: an expired watchdog is not its result, so it stays in
+-- flight with its provenance (spell, pre-send count, run, ordinal) until its
+-- exact grant is proven or a run boundary voids it.
 local function WatchLatches()
     local p = PerksTbl()
     if not p then return end
@@ -3615,10 +3665,41 @@ local function WatchLatches()
             latchSince[kind] = latchSince[kind] or now
             if not deadLatch[kind] and (now - latchSince[kind]) > 10 then
                 deadLatch[kind] = true
-                if inFlightKind == kind then inFlightKind, inFlightSig = nil, nil end
+                -- The adapter's Select tracking is never released here: the
+                -- own Select keeps its provenance, and a flag left by one a
+                -- run boundary voided keeps Select admission closed until it
+                -- clears. Other kinds keep the per-action release.
+                local held = kind == "select" and inFlightKind == "select"
+                local own = held and selectRecovery.record
+                if own then own.latchDeadAt = now end
+                if inFlightKind == kind and not held then
+                    inFlightKind, inFlightSig = nil, nil
+                end
+                -- What was observed, nothing more: the client's flag is still
+                -- set. Not a claim that the server stayed silent. For the own
+                -- Select the grant clause comes from this poll's count sample
+                -- (ConfirmAwaitingGrant runs first): a matching grant can be
+                -- visible while the flag stays set.
                 if callbacks and callbacks.OnStatus then
-                    callbacks.OnStatus(kind .. " got no server reply for 10s -- "
-                        .. kind .. " disabled for this session (/reload recovers)")
+                    local seen = own and (own.count or 0) > (own.baseline or 0)
+                    local text
+                    if own then
+                        text = "Select still unresolved after 10s: the client's pending"
+                            .. " flag is still set"
+                            .. (seen and " although a matching grant is visible"
+                                or " and its grant is not visible yet")
+                            .. ". Nexus sends nothing new and waits"
+                            .. (seen and " for the flag to clear."
+                                or "; it rechecks granted data while Auto is ON.")
+                    elseif held then
+                        text = "Select: the client's pending flag is still set after 10s"
+                            .. " with no result observed; no new Select is sent until it clears."
+                    else
+                        text = kind .. ": the client's pending flag is still set after 10s"
+                            .. " with no result observed -- no longer waited on"
+                            .. " (it is honoured again if the flag clears)"
+                    end
+                    callbacks.OnStatus(text)
                 end
             end
         else
@@ -3650,16 +3731,22 @@ end
 -- A live select latch is never merged with "grant": that request's latch has
 -- already cleared, so a latch seen now is a separate request, even for the
 -- same spell. A Select has its spell and its granted count before the send
--- (a "latch" Select: the count now). Empty when nothing is pending.
+-- (a "latch" Select: the count now). The own Select ("own" or "grant") also
+-- has its local `ordinal` (provenance in this session, not a server token);
+-- it stays "own" while its latch is set, also after the watchdog expired it.
+-- Empty when nothing is pending.
 function A.PendingActions()
     local out = {}
     if awaitingGrant then
         out[#out + 1] = { kind = "select", source = "grant",
-            spellId = awaitingGrant.spellId, baseline = awaitingGrant.baseline }
+            spellId = awaitingGrant.spellId, baseline = awaitingGrant.baseline,
+            ordinal = awaitingGrant.ordinal }
     end
     if inFlightKind == "select" then
+        local own = selectRecovery.record
         out[#out + 1] = { kind = "select", source = "own",
-            spellId = pendingOwnPick, baseline = pendingOwnBaseline }
+            spellId = pendingOwnPick, baseline = pendingOwnBaseline,
+            ordinal = own and own.ordinal or nil }
     elseif inFlightKind then
         out[#out + 1] = { kind = inFlightKind, source = "own" }
     end
@@ -3693,14 +3780,39 @@ function A.GrantedCount(spellId)
 end
 
 -- The one confirmation there is: the granted mirror shows the selected spell
--- above the count it had when the Select was submitted. A board transition,
--- a cleared latch, elapsed time, a new table with the same contents, or a
--- grant of a different spell confirms nothing.
+-- above the count it had when the Select was submitted, in the same run,
+-- while the client shows no Select pending at all (its latch field is nil:
+-- native Select admission is clear) and no outside Select of that spell, or
+-- one whose spell could not be read, was seen while it waited. Such a
+-- `competing` Select makes any rise ambiguous for good: no supported receipt
+-- says which request a grant answered, so further rises settle nothing and
+-- the Select stays held until a run boundary voids it. A board transition, a
+-- cleared latch, an expired watchdog, a loading screen, elapsed time, a new
+-- table with the same contents, an old copy or a grant of a different spell
+-- confirms nothing. A matching grant seen while any Select flag is still set
+-- waits for it to clear, and so does one seen while the client's Perks table
+-- cannot be read: an absent surface is not a cleared flag. Every poll also
+-- samples the count and the wait reason (memory only).
 local function ConfirmAwaitingGrant()
-    local pending = awaitingGrant
-    if not pending then return end
-    if GrantedCountOf(pending.spellId) > (pending.baseline or 0) then
-        awaitingGrant = nil
+    local own = selectRecovery.record
+    if not own then return end
+    local count, now = GrantedCountOf(own.spellId), GetTime()
+    own.count, own.sampledAt = count, now
+    if now - own.sentAt >= selectRecovery.RECHECK_AFTER then own.overdue = true end
+    local p = PerksTbl()
+    local base = own.baseline or 0
+    if (own.competing or 0) > 0 then
+        own.wait = "ambiguous"
+    elseif type(p) ~= "table" then
+        own.wait = "latch_unknown"
+    elseif own.phase ~= "grant" or p.pendingSelectSpellId ~= nil then
+        own.wait = count > base and "latch_after_grant" or "latch"
+    elseif count <= base then
+        own.wait = "grant"
+    elseif own.run ~= ownedGeneration then
+        own.wait = "run"   -- not this run's grant (a run boundary voids it first)
+    else
+        FinishOwnSelect("proven")
         boardDirty = true
         dataDirty = true
     end
@@ -3711,24 +3823,30 @@ local function ResolveInFlight()
     if not inFlightKind then return end
     local p = PerksTbl()
     if inFlightKind == "select" then
-        if not (p and p.pendingSelectSpellId) then
-            local ch = p and p.currentChoice
+        -- Only a readable Perks table with no Select flag ends the latch
+        -- wait; an absent surface is not a cleared latch.
+        if type(p) == "table" and p.pendingSelectSpellId == nil then
+            local ch = p.currentChoice
             local resolvedSig = nil
             if type(ch) == "table" then
                 local parts = {}
                 for i = 1, #ch do parts[#parts + 1] = tostring(ch[i].spellId) end
                 resolvedSig = table.concat(parts, ",")
             end
-            if ch == nil or resolvedSig ~= inFlightSig then
-                -- The board moved on (auto-chain, or it went away). That ends
-                -- the latch wait, not the Select: it now waits for its grant,
-                -- still in flight, and still not owned.
-                if pendingOwnPick then
-                    awaitingGrant = {spellId = pendingOwnPick,
-                        baseline = pendingOwnBaseline or 0}
-                end
+            -- The client's latch cleared. That ends the latch wait, not the
+            -- Select, whatever the board did: a board that moved on
+            -- (auto-chain) or went away is not its grant, and one that stayed
+            -- the same is not a proven refusal -- no supported signal says
+            -- which. It now waits for its grant, still in flight and still
+            -- not owned (ConfirmAwaitingGrant). The board is kept as a
+            -- diagnostic fact only.
+            local own = selectRecovery.record
+            if own and own.phase == "latch" then
+                own.phase, own.latchClearedAt = "grant", GetTime()
+                own.board = ch == nil and "missing"
+                    or (resolvedSig == inFlightSig and "same" or "moved")
+                awaitingGrant = own
             end
-            -- failure (SS-1000 "0"): latch cleared, same board -> just release
             inFlightKind, inFlightSig, pendingOwnPick, pendingOwnBaseline =
                 nil, nil, nil, nil
             boardDirty = true
@@ -3747,6 +3865,92 @@ local function ResolveInFlight()
         inFlightKind, inFlightSig = nil, nil
         boardDirty = true
     end
+end
+
+-- A read-only granted refresh for the own Select while it is unresolved and
+-- its grant is not visible: never a resend, never a write to a client field.
+-- The runtime calls this only while Auto is ON, outside a loading screen and
+-- after its settle; the pacing is here. Nothing before RECHECK_AFTER seconds
+-- (the client normally answers well within that), then an early burst of
+-- EARLY requests EARLY_SPACING apart (a world entry starts a new burst), then
+-- one every SLOW_SPACING for as long as it stays unresolved. Coalesced with
+-- every other granted request (ownedRequestAt). A request, an unchanged
+-- answer or a new table is not grant evidence: only ConfirmAwaitingGrant
+-- settles the Select. Returns true when it sent a request.
+function A.RecheckSelect()
+    local own = selectRecovery.record
+    if not own then return false end
+    -- Nothing a refresh could settle: its grant is already visible (the
+    -- wait is the client's flag), or the rise is ambiguous for good.
+    if (own.count or 0) > (own.baseline or 0) or (own.competing or 0) > 0 then
+        return false
+    end
+    local now = GetTime()
+    if now - (own.sentAt or now) < selectRecovery.RECHECK_AFTER then return false end
+    local spacing = own.early < selectRecovery.EARLY
+        and selectRecovery.EARLY_SPACING or selectRecovery.SLOW_SPACING
+    if now - (ownedRequestAt or -math.huge) < spacing then return false end
+    if not A.RequestGranted(true) then return false end
+    own.rechecks = own.rechecks + 1
+    own.early = math.min(own.early + 1, selectRecovery.EARLY)
+    own.lastRecheckAt = now
+    return true
+end
+
+-- Memory only (no client read), for the runtime's gates and text: the
+-- unresolved own Select as ordinal, phase, spellId, wait, rechecks, overdue
+-- -- or nil. phase "latch": the client's latch still holds it (live, or past
+-- the watchdog); "grant": the latch cleared and it waits for its grant. wait,
+-- as of the last poll: "latch", "latch_after_grant" (a matching grant is
+-- visible, a Select flag is still set), "grant" or "ambiguous" (an outside
+-- Select of the same spell was seen). overdue: it has outlived the normal
+-- answer window (its watchdog expired, a world entry passed, or a poll saw
+-- RECHECK_AFTER seconds since the send). No clock or client read here.
+function A.SelectUnresolved()
+    local own = selectRecovery.record
+    if not own then return nil end
+    local overdue = own.overdue == true or own.latchDeadAt ~= nil or own.entries > 0
+    return own.ordinal, own.phase, own.spellId, own.wait, own.rechecks, overdue
+end
+
+-- Memory only: what became of the own Select with this local ordinal --
+-- "unresolved", "proven" or "voided" -- or nil when unknown here.
+function A.SelectOutcome(ordinal)
+    local own = selectRecovery.record
+    if own and own.ordinal == ordinal then return "unresolved" end
+    local outcomes = selectRecovery.outcomes
+    for i = #outcomes, 1, -1 do
+        if outcomes[i].ordinal == ordinal then return outcomes[i].outcome end
+    end
+    return nil
+end
+
+-- Memory only: the newest resolved own Select as ordinal, outcome, recovered
+-- (or nil). recovered: it was resolved only after outliving its watchdog,
+-- crossing a world entry or being rechecked -- not an ordinary prompt answer.
+function A.LastSelectOutcome()
+    local last = selectRecovery.outcomes[#selectRecovery.outcomes]
+    if not last then return nil end
+    return last.ordinal, last.outcome, last.latchDeadAt ~= nil
+        or last.entries > 0 or last.rechecks > 0
+end
+
+-- Memory only, for display and the support report: copies of the
+-- unresolved own Select and of the last few resolved ones (scalar fields
+-- only). Nothing is read from the client and nothing is requested: count,
+-- latch wait and board are what the last poll observed. `ordinal` is local
+-- provenance, not a server token; `rechecks` counts read refreshes this
+-- session requested, not server answers.
+function A.SelectRecoveryFacts()
+    local function Copy(row)
+        local out = {}
+        for key, value in pairs(row) do out[key] = value end
+        return out
+    end
+    local out = { submitted = selectRecovery.ordinal, outcomes = {} }
+    if selectRecovery.record then out.unresolved = Copy(selectRecovery.record) end
+    for i, row in ipairs(selectRecovery.outcomes) do out.outcomes[i] = Copy(row) end
+    return out
 end
 
 ------------------------------------------------------------------------
@@ -3802,9 +4006,9 @@ function A.Take(spellId)
     if A.InFlight() then return false, "in flight" end
     local board = A.Board()
     if not board then return false, "no board" end
-    local found = false
+    local found = nil
     for i = 1, #board.cards do
-        if board.cards[i].spellId == spellId then found = true; break end
+        if board.cards[i].spellId == spellId then found = board.cards[i]; break end
     end
     if not found then return false, "not on board" end
     local svc = PS()
@@ -3815,10 +4019,18 @@ function A.Take(spellId)
     local ok = svc and SafeCall(svc.SelectPerk, spellId)
     selfCalling = false
     if ok then
-        -- ids-only signature: ResolveInFlight compares like-for-like (a
-        -- flag-suffixed sig would misread every FAILED select as success)
+        -- ids-only signature: ResolveInFlight records like-for-like whether
+        -- the board moved when the latch cleared (a diagnostic fact only)
         inFlightKind, inFlightSig, pendingOwnPick = "select", board.idSignature, spellId
         pendingOwnBaseline = baseline
+        -- Its provenance until its exact grant is proven or a run boundary
+        -- voids it (selectRecovery). The exact spellId is the tier.
+        selectRecovery.ordinal = selectRecovery.ordinal + 1
+        selectRecovery.record = { ordinal = selectRecovery.ordinal,
+            spellId = spellId, quality = tonumber(found.quality),
+            baseline = baseline, count = baseline, run = ownedGeneration,
+            sentAt = GetTime(), phase = "latch", wait = "latch",
+            competing = 0, entries = 0, rechecks = 0, early = 0 }
         return true
     end
     return false, "refused"
@@ -4932,6 +5144,18 @@ local function InstallHooks()
         hooksecurefunc(svc, "SelectPerk", function(arg1)
             pcall(function()
                 boardDirty = true
+                -- An outside Select of the own unresolved Select's spell, or
+                -- one whose spell cannot be read, also while that one is in
+                -- flight. This post-hook cannot see whether the client
+                -- accepted it, so one later rise can no longer be attributed
+                -- to the own Select alone (ConfirmAwaitingGrant).
+                local own = not selfCalling and selectRecovery.record
+                if own then
+                    local id = tonumber(arg1)
+                    if id == nil or id == own.spellId then
+                        own.competing = (own.competing or 0) + 1
+                    end
+                end
                 if not selfCalling and not inFlightKind then
                     externalActionSeen = true
                     ownedProjectionRevision = ownedProjectionRevision + 1
@@ -5207,6 +5431,11 @@ function A.OnEvent(event)
         InstallHooks()
         A.RequestGranted()
         boardDirty, slotsDirty = true, true
+        -- An own Select still unresolved at a world entry keeps its
+        -- provenance (an entry is not its result); the entry is counted and
+        -- starts a new early recheck burst after the settle (A.RecheckSelect).
+        local own = selectRecovery.record
+        if own then own.entries, own.early = own.entries + 1, 0 end
     elseif event == "PLAYER_LEVEL_UP" then
         ObserveRunBoundary()
         levelBurstStatus.events = levelBurstStatus.events + 1

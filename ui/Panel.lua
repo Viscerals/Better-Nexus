@@ -150,6 +150,12 @@ local function ModelSignatures(model)
             assignment=model.assignment,
             orbGuidance=model.orbGuidance,
             paused=model.paused,
+            -- The heading's wait word (Auto waiting / Auto rechecking) can
+            -- change while the pause text stays the same; nil otherwise.
+            heading=model.auto and model.paused and type(model.effective) == "table"
+                and (model.effective.state == "waiting"
+                    or model.effective.state == "rechecking")
+                and model.effective.state or nil,
         }),
         performance = Signature({
             performance=type(model.progress) == "table" and model.progress.performance or nil,
@@ -1046,6 +1052,16 @@ local function EnsureFrame()
         GameTooltip:AddLine("OFF keeps recommendations visible; it does not turn off Sync.", 0.75, 0.75, 0.75, true)
         GameTooltip:AddLine("An off-Wishlist pick may occur when no eligible target or", 0.75, 0.75, 0.75, true)
         GameTooltip:AddLine("search action is available. Later improvement is not guaranteed.", 0.75, 0.75, 0.75, true)
+        -- The button is the selection; this is what it is doing now, from
+        -- the last committed model (memory only: waiting, rechecking,
+        -- paused or ready, with the reason).
+        local effective = type(M._lastModel) == "table" and M._lastModel.effective
+        if type(effective) == "table" and type(effective.state) == "string" then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Now: " .. effective.state
+                .. (type(effective.reason) == "string"
+                    and (" -- " .. effective.reason:sub(1, 240)) or ""), 1, 0.82, 0, true)
+        end
         GameTooltip:Show()
     end)
     autoBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1835,7 +1851,14 @@ local function ApplyModel(model, signatures, roll)
     if rollBlock then
         local activeSlot = tonumber(pr.activeSlot) or 0
         -- Auto stays ON while paused; the heading must not say it is acting.
-        if model.auto and model.paused then
+        -- A hold that is a wait for a sent action's result (the runtime's
+        -- effective state) is named as that wait; every other hold keeps the
+        -- paused heading. The Auto button still shows the selection.
+        local effective = type(model.effective) == "table" and model.effective.state
+        if model.auto and model.paused
+            and (effective == "waiting" or effective == "rechecking") then
+            statusText:SetText("|cffffd100Auto " .. effective .. "|r")
+        elseif model.auto and model.paused then
             statusText:SetText("|cffffd100Auto ON — paused|r")
         elseif #cards == 0 and recommendation == "" then
             statusText:SetText("|cff7fd5ffRoll status|r")
