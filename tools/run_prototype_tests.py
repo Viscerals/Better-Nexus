@@ -204,6 +204,8 @@ NAMES += ['batch_journal_fallback_argument','batch_low_score_display','batch_slo
 # Supplement r2: dynamic capacity, record partitions, locked partial target, wire records, restored Orb wording.
 NAMES += ['batch_locked_capacity_trust','batch_locked_capacity_autolock','batch_locked_capacity_display']
 NAMES += ['batch_autolock_locked_partial_target','batch_locked_wire_records','batch_orb_restored_wording']
+# Issue #25 refused copy page (SETUP/EXPECT/GUARD; EXPECT fails at 8eb6a3a by design). Parent #25 stays open.
+NAMES += ['triage_copy_refusal']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
