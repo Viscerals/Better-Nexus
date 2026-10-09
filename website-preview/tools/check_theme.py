@@ -115,7 +115,7 @@ try:
                 page.get_by_role("button", name="Open search", exact=True).press("Space")
                 expect(page.locator("#__search")).to_be_checked()
             else:
-                page.get_by_role("textbox", name="Search", exact=True).fill("Wishlist")
+                page.get_by_role("textbox", name="Search", exact=True).press_sequentially("Wishlist")
                 expect(page.locator(".md-search-result__list")).to_contain_text("Wishlist")
             assert not errors, errors
             context.close()
