@@ -118,7 +118,7 @@ def main() -> int:
     for line in timing_lines(rows, getattr(runner, 'DEFAULT_TIMEOUT_SECONDS', None)):
         print(line)
     admission = rows.get('sync_admission_traffic_acceptance')
-    if admission and admission['status'] == 'PASS':
+    if admission and admission['status'] == 'PASS' and admission.get('stdout'):
         print((admission.get('stdout') or '').rstrip())
     if failed or unexecuted or not_run:
         print('RESULT: FAILED')
