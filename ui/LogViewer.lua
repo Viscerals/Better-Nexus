@@ -38,13 +38,18 @@ local COPY_PAGE_BYTES = 16000
 local copyText, copyPage, copyPages = "", 1, 1
 local copyRanges={{1,0}}
 local pagePrevious, pageNext
+-- Shown in place of a page that Identity.DisplaySafeText refuses, never a
+-- stripped, escaped or partial copy of its bytes. No "|": the edit box would
+-- read it as markup.
+local REFUSED_COPY_PAGE = "This page is not shown: it contains text that this window cannot display safely, for example a control character such as a TAB, invalid UTF-8, or an invisible or combining mark. Its text cannot be copied from this window, so a report copied page by page will be missing this page."
 
 local function InertCopyText(value, maxBytes)
     value = tostring(value or "")
     local displayText = Nexus and Nexus.Identity
         and Nexus.Identity.DisplaySafeText
-    return displayText and displayText(
-        value, tonumber(maxBytes) or #value, true, true) or ""
+    if not displayText then return "" end
+    return displayText(value, tonumber(maxBytes) or #value, true, true)
+        or REFUSED_COPY_PAGE
 end
 
 local function RenderCopyPage()
