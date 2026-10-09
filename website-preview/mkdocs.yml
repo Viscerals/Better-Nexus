@@ -15,10 +15,21 @@ theme:
   logo: assets/nexus-mark.svg
   favicon: assets/nexus-mark.svg
   font: false
+  # First palette is the default, independent of the operating system.
+  # Material restores an explicit choice before rendering page content.
   palette:
-    scheme: default
-    primary: custom
-    accent: custom
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
   features:
     - navigation.tabs
     - navigation.sections
@@ -30,9 +41,9 @@ theme:
 plugins:
   - search
 extra_css:
-  - stylesheets/nexus.css?v=20261006-published
+  - stylesheets/nexus.css?v=20261009-dark
 extra_javascript:
-  - javascripts/accessibility.js
+  - javascripts/accessibility.js?v=20261009-dark
 extra:
   generator: false
   social:

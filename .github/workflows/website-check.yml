@@ -1,0 +1,37 @@
+name: Validate Nexus website
+on:
+  push:
+    branches: ["fix/website-dark-default-20261009"]
+    paths: ["website-preview/**", ".github/workflows/website-check.yml"]
+  pull_request:
+    branches: ["docs/site-preview-20261006"]
+    paths: ["website-preview/**", ".github/workflows/website-check.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: nexus-website-check-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  website:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build and validate website
+        run: |
+          python -m pip install -r website-preview/requirements.lock.txt
+          python -m pip install playwright==1.56.0
+          python -m mkdocs build --strict --config-file website-preview/mkdocs.yml
+          python website-preview/tools/check_site.py
+          python website-preview/tools/check_theme.py
+          python website-preview/tools/stage_site.py --output pages-check
+          git diff --check
+      - name: Preserve website verification
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: website-theme-verification
+          path: website-preview/qa/
+          retention-days: 14
