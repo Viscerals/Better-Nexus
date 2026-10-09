@@ -90,7 +90,7 @@ body { font-family: var(--md-text-font); }
 .nx-facts b { color: #3e3352; font-weight: 700; }
 .nx-start, .nx-toolkit, .nx-latest, .nx-support-note { padding: 3.1rem 3.2rem; }
 .nx-section-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 2rem; margin-bottom: 1.7rem; }
-.nx-home section:not(.nx-hero) .nx-eyebrow { color: #77658e; margin-bottom: .55rem; }
+.nx-home section:not(.nx-hero) .nx-eyebrow { color: #74628b; margin-bottom: .55rem; }
 .nx-home h2 { font-size: 1.7rem; line-height: 1.2; color: var(--nx-ink); font-weight: 720; letter-spacing: -.04em; }
 .nx-section-heading > p { font-size: .68rem; line-height: 1.65; color: #746b80; }
 .nx-route-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
