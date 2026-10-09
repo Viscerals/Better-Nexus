@@ -436,18 +436,28 @@ run-boundary, self-check demotion hook).
 
 ## Post-review amendments (from the v1.19.4 pre-deploy adversarial pass)
 
-> The index-base, signature, latch-watchdog and run-boundary items still describe
-> the current adapter. The `DISABLE_SUPPRESSES_GUARANTEE` self-check item is
-> **HISTORICAL**: that flag belongs to the obsolete guarantee model and changes
-> no current decision. The undemote command still exists and only clears those
-> legacy flag demotions.
+> The index-base item still describes the current adapter. The signature,
+> latch-watchdog and run-boundary items below are amended for the adapter's own
+> ordinary Select (its tracking until an exact grant). The
+> `DISABLE_SUPPRESSES_GUARANTEE` self-check item is **HISTORICAL**: that flag
+> belongs to the obsolete guarantee model and changes no current decision. The
+> undemote command still exists and only clears those legacy flag demotions.
 
 - **Index bases:** `Policy` `action.index` is **1-based** into `board.cards`;
   `GameAdapter.Banish(index0)` takes the client's **0-based** perk index. `Main`
   converts at the seam (`action.index - 1`).
-- `board` additionally carries `idSignature` (spellIds only, comma-joined) — the
-  in-flight select resolution compares idSignatures like-for-like (the flag-suffixed
-  `signature` would misread a failed select as success).
+- `board` additionally carries `idSignature` (spellIds only, comma-joined). When
+  the client's flag for the adapter's own Select clears, the adapter records,
+  like-for-like by `idSignature`, whether the board stayed the same, moved on or
+  went away. That is a diagnostic fact only: no board outcome is that Select's
+  result (no supported signal says refused or granted). The Select stays in
+  flight, never owned, until its exact grant: that spell's granted count above
+  the pre-send count, in the same run, with a readable `Perks` table showing no
+  Select flag and no outside Select of that spell seen (any such Select makes
+  every later rise ambiguous). Otherwise it waits until a run boundary voids it,
+  or a `/reload` drops the tracking with the result unknown. The game gives no
+  receipt for a selection, so this wait can last the run. Auto off and on does
+  not end it.
 - **`Ratchet.Dominates` filler axis is COUNT-based**, not set-subset: every board
   forces a take, so per-run filler sets always differ and subset never holds; the
   spec's own potential Φ = coverage − ρ·fillerCount is count-based. Coverage stays
@@ -457,12 +467,22 @@ run-boundary, self-check demotion hook).
 - `GameAdapter.DisabledLevers()` values are `"confirmed"` (server mirror) or
   `"pending"` (our unconfirmed request) — both truthy for pool math; only
   `"confirmed"` may drive the DISABLE_SUPPRESSES_GUARANTEE self-check demotion.
-- Per-latch watchdog: a client `pending*` latch stuck >10s is declared dead for the
-  session (per-action, mirroring the client's own failure mode), excluded from the
+- Per-latch watchdog: a client `pending*` latch stuck >10s is declared dead
+  (per-action, mirroring the client's own failure mode), excluded from the
   whole-loop gate, its charges zeroed, status surfaced; recovers if the latch clears.
-- Run boundary (`A.RunBoundaryReset`, called on every arrival at level 1): recorded
-  picks void; owned-sync trust suspended until the client-reported owned set CHANGES
-  from its at-reset snapshot (dead-run ghost protection).
+  Exceptions: the adapter's own unresolved Select is not released (an expired
+  watchdog is not its result; it keeps its provenance). A dead Select flag is still
+  a set flag: `A.Take` admits a Select only when a readable `Perks` table shows
+  `pendingSelectSpellId == nil`, checked before the client is called (as a dead
+  Freeze flag keeps Freeze closed). Nothing writes a client field.
+- Run boundary (`A.RunBoundaryReset`, called once this session has seen level 80
+  and then a live lower level): recorded picks void; owned-sync trust suspended
+  until the client-reported owned set CHANGES from its at-reset snapshot (dead-run
+  ghost protection). The own unresolved Select is voided (its result unknown, never
+  proven). If a Select flag is still set then, or `Perks` cannot be read, the
+  in-flight marker is re-armed and holds every Echo action (Take, Banish, Freeze,
+  Reroll, Orb actions) until a readable table shows no flag. That flag is a
+  selection pending, not proof that the voided Select is the one pending.
 - Level 80 with a live board runs the board FIRST; save only after the final board
   is spent. After any save, the slot cache is re-requested (~3.5s) for verification.
 - Seeding saves only into an empty slot within `GetServerUnlockedSlots()`.

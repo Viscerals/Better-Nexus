@@ -13,8 +13,18 @@ H.Board(CARDS);H.Notify();H.Advance(.5)
 check(A.Wishlist()~=nil and A.Board()~=nil,'fixture has a real target and a real three-card board')
 local P=H.perks
 local function settle()
+ -- Each positive mutator control starts from a completed previous action.
+ -- A cleared Select flag alone is no result: model its exact granted copy
+ -- before clearing the flag, retaining the real gate/mutator assertions.
+ local selected=P.pendingSelectSpellId
+ if selected then
+  local key='synthetic successful Select'
+  H.granted[key]=H.granted[key] or {}
+  H.granted[key][#H.granted[key]+1]={spellId=selected,quality=1}
+ end
  P.pendingSelectSpellId=nil;P.pendingBanishIndex=nil;P.pendingFreezeIndex=nil;P.pendingReroll=nil
  H.Advance(.6)
+ check(not A.InFlight(),'positive control completed before testing the next Orb gate case')
 end
 local MUTATORS={
  {'Take',function()return A.Take(200001)end,'take'},

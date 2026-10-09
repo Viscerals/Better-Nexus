@@ -407,9 +407,9 @@ do
  assert(o.synced and o.total==79,'reached: the save path at level 80: '..tostring(o.total))
  assert(status:find('auto paused: no confirmed result for '..l.actionType..' sent before the loading screen',1,true),'the save path says why: '..status)
 end
--- 16. At level 80 no StepRun resolves a Take, so a Take granted with no
--- loading screen is still "submitted" at a later leave. Its visible grant is
--- its result there: the zone holds nothing.
+-- 16. At level 80 a proven final Take with no choice (full 79 copies)
+-- is confirmed and released before the idle/save render. A later zone
+-- holds nothing and must not record its confirmation again.
 do
  local H=Boot();H.run=NOCHARGES
  H.playerLevel=80;H.granted=Granted(78,false);Nexus.GameAdapter.RequestGranted();H.Advance(1)
@@ -417,11 +417,37 @@ do
  SlashCmdList.NEXUS('auto');H.Advance(1.2)
  assert(H.attempts==1 and Nexus.RecomputeStats().lastActionLifecycle.actionType=='take','the final Take is sent')
  H.perks.pendingSelectSpellId=nil;H.Board({});H.Notify();H.granted=Granted(78,true);H.Notify();H.Advance(34)
- assert(Nexus.RecomputeStats().lastActionLifecycle.state=='submitted','precondition: nothing resolved the granted Take before the zone')
+ local proven=Nexus.RecomputeStats()
+ assert(proven.lastActionLifecycle.state=='confirmed' and proven.lastActionLifecycle.reason=='grant_observed' and Nexus.PendingIntentState()==nil,'the proven final Take is confirmed and released before the zone')
+ assert(proven.actionLifecycle.confirmed==1,'the final Take is confirmed exactly once before the zone')
  H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
  local l=Nexus.RecomputeStats().lastActionLifecycle
- assert(l.state=='confirmed' and l.reason=='grant_observed','the leave records the visible grant: '..tostring(l.state)..'/'..tostring(l.reason))
+ assert(l.state=='confirmed' and l.reason=='grant_observed','the observed grant remains its result after the zone: '..tostring(l.state)..'/'..tostring(l.reason))
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==1 and H.attempts==1,'the zone neither duplicates confirmation nor resends the final Take')
  assert(H.Allowed() and H.runtime.StatusLine():find('run complete',1,true),'the zone holds nothing: '..H.runtime.StatusLine())
+end
+
+-- 16a. The exact grant can be proven by an adapter poll immediately before
+-- leaving the world, before the next runtime step consumes it. Keep the
+-- positive world-leave branch covered as well as the earlier idle release.
+do
+ local H=Boot();H.run=NOCHARGES
+ H.playerLevel=80;H.granted=Granted(78,false);Nexus.GameAdapter.RequestGranted();H.Advance(1)
+ H.Offer({{spellId=200001,quality=1},{spellId=200089,quality=0},{spellId=200090,quality=1}})
+ SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ assert(H.attempts==1 and Nexus.PendingIntentState()=='submitted','one final Take is submitted before the direct poll')
+ H.perks.pendingSelectSpellId=nil;H.Board({});H.granted=Granted(78,true)
+ Nexus.GameAdapter.RequestGranted();Nexus.GameAdapter.Poll()
+ local owned=Nexus.GameAdapter.Owned()
+ assert(owned.synced and owned.total==79 and not Nexus.GameAdapter.SelectUnresolved(),'the adapter proved the exact final grant before the next runtime step')
+ assert(Nexus.PendingIntentState()=='submitted' and (Nexus.RecomputeStats().actionLifecycle.confirmed or 0)==0,'the runtime has not consumed that proof before the leave')
+ H.Fire('PLAYER_LEAVING_WORLD')
+ local life=Nexus.RecomputeStats().lastActionLifecycle
+ assert(life.state=='confirmed' and life.reason=='grant_observed' and Nexus.PendingIntentState()==nil,'the leave itself confirms and releases the already-proven Take')
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==1 and H.attempts==1,'the leave records one confirmation without a resend')
+ H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
+ assert(H.Allowed() and H.runtime.StatusLine():find('run complete',1,true),'after settling, no unresolved world hold remains')
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==1 and H.attempts==1,'later steps neither duplicate confirmation nor resend')
 end
 
 -- 17. A later leave adds its pending items to an open hold. At the first
@@ -446,9 +472,14 @@ end
 -- the same spell: the automatic Take waits for its grant and the player
 -- clicks another copy of that spell (a live latch). One grant does not end
 -- the hold, the watchdog release of the player's latch does not erase it,
--- and a second zone keeps it. Player input ends it without recording a
--- confirmation. Control: the automatic Take alone is one request (its local
--- tracking and its latch are not counted twice) and its grant resumes.
+-- and a second zone keeps it. Player input ends that hold without recording
+-- a confirmation, but not the adapter's own Select, which waits for its exact
+-- settlement: for a different spell once the player's Select flag has
+-- cleared; for the same spell never (the player's Select of that spell makes
+-- any grant ambiguous for good -- no supported receipt says which request it
+-- answered -- so automation stays held). Control: the automatic Take alone is
+-- one request (its local tracking and its latch are not counted twice) and
+-- its grant resumes.
 local function Grant(H,id)
  local g=H.Clone(H.granted) or {};local k='Echo '..(id-200000);g[k]=g[k] or {}
  table.insert(g[k],{spellId=id});H.granted=g;H.Notify()
@@ -476,7 +507,10 @@ for _,v in ipairs({{'same spell',200001},{'different spell',200030},{'single aut
   local ok,why=H.Allowed()
   assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for 2 take requests',1,true),
    v[1]..': one grant does not end the hold: '..tostring(why)..', attempts='..H.attempts)
-  assert(not Nexus.GameAdapter.InFlight(),v[1]..': reached: granted once, and the player latch is dead')
+  -- The player's Select flag stays set (past its watchdog), so the adapter's
+  -- own Select is not settled by the visible grant either.
+  assert(Nexus.GameAdapter.InFlight() and H.perks.pendingSelectSpellId==v[2],
+   v[1]..': reached: granted once; the player flag is still set and the own Select stays held')
   H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(5)
   ok,why=H.Allowed()
   assert(H.attempts==1 and not ok and tostring(why):find('no confirmed result for 2 take requests',1,true),
@@ -489,7 +523,16 @@ for _,v in ipairs({{'same spell',200001},{'different spell',200030},{'single aut
   -- leave), so no intent is resolved; nothing may be recorded as confirmed.
   assert(l.state~='confirmed' and Nexus.RecomputeStats().actionLifecycle.confirmed==confirmed,
    v[1]..': the acknowledgement records no confirmation: '..tostring(l.state)..'/'..tostring(l.reason))
-  H.Advance(1.5);assert(H.attempts==2,v[1]..': automation continues after the acknowledgement, attempts='..H.attempts)
+  H.Advance(1.5)
+  assert(H.attempts==1 and Nexus.GameAdapter.InFlight(),
+   v[1]..': the acknowledgement does not retire the own Select while a Select flag is set, attempts='..H.attempts)
+  H.perks.pendingSelectSpellId=nil;H.Notify();H.Advance(1.5) -- the player's Select flag clears
+  if v[2]==200001 then
+   assert(H.attempts==1 and Nexus.GameAdapter.InFlight(),
+    v[1]..': the same-spell overlap stays ambiguous; nothing is sent, attempts='..H.attempts)
+  else
+   assert(H.attempts==2,v[1]..': its exact grant with the flag clear lets automation continue, attempts='..H.attempts)
+  end
  end
 end
 
@@ -561,8 +604,10 @@ do
  assert(not tostring(why):find('no confirmed result',1,true),'the hold is gone: '..tostring(why))
  assert(Nexus.RecomputeStats().actionLifecycle.confirmed==0,'nothing is recorded as confirmed')
 end
--- 21. A Take that the client refused is never recorded as confirmed by a
--- grant from the player's own Select of the same spell (level 80).
+-- 21. A refused Take is never recorded as confirmed by a grant from the
+-- player's own Select of the same spell (level 80). The player's Select flag
+-- is still set past its watchdog, so the adapter refuses the automatic Take
+-- before calling the client (a set Select flag is never Select admission).
 do
  local H=Boot();H.run=NOCHARGES
  H.playerLevel=80;H.granted=Granted(77,false);Nexus.GameAdapter.RequestGranted();H.Advance(1)
@@ -570,7 +615,7 @@ do
  assert(H.service.SelectPerk(200001),'the player Select is accepted');H.attempts=0
  SlashCmdList.NEXUS('auto');H.Advance(12)
  local l=Nexus.RecomputeStats().lastActionLifecycle
- assert(H.attempts==1 and l.actionType=='take' and l.state=='rejected','precondition: the automatic Take was refused: '..tostring(l.state))
+ assert(H.attempts==0 and l.actionType=='take' and l.state=='rejected','precondition: the automatic Take was refused before any client call: '..tostring(l.state)..', attempts='..H.attempts)
  H.perks.pendingSelectSpellId=nil;H.Board({});H.Notify();Grant(H,200001);H.Advance(3)
  H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
  l=Nexus.RecomputeStats().lastActionLifecycle

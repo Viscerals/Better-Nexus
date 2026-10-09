@@ -165,7 +165,10 @@ do
   and c.body=='Waiting for the game to confirm the last Echo action.','loading screen: the pause and the waiting line in the same footprint: ['..c.head..'] ['..c.body..'] '..Show(g))
  H.Fire('PLAYER_ENTERING_WORLD');H.Advance(6)
  local e,ec=Geo(),Content()
- check(Same(e,base) and ec.head=='Auto ON — paused' and #ec.cards==0,'after the world entry the unresolved hold stays visible: ['..ec.head..'] '..Show(e))
+ -- After the entry the hold is the wait for that Select's own result, and the
+ -- heading names it as a wait (never as active rolling); the loading screen
+ -- above is still the paused heading.
+ check(Same(e,base) and ec.head=='Auto waiting' and #ec.cards==0,'after the world entry the unresolved hold stays visible: ['..ec.head..'] '..Show(e))
  check(#H.actions==takes and not (NexusOrbPanel and NexusOrbPanel:IsShown()),'no action and no Orb window during the hold')
  H.perks.pendingSelectSpellId=nil;Grant(H.actions[takes][2]);H.Advance(1)
  local r,rc=Geo(),Content()

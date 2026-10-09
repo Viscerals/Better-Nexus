@@ -158,7 +158,14 @@ the decision numbers shows replacement. A decision with no outcome before a
 `session` boundary was interrupted by a reload. (Records carry their own session tag, so
 the gap shows even when a loading boundary was written first.) `fate=interrupted:world_leave` or
 `:run` marks a loading screen or run reset. Boundaries recorded: `session`,
-`run`, `world_leave`, `world_enter`, `auto`, `policy`.
+`run`, `world_leave`, `world_enter`, `auto`, `policy`, `select_recovery`. A
+`select_recovery` row notes an own Select that was resolved only after its
+watchdog, a world entry or a read refresh: outcome (`proven` or `voided`), `L#`
+local ordinal (provenance in this session, not a server token), spell, pre-send
+and last granted count, world entries (`e`) and refreshes requested (`r`, not
+server answers). Fields are whole; when one does not fit the detail limit it is
+left out and ` ...` marks the omission. A tracked Take is `confirmed:grant_observed`
+only by that exact grant; a board change or clear alone leaves it `uncertain`.
 
 The prepared support report (`/nexus report`, Prepare report file) carries the whole record
 in its own section. A full ring is about 120 KiB of text typically (up to about 0.6 MiB in the worst case), and the report file is also

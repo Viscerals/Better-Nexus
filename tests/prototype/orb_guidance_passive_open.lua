@@ -89,9 +89,11 @@ do
   'with an unconfirmed action the offer is only reported: '..why)
 end
 -- An automatic Take whose latch cleared on the same board: the automation
--- runtime records the action as uncertain. No latch and no in-flight action
--- remain, but the action still has no confirmed result, so the board is
--- only reported (the HUD says "Waiting..." for the same record).
+-- runtime records the action as uncertain, and the adapter keeps that Select
+-- unresolved (in flight, not owned) because a same-board clear is not a
+-- proven refusal. No latch remains, but the action still has no confirmed
+-- result, so the board is only reported (the HUD says "Waiting..." for the
+-- same record).
 do
  local H,M,A,O=Fresh()
  H.OrbPlan()
@@ -103,7 +105,7 @@ do
  H.perks.pendingSelectSpellId=nil;H.Notify();A.Poll()
  for _=1,4 do Nexus.RequestRecompute();H.Advance(.25) end
  check(Nexus.PendingIntentState()=='uncertain','fixture: the automation runtime records it as uncertain: '..tostring(Nexus.PendingIntentState()))
- check(not A.InFlight() and not A.UnconfirmedLatch(),'fixture: no latch and no in-flight action remain')
+ check(not A.UnconfirmedLatch() and A.InFlight(),'fixture: no latch remains; the Select itself stays unresolved')
  local why=tostring(M.Status().startReason)
  check(Leads(why,'has no confirmed result','An Echo choice is shown') and NoImperative(why),
   'an uncertain automatic action: the board is only reported: '..why)

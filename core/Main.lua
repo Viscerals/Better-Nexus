@@ -630,6 +630,12 @@ local function RenderIdlePanel(plan, owned, slots, catalog, staticContext,
     local okAuto, autoWhy = AutoAllowed()
     local runtime = Automation()
     local auto = (runtime and runtime.AutoEnabled()) or false
+    -- What Auto is doing now, as on the board path: from the accessor the
+    -- runtime publishes for passive readers (memory only; it creates and
+    -- steps no runtime, calls no gate and reads nothing from the game).
+    local accessor, okEffective, effective = Nexus.AutomationEffectiveState, false, nil
+    if type(accessor) == "function" then okEffective, effective = pcall(accessor) end
+    if not okEffective or type(effective) ~= "table" then effective = nil end
     local model = {
         status = StatusLine(),
         cards = {},
@@ -638,7 +644,11 @@ local function RenderIdlePanel(plan, owned, slots, catalog, staticContext,
             staticContext, lockedOverride),
         level = Adapter.Level(),
         auto = auto,
-        paused = auto and not okAuto and autoWhy and tostring(autoWhy) or nil,
+        -- A wait that is not a normal short answer is named, not hidden.
+        paused = auto and (not okAuto and autoWhy and tostring(autoWhy)
+            or effective and effective.hold and effective.reason) or nil,
+        effective = effective and { state = effective.state,
+            reason = effective.reason, hold = effective.hold } or nil,
         version = Nexus.VERSION,
     }
     if Nexus.OrbGuidance then
