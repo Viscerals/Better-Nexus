@@ -18,7 +18,8 @@ local function Boot(early)
  -- This fixture compares simulated action times, so bootstrap must start
  -- the same poll phase on every boot. Charge only bootstrap profiler reads
  -- a logical 0.125 ms. Keep the normal valid-clock timed startup path.
- -- All action/beat/latch/grant checks below then use elapsed host CPU time.
+ -- Action/beat/latch/grant assertions below still use simulated GetTime().
+ -- After boot the runtime profiler again measures elapsed host CPU time.
  local realProfiler=debugprofilestop
  assert(type(realProfiler)=='function','rolling fixture needs a valid profiler')
  local profilerNow=realProfiler()
