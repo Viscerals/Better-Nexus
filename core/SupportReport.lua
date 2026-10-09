@@ -1207,6 +1207,11 @@ local SELECT_WAITS = codeSet({"latch", "latch_after_grant", "latch_unknown",
 local SELECT_OUTCOMES = codeSet({"proven", "voided"})
 local SELECT_BOARDS = codeSet({"same", "moved", "missing"})
 local EFFECTIVE_STATES = codeSet({"off", "paused", "waiting", "rechecking", "ready"})
+-- The effective reason states a whole wait (the missing receipt, the run-long
+-- wait, what Auto off/on and a /reload do), also behind a pause prefix such
+-- as an Orb block reason. A longer one is cut on a UTF-8 character boundary
+-- and marked " ...", within this bound.
+local SELECT_REASON_BYTES = 1024
 
 -- Ages are measured from the send (no clock read here): to its resolution
 -- for a resolved row, to the adapter's last poll of it for the unresolved one.
@@ -1244,7 +1249,16 @@ local function selectRecoveryLines()
         out[#out + 1] = "Auto: selected=" .. factFlag(effective.selected)
             .. " effective=" .. factCode(effective.state, EFFECTIVE_STATES)
             .. " rechecks requested this session (all own Selects)=" .. factCount(effective.rechecks)
-        out[#out + 1] = "Auto reason: " .. safeText(effective.reason, 240)
+        -- safeText's conversion, then a cut that never splits a character
+        -- (Identity.Utf8Prefix, loaded earlier in the TOC; a byte cut only
+        -- without it, as in core/Errors.lua) and says that text was left out.
+        local reason = safeText(effective.reason, SELECT_REASON_BYTES + 1)
+        if #reason > SELECT_REASON_BYTES then
+            local identity, keep = Nexus.Identity, SELECT_REASON_BYTES - 4
+            reason = (identity and type(identity.Utf8Prefix) == "function"
+                and identity.Utf8Prefix(reason, keep) or reason:sub(1, keep)) .. " ..."
+        end
+        out[#out + 1] = "Auto reason: " .. reason
     else
         out[#out + 1] = "Auto: effective state unavailable (the runtime did not answer)"
     end

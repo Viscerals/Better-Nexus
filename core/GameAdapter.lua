@@ -3710,6 +3710,13 @@ local function WatchLatches()
                     elseif held then
                         text = "Select: the game still shows a selection pending after 10s"
                             .. " with no result observed; Nexus sends no Echo action until it clears."
+                    elseif kind == "select" then
+                        -- An outside Select flag: past its watchdog it no
+                        -- longer holds the other Echo actions (InFlight), but
+                        -- A.Take admits a Select only while the flag is nil.
+                        text = "select: the client's pending flag is still set after 10s"
+                            .. " with no result observed; it no longer holds other Echo actions,"
+                            .. " and Nexus sends no Select while it is set."
                     else
                         text = kind .. ": the client's pending flag is still set after 10s"
                             .. " with no result observed -- no longer waited on"

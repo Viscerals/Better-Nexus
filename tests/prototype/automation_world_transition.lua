@@ -407,9 +407,9 @@ do
  assert(o.synced and o.total==79,'reached: the save path at level 80: '..tostring(o.total))
  assert(status:find('auto paused: no confirmed result for '..l.actionType..' sent before the loading screen',1,true),'the save path says why: '..status)
 end
--- 16. At level 80 no StepRun resolves a Take, so a Take granted with no
--- loading screen is still "submitted" at a later leave. Its visible grant is
--- its result there: the zone holds nothing.
+-- 16. At level 80 a proven final Take with no choice (full 79 copies)
+-- is confirmed and released before the idle/save render. A later zone
+-- holds nothing and must not record its confirmation again.
 do
  local H=Boot();H.run=NOCHARGES
  H.playerLevel=80;H.granted=Granted(78,false);Nexus.GameAdapter.RequestGranted();H.Advance(1)
@@ -417,10 +417,13 @@ do
  SlashCmdList.NEXUS('auto');H.Advance(1.2)
  assert(H.attempts==1 and Nexus.RecomputeStats().lastActionLifecycle.actionType=='take','the final Take is sent')
  H.perks.pendingSelectSpellId=nil;H.Board({});H.Notify();H.granted=Granted(78,true);H.Notify();H.Advance(34)
- assert(Nexus.RecomputeStats().lastActionLifecycle.state=='submitted','precondition: nothing resolved the granted Take before the zone')
+ local proven=Nexus.RecomputeStats()
+ assert(proven.lastActionLifecycle.state=='confirmed' and proven.lastActionLifecycle.reason=='grant_observed' and Nexus.PendingIntentState()==nil,'the proven final Take is confirmed and released before the zone')
+ assert(proven.actionLifecycle.confirmed==1,'the final Take is confirmed exactly once before the zone')
  H.Fire('PLAYER_LEAVING_WORLD');H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
  local l=Nexus.RecomputeStats().lastActionLifecycle
- assert(l.state=='confirmed' and l.reason=='grant_observed','the leave records the visible grant: '..tostring(l.state)..'/'..tostring(l.reason))
+ assert(l.state=='confirmed' and l.reason=='grant_observed','the observed grant remains its result after the zone: '..tostring(l.state)..'/'..tostring(l.reason))
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==1 and H.attempts==1,'the zone neither duplicates confirmation nor resends the final Take')
  assert(H.Allowed() and H.runtime.StatusLine():find('run complete',1,true),'the zone holds nothing: '..H.runtime.StatusLine())
 end
 

@@ -498,19 +498,27 @@ local function AutoAllowed()
     end
     if actionHold.worldPending then
         -- Auto off and on ends this hold, but not the adapter's own
-        -- unresolved Select: the text must not promise more than that. Read
-        -- refreshes are named only while they could settle it (its grant not
-        -- visible yet, no same-Echo overlap: GameAdapter.RecheckSelect).
+        -- unresolved Select: the text must not promise more than that. Its
+        -- exact grant is named as the end of this hold only for the Select
+        -- this hold tracks (its ordinal) while a grant can still settle it:
+        -- after a same-Echo overlap ("ambiguous") or a run boundary ("run")
+        -- none can. Read refreshes are named only while they could settle
+        -- it (its grant not visible yet, no same-Echo overlap:
+        -- GameAdapter.RecheckSelect), with SelectWait's condition: SelectPoll
+        -- sends none while Auto is OFF or another pause holds. Text only.
         local ownSelect, _, _, wait = nil, nil, nil, nil
         if Adapter.SelectUnresolved then ownSelect, _, _, wait = Adapter.SelectUnresolved() end
+        local noGrant = wait == "ambiguous" or wait == "run"
         return false, "no confirmed result for "
             .. actionHold.worldPending.label
             .. " sent before the loading screen -- "
-            .. (ownSelect and ((actionHold.worldPending.ordinal
-                    and "it ends with the exact grant of the Echo selection already sent"
+            .. (ownSelect and ((noGrant
+                        and "a grant can no longer settle the Echo selection already sent; Auto off and on ends only this hold, not the wait for that selection"
+                    or actionHold.worldPending.ordinal == ownSelect
+                        and "it ends with the exact grant of the Echo selection already sent"
                     or "the Echo selection already sent still waits for its exact grant; Auto off and on ends only this hold")
                 .. ((wait == "grant" or wait == "latch")
-                    and " (Nexus re-reads the granted Echoes; nothing is resent)"
+                    and " (Nexus re-reads the granted Echoes while Auto is ON and nothing else pauses it; nothing is resent)"
                     or " (nothing is resent)"))
                 or "turn Auto off and on to continue")
     end
@@ -3356,10 +3364,30 @@ local function DispatchLevelStep(level, plan, slots, owned, flags,
         -- board frames can disappear briefly between chained selections.
         -- Locked Echoes are not included in owned.total.
         local rolledTotal = tonumber(owned and owned.total) or 0
-        if owned and owned.synced and rolledTotal >= 79 then
+        local complete = owned and owned.synced and rolledTotal >= 79
+        -- Without a board no StepRun resolves a tracked automatic Take at
+        -- this level, on either path below (the final grant can fill the
+        -- 79th copy). Once the adapter has proven its Select (its exact
+        -- settlement: GameAdapter ConfirmAwaitingGrant), that is its result:
+        -- the missing-board rule (ResolveActionIntent) records it once and
+        -- releases the intent before either idle render (StepSave renders
+        -- first), so neither the Orb guidance nor the effective state still
+        -- waits for it. The board is read once: below 79 copies as before,
+        -- on the save path only for such a Take. A Take sent before a
+        -- loading screen keeps its hold (the check above), and an
+        -- unresolved or voided Select keeps its existing handling.
+        local intent = actionIntent
+        local proven = intent and not intent.crossedWorld
+            and intent.action.type == "take" and intent.selectOrdinal
+            and (intent.state == "submitted" or intent.state == "uncertain"
+                or intent.state == "expired")
+            and Adapter.SelectOutcome
+            and Adapter.SelectOutcome(intent.selectOrdinal) == "proven"
+        local board = (proven or not complete) and Adapter.Board() or nil
+        if proven and not board then ResolveActionIntent(nil) end
+        if complete then
             StepSave(level, plan, slots, owned, static, locked)
         else
-            local board = Adapter.Board()
             if board then
                 StepRun(level, plan, slots, owned, flags, disabledLevers,
                     static, locked)
