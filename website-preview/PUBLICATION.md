@@ -1,6 +1,6 @@
 # Better Nexus documentation website
 
-This directory contains the original Better Nexus documentation website. It is separate from the runtime addon and describes the published experimental public test.9093. Release identity and download links are recorded in `release-source.json`; historical notes remain available.
+This directory contains the original Better Nexus documentation website. It is separate from the runtime addon and describes the published public test.9094, which needs testing. Release identity and download links are recorded in `release-source.json`; historical notes remain available.
 
 The dedicated website workflow builds only this directory and publishes the generated static website at `/Better-Nexus/`. Former `/Better-Nexus/preview/` page routes redirect to their canonical equivalents; compatibility copies of old asset paths remain available. The workflow does not package or release the addon. QA reports, private data, and local research snapshots are excluded.
 

@@ -2,6 +2,18 @@
 
 This page summarizes published changes in original wording. The versioned GitHub release is the full record.
 
+## Public test.9094
+
+**1.20.0-beta.1 · needs testing · 9 October 2026**
+
+- **Automatic pick recovery:** Track an unresolved pick and make bounded read-only rechecks when Auto is on and other pauses allow it. Automation can resume once the exact tracked grant is proven, without resending the pick.
+- **Travel and final rolls:** Preserve unresolved picks across loading screens; clear stale waiting guidance after a proven final level 80 pick.
+- **Status and reporting:** Show waiting, rechecking and pauses clearly; preserve useful bounded recovery reasons in `/nexus report`.
+
+Native behavior is unverified. Recovery is not guaranteed, and the separate Orb server-data readiness wait is not claimed fixed.
+
+[Full test.9094 notes](https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9094)
+
 ## Public test.9093
 
 **1.20.0-beta.1 · 8 October 2026 · EXPERIMENTAL PRERELEASE**
@@ -46,6 +58,6 @@ These are cumulative published highlights, not a promise that every native edge 
 
 - [All published releases](https://github.com/Viscerals/Better-Nexus/releases)
 - [Inherited changelog in the source repository](https://github.com/Viscerals/Better-Nexus/blob/main/CHANGELOG.md)
-- [Download test.9093](index.md)
+- [Download test.9094](index.md)
 
 The historical changelog and development source can differ from the current package. Use the release tag and package identity for a precise report.
