@@ -244,7 +244,8 @@ html:has(body[data-md-color-scheme="default"]) { background: #f9f8fc; color-sche
 [data-md-color-scheme="slate"] .md-typeset a:hover { color: #dcc6f2; }
 .md-header__button:focus-visible { outline: 3px solid #977adf; outline-offset: 2px; }
 [data-md-color-scheme="slate"] :is(a, button, .md-header__button):focus-visible { outline-color: #c6a8ea; }
-[data-md-color-scheme="slate"] .md-typeset .md-button { border-color: #b8a3d6; }
+[data-md-color-scheme="slate"] .md-typeset .md-button { border-color: #b8a3d6; color: #c1addc; }
+[data-md-color-scheme="slate"] .md-typeset .md-button:is(:hover, :focus) { background: #bca7d6; border-color: #bca7d6; color: #211c2b; }
 [data-md-color-scheme="slate"] .md-typeset .md-button--primary { background: #b8a3d6; color: #211c2b; }
 [data-md-color-scheme="slate"] .md-typeset .grid.cards > ul > li,
 [data-md-color-scheme="slate"] .nx-contribute-grid > div { background: #24252b; border-color: #41434b; }
