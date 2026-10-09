@@ -215,6 +215,7 @@ body { font-family: var(--md-text-font); }
 /* Website palette: Material owns the toggle and site-scoped saved preference. */
 html { background: #1d1e22; color-scheme: dark; }
 html:has(body[data-md-color-scheme="default"]) { background: #f9f8fc; color-scheme: light; }
+[data-md-color-scheme="default"] { --md-default-bg-color: #f9f8fc; }
 [data-md-color-scheme="slate"] {
   color-scheme: dark;
   --md-primary-fg-color: #17181c;
