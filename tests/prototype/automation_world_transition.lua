@@ -427,6 +427,29 @@ do
  assert(H.Allowed() and H.runtime.StatusLine():find('run complete',1,true),'the zone holds nothing: '..H.runtime.StatusLine())
 end
 
+-- 16a. The exact grant can be proven by an adapter poll immediately before
+-- leaving the world, before the next runtime step consumes it. Keep the
+-- positive world-leave branch covered as well as the earlier idle release.
+do
+ local H=Boot();H.run=NOCHARGES
+ H.playerLevel=80;H.granted=Granted(78,false);Nexus.GameAdapter.RequestGranted();H.Advance(1)
+ H.Offer({{spellId=200001,quality=1},{spellId=200089,quality=0},{spellId=200090,quality=1}})
+ SlashCmdList.NEXUS('auto');H.Advance(1.2)
+ assert(H.attempts==1 and Nexus.PendingIntentState()=='submitted','one final Take is submitted before the direct poll')
+ H.perks.pendingSelectSpellId=nil;H.Board({});H.granted=Granted(78,true)
+ Nexus.GameAdapter.RequestGranted();Nexus.GameAdapter.Poll()
+ local owned=Nexus.GameAdapter.Owned()
+ assert(owned.synced and owned.total==79 and not Nexus.GameAdapter.SelectUnresolved(),'the adapter proved the exact final grant before the next runtime step')
+ assert(Nexus.PendingIntentState()=='submitted' and (Nexus.RecomputeStats().actionLifecycle.confirmed or 0)==0,'the runtime has not consumed that proof before the leave')
+ H.Fire('PLAYER_LEAVING_WORLD')
+ local life=Nexus.RecomputeStats().lastActionLifecycle
+ assert(life.state=='confirmed' and life.reason=='grant_observed' and Nexus.PendingIntentState()==nil,'the leave itself confirms and releases the already-proven Take')
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==1 and H.attempts==1,'the leave records one confirmation without a resend')
+ H.Advance(2);H.Fire('PLAYER_ENTERING_WORLD');H.Advance(4.5)
+ assert(H.Allowed() and H.runtime.StatusLine():find('run complete',1,true),'after settling, no unresolved world hold remains')
+ assert(Nexus.RecomputeStats().actionLifecycle.confirmed==1 and H.attempts==1,'later steps neither duplicate confirmation nor resend')
+end
+
 -- 17. A later leave adds its pending items to an open hold. At the first
 -- leave only the automatic Take waited (its grant could end the hold). The
 -- player's own Freeze, sent during that hold, is pending at the second

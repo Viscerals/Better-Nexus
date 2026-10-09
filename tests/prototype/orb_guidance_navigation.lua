@@ -12,6 +12,11 @@
 -- reads it. The button only opens the Orb window, which reads and shows.
 -- Expected outcomes are written out per case; the product helper is not used
 -- as its own oracle. SYNTHETIC ids and counts.
+-- Compare independent boots with identical scheduler pacing. The real CPU
+-- profiler can change startup turns and persisted recorder timestamps,
+-- even when navigation does nothing. Use the supported one-slice fallback;
+-- every saved value and mutator/action assertion stays compared.
+dofile('tests/prototype/startup_support.lua').SingleSlicePacing()
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 
 ------------------------------------------------------------------------
