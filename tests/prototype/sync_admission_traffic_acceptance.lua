@@ -6,10 +6,26 @@
 -- one category at each boundary. The per-update slice cap must hold.
 -- Real TOC, real inbound decoder, real receiver admission, real catalog.
 -- Simulated update clock and work counters; not WoW frame times.
+-- The valid profiler below has a stated logical cost: one frozen-clock
+-- update reaches the shared cap, then each read advances by exactly 0.125 ms.
+-- This is an explicit paced workload, not host CPU-time benchmarking. The
+-- timed-drive budget, rate, FPS, records, deadlines and assertions remain.
+-- Real slice costs and native frame times require a separate measurement.
 local A=dofile('tests/prototype/sync_admission_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local ROWS,EVERY,SPAN,DEADLINE,CAP=1350,20,900,300,32
 local H,C=A.Boot(ROWS)
+-- The acceptance scenario has a simulated update clock and work counters.
+-- Use an exact binary scripted profiler increment rather than host CPU time.
+-- Keep the valid timed-drive branch; a frozen-clock control first exercises
+-- the shared slice cap, then 0.125 ms per read exercises the soft time budget.
+local realProfiler=debugprofilestop
+check(type(realProfiler)=='function','fixture setup: a profiler clock is available')
+local profilerNow,profilerStep=realProfiler(),0
+local capControlSeen=false
+io.stderr:setvbuf("no")
+debugprofilestop=function() profilerNow=profilerNow+profilerStep;return profilerNow end
+
 local FPS=60;local dt=1/FPS
 local tickets,sentData,arrivedAt,committedAt={},{},{},{}
 local batches,largestBatch=0,0
@@ -45,6 +61,17 @@ local function Step(t)
  local used=pumpsAfter-pumpsBefore
  if used>worstFrameSlices then worstFrameSlices=used end
  pumpsBefore=pumpsAfter
+ if not capControlSeen and used>1 then
+  check(used>=CAP and used<=CAP+1,'frozen valid clock reaches the shared cap, including at most the direct put: '..used)
+  capControlSeen=true;profilerStep=0.125
+ end
+ -- Bounded heartbeat gives a censored timeout a useful last progress point.
+ if frames%3600==0 then
+  local committed=0
+  for _,id in ipairs(ids)do if committedAt[id]~=nil then committed=committed+1 end end
+  io.stderr:write(string.format('SATA progress t=%ds sent=%d committed=%d batches=%d worstSlices=%d wallClock=%.3f\n',
+   math.floor(frames*dt),sent,committed,batches,worstFrameSlices,os.clock()))
+ end
 end
 while frames*dt<SPAN do
  local t=frames*dt
@@ -127,7 +154,10 @@ check(Snapshot().count==0 and (tonumber(Snapshot().inFlight) or 0)==0,
 check(worstFrameSlices<=CAP+1,'no update exceeded the shared slice cap: '..worstFrameSlices)
 check(batches>=1,'records were committed through the multi-record put: '..batches)
 check(largestBatch>1,'at least one batch carried several records: '..largestBatch)
+check(capControlSeen,'the explicit shared-cap control ran')
 local timing=Nexus.manualSyncTiming
+check((timing.driveFallbackUpdates or 0)==0,'scripted valid clock stays on the timed drive')
+check((timing.driveMaxBatchMs or 0)<=2.25,'timed drive yields at the soft two-ms budget plus two scripted read intervals: '..tostring(timing.driveMaxBatchMs))
 -- The drive keeps its own counters: a receiver-only session must not be
 -- reported as manual-Sync work.
 check(type(timing)=='table' and (timing.driveSlices or 0)>0,
@@ -155,3 +185,5 @@ check((outbound.WLBI or 0)==0 and (outbound.WLBD or 0)==0,
 check((outbound.WLCP or 0)<=1+math.floor(H.now/300),'at most one capability advertisement per 300 s: '..tostring(outbound.WLCP)..' in '..math.floor(H.now)..' s')
 print(string.format('PASS sync_admission_traffic_acceptance: %d/%d committed before their own deadlines; worst %ds; %d batches, largest %d; worst update %d slices checks=%d',
  #final.committed,sent,math.floor(worst),batches,largestBatch,worstFrameSlices,checks))
+
+debugprofilestop=realProfiler
