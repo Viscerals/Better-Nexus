@@ -1,19 +1,19 @@
 {
-  "tag_name": "v1.20.0-beta.1-test.9094",
-  "name": "Better Nexus 1.20.0-beta.1 test.9094 \u2014 Automatic pick recovery (needs testing)",
-  "html_url": "https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9094",
-  "published_at": "2026-10-09T10:44:46Z",
+  "tag_name": "v1.20.0-beta.1-test.9095",
+  "name": "Better Nexus 1.20.0-beta.1 test.9095 - UI refresh and recovery updates",
+  "html_url": "https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9095",
+  "published_at": "2026-10-13T03:02:46Z",
   "prerelease": true,
   "assets": [
     {
-      "name": "Better-Nexus-test.9094-a9adf50.zip",
-      "browser_download_url": "https://github.com/Viscerals/Better-Nexus/releases/download/v1.20.0-beta.1-test.9094/Better-Nexus-test.9094-a9adf50.zip",
-      "digest": "sha256:00957c5f839eff2bbf272137d398288e5aad2ca3cc3a4e28ac98795d8751c284"
+      "name": "Better-Nexus-test.9095-b9c9332.zip",
+      "browser_download_url": "https://github.com/Viscerals/Better-Nexus/releases/download/v1.20.0-beta.1-test.9095/Better-Nexus-test.9095-b9c9332.zip",
+      "digest": "sha256:76da7d387e90e273fa33762f78de023ee68884aad0ed2c29f2c2a5ea1f20ba09"
     },
     {
       "name": "SHA256SUMS.txt",
-      "browser_download_url": "https://github.com/Viscerals/Better-Nexus/releases/download/v1.20.0-beta.1-test.9094/SHA256SUMS.txt",
-      "digest": "sha256:3eb4e94abd908e296f29e68bb618700ef35b81e2c9fb5317f6186500e088fd94"
+      "browser_download_url": "https://github.com/Viscerals/Better-Nexus/releases/download/v1.20.0-beta.1-test.9095/SHA256SUMS.txt",
+      "digest": "sha256:7db9d6ada8da4955f47b722458b2e7eda91cc0df81f729b0aa95dd1a95a6b93d"
     }
   ]
 }

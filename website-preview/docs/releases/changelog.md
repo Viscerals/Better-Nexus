@@ -2,6 +2,20 @@
 
 This page summarizes published changes in original wording. The versioned GitHub release is the full record.
 
+## Public test.9095
+
+**1.20.0-beta.1 - 13 October 2026 - EXPERIMENTAL PRERELEASE**
+
+- **Appearance and panels:** Vista and Slate styles, six accent palettes, themed Welcome and Display Settings, and refreshed main, Orb and compact mini panels.
+- **Wishlist progress:** Nexus Progress shows represented and missing families for the assigned Wishlist, with expanded details and clearer count explanations.
+- **Help and Logs:** Clearer navigation and diagnostic views make the existing guidance and reports easier to reach.
+- **Repeated work:** Catalog/status corrections avoid repeated work behind the panels. No matched native FPS or CPU improvement is claimed.
+- **Recovery and reporting:** Reviewed own-reroll recovery checks use fresh same-run evidence after loading screens. Unresolved Take messages describe the unconfirmed grant and client flag without resending the action. Existing Sync/DPS diagnostics retain useful refusal context.
+
+Unresolved Take pauses and cross-client LK DPS sharing remain open. Earlier private native checks support scoped UI behavior; they do not establish current-package server recovery, new LK transfer, or live performance gains.
+
+[Full test.9095 notes](https://github.com/Viscerals/Better-Nexus/releases/tag/v1.20.0-beta.1-test.9095)
+
 ## Public test.9094
 
 **1.20.0-beta.1 · needs testing · 9 October 2026**
@@ -58,6 +72,6 @@ These are cumulative published highlights, not a promise that every native edge 
 
 - [All published releases](https://github.com/Viscerals/Better-Nexus/releases)
 - [Inherited changelog in the source repository](https://github.com/Viscerals/Better-Nexus/blob/main/CHANGELOG.md)
-- [Download test.9094](index.md)
+- [Download test.9095](index.md)
 
 The historical changelog and development source can differ from the current package. Use the release tag and package identity for a precise report.
