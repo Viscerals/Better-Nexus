@@ -1,10 +1,7 @@
-# Fresh owner request after the approved exact-pin Actions policy change.
 # Owner-triggered, repository-only source review. No fork checkout/execution.
 name: Claude PR119 source review
 
 'on':
-  push:
-    branches: [setup/claude-pr119-review]
   workflow_dispatch:
     inputs:
       expected_head:
@@ -23,8 +20,8 @@ jobs:
     if: >-
       github.repository == 'Viscerals/Better-Nexus' &&
       github.actor == 'Viscerals' && github.triggering_actor == 'Viscerals' &&
-      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-       (github.event_name == 'push' && github.ref == 'refs/heads/setup/claude-pr119-review'))
+      (github.event_name == 'workflow_dispatch' &&
+       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/setup/claude-pr119-review'))
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -190,8 +187,8 @@ jobs:
     if: >-
       github.repository == 'Viscerals/Better-Nexus' &&
       github.actor == 'Viscerals' && github.triggering_actor == 'Viscerals' &&
-      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-       (github.event_name == 'push' && github.ref == 'refs/heads/setup/claude-pr119-review')) &&
+      (github.event_name == 'workflow_dispatch' &&
+       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/setup/claude-pr119-review')) &&
       needs.analyze.result == 'success' &&
       needs.analyze.outputs.skip == 'false'
     runs-on: ubuntu-24.04
