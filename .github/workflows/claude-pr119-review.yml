@@ -1,3 +1,4 @@
+# Fresh owner request after the approved exact-pin Actions policy change.
 # Owner-triggered, repository-only source review. No fork checkout/execution.
 name: Claude PR119 source review
 
