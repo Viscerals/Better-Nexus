@@ -182,6 +182,38 @@ jobs:
             --strict-mcp-config --mcp-config '{"mcpServers":{}}'
             --json-schema '{"type":"object","additionalProperties":false,"required":["review_complete","summary","findings","coverage_limits"],"properties":{"review_complete":{"type":"boolean"},"summary":{"type":"string","minLength":1,"maxLength":6000},"findings":{"type":"array","maxItems":20,"items":{"type":"object","additionalProperties":false,"required":["path","line","severity","message"],"properties":{"path":{"type":"string","maxLength":500},"line":{"type":"integer","minimum":1},"severity":{"enum":["P1","P2","P3"]},"message":{"type":"string","minLength":1,"maxLength":2000}}}},"coverage_limits":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"string","minLength":1,"maxLength":500}}}}'
 
+      - name: Report filtered Claude failure reason
+        if: failure() && steps.claude.outcome == 'failure'
+        env:
+          OAUTH_SECRET: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ACTIONS_SECRET: ${{ github.token }}
+        shell: python
+        run: |
+          import json
+          import os
+          from pathlib import Path
+
+          # Do not enable full model output or publish the execution transcript.
+          path = Path(os.environ['RUNNER_TEMP']) / 'claude-execution-output.json'
+          if not path.is_file() or path.stat().st_size > 8_000_000:
+              raise SystemExit('No bounded Claude failure record is available.')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          messages = data if isinstance(data, list) else [data]
+          for message in messages:
+              if not isinstance(message, dict) or message.get('type') != 'result':
+                  continue
+              if not message.get('is_error'):
+                  continue
+              detail = {key: message[key] for key in
+                        ('subtype', 'is_error', 'result', 'errors') if key in message}
+              rendered = json.dumps(detail, ensure_ascii=True)
+              for key in ('OAUTH_SECRET', 'ACTIONS_SECRET'):
+                  secret = os.environ.get(key)
+                  if secret:
+                      rendered = rendered.replace(secret, '<REDACTED>')
+              # JSON escaping prevents newline-based workflow command injection.
+              print('Claude failure detail: ' + rendered[:6000])
+
   publish-review:
     needs: analyze
     if: >-
