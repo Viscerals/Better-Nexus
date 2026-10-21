@@ -296,6 +296,7 @@ NAMES += ['ux_save_assignment_result','ux_captured_destination_labels']
 NAMES += ['ux_setup_replay','ux_manual_recommendation','ux_help_navigation']
 # Priority user bug: one logical Wishlist Create uploads once; new same-name Wishlists get copy names (EXPECT fails on delivered1704 and pre-fix current by design).
 NAMES += ['wishlist_create_once','wishlist_unique_names']
+NAMES += ['flexible_plan_player_choice']
 NAMES += ['manual_external_orb_refresh']
 NAMES += ['manual_refresh_projection_consistency']
 # UX M3: Save changes vs Save & assign intents, bound destinations, truthful partial/unconfirmed results, Auto consent and scope (EXPECT fails on accepted ea3268a8 by design).

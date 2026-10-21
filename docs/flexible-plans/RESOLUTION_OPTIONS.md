@@ -1,10 +1,17 @@
 # Pending design decisions
 
-**All choices below remain PENDING.** They are preparation for
-[#47](https://github.com/Viscerals/Better-Nexus/issues/47), not an accepted
-architecture, schema, algorithm, API or implementation plan. The
+**First-slice direction: the player chooses the exact Wishlist.** Automatic
+resolution and pool sharing are deferred. Other choices below remain pending
+unless explicitly identified as this selected scope. These documents prepare
+[#47](https://github.com/Viscerals/Better-Nexus/issues/47); they do not accept a
+schema, algorithm, API or implementation plan. The
 [current boundaries](BOUNDARIES.md) constrain every option. No option authorizes
 new actions, storage or sharing merely by appearing here.
+
+The separately scoped first ordinary model now implements the
+[player-choice public seam](PLAYER_CHOICE_SLICE.md) in session memory only.
+Its routine module/API and technical bounds do not select a durable pool
+schema, full UI, locked-target interaction or any automatic resolver.
 
 ## Decision table
 
@@ -14,16 +21,17 @@ new actions, storage or sharing merely by appearing here.
 | Desired copies and quality | Exact desired variants/counts; explicit acceptable variant groups; or another declared alternative relation. | Define whether alternatives replace each other or are cumulative quotas. Define role, exact spell ID and quality effects; do not silently reuse existing family/quality progress with changed meaning. |
 | Preference and substitution | User ordering, explicit priority groups, explicit substitution choices, or a narrower initial subset. | Resolve ties/conflicts and unavailable catalog entries without fabricating equivalence or claiming future offers. Selection rule remains undecided. |
 | Pool size and work bounds | Explicit storage limits; larger retained collections with bounded projections; or a smaller initial feature. | Choose concrete limits and worst-case work/memory evidence before implementation. “More than 79 alternatives” neither specifies a maximum nor proves uncapped storage safe. |
-| Exact-target resolution | User selects the exact target; a deterministic rule proposes one for explicit approval; or another separately specified resolver. | Specify complete inputs, failure/ambiguity behavior and how the output meets current exact-target contracts. No algorithm is chosen here. |
+| Exact-target resolution | **Selected for the first slice: the player explicitly selects the exact target.** Nexus does not propose or rank a target. | The technical contract must preserve the player's exact choice and existing validation, refusing unsupported selections rather than trimming or substituting them. No automatic resolver is selected. |
 | Stability during a run | Hold an approved resolution; permit explicitly requested re-resolution; or another documented lifecycle. | Define what changes invalidate a resolution and whether changing catalog/ownership observations may affect it. Avoid silent target changes; exact behavior remains pending. |
-| Local/shared ownership | Local-only plans; immutable shared source plus local fork; or mutable local copy with explicit provenance. | Define edit identity, provenance, conflict behavior and unknown-field preservation. No identity format or migration is selected. |
-| Sharing eligibility | Defer sharing; share only an independently validated exact result through existing rules; or design a distinct compatible pool exchange. | Resolve whether pools are Syncable at all. A new pool cannot masquerade as an exact Community/Sync loadout. Any distinct exchange needs separate compatibility and trust review. |
+| Local/shared ownership | **First slice is local; pool sharing is deferred.** Later shared/fork behavior remains undecided. | Define local persistence/edit identity before wiring storage. No identity format or migration is selected; a session-only technical milestone must say that it does not persist a pool. |
+| Sharing eligibility | **Deferred for the first slice.** Later exact-result sharing or a distinct pool exchange remains undecided. | No new sharing or Sync path is enabled. A pool cannot masquerade as an exact Community/Sync loadout. Any later exchange needs separate compatibility and trust review. |
 | Presentation and diagnostics | Distinct labels and status on a later UI; explicit resolved/unresolved explanation; or a narrower non-actionable planning view. | Specify how users identify the pool, exact result and current assignment without implying ownership, completion or assignment from a name. No UI layout is selected. |
 
 The issue's [current comment](https://github.com/Viscerals/Better-Nexus/issues/47#issuecomment-6080819599)
-explicitly leaves entity, resolution and Sync eligibility missing. It also
-qualifies the older 6/85 wording. Acceptance of these preparation documents
-does not select any table row or remove those dependencies.
+identified entity, resolution and Sync eligibility as missing at that snapshot.
+The player-choice direction above now narrows the first slice; the comment's
+units correction still qualifies the older 6/85 wording. This does not settle
+the other design rows or authorize a new storage, action or sharing path.
 
 ## Existing meanings that an option must explain
 
