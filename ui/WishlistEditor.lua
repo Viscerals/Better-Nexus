@@ -126,6 +126,8 @@ local wishlistRenderer
 local HideServerEchoUI
 local serverHideHooks = {}
 local wishlistController
+local flexiblePlanChooser
+local flexiblePlanRequest
 
 local function SyncFulfilledDraftTargets()
     M._fulfilledDraftTargets =
@@ -872,6 +874,57 @@ end
 
 function M.DebugDraftState()
     return wishlistController.DebugDraftState()
+end
+
+StaticPopupDialogs["NEXUS_FLEXIBLE_PLAN_REPLACE"] = {
+    text = "Open your exact choice as a new Wishlist draft?\nThis replaces the current editor draft and its destination context. Nothing is saved until you save the new draft.",
+    button1 = "Open new draft", button2 = "Cancel",
+    OnAccept = function(_, request) if request then return request.Install() end end,
+    OnCancel = function(_, request) if request then request.Cancel() end end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+
+function M.OpenFlexiblePlanChooser()
+    if not flexiblePlanChooser then
+        flexiblePlanChooser = Nexus.FlexiblePlanChooser.New({
+            catalog=wishlistController.CatalogProjection,
+            openDraft=function(draft, alternatives, planCurrent, installed, refuse)
+                local renderer = RendererInstance()
+                local name = renderer.NameText()
+                local intent, why = wishlistController.PrepareNewExactDraft(draft, alternatives)
+                if not intent then return refuse(why) end
+                local request = {}
+                flexiblePlanRequest = request
+                local function Install()
+                    if flexiblePlanRequest ~= request then return refuse("EDITOR_CHANGED") end
+                    if not planCurrent() then return refuse("PLAN_CHANGED") end
+                    if renderer.NameText() ~= name then return refuse("EDITOR_CHANGED") end
+                    local ok, reason = intent.Install()
+                    if not ok then return refuse(reason) end
+                    flexiblePlanRequest = nil
+                    RolePicker.Hide()
+                    SyncFulfilledDraftTargets()
+                    renderer.Prepare({attach=true, style=true, close=true})
+                    renderer.SetNameText("")
+                    HideServerEchoUI()
+                    renderer.ShowFrame()
+                    installed()
+                    M.Refresh()
+                    return true
+                end
+                request.Install = Install
+                request.Cancel = function()
+                    if flexiblePlanRequest == request then flexiblePlanRequest = nil end
+                end
+                if intent.replaces or name ~= "" then
+                    StaticPopup_Show("NEXUS_FLEXIBLE_PLAN_REPLACE",nil,nil,request)
+                    return true
+                end
+                return Install()
+            end,
+        })
+    end
+    flexiblePlanChooser.Show()
 end
 
 function M.OpenForCandidate(candidate)

@@ -1511,6 +1511,12 @@ local function EnsureFrame()
     importBtn:SetText("Import")
     importBtn:SetScript("OnClick", function() StaticPopup_Show("NEXUS_IMPORT_WISHLIST") end)
 
+    local planBtn = CreateFrame("Button", "NexusFlexiblePlanEntry", frame, "UIPanelButtonTemplate")
+    planBtn:SetSize(148, 22)
+    planBtn:SetPoint("RIGHT", importBtn, "LEFT", -4, 0)
+    planBtn:SetText("Plan alternatives")
+    planBtn:SetScript("OnClick", function() Nexus.WishlistEditor.OpenFlexiblePlanChooser() end)
+
     -- Tracking status: shows EXACTLY what the addon currently believes
     -- the active wishlist is, rather than a bare "no wishlist" that reads
     -- as "you have none" when really it can also mean "you have several

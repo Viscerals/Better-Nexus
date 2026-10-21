@@ -1,6 +1,6 @@
 # Player-choice first slice
 
-**First ordinary model implemented for offline review; full feature incomplete.** For the first version of
+**Ordinary model accepted; session chooser integration implemented for focused offline review; full feature incomplete.** For the first version of
 [#47](https://github.com/Viscerals/Better-Nexus/issues/47), the player chooses the
 exact Wishlist from a broader local planning pool. Nexus does not propose the
 result. Automatic resolution, priority/substitution/tie rules and pool sharing
@@ -48,18 +48,57 @@ draft, and a canonical row/count comparison refuses any lossy result. The broad
 pool never goes through import or captured-evidence normalizers. No fingerprint,
 verification, completeness or assignment authority is attached to the result.
 
+## Session chooser integration
+
+The Wishlist Editor's **Plan alternatives** button opens an ordinary planning
+pool. Players add exact catalog IDs, then explicitly Set each chosen count;
+zero leaves a member unchosen. Membership, catalog filtering, scrolling and
+reopening never select results. Two fixed sets of 12 visible row frames use
+`VirtualList.Window`. The pool holds at most 256 alternatives; an explicit
+choice still holds at most 79 ordinary copies and respects each captured stack
+bound. Exact variants and ordinary IDs currently held locked remain ordinary.
+
+The pool and choice live only in session memory. Hide/reopen retains them;
+Reset clears only this planning session; reload loses them. No pool schema,
+SavedVariables migration or persistent entity is added.
+
+**Open as new Wishlist draft** validates the complete model result and detaches
+it before replacing anything. `WishlistController.PrepareNewExactDraft` returns
+a single-use install intent, without changing the current draft or its active
+save confirmation. Required chosen ID/quality/maxStack/group facts and the
+ordinary source role are checked against the existing catalog projection on
+preparation and again on confirmation; unavailable or changed facts refuse.
+Display-name changes do not reinterpret the exact selection.
+
+A current draft, name or destination/edit context requires an in-product
+replacement confirmation with Cancel. Cancellation, refusal or a stale editor
+or planning context preserves the previous editor. The installed new context
+contains exactly the chosen pending ordinary rows, empty locked/fulfilled and
+retained-design maps, and no stale candidate, save/retry or confirmation identity.
+Its seeded draft cannot auto-load an earlier Wishlist on refresh. Save remains
+a distinct subsequent player action; this handoff uploads, saves, assigns,
+shares and spends nothing.
+
+The synthetic `flexible_plan_editor_handoff` fixture boots production modules,
+drives real entry/Add/Set/Open/Cancel callbacks, compares 100 alternatives and
+the explicit last 79 choices with an ordinary manual control, and covers
+catalog/schema/count refusals, detachment, same-family variants, held locks,
+stale confirmations, the 256/257 bound and session lifecycle. This is focused
+offline evidence. Final full CI, package validation and independent Spec and
+Standards review belong to the integration owner. Native UI validation is
+NOT_RUN; no exact versioned client/export reference was available locally.
+
 ## Deliberate limits
 
-The model milestone has no game-service reads, frames, SavedVariables,
-save/assignment calls, automation, resource actions or sharing. A detached draft
-would not be uploaded or installed into the current editor automatically.
+The accepted model remains unchanged and frame-free. The integration uses
+existing editor UI conventions and catalog projections, with no new refresh,
+game-service, save/assignment, automation, resource-action or sharing route.
 Session-memory retention does not satisfy the issue's reload/persistence goal.
 
-Persistence format, pool editing/identity, visible UI and the explicit handoff
-to the existing editor still need separately reviewed integration. Naming a
-routine module is an implementation detail; accepting a stored entity/schema
-or a new player interaction is not. The full issue remains open and is not
-scheduled for a public release by this milestone.
+Persistence format, durable pool identity/edit/fork/migration, grouped choices,
+priorities/substitution/ties, locked planning pools and sharing remain deferred.
+The full issue remains open and is not scheduled for public release by this
+slice.
 
 The [boundaries](BOUNDARIES.md) and [future acceptance matrix](ACCEPTANCE_MATRIX.md)
 continue to apply. The focused synthetic fixture exercises the real

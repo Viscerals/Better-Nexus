@@ -80,6 +80,7 @@ ui\Panel.lua
 ui\JournalTab.lua
 ui\LogViewer.lua
 ui\WishlistRenderer.lua
+ui\FlexiblePlanChooser.lua
 ui\WishlistEditor.lua
 ui\WishlistOverlay.lua
 ui\QuickStart.lua
