@@ -1,6 +1,19 @@
 -- #47 session chooser and atomic new-draft handoff, real TOC/public callbacks.
 -- Synthetic catalog/host only. No native UI claim.
 local H = dofile('tests/prototype/harness.lua')
+-- Record root-window paint calls at the synthetic host boundary. The real
+-- Theme helper must paint the chooser; a styled-button tree alone is not a
+-- window surface over the editor beneath it.
+local createFrame=CreateFrame
+CreateFrame=function(kind,name,parent,template)
+    local frame=createFrame(kind,name,parent,template)
+    if name=='NexusEditorFrame' or name=='NexusFlexiblePlanChooser' then
+        frame.SetBackdrop=function(self,value) self.drawnBackdrop=value end
+        frame.SetBackdropColor=function(self,...) self.drawnFill={...} end
+        frame.SetBackdropBorderColor=function(self,...) self.drawnBorder={...} end
+    end
+    return frame
+end
 wipe(H.db)
 local function EchoName(i) return (i==22 or i==23) and 'Exact variants' or 'Choice '..i end
 for i=1,257 do H.AddEcho(410000+i,EchoName(i),i%4,5,(i==22 or i==23) and 77 or 0) end
@@ -148,6 +161,50 @@ check(NexusFlexiblePlanEntry ~= nil, 'EXPECT reachable session chooser entry in 
 NexusFlexiblePlanEntry:Click()
 check(NexusFlexiblePlanChooser and NexusFlexiblePlanChooser:IsShown(),
     'actual production entry callback opens chooser')
+local theme,chooser=Nexus.Theme,NexusFlexiblePlanChooser
+local function RootTextures(window)
+    local count=0
+    for _,region in ipairs(window.regions) do
+        if region:GetObjectType()=='Texture' then count=count+1 end
+    end
+    return count
+end
+check(NexusEditorFrame:IsShown() and NexusEditorFrame.drawnBackdrop
+    and NexusEditorFrame.drawnFill[4]==0.96,'CONTROL existing editor beneath chooser has themed window surface')
+print('CONTROL existing editor beneath chooser has themed surface PASS')
+check(chooser.drawnBackdrop==theme.STYLES.vista.windowBackdrop
+    and chooser.drawnFill and chooser.drawnFill[4]==0.96
+    and RootTextures(chooser)>0,
+    'EXPECT reachable chooser paints a themed root background above the visible editor')
+check(chooser:GetFrameStrata()==NexusEditorFrame:GetFrameStrata()
+    and chooser:GetFrameLevel()>NexusEditorFrame:GetFrameLevel(),
+    'chooser window surface is above the preserved visible editor')
+local rootTextureCount,themeTextures=RootTextures(chooser),theme.Stats().textures
+local rootBackdrop,rootShade=chooser.drawnBackdrop,chooser._nexusWindowShade
+NexusFlexiblePlanHide:Click();NexusFlexiblePlanEntry:Click()
+check(chooser==NexusFlexiblePlanChooser and chooser:IsShown() and NexusEditorFrame:IsShown()
+    and chooser.drawnBackdrop==rootBackdrop and chooser._nexusWindowShade==rootShade,
+    'Hide/reopen retains the chooser surface and the editor beneath')
+check(RootTextures(chooser)==rootTextureCount and theme.Stats().textures==themeTextures,
+    'Hide/reopen allocates no additional root or themed textures')
+-- Simulate a changed read-only settings projection, then invoke the public
+-- repaint path; the chooser does not gain a new preference-writing route.
+local settingsProvider=Nexus.Store.Settings
+local paletteSettings=H.Clone(settingsProvider())
+paletteSettings.uiPalette='emerald'
+Nexus.Store.Settings=function() return paletteSettings end
+theme.Refresh();theme.Reapply()
+check(chooser.drawnBorder and chooser.drawnBorder[1]==theme.PALETTES.emerald.windowBorder[1]
+    and chooser.drawnBorder[2]==theme.PALETTES.emerald.windowBorder[2]
+    and chooser.drawnBorder[3]==theme.PALETTES.emerald.windowBorder[3],
+    'existing palette repaint path updates the chooser root window border')
+check(RootTextures(chooser)==rootTextureCount and theme.Stats().textures==themeTextures,
+    'palette repaint reuses existing root and themed textures')
+Nexus.Store.Settings=settingsProvider
+theme.Refresh()
+check(chooser.drawnBorder[1]==theme.PALETTES.amethyst.windowBorder[1]
+    and chooser.drawnBorder[2]==theme.PALETTES.amethyst.windowBorder[2],
+    'restoring the existing settings projection repaints the original palette')
 local function VisibleRow(area,id)
     for _,f in ipairs(H.frames) do
         if f:GetParent()==area and f:IsVisible() and f.spellId==id then return f end

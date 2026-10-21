@@ -210,7 +210,10 @@ function Factory.New(options)
         frame:SetScript("OnShow",function(self)
             if Nexus.LayoutMetrics then Nexus.LayoutMetrics.FitToScreen(self) end
         end)
-        if Nexus.Theme then Nexus.Theme.StyleTree(frame) end
+        if Nexus.Theme then
+            Nexus.Theme.StyleWindow(frame, 0.96)
+            Nexus.Theme.StyleTree(frame)
+        end
         frame:Hide()
     end
     function M.Show() EnsureFrame();Refresh();frame:Show() end
