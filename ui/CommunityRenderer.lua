@@ -2294,6 +2294,15 @@ local function EnsureFrame()
         pump.Retain(err)
         return false
     end
+    function M.RefreshFromController()
+        -- Catalog completion still owns its onComplete after this callback.
+        -- Retain display failures here so that work can finish independently.
+        if not frame:IsShown() then return end
+        pump.now = type(GetTime) == "function" and GetTime() or 0
+        pump.Note()
+        if viewDiagnostic.projectionError and pump.now < failBackoffUntil then return end
+        if pump.GuardedRefresh() then pump.Note() end
+    end
     function pump.RetainImport(err)
         -- Personal import failure does not invalidate a shared publication.
         -- Keep its evidence until the import finishes, even if All publishes.
@@ -2377,8 +2386,8 @@ local function EnsureFrame()
         end
         local importDue = (importPending or viewDiagnostic.importRetryPending)
             and pump.now >= pump.importHoldUntil
-        -- Due import work owns this frame before receive-end publication.
-        -- A held personal import still lets All publish committed shared data.
+        -- Due import work runs first; All can publish committed shared data
+        -- at the ordinary cadence while that personal import remains pending.
         -- A receive transition is not evidence that a failed view recovered.
         if receiveEnded and refreshDirty and not importDue
             and not (viewDiagnostic.projectionError and now < failBackoffUntil) then
@@ -2414,8 +2423,7 @@ local function EnsureFrame()
             if pumpTicker >= pump.interval then
                 pumpTicker = 0
                 if ((not importPending and not viewDiagnostic.importRetryPending)
-                    or (virtualStats.lastImportError ~= nil
-                    and FilterSettings().scope ~= "mine")) and refreshDirty
+                    or FilterSettings().scope ~= "mine") and refreshDirty
                     and not viewDiagnostic.projectionPending
                     and not receivingNow then
                     -- MarkDataDirty clears projectionPending; request a job

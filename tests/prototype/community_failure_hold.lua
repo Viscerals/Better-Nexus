@@ -796,6 +796,96 @@ C.scenario('production-pump-failure-clock-advance',function()
 end)
 
 
+
+-- Queued-import callback failures use 7e6c81f5 as their staged baseline.
+-- A real nonempty Saved slot produces a real pending catalog ticket; the
+-- host fault is armed only after that ticket exists and at actual commit.
+C.scenario('saved-catalog-completion-refresh-throw',function()
+ local receiving={value=true}
+ local H,CB=Boot(receiving)
+ local catalog=Nexus.BuildCatalog
+ local put=catalog.Put
+ local ticket,mirrorId
+ catalog.Put=function(record,...)
+  local ok,why,pending=put(record,...)
+  if record.importedSavedBuild and ok==nil and why=='ROOT_MUTATION_PENDING' then
+   ticket=pending;mirrorId=record.id
+  end
+  return ok,why,pending
+ end
+ CB.Show();NexusCommunityBuildsFrame._myBuildsBtn:Click()
+ local before=CB.VirtualStats().savedImport
+ local callbackFailures=catalog.DebugStats().mutationCompletionFailures
+ if not C.setup(before.pending and before.pumps==0,
+  'nonempty Saved slot is genuinely deferred before creating a catalog write') then return end
+ receiving.value=false
+ local escaped=0
+ for _=1,2000 do
+  if ticket then break end
+  escaped=escaped+Step(H,1)
+ end
+ local waiting=CB.VirtualStats().savedImport
+ if not C.setup(type(ticket)=='table' and ticket.state=='pending' and waiting.pending
+  and waiting.catalogPutCalls==before.catalogPutCalls+1,
+  'real Saved import produced one pending catalog mutation ticket') then return end
+ local frame=NexusCommunityBuildsFrame
+ local setText=frame._classDropBtn.SetText
+ local throws,callbackOrigin=0,false
+ local message='Synthetic saved-ticket completion Refresh exception'
+ frame._classDropBtn.SetText=function(self,text)
+  if ticket.committed==true then
+   throws=throws+1
+   local stack={}
+   for i=2,30 do
+    local info=debug.getinfo(i,'S');if not info then break end
+    stack[#stack+1]=info.source
+   end
+   local origin=table.concat(stack,' | ')
+   if origin:find('core/CommunityController.lua',1,true)
+    and origin:find('core/BuildCatalog.lua',1,true) then callbackOrigin=true end
+   error(message,0)
+  end
+  return setText(self,text)
+ end
+ for _=1,2000 do
+  if ticket.state~='pending' and throws>0 then break end
+  escaped=escaped+Step(H,1)
+ end
+ local failed=CB.VirtualStats()
+ if not C.setup(ticket.committed==true and throws>0 and callbackOrigin,
+  'delegated SetText fault is reached by the real committed-ticket controller callback') then return end
+ C.expect(failed.dataFailures==1 and failed.lastDataError==message
+  and failed.importFailures==0 and failed.lastImportError==nil,
+  'ticket callback retains a view failure without misclassifying the successful import write')
+ C.expect(catalog.DebugStats().mutationCompletionFailures==callbackFailures,
+  'view failure does not abort the catalog completion callback')
+ escaped=escaped+Step(H,40)
+ local held=CB.VirtualStats()
+ C.expect(held.dataRefreshes==failed.dataRefreshes and held.lastDataError==message
+  and held.dataFailures==1,'callback failure preserves its publication hold and error for400ms')
+ C.guard(catalog.Get(mirrorId)~=nil and ticket.committed==true,
+  'Saved mirror is genuinely committed despite the delegated display fault')
+ frame._classDropBtn.SetText=setText
+ catalog.Put=put
+ local recovered=Settle(H,CB,2000)
+ local final=CB.VirtualStats()
+ C.expect(recovered and not final.savedImport.pending
+  and final.savedImport.completions==before.completions+1
+  and final.savedImport.catalogPutCalls==before.catalogPutCalls+1
+  and final.savedImport.writes==before.writes+1,
+  'restored display lets the original real import complete once without resubmitting its ticket',recovered)
+ C.expect(final.lastDataError==nil and CB.DiagnosticSnapshot().projectionCurrent
+  and final.dataBinds>failed.dataBinds,
+  'automatic projection work eventually republishes after callback failure')
+ C.guard(final.savedImport.maxWorkPerPump<=25 and escaped==0 and #H.actions==0 and #H.sent==0,
+  'catalog callback recovery stays bounded and causes no frame escape or game/network action')
+ print('OBSERVED saved-ticket-refresh',F.Serialize({throws=throws,callbackOrigin=callbackOrigin,
+  ticketCommitted=ticket.committed,pending=final.savedImport.pending,
+  completions=final.savedImport.completions-before.completions,
+  callbackFailures=catalog.DebugStats().mutationCompletionFailures-callbackFailures,
+  dataFailures=final.dataFailures,importFailures=final.importFailures,recoveredFrames=recovered or false}))
+end)
+
 -- F5 uses 2e9533a as its staged baseline. The import-only ledger contract
 -- is an EXPECT, not a setup requirement. WLRB eligibility and real pending
 -- import work are checked before the publication regression is measured.
@@ -1224,6 +1314,211 @@ C.scenario('open-import-begin-failure-before-job',function()
   'Begin recovery advances real work with no frame exception or game/network action')
  print('OBSERVED Begin-failure-origin',F.Serialize(origins))
 end)
+end
+
+-- F1 queued healthy-import fairness uses7e6c81f as its baseline.
+-- Select the documented no-profiler catalog fallback only for this case.
+do
+-- F1: healthy nonempty saved import across real receive-end publication.
+-- Supported no-profiler pacing makes actual catalog tickets observable.
+-- No renderer/projection/import replacement, pending-state fabrication,
+-- private callback invocation, catalog-pump shortcut or injected exception.
+local T=dofile('tests/prototype/startup_support.lua')
+local restorePacing=T.SingleSlicePacing()
+local F=dofile('tests/prototype/format5_support.lua')
+local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+local V=dofile('tests/prototype/view_regression_support.lua')
+local tag='registered-queued-import'
+local function Current(CB)
+ local d=CB.DiagnosticSnapshot()
+ return d.projectionCurrent and not d.projectionPending and not d.projectionDirty
+end
+local function Visible(H,id)
+ for _,f in ipairs(H.frames) do if f.buildId==id and f:IsVisible() then return true end end
+ return false
+end
+C.scenario('healthy-nonempty-import-receive-end',function()
+ local fx=L.New({players={{name='Existing',class='MAGE',variant=1,title='Existing shared build'}}})
+ local db=fx:Install(F.Database())
+ db.buildFilters={qualifiedOnly=false,currentClassOnly=true,scope='all',sortMode='recent',page=1,search=''}
+ local H=F.Boot(db,function(h)
+  h.playerLevel=60;h.perks.serverActiveSlot=1
+  h.perks.serverBuildSlots={[1]={name='Original saved build',verified=true,echoes=L.OrdinaryRows(3)}}
+ end)
+ local CB,CAT=Nexus.CommunityBuilds,Nexus.BuildCatalog
+ local receiving={value=false}
+ Nexus.Sync.IsReceiving=function() return receiving.value end
+ Nexus.Sync.ReceiveTimeLeft=function() return receiving.value and .5 or 0 end
+ local openFrames,escaped=0,0
+ local function Step(n)
+  for _=1,n do
+   if not pcall(H.Advance,.01,.01) then escaped=escaped+1 end
+   openFrames=openFrames+1
+  end
+ end
+ local function State()
+  local s,d,w=CB.VirtualStats(),CB.DiagnosticSnapshot(),Nexus.ViewProjections.WorkStats()
+  return {time=H.now,frame=openFrames,importPending=s.savedImport.pending,
+   importJobs=s.savedImport.jobs,importPumps=s.savedImport.pumps,importWork=s.savedImport.workUnits,
+   importCompletions=s.savedImport.completions,importWrites=s.savedImport.writes,
+   importFinalizations=s.savedImport.finalizations,importCatalogPuts=s.savedImport.catalogPuts,
+   importFailures=s.importFailures or 0,lastImportError=s.lastImportError or false,
+   dataFailures=s.dataFailures,dataBinds=s.dataBinds,deferredRefreshes=s.deferredRefreshes,
+   communityPumps=w.communityPumps,sourceRows=w.sourceRows,
+   projectionDirty=d.projectionDirty,projectionPending=d.projectionPending,
+   projectionCurrent=d.projectionCurrent,resultCount=d.resultCount,reason=d.blockedReason}
+ end
+ if not C.setup(Nexus.StartupStatus().state=='ready' and debugprofilestop==nil,
+  'actual TOC ready under documented single-slice catalog fallback') then return end
+ CB.Show()
+ local settled
+ for i=0,4000 do
+  if Current(CB) and not CB.VirtualStats().savedImport.pending then settled=i;break end
+  if i<4000 then Step(1) end
+ end
+ Step(100)
+ for _=1,1000 do
+  if Current(CB) and not CB.VirtualStats().savedImport.pending
+   and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil then break end
+  Step(1)
+ end
+ local mirror
+ for _,b in pairs(CB.Builds()) do
+  if b.importedSavedBuild and b.serverSlot==1 then mirror=b end
+ end
+ if not C.setup(settled~=nil and mirror and CAT.Get(mirror.id)
+  and Current(CB) and not CB.VirtualStats().savedImport.pending
+  and CB.DiagnosticSnapshot().filterScope=='all'
+  and CB.DiagnosticSnapshot().resultCount>=1
+  and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil,
+  'warm actual All publication and real completed nonempty saved mirror') then return end
+ local before=State()
+ local originalPut=CAT.Put
+ local ticket,puts={},{ }
+ -- Transparent observation only: preserve all return values and invoke no
+ -- completion callbacks. The import itself obtains and owns the real ticket.
+ CAT.Put=function(record,...)
+  local ok,why,pending=originalPut(record,...)
+  if type(record)=='table' and record.importedSavedBuild then
+   puts[#puts+1]={frame=openFrames,time=H.now,id=record.id,title=record.title,
+    why=why or false,ok=ok==nil and 'nil' or ok,
+    pending=type(pending)=='table' and pending.state=='pending',
+    trace=debug.traceback('real saved-mirror Put',2)}
+   if type(pending)=='table' then ticket=pending end
+  end
+  return ok,why,pending
+ end
+ receiving.value=true
+ H.perks.serverBuildSlots[1]={name='Changed healthy saved build',verified=true,echoes=L.OrdinaryRows(4)}
+ local changedSource=F.Serialize(H.perks.serverBuildSlots)
+ H.Notify();Nexus.GameAdapter.Poll();CB.Hide();CB.Show()
+ openFrames=0
+ local opened=State()
+ if not C.setup(opened.importPending and opened.importJobs==before.importJobs+1
+  and CB.VirtualStats().savedImport.syncDeferrals>0 and #puts==0,
+  'public reopen starts a real changed nonempty import and receive defers its work') then return end
+ local id,sender='receive-completion-incoming','Incoming-Ebonhold'
+ local ordinary=L.OrdinaryRows(2)
+ if not C.setup(L.Copies(ordinary)==79 and Nexus.LoadoutEvidence.PublicOrdinaryCompleteness({echoes=ordinary}).complete,
+  'incoming full snapshot has coherent complete 79-copy ordinary evidence') then return end
+ local data={id=id,t='Incoming complete shared build',a=sender,o=Nexus.Identity.OwnerKey('Incoming','Ebonhold'),
+  c='MAGE',m=time()+1,e={}}
+ for _,row in ipairs(ordinary) do data.e[#data.e+1]={row.spellId,row.quality,row.stacks} end
+ local priorRevision=Nexus.Revisions.Get(Nexus.Revisions.BUILD_LIBRARY_CHANGED)
+ local encoded=Nexus.Codec.Base64Encode(Nexus.Codec.JSONEncode(data))
+ local total=math.ceil(#encoded/150)
+ for i=1,total do
+  Nexus.Sync.HandleIncoming(string.format('WLRB|%s|%s|%d|%d/%d|%s',sender,id,data.m,i,total,
+   encoded:sub((i-1)*150+1,i*150)),sender)
+ end
+ local committed
+ for i=0,450 do
+  local b=CAT.Get(id)
+  if b and b.title==data.t and Nexus.Revisions.Get(Nexus.Revisions.BUILD_LIBRARY_CHANGED)>priorRevision then committed=i;break end
+  if i<450 then Step(1) end
+ end
+ local incoming=CAT.Get(id)
+ if not C.setup(committed~=nil and incoming and CAT.GetSummary(id).ordinaryComplete==true
+  and L.Copies(incoming.echoes)==79,
+  'actual Sync decoder commits full incoming row before receive closes',committed) then return end
+ Step(30)
+ -- Hide/Show reset the real status and safety tickers. Align to just before
+ -- an ordinary 250ms status turn without invoking its callback ourselves.
+ while openFrames%25~=24 do Step(1) end
+ local beforeEnd=State()
+ if not C.setup(openFrames<500 and beforeEnd.importPending and beforeEnd.projectionDirty
+  and not beforeEnd.projectionPending and not Visible(H,id) and #puts==0,
+  'real revision route dirties old publication while receive and changed import remain pending',F.Serialize(beforeEnd)) then return end
+ receiving.value=false
+ local endFrame,endTime=openFrames,H.now
+ Step(1)
+ local first=State()
+ local firstPump,firstRequest,firstPublication,firstTicket,firstTicketCommit,firstCompletion
+ local publicationPending,publicationTicketPending,preCommitPumps= false,false,0
+ local lastPumps=beforeEnd.communityPumps
+ local events={}
+ local function Observe()
+  local s=State();local f=openFrames-endFrame
+  local pending=ticket.state=='pending'
+  if not firstTicket and pending then firstTicket=f;events[#events+1]={event='ticket-pending',frame=f,state=s} end
+  if not firstTicketCommit and ticket.state=='committed' then firstTicketCommit=f;events[#events+1]={event='ticket-committed',frame=f,state=s} end
+  if not firstCompletion and not s.importPending then firstCompletion=f;events[#events+1]={event='import-complete',frame=f,state=s} end
+  if not firstRequest and s.projectionPending then firstRequest=f;events[#events+1]={event='projection-request',frame=f,state=s} end
+  if s.communityPumps>lastPumps then
+   if not firstPump then firstPump=f;events[#events+1]={event='positive-projection-pump',frame=f,state=s} end
+   if pending then preCommitPumps=preCommitPumps+s.communityPumps-lastPumps end
+  end
+  lastPumps=s.communityPumps
+  if not firstPublication and s.dataBinds>beforeEnd.dataBinds and Visible(H,id) then
+   firstPublication=f;publicationPending=s.importPending;publicationTicketPending=pending
+   events[#events+1]={event='incoming-visible',frame=f,state=s,ticketPending=pending}
+  end
+ end
+ Observe()
+ -- Never reach the 8-second safety ticker after this reopen. Let the actual
+ -- lifecycle finish the genuine ticket and import as a healthy control.
+ for _=1,600 do
+  if openFrames>=740 then break end
+  if firstPublication and firstCompletion and ticket.state=='committed' and Current(CB) then break end
+  Step(1);Observe()
+ end
+ local final=State()
+ C.setup(#puts==1 and puts[1].why=='ROOT_MUTATION_PENDING' and puts[1].pending
+  and firstTicket and firstTicketCommit and firstTicketCommit>firstTicket,
+  'changed slot creates one genuine pending catalog ticket that later commits',F.Serialize(puts))
+ C.expect(firstPump and firstTicketCommit and firstPump<firstTicketCommit,
+  'All projection performs positive work before healthy saved-mirror commit',firstPump)
+ C.expect(firstPublication and publicationPending and publicationTicketPending,
+  'actual incoming card publishes while healthy saved import and its real ticket remain pending',firstPublication)
+ C.expect(preCommitPumps>=2 and firstPublication and firstPublication<=50,
+  'real multi-step All projection publishes within500ms while catalog work continues',preCommitPumps)
+ C.guard(first.importWork>beforeEnd.importWork and first.importPumps>beforeEnd.importPumps
+  and CB.VirtualStats().savedImport.maxWorkPerPump<=25,
+  'due healthy import advances on the first receive-end frame within its25-unit budget')
+ C.guard(firstTicketCommit and firstCompletion and not final.importPending
+  and final.importCompletions==before.importCompletions+1 and final.importJobs==before.importJobs+1
+  and CAT.Get(mirror.id).serverTitle=='Changed healthy saved build',
+  'healthy import finishes exactly once and commits the actual changed saved mirror')
+ C.guard(firstPublication and Visible(H,id) and Current(CB),
+  'incoming complete row ultimately publishes through production scheduling')
+ C.guard(openFrames<800,'observation ends before the 8-second safety probe can run',openFrames)
+ C.guard(final.dataFailures==0 and final.importFailures==0 and escaped==0,
+  'healthy scenario contains no injected or escaped fault')
+ C.guard(F.Serialize(H.perks.serverBuildSlots)==changedSource and #H.actions==0 and #H.sent==0,
+  'source saved-slot payload is unchanged; no synthetic game action or network send')
+ print('OBSERVED_F1',tag,F.Serialize({before=before,opened=opened,incomingCommitFrames=committed,
+  receiveEndFrame=endFrame,receiveEndTime=endTime,beforeEnd=beforeEnd,firstFrame=first,
+  firstFrameImportWork=first.importWork-beforeEnd.importWork,
+  firstRequestFrame=firstRequest or false,firstPumpFrame=firstPump or false,
+  firstTicketFrame=firstTicket or false,firstTicketCommitFrame=firstTicketCommit or false,
+  firstPublicationFrame=firstPublication or false,firstImportCompletionFrame=firstCompletion or false,
+  publicationWhileImportPending=publicationPending,publicationWhileTicketPending=publicationTicketPending,
+  positivePumpsWhileTicketPending=preCommitPumps,events=events,puts=puts,final=final,
+  sourceRowsAdded=final.sourceRows-beforeEnd.sourceRows,actions=#H.actions,sent=#H.sent,
+  noSafetyProbe=openFrames<800,escaped=escaped}))
+ CAT.Put=originalPut
+end)
+restorePacing()
 end
 
 C.finish('(public failure hold and recovery; synthetic host only)')

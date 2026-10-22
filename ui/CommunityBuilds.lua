@@ -142,7 +142,12 @@ local function EnsureCommunityController()
     if not (factory and type(factory.New) == "function") then return nil end
     communityController = factory.New({
         refresh=function()
-            if type(M.Refresh) == "function" then M.Refresh() end
+            -- A view failure must not interrupt a controller completion.
+            if communityRenderer and type(communityRenderer.RefreshFromController) == "function" then
+                communityRenderer.RefreshFromController()
+            elseif type(M.Refresh) == "function" then
+                M.Refresh()
+            end
         end,
     })
     return communityController
