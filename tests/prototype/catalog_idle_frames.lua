@@ -110,6 +110,15 @@ end)
 H.Advance(.05)
 debug.setupvalue(runUpdate,storeIndex,rawStore)
 debugprofilestop=realClock
+-- Failure path only (M5 queue, after the first full-run red at this check):
+-- the ticket's own scalar fields are printed before the unchanged assertion,
+-- so a red states how ticket2 settled. Nothing runs in the window or on a
+-- committed ticket; a table detail is named by its type, not walked.
+if ticket2.state~='committed' then
+ print('DIAGNOSTIC catalog_idle_frames ticket2 state='..tostring(ticket2.state)..' reason='..tostring(ticket2.reason)
+  ..' pumps='..tostring(ticket2.pumps)..' committed='..tostring(ticket2.committed)
+  ..' detail='..(type(ticket2.detail)=='table' and 'table' or tostring(ticket2.detail)))
+end
 check(ticket2.state=='committed','fixture: the write committed inside the preparation window')
 check(Nexus.StartupStatus().syncGateCatalogReady==false,
  'over the allowance: not reported ready in this update (as on test.9053): '..tostring(Nexus.StartupStatus().syncGate))
