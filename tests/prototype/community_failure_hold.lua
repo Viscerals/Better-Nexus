@@ -53,7 +53,7 @@ C.scenario('failed-job-diagnostic',function()
   'reason='..d.blockedReason,'pending='..tostring(d.projectionPending))
  C.expect(d.blockedReason=='projection-error',
   'failed production job remains an error instead of replacement pending',d.blockedReason)
- C.expect(d.projectionDirty and not d.projectionCurrent,
+ C.guard(d.projectionDirty and not d.projectionCurrent,
   'failed view stays dirty and not current while pending status stays truthful')
  C.guard(stats.lastDataError and stats.lastDataError:find('Synthetic retained eligibility failure',1,true),
   'failure message remains in the public view stats')
@@ -116,7 +116,7 @@ C.scenario('receive-end-churn',function()
   'receive-end transitions cannot erase an active failure hold',attempts)
  C.expect(d.blockedReason=='projection-error' and d.projectionDirty and not d.projectionCurrent,
   'receive-end churn retains visible failure and stale publication',d.blockedReason)
- C.guard(stats.lastDataError and stats.lastDataError:find('Synthetic receive-end render failure',1,true),
+ C.expect(stats.lastDataError and stats.lastDataError:find('Synthetic receive-end render failure',1,true),
   'receive-end failure message remains available in public stats')
  C.guard(escaped==0,'receive-end refresh exception stays inside the frame',escaped)
  C.guard(not stats.savedImport.pending,'receive-end test is independent of import completion')
@@ -130,7 +130,7 @@ C.scenario('dependency-recovery',function()
   return false,'Synthetic recoverable eligibility failure'
  end
  CB.Show();Step(H,100)
- C.setup(CB.DiagnosticSnapshot().blockedReason=='projection-error',
+ C.setup(CB.VirtualStats().dataFailures>0,
   'production projection reached the recoverable dependency failure')
  local failures=CB.VirtualStats().dataFailures
  Nexus.DpsCapture.CommunityEligibilityCursorNext=read
@@ -138,10 +138,10 @@ C.scenario('dependency-recovery',function()
  local d,stats=CB.DiagnosticSnapshot(),CB.VirtualStats()
  print('OBSERVED dependency-recovery','settled-frames='..tostring(settled),
   'reason='..d.blockedReason,'failures='..stats.dataFailures)
- C.expect(settled~=nil and d.projectionCurrent and not d.projectionDirty
+ C.guard(settled~=nil and d.projectionCurrent and not d.projectionDirty
   and not d.projectionPending and d.blockedReason=='none',
   'restored dependency publishes a current view and clears failure state',d.blockedReason)
- C.expect(stats.lastDataError==nil,'successful recovery clears the retained failure message')
+ C.guard(stats.lastDataError==nil,'successful recovery clears the retained failure message')
  C.guard(stats.dataFailures==failures,'healthy recovery adds no failure',stats.dataFailures)
  C.guard(#H.actions==0 and #H.sent==0,'dependency recovery sends no game or network action')
 end)
@@ -153,7 +153,7 @@ C.scenario('explicit-filter-recovery',function()
   return false,'Synthetic old-filter eligibility failure'
  end
  CB.Show();Step(H,100)
- C.setup(CB.DiagnosticSnapshot().blockedReason=='projection-error',
+ C.setup(CB.VirtualStats().dataFailures>0,
   'old filter context has a retained projection failure')
  local before=CB.DiagnosticSnapshot().filterCurrentClassOnly
  Nexus.DpsCapture.CommunityEligibilityCursorNext=read
@@ -166,10 +166,10 @@ C.scenario('explicit-filter-recovery',function()
  local d=CB.DiagnosticSnapshot()
  print('OBSERVED explicit-filter-recovery','settled-frames='..tostring(settled),
   'reason='..d.blockedReason,'class-only='..tostring(d.filterCurrentClassOnly))
- C.expect(settled~=nil and d.filterCurrentClassOnly~=before
+ C.guard(settled~=nil and d.filterCurrentClassOnly~=before
   and d.projectionCurrent and not d.projectionDirty and d.blockedReason=='none',
   'successful new filter publication truthfully replaces the failed context',d.blockedReason)
- C.expect(CB.VirtualStats().lastDataError==nil,'new current publication clears the old failure message')
+ C.guard(CB.VirtualStats().lastDataError==nil,'new current publication clears the old failure message')
  C.guard(#H.actions==0 and #H.sent==0,'filter recovery sends no game or network action')
 end)
 
@@ -241,6 +241,145 @@ C.scenario('receive-end-first-frame-import',function()
  C.guard(not final.pending and final.completions==1 and final.catalogPutCalls==1 and final.writes==1,
   'the same resumed import commits exactly once')
  C.guard(#H.actions==0 and #H.sent==0,'receive-end import sends no game or network action')
+end)
+
+C.scenario('explicit-filter-work-during-hold',function()
+ local H,CB=Boot({value=false},true)
+ local read=Nexus.DpsCapture.CommunityEligibilityCursorNext
+ local message='Synthetic previous-query failure'
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=function() return false,message end
+ CB.Show()
+ for _=1,100 do
+  if CB.VirtualStats().dataFailures>0 then break end
+  Step(H,1)
+ end
+ local failed=CB.VirtualStats()
+ C.setup(failed.dataFailures==1 and failed.lastDataError
+  and failed.lastDataError:find(message,1,true)
+  and CB.DiagnosticSnapshot().blockedReason=='projection-error',
+  'a real failed projection establishes the first active failure hold')
+ local heldPumps=Nexus.ViewProjections.WorkStats().communityPumps
+ Step(H,10,function() CB.MarkDataDirty() end)
+ C.guard(Nexus.ViewProjections.WorkStats().communityPumps==heldPumps
+  and CB.VirtualStats().dataFailures==failed.dataFailures,
+  'ordinary same-query dirty notifications keep the active hold')
+ local previousClass=CB.DiagnosticSnapshot().filterCurrentClassOnly
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=read
+ NexusCommunityBuildsFrame._classDropBtn:Click()
+ local requested=CB.DiagnosticSnapshot()
+ C.setup(requested.filterCurrentClassOnly~=previousClass and requested.projectionPending,
+  'real class click requests a healthy distinct pending projection')
+ C.guard(requested.blockedReason=='projection-error' and requested.projectionDirty
+  and not requested.projectionCurrent and CB.VirtualStats().lastDataError==failed.lastDataError,
+  'new pending work retains the prior error evidence until publication')
+ local before=Nexus.ViewProjections.WorkStats().communityPumps
+ local firstWork,pendingEvidence,escaped=nil,true,0
+ for i=1,20 do
+  escaped=escaped+Step(H,1)
+  local d=CB.DiagnosticSnapshot()
+  if not d.projectionCurrent then
+   pendingEvidence=pendingEvidence and d.blockedReason=='projection-error'
+    and CB.VirtualStats().lastDataError==failed.lastDataError
+  end
+  if not firstWork and Nexus.ViewProjections.WorkStats().communityPumps>before then firstWork=i end
+ end
+ local progress=Nexus.ViewProjections.WorkStats().communityPumps-before
+ print('OBSERVED explicit-filter-work-during-hold','frames=20 first-work='..tostring(firstWork),
+  'positive-pumps='..progress,'reason='..CB.DiagnosticSnapshot().blockedReason)
+ C.expect(firstWork~=nil and progress>0,
+  'explicit healthy filter query advances projection work within 200ms of its request',progress)
+ C.guard(pendingEvidence,'every observed pending frame retains failure evidence')
+ C.guard(escaped==0 and CB.VirtualStats().dataFailures==failed.dataFailures,
+  'healthy new-query work causes no exception or additional failure',escaped)
+ C.guard(#H.actions==0 and #H.sent==0,'explicit query sends no game or network action')
+end)
+
+C.scenario('pending-observations-do-not-extend-hold',function()
+ local H,CB=Boot({value=false},true)
+ local read=Nexus.DpsCapture.CommunityEligibilityCursorNext
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=function()
+  return false,'Synthetic fixed-deadline failure'
+ end
+ CB.Show()
+ for _=1,100 do
+  if CB.VirtualStats().dataFailures>0 then break end
+  Step(H,1)
+ end
+ C.setup(CB.VirtualStats().dataFailures==1 and CB.DiagnosticSnapshot().projectionPending,
+  'one production failure has left replacement work pending')
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=read
+ local before=Nexus.ViewProjections.WorkStats().communityPumps
+ local firstWork
+ -- Re-reading the same pending query neither releases nor renews its 500ms
+ -- first-failure deadline. The next 100ms work tick must still become due.
+ for i=1,70 do
+  CB.Refresh();Step(H,1)
+  if not firstWork and Nexus.ViewProjections.WorkStats().communityPumps>before then firstWork=i end
+ end
+ print('OBSERVED pending-observations-do-not-extend-hold','frames=70 first-work='..tostring(firstWork),
+  'failures='..CB.VirtualStats().dataFailures)
+ C.guard(firstWork and firstWork>=50 and firstWork<=70,
+  'same-query pending observations keep the original deadline instead of sliding it',firstWork)
+ C.guard(CB.VirtualStats().dataFailures==1,'pending observations do not record new failures')
+ C.guard(#H.actions==0 and #H.sent==0,'pending observation sends no game or network action')
+end)
+
+C.scenario('latest-handled-failure-message',function()
+ local H,CB=Boot({value=false},true)
+ local read=Nexus.DpsCapture.CommunityEligibilityCursorNext
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=function()
+  return false,'Synthetic older pump failure'
+ end
+ CB.Show();Step(H,100)
+ local before=CB.VirtualStats()
+ C.setup(before.dataFailures>0 and before.lastDataError=='Synthetic older pump failure',
+  'an older production pump failure has a retained message')
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=read
+ local begin=Nexus.DpsCapture.BeginCommunityEligibilityCursor
+ local refusals=0
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=function()
+  refusals=refusals+1;return nil
+ end
+ CB.MarkDataDirty();NexusCommunityBuildsFrame._classDropBtn:Click()
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=begin
+ local after,d=CB.VirtualStats(),CB.DiagnosticSnapshot()
+ C.setup(refusals>0 and after.dataFailures>before.dataFailures,
+  'a new explicit query reaches the handled production factory refusal')
+ print('OBSERVED latest-handled-failure-message','refusals='..refusals,
+  'message='..tostring(after.lastDataError))
+ C.expect(after.lastDataError=='DPS eligibility cursor unavailable',
+  'a newer handled failure replaces the older message',after.lastDataError)
+ C.guard(d.blockedReason=='projection-error' and d.projectionDirty and not d.projectionCurrent,
+  'the newer handled failure stays visible and not current')
+ C.guard(#H.actions==0 and #H.sent==0,'handled failure sends no game or network action')
+end)
+
+C.scenario('replacement-handled-failure-message',function()
+ local H,CB=Boot({value=false},true)
+ local begin=Nexus.DpsCapture.BeginCommunityEligibilityCursor
+ local refuse,refusals=false,0
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=function()
+  refuse=true;return false,'Synthetic failed job before replacement'
+ end
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=function(...)
+  if refuse then refusals=refusals+1;return nil end
+  return begin(...)
+ end
+ CB.Show()
+ for _=1,200 do
+  if refusals>0 then break end
+  Step(H,1)
+ end
+ local stats,d=CB.VirtualStats(),CB.DiagnosticSnapshot()
+ C.setup(refusals>0 and stats.dataFailures==1,
+  'a failed production job reaches a replacement factory refusal within its first hold')
+ print('OBSERVED replacement-handled-failure-message','refusals='..refusals,
+  'message='..tostring(stats.lastDataError))
+ C.expect(stats.lastDataError=='DPS eligibility cursor unavailable',
+  'requesting a replacement retains its latest handled failure message',stats.lastDataError)
+ C.guard(d.blockedReason=='projection-error' and d.projectionDirty and not d.projectionCurrent,
+  'a refused replacement does not claim publication or clear failure')
+ C.guard(#H.actions==0 and #H.sent==0,'replacement refusal sends no game or network action')
 end)
 
 C.finish('(public failure hold and recovery; synthetic host only)')

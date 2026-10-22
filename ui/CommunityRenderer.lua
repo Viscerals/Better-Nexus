@@ -2253,6 +2253,12 @@ local function EnsureFrame()
             failBackoffUntil = 0
         end
     end
+    function pump.RefreshContext()
+        -- A new explicit request gets its own chance to run. Keep the last
+        -- failure evidence until that request successfully publishes.
+        failBackoffUntil = 0
+        return M.Refresh()
+    end
     -- An escaped refresh used to skip the safety ticker. Keep the error on
     -- the diagnostic the backoff already reads, and remember the message.
     function pump.Retain(err)
@@ -2371,9 +2377,8 @@ local function EnsureFrame()
                     elseif published then
                         if pump.GuardedRefresh() then pump.Note() end
                     elseif pumpError then
-                        -- Requesting again replaces the failed job and clears
-                        -- the error. Record the hold first, then restore it
-                        -- unless that request actually published.
+                        -- A replacement request is not proof of recovery.
+                        -- Preserve the failure hold unless it publishes.
                         viewDiagnostic.projectionError = true
                         viewDiagnostic.projectionCurrent = false
                         virtualStats.dataFailures =
@@ -2382,14 +2387,12 @@ local function EnsureFrame()
                         pump.Note()
                         local heldUntil = failBackoffUntil
                         local heldFailures = virtualStats.dataFailures
-                        local heldError = virtualStats.lastDataError
                         pcall(M.Refresh)
                         if viewDiagnostic.projectionCurrent == true then
                             failBackoffUntil = 0
                         else
                             failBackoffUntil = heldUntil
                             virtualStats.dataFailures = heldFailures
-                            virtualStats.lastDataError = heldError
                             viewDiagnostic.projectionError = true
                             viewDiagnostic.projectionCurrent = false
                         end
@@ -2544,7 +2547,7 @@ local function EnsureFrame()
         row:SetScript("OnClick",function()
             onSelect(item)
             CloseDropdowns()
-            M.Refresh()
+            pump.RefreshContext()
         end)
         panel._rows = panel._rows or {}
         panel._rows[#panel._rows+1] = row
@@ -2665,7 +2668,7 @@ local function EnsureFrame()
         end
         if suppressSearchChange then return end
         ControllerInstance().SetFilter("search", self:GetText() or "")
-        M.Refresh()
+        pump.RefreshContext()
     end)
     local searchLabel = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     searchLabel:SetPoint("LEFT",searchBox,"LEFT",6,0)
@@ -2693,7 +2696,7 @@ local function EnsureFrame()
         ControllerInstance().SetFilter("page", requestedPage)
         searchLabel:Show()
         clearSearchBtn:Hide()
-        M.Refresh()
+        pump.RefreshContext()
     end)
 
     -- Library scope is a direct two-button selector instead of a hidden dropdown.
@@ -2706,7 +2709,7 @@ local function EnsureFrame()
         ControllerInstance().SetFilter("scope", "all")
         ControllerInstance().ClearSelection()
         CloseDropdowns()
-        M.Refresh()
+        pump.RefreshContext()
     end)
     scopeBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
@@ -2727,7 +2730,7 @@ local function EnsureFrame()
         ControllerInstance().SetFilter("scope", "mine")
         ControllerInstance().ClearSelection()
         CloseDropdowns()
-        M.Refresh()
+        pump.RefreshContext()
     end)
     myBuildsBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
@@ -2749,7 +2752,7 @@ local function EnsureFrame()
             filters.currentClassOnly == false)
         ControllerInstance().ClearSelection()
         CloseDropdowns()
-        M.Refresh()
+        pump.RefreshContext()
     end)
     classDropBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
@@ -2788,7 +2791,7 @@ local function EnsureFrame()
             filters.qualifiedOnly == false)
         ControllerInstance().ClearSelection()
         CloseDropdowns()
-        M.Refresh()
+        pump.RefreshContext()
     end
     local function QualifiedTip(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
@@ -2881,7 +2884,7 @@ local function EnsureFrame()
         if (filters.page or 1) <= 1 then return end
         ControllerInstance().SetFilter("page", (filters.page or 1) - 1)
         if scrollBar then scrollBar.value = 0 end
-        M.Refresh()
+        pump.RefreshContext()
     end)
 
     pageText = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
@@ -2899,7 +2902,7 @@ local function EnsureFrame()
         local filters = FilterSettings()
         ControllerInstance().SetFilter("page", (filters.page or 1) + 1)
         if scrollBar then scrollBar.value = 0 end
-        M.Refresh()
+        pump.RefreshContext()
     end)
 
     syncStatusText = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
@@ -3268,6 +3271,7 @@ function M.Refresh()
         viewDiagnostic.projectionError = true
         viewDiagnostic.projectionCurrent = false
         virtualStats.dataFailures = virtualStats.dataFailures + 1
+        virtualStats.lastDataError = tostring(projectionError or "Community projection failed"):sub(1, 300)
         RenderSyncStatus()
         return false, projectionError
     end

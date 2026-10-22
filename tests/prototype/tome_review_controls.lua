@@ -313,7 +313,7 @@ K.Run({
                 local ok, err = pcall(H.AcceptPopup)
                 Nexus.OverwriteWarning.RequestAuto = original
                 c(not ok and tostring(err):find('Synthetic RequestAuto fault', 1, true),
-                    'prompt_exception_cleanup reached: the original request exception remains visible')
+                    'prompt_exception_cleanup the original request exception remains visible')
             end
             Nexus.MainInternals.StoreAuthorityOwner.UpdateSettingsV1('autoDisable', false)
             H.Notify()
