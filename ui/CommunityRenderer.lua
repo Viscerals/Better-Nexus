@@ -625,7 +625,7 @@ function Renderer.New(options)
     local suppressSearchChange = false
     local virtualStats = {
         created=0,peakActive=0,active=0,results=0,
-        dataRefreshes=0,dataFailures=0,
+        dataRefreshes=0,dataFailures=0,importFailures=0,
         dataBinds=0,scrollBinds=0,resizeBinds=0,
         dirtyMarks=0,deferredRefreshes=0,periodicSkips=0,
         first=1,last=0,offset=0,maxOffset=0,
@@ -2290,6 +2290,16 @@ local function EnsureFrame()
         pump.Retain(err)
         return false
     end
+    function pump.RetainImport(err)
+        -- Personal import failure does not invalidate a shared publication.
+        -- Keep its evidence until the import finishes, even if All publishes.
+        virtualStats.importFailures = virtualStats.importFailures + 1
+        virtualStats.lastImportError = tostring(err):sub(1, 300)
+        pump.now = type(GetTime) == "function" and GetTime() or 0
+        local delay = FAIL_BACKOFF_BASE
+            * (2 ^ math.min(virtualStats.importFailures - 1, 4))
+        pump.importHoldUntil = pump.now + math.min(delay, FAIL_BACKOFF_MAX)
+    end
     -- Named so Hide can detach it. Hidden frames already skip OnUpdate in
     -- 3.3.5a; clearing the script makes dormancy explicit and prevents any
     -- accidental re-Show of a child from keeping this pump alive.
@@ -2331,9 +2341,15 @@ local function EnsureFrame()
 
         local importPending = type(controller.HasPendingSavedLoadoutImport) == "function"
             and controller.HasPendingSavedLoadoutImport()
-        -- An import owns this frame before ordinary receive-end publication.
+        if not importPending then
+            virtualStats.lastImportError = nil
+            pump.importHoldUntil = 0
+        end
+        local importDue = importPending and pump.now >= pump.importHoldUntil
+        -- Due import work owns this frame before receive-end publication.
+        -- A held personal import still lets All publish committed shared data.
         -- A receive transition is not evidence that a failed view recovered.
-        if receiveEnded and refreshDirty and not importPending
+        if receiveEnded and refreshDirty and not importDue
             and not (viewDiagnostic.projectionError and now < failBackoffUntil) then
             virtualStats.deferredRefreshes =
                 virtualStats.deferredRefreshes + 1
@@ -2347,13 +2363,13 @@ local function EnsureFrame()
         -- backs off without stopping a healthy import.
         -- Receive-window coalescing: while Sync is receiving, hold dirty
         -- republish (except a gated cold open) until the window ends above.
-        if importPending and pump.now >= pump.importHoldUntil then
+        if importDue then
             local imported, advanced, pending = pcall(PrepareData, false)
             if not imported then
-                pump.Retain(advanced)
-                pump.importHoldUntil = failBackoffUntil
+                pump.RetainImport(advanced)
             else
                 pump.importHoldUntil = 0
+                if not pending then virtualStats.lastImportError = nil end
                 if not pending and not (viewDiagnostic.projectionError
                     and pump.now < failBackoffUntil)
                     and pump.GuardedRefresh() then pump.Note() end
@@ -2370,7 +2386,8 @@ local function EnsureFrame()
             pumpTicker = pumpTicker + elapsed
             if pumpTicker >= pump.interval then
                 pumpTicker = 0
-                if not importPending and refreshDirty
+                if (not importPending or (virtualStats.lastImportError ~= nil
+                    and FilterSettings().scope ~= "mine")) and refreshDirty
                     and not viewDiagnostic.projectionPending
                     and not receivingNow then
                     -- MarkDataDirty clears projectionPending; request a job
@@ -3118,7 +3135,8 @@ function M.DiagnosticSnapshot()
     if not shown then reason = "hidden"
     elseif viewDiagnostic.projectionError then reason = "projection-error"
     elseif base.filterScope == "mine" and base.savedImportPending then
-        reason = "saved-import"
+        reason = virtualStats.lastImportError ~= nil
+            and "saved-import-error" or "saved-import"
     elseif viewDiagnostic.projectionPending then reason = "projection-pending"
     elseif dirty and receiving and viewDiagnostic.publishedPage > 0 then
         reason = "sync-receiving"
@@ -3160,6 +3178,7 @@ function M.DiagnosticSnapshot()
         projectionDirty=dirty,savedImportPending=
             base.savedImportPending == true,
         savedImportPhase=base.savedImportPhase or "unknown",
+        savedImportError=virtualStats.lastImportError ~= nil,
         syncReceiving=receiving,
         lastPublicationAge=PublicationAge(viewDiagnostic.publishedAt),
         blockedReason=reason,
@@ -3250,10 +3269,11 @@ function M.Refresh()
     -- filter, scope, sort, and page controls truthful before that gate so the
     -- visible browser never looks frozen while its last-good rows stay bound.
     local controller = ControllerInstance()
-    local importPending = fs.scope == "mine"
-        and type(controller.HasPendingSavedLoadoutImport) == "function"
+    local importPending = type(controller.HasPendingSavedLoadoutImport) == "function"
         and controller.HasPendingSavedLoadoutImport()
-    if importPending then
+    -- Show may finish the real import before the next frame callback.
+    if not importPending then virtualStats.lastImportError = nil end
+    if fs.scope == "mine" and importPending then
         refreshDirty = true
         -- The rows still shown are the last published ones, not the result
         -- of the current filters.
