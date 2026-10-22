@@ -6,7 +6,13 @@
 -- against 1be520d; failed explicit-request timing and thrown-message cases against
 -- 8e03747. Later SETUPs may rely on earlier retained-error repairs. Existing
 -- predicates stay in the file except the two replacement-message cases, now
--- superseded by stricter post-hold timing and truthful cancelled-job checks.
+-- superseded by stricter post-hold timing and truthful cancelled-job checks,
+-- and the old cold-Mine receive writes>0 guard. Final Spec-Library F3 replaces
+-- that churn requirement with zero writes/pumps while Mine waits for import;
+-- final-f3-all-cold-receive-progresses retains the All progression predicate.
+-- The dirty-notifications Mine arm now establishes its actual fault through
+-- explicit Refresh: correct no-churn waiting no longer triggers that setter
+-- automatically. Its original hold/safety/import assertions remain unchanged.
 -- The advancing-clock explicit exception uses 6dd5ceae as its baseline. It
 -- characterizes synthetic timing robustness, not native GetTime clock caching.
 -- Show/direct-refresh, cached-render retry, replacement liveness and frame-clock
@@ -82,6 +88,14 @@ C.scenario('dirty-notifications-hold',function()
  NexusCommunityBuildsFrame._classDropBtn.SetText=function()
   attempts=attempts+1;error('Synthetic dirty-event render failure')
  end
+ -- R2 now correctly forbids the old automatic cold-Mine refresh trigger.
+ -- Establish the real view failure explicitly, then keep the original
+ -- same-context dirty-notification hold, import and safety predicates below.
+ local faulted,fault=pcall(CB.Refresh)
+ C.setup(not faulted and attempts==1 and type(fault)=='string'
+  and fault:find('Synthetic dirty-event render failure',1,true)
+  and CB.VirtualStats().savedImport.pending,
+  'explicit Refresh establishes actual Mine view failure before dirty notifications')
  local reads=SafetyReads()
  local before=CB.VirtualStats().savedImport.syncDeferrals
  -- Public dirty notifications describe the same current view. They are not a
@@ -201,8 +215,11 @@ C.scenario('healthy-import-and-cadence',function()
  local projectionPumps=Nexus.ViewProjections.WorkStats().communityPumps-pumpBefore
  print('OBSERVED healthy-import-and-cadence','cold-refresh-writes='..writes,
   'projection-pumps='..projectionPumps,'receive-checks='..(deferred.syncDeferrals-before.syncDeferrals))
- C.guard(writes>0 and writes<=10 and projectionPumps<=10,
-  'cold receive refresh and projection work respect the 100ms cadence',writes)
+ -- Supersedes the original writes>0 Mine predicate (retained in frozen a7
+ -- evidence): R2 requires Mine to wait without full-refresh churn. Actual All
+ -- cold-receive cadence/progression has a separate positive successor below.
+ C.expect(writes==0 and projectionPumps==0,
+  'cold Mine receive waits for import without full-refresh or projection churn',writes)
  C.guard(escaped==0 and deferred.pending and deferred.syncDeferrals-before.syncDeferrals==100,
   'healthy saved import remains independently deferred on every frame')
  receiving.value=false
@@ -3007,6 +3024,193 @@ C.scenario(faulted and 'safety-refusal-anchor' or 'safety-healthy-anchor',functi
   revisionBefore=revisionBefore,revisionAfter=revisionAfter,returnedCurrent=returnedCurrent,
   safetyTrace=safetyTrace,refusalTrace=refusalTrace,acquired=acquired,refusals=refusals,
   recoveredFrames=recovered or false,escaped=escaped}))
+end)
+end
+
+-- Final Spec-Library F1-F4 successor controls use a7ce9eb as RED baseline.
+-- Public renderer/controller paths and actual host setters only; no renderer,
+-- projection job, clock, revision, or failure-state replacement.
+do
+local function WarmCards()
+ local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+ local fx=L.New({players={{name='FinalCard',class='MAGE',variant=1,title='Final exact binding'}}})
+ local db=fx:Install(F.Database())
+ db.buildFilters={qualifiedOnly=false,currentClassOnly=true,scope='all',sortMode='title',page=1,search=''}
+ local H=F.Boot(db,function(h)h.playerLevel=60;h.perks.serverBuildSlots={}end)
+ return H,Nexus.CommunityBuilds
+end
+local function Cards(H)
+ local cards={}
+ for _,f in ipairs(H.frames)do
+  if f.buildId and f.title and f.author and f.dpsBreakdown then cards[#cards+1]=f end
+ end
+ return cards
+end
+local function FaultCards(H,value)
+ local originals,calls={},0
+ for _,card in ipairs(Cards(H))do
+  originals[card.title]=card.title.SetText
+  card.title.SetText=function()calls=calls+1;error(value,0)end
+ end
+ return function()return calls end,function()
+  for label,setter in pairs(originals)do label.SetText=setter end
+ end
+end
+for _,entry in ipairs({'Refresh','Show'})do
+C.scenario('final-f1-card-exact-'..entry,function()
+ local H,CB=WarmCards();CB.Show()
+ assert(C.setup(Settle(H,CB)~=nil and #Cards(H)>0,'real visible card bound before exact-value fault'))
+ local values={{kind='string',value='Exact card title failure'},
+  {kind='table',value={fault='card'}},{kind='nil'},{kind='false',value=false}}
+ for _,case in ipairs(values)do
+  local calls,restore=FaultCards(H,case.value);local before=CB.VirtualStats().dataFailures
+  local ok,err=pcall(CB[entry]);local s=CB.VirtualStats()
+  C.setup(calls()==1,'actual card title host setter throws once: '..entry..'/'..case.kind,calls())
+  C.expect(not ok and err==case.value,'card binding rethrows exact '..case.kind..' from '..entry,err)
+  C.expect(s.dataFailures==before+1 and s.lastDataError==Nexus.Errors.SafeText(case.value),
+   'card fault retains exact bounded evidence once: '..entry..'/'..case.kind,s.lastDataError)
+  restore();CB.Refresh()
+  C.guard(Settle(H,CB)~=nil and CB.VirtualStats().lastDataError==nil,'restored card recovers through public Refresh')
+ end
+ C.guard(#H.actions==0 and #H.sent==0,'exact card failures send no gameplay or transport action')
+end)
+end
+C.scenario('final-f1-detail-exact-returned-error',function()
+ local H,CB=Boot({value=false});CB.Show()
+ assert(C.setup(Settle(H,CB)~=nil,'real detail source settles'))
+ local id
+ for _,b in pairs(CB.Builds())do if b.importedSavedBuild then id=b.id;break end end
+ assert(C.setup(id~=nil,'actual saved mirror is available for public selection'))
+ local get=Nexus.BuildCatalog.Get;local message='Exact detail dependency failure';local calls=0
+ Nexus.BuildCatalog.Get=function(...)
+  for i=2,10 do local info=debug.getinfo(i,'S');if not info then break end
+   if info.source=='@core/CommunityProjection.lua' then calls=calls+1;error(message,0)end
+  end
+  return get(...)
+ end
+ local ok,err=pcall(CB.Select,id)
+ C.setup(calls==1,'real detail projection catches its failing catalog dependency',calls)
+ C.expect(not ok and err==message and CB.VirtualStats().lastDataError==message,
+  'renderer preserves exact error returned by existing detail projection contract',err)
+ Nexus.BuildCatalog.Get=get;CB.Refresh()
+ C.guard(Settle(H,CB)~=nil and CB.VirtualStats().lastDataError==nil,'restored detail dependency recovers')
+ C.guard(#H.actions==0 and #H.sent==0,'detail control sends no gameplay or transport action')
+end)
+C.scenario('final-f2-sync-ticker-import-independent',function()
+ local receiving={value=true};local H,CB=Boot(receiving)
+ CB.Show();NexusCommunityBuildsFrame._myBuildsBtn:Click()
+ local label=NexusCommunityBuildsFrame._syncStatusText;local setter=label.SetText
+ local calls=0;local message='Automatic receive label host failure'
+ label.SetText=function()calls=calls+1;error(message,0)end
+ local before=CB.VirtualStats();local escaped=Step(H,30);local held=CB.VirtualStats()
+ C.setup(calls>0,'real automatic receive label reaches the persistent host fault')
+ C.expect(escaped==0 and calls==1,'automatic sync label failure is contained and held',escaped..'/'..calls)
+ C.expect(held.dataFailures==before.dataFailures+1 and held.lastDataError==message,
+  'sync label fault belongs to existing view failure owner once',held.lastDataError)
+ C.expect(held.savedImport.syncDeferrals-before.savedImport.syncDeferrals==30,
+  'sync label exception cannot abort healthy per-frame deferred import checks')
+ C.guard(held.statusFailures==before.statusFailures and held.lastStatusError==before.lastStatusError,
+  'sync label never touches unrelated Share status failure ledger')
+ receiving.value=false;Step(H,1);local nextFrame=CB.VirtualStats()
+ C.expect(nextFrame.savedImport.pumps==held.savedImport.pumps+1,
+  'first nonreceiving frame advances healthy import inside view failure hold')
+ label.SetText=setter
+ C.guard(Settle(H,CB)~=nil,'restored sync label and independent import recover')
+ C.guard(#H.actions==0 and #H.sent==0,'sync label faults send no gameplay or transport action')
+end)
+C.scenario('final-f2-resize-held-scroll-explicit',function()
+ local H,CB=WarmCards();CB.Show()
+ assert(C.setup(Settle(H,CB)~=nil and #Cards(H)>0,'real visible cards settle before cached rebind'))
+ local scroll=NexusCommunityBuildsFrame._virtualListScrollFrame
+ local resize=scroll:GetScript('OnSizeChanged');local message='Exact cached rebind host failure'
+ local calls,restore=FaultCards(H,message);local before=CB.VirtualStats().dataFailures
+ local ok,err=pcall(resize,scroll)
+ C.setup(calls()==1,'real resize callback reaches actual cached card setter')
+ C.expect(ok and CB.VirtualStats().dataFailures==before+1
+  and CB.VirtualStats().lastDataError==message,'automatic resize contains and retains exact fault once',err)
+ local escaped=0
+ for _=1,40 do H.now=H.now+.01;if not pcall(resize,scroll)then escaped=escaped+1 end end
+ C.expect(escaped==0 and calls()==1,'repeated automatic resize honors existing view hold',calls())
+ local scrolled,scrollErr=pcall(CB.ScrollTo,0)
+ C.expect(not scrolled and scrollErr==message and calls()==2,
+  'public explicit scroll stays immediate inside hold and exact-rethrows its own fault',scrollErr)
+ C.expect(CB.VirtualStats().dataFailures==before+2 and CB.VirtualStats().lastDataError==message,
+  'explicit scroll retains its actual new failed attempt')
+ restore();CB.Refresh()
+ C.guard(Settle(H,CB)~=nil and CB.VirtualStats().lastDataError==nil,'cached binding recovers through successful publication')
+ C.guard(CB.VirtualStats().statusFailures==0 and #H.actions==0 and #H.sent==0,'cached rebind preserves status ledger and performs no gameplay action')
+end)
+for _,held in ipairs({false,true})do
+C.scenario('final-f3-mine-cold-receive-'..(held and 'import-held' or 'import-deferred'),function()
+ local receiving={value=not held};local H,CB=Boot(receiving)
+ local slots=Nexus.GameAdapter.Slots
+ if held then Nexus.GameAdapter.Slots=function(...)
+  local info=debug.getinfo(2,'S')
+  if info and info.source=='@core/CommunityController.lua' then error('Held Mine import Begin',0)end
+  return slots(...)
+ end end
+ CB.Show();NexusCommunityBuildsFrame._myBuildsBtn:Click();receiving.value=true
+ local before=CB.VirtualStats();local frame=NexusCommunityBuildsFrame
+ C.setup(before.dataBinds==0 and CB.DiagnosticSnapshot().filterScope=='mine',
+  'Mine cold receive has not bound a publication')
+ C.setup(held and before.importFailures==1 or not held and before.savedImport.pending,
+  'real deferred/failed import owns cold Mine wait')
+ local writes=0;local setter=frame._classDropBtn.SetText
+ frame._classDropBtn.SetText=function(self,...)writes=writes+1;return setter(self,...)end
+ local pumps=Nexus.ViewProjections.WorkStats().communityPumps;local escaped=Step(H,100)
+ C.expect(writes==0 and Nexus.ViewProjections.WorkStats().communityPumps==pumps,
+  'cold Mine pending import performs zero full-refresh churn during receive',writes)
+ C.guard(escaped==0 and CB.VirtualStats().dataFailures==0,'waiting Mine does not manufacture view failure')
+ frame._classDropBtn.SetText=setter;Nexus.GameAdapter.Slots=slots;receiving.value=false
+ C.guard(Settle(H,CB)~=nil and CB.DiagnosticSnapshot().projectionCurrent,
+  'Mine resumes genuine import and publication after receive/hold')
+ C.guard(#H.actions==0 and #H.sent==0,'cold Mine wait sends no gameplay or transport action')
+end)
+end
+C.scenario('final-f3-all-cold-receive-progresses',function()
+ local receiving={value=true};local H,CB=Boot(receiving);CB.Show()
+ local before=CB.VirtualStats();local pumps=Nexus.ViewProjections.WorkStats().communityPumps
+ local label=NexusCommunityBuildsFrame._classDropBtn;local setter=label.SetText;local writes=0
+ label.SetText=function(self,...)writes=writes+1;return setter(self,...)end
+ local escaped=Step(H,100);local after=CB.VirtualStats()
+ local advanced=Nexus.ViewProjections.WorkStats().communityPumps-pumps
+ C.setup(before.dataBinds==0 and before.savedImport.pending,'All starts cold with actual deferred personal import')
+ C.guard(escaped==0 and after.dataBinds>0 and advanced>0 and advanced<=10 and writes>0 and writes<=10,
+  'All cold receive retains positive publication and bounded100ms refresh/pump cadence',writes..'/'..advanced)
+ C.guard(after.savedImport.pending and after.savedImport.syncDeferrals>before.savedImport.syncDeferrals,
+  'All progression does not bypass the independent personal receive deferral')
+ C.guard(#H.actions==0 and #H.sent==0,'All progression sends no gameplay or transport action')
+ label.SetText=setter
+end)
+C.scenario('final-f4-unchanged-status-is-not-recovery',function()
+ local H,CB=Boot({value=false},true);CB.Show()
+ assert(C.setup(Settle(H,CB)~=nil,'real Library settles before unchanged status fault'))
+ CB.ShowPostBuild();local label=NexusPostPopup._shareStatus;local setter=label.SetText
+ local displayed=label:GetText();local message='Persistent unchanged Share setter failure';local calls=0
+ label.SetText=function()calls=calls+1;error(message,0)end
+ local records=Nexus.Errors.SessionCount();CB.Refresh()
+ C.setup(calls==1 and label:GetText()==displayed and CB.VirtualStats().lastStatusError==message,
+  'actual explicit setter fails while already displayed status equals desired text')
+ -- Isolate the real popup poll: hidden Library has no unrelated data refresh
+ -- that could immediately attempt a new status write after the unchanged poll.
+ CB.Hide()
+ -- Two real 500ms polls cross the strict failure deadline even when binary
+ -- frame increments make the first poll land just before that deadline.
+ local escaped=Step(H,120)
+ C.expect(CB.VirtualStats().lastStatusError==message,
+  'unchanged polling cannot erase active status failure without successful host write')
+ CB.Refresh()
+ C.expect(Nexus.Errors.SessionCount()==records+1,
+  'same active failure remains one history episode across unchanged polls',Nexus.Errors.SessionCount()-records)
+ C.guard(escaped==0 and CB.VirtualStats().dataFailures==0 and CB.DiagnosticSnapshot().projectionCurrent,
+  'status episode does not invalidate or escape healthy Library work')
+ label.SetText=setter;CB.Refresh()
+ C.guard(CB.VirtualStats().lastStatusError==nil,'actual successful status write proves recovery')
+ local recoveredRecords=Nexus.Errors.SessionCount()
+ label.SetText=function()error(message,0)end;CB.Refresh()
+ C.guard(Nexus.Errors.SessionCount()==recoveredRecords+1,'recurrence after actual successful write starts one new episode')
+ label.SetText=setter;CB.Refresh()
+ C.guard(#H.actions==0 and #H.sent==0,'status recovery control sends no gameplay or transport action')
 end)
 end
 

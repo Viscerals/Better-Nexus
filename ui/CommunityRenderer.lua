@@ -735,6 +735,34 @@ function Renderer.New(options)
         pump.Retain(err)
         return false
     end
+    function pump.SyncStatus(receiveCount)
+        local now = type(GetTime) == "function" and GetTime() or 0
+        if viewDiagnostic.projectionError and now < pump.failBackoffUntil then
+            return false
+        end
+        -- This renderer label belongs to the view owner, not the independent
+        -- Share form ledger. A failed ticker must still let import work run.
+        local ok, err = pcall(RenderSyncStatus, receiveCount)
+        if not ok then
+            pump.Retain(err)
+            pump.RecordError("Community.SyncStatus", err)
+        end
+        return ok
+    end
+    function pump.Rebind(reason, explicit)
+        local now = type(GetTime) == "function" and GetTime() or 0
+        if not explicit and viewDiagnostic.projectionError
+            and now < pump.failBackoffUntil then return false end
+        local ok, err = pcall(Measure, "community.render", renderBuildWindow, reason)
+        if not ok then
+            pump.Retain(err)
+            -- A user scroll remains immediate and preserves its exact error;
+            -- repeated automatic resize notifications honor the view hold.
+            if explicit then error(err, 0) end
+            pump.RecordError("Community.Resize", err)
+        end
+        return ok
+    end
     function pump.RetainImport(err)
         -- Personal import failure does not invalidate a shared publication.
         -- Keep its evidence until the import finishes, even if All publishes.
@@ -1033,8 +1061,9 @@ do
     local pump = viewDiagnostic.pump
     function pump.RenderStatus(onlyChanged)
         local text = PostStatusText()
-        if onlyChanged and postPopup._shareStatus:GetText() == text then return end
+        if onlyChanged and postPopup._shareStatus:GetText() == text then return false end
         postPopup._shareStatus:SetText(text)
+        return true
     end
     function pump.Status(propagate, explicit, onlyChanged)
         if not (postPopup and postPopup:IsShown() and postPopup._shareStatus) then return true end
@@ -1052,6 +1081,8 @@ do
             end
             return false, "failed"
         end
+        -- A no-write poll says nothing about a failed setter's recovery.
+        if err ~= true then return true end
         virtualStats.lastStatusError = nil
         pump.statusRecordedError = nil
         pump.statusHoldUntil = 0
@@ -1930,7 +1961,7 @@ local function RefreshDetailPanel(buildId, listPending)
         local err, why
         detail, err, why = projection.Detail(buildId, ProjectionContext())
         if not detail then
-            if err then error(err) end
+            if err ~= nil then error(err, 0) end
             if listPending and detailPanel:IsShown()
                 and detailPanel._nexusShownId == buildId then return end
             ShowDetailStatus(listPending and "pending" or why or "unavailable")
@@ -2462,7 +2493,7 @@ local function EnsureFrame()
             local receiveCount = Nexus.Sync and Nexus.Sync.LastSyncNewCount and Nexus.Sync.LastSyncNewCount() or 0
             if receivingNow and syncStatusText and Nexus.Sync
                 and RenderSyncStatus then
-                RenderSyncStatus(receiveCount)
+                pump.SyncStatus(receiveCount)
             end
 
             -- Build/DPS revisions mark the view dirty while Sync is active.
@@ -2531,7 +2562,8 @@ local function EnsureFrame()
                     -- first opens. Keep that cold persisted projection moving
                     -- at the ordinary cadence, but retain an existing
                     -- last-good publication until the burst becomes quiet.
-                    if receivingNow and coldStart then
+                    if receivingNow and coldStart and not (FilterSettings().scope == "mine"
+                        and (importPending or viewDiagnostic.importRetryPending)) then
                         if pump.GuardedRefresh() then pump.Note() end
                     end
                     -- A refresh above may have just failed in this callback.
@@ -3097,7 +3129,7 @@ local function EnsureFrame()
         pcall(function() scrollFrame:SetVerticalScroll(val) end)
         if renderBuildWindow and frame and frame:IsShown()
             and not virtualBinding then
-            Measure("community.render", renderBuildWindow, "scroll")
+            pump.Rebind("scroll", true)
         end
     end
     scrollBar.SetValue = function(_, val) SetScroll(val) end
@@ -3111,7 +3143,7 @@ local function EnsureFrame()
     scrollFrame:SetScript("OnSizeChanged", function()
         if renderBuildWindow and frame and frame:IsShown()
             and not virtualBinding then
-            Measure("community.render", renderBuildWindow, "resize")
+            pump.Rebind("resize", false)
         end
     end)
     frame._virtualListScrollFrame = scrollFrame
@@ -3446,7 +3478,9 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
         viewDiagnostic.projectionCurrent = false
         virtualStats.dataFailures = virtualStats.dataFailures + 1
         virtualStats.lastDataError = viewDiagnostic.pump.ErrorText(projectionError or "Community projection failed")
-        RenderSyncStatus()
+        -- Retain this actual projection failure before any further label
+        -- attempt; a secondary presentation fault must not bypass its hold.
+        viewDiagnostic.pump.Note()
         return false, projectionError
     end
     if projectionSummary and fs.page ~= projectionSummary.page then
@@ -3769,7 +3803,7 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
             virtualStats.active = 0
             virtualStats.first, virtualStats.last = 1, 0
             virtualStats.selectedVisible = false
-            error(err)
+            error(err, 0)
         end
     end
     Measure("community.render", renderBuildWindow, "data")
