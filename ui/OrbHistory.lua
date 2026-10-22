@@ -75,6 +75,9 @@ local RUN_STATES = {
 M.RUN_STATES = RUN_STATES
 
 M.SESSION_NOTE = "History clears on reload or logout."
+-- For an unresolved action restored after a reload: its saved record is kept,
+-- but the steps that led to it were in the cleared session history.
+M.RELOAD_CLEARED_NOTE = "History clears on reload or logout; steps before the reload are not listed."
 
 -- Recorded values bounded for rows, headers and reports, in bytes of the
 -- displayed text. Tooltips and details get the complete value instead.
@@ -357,7 +360,7 @@ function M.Header(view)
         wishlist = display(view.wishlist or "none", WISHLIST_BYTES),
         wishlistFull = display(view.wishlist or "none"),
         status = RUN_STATES[view.state] or tostring(view.state or "unknown"),
-        usage = "Orbs used: " .. spent .. " / " .. limit,
+        usage = "Orbs used: " .. spent .. " / " .. limit .. " approved",
         increased = view.increased == true,
         pending = reserved > 0 and
             (reserved .. " unresolved operation" .. (reserved == 1 and "" or "s")
