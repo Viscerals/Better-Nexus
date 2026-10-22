@@ -1,3 +1,31 @@
+-- Diagnostic evidence through real public report/viewer/export boundaries.
+-- Synthetic offline hosts only; native clipboard/UI behavior remains NOT_RUN.
+-- Staged behavior baselines: fault-bit C against preconsumer5d396f22a532c2622c82796a78abdd9332c86474;
+-- ViewChecks against88478ffb1dbac3d02197d7de28e59eae70c0eec1;
+-- retained-ledger R against82d1a0a9def265667587f8e1394a633497e9ff0a.
+-- Current evidence controls targetd3f9051d81624447b19a6d7757f10b2bc6f49959;
+-- a captured faults-line payload mutation must fail the strict parser/block guard.
+-- Older projection-line literals "phase:idle error:true status_error:false" and
+-- "error:false status_error:true" are superseded by equivalent owner-bit checks.
+-- Both earlier literal layouts remain parseable for their staged comparisons;
+-- current-view checks independently require the separate owner fault group.
+-- The former projection-only negative guard is strengthened to include the
+-- nonempty actual snapshot block. All four original sanitizer inputs remain;
+-- a separate string-Share case gives both negative markers real string values.
+-- Owner grammar: Community view/saved_import/share_status; Leaderboard view only.
+-- A false view bit means no retained owned view-ledger fault, not universal
+-- projection-job health. Unowned Leaderboard pump failures are outside this scope.
+-- Existing import/Share nonboolean-to-false compatibility is retained; view
+-- nonbooleans are unknown. Missing/unreadable snapshots do not prove health.
+-- State content is carried opaquely by NEXUS_DIAGNOSTIC_LOG_5 D/L dictionary
+-- framing/escaping. Its inverse preserves whole CR-normalized lines and trailing
+-- newline, without interpreting token meanings or claiming an external parser API.
+-- Public integration1e8215c81a0e0b999606902401e65fb375cafd0e and contributor
+--1f993d7beda05a3c77cad45ac3e3bb39855e5ec6 have no unpublished error/status_error
+-- tokens. Owner fault groups are additive to those public State-page layouts.
+-- This fixture owns its strict token expectations; it claims no external-parser
+-- compatibility or universal passivity of inherited State-page getters.
+
 local H=dofile('tests/prototype/harness.lua');H.Boot()
 local L,V=Nexus.DiagnosticLogs,Nexus.LogViewer
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
@@ -53,15 +81,31 @@ local function OwnerLine(text,owner,prefix)
   elseif within and line:find(prefix,1,true)==1 then return line end
  end
 end
+local function SnapshotBlock(text)
+ return text:match('PERSISTED VIEW DIAGNOSTICS[^\n]*\n(.-)\n\n') or ''
+end
+local function ParseFaultLine(line,owner)
+ if type(line)~='string'then return end
+ local view,import,status
+ if owner=='community'then
+  view,import,status=line:match('^  faults view=error:(%a+) saved_import=error:(%a+) share_status=error:(%a+)$')
+ else view=line:match('^  faults view=error:(%a+)$')end
+ local known={['true']=true,['false']=true,unknown=true}
+ if not known[view] or (owner=='community' and (not known[import] or not known[status]))then return end
+ return view,import,status
+end
 local function FaultBits(text,importError,statusError)
  local line=OwnerLine(text,'community','  faults ')
  if line then
-  return line:find(' saved_import=error:'..tostring(importError)..' share_status=error:'..tostring(statusError),1,true)~=nil
+  local view,import,status=ParseFaultLine(line,'community')
+  return view~=nil and import==tostring(importError) and status==tostring(statusError)
  end
- -- Matched RED keeps the preceding two-bit report representation. The new
- -- view tests separately require the new owner groups; no source is fabricated.
+ -- Parses the earlier projection-line representation for staged baselines.
+ -- Current-view scenarios independently require the separate owner fault group.
  line=OwnerLine(text,'community','  projection=')
- return line and line:find(' error:'..tostring(importError)..' status_error:'..tostring(statusError),1,true)~=nil
+ return line and line:match('^  projection=current:%S+ pending:%S+ dirty:%S+ import=pending:%S+ phase:%S+ error:'
+  ..tostring(importError)..' status_error:'..tostring(statusError)
+  ..' receiving=%S+ publication_age=%S+ blocked=%S+$')~=nil
 end
 local ViewChecks=dofile('tests/prototype/view_regression_support.lua').Checker('diagnostic view fault')
 
@@ -174,16 +218,25 @@ C.guard(not rendered:find('Synthetic personal import diagnostic fault',1,true),
  'consumer never includes raw import exception payload')
 C.guard(FindCommunityLine('community catalog=0\n  filters scope=mine\nleaderboard catalog=1\n  projection=wrong')==nil,
  'community parser cannot borrow the leaderboard projection line')
-for _,values in ipairs({{true,true},{'truthy import',{private='status payload'}},{1,'true'},{false,false}})do
+for _,values in ipairs({{true,true},{'truthy import',{private='status payload'}},{1,'true'},{false,false},{'truthy import marker','status payload'}})do
  CB.DiagnosticSnapshot=function()
   local d=originalSnapshot();d.savedImportError=values[1];d.shareStatusError=values[2];return d
  end
  local sanitizedText=Nexus.GetDiagnosticPageText('state')
  local sanitized=CommunityLine(sanitizedText)
+ local measured=SnapshotBlock(sanitizedText)
+ C.setup(#measured>0 and measured:find('community catalog=',1,true),
+  'nonboolean payload control measures a nonempty actual Community snapshot block')
+ if values[2]=='status payload'then
+  C.setup(type(values[1])=='string' and values[1]:find('truthy import',1,true)
+   and type(values[2])=='string' and values[2]=='status payload',
+   'both nonboolean payload markers are meaningful at the string boundary')
+ end
  C.expect(FaultBits(sanitizedText,values[1]==true,values[2]==true),
   'only literal true survives both fault-bit sanitizers')
- C.guard(not sanitized:find('truthy import',1,true) and not sanitized:find('status payload',1,true),
-  'nonboolean fault inputs never become diagnostic payload')
+ C.guard(not sanitized:find('truthy import',1,true) and not sanitized:find('status payload',1,true)
+  and not measured:find('truthy import',1,true) and not measured:find('status payload',1,true),
+  'nonboolean fault inputs never become diagnostic payload in the measured owner block')
 end
 CB.DiagnosticSnapshot=originalSnapshot
 -- An actual All view masks import reason while preserving the retained error.
@@ -205,6 +258,68 @@ local maskedText=Nexus.GetDiagnosticPageText('state')
 local maskedLine=CommunityLine(maskedText)
 C.expect(FaultBits(maskedText,true,false) and maskedLine:match(' blocked=projection%-error$'),
  'projection-error report still carries independent import fault')
+C.expect(OwnerLine(maskedText,'community','  faults ')
+ =='  faults view=error:true saved_import=error:true share_status=error:false',
+ 'one actual projection-error report preserves coexistent view/import faults and healthy Share')
+-- Export the captured actual fault state through the unchanged opaque D/L format.
+do
+ local provider=Nexus.GetDiagnosticPageText
+ local captured=maskedText..'\nSynthetic export sentinel %7C|%25\r\n'
+ local stateCalls,otherCalls=0,0
+ Nexus.GetDiagnosticPageText=function(page,...)
+  if page=='state'then stateCalls=stateCalls+1;return captured end
+  otherCalls=otherCalls+1;return provider(page,...)
+ end
+ local exportOK,exported=pcall(function()
+  local co=Nexus.NewAIExportCoroutine()
+  for i=1,2000 do
+   local ok,value=coroutine.resume(co)
+   if not ok then error(value,0)end
+   if coroutine.status(co)=='dead'then return value end
+  end
+  error('Synthetic export did not finish within the bounded resume count',0)
+ end)
+ Nexus.GetDiagnosticPageText=provider
+ C.guard(Nexus.GetDiagnosticPageText==provider,'opaque inverse restores the public page provider before assertions')
+ if C.setup(exportOK and type(exported)=='string'
+  and exported:match('^NEXUS_DIAGNOSTIC_LOG_5\n') and exported:find('\nEND|',1,true),
+  'actual bounded export completes with the unchanged version5 framing')then
+  local dictionary={[0]=''};local refs={};local valid=true;local definitions=0
+  for row in (exported..'\n'):gmatch('([^\n]*)\n')do
+   local id,encoded=row:match('^D|(%d+)|(.*)$')
+   if id then
+    id=tonumber(id)
+    if dictionary[id]~=nil then valid=false end
+    -- One pass: an encoded literal "%7C" becomes "%7C", never another pipe.
+    dictionary[id]=encoded:gsub('%%(%x%x)',function(hex)return string.char(tonumber(hex,16))end)
+    definitions=definitions+1
+   else
+    local page,line,text=row:match('^L|(%d+)|(%d+)|(%d+)$')
+    if page then refs[#refs+1]={tonumber(page),tonumber(line),tonumber(text)}end
+   end
+  end
+  local state={}
+  for _,ref in ipairs(refs)do
+   if dictionary[ref[1]]=='state'then
+    if ref[2]~=#state+1 or dictionary[ref[3]]==nil then valid=false
+    else state[#state+1]=dictionary[ref[3]]end
+   end
+  end
+  C.setup(valid and definitions>0 and #state>0 and stateCalls==1 and otherCalls>0,
+   'actual dictionary references reconstruct ordered State rows and delegate other real pages')
+  local reconstructed=table.concat(state,'\n')
+  C.expect(reconstructed==captured:gsub('\r',''),
+   'opaque State D/L inverse preserves the complete CR-normalized page and its trailing newline')
+  C.expect(OwnerLine(reconstructed,'community','  faults ')
+   ==OwnerLine(maskedText,'community','  faults '),
+   'real coexistent owner fault line survives the unchanged opaque export inverse')
+  C.guard(reconstructed:find('Synthetic export sentinel %7C|%25\n',1,true),
+   'single-pass dictionary decoding preserves literal percent escapes and a pipe')
+  print('OPAQUE_STATE_INVERSE lines='..#state..' state_calls='..stateCalls..' other_page_calls='..otherCalls)
+ end
+ C.guard(#H.actions==0 and #H.sent==0,'opaque inverse sends no gameplay or transport action')
+end
+
 local function Settle()
  for i=1,2000 do
   H.Advance(.01,.01)
@@ -306,10 +421,7 @@ local function Settled(H,owner)
 end
 local function ViewError(text,owner)
  local line=OwnerLine(text,owner,'  faults ')
- return line and line:match(' view=error:(%S+)')
-end
-local function SnapshotBlock(text)
- return text:match('PERSISTED VIEW DIAGNOSTICS[^\n]*\n(.-)\n\n') or ''
+ return (ParseFaultLine(line,owner))
 end
 local function Viewer(H)
  if not C.setup(NexusLogViewer and NexusLogViewer:IsShown(),
@@ -347,7 +459,7 @@ C.scenario('real Library view failure survives hidden viewer and recovers',funct
  local direct=Nexus.GetDiagnosticPageText('state')
  C.expect(ViewError(direct,'community')=='true','direct report exposes the actual retained Library view fault')
  C.expect(OwnerLine(direct,'community','  projection='):match('phase:%S+ receiving='),
-  'existing projection-line phase/receiving adjacency remains intact')
+  'projection line no longer carries import/Share error tokens; they use the owner fault group')
  SlashCmdList.NEXUS('log');H.Advance(.15,.01)
  local hidden=Viewer(H)
  if not C.setup(hidden and CB.DiagnosticSnapshot().blockedReason=='hidden'
@@ -504,15 +616,21 @@ do
   Nexus.Sync.ReceiveTimeLeft=function()return receiving and 1 or 0 end
   local revision=Nexus.Revisions.Get(Nexus.Revisions.DPS_CHANGED)
   Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED)
-  H.Advance(.1,.01)
+  local receivePending
+  for i=1,70 do
+   H.Advance(.01,.01)
+   receivePending=Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())
+   if receivePending and receivePending.due-H.now>.6 then break end
+  end
   local deferred=LB.DiagnosticSnapshot()
   if not R.setup(Nexus.Revisions.Get(Nexus.Revisions.DPS_CHANGED)==revision+1
-   and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())~=nil
+   and receivePending and receivePending.due-H.now>.6
    and Retained(LB,message) and LB.VirtualStats().dataRefreshes==publication
    and deferred.projectionDirty and deferred.syncReceiving,
    'real DPS revision reaches receive-deferred ViewRefresh without recovering the fault')then
    Nexus.Sync.IsReceiving,Nexus.Sync.ReceiveTimeLeft=oldReceiving,oldRemaining;return
   end
+  print(string.format('RECEIVE_DEFERRED leaderboard due_in=%.3f',receivePending.due-H.now))
   R.expect(deferred.projectionError==true,'receive-window dirty notification retains Leaderboard fault')
   R.expect(ReportFault('leaderboard')=='true','public receive-deferred report retains the fault')
   local pumped=P.WorkStats().leaderboardPumps
@@ -560,18 +678,31 @@ do
   Nexus.Sync.ReceiveTimeLeft=function()return receiving and 1 or 0 end
   local revision=Nexus.Revisions.Get(Nexus.Revisions.BUILD_LIBRARY_CHANGED)
   Nexus.Revisions.Advance(Nexus.Revisions.BUILD_LIBRARY_CHANGED)
-  H.Advance(.1,.01)
+  local receivePending
+  for i=1,70 do
+   H.Advance(.01,.01)
+   receivePending=Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())
+   if receivePending and receivePending.due-H.now>.6 then break end
+  end
   if not R.setup(Nexus.Revisions.Get(Nexus.Revisions.BUILD_LIBRARY_CHANGED)==revision+1
-   and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())~=nil
+   and receivePending and receivePending.due-H.now>.6
    and Retained(CB,message) and CB.VirtualStats().dataRefreshes==publication,
    'Community receives real revision deferral without publication or error clearing')then
    label.SetText=setter;Nexus.Sync.IsReceiving,Nexus.Sync.ReceiveTimeLeft=oldReceiving,oldRemaining;return
   end
+  print(string.format('RECEIVE_DEFERRED community due_in=%.3f',receivePending.due-H.now))
   local deferred=CB.DiagnosticSnapshot()
   R.guard(deferred.projectionError==true and ReportFault('community')=='true'
-   and deferred.savedImportError==false and deferred.shareStatusError==false,
+   and deferred.savedImportError==false and deferred.shareStatusError==false
+   and OwnerLine(Nexus.GetDiagnosticPageText('state'),'community','  faults ')
+    =='  faults view=error:true saved_import=error:false share_status=error:false',
    'Community view fault stays distinct from healthy import and Share ledgers')
   label.SetText=setter;receiving=false;CB.Show()
+  local pending=CB.DiagnosticSnapshot()
+  R.setup(pending.projectionPending and Retained(CB,message),
+   'real Community request is pending before retained-fault publication recovery')
+  R.expect(pending.projectionPending and pending.projectionError==true and ReportFault('community')=='true',
+   'Community pending work coexists with its retained view fault in public text')
   local settled=Settled(H,CB)
   Nexus.Sync.IsReceiving,Nexus.Sync.ReceiveTimeLeft=oldReceiving,oldRemaining
   if not R.setup(settled~=nil and CB.VirtualStats().lastDataError==nil
