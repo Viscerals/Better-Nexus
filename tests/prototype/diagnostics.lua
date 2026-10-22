@@ -441,7 +441,7 @@ end
 end
 Nexus.BuildCatalog.BeginSavedMirrorCursor=factory
 Nexus.Sync.IsReceiving=previousReceiving;CB.Show()
-local pendingSettled=C.guard(Settle()~=nil,'restored factory completes the original real pending import')
+local pendingSettled=pendingReady and C.guard(Settle()~=nil,'restored factory completes the original real pending import')
 if pendingReady and pendingFaultReady and pendingSettled then
 C.expect(FaultBits(Nexus.GetDiagnosticPageText('state'),false,false),
  'completed pending import clears current diagnostic fault bit')
