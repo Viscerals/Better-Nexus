@@ -13,9 +13,8 @@ local H=dofile('tests/prototype/harness.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 NexusDB=T.Profile(40,60);T.Load()
 
--- Install the pass-through seam before any event/update heats RunUpdate. A
--- late debug.setupvalue can report the new function while an existing hot
--- call path still skips it. Only the mutable arm changes in scenario 3.
+-- Install the pass-through store seam before initialization events and updates.
+-- Only the mutable preparation arm changes after the lifecycle starts.
 -- The lifecycle's admission batch, through the update's shared upvalues.
 local function upvalue(fn,name)
  for i=1,255 do local n,v=debug.getupvalue(fn,i);if not n then break end;if n==name then return v end end
@@ -134,7 +133,8 @@ print('IDLE_PREPARATION entered='..preparation.entered..' exited='..preparation.
  ..' windowReady='..tostring(Nexus.StartupStatus().syncGateCatalogReady))
 check(preparation.entered==1 and preparation.exited==1,
  'fixture: the armed preparation wrapper entered and exited exactly once')
-check(owned and select(2,debug.getupvalue(runUpdate,storeIndex))==rawStore and preparation.ticket==nil,
+check(owned and select(2,debug.getupvalue(runUpdate,storeIndex))==rawStore and preparation.ticket==nil
+ and debugprofilestop==realClock,
  'fixture: the same store callback was owned, disarmed, and restored')
 check(ticket2.state=='committed','fixture: the write committed inside the preparation window')
 check(Nexus.StartupStatus().syncGateCatalogReady==false,

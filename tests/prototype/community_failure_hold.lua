@@ -5,7 +5,8 @@
 -- regressions against 1f993d7; explicit-query latency and handled-message cases
 -- against 1be520d; failed explicit-request timing and thrown-message cases against
 -- 8e03747. Later SETUPs may rely on earlier retained-error repairs. Existing
--- predicates stay in the file to guard those accepted stages on every replay.
+-- predicates stay in the file except the two replacement-message cases, now
+-- superseded by stricter post-hold timing and truthful cancelled-job checks.
 -- The advancing-clock explicit exception uses 6dd5ceae as its baseline. It
 -- characterizes synthetic timing robustness, not native GetTime clock caching.
 -- Show/direct-refresh, cached-render retry, replacement liveness and frame-clock
@@ -314,6 +315,7 @@ C.scenario('pending-observations-do-not-extend-hold',function()
   if CB.VirtualStats().dataFailures>0 then break end
   Step(H,1)
  end
+ CB.Refresh() -- Explicit request supplies real pending work during the existing hold.
  C.setup(CB.VirtualStats().dataFailures==1 and CB.DiagnosticSnapshot().projectionPending,
   'one production failure has left replacement work pending')
  Nexus.DpsCapture.CommunityEligibilityCursorNext=read
@@ -363,33 +365,6 @@ C.scenario('latest-handled-failure-message',function()
  C.guard(#H.actions==0 and #H.sent==0,'handled failure sends no game or network action')
 end)
 
-C.scenario('replacement-handled-failure-message',function()
- local H,CB=Boot({value=false},true)
- local begin=Nexus.DpsCapture.BeginCommunityEligibilityCursor
- local refuse,refusals=false,0
- Nexus.DpsCapture.CommunityEligibilityCursorNext=function()
-  refuse=true;return false,'Synthetic failed job before replacement'
- end
- Nexus.DpsCapture.BeginCommunityEligibilityCursor=function(...)
-  if refuse then refusals=refusals+1;return nil end
-  return begin(...)
- end
- CB.Show()
- for _=1,200 do
-  if refusals>0 then break end
-  Step(H,1)
- end
- local stats,d=CB.VirtualStats(),CB.DiagnosticSnapshot()
- C.setup(refusals>0 and stats.dataFailures==1,
-  'a failed production job reaches a replacement factory refusal within its first hold')
- print('OBSERVED replacement-handled-failure-message','refusals='..refusals,
-  'message='..tostring(stats.lastDataError))
- C.expect(stats.lastDataError=='DPS eligibility cursor unavailable',
-  'requesting a replacement retains its latest handled failure message',stats.lastDataError)
- C.guard(d.blockedReason=='projection-error' and d.projectionDirty and not d.projectionCurrent,
-  'a refused replacement does not claim publication or clear failure')
- C.guard(#H.actions==0 and #H.sent==0,'replacement refusal sends no game or network action')
-end)
 
 C.scenario('explicit-persistent-handled-failure-hold',function()
  local H,CB=Boot({value=false},true)
@@ -497,51 +472,6 @@ C.scenario('explicit-refresh-throw-retained-and-held',function()
  C.guard(#H.actions==0 and #H.sent==0,'explicit refresh exception sends no game or network action')
 end)
 
-C.scenario('replacement-thrown-failure-message',function()
- local H,CB=Boot({value=false},true)
- local read=Nexus.DpsCapture.CommunityEligibilityCursorNext
- local nextCalls,throws,armed=0,0,false
- local older='Synthetic older pump failure before replacement throw'
- local newer='Synthetic newer replacement refresh throw'
- Nexus.DpsCapture.CommunityEligibilityCursorNext=function()
-  nextCalls=nextCalls+1;armed=true;return false,older
- end
- CB.Show()
- local frame=NexusCommunityBuildsFrame
- local setText=frame._classDropBtn.SetText
- frame._classDropBtn.SetText=function(self,text)
-  if armed then armed=false;throws=throws+1;error(newer,0) end
-  return setText(self,text)
- end
- local escaped=0
- for _=1,200 do
-  if throws>0 then break end
-  escaped=escaped+Step(H,1)
- end
- local stats,d=CB.VirtualStats(),CB.DiagnosticSnapshot()
- C.setup(nextCalls==1 and throws==1 and stats.dataFailures==1,
-  'a real failed production job reaches the one-shot replacement host exception')
- print('OBSERVED replacement-thrown-failure-message','next-calls='..nextCalls,
-  'throws='..throws,'message='..tostring(stats.lastDataError))
- C.expect(stats.lastDataError==newer,
-  'the newer automatic replacement exception replaces the older pump message',stats.lastDataError)
- C.guard(escaped==0 and d.blockedReason=='projection-error'
-  and d.projectionDirty and not d.projectionCurrent,
-  'replacement exception remains contained and leaves a failed current request')
- C.guard(stats.dataFailures==1,'replacement exception preserves the original hold failure count')
- C.guard(#H.actions==0 and #H.sent==0,'replacement exception sends no game or network action')
- C.expect(not d.projectionPending,
-  'thrown automatic replacement does not claim its cancelled job is pending')
- Nexus.DpsCapture.CommunityEligibilityCursorNext=read
- local pumps=Nexus.ViewProjections.WorkStats().communityPumps
- local recovered=Settle(H,CB,200)
- local final=CB.VirtualStats()
- print('OBSERVED replacement-thrown-failure-recovery','frames='..tostring(recovered),
-  'positive-pumps='..(Nexus.ViewProjections.WorkStats().communityPumps-pumps))
- C.expect(recovered~=nil and Nexus.ViewProjections.WorkStats().communityPumps>pumps
-  and final.lastDataError==nil and final.dataFailures==1,
-  'replacement exception resumes actual work and publishes within two seconds of the hold')
-end)
 
 C.scenario('explicit-refresh-throw-clock-advance',function()
  local H,CB=Boot({value=false},true)
@@ -681,7 +611,11 @@ C.scenario('safety-probe-cached-throw-retry',function()
  CB.Show()
  if not C.setup(Settle(H,CB)~=nil and not CB.VirtualStats().refreshDirty,
   'published view is clean before the safety-probe cache failure') then return end
+ Step(H,100)
+ C.setup(Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil and CB.DiagnosticSnapshot().projectionCurrent
+  and not CB.VirtualStats().refreshDirty,'startup view scheduler is drained before arming safety-only observation')
  local frame=NexusCommunityBuildsFrame
+ local callback=frame:GetScript('OnUpdate');local probeFromFrame=false
  local read=Nexus.ViewProjections.BuildsCurrent
  local setText=frame._resultText.SetText
  local reads,throws=0,0
@@ -691,6 +625,7 @@ C.scenario('safety-probe-cached-throw-retry',function()
   reads=reads+1
   local current=read(...)
   if not probe then
+   for i=2,50 do local info=debug.getinfo(i,'f');if not info then break end;if info.func==callback then probeFromFrame=true end end
    probe=true;cacheCurrent=current==true;cleanAtProbe=not CB.VirtualStats().refreshDirty
    return false
   end
@@ -712,6 +647,7 @@ C.scenario('safety-probe-cached-throw-retry',function()
  if not C.setup(probe and cacheCurrent and cleanAtProbe and cleanAtThrow and reads>=2
   and throws==1 and failed.dataFailures==1 and failed.lastDataError==message,
   'real safety probe triggers late host exception after a clean cached list is served') then return end
+ C.guard(probeFromFrame,'currentness failure is observed through the actual registered Library safety callback')
  C.guard(d.blockedReason=='projection-error' and not d.projectionPending,
   'late cache exception records error and no pending projection')
  C.expect(failed.refreshDirty,'retained late cache exception leaves automatic refresh work dirty')
@@ -779,6 +715,7 @@ C.scenario('production-pump-failure-clock-advance',function()
   if CB.VirtualStats().dataFailures>0 then break end
   escaped=escaped+Step(H,1)
  end
+ CB.Refresh() -- Explicit pending request preserves the completion-anchored hold.
  local failed=CB.VirtualStats()
  if not C.setup(failures==1 and failed.dataFailures==1 and failed.lastDataError==message
   and CB.DiagnosticSnapshot().projectionPending,
@@ -2308,6 +2245,7 @@ Nexus.DpsCapture.CommunityEligibilityCursorNext=function(...)
 end
 CB.Show()
 if faulted then assert(C.setup(Until(200,function()return CB.VirtualStats().dataFailures>0 end)~=nil,'production frame pump reaches actual eligibility failure')) end
+if faulted then CB.Refresh() end -- Real explicit request after a cancelled-job failure.
 local before=State();local retained=jobs.builds
 assert(C.setup(type(retained)=='table' and before.pending and not before.current and before.binds==0
  and before.failures==(faulted and 1 or 0) and (not faulted or before.deadline>H.now),
@@ -2397,6 +2335,678 @@ class.SetText=setter
 C.guard(Until(2000,function()return CB.DiagnosticSnapshot().projectionCurrent and CB.VirtualStats().lastDataError==nil end)~=nil,'restored host eventually publishes healthy Library')
 C.guard(#H.actions==0 and #H.sent>0 and #H.sent<=10,'only bounded synthetic manual Sync traffic; no gameplay action')
 print('COLD_RECEIVE',F.Serialize({faulted=faulted,initial=initial,before=before,after=after,final=State(),sameTickCalls=sameTickCalls,throws=throws,calls=calls,syntheticSent=H.sent}))
+end)
+end
+
+-- Automatic replacement is deferred until the first ordinary tick after the hold.
+-- The cancelled job cannot claim pending work; explicit Refresh remains immediate.
+for _,kind in ipairs({'handled','thrown'}) do
+C.scenario('replacement-'..kind..'-posthold-message',function()
+ local H=F.Boot(F.Database(),function(h)h.playerLevel=60;h.perks.serverBuildSlots={}end)
+ local CB,VP=Nexus.CommunityBuilds,Nexus.ViewProjections
+ local function Up(fn,name)for i=1,60 do local k,v=debug.getupvalue(fn,i);if not k then return end;if k==name then return v end end end
+ local renderer=Up(Up(Up(CB.DiagnosticSnapshot,'RendererInstance'),'EnsureCommunityRenderer'),'communityRenderer')
+ local pump=Up(renderer.DiagnosticSnapshot,'viewDiagnostic').pump
+ local read,begin=Nexus.DpsCapture.CommunityEligibilityCursorNext,Nexus.DpsCapture.BeginCommunityEligibilityCursor
+ local firstAt,newAt,armed,reads,requests,newAttempts=nil,nil,false,0,0,0
+ local older='Original cancelled projection failure'
+ local newer=kind=='handled' and 'DPS eligibility cursor unavailable' or 'New replacement label failure'
+ local hostCalls,hostAtFailure,requestsAtFailure,pumpsAtFailure,publicationsAtFailure=0,0,0,0,0
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=function(...)
+  reads=reads+1
+  if not firstAt then
+   H.now=H.now+.037;firstAt=H.now;armed=true
+   hostAtFailure=hostCalls;requestsAtFailure=requests
+   pumpsAtFailure=VP.WorkStats().communityPumps;publicationsAtFailure=VP.WorkStats().publications
+   return false,older
+  end
+  return read(...)
+ end
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=function(...)
+  requests=requests+1
+  if armed and kind=='handled' then
+   armed=false;newAttempts=newAttempts+1;H.now=H.now+.023;newAt=H.now;return nil
+  end
+  return begin(...)
+ end
+ CB.Show();local label=NexusCommunityBuildsFrame._classDropBtn;local setter=label.SetText
+ label.SetText=function(self,...)
+  hostCalls=hostCalls+1
+  if armed and kind=='thrown' then
+   armed=false;newAttempts=newAttempts+1;H.now=H.now+.023;newAt=H.now;error(newer,0)
+  end
+  return setter(self,...)
+ end
+ for _=1,200 do if firstAt then break end;H.Advance(.01,.01)end
+ assert(C.setup(firstAt~=nil and reads==1,'actual production frame pump reaches one cancelled-job failure'))
+ local first=CB.VirtualStats();local firstDeadline=firstAt+.5
+ C.guard(VP.WorkStats().communityPumps==pumpsAtFailure+1,'original failed pump increments its completed pump counter exactly once')
+ C.expect(newAttempts==0 and requests==requestsAtFailure and hostCalls==hostAtFailure,'failed pump performs no inline replacement request or render')
+ C.expect(not CB.DiagnosticSnapshot().projectionPending and CB.DiagnosticSnapshot().projectionDirty,'known cancelled job is dirty without false pending progress')
+ C.expect(first.dataFailures==1 and first.lastDataError==older and math.abs(pump.failBackoffUntil-firstDeadline)<1e-6,'first failure retains its own message/count/completion deadline')
+ while H.now<firstDeadline-.02 do H.Advance(.01,.01)end
+ C.expect(newAttempts==0 and requests==requestsAtFailure and hostCalls==hostAtFailure and VP.WorkStats().communityPumps==pumpsAtFailure+1
+  and VP.WorkStats().publications==publicationsAtFailure,'entire active hold has no replacement render/request/pump/publication')
+ for _=1,50 do if newAttempts>0 then break end;H.Advance(.01,.01)end
+ assert(C.setup(newAttempts==1 and newAt~=nil,'first post-hold attempt reaches real replacement refusal or host throw'))
+ local latest=CB.VirtualStats()
+ C.expect(newAt>=firstDeadline and newAt<=firstDeadline+.2,'replacement occurs on first ordinary post-hold cadence')
+ C.expect(latest.dataFailures==2 and latest.lastDataError==newer,'actual newer handled/thrown failure increments count and owns newest diagnostic')
+ C.expect(math.abs(pump.failBackoffUntil-(newAt+1))<1e-6,'second actual failure anchors its one-second hold at completion')
+ C.guard(not CB.DiagnosticSnapshot().projectionPending and not CB.DiagnosticSnapshot().projectionCurrent,'failed replacement does not invent a pending job or successful publication')
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=read;Nexus.DpsCapture.BeginCommunityEligibilityCursor=begin;label.SetText=setter
+ C.guard(Settle(H,CB,300)~=nil and CB.VirtualStats().lastDataError==nil,'restored dependencies recover automatically after second hold')
+ C.guard(#H.actions==0 and #H.sent==0,'replacement timing sends no gameplay/transport action')
+ print('POSTHOLD_REPLACEMENT',F.Serialize({kind=kind,firstAt=firstAt,newAt=newAt,firstDeadline=firstDeadline,latestFailures=latest.dataFailures,latestError=latest.lastDataError}))
+end)
+end
+
+-- Public diagnostic byte boundaries and protected error formatting.
+for _,route in ipairs({'status','view'}) do
+for _,kind in ipairs({'utf2','utf3','utf4','ascii','unprintable','healthy'}) do
+C.scenario('diagnostic-utf8-'..route..'-'..kind,function()
+-- Isolated public-entry evidence. No canonical source or private state writes.
+local F=dofile('tests/prototype/format5_support.lua')
+local V=dofile('tests/prototype/view_regression_support.lua')
+local H=F.Boot(F.Database(),function(h) h.playerLevel=60;h.perks.serverBuildSlots={} end)
+local CB=Nexus.CommunityBuilds
+local function Step(n) for _=1,n do H.Advance(.01,.01) end end
+CB.Show();Step(200)
+assert(C.setup(CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending,'real public Library startup settled'))
+assert(C.setup(jit.status() and NEXUS_TEST_NO_PROFILE_CLOCK~=true,'default JIT and profiler remain enabled'))
+local prefix="Library display failed for saved build '"..string.rep('Arcane Mage ',20)
+prefix=prefix..string.rep('x',299-#prefix)
+assert(C.setup(#prefix==299,'selected multibyte character starts exactly at byte300'))
+local tail=kind=='utf2' and string.char(195,169) or kind=='utf3' and string.char(231,149,140)
+ or kind=='utf4' and string.char(240,159,148,165) or 'ASCII title suffix'
+local message=prefix..tail.."': label could not be displayed"
+local tostringCalls=0
+local value=kind=='unprintable' and setmetatable({}, {__tostring=function() tostringCalls=tostringCalls+1;error('secondary tostring fault',0) end}) or message
+local healthy=kind=='healthy'
+local target,original,field
+if route=='status' then
+ CB.ShowPostBuild();target=assert(NexusPostPopup)._shareStatus;original=target.SetText;field='lastStatusError'
+elseif route=='view' then
+ target=assert(NexusCommunityBuildsFrame)._classDropBtn;original=target.SetText;field='lastDataError'
+else error('unknown route') end
+local calls,trace=0,nil
+target.SetText=function(self,...)
+ calls=calls+1;trace=debug.traceback('public host seam',2)
+ if not healthy then error(value,0) end
+ return original(self,...)
+end
+local ok,err=pcall(CB.Refresh)
+local stats,diag=CB.VirtualStats(),CB.DiagnosticSnapshot()
+local actual=stats[field]
+assert(C.setup(calls==1,'public facade reached selected real host label exactly once'))
+C.guard(healthy and ok or not healthy and (route=='status' and ok or route=='view' and not ok and err==value),'public containment or exact original rethrow is preserved')
+if healthy then C.expect(actual==nil,'healthy public refresh retains no diagnostic error')
+elseif kind=='unprintable' then
+ C.expect(actual=='<unprintable value>' and tostringCalls>0,'throwing tostring is safely formatted through actual Errors.SafeText')
+else
+ assert(C.setup(Nexus.Identity.ValidUtf8(message) and #message>300,'realistic long input is valid UTF-8 and crosses diagnostic byte bound'))
+ C.guard(type(actual)=='string' and #actual<=300,'public diagnostic remains bounded at300 bytes')
+ C.expect(Nexus.Identity.ValidUtf8(actual),'public diagnostic remains valid UTF-8')
+ C.expect(actual==Nexus.Identity.Utf8Prefix(message,300),'public diagnostic equals complete character prefix at300-byte bound')
+end
+local hex={};if type(actual)=='string' then for i=math.max(1,#actual-7),#actual do hex[#hex+1]=string.format('%02x',actual:byte(i)) end end
+print('UTF8_PUBLIC',F.Serialize({route=route,kind=kind,at=H.now,ok=ok,inputBytes=#message,outputBytes=type(actual)=='string' and #actual or 0,
+ outputValid=type(actual)=='string' and Nexus.Identity.ValidUtf8(actual) or false,expectedBytes=#Nexus.Identity.Utf8Prefix(message,300),tailHex=table.concat(hex,' '),
+ tostringCalls=tostringCalls,dataFailures=stats.dataFailures,statusFailures=stats.statusFailures,shareStatusError=diag.shareStatusError,trace=trace}))
+target.SetText=original;CB.Refresh();Step(100)
+C.guard(CB.DiagnosticSnapshot().projectionCurrent and CB.VirtualStats()[field]==nil,'restored real host recovers through public refresh')
+C.guard(#H.actions==0 and #H.sent==0,'no gameplay or transport actions')
+
+end)
+end
+end
+
+for _,kind in ipairs({'nil','unprintable','changed','healthy'}) do
+C.scenario('latest-error-'..kind,function()
+-- Read-only frozen-source proof of newest-error diagnostics through public Refresh.
+local F=dofile('tests/prototype/format5_support.lua')
+local V=dofile('tests/prototype/view_regression_support.lua')
+local H=F.Boot(F.Database(),function(h)h.playerLevel=60;h.perks.serverBuildSlots={}end)
+local CB=Nexus.CommunityBuilds
+local function Step(n)for _=1,n do H.Advance(.01,.01)end end
+CB.Show();Step(200)
+assert(C.setup(CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending,'real public Library and import settled'))
+assert(C.setup(jit.status() and NEXUS_TEST_NO_PROFILE_CLOCK~=true and Nexus.Errors.SafeText(nil)=='nil','default runtime and actual nil formatter contract'))
+local label=NexusCommunityBuildsFrame._classDropBtn;local setter=label.SetText
+local old='Older real view label failure';local calls,phase,events,tostringCalls=0,1,{},0
+local object=setmetatable({}, {__tostring=function()tostringCalls=tostringCalls+1;error('secondary tostring throw',0)end})
+local changed='Newer real view label failure'
+label.SetText=function(self,...)
+ calls=calls+1;events[#events+1]={at=H.now,phase=phase,stack=debug.traceback('actual public class-label setter',2)}
+ if phase==1 then error(old,0) end
+ if kind=='nil' then error(nil,0) end
+ if kind=='unprintable' then error(object,0) end
+ if kind=='changed' then error(changed,0) end
+ assert(kind=='healthy');return setter(self,...)
+end
+local firstOK,firstErr=pcall(CB.Refresh);local before=CB.VirtualStats()
+assert(C.setup(not firstOK and firstErr==old and calls==1 and before.lastDataError==old and before.dataFailures==1,'first real public throw is retained exactly once'))
+phase=2
+local ok,err=pcall(CB.Refresh);local after=CB.VirtualStats();local diagnostic=CB.DiagnosticSnapshot()
+assert(C.setup(calls==2,'second public explicit refresh reaches same host during retained failure'))
+if kind=='healthy' then
+ C.expect(ok and after.lastDataError==nil and diagnostic.projectionCurrent,'healthy replacement publication clears older error')
+ C.guard(after.dataFailures==before.dataFailures,'healthy replacement is not counted as a new failure')
+else
+ C.guard(after.dataFailures==before.dataFailures+1 and not diagnostic.projectionCurrent,'second actual throw counts a new failed view attempt')
+ if kind=='nil' then
+  C.guard(not ok and err==nil,'public boundary rethrows exact nil value')
+  C.expect(after.lastDataError==Nexus.Errors.SafeText(nil),'new nil throw replaces older retained message with literal nil')
+ elseif kind=='unprintable' then
+  C.guard(not ok and err==object and tostringCalls>0,'throwing tostring preserves original exception object')
+  C.expect(after.lastDataError=='<unprintable value>','unprintable new exception replaces older retained evidence safely')
+ else
+  C.guard(not ok and err==changed,'public boundary preserves changed string exception')
+  C.expect(after.lastDataError==changed,'changed string error replaces older retained evidence')
+ end
+end
+print('NIL_PUBLIC',F.Serialize({kind=kind,firstOK=firstOK,secondOK=ok,secondErrIsNil=err==nil,beforeError=before.lastDataError or false,
+ afterError=after.lastDataError or false,beforeFailures=before.dataFailures,afterFailures=after.dataFailures,calls=calls,events=events,tostringCalls=tostringCalls}))
+label.SetText=setter;CB.Refresh();Step(100)
+C.guard(CB.DiagnosticSnapshot().projectionCurrent and CB.VirtualStats().lastDataError==nil,'restored host recovers through real public refresh')
+C.guard(#H.actions==0 and #H.sent==0,'no gameplay or transport actions')
+
+end)
+end
+
+C.scenario('status-active-error-history',function()
+local F=dofile('tests/prototype/format5_support.lua')
+local V=dofile('tests/prototype/view_regression_support.lua')
+local H=F.Boot(F.Database(),function(h)h.playerLevel=60;h.perks.serverBuildSlots={}end)
+local CB,E=Nexus.CommunityBuilds,Nexus.Errors
+local function Step(n)for _=1,n do H.Advance(.01,.01)end end
+CB.Show();Step(200);CB.ShowPostBuild()
+assert(C.setup(CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending,'real public Library and import settled'))
+local popup=assert(NexusPostPopup);local label=popup._shareStatus;local setter=label.SetText
+local firstMessage='Persistent Share label font failure';local currentMessage=firstMessage
+local calls,events,firstStack=0,{},nil
+setter(label,'Previously displayed Share result')
+label.SetText=function(self,...)
+ calls=calls+1;events[#events+1]={at=H.now,message=currentMessage}
+ firstStack=firstStack or debug.traceback('ordinary popup/Library host fault',2)
+ error(currentMessage,0)
+end
+E.Record('Probe.PreviousRootCause','Earlier independent failure retained before popup fault')
+local beforeCount=E.SessionCount();local started=H.now
+for _=1,18000 do
+ Step(1)
+ if calls>=21 then break end
+end
+local persistentCount=E.SessionCount()-beforeCount;local persistentHistory=E.History()
+local retainedEarlier,repeats=false,0
+for _,entry in ipairs(persistentHistory)do
+ if entry.source=='Probe.PreviousRootCause' then retainedEarlier=true end
+ if entry.source=='Community.ShareStatus' and entry.message==firstMessage then repeats=repeats+1 end
+end
+assert(C.setup(calls>=21 and #events>=21,'ordinary registered frame callbacks repeat the persistent host fault at least21 times'))
+C.guard(CB.VirtualStats().statusFailures==calls,'every actual failed status attempt is counted independently')
+C.guard(CB.VirtualStats().dataFailures==0 and CB.DiagnosticSnapshot().projectionCurrent,'status fault preserves healthy Library current state')
+C.expect(persistentCount==1,'same active unchanged status fault records only its first retained evidence',persistentCount)
+C.expect(retainedEarlier,'persistent status retry does not evict earlier unrelated evidence',#persistentHistory)
+local priorCalls=calls;currentMessage='Changed Share label font failure'
+CB.Refresh();local afterChanged=E.Latest();local changedCount=E.SessionCount()-beforeCount
+C.guard(calls==priorCalls+1 and afterChanged.message==currentMessage,'new error value is retained on explicit real refresh')
+label.SetText=setter;CB.Refresh();local recovered=CB.VirtualStats().lastStatusError==nil
+label.SetText=function(self,...)calls=calls+1;error(firstMessage,0)end
+CB.Refresh();local afterRecovery=E.Latest();local finalCount=E.SessionCount()-beforeCount
+C.guard(recovered and afterRecovery.message==firstMessage and finalCount==changedCount+1,'recovered then recurring failure is a distinct active episode')
+label.SetText=setter;CB.Refresh();Step(100)
+C.guard(CB.VirtualStats().lastStatusError==nil and #H.actions==0 and #H.sent==0,'restored host recovers with no gameplay/transport action')
+local deltas={};for i=2,#events do deltas[#deltas+1]=events[i].at-events[i-1].at end
+print('STATUS_RING',F.Serialize({started=started,elapsedTo21=events[21].at-started,firstAt=events[1].at,lastAt=events[21].at,callsAtPersistent=priorCalls,
+ sessionRecordsAtPersistent=persistentCount,historySize=#persistentHistory,sameMessageEntries=repeats,earlierRetained=retainedEarlier,
+ retryDeltas=deltas,events=events,changedLatestSource=afterChanged.source,recoveredThenRecurringSource=afterRecovery.source,firstStack=firstStack}))
+
+end)
+
+C.scenario('distinct-controller-error-history',function()
+local F=dofile('tests/prototype/format5_support.lua')
+local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+local V=dofile('tests/prototype/view_regression_support.lua')
+local H=F.Boot(F.Database(),function(h)h.playerLevel=60;h.perks.serverBuildSlots={};h.perks.serverActiveSlot=1 end)
+local CB,CAT,E=Nexus.CommunityBuilds,Nexus.BuildCatalog,Nexus.Errors
+local function Step(n)for _=1,n do H.Advance(.01,.01)end end
+local function Until(n,fn)for i=0,n do if fn() then return i end;if i<n then Step(1)end end end
+CB.Show();Step(200)
+assert(C.setup(CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending,'real Library and personal import settled'))
+local label=NexusCommunityBuildsFrame._classDropBtn;local setter=label.SetText
+local message='Same font failure during distinct committed catalog transactions'
+local events={}
+label.SetText=function(self,...)
+ local controller,catalog,lifecycle=false,false,false
+ for i=2,50 do local d=debug.getinfo(i,'S');if not d then break end
+  controller=controller or d.source=='@core/CommunityController.lua'
+  catalog=catalog or d.source=='@core/BuildCatalog.lua'
+  lifecycle=lifecycle or d.source=='@core/MainLifecycle.lua'
+ end
+ if controller and catalog and lifecycle then
+  events[#events+1]={at=H.now,stack=debug.traceback('actual committed controller callback',2)}
+  error(message,0)
+ end
+ return setter(self,...)
+end
+local initialCount=E.SessionCount();local tickets={};local rows={}
+for transaction=1,2 do
+ local title='Distinct diagnostic transaction '..transaction
+ local echoes=L.OrdinaryRows(transaction+1)
+ assert(C.setup(L.Copies(echoes)==79 and Nexus.LoadoutEvidence.PublicOrdinaryCompleteness({echoes=echoes}).complete,'actual saved payload has79 complete ordinary copies'))
+ H.perks.serverBuildSlots[1]={name=title,verified=true,echoes=echoes};H.Notify();Nexus.GameAdapter.Poll()
+ local originalPut=CAT.Put;local ticket,id,puts
+ puts=0
+ CAT.Put=function(record,...)
+  local ok,why,t=originalPut(record,...)
+  if record.importedSavedBuild and record.serverTitle==title then ticket=t;id=record.id;puts=puts+1 end
+  return ok,why,t
+ end
+ local beforeCallbacks=#events;local beforeFailures=CAT.DebugStats().mutationCompletionFailures
+ CB.Hide();CB.Show()
+ assert(C.setup(Until(1000,function()return ticket~=nil end)~=nil and ticket.state=='pending','public reopen import submits an actual pending catalog transaction'))
+ tickets[#tickets+1]=ticket
+ assert(C.setup(Until(2000,function()return #events>beforeCallbacks end)~=nil and ticket.committed,'real lifecycle completion reaches controller host callback'))
+ local caught=E.Latest()
+ C.expect(caught.source=='Community.ControllerRefresh' and caught.message==message,'each distinct contained controller failure retains its evidence')
+ C.guard(E.SessionCount()==initialCount+transaction,'one entry per committed transaction without duplicated callbacks')
+ C.guard(Until(2000,function()return CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending and CB.VirtualStats().lastDataError==nil end)~=nil,'actual healthy publication completes and clears active view failure')
+ C.guard(CAT.Get(id) and puts==1 and CAT.DebugStats().mutationCompletionFailures==beforeFailures,'catalog commits exactly once and completion failure count is unchanged')
+ rows[#rows+1]={transaction=transaction,puts=puts,committed=ticket.committed,id=id,at=H.now,sessionCount=E.SessionCount()-initialCount}
+ CAT.Put=originalPut
+end
+label.SetText=setter
+C.guard(tickets[1]~=tickets[2] and #events==2,'two different real tickets each produce one isolated callback observation')
+C.guard(#H.actions==0 and #H.sent==0 and jit.status() and NEXUS_TEST_NO_PROFILE_CLOCK~=true,'default runtime and no gameplay/transport actions')
+print('CONTROLLER_TRANSACTIONS',F.Serialize({transactions=rows,events=events,history=E.History(),newRecords=E.SessionCount()-initialCount}))
+
+end)
+
+C.scenario('public-refresh-metric-attribution',function()
+-- Evidence-only attribution probe: real TOC/owner paths and public metrics.
+local F=dofile('tests/prototype/format5_support.lua')
+local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+local function check(ok,label)return C.expect(ok,label)end
+local function Require(ok,label)return assert(C.setup(ok,label))end
+local early,bootHarness
+local H=F.Boot(F.Database(),function(h)
+ bootHarness=h;h.playerLevel=60;h.perks.serverBuildSlots={};h.perks.serverActiveSlot=1
+end,function()
+ local state=Nexus.StartupStatus().state
+ local a,b=Nexus.CommunityBuilds.RefreshAutomatic()
+ local c,d=Nexus.CommunityBuilds.Refresh()
+ local frameAbsent=true
+ for _,frame in ipairs(bootHarness.frames)do if frame:GetName()=='NexusCommunityBuildsFrame' then frameAbsent=false end end
+ early={state=state,automatic=a,automaticWhy=b,explicit=c,explicitWhy=d,
+  frameAbsent=frameAbsent}
+end)
+local CB,A,CAT,P=Nexus.CommunityBuilds,Nexus.GameAdapter,Nexus.BuildCatalog,Nexus.Performance
+Require(Nexus.StartupStatus().state=='ready','SETUP real TOC startup ready')
+Require(early.state~='ready' and early.automatic==false and early.automaticWhy=='pending'
+ and early.explicit==false and early.explicitWhy=='pending' and early.frameAbsent,
+ 'SETUP public explicit/automatic gates reject actual startup without Library frame')
+print('STARTUP publicGates=true frameAbsent=true')
+local function Step(n)for i=1,n do H.Advance(.01,.01)end end
+local function Until(n,fn)
+ for i=0,n do if fn() then return i end;if i<n then Step(1)end end
+ error('SETUP bounded condition not reached',0)
+end
+CB.Show();Step(100)
+Until(2000,function()
+ return not CB.VirtualStats().savedImport.pending and CB.DiagnosticSnapshot().projectionCurrent
+  and CAT.RootState().candidate~=true and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil
+end)
+local frame=NexusCommunityBuildsFrame
+Require(frame and frame:IsShown() and frame._classDropBtn,'SETUP actual shown Library host control')
+local originalText=frame._classDropBtn.SetText
+local calls,controllerCalls,activeTag=0,0,'none'
+local function IsCompletion()
+ local controller,catalog,lifecycle=false,false,false
+ for i=2,45 do
+  local info=debug.getinfo(i,'S');if not info then break end
+  controller=controller or info.source=='@core/CommunityController.lua'
+  catalog=catalog or info.source=='@core/BuildCatalog.lua'
+  lifecycle=lifecycle or info.source=='@core/MainLifecycle.lua'
+ end
+ return controller and catalog and lifecycle
+end
+frame._classDropBtn.SetText=function(...)
+ calls=calls+1
+ if IsCompletion() then controllerCalls=controllerCalls+1 end
+ return originalText(...)
+end
+local clock=0
+Require(P.SetClock(function()clock=clock+2;return clock end),'SETUP supported metrics clock')
+P.SetEnabled(true)
+-- Only Performance's supported injected clock is deterministic. The game and
+-- scheduler clocks and debugprofilestop remain the ordinary harness versions.
+local function MetricReset(tag)
+ activeTag=tag;calls,controllerCalls=0,0
+ Require(P.Reset('community.refresh'))
+end
+local function Observe(tag)
+ local stats=P.Stats('community.refresh')
+ local crumbs=0
+ for _,op in ipairs(P.RecentOperations(H.now-1,H.now,H.now))do
+  if op.name=='community.refresh' then crumbs=crumbs+1 end
+ end
+ print('METRIC tag='..tag..' count='..stats.count..' hostCalls='..calls
+  ..' controllerCalls='..controllerCalls..' breadcrumbs='..crumbs)
+ return stats.count,crumbs
+end
+
+MetricReset('explicit')
+CB.Refresh()
+local count,crumbs=Observe('explicit')
+Require(calls==1,'SETUP explicit refresh reaches real host once')
+check(count==1 and crumbs==1,'existing explicit Refresh records exactly one aggregate and breadcrumb')
+
+MetricReset('automatic')
+CB.RefreshAutomatic()
+count,crumbs=Observe('automatic')
+Require(calls==1,'SETUP automatic refresh reaches real host once')
+check(count==1,'automatic refresh retains existing community.refresh attribution')
+check(crumbs==1,'automatic refresh retains community.refresh breadcrumb')
+
+-- Measure records completed callbacks only; exceptions preserve exact values.
+MetricReset('explicit-throw')
+frame._classDropBtn.SetText=function()error('Metric explicit host fault',0)end
+local explicitOK,explicitError=pcall(CB.Refresh)
+local explicitCount,explicitCrumbs=Observe('explicit-throw')
+C.guard(not explicitOK and explicitError=='Metric explicit host fault' and explicitCount==0 and explicitCrumbs==0,
+ 'existing explicit Measure path preserves throw and records no completed sample')
+frame._classDropBtn.SetText=function(...)return originalText(...)end
+CB.Refresh()
+MetricReset('automatic-throw')
+frame._classDropBtn.SetText=function()error('Metric automatic host fault',0)end
+local thrown,why=pcall(CB.RefreshAutomatic)
+C.guard(not thrown and why=='Metric automatic host fault','automatic measurement preserves exact thrown value')
+count,crumbs=Observe('automatic-throw')
+C.guard(count==explicitCount and crumbs==explicitCrumbs,'automatic throw matches existing explicit zero-completed-sample convention')
+frame._classDropBtn.SetText=function(...)
+ calls=calls+1;if IsCompletion() then controllerCalls=controllerCalls+1 end
+ return originalText(...)
+end
+CB.Refresh()
+MetricReset('scheduled')
+local views=P.Stats('views.refresh').count
+Require(Nexus.ViewRefresh.Request(),'SETUP actual scheduler request accepted')
+local scheduledFrames=Until(200,function()return P.Stats('views.refresh').count>views end)
+count,crumbs=Observe('scheduled')
+Require(calls>0 and scheduledFrames>0,'SETUP scheduled view refresh reached actual Library host')
+print('ENCLOSING tag=scheduled views='..(P.Stats('views.refresh').count-views))
+check(count>0,'scheduled ViewRefresh retains community.refresh attribution')
+
+-- Submit a real complete saved mirror and observe its catalog callback; no
+-- callback replacement, private state injection, or manual ticket completion.
+local rows=L.OrdinaryRows(2)
+Require(L.Copies(rows)==79,'SETUP real complete nonempty ordinary rows')
+local title='Independent metric completion'
+H.perks.serverBuildSlots[1]={name=title,verified=true,echoes=H.Clone(rows)}
+H.Notify();A.Poll()
+local realPut=CAT.Put
+local ticket,id,putCalls
+putCalls=0
+CAT.Put=function(record,...)
+ local ok,why,t=realPut(record,...)
+ if record and record.importedSavedBuild and record.serverTitle==title then
+  putCalls=putCalls+1;ticket,id=t,record.id
+ end
+ return ok,why,t
+end
+CB.Hide();CB.Show()
+Until(1000,function()return ticket~=nil end)
+CAT.Put=realPut
+Require(ticket.state=='pending' and type(ticket.completionCallback)=='function' and putCalls==1,
+ 'SETUP actual import submits one pending ticket retaining its real callback')
+MetricReset('controller')
+local lifecycle=P.Stats('lifecycle.update').count
+local catalog=P.Stats('lifecycle.phase.catalog').count
+local completionFrames=Until(2000,function()return ticket.state~='pending' end)
+count,crumbs=Observe('controller')
+local record=CAT.Get(id)
+Require(ticket.state=='committed' and ticket.completionCallback==nil
+ and record and record.serverTitle==title and L.Copies(record.echoes)==79
+ and controllerCalls==1 and completionFrames>0,'SETUP real callback rendered once and committed nonempty ticket')
+Require(not CB.VirtualStats().savedImport.pending,'SETUP original callback finished real import')
+print('ENCLOSING tag=controller lifecycle='..(P.Stats('lifecycle.update').count-lifecycle)
+ ..' catalog='..(P.Stats('lifecycle.phase.catalog').count-catalog)
+ ..' committed=true importComplete=true')
+check(count>0,'controller catalog completion retains community.refresh attribution')
+
+frame._classDropBtn.SetText=originalText
+Require(P.SetClock(nil),'SETUP restore default metric clock')
+print('RESTORED host='..tostring(frame._classDropBtn.SetText==originalText)
+ ..' catalog='..tostring(CAT.Put==realPut)..' metricsClock=true')
+
+end)
+
+-- Evidence-only real-TOC probe. Never assigns renderer/job flags or replaces
+-- RenderRefresh, List, RequestBuilds, PumpBuilds, or revision/scheduler behavior.
+local F=dofile('tests/prototype/format5_support.lua')
+local V=dofile('tests/prototype/view_regression_support.lua')
+local function Up(fn,name)
+ for i=1,60 do local k,v=debug.getupvalue(fn,i);if not k then return end;if k==name then return v end end
+end
+for _,kind in ipairs({'current','dps','build'}) do
+C.scenario('pending-revision-'..kind,function()
+ local H=F.Boot(F.Database(),function(h)h.playerLevel=60;h.perks.serverBuildSlots={}end)
+ local CB,VP,R,P=Nexus.CommunityBuilds,Nexus.ViewProjections,Nexus.Revisions,Nexus.Performance
+ local escaped=0
+ local function Step(n)
+  for _=1,n do local ok,err=pcall(H.Advance,.01,.01);if not ok then escaped=escaped+1;print('FRAME_ERROR '..tostring(err))end end
+ end
+ local function Until(n,fn)
+  for i=0,n do if fn()then return i end;if i<n then Step(1)end end
+ end
+ local renderer=Up(Up(Up(CB.DiagnosticSnapshot,'RendererInstance'),'EnsureCommunityRenderer'),'communityRenderer')
+ assert(C.setup(type(renderer)=='table','actual startup renderer available for read-only observation'))
+ local pump=Up(renderer.DiagnosticSnapshot,'viewDiagnostic').pump
+ local jobs=Up(VP.RequestBuilds,'jobs')
+ assert(C.setup(type(jobs)=='table','actual production job table available read-only'))
+ local function State()
+  local d,s,w=CB.DiagnosticSnapshot(),CB.VirtualStats(),VP.WorkStats()
+  return {at=H.now,current=d.projectionCurrent,pending=d.projectionPending,dirty=d.projectionDirty,
+   reason=d.blockedReason,error=s.lastDataError or false,failures=s.dataFailures,binds=s.dataBinds,
+   pumps=w.communityPumps,publications=w.publications,cancellations=w.cancellations,
+   sourceRows=w.sourceRows,joins=w.joins,copies=w.copies,deadline=pump.failBackoffUntil,
+   job=jobs.builds~=nil,jobKey=jobs.builds and jobs.builds.key or false,
+   jobPhase=jobs.builds and jobs.builds.phase or false,importPending=s.savedImport.pending,
+   dpsRevision=R.Get(R.DPS_CHANGED),buildRevision=R.Get(R.BUILD_LIBRARY_CHANGED),
+   viewRefreshes=P.Stats('views.refresh').count}
+ end
+ Step(100);P.SetEnabled(true)
+ assert(C.setup(Nexus.StartupStatus().state=='ready' and not Nexus.Sync.IsReceiving()
+  and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil,'ready nonreceiving startup scheduler drained'))
+ local read=Nexus.DpsCapture.CommunityEligibilityCursorNext
+ local seamCalls,failedAt,faultTrace=0,nil,nil
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=function(...)
+  seamCalls=seamCalls+1
+  if seamCalls==1 then failedAt=H.now;faultTrace=debug.traceback('real production eligibility failure',2);return false,'Independent one-shot cursor failure' end
+  return read(...)
+ end
+ CB.Show()
+ assert(C.setup(Until(200,function()return CB.VirtualStats().dataFailures>0 end)~=nil,'actual frame pump reaches handled dependency failure'))
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=read
+ -- Explicit Refresh is allowed to request immediately after a cancelled job.
+ local explicit,why=CB.Refresh()
+ assert(C.setup(explicit==false and why=='pending','public explicit refresh supplies genuine pending work during hold'))
+ local before=State();local retained=jobs.builds
+ assert(C.setup(seamCalls==1 and type(retained)=='table' and before.pending and not before.current
+  and before.failures==1 and before.reason=='projection-error' and before.deadline>H.now,
+  'one real handled failure leaves real replacement job pending inside first hold'))
+ local event=kind=='dps' and R.DPS_CHANGED or kind=='build' and R.BUILD_LIBRARY_CHANGED or nil
+ local scheduledDue=false
+ if event then
+  local old=R.Get(event)
+  assert(C.setup(R.Advance(event,{scope='all',reason='independent stale pending repro'})==old+1,'public revision token advances once'))
+  local pending=Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())
+  scheduledDue=pending and pending.due or false
+  assert(C.setup(scheduledDue and scheduledDue<before.deadline,'real coalesced revision refresh is due within retained hold'))
+ end
+ Step(12)
+ local held=State()
+ C.guard(held.at<before.deadline and held.deadline==before.deadline and held.pumps==before.pumps,
+  'first 120ms preserves failure deadline and performs no held projection work')
+ C.guard(jobs.builds==retained,'held observation does not mutate the actual production job')
+ if event then
+  C.expect(not held.pending and held.dirty and not held.current,'changed revision invalidates only stale pending truth during hold')
+  C.guard(held.failures==before.failures and held.error==before.error,'revision invalidation preserves active failure evidence')
+ else C.guard(held.pending,'unchanged pending request retains truthful pending state') end
+ if event then
+  assert(C.setup(held.viewRefreshes==before.viewRefreshes+1
+   and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil,'real scheduler refresh executes once and drains during hold'))
+ end
+ local firstWork,firstMissing,firstSame
+ while H.now<before.deadline+.2-.00000001 do
+  Step(1)
+  if not firstWork and VP.WorkStats().communityPumps>before.pumps then firstWork=State();firstSame=jobs.builds==retained end
+  if not firstMissing and not jobs.builds and not CB.DiagnosticSnapshot().projectionCurrent then firstMissing=State()end
+ end
+ local due=State()
+ if event then
+  C.expect(firstWork~=nil,'changed revision resumes positive projection work within hold plus 200ms',F.Serialize(due))
+  C.expect(not due.pending or due.job,'public pending diagnostic corresponds to an actual live production job',F.Serialize(due))
+ else
+  C.guard(firstWork~=nil and firstSame,'unchanged revision advances the same retained production job within hold plus 200ms',F.Serialize(firstWork))
+ end
+ C.guard(not firstWork or firstWork.at+.00000001>=before.deadline,'ordinary work never releases the original failure hold early')
+ local finishFrames=Until(2000,function()
+  if not firstWork and VP.WorkStats().communityPumps>before.pumps then firstWork=State();firstSame=jobs.builds==retained end
+  return CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending
+ end)
+ local final=State()
+ C.guard(finishFrames~=nil and final.current and not final.pending and final.error==false,'bounded safety path eventually publishes after restored dependency')
+ C.guard(final.failures==1 and escaped==0,'restoration creates no new failure or escaping frame')
+ C.guard(#H.actions==0 and #H.sent==0,'no synthetic gameplay or transport action')
+ print('OBSERVATION '..F.Serialize({kind=kind,failedAt=failedAt,faultTrace=faultTrace,
+  scheduledDue=scheduledDue,before=before,held=held,due=due,firstMissing=firstMissing or false,
+  firstWork=firstWork or false,firstWorkSameJob=firstSame or false,final=final,seamCalls=seamCalls,
+  jitEnabled=jit.status(),defaultProfiler=type(debugprofilestop)=='function'}))
+end)
+end
+
+-- Independent F3 probe. All production functions execute except one public
+-- cursor acquisition which refuses with nil in the fault arm. A pass-through
+-- currentness observer advances the real revision at the safety-read boundary.
+-- Its real cursor acquisition advances harness time37ms in both arms only; clocks/JIT are not replaced.
+local F=dofile('tests/prototype/format5_support.lua')
+local function Check(kind,ok,label)
+ if kind=='SETUP' then return C.setup(ok,label) end
+ if kind=='GUARD' then return C.guard(ok,label) end
+ return C.expect(ok,label)
+end
+local function Up(fn,name)
+ assert(type(fn)=='function','upvalue owner '..name)
+ for i=1,60 do local k,v=debug.getupvalue(fn,i);if not k then return end;if k==name then return v end end
+end
+for _,faulted in ipairs({false,true}) do
+C.scenario(faulted and 'safety-refusal-anchor' or 'safety-healthy-anchor',function()
+ local H=F.Boot(F.Database(),function(h)
+  h.playerLevel=60;h.perks.serverBuildSlots={};h.perks.serverActiveSlot=1
+ end)
+ local CB,VP=Nexus.CommunityBuilds,Nexus.ViewProjections
+ local renderer=Up(Up(Up(CB.DiagnosticSnapshot,'RendererInstance'),'EnsureCommunityRenderer'),'communityRenderer')
+ local d=Up(renderer.DiagnosticSnapshot,'viewDiagnostic');local pump=d.pump
+ local jobs=Up(VP.RequestBuilds,'jobs')
+ local function State()
+  local s,ds=CB.VirtualStats(),CB.DiagnosticSnapshot()
+  return {at=GetTime(),current=ds.projectionCurrent,pending=ds.projectionPending,
+   dirty=ds.projectionDirty,reason=ds.blockedReason,failures=s.dataFailures,
+   error=s.lastDataError or false,deadline=pump.failBackoffUntil,
+   noted=pump.failuresNoted or 0,job=jobs.builds~=nil,
+   pumps=VP.WorkStats().communityPumps,publications=VP.WorkStats().publications,
+   binds=s.dataBinds,importPending=s.savedImport.pending}
+ end
+ local escaped=0
+ local function Step(delta)
+  local ok,err=pcall(H.Advance,delta or .01,delta or .01)
+  if not ok then escaped=escaped+1;print('ESCAPE',err) end
+ end
+ local function Until(limit,predicate)
+  for i=0,limit do if predicate() then return i end;if i<limit then Step() end end
+ end
+ print('ARM',faulted and 'fault' or 'healthy')
+ assert(Check('SETUP',Nexus.StartupStatus().state=='ready','real TOC startup ready'))
+ CB.Show();for i=1,100 do Step() end
+ assert(Check('SETUP',Until(2000,function()
+  return CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending
+   and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil and not Nexus.Sync.IsReceiving()
+ end)~=nil,'warm current view with scheduler/import/receive settled'))
+ local before=State()
+ assert(Check('SETUP',before.failures==0 and not before.job and not before.dirty,
+  'no initial failure, job or dirty projection'))
+ local update=NexusCommunityBuildsFrame:GetScript('OnUpdate')
+ local function InUpdate()
+  for i=2,50 do local d=debug.getinfo(i,'f');if not d then break end;if d.func==update then return true end end
+  return false
+ end
+ local nativeCurrent=VP.BuildsCurrent
+ local nativeBegin=Nexus.DpsCapture.BeginCommunityEligibilityCursor
+ local armed,triggered=false,false
+ local safetyTrace,refusalTrace,revisionBefore,revisionAfter,returnedCurrent
+ local acquired,refusals=0,0
+ local cursorEnteredAt,cursorCompletedAt
+ VP.BuildsCurrent=function(...)
+  local trace=debug.traceback('currentness boundary',2)
+  if armed and not triggered and InUpdate() then
+   triggered=true;safetyTrace=trace
+   revisionBefore=Nexus.Revisions.Get(Nexus.Revisions.DPS_CHANGED)
+   revisionAfter=Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED,{source='independent F3 boundary'})
+   returnedCurrent=nativeCurrent(...)
+   return returnedCurrent
+  end
+  return nativeCurrent(...)
+ end
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=function(...)
+  acquired=acquired+1
+  if triggered and acquired==1 then
+   cursorEnteredAt=GetTime();H.now=H.now+.037;cursorCompletedAt=GetTime()
+   refusalTrace=debug.traceback('actual cursor acquisition',2)
+   if faulted then refusals=refusals+1;return nil end
+  end
+  return nativeBegin(...)
+ end
+ armed=true
+ assert(Check('SETUP',Until(1000,function()return triggered end)~=nil,'actual eight-second safety currentness read reached'))
+ local immediate=State()
+ Check('GUARD',revisionAfter==revisionBefore+1 and returnedCurrent==false,
+  'real public DPS revision makes delegated currentness false')
+ Check('GUARD',acquired==1 and refusalTrace and triggered and cursorEnteredAt-before.at>=6.9,
+  'real safety RenderRefresh reaches real RequestBuilds acquisition once')
+ Check('GUARD',cursorCompletedAt and math.abs(cursorCompletedAt-cursorEnteredAt-.037)<1e-6,
+  'synthetic acquisition advances clock by 37ms in both arms')
+ if faulted then
+  Check('GUARD',refusals==1 and immediate.failures==1 and immediate.error=='DPS eligibility cursor unavailable'
+   and not immediate.pending and not immediate.job and immediate.reason=='projection-error',
+   'handled nil acquisition becomes one truthful projection failure, no job or pending flag')
+  Check('EXPECT',math.abs(immediate.deadline-(cursorCompletedAt+.5))<1e-6,
+   'handled safety failure arms first 500ms hold before the frame returns')
+ else
+  Check('GUARD',refusals==0 and immediate.failures==0 and immediate.pending and immediate.job,
+   'healthy identical revision creates a real pending job without failure')
+  Check('EXPECT',immediate.deadline==0,'healthy pending work does not acquire failure hold')
+ end
+ Step(.02)
+ local nextFrame=State()
+ if faulted then
+  Check('GUARD',nextFrame.failures==1 and nextFrame.noted==1,
+   'next frame observes the same single retained failure')
+  Check('EXPECT',math.abs(nextFrame.deadline-(cursorCompletedAt+.5))<1e-6,
+   'later observation preserves the original failure completion deadline')
+ else
+  Check('EXPECT',nextFrame.deadline==0 and nextFrame.failures==0,'healthy next frame remains free of failure hold')
+ end
+ VP.BuildsCurrent=nativeCurrent;Nexus.DpsCapture.BeginCommunityEligibilityCursor=nativeBegin;armed=false
+ local recovered=Until(2000,function()return CB.DiagnosticSnapshot().projectionCurrent and CB.VirtualStats().lastDataError==nil end)
+ Check('GUARD',recovered~=nil,'restored public dependencies eventually publish a healthy current view')
+ Check('GUARD',escaped==0 and #H.actions==0 and #H.sent==0,'no frame escape or synthetic gameplay/network operation')
+ print('OBSERVED',F.Serialize({faulted=faulted,before=before,immediate=immediate,nextFrame=nextFrame,
+  final=State(),cursorEnteredAt=cursorEnteredAt,cursorCompletedAt=cursorCompletedAt,
+  revisionBefore=revisionBefore,revisionAfter=revisionAfter,returnedCurrent=returnedCurrent,
+  safetyTrace=safetyTrace,refusalTrace=refusalTrace,acquired=acquired,refusals=refusals,
+  recoveredFrames=recovered or false,escaped=escaped}))
 end)
 end
 

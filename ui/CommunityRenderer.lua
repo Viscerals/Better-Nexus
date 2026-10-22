@@ -645,8 +645,12 @@ function Renderer.New(options)
         local errors = Nexus and Nexus.Errors
         local format = errors and errors.SafeText or tostring
         local ok, text = pcall(format, err)
-        return (ok and type(text) == "string" and text
-            or "<unprintable error>"):sub(1, 300)
+        text = ok and type(text) == "string" and text or "<unprintable error>"
+        local identity = Nexus and Nexus.Identity
+        if identity and type(identity.Utf8Prefix) == "function" then
+            return identity.Utf8Prefix(text, 300)
+        end
+        return text:sub(1, 300)
     end
     function pump.RecordError(source, err)
         local errors = Nexus and Nexus.Errors
@@ -678,6 +682,23 @@ function Renderer.New(options)
             pump.failBackoffUntil = 0
         end
     end
+    function pump.Revisions()
+        local revisions = Nexus and Nexus.Revisions
+        if not (revisions and type(revisions.Get) == "function") then return 0, 0 end
+        return revisions.Get("BUILD_LIBRARY_CHANGED") or 0,
+            revisions.Get("DPS_CHANGED") or 0
+    end
+    function pump.InvalidateStalePending()
+        if not viewDiagnostic.projectionPending then return end
+        local build, dps = pump.Revisions()
+        if build ~= pump.pendingBuildRevision or dps ~= pump.pendingDpsRevision then
+            -- Only pending truth is invalidated. The failure still owns its
+            -- deadline; the next permitted tick requests the current revision.
+            viewDiagnostic.projectionPending = false
+            viewDiagnostic.projectionCurrent = false
+            refreshDirty = true
+        end
+    end
     function pump.RefreshContext()
         -- A new explicit request gets its own chance to run. Keep the last
         -- failure evidence until that request successfully publishes.
@@ -705,9 +726,7 @@ function Renderer.New(options)
         viewDiagnostic.projectionCurrent = false
         virtualStats.dataFailures =
             (tonumber(virtualStats.dataFailures) or 0) + 1
-        if err ~= nil then
-            virtualStats.lastDataError = pump.ErrorText(err)
-        end
+        virtualStats.lastDataError = pump.ErrorText(err)
         pump.Note()
     end
     function pump.GuardedRefresh()
@@ -1025,10 +1044,16 @@ do
         if not ok then
             pump.RetainStatus(err)
             if propagate then error(err, 0) end
-            pump.RecordError("Community.ShareStatus", err)
+            -- Repeated retries of one active status error must not evict
+            -- unrelated history. Counters and the retry deadline still advance.
+            if pump.statusRecordedError ~= virtualStats.lastStatusError then
+                pump.RecordError("Community.ShareStatus", err)
+                pump.statusRecordedError = virtualStats.lastStatusError
+            end
             return false, "failed"
         end
         virtualStats.lastStatusError = nil
+        pump.statusRecordedError = nil
         pump.statusHoldUntil = 0
         return true
     end
@@ -2417,6 +2442,7 @@ local function EnsureFrame()
             and Nexus.Sync.IsReceiving() or false
         local now = type(GetTime) == "function" and GetTime() or 0
         pump.now = now
+        pump.InvalidateStalePending()
         if viewDiagnostic.projectionError and (tonumber(virtualStats.dataFailures) or 0)
             > (pump.failuresNoted or 0) then pump.Note() end
         retryTicker = retryTicker + elapsed
@@ -2520,34 +2546,10 @@ local function EnsureFrame()
                             viewDiagnostic.projectionPending = false
                             if pump.GuardedRefresh() then pump.Note() end
                         elseif pumpError then
-                            -- PumpBuilds cancels a failed job before returning its error.
+                            -- PumpBuilds cancelled this failed job. Retain the
+                            -- failure now; ordinary replacement waits for its hold.
                             viewDiagnostic.projectionPending = false
-                            -- A replacement request is not proof of recovery.
-                            -- Preserve the failure hold unless it publishes.
-                            viewDiagnostic.projectionError = true
-                            viewDiagnostic.projectionCurrent = false
-                            virtualStats.dataFailures =
-                                (tonumber(virtualStats.dataFailures) or 0) + 1
-                            virtualStats.lastDataError = pump.ErrorText(pumpError)
-                            pump.Note()
-                            local heldUntil = pump.failBackoffUntil
-                            local heldFailures = virtualStats.dataFailures
-                            local refreshOk, refreshErr = pcall(M.RenderRefresh)
-                            if not refreshOk then
-                                -- Keep the original failure's count/deadline and
-                                -- any real replacement requested before the display fault.
-                                refreshDirty = true
-                                virtualStats.lastDataError = pump.ErrorText(
-                                    refreshErr or "Community refresh failed")
-                            end
-                            if viewDiagnostic.projectionCurrent == true then
-                                pump.failBackoffUntil = 0
-                            else
-                                pump.failBackoffUntil = heldUntil
-                                virtualStats.dataFailures = heldFailures
-                                viewDiagnostic.projectionError = true
-                                viewDiagnostic.projectionCurrent = false
-                            end
+                            pump.Retain(pumpError)
                         end
                     end
                 end
@@ -2592,7 +2594,8 @@ local function EnsureFrame()
                 virtualStats.periodicSkips = virtualStats.periodicSkips + 1
             elseif not receiving and (refreshDirty or current ~= true) then
                 local refreshOk, refreshErr = pcall(M.RenderRefresh)
-                if not refreshOk then pump.Retain(refreshErr) end
+                if refreshOk then pump.Note()
+                else pump.Retain(refreshErr) end
             else
                 virtualStats.periodicSkips = virtualStats.periodicSkips + 1
             end
@@ -3323,6 +3326,7 @@ end
 ------------------------------------------------------------------------
 
 function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
+    viewDiagnostic.pump.InvalidateStalePending()
     -- Status has its own failure owner. Automatic label failure cannot block
     -- independent Library work, including before/without main frame creation.
     if not statusAlreadyRefreshed then viewDiagnostic.pump.Status(false, false) end
@@ -3410,11 +3414,16 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
     -- Build browser contains builds only. DPS rankings are rendered in the
     -- dedicated Leaderboard window.
     local boardRows = nil
+    local pendingBuildRevision, pendingDpsRevision = viewDiagnostic.pump.Revisions()
     local builds, projectionSummary, projectionError =
         Measure("community.projection", SortedBuilds)
     -- Record the real request result before any host label can throw.
     viewDiagnostic.projectionPending = type(builds) ~= "table"
         and projectionError == "pending"
+    if viewDiagnostic.projectionPending then
+        viewDiagnostic.pump.pendingBuildRevision = pendingBuildRevision
+        viewDiagnostic.pump.pendingDpsRevision = pendingDpsRevision
+    end
     if type(builds) ~= "table" then
         if projectionError == "pending" then
             refreshDirty = true

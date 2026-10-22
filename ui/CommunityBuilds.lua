@@ -144,7 +144,7 @@ local function EnsureCommunityController()
         refresh=function()
             -- A view failure must not interrupt a controller completion.
             if communityRenderer and type(communityRenderer.RefreshFromController) == "function" then
-                communityRenderer.RefreshFromController()
+                Measure("community.refresh", communityRenderer.RefreshFromController)
             elseif type(M.Refresh) == "function" then
                 M.Refresh()
             end
@@ -342,7 +342,7 @@ end
 
 function M.RefreshAutomatic()
     if StartupStatus().state~="ready" then return false,"pending" end
-    return RendererInstance().RefreshAutomatic()
+    return Measure("community.refresh", RendererInstance().RefreshAutomatic)
 end
 
 function M.ShowPostBuild()
