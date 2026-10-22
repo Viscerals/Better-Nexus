@@ -116,13 +116,29 @@ end
 
 -- Typed counts: done is only a confirmed target-state observation.
 -- continuing is in-flight pending or still-eligible work. unresolved is
--- unknown/unreadable or an expired unconfirmed send this visit. Absence from
+-- unknown/unreadable or an expired unconfirmed send this session. Absence from
 -- DisabledLevers is not treated as enabled.
 local function Level1LeverMirrorKind(Adapter, lever)
     if Adapter and Adapter.LeverMirrorKind then
         return Adapter.LeverMirrorKind(lever)
     end
     return "unknown"
+end
+
+-- Accepted toggles outlive the UI pending timeout, Wishlist changes and runs
+-- within this Lua session. Reload recovery still uses the adapter's saved pending.
+-- Only the accepted target's typed mirror observation releases this exclusion;
+-- visitDir also records current-plan bookkeeping and cannot own that receipt.
+local function Level1TomeUnconfirmedSync(Adapter)
+    local a = level1Arm
+    if not a then return end
+    for lever, direction in pairs(a.unconfirmedDir) do
+        local kind = Level1LeverMirrorKind(Adapter, lever)
+        if (direction == "enable" and kind == "enabled")
+            or (direction == "disable" and kind == "disabled") then
+            a.unconfirmedDir[lever] = nil
+        end
+    end
 end
 
 local function Level1TomeProgressCounts(plan, disabledLevers, settings, pendingMap, Adapter, visitDir)
@@ -132,13 +148,14 @@ local function Level1TomeProgressCounts(plan, disabledLevers, settings, pendingM
     disableList = plan and plan.leverPlan and plan.leverPlan.disable
     pendingMap = type(pendingMap) == "table" and pendingMap or {}
     visitDir = type(visitDir) == "table" and visitDir or {}
+    local unconfirmed = level1Arm and level1Arm.unconfirmedDir or {}
     if type(keepList) == "table" then
         for index = 1, #keepList do
             lever = keepList[index]
             total = total + 1
             pending = pendingMap[lever] ~= nil
             kind = Level1LeverMirrorKind(Adapter, lever)
-            sent = visitDir[lever] == "enable"
+            sent = visitDir[lever] == "enable" or unconfirmed[lever] ~= nil
             if pending then
                 continuing = continuing + 1
             elseif kind == "enabled" then
@@ -161,7 +178,7 @@ local function Level1TomeProgressCounts(plan, disabledLevers, settings, pendingM
                 total = total + 1
                 pending = pendingMap[lever] ~= nil
                 kind = Level1LeverMirrorKind(Adapter, lever)
-                sent = visitDir[lever] == "disable"
+                sent = visitDir[lever] == "disable" or unconfirmed[lever] ~= nil
                 if pending then
                     continuing = continuing + 1
                 elseif kind == "disabled" then
@@ -254,8 +271,8 @@ local function Level1PromptSnapshot(Adapter)
     a.promptBoundName = type(assigned) == "table" and assigned.name or nil
 end
 
-local function Level1PromptStillBound(Adapter)
-    local a = level1Arm
+local function Level1PromptStillBound(Adapter, context)
+    local a = context or level1Arm
     if not a then return false end
     local assigned = Adapter and Adapter.AssignedWishlist and Adapter.AssignedWishlist() or nil
     local identity = type(assigned) == "table"
@@ -636,6 +653,8 @@ end
 -- Packed ARM/SAVE visit + level-1 lever-send state (one local).
 -- leverLastAt / cadence.lever* pace ToggleTomeEcho without waiting on mirror
 -- confirmation between different levers (pending remains per-lever).
+-- unconfirmedDir excludes accepted sends across run/plan bookkeeping until a
+-- typed target-state observation; unlike visitDir it lasts this Lua session.
 -- promptedForAuto latches the level-1 "enable Auto for tomes" StaticPopup once
 -- per wishlist; cleared when Auto turns on or the wishlist fingerprint changes.
 -- progressDismissed latches a manual Hide/OK on the live progress dialog for
@@ -646,7 +665,7 @@ local arm = {
     promptedForAuto=false,promptWishlistKey=nil,
     progressDismissed=false,lastPopupMode=nil,
     lastProgressDone=nil,lastProgressTotal=nil,
-    keepCursor=1,disableCursor=1,visitDir={},
+    keepCursor=1,disableCursor=1,visitDir={},unconfirmedDir={},
     promptBoundIdentity=nil,promptBoundName=nil,
     promptOverwritePending=false,promptEnableInFlight=false,
     promptContinuing=nil,promptUnresolved=nil,
@@ -1283,6 +1302,7 @@ end
 
 local function StepArm(level, plan, owned, slots, disabledLevers, static, locked)
     if Adapter.TomeObservationBegin then Adapter.TomeObservationBegin() end
+    Level1TomeUnconfirmedSync(Adapter)
     local settings = Store.Settings()
     local automationAllowed = AutoAllowed()
     -- (a) Loadout selection is owned by the stock Echo Journal. Each saved
@@ -1316,6 +1336,7 @@ local function StepArm(level, plan, owned, slots, disabledLevers, static, locked
             arm.keepCursor, arm.disableCursor = 1, 1
             arm.promptBoundIdentity, arm.promptBoundName = nil, nil
             arm.promptOverwritePending, arm.promptEnableInFlight = false, false
+            arm.promptOverwriteContext = nil
         end
         Level1TomeProgressSync(level, plan, disabledLevers, settings,
             sched.autoEnabled, Adapter, Store)
@@ -1397,6 +1418,8 @@ local function StepArm(level, plan, owned, slots, disabledLevers, static, locked
                         -- In-flight re-enable: mirror may still read disabled.
                         -- Never re-call ToggleLever; wake again after spacing.
                         moreWork = true
+                    elseif arm.unconfirmedDir[lever] then
+                        -- Expired is still unresolved, even after a plan switch.
                     elseif visitDir[lever] == "enable" then
                         -- Accepted this visit. Expiry is not resubmit permission.
                     elseif attempted >= burst then
@@ -1413,6 +1436,7 @@ local function StepArm(level, plan, owned, slots, disabledLevers, static, locked
                             -- Directional visit latch: a later wishlist that
                             -- needs this lever disabled may still send disable.
                             visitDir[lever] = "enable"
+                            arm.unconfirmedDir[lever] = "enable"
                             lastStatus = "re-enabling wishlist tome lever " .. lever
                         elseif reason == "pending" or reason == "pause"
                             or reason == "refused" then
@@ -1440,6 +1464,9 @@ local function StepArm(level, plan, owned, slots, disabledLevers, static, locked
                     elseif pendingMap[lever] or disabledLevers[lever] == "pending" then
                         if Adapter.TomeObservationDecision then Adapter.TomeObservationDecision(lever,"pending") end
                         moreWork = true
+                    elseif arm.unconfirmedDir[lever] then
+                        -- A matching current plan is not the earlier send's result.
+                        if Adapter.TomeObservationDecision then Adapter.TomeObservationDecision(lever,"visit_done") end
                     elseif disabledLevers[lever] then
                         if Adapter.TomeObservationDecision then Adapter.TomeObservationDecision(lever,"disabled") end
                         -- Mirror confirmed disabled: keep the disable latch so a
@@ -1463,6 +1490,7 @@ local function StepArm(level, plan, owned, slots, disabledLevers, static, locked
                             if arm.disableCursor > disableN then arm.disableCursor = 1 end
                             if ok then
                                 visitDir[lever] = "disable"
+                                arm.unconfirmedDir[lever] = "disable"
                                 lastStatus = "disabling off-wishlist tome lever " .. lever
                             elseif reason == "pending" or reason == "pause"
                                 or reason == "refused" then
@@ -1481,6 +1509,7 @@ local function StepArm(level, plan, owned, slots, disabledLevers, static, locked
                     lever = disableList[index]
                     if not optOut[lever] and not disabledLevers[lever]
                         and not pendingMap[lever]
+                        and not arm.unconfirmedDir[lever]
                         and visitDir[lever] ~= "disable"
                         and Adapter.LeverHasKnownMember(lever) then
                         moreWork = true
@@ -4584,6 +4613,7 @@ end
                 arm.promptedForAuto = false
                 arm.promptOverwritePending = false
                 arm.promptEnableInFlight = false
+                arm.promptOverwriteContext = nil
                 if (UnitLevel("player") or 0) == 1
                     and (arm.promptContinuing or 0) > 0 then
                     Level1TomeProgressUpdate("progress",
@@ -4601,6 +4631,7 @@ end
                 actionHold.worldNoticePending = nil
                 arm.promptOverwritePending = false
                 arm.promptEnableInFlight = false
+                arm.promptOverwriteContext = nil
                 Level1TomeProgressHide()
                 if actionIntent and actionIntent.state == "prepared" then
                     local revokedDeadline = actionIntent.readyAt
@@ -4631,6 +4662,17 @@ end
                 arm.promptOverwritePending = false
             end
         end
+        -- The callback owns its prompt origin. Shared UI flags are reset when
+        -- the Wishlist changes, so they cannot decide whether to revalidate.
+        local promptContext
+        if arm.promptEnableInFlight then
+            promptContext = {
+                promptBoundIdentity = arm.promptBoundIdentity,
+                promptBoundName = arm.promptBoundName,
+                promptWishlistKey = arm.promptWishlistKey,
+            }
+            arm.promptOverwriteContext = promptContext
+        end
         return warning.RequestAuto(M, function()
             -- Approval belongs to this still-OFF request. Recheck interruption
             -- and Orb exclusion rather than authorizing a stale UI callback.
@@ -4638,14 +4680,16 @@ end
                 arm.promptOverwritePending = false
                 return false
             end
-            if arm.promptOverwritePending then
+            if promptContext then
                 arm.promptOverwritePending = false
+                if arm.promptOverwriteContext ~= promptContext then return false end
+                arm.promptOverwriteContext = nil
                 local promptSettings = Store.Settings()
                 if not promptSettings or not promptSettings.autoDisable then return false end
                 if not Level1PromptReady(Adapter) then return false end
-                if not Level1PromptStillBound(Adapter) then return false end
+                if not Level1PromptStillBound(Adapter, promptContext) then return false end
                 local static = sched.staticCache
-                if not static or static.wishlistKey ~= arm.promptWishlistKey then
+                if not static or static.wishlistKey ~= promptContext.promptWishlistKey then
                     return false
                 end
                 local state = Store.State()
