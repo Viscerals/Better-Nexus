@@ -421,7 +421,8 @@ function Renderer.New(options)
         text = "Lock in '%s'?\nThis overwrites your current active wishlist.",
         button1 = "Lock In", button2 = "Cancel",
         OnAccept = function(_, data)
-            ControllerInstance().AcceptLockIn(data)
+            local accepted = ControllerInstance().AcceptLockIn(data)
+            if accepted then M.Refresh() end
         end,
         timeout=0, whileDead=true, hideOnEscape=true,
     }

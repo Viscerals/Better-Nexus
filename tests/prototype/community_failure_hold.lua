@@ -1,18 +1,21 @@
 -- Real TOC, Community facade/controller/projection factory and registered frame.
--- Faults touch only public dependencies or synthetic host methods. No renderer,
--- List or PumpBuilds replacement; no native timing or global error-history claim.
+-- Faults use public dependencies or synthetic host methods except the detail-Finish
+-- refusal arms, which replace a private controller method and invoke its captured
+-- callback. Some setup/guard observations inspect private upvalues. Renderer, List
+-- and PumpBuilds functions are not replaced. Error-history checks concern synthetic
+-- addon records; they establish no native timing or native error-frame outcome.
 -- Checker classifications use staged baselines: original failure/receive/import
 -- regressions against 1f993d7; explicit-query latency and handled-message cases
 -- against 1be520d; failed explicit-request timing and thrown-message cases against
--- 8e03747. Later SETUPs may rely on earlier retained-error repairs. Existing
--- predicates stay in the file except the two replacement-message cases, now
--- superseded by stricter post-hold timing and truthful cancelled-job checks,
--- and the old cold-Mine receive writes>0 guard. Final Spec-Library F3 replaces
--- that churn requirement with zero writes/pumps while Mine waits for import;
+-- 8e03747. Later SETUPs may rely on earlier retained-error repairs. Setup and check
+-- classifications also evolved with those repairs; exact supersession comparisons
+-- remain in the PR evidence. Removed expectations are the two replacement-message
+-- cases, superseded by post-hold timing and truthful cancelled-job checks, and the
+-- old cold-Mine receive writes>0 guard. The Mine wait now requires zero writes/pumps;
 -- final-f3-all-cold-receive-progresses retains the All progression predicate.
--- The dirty-notifications Mine arm now establishes its actual fault through
--- explicit Refresh: correct no-churn waiting no longer triggers that setter
--- automatically. Its original hold/safety/import assertions remain unchanged.
+-- The dirty-notifications Mine arm establishes its actual fault through explicit
+-- Refresh: correct no-churn waiting no longer triggers that setter automatically.
+-- Its original hold/safety/import assertions remain unchanged.
 -- The advancing-clock explicit exception uses 6dd5ceae as its baseline. It
 -- characterizes synthetic timing robustness, not native GetTime clock caching.
 -- Show/direct-refresh, cached-render retry, replacement liveness and frame-clock
@@ -3361,6 +3364,93 @@ C.scenario('opus-final-detail-finish-'..mode,function()
   'synthetic refused detail route submits no game or transport action')
  controller.PublishImportedBuild=publish;label.SetText=setter
  C.guard(Settle(H,CB)~=nil,'detail refusal control recovers through actual view publication')
+end)
+end
+end
+
+-- Explicit lock-in confirmation uses the real public popup, controller and
+-- adapter with the unchanged synthetic harness host. Fake upload actions
+-- are counted; no native server or transport operation is performed.
+do
+local F=dofile('tests/prototype/format5_support.lua')
+local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+for _,arm in ipairs({'healthy','persistent-host-fault','spacing-pending','healthy-unheld'})do
+C.scenario('lock-in-confirmation-'..arm,function()
+ local H=F.Boot(F.Database(),function(h)
+  h.playerLevel=60;h.perks.serverActiveSlot=1
+  h.perks.serverBuildSlots={[1]={name='Synthetic lock-in proof',verified=true,echoes=L.OrdinaryRows(3)}}
+ end)
+ local CB=Nexus.CommunityBuilds
+ C.setup(Nexus.StartupStatus().state=='ready'and not Nexus.Sync.IsReceiving(),'real TOC ready with actual Sync idle')
+ CB.Show();local settled=false
+ for _=1,2500 do
+  H.Advance(.01,.01)
+  if CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending then settled=true;break end
+ end
+ assert(C.setup(settled,'actual personal import and projection settle'))
+ local mirror
+ for _,b in pairs(CB.Builds())do if b.importedSavedBuild and b.serverSlot==1 then mirror=b end end
+ assert(C.setup(mirror~=nil,'actual imported mirror is selectable'))
+ CB.Select(mirror.id);H.Advance(3.1,.01)
+ local upload=Nexus.GameAdapter.UploadWishlist;local pump=Nexus.ViewProjections.PumpBuilds
+ local realHost=H.perks.UploadServerBuildSlot
+ if arm=='spacing-pending'then
+  CB.LockInSelected();local p=H.popup
+  assert(C.setup(p and p.which=='NEXUS_LOCKIN_BUILD','public lock-in opens actual registered confirmation'))
+  StaticPopupDialogs[p.which].OnAccept(p.frame,p.data)
+  assert(C.setup(#H.actions==1 and H.actions[1][1]=='upload','one real adapter upload to unchanged synthetic host establishes spacing'))
+ end
+ local label=NexusCommunityBuildsFrame._classDropBtn;local setter=label.SetText
+ local marker={label='Synthetic lock-in refresh exception'};local calls=0;local first=true
+ label.SetText=function(self,...)
+  calls=calls+1
+  if arm~='healthy-unheld'and(first or arm=='persistent-host-fault')then first=false;error(marker,0)end
+  return setter(self,...)
+ end
+ if arm~='healthy-unheld'then
+  local failed,why=pcall(CB.Refresh)
+  assert(C.setup(not failed and why==marker and calls==1 and CB.VirtualStats().dataFailures==1,
+   'actual host exception establishes one retained view hold before user confirms'))
+ else
+  C.setup(calls==0 and CB.VirtualStats().dataFailures==0,'healthy explicit confirmation has no prior view hold')
+ end
+ CB.LockInSelected();local p=H.popup
+ assert(C.setup(p and p.which=='NEXUS_LOCKIN_BUILD'and type(p.data.echoes)=='table',
+  'public LockInSelected opens registered confirmation with real copied payload'))
+ local beforeActions=#H.actions;local beforeAt=GetTime()
+ local accepted,err=pcall(StaticPopupDialogs[p.which].OnAccept,p.frame,p.data)
+ local stats=CB.VirtualStats()
+ if arm=='spacing-pending'then
+  C.guard(accepted and calls==1 and #H.actions==beforeActions and stats.dataFailures==1,
+   'spacing refusal does not pretend success or bypass hold for a pending automatic retry')
+ elseif arm=='healthy-unheld'then
+  C.guard(accepted and #H.actions==beforeActions+1 and H.actions[#H.actions][1]=='upload'
+   and stats.dataFailures==0 and calls>=1 and calls<=2,
+   'healthy confirmation uploads once; explicit outcome may refresh after controller refresh')
+  local uploads=#H.actions
+  H.Advance(.2,.01)
+  C.guard(#H.actions==uploads and CB.VirtualStats().lastDataError==nil,
+   'healthy explicit confirmation starts no ongoing automatic upload loop')
+ else
+  C.setup(#H.actions==beforeActions+1 and H.actions[#H.actions][1]=='upload',
+   'actual controller confirms one successful upload through real adapter to synthetic host')
+  C.expect(calls==2 and GetTime()==beforeAt,
+   'successful explicit confirmation refreshes immediately inside existing hold',calls)
+  if arm=='persistent-host-fault'then
+   C.expect(not accepted and err==marker and stats.dataFailures==2,
+    'explicit post-success refresh retains and rethrows exact host exception')
+  else
+   C.expect(accepted and stats.lastDataError==nil and CB.DiagnosticSnapshot().projectionCurrent,
+    'successful explicit refresh publishes and clears actual retained view error')
+  end
+ end
+ C.guard(Nexus.GameAdapter.UploadWishlist==upload and Nexus.ViewProjections.PumpBuilds==pump
+  and H.perks.UploadServerBuildSlot==realHost,'controller adapter/projection/host function identities preserved')
+ C.guard(#H.sent==0,'synthetic proof sends no transport messages',#H.sent)
+ label.SetText=setter
+ print('OBSERVED_LOCKIN',arm,F.Serialize({calls=calls,accepted=accepted,
+  exactError=err==marker,dataFailures=stats.dataFailures,syntheticHostUploads=#H.actions,
+  sent=#H.sent,at=GetTime(),native='NOT_RUN'}))
 end)
 end
 end
