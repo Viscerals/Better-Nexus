@@ -703,6 +703,8 @@ local function ViewSnapshot(owner, expectedView)
         projectionPending=value.projectionPending == true,
         projectionDirty=value.projectionDirty ~= false,
         savedImportPending=value.savedImportPending == true,
+        savedImportError=value.savedImportError == true,
+        shareStatusError=value.shareStatusError == true,
         savedImportPhase=ViewToken(value.savedImportPhase,
             VIEW_PHASES, "unknown"),
         syncReceiving=value.syncReceiving == true,lastPublicationAge=age,
@@ -735,10 +737,11 @@ local function AddViewSnapshot(out, owner, expectedView)
     local age = state.lastPublicationAge < 0 and "never"
         or string.format("%.1fs", state.lastPublicationAge)
     out[#out + 1] = string.format(
-        "  projection=current:%s pending:%s dirty:%s import=pending:%s phase:%s receiving=%s publication_age=%s blocked=%s",
+        "  projection=current:%s pending:%s dirty:%s import=pending:%s phase:%s error:%s status_error:%s receiving=%s publication_age=%s blocked=%s",
         tostring(state.projectionCurrent),tostring(state.projectionPending),
         tostring(state.projectionDirty),tostring(state.savedImportPending),
-        state.savedImportPhase,tostring(state.syncReceiving),age,
+        state.savedImportPhase,tostring(state.savedImportError),
+        tostring(state.shareStatusError),tostring(state.syncReceiving),age,
         state.blockedReason)
 end
 
