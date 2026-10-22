@@ -2256,8 +2256,18 @@ local function EnsureFrame()
     function pump.RefreshContext()
         -- A new explicit request gets its own chance to run. Keep the last
         -- failure evidence until that request successfully publishes.
+        pump.now = type(GetTime) == "function" and GetTime() or 0
         failBackoffUntil = 0
-        return M.Refresh()
+        refreshDirty = true
+        pump.failuresNoted = math.max(pump.failuresNoted or 0,
+            tonumber(virtualStats.dataFailures) or 0)
+        local ok, result, why = pcall(M.Refresh)
+        if not ok then
+            pump.Retain(result)
+            error(result, 0)
+        end
+        pump.Note()
+        return result, why
     end
     -- An escaped refresh used to skip the safety ticker. Keep the error on
     -- the diagnostic the backoff already reads, and remember the message.
@@ -2387,7 +2397,11 @@ local function EnsureFrame()
                         pump.Note()
                         local heldUntil = failBackoffUntil
                         local heldFailures = virtualStats.dataFailures
-                        pcall(M.Refresh)
+                        local refreshOk, refreshErr = pcall(M.Refresh)
+                        if not refreshOk then
+                            virtualStats.lastDataError = tostring(
+                                refreshErr or "Community refresh failed"):sub(1, 300)
+                        end
                         if viewDiagnostic.projectionCurrent == true then
                             failBackoffUntil = 0
                         else

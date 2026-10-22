@@ -307,11 +307,15 @@ K.Run({
                 'prompt_exception_cleanup reached: bound Auto-OFF prompt open')
             if inject then
                 local original = Nexus.OverwriteWarning.RequestAuto
+                local calls = 0
                 Nexus.OverwriteWarning.RequestAuto = function()
+                    calls = calls + 1
                     error('Synthetic RequestAuto fault')
                 end
                 local ok, err = pcall(H.AcceptPopup)
                 Nexus.OverwriteWarning.RequestAuto = original
+                c(calls == 1,
+                    'prompt_exception_cleanup reached: accept reached the RequestAuto seam')
                 c(not ok and tostring(err):find('Synthetic RequestAuto fault', 1, true),
                     'prompt_exception_cleanup the original request exception remains visible')
             end

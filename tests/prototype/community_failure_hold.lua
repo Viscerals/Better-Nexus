@@ -1,6 +1,11 @@
 -- Real TOC, Community facade/controller/projection factory and registered frame.
 -- Faults touch only public dependencies or synthetic host methods. No renderer,
 -- List or PumpBuilds replacement; no native timing or global error-history claim.
+-- Checker classifications use staged baselines: original failure/receive/import
+-- regressions against 1f993d7; explicit-query latency and handled-message cases
+-- against 1be520d; failed explicit-request timing and thrown-message cases against
+-- 8e03747. Later SETUPs may rely on earlier retained-error repairs. Existing
+-- predicates stay in the file to guard those accepted stages on every replay.
 local F=dofile('tests/prototype/format5_support.lua')
 local V=dofile('tests/prototype/view_regression_support.lua')
 local C=V.Checker('community_failure_hold')
@@ -380,6 +385,146 @@ C.scenario('replacement-handled-failure-message',function()
  C.guard(d.blockedReason=='projection-error' and d.projectionDirty and not d.projectionCurrent,
   'a refused replacement does not claim publication or clear failure')
  C.guard(#H.actions==0 and #H.sent==0,'replacement refusal sends no game or network action')
+end)
+
+C.scenario('explicit-persistent-handled-failure-hold',function()
+ local H,CB=Boot({value=false},true)
+ CB.Show()
+ C.setup(Settle(H,CB)~=nil,'healthy view and import settle before an explicit refusal')
+ local begin=Nexus.DpsCapture.BeginCommunityEligibilityCursor
+ local refusals=0
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=function()
+  refusals=refusals+1;return nil
+ end
+ NexusCommunityBuildsFrame._classDropBtn:Click()
+ local afterClick=refusals
+ C.setup(afterClick==1 and CB.VirtualStats().dataFailures>0,
+  'real class request reaches a handled production factory refusal')
+ local escaped=Step(H,40)
+ local afterQuiet=refusals
+ print('OBSERVED explicit-persistent-handled-failure-hold','after-click='..afterClick,
+  'after-400ms='..afterQuiet)
+ C.expect(afterQuiet==afterClick,
+  'a failed explicit query installs its hold before any 400ms background retry',afterQuiet)
+ Step(H,100)
+ C.guard(refusals>afterQuiet,'persistent failure eventually retries after its deadline',refusals)
+ C.guard(escaped==0 and CB.DiagnosticSnapshot().blockedReason=='projection-error'
+  and CB.VirtualStats().lastDataError=='DPS eligibility cursor unavailable',
+  'persistent refusal is contained and remains visible')
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=begin
+ C.guard(Settle(H,CB)~=nil,'restoring the refused factory eventually recovers')
+ C.guard(#H.actions==0 and #H.sent==0,'explicit refusal sends no game or network action')
+end)
+
+C.scenario('transient-explicit-refusal-fixed-deadline',function()
+ local H,CB=Boot({value=false},true)
+ CB.Show()
+ C.setup(Settle(H,CB)~=nil,'healthy view settles before a transient explicit refusal')
+ local begin=Nexus.DpsCapture.BeginCommunityEligibilityCursor
+ local refusals=0
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=function()
+  refusals=refusals+1;return nil
+ end
+ NexusCommunityBuildsFrame._classDropBtn:Click()
+ C.setup(refusals==1 and CB.VirtualStats().dataFailures==1,
+  'one explicit query records its own transient handled failure')
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=begin
+ -- This is the same failed query, observed through the non-releasing facade.
+ -- A healthy pending observation must not become the deadline's new origin.
+ CB.Refresh()
+ C.setup(CB.DiagnosticSnapshot().projectionPending,'restored factory provides real healthy replacement work')
+ local before=Nexus.ViewProjections.WorkStats().communityPumps
+ local firstWork
+ for i=1,70 do
+  Step(H,1)
+  if not firstWork and Nexus.ViewProjections.WorkStats().communityPumps>before then firstWork=i end
+ end
+ print('OBSERVED transient-explicit-refusal-fixed-deadline','frames=70 first-work='..tostring(firstWork))
+ C.expect(firstWork and firstWork>=50 and firstWork<=70,
+  'transient refusal holds replacement work to its original failure deadline',firstWork)
+ C.guard(CB.VirtualStats().dataFailures==1,'healthy pending replacement adds no failure')
+ C.guard(Settle(H,CB)~=nil and CB.VirtualStats().lastDataError==nil,
+  'healthy replacement eventually publishes and clears the transient message')
+ C.guard(#H.actions==0 and #H.sent==0,'transient refusal sends no game or network action')
+end)
+
+C.scenario('explicit-refresh-throw-retained-and-held',function()
+ local H,CB=Boot({value=false},true)
+ CB.Show()
+ C.setup(Settle(H,CB)~=nil,'healthy view settles before a thrown explicit refresh')
+ local frame=NexusCommunityBuildsFrame
+ local setText=frame._classDropBtn.SetText
+ local calls,armed=0,true
+ local message='Synthetic one-shot explicit refresh failure'
+ frame._classDropBtn.SetText=function(self,text)
+  calls=calls+1
+  if armed then armed=false;error(message,0) end
+  return setText(self,text)
+ end
+ local ok,err=pcall(function() frame._classDropBtn:Click() end)
+ C.setup(calls==1,'actual explicit refresh reaches the one-shot host fault')
+ C.guard(not ok and err==message,'explicit refresh rethrows the original error value',err)
+ local stats,d=CB.VirtualStats(),CB.DiagnosticSnapshot()
+ C.expect(stats.dataFailures==1 and stats.lastDataError==message
+  and d.blockedReason=='projection-error' and d.projectionDirty and not d.projectionCurrent,
+  'thrown explicit refresh retains its message and failure state before rethrow',stats.lastDataError)
+ local pumps=Nexus.ViewProjections.WorkStats().communityPumps
+ local escaped=Step(H,40)
+ print('OBSERVED explicit-refresh-throw-retained-and-held','calls-after-400ms='..calls,
+  'positive-pumps='..(Nexus.ViewProjections.WorkStats().communityPumps-pumps),
+  'message='..tostring(stats.lastDataError))
+ C.guard(calls==1 and Nexus.ViewProjections.WorkStats().communityPumps==pumps,
+  'one-shot thrown explicit refresh installs a hold before returning to the frame',calls)
+ C.guard(escaped==0,'subsequent automatic refresh contains no escaped error',escaped)
+ local recovered=false
+ -- A throw before SortedBuilds can leave the old projectionCurrent flag true.
+ -- Require actual new production work as well as a current publication, within
+ -- 200 total 10ms frames of the request (40 above, at most 160 below).
+ for _=1,160 do
+  Step(H,1)
+  local current=CB.DiagnosticSnapshot()
+  if Nexus.ViewProjections.WorkStats().communityPumps>pumps and current.projectionCurrent
+   and not current.projectionPending and not current.projectionDirty then recovered=true;break end
+ end
+ print('OBSERVED explicit-refresh-throw-recovery','recovered='..tostring(recovered),
+  'positive-pumps='..(Nexus.ViewProjections.WorkStats().communityPumps-pumps))
+ C.expect(recovered and CB.VirtualStats().lastDataError==nil,
+  'the failed explicit request resumes production work and publishes within two seconds')
+ C.guard(#H.actions==0 and #H.sent==0,'explicit refresh exception sends no game or network action')
+end)
+
+C.scenario('replacement-thrown-failure-message',function()
+ local H,CB=Boot({value=false},true)
+ local nextCalls,throws,armed=0,0,false
+ local older='Synthetic older pump failure before replacement throw'
+ local newer='Synthetic newer replacement refresh throw'
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=function()
+  nextCalls=nextCalls+1;armed=true;return false,older
+ end
+ CB.Show()
+ local frame=NexusCommunityBuildsFrame
+ local setText=frame._classDropBtn.SetText
+ frame._classDropBtn.SetText=function(self,text)
+  if armed then armed=false;throws=throws+1;error(newer,0) end
+  return setText(self,text)
+ end
+ local escaped=0
+ for _=1,200 do
+  if throws>0 then break end
+  escaped=escaped+Step(H,1)
+ end
+ local stats,d=CB.VirtualStats(),CB.DiagnosticSnapshot()
+ C.setup(nextCalls==1 and throws==1 and stats.dataFailures==1,
+  'a real failed production job reaches the one-shot replacement host exception')
+ print('OBSERVED replacement-thrown-failure-message','next-calls='..nextCalls,
+  'throws='..throws,'message='..tostring(stats.lastDataError))
+ C.expect(stats.lastDataError==newer,
+  'the newer automatic replacement exception replaces the older pump message',stats.lastDataError)
+ C.guard(escaped==0 and d.blockedReason=='projection-error'
+  and d.projectionDirty and not d.projectionCurrent,
+  'replacement exception remains contained and leaves a failed current request')
+ C.guard(stats.dataFailures==1,'replacement exception preserves the original hold failure count')
+ C.guard(#H.actions==0 and #H.sent==0,'replacement exception sends no game or network action')
 end)
 
 C.finish('(public failure hold and recovery; synthetic host only)')
