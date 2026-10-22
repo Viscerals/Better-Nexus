@@ -3334,6 +3334,7 @@ function M.DiagnosticSnapshot()
         filterQualifiedOnly=base.filterQualifiedOnly ~= false,
         filterSearchActive=base.filterSearchActive == true,
         filterSort=base.filterSort or "dps",filterCategory="builds",
+        projectionError=viewDiagnostic.projectionError == true,
         projectionCurrent=current,projectionPending=
             viewDiagnostic.projectionPending == true,
         projectionDirty=dirty,savedImportPending=

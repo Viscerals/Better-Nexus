@@ -665,11 +665,13 @@ local function ViewVersion(value)
 end
 
 local function ViewSnapshot(owner, expectedView)
-    local value = {}
+    local value, available = {}, false
     if type(owner) == "table"
         and type(owner.DiagnosticSnapshot) == "function" then
         local ok, result = pcall(owner.DiagnosticSnapshot)
-        if ok and type(result) == "table" then value = result end
+        if ok and type(result) == "table" then
+            value, available = result, true
+        end
     end
     local age = tonumber(value.lastPublicationAge)
     if not age or age ~= age or age >= math.huge or age <= -math.huge then
@@ -699,6 +701,9 @@ local function ViewSnapshot(owner, expectedView)
         filterSort=ViewToken(value.filterSort, VIEW_SORTS, "dps"),
         filterCategory=ViewToken(value.filterCategory,
             VIEW_CATEGORIES, expectedView == "community" and "builds" or "lk"),
+        snapshotAvailable=available,
+        projectionError=value.projectionError == true,
+        projectionErrorKnown=available and type(value.projectionError) == "boolean",
         projectionCurrent=value.projectionCurrent == true,
         projectionPending=value.projectionPending == true,
         projectionDirty=value.projectionDirty ~= false,
@@ -737,12 +742,22 @@ local function AddViewSnapshot(out, owner, expectedView)
     local age = state.lastPublicationAge < 0 and "never"
         or string.format("%.1fs", state.lastPublicationAge)
     out[#out + 1] = string.format(
-        "  projection=current:%s pending:%s dirty:%s import=pending:%s phase:%s error:%s status_error:%s receiving=%s publication_age=%s blocked=%s",
+        "  projection=current:%s pending:%s dirty:%s import=pending:%s phase:%s receiving=%s publication_age=%s blocked=%s",
         tostring(state.projectionCurrent),tostring(state.projectionPending),
         tostring(state.projectionDirty),tostring(state.savedImportPending),
-        state.savedImportPhase,tostring(state.savedImportError),
-        tostring(state.shareStatusError),tostring(state.syncReceiving),age,
+        state.savedImportPhase,tostring(state.syncReceiving),age,
         state.blockedReason)
+    local viewError = state.projectionErrorKnown
+        and tostring(state.projectionError) or "unknown"
+    if expectedView == "community" then
+        out[#out + 1] = string.format(
+            "  faults view=error:%s saved_import=error:%s share_status=error:%s",
+            viewError,
+            state.snapshotAvailable and tostring(state.savedImportError) or "unknown",
+            state.snapshotAvailable and tostring(state.shareStatusError) or "unknown")
+    else
+        out[#out + 1] = "  faults view=error:" .. viewError
+    end
 end
 
 local function LogText_State()
