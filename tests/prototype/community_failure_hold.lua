@@ -6,6 +6,8 @@
 -- against 1be520d; failed explicit-request timing and thrown-message cases against
 -- 8e03747. Later SETUPs may rely on earlier retained-error repairs. Existing
 -- predicates stay in the file to guard those accepted stages on every replay.
+-- The advancing-clock explicit exception uses 6dd5ceae as its baseline. It
+-- characterizes synthetic timing robustness, not native GetTime clock caching.
 local F=dofile('tests/prototype/format5_support.lua')
 local V=dofile('tests/prototype/view_regression_support.lua')
 local C=V.Checker('community_failure_hold')
@@ -525,6 +527,62 @@ C.scenario('replacement-thrown-failure-message',function()
   'replacement exception remains contained and leaves a failed current request')
  C.guard(stats.dataFailures==1,'replacement exception preserves the original hold failure count')
  C.guard(#H.actions==0 and #H.sent==0,'replacement exception sends no game or network action')
+end)
+
+C.scenario('explicit-refresh-throw-clock-advance',function()
+ local H,CB=Boot({value=false},true)
+ CB.Show()
+ if not C.setup(Settle(H,CB)~=nil,
+  'healthy view settles before the advancing-clock explicit exception') then return end
+ local frame=NexusCommunityBuildsFrame
+ local setText=frame._classDropBtn.SetText
+ local calls,armed=0,true
+ local message='Synthetic clock-advanced explicit refresh failure'
+ frame._classDropBtn.SetText=function(self,text)
+  calls=calls+1
+  if armed then
+   armed=false
+   -- No recursive frame dispatch. This models a clock that advances during
+   -- a synchronous host call; native frame-cached GetTime remains unproven.
+   H.now=H.now+.6
+   error(message,0)
+  end
+  return setText(self,text)
+ end
+ local requestedAt=GetTime()
+ local ok,err=pcall(function() frame._classDropBtn:Click() end)
+ local caughtAt=GetTime()
+ if not C.setup(calls==1 and caughtAt-requestedAt>.59,
+  'real class request reaches one host fault after 600ms synthetic clock advance') then return end
+ C.guard(not ok and err==message,
+  'clock-advanced explicit exception rethrows its unchanged original value',err)
+ local failed,d=CB.VirtualStats(),CB.DiagnosticSnapshot()
+ C.guard(failed.dataFailures==1 and failed.lastDataError==message
+  and d.blockedReason=='projection-error' and d.projectionDirty and not d.projectionCurrent,
+  'clock-advanced exception is immediately visible with one failure',failed.lastDataError)
+ local pumps=Nexus.ViewProjections.WorkStats().communityPumps
+ local escaped=Step(H,40)
+ print('OBSERVED explicit-refresh-throw-clock-advance','request-time='..requestedAt,
+  'catch-time='..caughtAt,'calls-after-400ms='..calls,
+  'positive-pumps='..(Nexus.ViewProjections.WorkStats().communityPumps-pumps))
+ C.expect(calls==1 and Nexus.ViewProjections.WorkStats().communityPumps==pumps,
+  'clock-advanced explicit failure holds automatic retry for 400ms after it is observed',calls)
+ local recovered=false
+ for _=1,160 do
+  escaped=escaped+Step(H,1)
+  local current=CB.DiagnosticSnapshot()
+  if Nexus.ViewProjections.WorkStats().communityPumps>pumps and current.projectionCurrent
+   and not current.projectionPending and not current.projectionDirty then recovered=true;break end
+ end
+ local final=CB.VirtualStats()
+ print('OBSERVED explicit-refresh-throw-clock-recovery','recovered='..tostring(recovered),
+  'elapsed-after-catch='..(GetTime()-caughtAt),
+  'positive-pumps='..(Nexus.ViewProjections.WorkStats().communityPumps-pumps))
+ C.expect(recovered and final.lastDataError==nil,
+  'clock-advanced exception eventually resumes real work and publishes within two seconds')
+ C.guard(final.dataFailures==1 and escaped==0,
+  'healthy clock-advanced recovery adds no failure or escaped background exception',escaped)
+ C.guard(#H.actions==0 and #H.sent==0,'clock-advanced exception sends no game or network action')
 end)
 
 C.finish('(public failure hold and recovery; synthetic host only)')

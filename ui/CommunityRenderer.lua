@@ -2256,12 +2256,13 @@ local function EnsureFrame()
     function pump.RefreshContext()
         -- A new explicit request gets its own chance to run. Keep the last
         -- failure evidence until that request successfully publishes.
-        pump.now = type(GetTime) == "function" and GetTime() or 0
         failBackoffUntil = 0
         refreshDirty = true
         pump.failuresNoted = math.max(pump.failuresNoted or 0,
             tonumber(virtualStats.dataFailures) or 0)
         local ok, result, why = pcall(M.Refresh)
+        -- Anchor the hold to the observed result of this synchronous refresh.
+        pump.now = type(GetTime) == "function" and GetTime() or 0
         if not ok then
             pump.Retain(result)
             error(result, 0)
