@@ -1634,17 +1634,17 @@ local function Renderer()
  local instance=Upvalue(CB.ShowPostBuild,'RendererInstance')
  return Upvalue(Upvalue(instance,'EnsureCommunityRenderer'),'communityRenderer')
 end
-local function Stack()
- local rows,callback,lifecycle,catalog={},false,false,false
+local function Stack(expectedCallback)
+ local rows,controller,lifecycle,catalog={},nil,false,false
  for i=2,50 do
-  local info=debug.getinfo(i,'Sln')
+  local info=debug.getinfo(i,'Slnf')
   if not info then break end
   rows[#rows+1]=(info.source or '?')..':'..tostring(info.currentline)..' ('..(info.name or '?')..')'
-  if info.source=='@core/CommunityController.lua' and info.currentline==129 then callback=true end
+  if not controller and info.source=='@core/CommunityController.lua' then controller=info.func end
   if info.source=='@core/MainLifecycle.lua' then lifecycle=true end
   if info.source=='@core/BuildCatalog.lua' then catalog=true end
  end
- return table.concat(rows,'\n'),callback,lifecycle,catalog
+ return table.concat(rows,'\n'),controller~=nil and controller==expectedCallback and catalog,lifecycle,catalog
 end
 assert(C.setup(Nexus.StartupStatus().state=='ready' and CAT.ManualPreparationStatus().ready,
  'real TOC, Store and catalog preparation are ready'))
@@ -1684,9 +1684,10 @@ assert(C.setup(popup:IsShown() and popup._shareStatus and not LibraryExists()
  'public Share reopen precedes Library and exposes existing status host method'))
 local originalText=popup._shareStatus.SetText
 local callbackCalls,throws,callbackStack,callbackLifecycle,callbackCatalog=0,0,nil,false,false
+local expectedCompletionCallback=ticket.completionCallback
 local message='Synthetic Share status SetText fault before Library initialization'
 popup._shareStatus.SetText=function(self,...)
- local trace,isCallback,isLifecycle,isCatalog=Stack()
+ local trace,isCallback,isLifecycle,isCatalog=Stack(expectedCompletionCallback)
  if isCallback then
   callbackCalls=callbackCalls+1;callbackStack=trace
   callbackLifecycle,callbackCatalog=isLifecycle,isCatalog
@@ -1967,12 +1968,12 @@ end
 -- Status-ledger probes use1075676 as the staged baseline. Jobs are read-only
 -- test witnesses; production uses the real RequestBuilds result.
 for _,finding in ipairs({'popup','history','pending'}) do
-C.scenario('responsible-ledger-'..finding,function()
+for _,faulted in ipairs({false,true}) do
+C.scenario('responsible-ledger-'..finding..(faulted and '-fault' or '-healthy'),function()
 -- Independent probes of three renderer ledger findings. Real TOC/public paths.
 local F=dofile('tests/prototype/format5_support.lua')
 local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
 local V=dofile('tests/prototype/view_regression_support.lua')
-local faulted=true
 local H=F.Boot(F.Database(),function(h)
  h.playerLevel=60;h.perks.serverBuildSlots={};h.perks.serverActiveSlot=1
 end)
@@ -2000,16 +2001,16 @@ end
 local function Upvalue(fn,wanted)
  for i=1,60 do local k,v=debug.getupvalue(fn,i);if not k then return end;if k==wanted then return v end end
 end
-local function Stack()
- local rows,callback,lifecycle,catalog={},false,false,false
+local function Stack(expectedCallback)
+ local rows,controller,lifecycle,catalog={},nil,false,false
  for i=2,50 do
-  local d=debug.getinfo(i,'Sln');if not d then break end
+  local d=debug.getinfo(i,'Slnf');if not d then break end
   rows[#rows+1]=(d.source or '?')..':'..d.currentline..' '..(d.name or '?')
-  if d.source=='@core/CommunityController.lua' and d.currentline==129 then callback=true end
+  if not controller and d.source=='@core/CommunityController.lua' then controller=d.func end
   if d.source=='@core/MainLifecycle.lua' then lifecycle=true end
   if d.source=='@core/BuildCatalog.lua' then catalog=true end
  end
- return table.concat(rows,'\n'),callback,lifecycle,catalog
+ return table.concat(rows,'\n'),controller~=nil and controller==expectedCallback and catalog,lifecycle,catalog
 end
 local function Matches(message)
  local n=0
@@ -2047,8 +2048,13 @@ if finding=='popup' then
   and throws==(faulted and 1 or 0),'real popup OnUpdate reaches matched healthy/fault SetText seam'))
  status.SetText=original
  local first=Snapshot()
- C.expect(CB.VirtualStats().statusFailures==1 and CB.VirtualStats().lastStatusError=='Independent popup-only label fault'
-  and CB.DiagnosticSnapshot().shareStatusError==true,'status fault owns an independent bounded counter message and diagnostic')
+ if faulted then
+  C.expect(CB.VirtualStats().statusFailures==1 and CB.VirtualStats().lastStatusError=='Independent popup-only label fault'
+   and CB.DiagnosticSnapshot().shareStatusError==true,'status fault owns an independent bounded counter message and diagnostic')
+ else
+  C.expect(CB.VirtualStats().statusFailures==0 and CB.VirtualStats().lastStatusError==nil
+   and CB.DiagnosticSnapshot().shareStatusError==false,'healthy popup text work leaves its status ledger clear')
+ end
  C.expect(first.dataFailures==before.dataFailures and first.lastDataError==before.lastDataError,
   'popup-only label failure does not charge the Library projection ledger',F.Serialize(first))
  C.expect(first.projectionCurrent and first.reason=='none',
@@ -2058,8 +2064,13 @@ if finding=='popup' then
  assert(C.setup(Nexus.Revisions.Get(Nexus.Revisions.DPS_CHANGED)>revision
   and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())~=nil,'real DPS revision naturally schedules ViewRefresh'))
  Step(40);local held=Snapshot()
- C.expect(CB.VirtualStats().lastStatusError=='Independent popup-only label fault' and CB.DiagnosticSnapshot().shareStatusError,
-  'All publication during the status hold preserves independent status error evidence')
+ if faulted then
+  C.expect(CB.VirtualStats().lastStatusError=='Independent popup-only label fault' and CB.DiagnosticSnapshot().shareStatusError,
+   'All publication during the status hold preserves independent status error evidence')
+ else
+  C.expect(CB.VirtualStats().statusFailures==0 and CB.VirtualStats().lastStatusError==nil
+   and CB.DiagnosticSnapshot().shareStatusError==false,'healthy All publication creates no status error evidence')
+ end
  C.expect(held.pumps>first.pumps,'independent healthy All projection work advances within400ms after revision',F.Serialize(held))
  local recovered=Until(2000,function() return CB.DiagnosticSnapshot().projectionCurrent and CB.VirtualStats().lastDataError==nil end)
  C.guard(recovered~=nil and VP.WorkStats().communityPumps>first.pumps,'eventual restored status permits positive projection work and publication',recovered)
@@ -2088,9 +2099,10 @@ elseif finding=='history' then
   'actual public Show import submits one real pending catalog ticket'))
  local label=NexusCommunityBuildsFrame._classDropBtn;local original=label.SetText
  local calls,throws,callbackStack,origin=0,0,nil,false
+ local expectedCompletionCallback=ticket.completionCallback
  local message='Independent controller-only retained evidence fault'
  label.SetText=function(self,...)
-  local trace,callback,lifecycle,catalog=Stack()
+  local trace,callback,lifecycle,catalog=Stack(expectedCompletionCallback)
   if callback then
    calls=calls+1;callbackStack=trace;origin=lifecycle and catalog
    if faulted and throws==0 then throws=1;label.SetText=original;error(message,0) end
@@ -2157,6 +2169,7 @@ elseif finding=='pending' then
   firstPositivePumpFrame=firstPump,sameJobAtFirstPump=jobSameAtFirstPump,calls=calls,throws=throws,bindStack=bindStack}))
 else error('unknown finding '..tostring(finding)) end
 end)
+end
 end
 
 C.scenario('unprintable-controller-error-cannot-abort-completion',function()
