@@ -1583,7 +1583,7 @@ function M.DiagnosticSnapshot()
         filterSearchActive=searchActive,filterSort="dps",
         filterCategory=(category == "dummy" or category == "combined")
             and category or "lk",
-        projectionError=viewDiagnostic.projectionError == true,
+        projectionError=viewDiagnostic.projectionError == true or lastDataError ~= nil,
         projectionCurrent=current,
         projectionPending=viewDiagnostic.projectionPending == true,
         projectionDirty=dirty,savedImportPending=false,

@@ -353,6 +353,9 @@ C.scenario('real Library view failure survives hidden viewer and recovers',funct
  if not C.setup(hidden and CB.DiagnosticSnapshot().blockedReason=='hidden'
   and CB.VirtualStats().lastDataError==message,'registered viewer hides Library while actual view fault remains retained')then label.SetText=setter;return end
  C.expect(ViewError(hidden,'community')=='true','registered hidden Library viewer exposes retained view fault independently of hidden')
+ C.setup(SnapshotBlock(direct):find('community catalog=',1,true)
+  and SnapshotBlock(hidden):find('community catalog=',1,true),
+  'nonempty direct and hidden sanitized blocks contain the real Community owner')
  C.guard(not SnapshotBlock(direct):find(message,1,true) and not SnapshotBlock(hidden):find(message,1,true),
   'sanitized snapshot blocks contain no raw retained view error payload')
  local fault=CB.DiagnosticSnapshot();local stats=CB.VirtualStats();local now=H.now
@@ -405,6 +408,8 @@ C.scenario('Leaderboard owns its own current view flag',function()
  local faults=OwnerLine(hidden,'leaderboard','  faults ')
  C.expect(faults and faults:match('^  faults view=error:true$'),
   'Leaderboard fault group never claims ownership of import or Share ledgers')
+ C.setup(SnapshotBlock(hidden):find('leaderboard catalog=',1,true),
+  'nonempty hidden sanitized block contains the real Leaderboard owner')
  C.guard(not SnapshotBlock(hidden):find(message,1,true),'Leaderboard snapshot block exports no raw dependency message')
  Nexus.ViewProjections.RequestLeaderboard=request;LB.Show('lk')
  if not C.setup(Settled(H,LB)~=nil and LB.VirtualStats().lastDataError==nil,'restored Leaderboard dependency publishes successfully')then return end
@@ -424,6 +429,8 @@ C.scenario('strict view sanitizer and unavailable snapshot reads',function()
    if not C.setup(ok,'public report survives strict view-bit input')then return end
    local expected=type(value)=='boolean' and tostring(value) or 'unknown'
    C.expect(ViewError(text,name)==expected,'only a genuine boolean gives a known view fault observation')
+   C.setup(SnapshotBlock(text):find(name..' catalog=',1,true),
+    'strict sanitizer payload control inspects a nonempty block with its actual owner')
    C.guard(not SnapshotBlock(text):find('truthy view payload',1,true),'nonboolean view input never becomes snapshot payload')
   end
   for _,mode in ipairs({'missing','throwing','non-table'})do
@@ -448,6 +455,136 @@ C.scenario('strict view sanitizer and unavailable snapshot reads',function()
 end)
 C.finish('(current owned diagnostic flags; synthetic host only)')
 checks=checks+C.n.expect+C.n.guard+C.n.setup
+
+-- Retained fault observations stay independent of dirty and pending state.
+do
+ local R=dofile('tests/prototype/view_regression_support.lua').Checker('retained view diagnostic')
+ local function Retained(owner,message)
+  return owner.VirtualStats().lastDataError==message
+ end
+ local function ReportFault(owner)
+  return ViewError(Nexus.GetDiagnosticPageText('state'),owner)
+ end
+ R.scenario('Leaderboard retains fault across dirty, receive revision and pending retry',function()
+  local H=Boot();local LB=Nexus.Leaderboard;local P=Nexus.ViewProjections
+  LB.Show('lk')
+  if not R.setup(Settled(H,LB)~=nil,'real healthy Leaderboard publication settles before fault')then return end
+  R.guard(LB.VirtualStats().lastDataError==nil and LB.DiagnosticSnapshot().projectionError==false
+   and ReportFault('leaderboard')=='false','healthy publication has no retained view fault')
+  LB.Hide();LB.MarkDataDirty()
+  R.guard(LB.VirtualStats().lastDataError==nil and LB.DiagnosticSnapshot().projectionError==false
+   and ReportFault('leaderboard')=='false','healthy hidden dirty mark does not fabricate a fault')
+  LB.Show('lk')
+  if not R.setup(Settled(H,LB)~=nil,'healthy dirty Leaderboard republishes before fault')then return end
+  local request=P.RequestLeaderboard;local calls=0
+  local message='Synthetic retained Leaderboard diagnostic failure'
+  P.RequestLeaderboard=function(...)
+   local caller=debug.getinfo(2,'S')
+   if caller and caller.source=='@ui/Leaderboard.lua' then calls=calls+1;return nil,nil,message end
+   return request(...)
+  end
+  LB.MarkDataDirty()
+  local failures=LB.VirtualStats().dataFailures;local ok=pcall(LB.Refresh)
+  P.RequestLeaderboard=request
+  if not R.setup(ok and calls==1 and Retained(LB,message)
+   and LB.VirtualStats().dataFailures==failures+1,'real Leaderboard Refresh retains one dependency failure')then return end
+  local publication=LB.VirtualStats().dataRefreshes
+  R.guard(LB.DiagnosticSnapshot().projectionError==true and ReportFault('leaderboard')=='true',
+   'actual initial failure is independently observable before invalidation')
+  LB.Hide();LB.MarkDataDirty()
+  local dirty=LB.DiagnosticSnapshot()
+  if not R.setup(Retained(LB,message) and LB.VirtualStats().dataRefreshes==publication
+   and dirty.projectionDirty and not dirty.projectionCurrent and dirty.blockedReason=='hidden',
+   'hidden dirty mark retains actual error without a successful publication')then return end
+  R.expect(dirty.projectionError==true,'dirty invalidation cannot erase the retained Leaderboard fault')
+  R.expect(ReportFault('leaderboard')=='true','public hidden dirty report retains the actual fault')
+  local receiving=true
+  local oldReceiving,oldRemaining=Nexus.Sync.IsReceiving,Nexus.Sync.ReceiveTimeLeft
+  Nexus.Sync.IsReceiving=function()return receiving end
+  Nexus.Sync.ReceiveTimeLeft=function()return receiving and 1 or 0 end
+  local revision=Nexus.Revisions.Get(Nexus.Revisions.DPS_CHANGED)
+  Nexus.Revisions.Advance(Nexus.Revisions.DPS_CHANGED)
+  H.Advance(.1,.01)
+  local deferred=LB.DiagnosticSnapshot()
+  if not R.setup(Nexus.Revisions.Get(Nexus.Revisions.DPS_CHANGED)==revision+1
+   and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())~=nil
+   and Retained(LB,message) and LB.VirtualStats().dataRefreshes==publication
+   and deferred.projectionDirty and deferred.syncReceiving,
+   'real DPS revision reaches receive-deferred ViewRefresh without recovering the fault')then
+   Nexus.Sync.IsReceiving,Nexus.Sync.ReceiveTimeLeft=oldReceiving,oldRemaining;return
+  end
+  R.expect(deferred.projectionError==true,'receive-window dirty notification retains Leaderboard fault')
+  R.expect(ReportFault('leaderboard')=='true','public receive-deferred report retains the fault')
+  local pumped=P.WorkStats().leaderboardPumps
+  LB.Show('lk')
+  local pending=LB.DiagnosticSnapshot()
+  if not R.setup(pending.projectionPending and Retained(LB,message)
+   and LB.VirtualStats().dataRefreshes==publication and P.WorkStats().leaderboardPumps==pumped,
+   'restored actual request creates pending work before any pump or publication')then
+   Nexus.Sync.IsReceiving,Nexus.Sync.ReceiveTimeLeft=oldReceiving,oldRemaining;return
+  end
+  R.expect(pending.projectionError==true,'real pending retry is not successful fault recovery')
+  R.expect(ReportFault('leaderboard')=='true','public pending report retains fault independently of pending reason')
+  local refreshed,why=LB.RefreshData()
+  R.guard(refreshed==false and why=='pending' and LB.DiagnosticSnapshot().projectionPending
+   and Retained(LB,message),'repeated real request stays pending and retains its error ledger')
+  R.expect(LB.DiagnosticSnapshot().projectionError==true,'repeated pending request cannot hide the retained fault')
+  receiving=false
+  local settled=Settled(H,LB)
+  Nexus.Sync.IsReceiving,Nexus.Sync.ReceiveTimeLeft=oldReceiving,oldRemaining
+  if not R.setup(settled~=nil and LB.VirtualStats().lastDataError==nil
+   and LB.VirtualStats().dataRefreshes>publication and P.WorkStats().leaderboardPumps>pumped,
+   'ordinary real projection pumps publish and clear the retained error')then return end
+  R.guard(LB.DiagnosticSnapshot().projectionError==false and ReportFault('leaderboard')=='false',
+   'successful actual publication clears the exported retained fault')
+  R.guard(LB.VirtualStats().dataFailures==failures+1,'dirty and pending progression create no extra failure')
+  R.guard(#H.actions==0 and #H.sent==0,'retention and recovery send no gameplay or transport action')
+ end)
+ R.scenario('Community keeps its independent retained fault through the same notifications',function()
+  local H=Boot();local CB=Nexus.CommunityBuilds;CB.Show()
+  if not R.setup(Settled(H,CB)~=nil,'real Community publication and import settle')then return end
+  local label=NexusCommunityBuildsFrame._classDropBtn;local setter=label.SetText
+  local message='Synthetic Community retained diagnostic control'
+  label.SetText=function()error(message,0)end
+  local failures=CB.VirtualStats().dataFailures;local ok,err=pcall(CB.Refresh)
+  if not R.setup(not ok and err==message and Retained(CB,message)
+   and CB.VirtualStats().dataFailures==failures+1,'actual host setter exception is retained by Community owner')then
+   label.SetText=setter;return
+  end
+  local publication=CB.VirtualStats().dataRefreshes
+  CB.Hide();CB.MarkDataDirty()
+  R.guard(CB.DiagnosticSnapshot().projectionError==true and Retained(CB,message)
+   and ReportFault('community')=='true','Community hidden dirty mark keeps independent fault visible')
+  local receiving=true;local oldReceiving,oldRemaining=Nexus.Sync.IsReceiving,Nexus.Sync.ReceiveTimeLeft
+  Nexus.Sync.IsReceiving=function()return receiving end
+  Nexus.Sync.ReceiveTimeLeft=function()return receiving and 1 or 0 end
+  local revision=Nexus.Revisions.Get(Nexus.Revisions.BUILD_LIBRARY_CHANGED)
+  Nexus.Revisions.Advance(Nexus.Revisions.BUILD_LIBRARY_CHANGED)
+  H.Advance(.1,.01)
+  if not R.setup(Nexus.Revisions.Get(Nexus.Revisions.BUILD_LIBRARY_CHANGED)==revision+1
+   and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())~=nil
+   and Retained(CB,message) and CB.VirtualStats().dataRefreshes==publication,
+   'Community receives real revision deferral without publication or error clearing')then
+   label.SetText=setter;Nexus.Sync.IsReceiving,Nexus.Sync.ReceiveTimeLeft=oldReceiving,oldRemaining;return
+  end
+  local deferred=CB.DiagnosticSnapshot()
+  R.guard(deferred.projectionError==true and ReportFault('community')=='true'
+   and deferred.savedImportError==false and deferred.shareStatusError==false,
+   'Community view fault stays distinct from healthy import and Share ledgers')
+  label.SetText=setter;receiving=false;CB.Show()
+  local settled=Settled(H,CB)
+  Nexus.Sync.IsReceiving,Nexus.Sync.ReceiveTimeLeft=oldReceiving,oldRemaining
+  if not R.setup(settled~=nil and CB.VirtualStats().lastDataError==nil
+   and CB.VirtualStats().dataRefreshes>publication,'restored actual Community binding publishes successfully')then return end
+  R.guard(CB.DiagnosticSnapshot().projectionError==false and ReportFault('community')=='false',
+   'actual Community recovery clears its fault without Leaderboard source changes')
+  R.guard(CB.VirtualStats().dataFailures==failures+1 and #H.actions==0 and #H.sent==0,
+   'Community notification/control paths add no new failure or gameplay/network action')
+ end)
+ R.finish('(actual retained errors across dirty and pending; synthetic host only)')
+ checks=checks+R.n.expect+R.n.guard+R.n.setup
+end
+
 end
 
 print('PASS diagnostic snapshot/paging/export checks='..checks..'; export turns='..turns..'; bytes='..#result)
