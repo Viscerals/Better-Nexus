@@ -861,10 +861,12 @@ for _,faulted in ipairs({true,false}) do
   local importBefore=CB.VirtualStats().savedImport
   local factory=Nexus.BuildCatalog.BeginSavedMirrorCursor
   local faultCalls,firstFaultSources=0,nil
+  local faultAt={}
   local message='Synthetic persistent delegated saved-mirror cursor failure'
   if faulted then
    Nexus.BuildCatalog.BeginSavedMirrorCursor=function()
     faultCalls=faultCalls+1
+    faultAt[#faultAt+1]=H.now
     if not firstFaultSources then firstFaultSources=Sources() end
     error(message,0)
    end
@@ -942,24 +944,26 @@ for _,faulted in ipairs({true,false}) do
   local pumps=Nexus.ViewProjections.WorkStats().communityPumps
   local firstPublication,firstPump,firstErrorCleared,pendingAtPublication,failuresAtPublication
   local lostImportError=false
-  local lastFaults,lastFaultTime=faultCalls,H.now
-  local closestRetry=math.huge
+  local faultDeltas,requiredHolds={},{}
+  local holdsValid=true
   receiving.value=false
   -- No explicit UI action or Refresh after receive-end. Only registered
   -- frame/scheduler paths may request, pump or publish.
   for i=1,2000 do
    escaped=escaped+Step(H,1)
    local d,s=CB.DiagnosticSnapshot(),CB.VirtualStats()
-   if faultCalls>lastFaults then
-    closestRetry=math.min(closestRetry,H.now-lastFaultTime)
-    lastFaults,lastFaultTime=faultCalls,H.now
-   end
    if faulted and s.savedImport.pending and s.lastImportError~=message then lostImportError=true end
    if not firstPump and Nexus.ViewProjections.WorkStats().communityPumps>pumps then firstPump=i end
    if not firstErrorCleared and faulted and s.lastDataError==nil then firstErrorCleared=i end
    if not firstPublication and s.dataBinds>priorBinds and IncomingVisible(H,id) and d.resultCount==2 then
     firstPublication=i;pendingAtPublication=s.savedImport.pending;failuresAtPublication=s.dataFailures
    end
+  end
+  for i=2,#faultAt do
+   local elapsed=faultAt[i]-faultAt[i-1]
+   local required=math.min(.5*(2^math.min(i-2,4)),8)
+   faultDeltas[#faultDeltas+1]=elapsed;requiredHolds[#requiredHolds+1]=required
+   if elapsed<required-1e-7 then holdsValid=false end
   end
   local d,s=CB.DiagnosticSnapshot(),CB.VirtualStats()
   C.guard(Nexus.BuildCatalog.Get(id)~=nil,tag..': incoming committed catalog row survives observation')
@@ -982,6 +986,7 @@ for _,faulted in ipairs({true,false}) do
    projectionCurrent=d.projectionCurrent,projectionPending=d.projectionPending,projectionDirty=d.projectionDirty,
    importPending=s.savedImport.pending,importPhase=s.savedImport.pendingPhase or 'none',
    importCompletions=s.savedImport.completions-importBefore.completions,faultCalls=faultCalls,
+   faultAt=faultAt,faultDeltas=faultDeltas,requiredHolds=requiredHolds,
    importFailures=s.importFailures or false,lastImportError=s.lastImportError or false,
    dataFailures=s.dataFailures,deferredRefreshes=s.deferredRefreshes-priorRefreshes,
    dataBinds=s.dataBinds-priorBinds,positivePumps=Nexus.ViewProjections.WorkStats().communityPumps-pumps,
@@ -993,7 +998,12 @@ for _,faulted in ipairs({true,false}) do
    C.expect(not lostImportError and s.lastImportError==message and s.importFailures==faultCalls
     and d.savedImportError==true and s.dataFailures==0 and s.lastDataError==nil,
     tag..': successful All publication never erases or reclassifies the import failure')
-   C.expect(closestRetry>=.49,tag..': import retries retain an independent bounded hold',closestRetry)
+   C.guard(#faultAt==faultCalls and #faultAt>=4,
+    tag..': every real factory fault has an observed timestamp')
+   C.expect(holdsValid,tag..': adjacent actual faults respect each independent exponential hold',F.Serialize(faultDeltas))
+   C.expect(faultAt[4] and faultAt[3] and faultAt[4]-faultAt[3]>=2-1e-7,
+    tag..': third-to-fourth fault includes receive admission time in its two-second hold',
+    faultAt[4] and faultAt[4]-faultAt[3])
   end
   C.guard((s.savedImport.maxWorkPerPump or 0)<=25,tag..': each real import pump respects its work budget')
   Nexus.BuildCatalog.BeginSavedMirrorCursor=factory
@@ -1064,6 +1074,155 @@ C.scenario('held-import-hide-show-dormancy',function()
  C.guard(final.dataBinds>hidden.dataBinds and Nexus.ViewProjections.WorkStats().communityPumps>pumps,
   'reshow recovers positive view projection work and publication')
  C.guard(escaped==0 and #H.actions==0 and #H.sent==0,'hide/show recovery sends no game or network action')
+end)
+
+-- S1 uses f3b00aed as its baseline. Normal opens stay nonreceiving:
+-- neither the initial fault nor the held reopen is hidden by sync deferral.
+for _,warm in ipairs({false,true}) do
+ local tag=warm and 'normal-reopen-import-fault' or 'cold-open-import-fault'
+ C.scenario(tag,function()
+  local H,CB,receiving
+  if warm then
+   H,CB,receiving=Boot(tag);if not H then return end
+   CB.Hide()
+  else
+   local fx=L.New({players={{name='Existing',class='MAGE',variant=1,title='Existing committed build'}}})
+   local db=fx:Install(F.Database())
+   db.buildFilters={qualifiedOnly=false,currentClassOnly=true,scope='all',sortMode='dps',page=1,search=''}
+   H=F.Boot(db,function(h) h.playerLevel=60;h.perks.serverBuildSlots={} end)
+   CB=Nexus.CommunityBuilds;receiving={value=false}
+   Nexus.Sync.IsReceiving=function() return receiving.value end
+  end
+  local before=CB.VirtualStats()
+  if not C.setup(Nexus.StartupStatus().state=='ready' and not CB.IsShown()
+   and not before.savedImport.pending and not Nexus.Sync.IsReceiving(),
+   tag..': real startup and hidden nonreceiving open prerequisites reached') then return end
+  local factory=Nexus.BuildCatalog.BeginSavedMirrorCursor
+  local calls,at=0,{}
+  local message='Synthetic normal-open saved cursor failure'
+  Nexus.BuildCatalog.BeginSavedMirrorCursor=function()
+   calls=calls+1;at[#at+1]=H.now;error(message,0)
+  end
+  local ok,err=pcall(CB.Show)
+  local failed=CB.VirtualStats()
+  if not C.setup(calls==1 and failed.savedImport.pending
+   and failed.savedImport.jobs==before.savedImport.jobs+1,
+   tag..': public Show reaches one real pending-job cleanup exception') then return end
+  C.expect(ok and CB.IsShown(),tag..': import exception is contained and the Library opens',err)
+  C.expect(failed.importFailures==before.importFailures+1 and failed.lastImportError==message
+   and failed.dataFailures==before.dataFailures and CB.DiagnosticSnapshot().savedImportError,
+   tag..': open-time failure enters the independent import ledger exactly once')
+  CB.Hide()
+  local escaped=Step(H,10)
+  local hidden=CB.VirtualStats()
+  C.guard(calls==1 and hidden.savedImport.pumps==failed.savedImport.pumps,
+   tag..': hidden frames do not retry the failed import')
+  local reopen,reopenErr=pcall(CB.Show)
+  C.expect(reopen and CB.IsShown() and calls==1,
+   tag..': normal reopen inside the hold opens without an early import retry',reopenErr)
+  escaped=escaped+Step(H,30)
+  C.expect(calls==1 and CB.VirtualStats().lastImportError==message,
+   tag..': hide and reopen preserve the original first400ms hold')
+  escaped=escaped+Step(H,160)
+  local published=CB.VirtualStats()
+  C.expect(CB.IsShown() and IsCurrent(CB) and CB.DiagnosticSnapshot().resultCount==1
+   and published.dataBinds>before.dataBinds and published.savedImport.pending,
+   tag..': All automatically publishes committed data while the import still fails')
+  C.expect(calls>=2 and at[2]-at[1]>=.5-1e-7
+   and published.importFailures==before.importFailures+calls and published.lastImportError==message,
+   tag..': real retries occur only after their hold and preserve error evidence',F.Serialize(at))
+  Nexus.BuildCatalog.BeginSavedMirrorCursor=factory
+  local recovered=Settle(H,CB,2000)
+  local final=CB.VirtualStats()
+  C.expect(recovered and final.savedImport.completions==before.savedImport.completions+1
+   and final.savedImport.jobs==before.savedImport.jobs+1 and final.lastImportError==nil
+   and CB.DiagnosticSnapshot().savedImportError==false,
+   tag..': restored cursor completes the original job exactly once without another Show',recovered)
+  C.guard(final.savedImport.workUnits>failed.savedImport.workUnits and final.savedImport.maxWorkPerPump<=25
+   and escaped==0 and #H.actions==0 and #H.sent==0,
+   tag..': recovery performs bounded real work without escaped frame errors or game/network actions')
+ end)
+end
+
+C.scenario('open-import-begin-failure-before-job',function()
+ local H,CB,receiving=Boot('begin-before-job');if not H then return end
+ CB.Hide()
+ local before=CB.VirtualStats()
+ local slots=Nexus.GameAdapter.Slots
+ local calls,origins=0,{}
+ local message='Synthetic saved import Begin dependency failure'
+ Nexus.GameAdapter.Slots=function(...)
+  local caller=debug.getinfo(2,'S')
+  if caller and caller.source:find('core/CommunityController.lua',1,true) then
+   calls=calls+1;origins[#origins+1]=Sources();error(message,0)
+  end
+  return slots(...)
+ end
+ local ok,err=pcall(CB.Show)
+ local failed=CB.VirtualStats()
+ if not C.setup(calls==1 and not failed.savedImport.pending
+  and failed.savedImport.jobs==before.savedImport.jobs and not Nexus.Sync.IsReceiving(),
+  'normal Show reaches a Begin dependency failure before a real job exists') then return end
+ C.expect(ok and CB.IsShown() and failed.lastImportError==message and failed.importFailures==before.importFailures+1,
+  'pre-job Begin failure opens the Library and retains import evidence',err)
+ C.expect(CB.DiagnosticSnapshot().savedImportPending==false and CB.DiagnosticSnapshot().savedImportError==true,
+  'retry intent never masquerades as an existing import job')
+ local escaped=Step(H,40)
+ C.expect(calls==1 and CB.VirtualStats().lastImportError==message,
+  'no-job observation cannot erase Begin error or bypass its first400ms hold')
+ -- The genuine Mine control must reflect the unresolved import request even
+ -- though no controller job exists; it must not manufacture a pending flag.
+ if CB.IsShown() then NexusCommunityBuildsFrame._myBuildsBtn:Click() end
+ C.expect(CB.DiagnosticSnapshot().filterScope=='mine'
+  and CB.DiagnosticSnapshot().blockedReason=='saved-import-error'
+  and CB.DiagnosticSnapshot().savedImportPending==false,
+  'Mine reports unresolved Begin error separately from actual job pending')
+ -- A normal no-source refusal is still not a completed import. Keep the
+ -- original failure while the real Begin returns false without a new error.
+ local refused=0
+ local refusalFinished
+ Nexus.GameAdapter.Slots=function(...)
+  local caller=debug.getinfo(2,'S')
+  if caller and caller.source:find('core/CommunityController.lua',1,true) then
+   refused=refused+1
+   if refused==1 then H.now=H.now+.6;refusalFinished=H.now end
+   return nil
+  end
+  return slots(...)
+ end
+ for _=1,100 do
+  if refused>0 then break end
+  escaped=escaped+Step(H,1)
+ end
+ local mineRefreshes=0
+ local frame=NexusCommunityBuildsFrame
+ local setText=frame and frame._classDropBtn.SetText
+ if setText then
+  frame._classDropBtn.SetText=function(self,text)
+   mineRefreshes=mineRefreshes+1;return setText(self,text)
+  end
+ end
+ escaped=escaped+Step(H,40)
+ C.expect(refused==1 and not CB.VirtualStats().savedImport.pending
+  and CB.VirtualStats().savedImport.jobs==before.savedImport.jobs
+  and CB.VirtualStats().lastImportError==message and CB.VirtualStats().importFailures==before.importFailures+1,
+  'a clock-advanced refused Begin preserves its error and full first400ms hold',refused)
+ C.expect(refusalFinished and setText and mineRefreshes==0,
+  'Mine does not request ordinary refreshes while unresolved Begin intent is held',mineRefreshes)
+ if setText then frame._classDropBtn.SetText=setText end
+ print('OBSERVED refused-Begin-clock-hold',F.Serialize({refusals=refused,
+  refusalFinished=refusalFinished,observedAt=H.now,mineRefreshes=mineRefreshes}))
+ Nexus.GameAdapter.Slots=slots
+ local recovered=Settle(H,CB,2000)
+ local final=CB.VirtualStats()
+ C.expect(recovered and final.savedImport.jobs==before.savedImport.jobs+1
+  and final.savedImport.completions==before.savedImport.completions+1
+  and final.lastImportError==nil and final.importFailures==before.importFailures+1,
+  'restoring Begin dependency automatically starts and completes exactly one real job',recovered)
+ C.guard(final.savedImport.pumps>before.savedImport.pumps and final.savedImport.workUnits>before.savedImport.workUnits
+  and escaped==0 and #H.actions==0 and #H.sent==0,
+  'Begin recovery advances real work with no frame exception or game/network action')
+ print('OBSERVED Begin-failure-origin',F.Serialize(origins))
 end)
 end
 

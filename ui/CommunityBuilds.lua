@@ -384,17 +384,6 @@ function M.GetViewMode() return "builds" end
 function M.Show()
     if M.WaitForStartup("Community",M.Show) then return false,"pending" end
     return Measure("community.show", function()
-        local controller = ControllerInstance()
-        Measure("community.saved-import",
-            controller.BeginSavedLoadoutImport, true)
-        -- Preserve the bounded first import unit on open, but keep it outside
-        -- Renderer.Refresh so public filters and cached page clicks never
-        -- become personal-reconciliation work.
-        if type(controller.HasPendingSavedLoadoutImport) == "function"
-            and controller.HasPendingSavedLoadoutImport()
-            and type(controller.PumpSavedLoadoutImport) == "function" then
-            controller.PumpSavedLoadoutImport(25)
-        end
         return RendererInstance().Show()
     end)
 end

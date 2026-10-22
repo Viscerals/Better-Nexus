@@ -386,12 +386,16 @@ function Renderer.New(options)
     local function PrepareData(force)
         local controller = ControllerInstance()
         if force and type(controller.BeginSavedLoadoutImport) == "function" then
-            controller.BeginSavedLoadoutImport(true)
+            local started = Measure("community.saved-import",
+                controller.BeginSavedLoadoutImport, true)
+            -- A refused Begin did not complete an earlier failed request.
+            if not started then return 0, false, false end
         end
         if type(controller.HasPendingSavedLoadoutImport) == "function"
             and controller.HasPendingSavedLoadoutImport() then
             return controller.PumpSavedLoadoutImport(25)
         end
+        if force then return 0, false, false end
         return controller.ImportCurrentSavedLoadouts(false)
     end
 
@@ -2295,10 +2299,36 @@ local function EnsureFrame()
         -- Keep its evidence until the import finishes, even if All publishes.
         virtualStats.importFailures = virtualStats.importFailures + 1
         virtualStats.lastImportError = tostring(err):sub(1, 300)
+        viewDiagnostic.importRetryPending = true
         pump.now = type(GetTime) == "function" and GetTime() or 0
         local delay = FAIL_BACKOFF_BASE
             * (2 ^ math.min(virtualStats.importFailures - 1, 4))
         pump.importHoldUntil = pump.now + math.min(delay, FAIL_BACKOFF_MAX)
+    end
+    function pump.Import(force)
+        local ok, advanced, pending, started = pcall(PrepareData, force)
+        if not ok then
+            pump.RetainImport(advanced)
+            return false, true
+        end
+        if started == false and viewDiagnostic.importRetryPending then
+            -- Keep a failed open request alive if its source is unavailable.
+            -- No new exception occurred, so do not recharge its error count.
+            pump.now = type(GetTime) == "function" and GetTime() or 0
+            pump.importHoldUntil = pump.now + FAIL_BACKOFF_BASE
+            return true, true
+        end
+        viewDiagnostic.importRetryPending = false
+        pump.importHoldUntil = 0
+        if not pending then virtualStats.lastImportError = nil end
+        return true, pending
+    end
+    function M.PrepareOpenImport()
+        -- Keep the first bounded import unit on open, outside Refresh. The
+        -- same owner contains Begin/pump failures and honors a held reopen.
+        pump.now = type(GetTime) == "function" and GetTime() or 0
+        if pump.now < pump.importHoldUntil then return end
+        pump.Import(true)
     end
     -- Named so Hide can detach it. Hidden frames already skip OnUpdate in
     -- 3.3.5a; clearing the script makes dormancy explicit and prevents any
@@ -2341,11 +2371,12 @@ local function EnsureFrame()
 
         local importPending = type(controller.HasPendingSavedLoadoutImport) == "function"
             and controller.HasPendingSavedLoadoutImport()
-        if not importPending then
+        if not importPending and not viewDiagnostic.importRetryPending then
             virtualStats.lastImportError = nil
             pump.importHoldUntil = 0
         end
-        local importDue = importPending and pump.now >= pump.importHoldUntil
+        local importDue = (importPending or viewDiagnostic.importRetryPending)
+            and pump.now >= pump.importHoldUntil
         -- Due import work owns this frame before receive-end publication.
         -- A held personal import still lets All publish committed shared data.
         -- A receive transition is not evidence that a failed view recovered.
@@ -2364,12 +2395,8 @@ local function EnsureFrame()
         -- Receive-window coalescing: while Sync is receiving, hold dirty
         -- republish (except a gated cold open) until the window ends above.
         if importDue then
-            local imported, advanced, pending = pcall(PrepareData, false)
-            if not imported then
-                pump.RetainImport(advanced)
-            else
-                pump.importHoldUntil = 0
-                if not pending then virtualStats.lastImportError = nil end
+            local imported, pending = pump.Import(viewDiagnostic.importRetryPending)
+            if imported then
                 if not pending and not (viewDiagnostic.projectionError
                     and pump.now < failBackoffUntil)
                     and pump.GuardedRefresh() then pump.Note() end
@@ -2386,7 +2413,8 @@ local function EnsureFrame()
             pumpTicker = pumpTicker + elapsed
             if pumpTicker >= pump.interval then
                 pumpTicker = 0
-                if (not importPending or (virtualStats.lastImportError ~= nil
+                if ((not importPending and not viewDiagnostic.importRetryPending)
+                    or (virtualStats.lastImportError ~= nil
                     and FilterSettings().scope ~= "mine")) and refreshDirty
                     and not viewDiagnostic.projectionPending
                     and not receivingNow then
@@ -2488,7 +2516,6 @@ local function EnsureFrame()
         frame:SetScript("OnUpdate", nil)
         retryTicker, statusTicker, dataTicker, pumpTicker = 0, 0, 0, 0
         failBackoffUntil = 0
-        pump.importHoldUntil = 0
         pump.now = 0
         if dropPanel then dropPanel:Hide() end
         if sortPanel then sortPanel:Hide() end
@@ -3134,7 +3161,8 @@ function M.DiagnosticSnapshot()
     local reason
     if not shown then reason = "hidden"
     elseif viewDiagnostic.projectionError then reason = "projection-error"
-    elseif base.filterScope == "mine" and base.savedImportPending then
+    elseif base.filterScope == "mine" and (base.savedImportPending
+        or viewDiagnostic.importRetryPending) then
         reason = virtualStats.lastImportError ~= nil
             and "saved-import-error" or "saved-import"
     elseif viewDiagnostic.projectionPending then reason = "projection-pending"
@@ -3272,8 +3300,10 @@ function M.Refresh()
     local importPending = type(controller.HasPendingSavedLoadoutImport) == "function"
         and controller.HasPendingSavedLoadoutImport()
     -- Show may finish the real import before the next frame callback.
-    if not importPending then virtualStats.lastImportError = nil end
-    if fs.scope == "mine" and importPending then
+    if not importPending and not viewDiagnostic.importRetryPending then
+        virtualStats.lastImportError = nil
+    end
+    if fs.scope == "mine" and (importPending or viewDiagnostic.importRetryPending) then
         refreshDirty = true
         -- The rows still shown are the last published ones, not the result
         -- of the current filters.
@@ -3703,6 +3733,7 @@ end
 
     function M.Show()
         Measure("community.frame.ensure", EnsureFrame)
+        M.PrepareOpenImport()
         M.ApplyResponsiveLayout(false)
         if Nexus.Panel and Nexus.Panel.AttachMenuFrame then
             Nexus.Panel.AttachMenuFrame(frame)
