@@ -2245,6 +2245,8 @@ local function EnsureFrame()
                 tonumber(virtualStats.dataFailures) or 1)
             if failures <= (pump.failuresNoted or 0) then return end
             pump.failuresNoted = failures
+            -- Only a newly observed failure reads the clock to arm its hold.
+            pump.now = type(GetTime) == "function" and GetTime() or 0
             local delay = FAIL_BACKOFF_BASE
                 * (2 ^ math.min(failures - 1, 4))
             if delay > FAIL_BACKOFF_MAX then delay = FAIL_BACKOFF_MAX end
@@ -2261,8 +2263,6 @@ local function EnsureFrame()
         pump.failuresNoted = math.max(pump.failuresNoted or 0,
             tonumber(virtualStats.dataFailures) or 0)
         local ok, result, why = pcall(M.Refresh)
-        -- Anchor the hold to the observed result of this synchronous refresh.
-        pump.now = type(GetTime) == "function" and GetTime() or 0
         if not ok then
             pump.Retain(result)
             error(result, 0)
@@ -2273,6 +2273,7 @@ local function EnsureFrame()
     -- An escaped refresh used to skip the safety ticker. Keep the error on
     -- the diagnostic the backoff already reads, and remember the message.
     function pump.Retain(err)
+        refreshDirty = true
         viewDiagnostic.projectionPending = false
         viewDiagnostic.projectionError = true
         viewDiagnostic.projectionCurrent = false
@@ -2299,6 +2300,8 @@ local function EnsureFrame()
             and Nexus.Sync.IsReceiving() or false
         local now = type(GetTime) == "function" and GetTime() or 0
         pump.now = now
+        if viewDiagnostic.projectionError and (tonumber(virtualStats.dataFailures) or 0)
+            > (pump.failuresNoted or 0) then pump.Note() end
         retryTicker = retryTicker + elapsed
         if retryTicker >= 0.5 then
             retryTicker = 0
@@ -2351,7 +2354,9 @@ local function EnsureFrame()
                 pump.importHoldUntil = failBackoffUntil
             else
                 pump.importHoldUntil = 0
-                if not pending and pump.GuardedRefresh() then pump.Note() end
+                if not pending and not (viewDiagnostic.projectionError
+                    and pump.now < failBackoffUntil)
+                    and pump.GuardedRefresh() then pump.Note() end
             end
         end
         local coldStart = virtualStats.dataBinds == 0
@@ -2400,6 +2405,8 @@ local function EnsureFrame()
                         local heldFailures = virtualStats.dataFailures
                         local refreshOk, refreshErr = pcall(M.Refresh)
                         if not refreshOk then
+                            refreshDirty = true
+                            viewDiagnostic.projectionPending = false
                             virtualStats.lastDataError = tostring(
                                 refreshErr or "Community refresh failed"):sub(1, 300)
                         end

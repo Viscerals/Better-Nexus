@@ -8,6 +8,8 @@
 -- predicates stay in the file to guard those accepted stages on every replay.
 -- The advancing-clock explicit exception uses 6dd5ceae as its baseline. It
 -- characterizes synthetic timing robustness, not native GetTime clock caching.
+-- Show/direct-refresh, cached-render retry, replacement liveness and frame-clock
+-- regressions use 688f6b9. Hidden dormancy and safety-refresh roles guard that pin.
 local F=dofile('tests/prototype/format5_support.lua')
 local V=dofile('tests/prototype/view_regression_support.lua')
 local C=V.Checker('community_failure_hold')
@@ -497,6 +499,7 @@ end)
 
 C.scenario('replacement-thrown-failure-message',function()
  local H,CB=Boot({value=false},true)
+ local read=Nexus.DpsCapture.CommunityEligibilityCursorNext
  local nextCalls,throws,armed=0,0,false
  local older='Synthetic older pump failure before replacement throw'
  local newer='Synthetic newer replacement refresh throw'
@@ -527,6 +530,17 @@ C.scenario('replacement-thrown-failure-message',function()
   'replacement exception remains contained and leaves a failed current request')
  C.guard(stats.dataFailures==1,'replacement exception preserves the original hold failure count')
  C.guard(#H.actions==0 and #H.sent==0,'replacement exception sends no game or network action')
+ C.expect(not d.projectionPending,
+  'thrown automatic replacement does not claim its cancelled job is pending')
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=read
+ local pumps=Nexus.ViewProjections.WorkStats().communityPumps
+ local recovered=Settle(H,CB,200)
+ local final=CB.VirtualStats()
+ print('OBSERVED replacement-thrown-failure-recovery','frames='..tostring(recovered),
+  'positive-pumps='..(Nexus.ViewProjections.WorkStats().communityPumps-pumps))
+ C.expect(recovered~=nil and Nexus.ViewProjections.WorkStats().communityPumps>pumps
+  and final.lastDataError==nil and final.dataFailures==1,
+  'replacement exception resumes actual work and publishes within two seconds of the hold')
 end)
 
 C.scenario('explicit-refresh-throw-clock-advance',function()
@@ -584,5 +598,202 @@ C.scenario('explicit-refresh-throw-clock-advance',function()
   'healthy clock-advanced recovery adds no failure or escaped background exception',escaped)
  C.guard(#H.actions==0 and #H.sent==0,'clock-advanced exception sends no game or network action')
 end)
+
+C.scenario('show-handled-failure-hidden-hold',function()
+ local receiving={value=true}
+ local H,CB=Boot(receiving,true)
+ -- Finish the independent startup ViewRefresh callback while this window is
+ -- hidden, so the measured retries belong to its registered frame pump.
+ Step(H,100)
+ local begin=Nexus.DpsCapture.BeginCommunityEligibilityCursor
+ local refusals=0
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=function()
+  refusals=refusals+1;return nil
+ end
+ CB.Show()
+ if not C.setup(refusals==1 and CB.VirtualStats().dataFailures==1
+  and CB.VirtualStats().savedImport.pending and CB.VirtualStats().savedImport.pumps==0,
+  'Show records one handled failure while an empty saved import is deferred') then return end
+ receiving.value=false
+ local escaped=Step(H,40)
+ local quiet=refusals
+ print('OBSERVED show-handled-failure-hold','after-show=1','after-400ms='..quiet,
+  'import-pending='..tostring(CB.VirtualStats().savedImport.pending))
+ C.expect(quiet==1,'Show failure holds automatic retry including empty import completion',quiet)
+ C.guard(not CB.VirtualStats().savedImport.pending,
+  'healthy empty saved import completes independently of the view hold')
+ local frame=NexusCommunityBuildsFrame
+ CB.Hide()
+ local hidden=CB.VirtualStats()
+ local pumps=Nexus.ViewProjections.WorkStats().communityPumps
+ C.guard(frame:GetScript('OnUpdate')==nil,'Hide detaches the real Community frame update')
+ escaped=escaped+Step(H,100)
+ local dormant=CB.VirtualStats()
+ C.guard(refusals==quiet and dormant.dataFailures==hidden.dataFailures
+  and dormant.savedImport.pumps==hidden.savedImport.pumps
+  and Nexus.ViewProjections.WorkStats().communityPumps==pumps,
+  'hidden failure performs no view retry, projection work or import pump')
+ C.guard(CB.DiagnosticSnapshot().blockedReason=='hidden'
+  and dormant.lastDataError=='DPS eligibility cursor unavailable',
+  'hidden diagnostic retains its failure message')
+ CB.Show()
+ local shown=refusals
+ if not C.setup(shown==quiet+1 and frame:GetScript('OnUpdate')~=nil,
+  'Show reattaches updates and observes one newer handled failure') then return end
+ escaped=escaped+Step(H,40)
+ C.expect(refusals==shown,'reshow failure receives its hold before automatic retry',refusals)
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=begin
+ C.guard(Settle(H,CB)~=nil and CB.VirtualStats().lastDataError==nil,
+  'restored factory recovers after hidden failure and reshow')
+ C.guard(escaped==0 and #H.actions==0 and #H.sent==0,
+  'Show/hide failure lifecycle has no escaped frame error, game or network action')
+end)
+
+C.scenario('direct-refresh-pending-original-hold',function()
+ local H,CB=Boot({value=false},true)
+ local begin=Nexus.DpsCapture.BeginCommunityEligibilityCursor
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=function() return nil end
+ CB.Show()
+ if not C.setup(CB.VirtualStats().dataFailures==1,
+  'direct Show has one unnoted handled failure before any frame') then return end
+ Nexus.DpsCapture.BeginCommunityEligibilityCursor=begin
+ local ready,why=CB.Refresh()
+ if not C.setup(ready==false and why=='pending' and CB.DiagnosticSnapshot().projectionPending,
+  'direct public refresh provides real healthy pending replacement work') then return end
+ local pumps=Nexus.ViewProjections.WorkStats().communityPumps
+ local firstWork,escaped=nil,0
+ for i=1,70 do
+  escaped=escaped+Step(H,1)
+  if not firstWork and Nexus.ViewProjections.WorkStats().communityPumps>pumps then firstWork=i end
+ end
+ print('OBSERVED direct-refresh-pending-original-hold','first-work='..tostring(firstWork))
+ C.expect(firstWork and firstWork>=50 and firstWork<=70,
+  'unnoted failure holds healthy pending work to the original observed deadline',firstWork)
+ C.guard(Settle(H,CB)~=nil and CB.VirtualStats().dataFailures==1
+  and CB.VirtualStats().lastDataError==nil,
+  'healthy replacement publishes without recharging the old failure count')
+ C.guard(escaped==0 and #H.actions==0 and #H.sent==0,
+  'direct pending observation sends no game or network action')
+end)
+
+C.scenario('safety-probe-cached-throw-retry',function()
+ local H,CB=Boot({value=false},true)
+ CB.Show()
+ if not C.setup(Settle(H,CB)~=nil and not CB.VirtualStats().refreshDirty,
+  'published view is clean before the safety-probe cache failure') then return end
+ local frame=NexusCommunityBuildsFrame
+ local read=Nexus.ViewProjections.BuildsCurrent
+ local setText=frame._resultText.SetText
+ local reads,throws=0,0
+ local probe,cacheCurrent,cleanAtProbe,cleanAtThrow=false,false,false,false
+ local message='Synthetic late cached-result refresh exception'
+ Nexus.ViewProjections.BuildsCurrent=function(...)
+  reads=reads+1
+  local current=read(...)
+  if not probe then
+   probe=true;cacheCurrent=current==true;cleanAtProbe=not CB.VirtualStats().refreshDirty
+   return false
+  end
+  return current
+ end
+ frame._resultText.SetText=function(self,text)
+  if throws==0 and tostring(text):find('Showing ',1,true) then
+   throws=throws+1;cleanAtThrow=not CB.VirtualStats().refreshDirty
+   error(message,0)
+  end
+  return setText(self,text)
+ end
+ local escaped=0
+ for _=1,900 do
+  if throws>0 then break end
+  escaped=escaped+Step(H,1)
+ end
+ local failed,d=CB.VirtualStats(),CB.DiagnosticSnapshot()
+ if not C.setup(probe and cacheCurrent and cleanAtProbe and cleanAtThrow and reads>=2
+  and throws==1 and failed.dataFailures==1 and failed.lastDataError==message,
+  'real safety probe triggers late host exception after a clean cached list is served') then return end
+ C.guard(d.blockedReason=='projection-error' and not d.projectionPending,
+  'late cache exception records error and no pending projection')
+ C.expect(failed.refreshDirty,'retained late cache exception leaves automatic refresh work dirty')
+ Nexus.ViewProjections.BuildsCurrent=read
+ frame._resultText.SetText=setText
+ local recovered=Settle(H,CB,200)
+ local final=CB.VirtualStats()
+ print('OBSERVED safety-probe-cached-throw-retry','reads='..reads,
+  'dirty-after-failure='..tostring(failed.refreshDirty),'recovered-frames='..tostring(recovered),
+  'refreshes='..(final.dataRefreshes-failed.dataRefreshes))
+ C.expect(recovered~=nil and final.dataRefreshes>failed.dataRefreshes
+  and final.lastDataError==nil and final.dataFailures==1,
+  'late cache failure automatically republishes within two seconds without manual invalidation or another probe')
+ C.guard(escaped==0 and #H.actions==0 and #H.sent==0,
+  'safety-probe failure sends no game or network action')
+end)
+
+C.scenario('automatic-refresh-throw-clock-advance',function()
+ local H,CB=Boot({value=false},true)
+ CB.Show()
+ if not C.setup(Settle(H,CB)~=nil,'healthy cache settles before automatic clock-advanced refresh') then return end
+ local frame=NexusCommunityBuildsFrame
+ local setText=frame._classDropBtn.SetText
+ local calls,throws=0,0
+ local message='Synthetic clock-advanced automatic refresh exception'
+ frame._classDropBtn.SetText=function(self,text)
+  calls=calls+1
+  if throws==0 then throws=1;H.now=H.now+.6;error(message,0) end
+  return setText(self,text)
+ end
+ CB.MarkDataDirty()
+ local escaped=0
+ for _=1,100 do
+  if throws>0 then break end
+  escaped=escaped+Step(H,1)
+ end
+ local failed=CB.VirtualStats()
+ if not C.setup(throws==1 and calls==1 and failed.dataFailures==1 and failed.lastDataError==message,
+  'automatic refresh observes one clock-advanced host exception') then return end
+ escaped=escaped+Step(H,40)
+ local quiet=CB.VirtualStats()
+ print('OBSERVED automatic-refresh-throw-clock-advance','calls-after-400ms='..calls,
+  'refreshes='..(quiet.dataRefreshes-failed.dataRefreshes))
+ C.expect(calls==1 and quiet.dataRefreshes==failed.dataRefreshes,
+  'automatic thrown refresh holds retry for 400ms after its observed failure',calls)
+ C.guard(Settle(H,CB,200)~=nil and CB.VirtualStats().lastDataError==nil
+  and CB.VirtualStats().dataRefreshes>failed.dataRefreshes,
+  'clock-advanced automatic refresh eventually republishes')
+ C.guard(CB.VirtualStats().dataFailures==1 and escaped==0 and #H.actions==0 and #H.sent==0,
+  'automatic clock recovery adds no failure, escaped exception, game or network action')
+end)
+
+C.scenario('production-pump-failure-clock-advance',function()
+ local H,CB=Boot({value=false},true)
+ local read=Nexus.DpsCapture.CommunityEligibilityCursorNext
+ local failures=0
+ local message='Synthetic clock-advanced production cursor failure'
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=function(...)
+  if failures==0 then failures=1;H.now=H.now+.6;return false,message end
+  return read(...)
+ end
+ CB.Show()
+ local escaped=0
+ for _=1,100 do
+  if CB.VirtualStats().dataFailures>0 then break end
+  escaped=escaped+Step(H,1)
+ end
+ local failed=CB.VirtualStats()
+ if not C.setup(failures==1 and failed.dataFailures==1 and failed.lastDataError==message
+  and CB.DiagnosticSnapshot().projectionPending,
+  'real clock-advanced cursor failure leaves healthy replacement work pending') then return end
+ local pumps=Nexus.ViewProjections.WorkStats().communityPumps
+ escaped=escaped+Step(H,40)
+ local progress=Nexus.ViewProjections.WorkStats().communityPumps-pumps
+ print('OBSERVED production-pump-failure-clock-advance','positive-pumps-after-400ms='..progress)
+ C.expect(progress==0,'production cursor failure starts its hold after synchronous work completes',progress)
+ C.guard(Settle(H,CB,200)~=nil and Nexus.ViewProjections.WorkStats().communityPumps>pumps
+  and CB.VirtualStats().lastDataError==nil,
+  'clock-advanced production failure eventually pumps and publishes')
+ C.guard(CB.VirtualStats().dataFailures==1 and escaped==0 and #H.actions==0 and #H.sent==0,
+  'production clock recovery adds no failure, escaped exception, game or network action')
+end)
+
 
 C.finish('(public failure hold and recovery; synthetic host only)')
