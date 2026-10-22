@@ -615,6 +615,8 @@ function Renderer.New(options)
     local refreshDirty = false
     local viewDiagnostic = {
         publishedAt=nil,publishedPage=0,
+        -- Last failure remains visible until a successful publication; pending
+        -- replacement work and ordinary invalidation do not confirm recovery.
         projectionCurrent=false,projectionPending=false,projectionError=false,
         bundledCount=0,overlayCount=0,availableCount=0,
         filterMatchedCount=0,qualifyingCount=0,resultCount=0,
@@ -2241,11 +2243,13 @@ local function EnsureFrame()
         if viewDiagnostic.projectionError then
             local failures = math.max(1,
                 tonumber(virtualStats.dataFailures) or 1)
+            if failures <= (pump.failuresNoted or 0) then return end
+            pump.failuresNoted = failures
             local delay = FAIL_BACKOFF_BASE
                 * (2 ^ math.min(failures - 1, 4))
             if delay > FAIL_BACKOFF_MAX then delay = FAIL_BACKOFF_MAX end
             failBackoffUntil = pump.now + delay
-        else
+        elseif viewDiagnostic.projectionCurrent then
             failBackoffUntil = 0
         end
     end
@@ -2277,6 +2281,7 @@ local function EnsureFrame()
         local receivingNow = Nexus.Sync and Nexus.Sync.IsReceiving
             and Nexus.Sync.IsReceiving() or false
         local now = type(GetTime) == "function" and GetTime() or 0
+        pump.now = now
         retryTicker = retryTicker + elapsed
         if retryTicker >= 0.5 then
             retryTicker = 0
@@ -2306,13 +2311,13 @@ local function EnsureFrame()
 
         local importPending = type(controller.HasPendingSavedLoadoutImport) == "function"
             and controller.HasPendingSavedLoadoutImport()
-        if receiveEnded and refreshDirty then
+        -- An import owns this frame before ordinary receive-end publication.
+        -- A receive transition is not evidence that a failed view recovered.
+        if receiveEnded and refreshDirty and not importPending
+            and not (viewDiagnostic.projectionError and now < failBackoffUntil) then
             virtualStats.deferredRefreshes =
                 virtualStats.deferredRefreshes + 1
-            failBackoffUntil = 0
-            local refreshOk, refreshErr = pcall(M.Refresh)
-            if refreshOk then return end
-            pump.Retain(refreshErr)
+            if pump.GuardedRefresh() then pump.Note(); return end
         end
 
         -- A saved import is a short state machine and has to advance on the
@@ -2322,7 +2327,6 @@ local function EnsureFrame()
         -- backs off without stopping a healthy import.
         -- Receive-window coalescing: while Sync is receiving, hold dirty
         -- republish (except a gated cold open) until the window ends above.
-        pump.now = now
         if importPending and pump.now >= pump.importHoldUntil then
             local imported, advanced, pending = pcall(PrepareData, false)
             if not imported then
@@ -3087,10 +3091,10 @@ function M.DiagnosticSnapshot()
     local dirty = refreshDirty or not current
     local reason
     if not shown then reason = "hidden"
+    elseif viewDiagnostic.projectionError then reason = "projection-error"
     elseif base.filterScope == "mine" and base.savedImportPending then
         reason = "saved-import"
     elseif viewDiagnostic.projectionPending then reason = "projection-pending"
-    elseif viewDiagnostic.projectionError then reason = "projection-error"
     elseif dirty and receiving and viewDiagnostic.publishedPage > 0 then
         reason = "sync-receiving"
     elseif dirty then reason = "dirty"
@@ -3143,9 +3147,8 @@ function M.MarkDataDirty()
         virtualStats.dirtyMarks = virtualStats.dirtyMarks + 1
     end
     viewDiagnostic.projectionPending = false
-    viewDiagnostic.projectionError = false
     viewDiagnostic.projectionCurrent = false
-    virtualStats.lastDataError = nil
+    -- Data churn does not erase a failure or release its retry deadline.
     return true
 end
 
@@ -3233,7 +3236,6 @@ function M.Refresh()
         if frame._emptyState then frame._emptyState:Hide() end
         frame._resultsStale = true
         viewDiagnostic.projectionPending = false
-        viewDiagnostic.projectionError = false
         viewDiagnostic.projectionCurrent = false
         RenderSyncStatus()
         RefreshDetailPanel(SelectedId(), true)
@@ -3256,7 +3258,6 @@ function M.Refresh()
             -- last rows, but must not show their empty text again).
             frame._resultsStale = true
             viewDiagnostic.projectionPending = true
-            viewDiagnostic.projectionError = false
             viewDiagnostic.projectionCurrent = false
             RenderSyncStatus()
             RefreshDetailPanel(SelectedId(), true)

@@ -296,4 +296,32 @@ K.Run({
         c(S.Toggles(H, R.echo) == 1 and H.disabled[R.echo] == false,
             'prompt_overwrite_interleaved the original valid Yes configures the current required Tome once')
     end},
+    {id = 'prompt_exception_cleanup', fn = function(c)
+        for _, inject in ipairs({false, true}) do
+            local R = S.Lever(1, 'Exception Review Echo', true, true)
+            local H, A = S.Fixture({levers = {R}})
+            c(S.Assign(H, A, 'Exception review plan', {R}),
+                'prompt_exception_cleanup reached: Wishlist assigned')
+            S.ResetToLevel1(H); H.Advance(1, .05)
+            c(H.popup and H.popup.which == 'NEXUS_LEVEL1_AUTO_TOMES' and not Auto(),
+                'prompt_exception_cleanup reached: bound Auto-OFF prompt open')
+            if inject then
+                local original = Nexus.OverwriteWarning.RequestAuto
+                Nexus.OverwriteWarning.RequestAuto = function()
+                    error('Synthetic RequestAuto fault')
+                end
+                local ok, err = pcall(H.AcceptPopup)
+                Nexus.OverwriteWarning.RequestAuto = original
+                c(not ok and tostring(err):find('Synthetic RequestAuto fault', 1, true),
+                    'prompt_exception_cleanup reached: the original request exception remains visible')
+            end
+            Nexus.MainInternals.StoreAuthorityOwner.UpdateSettingsV1('autoDisable', false)
+            H.Notify()
+            SlashCmdList.NEXUS('auto')
+            c(Auto(), inject
+                and 'prompt_exception_cleanup a failed prompt request does not bind a fresh generic Auto request'
+                or 'prompt_exception_cleanup generic Auto remains available without Tome permission')
+            c(#H.trace == 0, 'prompt_exception_cleanup no Tome request was submitted')
+        end
+    end},
 }, rawget(_G, 'arg'))

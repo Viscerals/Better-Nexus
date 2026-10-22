@@ -4740,8 +4740,10 @@ end
         arm.lastProgressTotal = nil
         arm.promptEnableInFlight = true
         arm.promptOverwritePending = true
-        M.ToggleAuto()
+        -- This request-origin marker must not survive a dependency exception.
+        local toggleOk, toggleError = pcall(M.ToggleAuto)
         arm.promptEnableInFlight = false
+        if not toggleOk then error(toggleError, 0) end
         if sched.autoEnabled then
             arm.promptOverwritePending = false
         else
