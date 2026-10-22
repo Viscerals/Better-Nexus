@@ -4,7 +4,7 @@
 -- C: pre-consumer 5d396f22a532c2622c82796a78abdd9332c86474 (no error bits).
 -- ViewChecks: 88478ffb1dbac3d02197d7de28e59eae70c0eec1 (intermediate two-bit line).
 -- R: 82d1a0a9def265667587f8e1394a633497e9ff0a (owner fault groups, pre-retention fix).
--- C owns the import/Share bit predicates (including the intermediate fallback).
+-- Block-1 C owns the import/Share bit predicates (including the intermediate fallback).
 -- ViewChecks owns the later exact owner grammar and view independence predicates.
 -- Counts include overlapping controls, not independent evidence items.
 -- Matched RED/GREEN and output-mutation results belong in the PR evidence;
@@ -211,7 +211,7 @@ check(renderedLine:match(' blocked=hidden$') and CB.DiagnosticSnapshot().blocked
 print('REGISTERED_SLASH_VIEWER '..renderedLine)
 check(#H.actions==0 and #H.sent==0,'guard: synthetic observation sends no gameplay/network action')
 check(exported==snapshot.blockedReason,
- 'EXPECT public diagnostic route preserves recognized saved-import-error; actual='..tostring(exported))
+ 'GUARD public diagnostic route preserves recognized saved-import-error; actual='..tostring(exported))
 
 -- Orthogonal fault evidence survives reason precedence without exposing payloads.
 local importReady=C.setup(snapshot.savedImportPending==false,'Begin failure occurs before any actual import job')
@@ -400,7 +400,7 @@ C.expect(FaultBits(hiddenStatusText,false,true) and hiddenStatus:match(' blocked
  'hidden report preserves active status fault even when visibility masks reason')
 end
 statusLabel.SetText=statusSetter;CB.Refresh()
-if C.setup(CB.DiagnosticSnapshot().shareStatusError==false,'successful actual status write proves recovery')then
+if shareReady and C.setup(CB.DiagnosticSnapshot().shareStatusError==false,'successful actual status write proves recovery')then
 C.expect(FaultBits(Nexus.GetDiagnosticPageText('state'),false,false),
  'successful status recovery clears printed status bit')
 end
