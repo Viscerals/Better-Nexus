@@ -3214,4 +3214,155 @@ C.scenario('final-f4-unchanged-status-is-not-recovery',function()
 end)
 end
 
+-- Final Library follow-up: settle real startup maintenance while hidden,
+-- before requesting the retained All job. The earlier cold-Mine controls stay
+-- intact; these controls remove their incidental revision-cancellation escape.
+do
+local function Up(fn,wanted)
+ for i=1,80 do local name,value=debug.getupvalue(fn,i)
+  if not name then break end
+  if name==wanted then return value end
+ end
+ error('missing read-only job upvalue '..wanted,0)
+end
+for _,arm in ipairs({'healthy','fault','import-held'})do
+C.scenario('opus-final-mine-retained-all-'..arm,function()
+ local held=arm=='import-held';local faulted=arm=='fault'
+ local receiving={value=not held};local H,CB=Boot(receiving)
+ C.setup(Step(H,200)==0,'real hidden startup maintenance settles before retained All request')
+ local VP,R=Nexus.ViewProjections,Nexus.Revisions
+ local jobs=Up(VP.RequestBuilds,'jobs')
+ local nextRow=Nexus.DpsCapture.CommunityEligibilityCursorNext;local calls=0
+ local slots=Nexus.GameAdapter.Slots
+ if held then Nexus.GameAdapter.Slots=function(...)
+  local info=debug.getinfo(2,'S')
+  if info and info.source=='@core/CommunityController.lua'then error('Held retained-All Mine import',0)end
+  return slots(...)
+ end end
+ if faulted then Nexus.DpsCapture.CommunityEligibilityCursorNext=function()
+  calls=calls+1;return false,'Retained All dependency must not run in waiting Mine'
+ end end
+ CB.Show();local job=jobs.builds
+ NexusCommunityBuildsFrame._myBuildsBtn:Click();receiving.value=true
+ local revision=R.Get(R.BUILD_LIBRARY_CHANGED);local dps=R.Get(R.DPS_CHANGED)
+ local before=VP.WorkStats();local stats=CB.VirtualStats()
+ assert(C.setup(job and jobs.builds==job and job.filters.scope=='all'
+  and CB.DiagnosticSnapshot().filterScope=='mine'
+  and (held and CB.DiagnosticSnapshot().savedImportError or not held and stats.savedImport.pending)
+  and not CB.DiagnosticSnapshot().projectionPending,
+  'actual current All job is retained while cold Mine has no requested projection'))
+ local escaped=Step(H,100);local after=VP.WorkStats()
+ C.setup(R.Get(R.BUILD_LIBRARY_CHANGED)==revision and R.Get(R.DPS_CHANGED)==dps,
+  'unchanged revisions exclude incidental stale-job cancellation during Mine wait')
+ C.expect(after.communityPumps==before.communityPumps and jobs.builds==job
+  and after.cancellations==before.cancellations,
+  'waiting Mine neither pumps nor publishes its retained All job',after.communityPumps-before.communityPumps)
+ C.expect(calls==0 and CB.VirtualStats().dataFailures==stats.dataFailures,
+  'waiting Mine does not inherit a retained All dependency failure',calls)
+ C.guard(escaped==0 and (held and CB.DiagnosticSnapshot().savedImportError
+  and CB.VirtualStats().importFailures>=stats.importFailures
+  and CB.VirtualStats().lastImportError=='Held retained-All Mine import'
+  or not held and CB.VirtualStats().savedImport.pending
+  and CB.VirtualStats().savedImport.syncDeferrals>stats.savedImport.syncDeferrals),
+  'real personal import remains independently deferred without frame escape')
+ Nexus.DpsCapture.CommunityEligibilityCursorNext=nextRow;Nexus.GameAdapter.Slots=slots;receiving.value=false
+ C.guard(Settle(H,CB)~=nil and CB.DiagnosticSnapshot().projectionCurrent
+  and not CB.VirtualStats().savedImport.pending,
+  'Mine resumes actual import and publication when receive ends')
+ C.guard(#H.actions==0 and #H.sent==0,'retained All discrimination sends no game or network action')
+end)
+end
+C.scenario('opus-final-all-current-job-progress',function()
+ local receiving={value=true};local H,CB=Boot(receiving)
+ C.setup(Step(H,200)==0,'hidden maintenance settles before All control')
+ CB.Show();local VP,R=Nexus.ViewProjections,Nexus.Revisions
+ local before=VP.WorkStats();local revision=R.Get(R.BUILD_LIBRARY_CHANGED)
+ C.setup(CB.DiagnosticSnapshot().projectionPending and CB.VirtualStats().savedImport.pending,
+  'All requests a genuine job while personal import waits')
+ local escaped=Step(H,100);local after=VP.WorkStats()
+ C.guard(after.communityPumps>before.communityPumps and CB.VirtualStats().dataBinds>0,
+  'healthy All still advances and publishes during receive')
+ C.guard(R.Get(R.BUILD_LIBRARY_CHANGED)==revision and after.cancellations==before.cancellations,
+  'positive All progression uses current work without incidental cancellation')
+ C.guard(escaped==0 and CB.VirtualStats().savedImport.pending and #H.actions==0 and #H.sent==0,
+  'All control preserves independent import deferral and has no actions')
+end)
+C.scenario('opus-final-dirty-current-pending',function()
+ local H,CB=Boot({value=true},true)
+ C.setup(Step(H,200)==0,'hidden startup maintenance settles before pending truth test')
+ CB.Show();local VP,R=Nexus.ViewProjections,Nexus.Revisions
+ local jobs=Up(VP.RequestBuilds,'jobs');local job=jobs.builds
+ local revision=R.Get(R.BUILD_LIBRARY_CHANGED);local before=VP.WorkStats()
+ assert(C.setup(job and CB.DiagnosticSnapshot().projectionPending,
+  'real current projection is pending before same-revision dirty notification'))
+ CB.MarkDataDirty()
+ C.expect(CB.DiagnosticSnapshot().projectionPending,
+  'same-revision MarkDataDirty preserves live pending truth')
+ C.guard(jobs.builds==job and R.Get(R.BUILD_LIBRARY_CHANGED)==revision,
+  'dirty notification leaves actual job and revision unchanged')
+ R.Advance(R.BUILD_LIBRARY_CHANGED);CB.MarkDataDirty()
+ C.guard(not CB.DiagnosticSnapshot().projectionPending and CB.DiagnosticSnapshot().projectionDirty,
+  'changed revision clears stale pending truth and retains dirty work')
+ local after=VP.WorkStats()
+ C.guard(after.communityPumps==before.communityPumps and after.cancellations==before.cancellations
+  and jobs.builds==job,'pending diagnostic invalidation neither pumps nor cancels actual work')
+ C.guard(#H.actions==0 and #H.sent==0,'pending truth observation sends no game or network action')
+end)
+for _,mode in ipairs({'synchronous','synchronous-fault','ticket'})do
+C.scenario('opus-final-detail-finish-'..mode,function()
+ local asynchronous=mode=='ticket';local persistent=mode=='synchronous-fault'
+ local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+ local H=F.Boot(F.Database(),function(h)h.playerLevel=60;h.perks.serverActiveSlot=1
+  h.perks.serverBuildSlots={[1]={name='Refused detail publication',verified=true,echoes=L.OrdinaryRows(3)}}end)
+ Nexus.Sync.IsReceiving=function()return false end
+ local CB=Nexus.CommunityBuilds;CB.Show()
+ assert(C.setup(Settle(H,CB,2500)~=nil,'real saved import and publication settle before detail refusal'))
+ local mirror
+ for _,b in pairs(CB.Builds())do if b.importedSavedBuild and b.serverSlot==1 then mirror=b end end
+ assert(C.setup(mirror~=nil,'real saved mirror exists for public detail action'))
+ CB.Select(mirror.id);local detail
+ for _,f in ipairs(H.frames)do if f.lockBtn and f.lockBtn.GetText then detail=f end end
+ assert(C.setup(detail and detail:IsShown() and detail.lockBtn:GetText()=='Share Build',
+  'actual saved-mirror detail Share button is visible'))
+ local controller=Up(Up(CB.PublishImportedBuild,'ControllerInstance'),'EnsureCommunityController')()
+ local publish=controller.PublishImportedBuild;local attempts=0;local callback;local ticket={state='pending'}
+ -- Synthetic refusal boundary: the public detail handler and refresh are real;
+ -- the controller cannot enqueue a catalog mutation, share or transport action.
+ controller.PublishImportedBuild=function(id,finish)
+  attempts=attempts+1;callback=finish
+  if asynchronous then return nil,'ROOT_MUTATION_PENDING',ticket end
+  return false,'Synthetic synchronous publication refusal'
+ end
+ local label=NexusCommunityBuildsFrame._classDropBtn;local setter=label.SetText
+ local calls=0;local armed=true;local message='Existing detail view hold'
+ label.SetText=function(self,...)
+  calls=calls+1;if armed or persistent then armed=false;error(message,0)end
+  return setter(self,...)
+ end
+ local ok,err=pcall(CB.Refresh)
+ assert(C.setup(not ok and err==message and calls==1 and CB.VirtualStats().lastDataError==message,
+  'real host exception establishes a view hold before explicit detail click'))
+ local actions,sent=#H.actions,#H.sent
+ local clicked,clickError=pcall(function()detail.lockBtn:Click()end)
+ if asynchronous then
+  assert(C.setup(clicked and attempts==1 and callback and detail.lockBtn:GetText()=='Sharing...',
+   'public detail click retains the synthetic pending ticket',clickError))
+  callback(false,'Synthetic asynchronous refusal',ticket)
+  callback(false,'Duplicate terminal refusal',ticket)
+  C.guard(calls==1 and CB.VirtualStats().lastDataError==message,
+   'ticket completion and duplicate notification respect the existing view hold')
+ else
+  C.setup(clicked and attempts==1,'public detail click reaches synchronous refusal without throwing',clickError)
+  C.expect(calls==2 and (persistent and CB.VirtualStats().lastDataError==message
+   and CB.VirtualStats().dataFailures==2 or not persistent and CB.VirtualStats().lastDataError==nil),
+   'synchronous explicit Finish immediately attempts a contained refresh during hold',calls)
+ end
+ C.guard(#H.actions==actions and #H.sent==sent,
+  'synthetic refused detail route submits no game or transport action')
+ controller.PublishImportedBuild=publish;label.SetText=setter
+ C.guard(Settle(H,CB)~=nil,'detail refusal control recovers through actual view publication')
+end)
+end
+end
+
 C.finish('(public failure hold and recovery; synthetic host only)')

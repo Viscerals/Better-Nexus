@@ -640,7 +640,7 @@ local VIEW_SORTS = {dps=true,recent=true,title=true}
 local VIEW_CATEGORIES = {builds=true,dummy=true,lk=true,combined=true}
 local VIEW_PHASES = {idle=true,slots=true,cleanup=true,unknown=true}
 local VIEW_REASONS = {
-    none=true,hidden=true,["saved-import"]=true,
+    none=true,hidden=true,["saved-import"]=true,["saved-import-error"]=true,
     ["projection-pending"]=true,["projection-error"]=true,
     ["sync-receiving"]=true,dirty=true,["not-published"]=true,
     unavailable=true,unknown=true,

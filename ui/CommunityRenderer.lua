@@ -1771,7 +1771,13 @@ local function EnsureDetailPanel(parent)
                 else
                     print("|cffff6060Nexus:|r " .. tostring(value))
                 end
-                M.RefreshFromController()
+                if ticket then
+                    M.RefreshFromController()
+                else
+                    -- The synchronous result belongs to this explicit click;
+                    -- contain its refresh without delaying it behind a hold.
+                    viewDiagnostic.pump.Refresh(false, false)
+                end
             end
             local ok, value, ticket = PublishImportedBuild(selected, Finish)
             if ok == nil and value == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
@@ -2539,7 +2545,11 @@ local function EnsureFrame()
         local coldStart = virtualStats.dataBinds == 0
         local backingOff = pump.now < pump.failBackoffUntil
             and viewDiagnostic.projectionError
-        local needProjection = (not backingOff) and (refreshDirty
+        -- Mine has no projection request while its personal import waits.
+        -- Retained All work must not advance or charge its failure to Mine.
+        local mineImportWaiting = (importPending or viewDiagnostic.importRetryPending)
+            and FilterSettings().scope == "mine"
+        local needProjection = (not backingOff) and (not mineImportWaiting) and (refreshDirty
             or viewDiagnostic.projectionPending or coldStart)
         if not needProjection then
             pumpTicker = 0
@@ -2551,7 +2561,7 @@ local function EnsureFrame()
                     or FilterSettings().scope ~= "mine") and refreshDirty
                     and not viewDiagnostic.projectionPending
                     and not receivingNow then
-                    -- MarkDataDirty clears projectionPending; request a job
+                    -- MarkDataDirty invalidates stale pending; request a job
                     -- before PumpBuilds can advance one.
                     if pump.GuardedRefresh() then pump.Note() end
                 end
@@ -3341,7 +3351,7 @@ function M.MarkDataDirty()
         refreshDirty = true
         virtualStats.dirtyMarks = virtualStats.dirtyMarks + 1
     end
-    viewDiagnostic.projectionPending = false
+    viewDiagnostic.pump.InvalidateStalePending()
     viewDiagnostic.projectionCurrent = false
     -- Data churn does not erase a failure or release its retry deadline.
     return true
