@@ -93,6 +93,9 @@ end
 local function inactiveControls()
     editLimit(false)
     if frame.cont then frame.cont:Hide()end
+    -- With no run read, Start alone holds its place, disabled like the rest.
+    if frame.review then frame.review:Hide()end
+    if frame.pause then frame.pause:Hide();frame.resume:Hide();frame.start:Show()end
     for _,b in ipairs(frame.mutations)do b:Disable()end
     frame.advanced:Hide();frame:SetHeight(RUN_H)
 end
@@ -116,10 +119,36 @@ local function notify(ok,err)
     if frame then frame.notice:SetText(truthful(err) or (ok and "" or "No change."))end
     UI.Refresh()
 end
+-- Deliberate review of a changed Resume target. When a paused run's next
+-- Resume would adopt a different ready assignment than the one it started
+-- with (OrbRuntime resumeTarget kind "changed"), Resume is offered only in
+-- this window and only after Review target for that exact assignment (its
+-- key). Memory only: another assignment, leaving that state or closing the
+-- window clears it. It writes and sends nothing and can only withhold Resume;
+-- Resume itself still makes every runtime check and adopts what it reads.
+local review={key=nil}
+local function changedTarget(t) return type(t)=="table" and t.kind=="changed" end
+local function reviewHeld(t)
+    return changedTarget(t) and not (t.key~=nil and review.key==t.key)
+end
+local function quotedName(t,whole)
+    return t.name~=nil and ("'"..name(t.name,whole).."'") or "an unnamed Wishlist"
+end
+local function reviewRefusal(t)
+    if not reviewHeld(t) then return nil end
+    return "Review the new target first: Resume would use "..quotedName(t)..". Nothing was resumed."
+end
+-- The legacy one-button entry (Pause while running, Resume while paused). The
+-- window no longer shows it during a run; it stays for programmatic callers
+-- and takes the same review.
 local function primary(limit,tracked)
     local s=Nexus.OrbRuntime.Status()
     if s.running then return Nexus.OrbRuntime.Pause()end
-    if s.state=="PAUSED" then return Nexus.OrbRuntime.Resume()end
+    if s.state=="PAUSED" then
+        local held=reviewRefusal(s.resumeTarget)
+        if held then return nil,held end
+        return Nexus.OrbRuntime.Resume()
+    end
     return Nexus.OrbRuntime.Start(limit,tracked)
 end
 -- The maximum box shows the draft; a refresh sets it without counting as
@@ -141,6 +170,48 @@ local confirmNewRun=false
 -- The maximum shown when the new run was armed. A different amount (for
 -- example a tracked balance that changed) needs a new review.
 local confirmAmount=nil
+-- What an explicit Resume of a paused run would act on (OrbRuntime
+-- resumeTarget): the ready assignment it would adopt, or the original
+-- operation it would continue. An assignment that is not ready is never named.
+local ASSIGNMENT_STATES={restoring="restoring",loading="loading",unavailable="unavailable",unassigned="not assigned"}
+local function resumeTargetText(t,whole)
+    if type(t)~="table" then return nil end
+    local n=quotedName(t,whole)
+    if t.kind=="original" then return "Resume continues the original operation for "..n.."."
+    elseif t.kind=="same" then return "Resume would use "..n..", the same target."
+    elseif t.kind=="changed" then
+        local was=t.original~=nil and t.original~=t.name and (" instead of '"..name(t.original,whole).."'") or ""
+        if not reviewHeld(t) then return "Reviewed: Resume would use "..n..was.." with the same maximum." end
+        return "New target: Resume would use "..n..was..". Review target first."
+    elseif t.kind=="settle" then return "Resume waits: the original operation must settle before a changed target can be used."
+    elseif t.kind=="unavailable" then
+        return "Resume target unknown: the assigned Wishlist is "..(ASSIGNMENT_STATES[t.assignmentState] or "not ready").."."
+    end
+    return nil
+end
+-- The compact views name the target in two short parts: what (with the raw
+-- name; the caller shortens and escapes it) and the instruction.
+local function compactTarget(t)
+    if type(t)~="table" then return nil end
+    local n=t.name~=nil and ("'"..tostring(t.name):gsub("%c"," ").."'") or "an unnamed Wishlist"
+    if t.kind=="original" or t.kind=="same" then return "Resume uses: "..n,"Paused"
+    elseif t.kind=="changed" then return "New target: "..n,"Paused - review it in the Orb window"
+    elseif t.kind=="settle" then return nil,"Paused - original must settle first"
+    elseif t.kind=="unavailable" then return "Resume target unknown","Paused - Wishlist not ready" end
+    return nil
+end
+-- An unresolved earlier result, in layers: what it blocks, what the player can
+-- do now (by the actual Continue state), then the runtime's own reason,
+-- unshortened, so recorded Echo names and earlier facts stay exact.
+local RECOVERY_HEADLINE="Previous result is unresolved: no new Orb run or ordinary roll until it settles."
+local function recoveryActions(cv)
+    if cv.stage=="checking" or cv.stage=="ready" then
+        return "What you can do: finish or cancel the check in the Continue window."
+    elseif cv.stage=="refused" then return "What you can do: Review check... below says why the check stopped."
+    elseif cv.eligible==true then return "What you can do: Continue... below checks the game, then asks you to confirm."
+    elseif cv.explanation==true then return "What you can do: follow the details; Why blocked... below explains this record." end
+    return "What you can do: follow the details below."
+end
 
 -- Read-only Orb history page. It renders one fixed row pool, reads only the
 -- page it shows plus the operation whose details are open, and performs no Orb
@@ -187,10 +258,11 @@ local function logPageView(page)
 end
 local function logKey(run)
     if not run then return "none" end
-    -- The revision changes on every recorded event, so a cached copy cannot
+    -- The revision changes on every recorded event, and the live run's usage
+    -- and exposure are read as they are now (RunLog), so a cached copy cannot
     -- outlive the history it was made from.
     return table.concat({tostring(run.which),tostring(run.runId),
-        tostring(run.revision),tostring(run.total)},"|")
+        tostring(run.revision),tostring(run.total),tostring(run.spent),tostring(run.reserved)},"|")
 end
 -- One lookup of ONE recorded id, at most once per distinct id on the page:
 -- the addon's shared catalog accessor, then the client's own spell info. It
@@ -261,6 +333,9 @@ local function refresh()
     -- The snapshot authorizes nothing: Start, Resume and every spend read again.
     local s=Nexus.OrbRuntime.Status(advanced);frame.snapshot=s
     local a=s.assignment or {};local busy=s.running or s.pending or s.state=="PAUSED" or s.state=="LIMIT"
+    -- A review belongs to the exact changed target it was made for.
+    local target=s.state=="PAUSED" and s.resumeTarget or nil
+    if not (changedTarget(target) and target.key~=nil and target.key==review.key) then review.key=nil end
     if a.state=="restoring" then setFull(frame.plan,"Restoring assigned Wishlist...")
     else setFull(frame.plan,"Assigned Wishlist: "..name(a.name or "none"),"Assigned Wishlist: "..name(a.name or "none",true)) end
     -- A ready assignment whose read was refused is still assigned: its progress
@@ -300,18 +375,38 @@ local function refresh()
     end
     frame.start:SetText(s.running and "Pause" or (s.state=="PAUSED" and "Resume"
         or (s.state=="FINISHED" and (confirmNewRun and "Confirm new run" or "Start new run") or "Start")))
-    frame.usage:SetText("Orbs used: "..s.spent.." / "..((busy or s.limit>0)and s.limit or (shown~="" and shown or "-"))
-        ..(s.reserved>0 and ("; unresolved exposure: "..s.reserved)or ""))
+    -- During a run, separate fixed Pause and Resume: a repeated press of one
+    -- never becomes the other. Otherwise Start (also the two-step new run).
+    if busy then frame.start:Hide();frame.pause:Show();frame.resume:Show()
+    else frame.pause:Hide();frame.resume:Hide();frame.start:Show() end
+    -- One usage form on every surface: Orbs used against the approved maximum;
+    -- a requested Orb whose spend is not confirmed is pending. Before a run,
+    -- the maximum shown is the draft, not yet approved.
+    frame.usage:SetText("Orbs used: "..s.spent.." / "..((busy or s.limit>0)and (s.limit.." approved") or (shown~="" and shown or "-"))
+        ..(s.reserved>0 and ("; pending: "..s.reserved..(s.reserved==1 and " Orb" or " Orbs").." requested, not confirmed yet")or ""))
     local reason=(s.running or s.pending or s.state=="PAUSED")and s.reason or (s.startReason or s.reason)
-    setFull(frame.status,(phases[s.state]or s.state).."\n"..(truthful(reason) or s.error or ""))
+    local detail=truthful(reason) or s.error or ""
+    local cv=Nexus.OrbRuntime.ContinueView()
+    local shownStatus,fullStatus
+    if s.state=="RECOVERY" then
+        shownStatus=RECOVERY_HEADLINE.."\n"..recoveryActions(cv).."\nDetails: "..detail
+        fullStatus=shownStatus
+    else
+        local phase=phases[s.state]or s.state
+        local line,whole=resumeTargetText(target,false),resumeTargetText(target,true)
+        shownStatus=phase..(line and ("\n"..line) or "").."\n"..detail
+        fullStatus=phase..(whole and ("\n"..whole) or "").."\n"..detail
+    end
     if confirmNewRun and s.state=="FINISHED" then
-        frame.status:SetText(frame.status:GetText().."\nPress Confirm new run to start a new run of up to "
-            ..tostring(frame.limit:GetText()).." Orb(s). Close this window to cancel.")
+        local tail="\nPress Confirm new run to start a new run of up to "
+            ..tostring(frame.limit:GetText()).." Orb(s). Close this window to cancel."
+        shownStatus,fullStatus=shownStatus..tail,fullStatus..tail
     end
     if s.targetChanged then
-        local base=frame.status:GetText().."\nOriginal operation: "
-        setFull(frame.status,base..name(s.operationName),base..name(s.operationName,true))
+        shownStatus=shownStatus.."\nOriginal operation: "..name(s.operationName)
+        fullStatus=fullStatus.."\nOriginal operation: "..name(s.operationName,true)
     end
+    setFull(frame.status,shownStatus,fullStatus)
     frame.assignmentNote:SetText(a.mirrorNote or "")
     if advanced then
         local rows=s.sources or {};sourcePage=math.max(1,math.min(sourcePage,math.max(1,math.ceil(#rows/4))))
@@ -324,15 +419,20 @@ local function refresh()
         enable(frame.clearExclusions,not busy)
         frame.sourcePage:SetText("Eligible sources "..sourcePage.." / "..math.max(1,math.ceil(#rows/4)))
     end
-    enable(frame.start,s.running or s.canResume or s.canStart);enable(frame.stop,busy);enable(frame.assigned,not busy)
+    local held=reviewHeld(target)
+    enable(frame.start,s.running or (s.canResume and not held) or s.canStart);enable(frame.stop,busy);enable(frame.assigned,not busy)
+    enable(frame.pause,s.running);enable(frame.resume,not s.running and s.canResume and not held)
     do
-        local cv=Nexus.OrbRuntime.ContinueView()
         local stage=cv.stage
         frame.cont:SetText(stage=="done" and "Review outcome..."
             or stage=="refused" and "Review check..."
             or stage=="checking" and "Check progress..." or (stage=="ready" or cv.eligible==true) and "Continue..." or "Why blocked...")
         if cv.explanation==true or cv.eligible==true or stage=="checking" or stage=="ready" or stage=="refused" or stage=="done" then frame.cont:Show()else frame.cont:Hide()end
     end
+    -- Review target shares Continue's place and is never shown with it.
+    if changedTarget(target) and target.key~=nil and not frame.cont:IsShown() then
+        frame.review:SetText(held and "Review target" or "Cancel review");frame.review:Show();frame.review:Enable()
+    else frame.review:Hide() end
     if advanced then frame.advanced:Show()else frame.advanced:Hide()end
     selected(frame.advancedToggle,advanced)
     frame:SetHeight(advanced and RUN_H_ADVANCED or RUN_H)
@@ -392,6 +492,29 @@ local function ensure()
     end)
     frame.max:SetScript("OnLeave",function()if GameTooltip then GameTooltip:Hide()end end)
     frame.max.tooltip=MAX_TIP
+    -- While a run is busy, Pause and Resume are separate buttons in Start's
+    -- place, each with one fixed meaning: a repeated press of Pause can never
+    -- become Resume. Each acts only when a fresh read offers it; the runtime
+    -- then applies its own checks.
+    frame.pause=button(frame,334,-188,58,"Pause",function()
+        if not Nexus.OrbRuntime.Status().running then notify(nil,"Not paused: the run is not running.");return end
+        notify(Nexus.OrbRuntime.Pause())
+    end)
+    frame.resume=button(frame,398,-188,62,"Resume",function()
+        local s=Nexus.OrbRuntime.Status()
+        if s.running then notify(nil,"Not resumed: the run is already running.");return end
+        if not s.canResume then
+            local t=s.state=="PAUSED" and s.resumeTarget or nil
+            notify(nil,t and t.kind=="settle" and "Not resumed: the original operation must settle first."
+                or t and t.kind=="unavailable" and "Not resumed: the assigned Wishlist is not ready."
+                or "Not resumed: Orb mode does not offer Resume now.")
+            return
+        end
+        local held=reviewRefusal(s.resumeTarget)
+        if held then notify(nil,held);return end
+        notify(Nexus.OrbRuntime.Resume())
+    end)
+    frame.pause:Hide();frame.resume:Hide()
     frame.start=button(frame,334,-188,126,"Start",function()
         local s=Nexus.OrbRuntime.Status()
         if s.state=="FINISHED" and not confirmNewRun then
@@ -455,6 +578,21 @@ local function ensure()
     -- The same read-only explanation also serves ineligible restored receipts.
     frame.cont=button(frame,470,-364,130,"Continue...",function()UI.ShowContinue()end)
     frame.cont:Hide()
+    -- The deliberate review of a changed Resume target (see `review`). Review
+    -- and Cancel review only record or clear it: nothing is resumed or spent.
+    frame.review=button(frame,470,-364,130,"Review target",function()
+        local t=Nexus.OrbRuntime.Status().resumeTarget
+        if not (changedTarget(t) and t.key~=nil) then
+            review.key=nil;frame.notice:SetText("No changed target to review. Nothing was changed.")
+        elseif review.key==t.key then
+            review.key=nil;frame.notice:SetText("Review cancelled. Resume stays withheld; nothing was spent.")
+        else
+            review.key=t.key
+            frame.notice:SetText("Reviewed: Resume would use "..quotedName(t).." with the same maximum. Nothing was spent.")
+        end
+        UI.Refresh()
+    end)
+    frame.review:Hide()
     frame.closeNotice=text(frame,20,-393,580,20,CLOSE_NOTICE)
     button(frame,20,-414,85,"Help",function()Nexus.Help.Show("orbs")end)
     frame.advancedToggle=button(frame,115,-414,95,"Advanced",function()
@@ -495,7 +633,7 @@ local function ensure()
     button(af,285,-151,85,"Previous",function()sourcePage=math.max(1,sourcePage-1);UI.Refresh()end)
     button(af,380,-151,85,"Next",function()sourcePage=sourcePage+1;UI.Refresh()end)
     frame.assignmentNote=text(af,5,-180,565,31)
-    frame.mutations={frame.start,frame.stop,frame.assigned,frame.clearExclusions,frame.max}
+    frame.mutations={frame.start,frame.stop,frame.assigned,frame.clearExclusions,frame.max,frame.pause,frame.resume,frame.review}
     for _,r in ipairs(frame.sourceRows)do frame.mutations[#frame.mutations+1]=r.exclude end
     -- Only the run text and child controls belong to this page. Root Texture
     -- regions can be window backdrop/decorative artwork and must remain shown
@@ -520,9 +658,10 @@ local function ensure()
     inactiveControls()
     frame:SetScript("OnShow",function()UI.Refresh()end)
     -- Closing the window is the one place an armed review is cancelled; it
-    -- also closes the history page and its copy view.
+    -- also closes the history page and its copy view, and clears a target
+    -- review.
     frame:SetScript("OnHide",function()
-        editLimit(false);confirmNewRun=false;confirmAmount=nil
+        editLimit(false);confirmNewRun=false;confirmAmount=nil;review.key=nil
         if logFrame then logFrame:Hide()end
     end)
     local elapsed=0;frame:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;UI.Refresh()end end)
@@ -698,7 +837,7 @@ function refreshLog(force)
     logRendered=key
 end
 -- Cheap bounded check: one header read with a single entry, never the whole
--- run. It re-renders only when the recorded history actually changed.
+-- run. It re-renders only when the shown history actually changed.
 local function logVisibleCheck()
     if not logFrame or not logFrame:IsShown() then return end
     local probe=Nexus.OrbRuntime.RunLog(logView,1,1)
@@ -902,6 +1041,11 @@ local function contRefresh()
         or v.stage=="done" and "Continued"
         or v.stage=="refused" and "Not continued"
         or (v.eligible and "Not checked yet" or "Not available"))
+    -- A record restored after a reload: its saved facts are kept, but this
+    -- session's history has none of the steps before the reload. Said only
+    -- when the session history really is empty (a bounded header read).
+    local log=v.explanation==true and Nexus.OrbRuntime.RunLog("current",1,0) or nil
+    contFrame.history:SetText(log and log.runId==nil and Nexus.OrbHistory and Nexus.OrbHistory.RELOAD_CLEARED_NOTE or "")
 end
 local function ensureContinue()
     if contFrame then return end
@@ -937,6 +1081,8 @@ local function ensureContinue()
         Nexus.OrbRuntime.ContinueCancel();f.notice:SetText("");contRefresh()
     end)
     button(f,480,-282,80,"Close",function()f:Hide()end)
+    f.history=text(f,20,-308,540,18)
+    if Nexus.LayoutMetrics then f.historyHit=Nexus.LayoutMetrics.FullTextTooltip(f.history,f) end
     f:SetScript("OnShow",function()contRefresh()end)
     -- Closing the window (also with Escape) cancels a check: no token outlives its window.
     f:SetScript("OnHide",function()
@@ -971,19 +1117,64 @@ function UI.AttachMainPanel(parent)
     f:SetPoint("TOPLEFT",parent,"BOTTOMLEFT",0,-2);f:SetSize(parent:GetWidth(),100);f:SetFrameLevel(parent:GetFrameLevel()+3)
     f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8"});f:SetBackdropColor(.035,.04,.05,.95)
     f.summary=text(f,8,-6,252,52)
+    -- Three lines; a shortened name is complete in the tooltip.
+    if Nexus.LayoutMetrics then f.summaryHit=Nexus.LayoutMetrics.FullTextTooltip(f.summary,f) end
+    -- The legacy one-button entry (Pause while running, Resume while paused):
+    -- hidden, so it cannot be clicked, and kept for programmatic callers with
+    -- the same gates as the fixed buttons below.
     f.primary=button(f,8,-65,87,"Pause",function()
         local s=Nexus.OrbRuntime.CompactStatus()
-        if s and s.running then Nexus.OrbRuntime.Pause()elseif s and s.canResume then Nexus.OrbRuntime.Resume()end
+        if s and s.running then Nexus.OrbRuntime.Pause()
+        elseif s and s.canResume and not changedTarget(s.resumeTarget) then Nexus.OrbRuntime.Resume()end
         f.refresh()
     end)
-    f.stop=button(f,102,-65,65,"Stop",function()Nexus.OrbRuntime.Stop();f.refresh()end)
-    f.details=button(f,174,-65,88,"Details",function()UI.Show()end)
+    f.primary:Hide()
+    -- Separate fixed Pause and Resume, as in the mini panel: a repeated press
+    -- of one never becomes the other. A changed target resumes only after the
+    -- review in the Orb window (Details).
+    f.pause=button(f,8,-65,55,"Pause",function()
+        local s=Nexus.OrbRuntime.CompactStatus()
+        if s and s.running then Nexus.OrbRuntime.Pause()end
+        f.refresh()
+    end)
+    f.resume=button(f,69,-65,62,"Resume",function()
+        local s=Nexus.OrbRuntime.CompactStatus()
+        if s and not s.running and s.canResume and not changedTarget(s.resumeTarget) then Nexus.OrbRuntime.Resume()end
+        f.refresh()
+    end)
+    f.stop=button(f,137,-65,48,"Stop",function()Nexus.OrbRuntime.Stop();f.refresh()end)
+    f.details=button(f,191,-65,69,"Details",function()UI.Show()end)
+    -- One line of the conservative 7 px model; the name is cut on a character
+    -- boundary, then pipes are doubled so they show as written.
+    local STRIP_CHARS=math.floor(252/7)
+    local function stripLine(v)
+        local cut=v
+        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then cut=Nexus.LayoutMetrics.Truncate(v,STRIP_CHARS)
+        elseif #v>STRIP_CHARS then cut=v:sub(1,STRIP_CHARS-3):gsub("[\192-\255][\128-\191]*$","").."..." end
+        return (cut:gsub("|","||")),(v:gsub("|","||"))
+    end
     f.refresh=function()
         local s=Nexus.OrbRuntime.CompactStatus()
         if not s then f:Hide();return end
-        f:Show();f.summary:SetText("Orbs: "..s.spent.." / "..s.limit.." used"..(s.reserved>0 and (" + "..s.reserved.." pending")or "")
-            .."\n"..(s.remaining~=nil and (s.remaining.." target copies remaining")or "Target data unavailable").."\n"..(phases[s.state]or s.state))
-        f.primary:SetText(s.running and "Pause"or "Resume");enable(f.primary,s.running or s.canResume)
+        f:Show()
+        local usage="Orbs used: "..s.spent.." / "..s.limit.." approved"
+        local second=s.reserved>0 and (s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending, not confirmed yet")
+            or (s.remaining~=nil and (s.remaining.." target copies remaining")or "Target data unavailable")
+        local third=phases[s.state]or s.state
+        local what,instruction
+        if s.state=="PAUSED" then what,instruction=compactTarget(s.resumeTarget) end
+        if instruction then third=instruction end
+        local shown,full=stripLine(second)
+        -- While paused, the target takes the second line; a pending Orb then
+        -- stays on the third.
+        if what then
+            shown,full=stripLine(what)
+            if s.reserved>0 and third=="Paused" then third="Paused - "..s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending" end
+        end
+        setFull(f.summary,usage.."\n"..shown.."\n"..third,usage.."\n"..full.."\n"..third)
+        local resumable=not s.running and s.canResume and not changedTarget(s.resumeTarget)
+        f.primary:SetText(s.running and "Pause"or "Resume");enable(f.primary,s.running or resumable)
+        enable(f.pause,s.running);enable(f.resume,resumable)
         enable(f.stop,s.running or s.pending or s.state=="PAUSED"or s.state=="LIMIT")
     end
     local elapsed=0
@@ -1066,16 +1257,22 @@ local function miniView()
     for _,key in ipairs({"running","pending","canResume"}) do
         if type(s[key])=="boolean" then v[key]=s[key] end
     end
+    -- What a Resume would act on (optional; absent offers no extra gate).
+    local t=s.resumeTarget
+    if type(t)=="table" and type(t.kind)=="string" then
+        v.target={kind=t.kind,name=type(t.name)=="string" and t.name or nil}
+    end
     if not (v.state and v.spent and v.limit and v.reserved) or v.running==nil or v.pending==nil
         or v.canResume==nil then v.kind="malformed" end
     return v
 end
 -- Pause while running; Resume only for a paused run the runtime offers to
--- resume (an unknown state never offers it); Stop as the main panel offers
--- it. Anything that is not a well-formed run offers nothing.
+-- resume (an unknown state never offers it) and never for a changed target,
+-- which is reviewed and resumed in the Orb window; Stop as the main panel
+-- offers it. Anything that is not a well-formed run offers nothing.
 local function miniGates(v)
     if v.kind~="run" then return false,false,false end
-    return v.running,v.state=="PAUSED" and v.canResume and not v.running,
+    return v.running,v.state=="PAUSED" and v.canResume and not v.running and not changedTarget(v.target),
         v.running or v.pending or v.state=="PAUSED" or v.state=="LIMIT"
 end
 local function miniStateText(v)
@@ -1084,6 +1281,8 @@ local function miniStateText(v)
     if v.kind~="run" then return "Run status unavailable" end
     local label=phases[v.state] or ("Unknown state: "..v.state)
     if v.running then return "Running - "..label end
+    if v.state=="PAUSED" and changedTarget(v.target) then return "Paused - review the new target in Open Orbs" end
+    if v.state=="PAUSED" and v.target and v.target.kind=="unavailable" then return "Paused - the assigned Wishlist is not ready" end
     -- Paused, and Resume is not offered: an earlier submitted action (restored
     -- after a reload, already chosen, or for a changed assignment) must settle.
     if v.state=="PAUSED" and not v.canResume then return "Paused - a pending result must settle first" end
@@ -1095,6 +1294,14 @@ local function miniReason(v)
     if v.kind~="run" then
         local _,detail=miniText(MINI_UNREAD[v.kind]..(v.error~=nil and (" "..tostring(v.error)) or ""))
         return MINI_UNREAD_TEXT,MINI_UNREAD_TEXT.." "..detail
+    end
+    -- Paused: the line names what Resume would act on; the run's reason stays
+    -- complete in the tooltip.
+    local what=v.state=="PAUSED" and compactTarget(v.target) or nil
+    if what then
+        local shown,full=miniText(what)
+        local _,reason=miniText(truthful(v.reason))
+        return shown,reason~="" and (full..". "..reason) or full
     end
     return miniText(truthful(v.reason))
 end
@@ -1120,7 +1327,8 @@ local function miniMissing(v)
     return "Rolled target copies missing: "..(v.remaining and miniNumber(v.remaining) or "unavailable")
 end
 local function miniKey(v)
-    return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume)},"|")
+    return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume),
+        tostring(v.target and v.target.kind)},"|")
 end
 -- A new UI size moves the panel back inside the UI. The panel is smaller
 -- than any UI this client supports (FitToScreen treats less than 640x480 as
@@ -1199,6 +1407,8 @@ local function miniRefusal(kind,v)
         if unread then return "Not resumed: the run status could not be read." end
         if v.kind=="none" then return "Not resumed: there is no approved run." end
         if v.running then return "Not resumed: the run is already running." end
+        -- One whole mini line (MINI_CHARS): the reason and the button to use.
+        if v.state=="PAUSED" and changedTarget(v.target) then return "Not resumed: review the new target in Open Orbs" end
         if v.state=="PAUSED" then return "Not resumed: a pending result must settle." end
         return "Not resumed: only a paused run can resume."
     end
@@ -1307,7 +1517,7 @@ local function ensureMini()
     f.stop=button(f,MINI_PAD+152,MINI_BUTTON_Y,60,"Stop",function()miniAct("stop")end)
     f.open=button(f,MINI_W-MINI_PAD-96,MINI_BUTTON_Y,96,"Open Orbs",function()UI.Show()end)
     miniTip(f.pause,"Pause holds the run before its next Orb. An Orb already requested cannot be undone. Offered only while the run is running.")
-    miniTip(f.resume,"Resume continues this paused run with the same approved maximum; its usage is not reset. It is not offered while an earlier action must settle first: one restored after a reload, one whose offer was already chosen, or one for a changed assignment. Orb mode checks again before it continues.")
+    miniTip(f.resume,"Resume continues this paused run with the same approved maximum; its usage is not reset. It is not offered while an earlier action must settle first: one restored after a reload, one whose offer was already chosen, or one for a changed assignment. After a target change, review the new target in Open Orbs and resume there. Orb mode checks again before it continues.")
     miniTip(f.stop,"Stop ends this run: no further Orb is spent. An action already submitted may still finish; resolve its offer in the game.")
     miniTip(f.open,"Opens the full Orb window. Opening it starts, resumes and spends nothing.")
     f.pause:Disable();f.resume:Disable();f.stop:Disable()
