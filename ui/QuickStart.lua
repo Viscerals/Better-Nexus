@@ -26,6 +26,20 @@ local NORMAL_TITLE = "Welcome to Nexus"
 local NORMAL_HINT = "Reopen Help any time with /nexus help. Automation and Orb spending require separate explicit controls."
 local SETUP_TITLE = "Nexus setup (information only)"
 local SETUP_HINT = "Information only: this guide saves nothing and never turns Auto ON."
+-- The current Sync mode in the Build Library's and Leaderboard's words. Off
+-- and Manual are core/SyncModePolicy.lua's text. Reading the mode writes
+-- nothing; this window neither offers nor changes a mode.
+local SYNC_AUTOMATIC_TEXT = "Sync is Automatic: Nexus may send without a click (login requests, answers to other users, your new DPS bests with your character name)."
+
+local function SyncNote(f)
+    if not (f and f.sync) then return f end
+    local policy = Nexus.SyncModePolicy
+    local mode = policy and type(policy.Mode) == "function" and policy.Mode() or nil
+    local text = mode == "automatic" and SYNC_AUTOMATIC_TEXT
+        or mode and type(policy.Text) == "function" and policy.Text(mode) or nil
+    f.sync:SetText(text and (text .. " Help: Sharing lists what is sent.") or "")
+    return f
+end
 
 -- Unlike the release note in ui/Changelog.lua, this acknowledgement does not
 -- require the shared catalog. A start-up that refused an oversized catalog
@@ -147,7 +161,7 @@ local function NormalTexts(f)
     f._informational = nil
     if f.title then f.title:SetText(NORMAL_TITLE) end
     if f.hint then f.hint:SetText(NORMAL_HINT) end
-    return f
+    return SyncNote(f)
 end
 
 local function EnsureFrame()
@@ -157,7 +171,9 @@ local function EnsureFrame()
     -- Height fits the body and hint at a 16 px replacement font such as the
     -- ElvUI font measured natively (6 body lines, 3 hint lines); the default
     -- font needs 5 and 2. tests/prototype/quickstart_layout_fit.lua models both.
-    frame:SetSize(420, 360)
+    -- The Sync line below the buttons (4 lines at that font, 3 at the
+    -- default) adds 80 px; tests/prototype/ux_sync_disclosure.lua models it.
+    frame:SetSize(420, 440)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 55)
     frame:SetFrameStrata("DIALOG")
     frame:EnableMouse(true)
@@ -251,6 +267,12 @@ local function EnsureFrame()
     local orbs = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     orbs:SetSize(174,26);orbs:SetPoint("TOPRIGHT",-24,-250);orbs:SetText("Orbs / Lost Memories")
     orbs:SetScript("OnClick",function() Finish();if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end)
+    local sync = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    frame.sync = sync
+    sync:SetPoint("TOPLEFT", 24, -284)
+    sync:SetSize(372, 72)
+    sync:SetJustifyH("LEFT")
+    sync:SetJustifyV("TOP")
     local hint = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     frame.hint = hint
     hint:SetPoint("BOTTOMLEFT", 24, 22)
@@ -272,6 +294,7 @@ local function EnsureFrame()
             theme.StyleLabel(title, "accent")
             theme.StyleLabel(subtitle, "muted")
             theme.StyleLabel(body, "text")
+            theme.StyleLabel(sync, "text")
             theme.StyleLabel(hint, "muted")
         end
     end
@@ -306,7 +329,7 @@ function M.ShowSetup()
     f._informational = true
     if f.title then f.title:SetText(SETUP_TITLE) end
     if f.hint then f.hint:SetText(SETUP_HINT) end
-    f:Show()
+    SyncNote(f):Show()
     return true
 end
 

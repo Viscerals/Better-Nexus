@@ -1203,6 +1203,22 @@ local function EnsureFrame()
         else print("|cffff6060Nexus:|r "..tostring(reason or "sync unavailable")) end
         M.RefreshStatus()
     end)
+    -- The same Sync words as the Build Library's Sync Now and Help. Reading
+    -- the saved mode writes nothing; Off and Manual are SyncModePolicy's text.
+    syncBtn:SetScript("OnEnter",function(self)
+        GameTooltip:SetOwner(self,"ANCHOR_TOP")
+        GameTooltip:AddLine("Sync Now",1,1,1)
+        GameTooltip:AddLine("Asks other Nexus users for shared builds and DPS records.",0.8,0.8,0.8,true)
+        local policy=Nexus.SyncModePolicy
+        local mode=policy and type(policy.Mode)=="function" and policy.Mode() or nil
+        local modeText=mode=="automatic" and "Sync is Automatic: Nexus may send without a click (login requests, answers to other users, your new DPS bests with your character name)."
+            or mode and type(policy.Text)=="function" and policy.Text(mode) or nil
+        if modeText then GameTooltip:AddLine(modeText,1,0.82,0,true) end
+        GameTooltip:AddLine("With Automatic, a new personal DPS best (with its Echo list) and its Record Loadout build page may be sent, each only if this client admits it: the page as a summary first, its Echo list only in later answers to players who ask. Sending is not delivery.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("Sent means it left this client, not that anyone stored it. Received means it arrived here; stored means this client kept it.",0.7,0.7,0.7,true)
+        GameTooltip:Show()
+    end)
+    syncBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
     dummyBtn=MakeTab(frame,"Training Dummy",118); dummyBtn:SetPoint("TOPLEFT",18,-82); dummyBtn:SetScript("OnClick",function() category="dummy"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
     lkBtn=MakeTab(frame,"Lich King",100); lkBtn:SetPoint("LEFT",dummyBtn,"RIGHT",5,0); lkBtn:SetScript("OnClick",function() category="lk"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
     combinedBtn=MakeTab(frame,"Both records",112); combinedBtn:SetPoint("LEFT",lkBtn,"RIGHT",5,0); combinedBtn:SetScript("OnClick",function() category="combined"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)

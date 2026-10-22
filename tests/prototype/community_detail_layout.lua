@@ -14,6 +14,14 @@
 -- 2024-byte unbroken link, 79 ordinary and six locked Echoes (the semantic
 -- maximum), DPS records, no Details! addon. The window is checked at several
 -- effective UI sizes and font models (tests/prototype/layout_geometry_support).
+-- M5 continuation 39: the Build Library window is no taller than the UI less
+-- 24 px, and its laid-out content scrolls when the layout is taller (font
+-- scale 2, small UIs). Before its checks, each detail is brought fully into
+-- the window through the window's own scroll bar. The window must lie inside
+-- the UI height everywhere, and inside the UI width wherever the UI is at
+-- least the 760 px window plus the margin (not in the 700 px case below the
+-- minimum). After a resize or font change while open, the scrolled place
+-- stays inside the new range. Every inherited inside-window check is kept.
 -- Geometry and text fit are offline models; native pixel fit is NOT TESTED.
 local F=dofile('tests/prototype/format5_support.lua')
 local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
@@ -79,10 +87,48 @@ end
 
 local function FullText(fs) return G.Visible(fs:GetText()) end
 
+-- The Build Library's own scroll bar, dragged the way the client reports it
+-- (SetValue, then OnValueChanged). Nothing moves without a scroll route.
+local function Route()
+ local scroll,content,bar=frame._contentScroll,frame._content,frame._contentBar
+ if scroll and content and bar and scroll.scrollChild==content then return scroll,content,bar end
+end
+local function Drag(value)
+ local scroll,content,bar=Route()
+ if not (bar and bar:IsShown()) then return end
+ local low,high=bar:GetMinMaxValues()
+ value=math.max(low,math.min(high,value))
+ bar:SetValue(value)
+ local changed=bar:GetScript('OnValueChanged')
+ if changed then changed(bar,value) end
+end
+-- Brings a region fully into the window: the bar to where its top shows.
+local function Reveal(region)
+ local scroll,content=Route()
+ if content then Drag(G.Rect(region,content)[2]) end
+end
+local function ScrollInRange(label)
+ local scroll,content,bar=Route()
+ local range=tonumber(frame._responsiveLayout and frame._responsiveLayout.scrollRange) or 0
+ local at=scroll and scroll:GetVerticalScroll()
+ check(scroll~=nil and at>=0 and at<=range and bar:GetValue()==at and bar:IsShown()==(range>0),
+  label..': the window\'s scrolled place is inside its range ('..tostring(at)..' of '..range..')')
+end
+
 -- Every check of one shown detail in one viewport and font model.
 local function Verify(label,expect)
  local m=G.model
  local root=frame
+ -- The whole window inside the UI height (and width, from 784 px up), then
+ -- the detail brought fully into it through the window's scroll bar.
+ local ui={0,0,UIParent:GetWidth(),UIParent:GetHeight()}
+ local wr=G.Rect(frame,UIParent)
+ check(wr[2]>=ui[2] and wr[4]<=ui[4] and frame:GetHeight()<=ui[4]-24,
+  label..': the window '..G.Text(wr)..' lies inside the UI height with its margin ('..ui[4]..')')
+ if ui[3]>=frame:GetWidth()+24 then
+  check(wr[1]>=ui[1] and wr[3]<=ui[3],label..': and inside the UI width ('..ui[3]..')')
+ end
+ Reveal(p)
  local panel=G.Rect(p,root)
  local window={0,0,frame:GetWidth(),frame:GetHeight()}
  check(G.Inside(panel,window),label..': the detail panel '..G.Text(panel)..' is inside the window '..G.Text(window))
@@ -153,7 +199,9 @@ local function Verify(label,expect)
  check(lr[2]>=view[2]-0.5 and lr[4]<=view[4]+0.5,label..': at the end of the scroll range the last line '..G.Text(lr)..' is inside the viewport '..G.Text(view))
  check(G.Inside(lr,panel) and G.Inside(lr,window),label..': the last line is inside the panel and the window')
  scroll:SetVerticalScroll(0)
- print('COMMUNITY_DETAIL_LAYOUT',label,'panel',G.Text(panel),'view',G.Text(view),'content',body:GetHeight(),'range',range)
+ print('COMMUNITY_DETAIL_LAYOUT',label,'panel',G.Text(panel),'view',G.Text(view),'content',body:GetHeight(),'range',range,
+  'window',G.Text(wr),'window scroll',tostring(Route() and frame._contentScroll:GetVerticalScroll()))
+ Drag(0)
 end
 
 local VIEWPORTS={
@@ -215,9 +263,15 @@ p.bodyScroll:SetVerticalScroll(10000)
 UIParent:SetSize(800,500);Settle()
 check(p:GetHeight()<tall,'a smaller UI shortens the open panel ('..tall..' -> '..p:GetHeight()..')')
 Verify('open, then 800x500',Expect(own.buildId))
+ScrollInRange('open, then 800x500')
 G.UseFont(G.MODELS.double);Settle()
 Verify('open, then font scale 2',Expect(own.buildId))
+ScrollInRange('open, then font scale 2')
+-- Scrolled to the end, a change back to a UI and face where everything fits
+-- brings the window back to its top without a bar.
+Drag(1e9)
 G.UseFont(G.MODELS.default);UIParent:SetSize(1366,768);Settle()
+ScrollInRange('scrolled to the end, then 1366x768 at the default face')
 
 -- 3. Full text: the description, link and records are complete in their
 -- widgets; a shortened title and byline are complete in the header tooltip.
