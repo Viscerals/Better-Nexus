@@ -340,6 +340,11 @@ function M.Refresh()
     return RendererInstance().Refresh()
 end
 
+function M.RefreshAutomatic()
+    if StartupStatus().state~="ready" then return false,"pending" end
+    return RendererInstance().RefreshAutomatic()
+end
+
 function M.ShowPostBuild()
     if M.WaitForStartup("Community",M.ShowPostBuild) then return false,"pending" end
     return RendererInstance().ShowPostBuild()

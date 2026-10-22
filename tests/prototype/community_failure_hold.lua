@@ -1521,4 +1521,444 @@ end)
 restorePacing()
 end
 
+-- Shared refresh-boundary regressions use f0b7c2ba as their baseline.
+C.scenario('natural-view-refresh-hold',function()
+-- Independent natural revision/scheduler path; no renderer/pump/callback replacement.
+local F=dofile('tests/prototype/format5_support.lua')
+local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+local V=dofile('tests/prototype/view_regression_support.lua')
+local H=F.Boot(F.Database(),function(h) h.playerLevel=60;h.perks.serverBuildSlots={};h.perks.serverActiveSlot=1 end)
+local CB,CAT,A=Nexus.CommunityBuilds,Nexus.BuildCatalog,Nexus.GameAdapter
+local escaped=0
+local function Step(n) for _=1,n do local ok,e=pcall(H.Advance,.01,.01);if not ok then escaped=escaped+1;print('ESCAPED',e) end end end
+local function Until(n,fn) for i=0,n do if fn() then return i end;if i<n then Step(1) end end end
+local function Stack()
+ local lines={}
+ for i=2,45 do local d=debug.getinfo(i,'Sln');if not d then break end;lines[#lines+1]=(d.source or '?')..':'..d.currentline..' '..(d.name or '?') end
+ return table.concat(lines,'\n')
+end
+local function Snapshot()
+ local s,d=CB.VirtualStats(),CB.DiagnosticSnapshot()
+ return {at=H.now,dataFailures=s.dataFailures,lastDataError=s.lastDataError or false,dataRefreshes=s.dataRefreshes,
+  dataBinds=s.dataBinds,importFailures=s.importFailures,importPending=s.savedImport.pending,
+  importCompletions=s.savedImport.completions,projectionCurrent=d.projectionCurrent,
+  projectionDirty=d.projectionDirty,projectionPending=d.projectionPending,reason=d.blockedReason}
+end
+assert(C.setup(Nexus.StartupStatus().state=='ready','real TOC startup ready'))
+CB.Show();Step(100)
+assert(C.setup(Until(2000,function() return CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending
+ and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil end)~=nil,'warm publication with no queued ViewRefresh'))
+assert(C.setup(Nexus.Sync.IsReceiving()==false,'actual Sync reports no receiving; no receive stub'))
+local baseline=CB.VirtualStats();local revisions=Nexus.Revisions.Get(Nexus.Revisions.BUILD_LIBRARY_CHANGED)
+local schedules={};local after=Nexus.Scheduler.After
+Nexus.Scheduler.After=function(key,delay,callback)
+ local ok,why=after(key,delay,callback)
+ if key==Nexus.ViewRefresh.Key() then local p=Nexus.Scheduler.Pending(key);schedules[#schedules+1]={at=H.now,delay=delay,due=p and p.due,origin=Stack()} end
+ return ok,why
+end
+local rows=L.OrdinaryRows(2)
+assert(C.setup(L.Copies(rows)==79 and Nexus.LoadoutEvidence.PublicOrdinaryCompleteness({echoes=rows}).complete,'real changed saved slot has complete79-copy evidence'))
+H.perks.serverBuildSlots[1]={name='Natural ViewRefresh hold probe',verified=true,echoes=rows};H.Notify();A.Poll()
+local put=CAT.Put;local ticket,id,puts
+puts=0
+CAT.Put=function(record,...)
+ local ok,why,t=put(record,...)
+ if record.importedSavedBuild and record.serverTitle=='Natural ViewRefresh hold probe' then puts=puts+1;ticket=t;id=record.id end
+ return ok,why,t
+end
+CB.Hide();CB.Show()
+assert(C.setup(Until(1000,function() return ticket~=nil end)~=nil and ticket.state=='pending'
+ and type(ticket.completionCallback)=='function' and CB.VirtualStats().savedImport.pending and puts==1,'actual import owns one pending catalog ticket with original callback'))
+local frame=NexusCommunityBuildsFrame;local setText=frame._classDropBtn.SetText
+local faults={};local firstMessage='Synthetic callback host failure';local latestMessage='Synthetic later scheduled host failure'
+frame._classDropBtn.SetText=function(self,text)
+ if ticket.committed then
+  local stack=Stack();local callback=stack:find('core/CommunityController.lua',1,true) and stack:find('core/BuildCatalog.lua',1,true)
+  local message=callback and firstMessage or latestMessage
+  faults[#faults+1]={at=H.now,stack=stack,callback=not not callback,scheduled=not not(stack:find('core/ViewRefresh.lua',1,true) and stack:find('core/Scheduler.lua',1,true)),message=message,before=Snapshot()}
+  error(message,0)
+ end
+ return setText(self,text)
+end
+assert(C.setup(Until(2000,function() return #faults>0 end)~=nil and ticket.committed and faults[1].callback,
+ 'real catalog completion reaches the first delegated host fault'))
+local first=Snapshot();local firstAt=faults[1].at
+assert(C.setup(first.dataFailures==baseline.dataFailures+1 and first.lastDataError==firstMessage,
+ 'callback fault is retained by the real view ledger before observation'))
+local observations={first}
+for _=1,40 do Step(1);observations[#observations+1]=Snapshot() end
+local held=Snapshot();local scheduledInside=false
+for _,f in ipairs(faults) do if f.scheduled and f.at-firstAt<.5 then scheduledInside=true end end
+C.expect(#faults==1,'no automatic refresh throws inside the retained first400ms hold',#faults)
+C.expect(not scheduledInside,'natural revision scheduler respects the callback view-failure deadline')
+C.guard(Nexus.Revisions.Get(Nexus.Revisions.BUILD_LIBRARY_CHANGED)>revisions and #schedules>0 and CAT.Get(id)~=nil,
+ 'real catalog commit publishes revision and naturally schedules ViewRefresh')
+C.guard(held.dataRefreshes==first.dataRefreshes and held.dataFailures==first.dataFailures and held.lastDataError==firstMessage,
+ 'old dataRefreshes/count checks remain unchanged during observed exceptions')
+local history=Nexus.Errors.History()
+print('FAULT_TIMELINE',F.Serialize({firstAt=firstAt,faults=faults,schedules=schedules,first=first,held=held,observations=observations,errorHistory=history}))
+frame._classDropBtn.SetText=setText;CAT.Put=put;Nexus.Scheduler.After=after
+local restoredAt=H.now;local beforePumps=Nexus.ViewProjections.WorkStats().communityPumps
+local recovered=Until(2000,function() return CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending and CB.VirtualStats().lastDataError==nil end)
+local final=Snapshot();local finalImport=CB.VirtualStats().savedImport
+C.guard(recovered and final.at-firstAt>=.5 and Nexus.ViewProjections.WorkStats().communityPumps>beforePumps,
+ 'restored host recovers through positive real projection work after500ms',recovered)
+C.guard(finalImport.completions==baseline.savedImport.completions+1 and finalImport.writes==baseline.savedImport.writes+1 and puts==1,
+ 'original real import completes exactly once despite display failures')
+C.guard(escaped==0 and #H.actions==0 and #H.sent==0,'no frame escape, synthetic game action or network send')
+print('RECOVERY',F.Serialize({restoredAt=restoredAt,firstFaultAt=firstAt,recoveredFrames=recovered,final=final,import=finalImport,positivePumps=Nexus.ViewProjections.WorkStats().communityPumps-beforePumps,escaped=escaped,actions=#H.actions,sent=#H.sent}))
+end)
+
+for _,faulted in ipairs({false,true}) do
+C.scenario(faulted and 'share-before-library-host-failure' or 'share-before-library-healthy',function()
+-- Evidence-only actual Share-before-Library path. Frozen source is not edited.
+local S=dofile('tests/prototype/share_test_support.lua')
+local F=dofile('tests/prototype/format5_support.lua')
+local V=dofile('tests/prototype/view_regression_support.lua')
+local H,CAT=S.Boot()
+local CB=Nexus.CommunityBuilds
+local function LibraryExists()
+ for _,f in ipairs(H.frames) do if f:GetName()=='NexusCommunityBuildsFrame' then return true end end
+ return false
+end
+print('SHARE_BOOT_ISOLATION',F.Serialize({namedGlobalExists=NexusCommunityBuildsFrame~=nil,activeLibraryFrameExists=LibraryExists()}))
+local function Upvalue(fn,wanted)
+ if type(fn)~='function' then return end
+ for i=1,60 do
+  local name,value=debug.getupvalue(fn,i)
+  if not name then return end
+  if name==wanted then return value end
+ end
+end
+local function Renderer()
+ local instance=Upvalue(CB.ShowPostBuild,'RendererInstance')
+ return Upvalue(Upvalue(instance,'EnsureCommunityRenderer'),'communityRenderer')
+end
+local function Stack()
+ local rows,callback,lifecycle,catalog={},false,false,false
+ for i=2,50 do
+  local info=debug.getinfo(i,'Sln')
+  if not info then break end
+  rows[#rows+1]=(info.source or '?')..':'..tostring(info.currentline)..' ('..(info.name or '?')..')'
+  if info.source=='@core/CommunityController.lua' and info.currentline==129 then callback=true end
+  if info.source=='@core/MainLifecycle.lua' then lifecycle=true end
+  if info.source=='@core/BuildCatalog.lua' then catalog=true end
+ end
+ return table.concat(rows,'\n'),callback,lifecycle,catalog
+end
+assert(C.setup(Nexus.StartupStatus().state=='ready' and CAT.ManualPreparationStatus().ready,
+ 'real TOC, Store and catalog preparation are ready'))
+assert(C.setup(NEXUS_TEST_NO_PROFILE_CLOCK~=true and type(debugprofilestop)=='function'
+ and GetTime()==H.now,'unchanged default harness clock and profiler pacing'))
+assert(C.setup(not LibraryExists() and Renderer()
+,'Library frame never constructed before actual Share'))
+local originalSlots=H.Clone(H.perks.serverBuildSlots)
+local beforeCatalog=CAT.DebugStats()
+local realPut=CAT.Put
+local ticket,id,puts,putStack
+puts=0
+CAT.Put=function(record,...)
+ local ok,why,receipt=realPut(record,...)
+ if record and record.title=='INDEPENDENT-SHARE-BEFORE-LIBRARY' then
+  puts=puts+1;ticket=receipt;id=record.id;putStack=Stack()
+  print('REAL_PUT',F.Serialize({ok=ok,why=why,id=id,state=receipt and receipt.state,at=H.now}))
+ end
+ return ok,why,receipt
+end
+local realPending=CB.PumpPendingShare
+local pumps,pendingPumps,lastPending,lastSubmitted=0,0,nil,nil
+CB.PumpPendingShare=function(...)
+ local pending,submitted=realPending(...)
+ pumps=pumps+1;if pending then pendingPumps=pendingPumps+1 end
+ lastPending,lastSubmitted=pending,submitted
+ return pending,submitted
+end
+local outcome,popup=S.Post('INDEPENDENT-SHARE-BEFORE-LIBRARY')
+assert(C.setup(ticket and ticket.state=='pending' and type(ticket.completionCallback)=='function'
+ and puts==1 and outcome.localPending and outcome.localStage=='saving'
+ and not outcome.localSaved and not popup:IsShown(),
+ 'actual enabled Share button produces exactly one real pending Put ticket and closes the form'))
+CB.ShowPostBuild()
+assert(C.setup(popup:IsShown() and popup._shareStatus and not LibraryExists()
+,
+ 'public Share reopen precedes Library and exposes existing status host method'))
+local originalText=popup._shareStatus.SetText
+local callbackCalls,throws,callbackStack,callbackLifecycle,callbackCatalog=0,0,nil,false,false
+local message='Synthetic Share status SetText fault before Library initialization'
+popup._shareStatus.SetText=function(self,...)
+ local trace,isCallback,isLifecycle,isCatalog=Stack()
+ if isCallback then
+  callbackCalls=callbackCalls+1;callbackStack=trace
+  callbackLifecycle,callbackCatalog=isLifecycle,isCatalog
+  if faulted and throws==0 then
+   throws=throws+1
+   popup._shareStatus.SetText=originalText -- one host fault; all later work is healthy
+   error(message,0)
+  end
+ end
+ return originalText(self,...)
+end
+local start=H.now
+local commitFrame,escaped= nil,0
+for i=1,400 do
+ local ok,why=pcall(H.Advance,.05,.05)
+ if not ok then escaped=escaped+1;print('ESCAPED',tostring(why)) end
+ if not commitFrame and ticket.state~='pending' then
+  commitFrame=i
+  print('COMMIT_OBSERVATION',F.Serialize({at=H.now,frame=i,ticketState=ticket.state,
+   committed=ticket.committed,status=CB.ShareStatus(id),startup=Nexus.StartupStatus(),
+   mutationCompletionFailures=CAT.DebugStats().mutationCompletionFailures,
+   callbackCalls=callbackCalls,throws=throws,lastPending=lastPending,lastSubmitted=lastSubmitted}))
+ end
+end
+popup._shareStatus.SetText=originalText
+CAT.Put=realPut;CB.PumpPendingShare=realPending
+local final,stats,startup=CB.ShareStatus(id),CAT.DebugStats(),Nexus.StartupStatus()
+local record=CAT.Get(id)
+assert(C.setup(commitFrame and ticket.state=='committed' and ticket.committed==true
+ and ticket.completionCallback==nil and record and record.title=='INDEPENDENT-SHARE-BEFORE-LIBRARY',
+ 'registered lifecycle really commits the Share record and consumes its original ticket callback'))
+assert(C.setup(callbackCalls==1 and callbackLifecycle and callbackCatalog and callbackStack,
+ 'status SetText is reached from actual controller completion, BuildCatalog and MainLifecycle stack'))
+assert(C.setup(throws==(faulted and 1 or 0),'only selected fault arm injects one actual host exception'))
+C.guard(not LibraryExists(),
+ 'neither arm constructs Library to settle Share')
+C.guard(puts==1 and H.putCalls[id]==1 and escaped==0,
+ 'one real submission, no retry and no exception escaping ordinary lifecycle')
+C.guard(S.T.Equal(originalSlots,H.perks.serverBuildSlots) and #H.actions==0,
+ 'server-source snapshots and gameplay action count remain unchanged')
+C.guard(pumps>0 and H.now-start>=19.99 and H.now-start<20.01,
+ 'real lifecycle pumps the public pending-Share operation throughout bounded default-clock observation')
+C.expect(final.localSaved==true and final.localPending==false and final.localStage=='saved',
+ 'committed Share completion settles its truthful public status',F.Serialize(final))
+C.expect(lastPending==false and startup.syncGate=='open',
+ 'ordinary lifecycle releases pending Share and opens Sync gate after committed save',F.Serialize(startup))
+C.expect(stats.mutationCompletionFailures==beforeCatalog.mutationCompletionFailures,
+ 'display fault does not abort actual catalog completion callback',F.Serialize(stats))
+print('FINAL_OBSERVATION',F.Serialize({faulted=faulted,seconds=H.now-start,commitFrame=commitFrame,
+ id=id,ticketState=ticket.state,ticketPumps=ticket.pumps,puts=puts,callbackCalls=callbackCalls,
+ throws=throws,mutationCompletionFailures=stats.mutationCompletionFailures,
+ status=final,startup=startup,shareText=popup._shareStatus:GetText(),pumps=pumps,pendingPumps=pendingPumps,
+ lastPending=lastPending,lastSubmitted=lastSubmitted,actions=#H.actions,
+ syntheticSent=#H.sent,broadcastCalls=#H.shareCalls,escaped=escaped,
+ libraryFrameAbsent=not LibraryExists(),defaultProfilerClock=type(debugprofilestop)=='function'}))
+print('CALLBACK_STACK_BEGIN\n'..tostring(callbackStack)..'\nCALLBACK_STACK_END')
+print('PUT_STACK_BEGIN\n'..tostring(putStack)..'\nPUT_STACK_END')
+end)
+end
+
+
+C.scenario('direct-show-host-exception-held',function()
+ local H,CB=Boot({value=true},true)
+ Step(H,100)
+ local message='Synthetic direct Show host exception'
+ local marker=setmetatable({},{__tostring=function() return message end})
+ local create=CreateFrame;local setter;local times={}
+ CreateFrame=function(kind,name,...)
+  local f=create(kind,name,...)
+  if name=='NexusCommunityBuildsFrame' then
+   local show=f.Show
+   f.Show=function(self,...)
+    if not setter and self._classDropBtn then
+     setter=self._classDropBtn.SetText
+     self._classDropBtn.SetText=function() times[#times+1]=H.now;error(marker,0) end
+    end
+    return show(self,...)
+   end
+  end
+  return f
+ end
+ local ok,err=pcall(CB.Show);CreateFrame=create
+ if not C.setup(#times==1 and setter and CB.IsShown()
+  and type(NexusCommunityBuildsFrame:GetScript('OnUpdate'))=='function',
+  'actual Show reaches one host fault with real frame pump attached') then return end
+ C.guard(not ok and err==marker,'public Show propagates the exact original exception value')
+ local first=CB.VirtualStats()
+ C.expect(first.dataFailures==1 and first.lastDataError==message,
+  'thrown Show records its view failure before returning the exception')
+ local escaped=Step(H,40)
+ C.expect(#times==1,'direct Show failure prevents actual host retry for first400ms',#times)
+ NexusCommunityBuildsFrame._classDropBtn.SetText=setter
+ Nexus.Sync.IsReceiving=function() return false end
+ local recovered=Settle(H,CB,2000)
+ C.guard(recovered and H.now-times[1]>=.5 and CB.VirtualStats().lastDataError==nil
+  and CB.DiagnosticSnapshot().projectionCurrent,'restored Show dependency automatically recovers after hold',recovered)
+ C.guard(escaped==0 and #H.actions==0 and #H.sent==0,'Show fault recovery has no frame escape or game/network action')
+ print('OBSERVED direct-Show-fault-times',F.Serialize(times))
+end)
+
+
+for _,faulted in ipairs({false,true}) do
+ local rawprint=print;local messages={}
+ print=function(...)
+  local row={};for i=1,select('#',...) do row[i]=tostring(select(i,...)) end
+  messages[#messages+1]=table.concat(row,' ');return rawprint(...)
+ end
+ C.scenario(faulted and 'detail-publish-view-failure' or 'detail-publish-healthy',function()
+  local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+  local H=F.Boot(F.Database(),function(h) h.playerLevel=60;h.perks.serverActiveSlot=1
+   h.perks.serverBuildSlots={[1]={name='Actual detail publication',verified=true,echoes=L.OrdinaryRows(3)}} end)
+  local CB,CAT=Nexus.CommunityBuilds,Nexus.BuildCatalog
+  CB.Show();local mirror
+  for _=1,2500 do
+   H.Advance(.01,.01)
+   if CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending then
+    for _,b in pairs(CB.Builds()) do if b.importedSavedBuild and b.serverSlot==1 then mirror=b end end
+    if mirror and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil then break end
+   end
+  end
+  if not C.setup(mirror and CAT.Get(mirror.id),'actual saved mirror settles before detail publication') then return end
+  H.Advance(10,.01)
+  CB.Select(mirror.id);local detail
+  for _,f in ipairs(H.frames) do if f.lockBtn and f.lockBtn.GetText then detail=f end end
+  if not C.setup(detail and detail:IsShown() and detail.lockBtn:IsShown()
+   and detail.lockBtn:GetText()=='Share Build','real saved-mirror detail Share action is visible') then return end
+  local commit=CAT.CommitMaintenance;local tickets={}
+  CAT.CommitMaintenance=function(...)
+   local ok,why,ticket=commit(...);if type(ticket)=='table' then tickets[#tickets+1]=ticket end
+   return ok,why,ticket
+  end
+  local frame=NexusCommunityBuildsFrame;local setText=frame._classDropBtn.SetText;local faults={}
+  if faulted then frame._classDropBtn.SetText=function()
+   faults[#faults+1]={at=H.now,stack=debug.traceback('',2)};error('DETAIL_FINISH_VIEW_HOST_FAULT',0)
+  end end
+  local clicked,err=pcall(function() detail.lockBtn:Click() end)
+  if not C.setup(clicked and #tickets==1 and tickets[1].state=='pending'
+   and detail.lockBtn:GetText()=='Sharing...','real detail click queues one asynchronous publish ticket',err) then return end
+  local escaped=0
+  for _=1,1200 do if tickets[1].state~='pending' then break end;escaped=escaped+Step(H,1) end
+  local source=CAT.Get(mirror.id);local published=source and source.publishedBuildId and CAT.Get(source.publishedBuildId)
+  local terminalOk,terminalId=CB.PublishImportedBuild(mirror.id)
+  C.guard(tickets[1].committed and published and terminalOk==true and terminalId==published.id,
+   'actual catalog publication and terminal receipt are successful')
+  local wrong=0
+  for _,line in ipairs(messages) do if line:find('Catalog completion failed:',1,true) then wrong=wrong+1 end end
+  C.expect(wrong==0,'display failure never reports a successful detail publication as failed catalog completion',wrong)
+  C.expect(#faults==(faulted and 1 or 0),'detail Finish honors the first actual callback view-failure hold',#faults)
+  if faulted then C.guard(CB.VirtualStats().dataFailures==1 and CB.VirtualStats().lastDataError=='DETAIL_FINISH_VIEW_HOST_FAULT',
+   'real publication display fault remains classified in view ledger') end
+  frame._classDropBtn.SetText=setText;CAT.CommitMaintenance=commit
+  C.guard(Settle(H,CB,2000)~=nil and escaped==0 and #H.actions==0,
+   'detail publication recovers without frame escape or gameplay action')
+  print('OBSERVED detail-publish-faults',faulted,F.Serialize({faults=faults,wrongCatalogMessages=wrong,terminalOk=terminalOk,terminalId=terminalId,syntheticSent=#H.sent}))
+ end)
+ print=rawprint
+end
+
+
+-- Popup-only poll and healthy completion status preserve their own UI lifetime.
+-- The stale text below is a synthetic host-state fault, not a catalog mutation.
+for _,withLibrary in ipairs({false,true}) do
+C.scenario(withLibrary and 'popup-scope-poll-hide' or 'popup-scope-poll-before-library',function()
+ local S=dofile('tests/prototype/share_test_support.lua')
+ local H,CAT=S.Boot();local CB=Nexus.CommunityBuilds
+ local function Library()
+  for _,f in ipairs(H.frames) do if f:GetName()=='NexusCommunityBuildsFrame' then return f end end
+ end
+ if withLibrary then CB.Show();S.T.Until(H,function() return CB.DiagnosticSnapshot().projectionCurrent
+  and not CB.VirtualStats().savedImport.pending end) end
+ local outcome,popup=S.Post('PERSISTENT-POPUP-STATUS-HOLD');local id=outcome.id
+ CB.ShowPostBuild()
+ S.T.Until(H,function() return CB.ShareStatus(id).localSaved==true and not CB.ShareStatus(id).localPending end)
+ H.Advance(.6,.05)
+ local status=popup._shareStatus;local setter=status.SetText;local correctText=status:GetText()
+ local poll=popup:GetScript('OnUpdate');local calls,escaped={},0
+ C.setup(popup:IsShown() and type(poll)=='function' and H.putCalls[id]==1 and CAT.Get(id)
+  and ((Library()~=nil)==withLibrary),'actual Share settles once before synthetic popup-only display fault')
+ setter(status,'Synthetic stale status text')
+ status.SetText=function()
+  local fromPoll=false
+  for i=2,50 do local info=debug.getinfo(i,'f');if not info then break end;if info.func==poll then fromPoll=true end end
+  calls[#calls+1]={at=H.now,poll=fromPoll};error('Persistent popup status host failure',0)
+ end
+ local function Advance(n)
+  for _=1,n do if not pcall(H.Advance,.05,.05) then escaped=escaped+1 end end
+ end
+ for _=1,20 do if #calls>0 then break end;Advance(1) end
+ if not C.setup(#calls==1 and calls[1].poll,'real popup OnUpdate reaches the first persistent host exception') then status.SetText=setter;return end
+ local firstAt=calls[1].at
+ if withLibrary then
+  -- Hide inside the second actual hold: its 1s deadline outlasts one popup tick.
+  for _=1,20 do if #calls>=2 then break end;Advance(1) end
+  CB.Hide()
+ end
+ local before=CB.VirtualStats();local pumps=Nexus.ViewProjections.WorkStats().communityPumps
+ Advance(64)
+ local deltas,bounds,held={}, {},true
+ for i=2,#calls do
+  deltas[#deltas+1]=calls[i].at-calls[i-1].at;bounds[#bounds+1]=math.min(.5*2^math.min(i-2,4),8)
+  if deltas[#deltas]+.0000001<bounds[#bounds] then held=false end
+ end
+ C.guard(#calls>=3 and calls[2].poll,'persistent fault positively reaches later real popup polls')
+ C.expect(held,'every actual popup retry respects the failure-to-failure deadline including public Library Hide',F.Serialize(deltas))
+ C.expect(escaped==0,'popup-only status errors stay contained inside ordinary updates',escaped)
+ C.expect(CB.VirtualStats().dataFailures==#calls and CB.VirtualStats().lastDataError=='Persistent popup status host failure',
+  'each actual popup exception is retained once in the view ledger',CB.VirtualStats().dataFailures)
+ C.guard((not withLibrary and not Library()) or (withLibrary and not CB.IsShown()
+  and Library():GetScript('OnUpdate')==nil),'popup polling neither constructs nor resumes the dormant main Library')
+ C.guard(Nexus.ViewProjections.WorkStats().communityPumps==pumps and CB.VirtualStats().savedImport.pumps==before.savedImport.pumps,
+  'held popup-only polls perform no hidden Library projection or import work')
+ status.SetText=setter
+ Advance(70)
+ local _,currentSentence=CB.ShareStatusText(id)
+ C.expect(type(currentSentence)=='string' and status:GetText():find(currentSentence,1,true)~=nil,
+  'restored popup setter positively repairs its stale text through the real poll')
+ C.guard(CB.ShareStatus(id).localSaved and not CB.ShareStatus(id).localPending and H.putCalls[id]==1 and #H.actions==0,
+  'popup failures neither repeat the Share submission nor perform gameplay actions')
+ print('POPUP_POLL_TIMELINE',F.Serialize({withLibrary=withLibrary,firstAt=firstAt,calls=calls,deltas=deltas,bounds=bounds,
+  escaped=escaped,failures=CB.VirtualStats().dataFailures,restoredText=status:GetText(),puts=H.putCalls[id]}))
+end)
+end
+
+for _,hidden in ipairs({true,false}) do
+C.scenario(hidden and 'popup-scope-immediate-hidden' or 'popup-scope-immediate-held',function()
+ local S=dofile('tests/prototype/share_test_support.lua')
+ local H,CAT=S.Boot();local CB=Nexus.CommunityBuilds
+ CB.Show();S.T.Until(H,function() return CB.DiagnosticSnapshot().projectionCurrent
+  and not CB.VirtualStats().savedImport.pending and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil end)
+ local frame=NexusCommunityBuildsFrame;local classSet=frame._classDropBtn.SetText
+ local outcome,popup=S.Post(hidden and 'IMMEDIATE-HIDDEN-STATUS' or 'IMMEDIATE-HELD-STATUS');local id=outcome.id
+ CB.ShowPostBuild();if hidden then CB.Hide() end
+ local function InCompletion()
+  for i=2,50 do local info=debug.getinfo(i,'S');if not info then break end
+   if info.source=='@core/CommunityController.lua' then return true end
+  end
+  return false
+ end
+ local firstFault,mainFaults=nil,0
+ if not hidden then frame._classDropBtn.SetText=function(self,...)
+  if InCompletion() and mainFaults==0 then
+   mainFaults=1;firstFault=H.now;frame._classDropBtn.SetText=classSet;error('Main view fails while Share status stays healthy',0)
+  end
+  return classSet(self,...)
+ end end
+ local setter=popup._shareStatus.SetText;local immediate={}
+ popup._shareStatus.SetText=function(self,text)
+  local s=CB.ShareStatus(id)
+  if InCompletion() and s and s.localSaved and not s.localPending then
+   local _,sentence=CB.ShareStatusText(id)
+   immediate[#immediate+1]={at=H.now,text=text,sentence=sentence,viewError=CB.DiagnosticSnapshot().blockedReason=='projection-error',mainHidden=not CB.IsShown()}
+  end
+  return setter(self,text)
+ end
+ S.T.Until(H,function() return CB.ShareStatus(id).localSaved and not CB.ShareStatus(id).localPending end)
+ C.setup(CAT.Get(id) and H.putCalls[id]==1 and popup:IsShown(),'real pending Share commits once while its form remains open')
+ C.setup(hidden or (mainFaults==1 and firstFault~=nil and CB.VirtualStats().dataFailures==1),
+  'held arm reaches one actual main-view callback failure before settled status notification')
+ C.expect(#immediate>0,'healthy status reaches its actual settled controller callback immediately despite hidden or held Library',#immediate)
+ if not hidden then C.expect(#immediate>0 and immediate[1].viewError and immediate[1].at-firstFault<.5,
+  'healthy Share text updates inside the main-view failure hold rather than waiting for its poll') end
+ C.expect(#immediate>0 and type(immediate[1].sentence)=='string'
+  and immediate[1].text:find(immediate[1].sentence,1,true)~=nil,
+  'actual Share status text reflects the committed result at its synchronous completion notification')
+ C.guard(hidden and not CB.IsShown() and frame:GetScript('OnUpdate')==nil or not hidden and CB.IsShown(),
+  'Share status completion preserves the requested Library visibility and frame lifetime')
+ C.guard(CAT.DebugStats().mutationCompletionFailures==0 and #H.actions==0 and H.putCalls[id]==1,
+  'healthy status notification completes its original Share without callback failure or repeat submission')
+ popup._shareStatus.SetText=setter;frame._classDropBtn.SetText=classSet
+ print('POPUP_IMMEDIATE',F.Serialize({hidden=hidden,firstFault=firstFault,mainFaults=mainFaults,immediate=immediate,
+  text=popup._shareStatus:GetText(),status=CB.ShareStatus(id)}))
+end)
+end
+
 C.finish('(public failure hold and recovery; synthetic host only)')
