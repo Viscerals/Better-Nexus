@@ -685,9 +685,9 @@ function Renderer.New(options)
         refreshDirty = true
         pump.failuresNoted = math.max(pump.failuresNoted or 0,
             tonumber(virtualStats.dataFailures) or 0)
-        -- Explicit status errors keep their own evidence and exact value.
-        -- They never enter the main-view exception boundary.
-        pump.Status(true, true)
+        -- Status failure retains its own evidence without blocking the view.
+        -- Only a view exception belongs to this explicit rethrow boundary.
+        pump.Status(false, true)
         local ok, result, why = pcall(M.RenderRefresh, false, true)
         if not ok then
             pump.Retain(result)
@@ -757,7 +757,7 @@ function Renderer.New(options)
             pump.now = type(GetTime) == "function" and GetTime() or 0
             pump.Note()
         end
-        if not respectHold then pump.Status(true, true) end
+        if not respectHold then pump.Status(false, true) end
         local ok, result, why = pcall(M.RenderRefresh, respectHold, not respectHold)
         if not ok then
             pump.Retain(result)
@@ -2508,40 +2508,46 @@ local function EnsureFrame()
                     if receivingNow and coldStart then
                         if pump.GuardedRefresh() then pump.Note() end
                     end
-                    local ok, published, pumpError = pcall(projections.PumpBuilds)
-                    if not ok then
-                        pump.Retain(published)
-                    elseif published then
-                        viewDiagnostic.projectionPending = false
-                        if pump.GuardedRefresh() then pump.Note() end
-                    elseif pumpError then
-                        -- PumpBuilds cancels a failed job before returning its error.
-                        viewDiagnostic.projectionPending = false
-                        -- A replacement request is not proof of recovery.
-                        -- Preserve the failure hold unless it publishes.
-                        viewDiagnostic.projectionError = true
-                        viewDiagnostic.projectionCurrent = false
-                        virtualStats.dataFailures =
-                            (tonumber(virtualStats.dataFailures) or 0) + 1
-                        virtualStats.lastDataError = pump.ErrorText(pumpError)
-                        pump.Note()
-                        local heldUntil = pump.failBackoffUntil
-                        local heldFailures = virtualStats.dataFailures
-                        local refreshOk, refreshErr = pcall(M.RenderRefresh)
-                        if not refreshOk then
-                            -- Keep the original failure's count/deadline and
-                            -- any real replacement requested before the display fault.
-                            refreshDirty = true
-                            virtualStats.lastDataError = pump.ErrorText(
-                                refreshErr or "Community refresh failed")
-                        end
-                        if viewDiagnostic.projectionCurrent == true then
-                            pump.failBackoffUntil = 0
-                        else
-                            pump.failBackoffUntil = heldUntil
-                            virtualStats.dataFailures = heldFailures
+                    -- A refresh above may have just failed in this callback.
+                    -- Recheck its new hold before advancing the retained job.
+                    backingOff = viewDiagnostic.projectionError
+                        and pump.now < pump.failBackoffUntil
+                    if not backingOff then
+                        local ok, published, pumpError = pcall(projections.PumpBuilds)
+                        if not ok then
+                            pump.Retain(published)
+                        elseif published then
+                            viewDiagnostic.projectionPending = false
+                            if pump.GuardedRefresh() then pump.Note() end
+                        elseif pumpError then
+                            -- PumpBuilds cancels a failed job before returning its error.
+                            viewDiagnostic.projectionPending = false
+                            -- A replacement request is not proof of recovery.
+                            -- Preserve the failure hold unless it publishes.
                             viewDiagnostic.projectionError = true
                             viewDiagnostic.projectionCurrent = false
+                            virtualStats.dataFailures =
+                                (tonumber(virtualStats.dataFailures) or 0) + 1
+                            virtualStats.lastDataError = pump.ErrorText(pumpError)
+                            pump.Note()
+                            local heldUntil = pump.failBackoffUntil
+                            local heldFailures = virtualStats.dataFailures
+                            local refreshOk, refreshErr = pcall(M.RenderRefresh)
+                            if not refreshOk then
+                                -- Keep the original failure's count/deadline and
+                                -- any real replacement requested before the display fault.
+                                refreshDirty = true
+                                virtualStats.lastDataError = pump.ErrorText(
+                                    refreshErr or "Community refresh failed")
+                            end
+                            if viewDiagnostic.projectionCurrent == true then
+                                pump.failBackoffUntil = 0
+                            else
+                                pump.failBackoffUntil = heldUntil
+                                virtualStats.dataFailures = heldFailures
+                                viewDiagnostic.projectionError = true
+                                viewDiagnostic.projectionCurrent = false
+                            end
                         end
                     end
                 end
@@ -2595,8 +2601,8 @@ local function EnsureFrame()
     local function PauseFrameUpdates()
         frame:SetScript("OnUpdate", nil)
         retryTicker, statusTicker, dataTicker, pumpTicker = 0, 0, 0, 0
-        -- Status and import deadlines belong to their independent owners.
-        pump.failBackoffUntil = 0
+        -- Hiding pauses work; pending-only reopening cannot prove recovery.
+        -- Keep every failure deadline with its independent owner.
         pump.now = 0
         if dropPanel then dropPanel:Hide() end
         if sortPanel then sortPanel:Hide() end
