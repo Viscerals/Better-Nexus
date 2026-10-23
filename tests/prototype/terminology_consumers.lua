@@ -55,6 +55,47 @@ for _,annotation in ipairs({'banked','returns later'})do
  check(texts():find('[Guaranteed offer]',1,true),'current guaranteed offer is distinct from prediction')
 end
 check(Nexus.Readout.QueueLines({entries={{name='Echo',wanted=true}}},1)[1]:find('(predicted)',1,true),'queue remains a prediction')
+-- Issue #123: the three status reasons through the localization seam in the
+-- normal panel/readout consumers: exact English bytes, repeated
+-- normalization, untouched raw inputs and no side effect. RED before the
+-- seam: Nexus.Localization is absent.
+local L=assert(Nexus.Localization,'localization seam loaded before its consumers');checks=checks+1
+local function same(a,b,seen)
+ if type(a)~='table' or type(b)~='table' then return a==b end
+ seen=seen or {};if seen[a] then return seen[a]==b end;seen[a]=b
+ for k,v in pairs(a)do if not same(v,b[k],seen)then return false end end
+ for k in pairs(b)do if a[k]==nil then return false end end
+ return true
+end
+local settings0=H.Clone(Nexus.Store.Settings())
+local before={actions=#H.actions,sent=#H.sent,chat=#H.chat,popup=H.popup,auto=Nexus.RecomputeStats().autoEnabled,misses=L.Diagnostics().misses}
+for _,case in ipairs({
+ {'ROOT_MUTATION_PENDING','reason.save_in_progress','Saving is still in progress; wait for its final result'},
+ {'CURSOR_REQUIRED','reason.list_preparing','This list is still being prepared'},
+ {'STORE_PENDING','reason.saved_data_reading','Reading your saved data'},
+})do
+ local code,english=case[1],case[3]
+ check(L.Text(case[2])==english,'seam English base: '..case[2])
+ local model=H.Clone(Nexus.Panel._lastModel);model.status=code;model.recommendation=code
+ local pristine=H.Clone(model)
+ assert(Nexus.Panel.Render(model))
+ check(same(model,pristine),'Render leaves the raw model and reason untouched: '..code)
+ check(Nexus.Panel._lastModel.status==english and Nexus.Panel._lastModel.recommendation==english,'committed panel model has the exact English: '..code)
+ check(texts():find(english,1,true) and not texts():find(code,1,true),'actual panel fontstring shows the English, not the code: '..code)
+ local again=H.Clone(Nexus.Panel._lastModel);assert(Nexus.Panel.Render(again))
+ check(Nexus.Panel._lastModel.status==english and Nexus.Panel._lastModel.recommendation==english,'rendering converted text again is stable: '..code)
+ Nexus.Panel.SetStatus(code);check(Nexus.Panel._lastModel.status==english,'status-only update: '..code)
+ Nexus.Panel.SetStatus(Nexus.UserText.Message(code));check(Nexus.Panel._lastModel.status==english,'onStatus double conversion is stable: '..code)
+ check(Nexus.Readout.Status({text=code})==english and Nexus.Readout.Status({text=code,level=12})=='Lv 12 - '..english,'Readout status line: '..code)
+ check(Nexus.Readout.AutoHoldText(code)==english and Nexus.Readout.AutoHoldNote(code):find('Paused: '..english,1,true),'Readout Auto hold line: '..code)
+end
+check(L.Resolve('reason.list_preparing',{['reason.list_preparing']='Fixture list text'})=='Fixture list text','fixture candidate resolves only when injected')
+local plain=H.Clone(Nexus.Panel._lastModel);plain.status='CURSOR_REQUIRED';plain.recommendation='CURSOR_REQUIRED'
+assert(Nexus.Panel.Render(plain))
+check(texts():find('This list is still being prepared',1,true) and not texts():find('Fixture list text',1,true),'the panel never selects an injected candidate')
+check(L.Diagnostics().misses==before.misses,'the normal consumer path records no fallback')
+check(#H.actions==before.actions and #H.sent==before.sent and H.popup==before.popup and #H.chat==before.chat,'no game action, Sync send, consent popup or chat line')
+check(Nexus.RecomputeStats().autoEnabled==before.auto and same(Nexus.Store.Settings(),settings0),'Automation selection and settings unchanged')
 Nexus.WishlistEditor.Show();check(texts():find('Build Library',1,true),'T01 actual Wishlist navigation')
 Nexus.CommunityBuilds.Show();check(texts():find('Build Library',1,true),'T01 actual library navigation/title')
 -- Real projection Detail and its normal renderer, with fixture read dependencies.
