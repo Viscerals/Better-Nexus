@@ -18,7 +18,14 @@ request prints nothing on stdout, exits 1 and writes one ASCII JSON line on
 stderr: record "error", error (missing, outside-root, unsupported, unreadable,
 not-utf8, unfinished-string, unfinished-comment or invalid-escape), path (the
 PATH as given), a short message and, for a token in the source, the line and
-column where it starts.
+column where it starts. An OS error while --root or a PATH is resolved,
+checked or read is unreadable; when --root cannot be resolved, path is the
+first PATH.
+
+A command line that argparse rejects (no PATH, an unknown option or a missing
+option value) is a usage error, not an invalid request: argparse writes its
+usage and message on stderr and exits 2, as usual. -h or --help prints the
+usage and this text on stdout and exits 0.
 
 Scanning follows the Lua 5.1 lexical rules for short strings and their
 escapes, long-bracket strings, short and long comments, and line breaks.
@@ -178,17 +185,21 @@ class Scanner:
 
 
 def inventory(root: pathlib.Path, name: str) -> list:
-    """The records of one PATH; SourceError when the request is invalid."""
-    path = (root / name).resolve()
+    """The records of one PATH; SourceError when the request is invalid. An
+    OSError while the PATH is resolved, checked or read is unreadable."""
+    try:
+        path = (root / name).resolve()
+    except OSError:
+        raise SourceError('unreadable') from None
     try:
         shown = path.relative_to(root).as_posix()
     except ValueError:
         raise SourceError('outside-root') from None
-    if not path.exists():
-        raise SourceError('missing')
-    if not path.is_file() or path.suffix != '.lua':
-        raise SourceError('unsupported')
     try:
+        if not path.exists():
+            raise SourceError('missing')
+        if not path.is_file() or path.suffix != '.lua':
+            raise SourceError('unsupported')
         data = path.read_bytes()
     except OSError:
         raise SourceError('unreadable') from None
@@ -207,19 +218,27 @@ def inventory(root: pathlib.Path, name: str) -> list:
     return records
 
 
+def report(error: SourceError, name: str) -> int:
+    """Write the one error record, for PATH name, on stderr; the exit status is 1."""
+    sys.stderr.write(json.dumps(error.record(name), sort_keys=True) + '\n')
+    return 1
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--root', type=pathlib.Path, default=ROOT)
     ap.add_argument('paths', nargs='+')
     ns = ap.parse_args(argv)
-    root = ns.root.resolve()
+    try:
+        root = ns.root.resolve()
+    except OSError:
+        return report(SourceError('unreadable'), ns.paths[0])
     lines = []
     for name in ns.paths:
         try:
             records = inventory(root, name)
         except SourceError as error:
-            sys.stderr.write(json.dumps(error.record(name), sort_keys=True) + '\n')
-            return 1
+            return report(error, name)
         lines += [json.dumps(record, sort_keys=True) for record in records]
     for line in lines:
         print(line)
