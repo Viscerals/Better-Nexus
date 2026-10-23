@@ -879,7 +879,11 @@ end
 StaticPopupDialogs["NEXUS_FLEXIBLE_PLAN_REPLACE"] = {
     text = "Open your exact choice as a new Wishlist draft?\nThis replaces the current editor draft and its destination context. Nothing is saved until you save the new draft.",
     button1 = "Open new draft", button2 = "Cancel",
-    OnAccept = function(_, request) if request then return request.Install() end end,
+    -- The client keeps a StaticPopup shown when its OnAccept returns a true
+    -- value, so this adapter returns nothing, like the other Nexus
+    -- confirmations: the dialog closes after an accept that installed the
+    -- choice and after one that refused (the chooser then says why).
+    OnAccept = function(_, request) if request then request.Install() end end,
     OnCancel = function(_, request) if request then request.Cancel() end end,
     timeout = 0, whileDead = true, hideOnEscape = true,
 }

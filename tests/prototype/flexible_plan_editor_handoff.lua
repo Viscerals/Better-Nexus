@@ -155,6 +155,59 @@ controller.BeginNewWishlist();controller.AddPending(catalog.rows[ids[3]])
 check(not lateIntent.Install() and controller.CanonicalEchoes()[1].spellId==ids[3],
     'stale controller confirmation cannot overwrite later draft')
 check(uploads==0,'controller preparation/refusal/install sends no upload')
+
+-- Synthetic StaticPopup boundary, original to this fixture; the shared
+-- harness stays untouched. It models one supplied scalar only: after the
+-- accept button, a true OnAccept return keeps that dialog shown and nil or
+-- false lets the click hide it. Each dialog is tracked by its own `which`,
+-- so hiding one confirmation never hides another. Cancel is modelled as
+-- OnCancel then hide, and OnShow is not run. Native StaticPopup frames,
+-- reuse, timing and the installed client version are not modelled (NOT_RUN).
+local REPLACE,CREATE='NEXUS_FLEXIBLE_PLAN_REPLACE','WISHLISTREALIZER_CREATE_WISHLIST'
+local Popup={shown={},hidden={}}
+function StaticPopup_Show(which,a,b,data)
+    local record={which=which,data=data,arg1=a,arg2=b,frame={which=which,data=data}}
+    Popup.shown[which]=record
+    return record.frame
+end
+function StaticPopup_Hide(which,data)
+    local record=Popup.shown[which]
+    if record and (data==nil or record.data==data) then
+        Popup.shown[which]=nil
+        Popup.hidden[which]=(Popup.hidden[which] or 0)+1
+    end
+end
+function Popup.Click(record,button)
+    assert(record and Popup.shown[record.which]==record,'only a shown dialog can be clicked')
+    local dialog,keep=StaticPopupDialogs[record.which],nil
+    if button==2 then
+        if dialog.OnCancel then dialog.OnCancel(record.frame,record.data) end
+    elseif dialog.OnAccept then
+        keep=dialog.OnAccept(record.frame,record.data)
+    end
+    if not keep and Popup.shown[record.which]==record then StaticPopup_Hide(record.which) end
+end
+local function Hidden(which) return Popup.hidden[which] or 0 end
+StaticPopupDialogs.NEXUS_TEST_POPUP_CONTROL={OnAccept=function(_,data) return data.value end}
+local function ControlKeeps(value)
+    StaticPopup_Show('NEXUS_TEST_POPUP_CONTROL',nil,nil,{value=value})
+    Popup.Click(Popup.shown.NEXUS_TEST_POPUP_CONTROL,1)
+    local kept=Popup.shown.NEXUS_TEST_POPUP_CONTROL~=nil
+    StaticPopup_Hide('NEXUS_TEST_POPUP_CONTROL')
+    return kept
+end
+check(ControlKeeps(true) and ControlKeeps('kept'),
+    'CONTROL synthetic popup keeps a dialog whose accept returns a true value')
+check(not ControlKeeps(nil) and not ControlKeeps(false),
+    'CONTROL synthetic popup dismisses a dialog whose accept returns nil or false')
+StaticPopup_Show('NEXUS_TEST_POPUP_CONTROL',nil,nil,{});StaticPopup_Show(CREATE,nil,nil,{})
+StaticPopup_Hide(CREATE)
+check(Popup.shown.NEXUS_TEST_POPUP_CONTROL~=nil and Popup.shown[CREATE]==nil,
+    'CONTROL hiding one dialog leaves another shown')
+StaticPopup_Hide('NEXUS_TEST_POPUP_CONTROL');StaticPopupDialogs.NEXUS_TEST_POPUP_CONTROL=nil
+Popup.hidden={}
+print('CONTROL synthetic popup accept-return model PASS')
+
 local editor=Nexus.WishlistEditor
 Nexus.WishlistEditor.NewWishlist()
 check(NexusFlexiblePlanEntry ~= nil, 'EXPECT reachable session chooser entry in actual editor')
@@ -285,63 +338,83 @@ for _,f in ipairs(H.frames) do
 end
 assert(applyButton,'existing Create unassigned control')
 applyButton:Click()
-local savePopup=assert(H.popup)
-check(savePopup.which=='WISHLISTREALIZER_CREATE_WISHLIST','existing Save remains separate confirmation')
+local savePopup=Popup.shown[CREATE]
+check(savePopup~=nil and savePopup.data~=nil and Popup.shown[REPLACE]==nil,
+    'existing Save remains a separate confirmation')
 local saveData=H.Clone(savePopup.data)
 NexusFlexiblePlanEntry:Click()
 check(ChooserText():find('Chosen: 79 / 79',1,true),'hide/reopen retains explicit whole choice')
 local oldRendered=Rendered()
-local beforePopup=H.popup
-check(not Count(ids[22],6) and H.popup==beforePopup,'planning refusal preserves active save popup identity')
+check(not Count(ids[22],6) and Popup.shown[CREATE]==savePopup and Popup.shown[REPLACE]==nil,
+    'planning refusal preserves active save popup identity')
 NexusFlexiblePlanOpen:Click()
-local replacement=assert(H.popup)
-check(replacement.which=='NEXUS_FLEXIBLE_PLAN_REPLACE' and editor.DebugPendingCount()==79,
+local replacement=Popup.shown[REPLACE]
+check(replacement~=nil and editor.DebugPendingCount()==79,
     'explicit Open action asks before replacing an existing draft')
-StaticPopupDialogs[replacement.which].OnCancel(replacement.frame,replacement.data)
-check(NexusWishlistNameInput:GetText()=='Keep this draft'
-    and equal(savePopup.data,saveData),'Cancel keeps name/exact rows and existing save-confirmation bytes')
-local canceled=StaticPopupDialogs[replacement.which].OnAccept(replacement.frame,replacement.data)
-check(canceled==false and NexusWishlistNameInput:GetText()=='Keep this draft',
-    'EXPECT canceled replacement callback is retired')
+Popup.Click(replacement,2)
+check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==savePopup
+    and NexusWishlistNameInput:GetText()=='Keep this draft' and equal(savePopup.data,saveData),
+    'Cancel dismisses only the replacement and keeps name and existing save-confirmation bytes')
 check(equal(Rendered(),oldRendered),'Cancel keeps exact rendered rows')
-NexusFlexiblePlanOpen:Click();replacement=assert(H.popup)
+-- A late delivery of the canceled accept is retired: nothing is installed,
+-- shown or dismissed, and the chooser says why.
+StaticPopupDialogs[REPLACE].OnAccept(replacement.frame,replacement.data)
+check(NexusWishlistNameInput:GetText()=='Keep this draft' and equal(Rendered(),oldRendered)
+    and Popup.shown[CREATE]==savePopup and equal(savePopup.data,saveData) and Popup.shown[REPLACE]==nil
+    and ChooserText():find('editor changed',1,true),'EXPECT canceled replacement callback is retired')
+NexusFlexiblePlanOpen:Click();replacement=Popup.shown[REPLACE]
+check(replacement~=nil,'the retained exact choice asks again before replacing')
 editor.Refresh()
-check(StaticPopupDialogs[replacement.which].OnAccept(replacement.frame,replacement.data)==true,
-    'EXPECT passive editor refresh does not invalidate an unchanged replacement')
-check(NexusWishlistNameInput:GetText()=='' and editor.DebugPendingCount()==79,
-    'confirmed replacement opens fresh exact new editor')
-local staleSave=StaticPopupDialogs[savePopup.which].OnAccept(savePopup.frame,savePopup.data)
+local dismissed=Hidden(REPLACE)
+Popup.Click(replacement,1)
+check(Popup.shown[REPLACE]==nil and Hidden(REPLACE)==dismissed+1,
+    'EXPECT an installing accept dismisses its replacement confirmation once, leaving no stale popup')
+check(NexusWishlistNameInput:GetText()=='' and editor.DebugPendingCount()==79
+    and equal(Rendered(),exact.CanonicalEchoes(manual)) and not NexusFlexiblePlanChooser:IsShown(),
+    'EXPECT passive editor refresh keeps the replacement current; accept opens the fresh exact new editor')
+check(Popup.shown[CREATE]==nil,'the fresh editor also dismisses the previous save confirmation')
+NexusWishlistNameInput:SetText('After install')
+StaticPopupDialogs[REPLACE].OnAccept(replacement.frame,replacement.data)
+check(NexusWishlistNameInput:GetText()=='After install' and editor.DebugPendingCount()==79
+    and Popup.shown[REPLACE]==nil,'a used replacement request installs only once')
+local staleSave=StaticPopupDialogs[CREATE].OnAccept(savePopup.frame,savePopup.data)
 check(staleSave==nil and #H.actions==actionBaseline,'successful new draft invalidates previous save confirmation')
 
 -- Stale replacement callbacks preserve the later editor and changed catalog.
-NexusFlexiblePlanEntry:Click();NexusFlexiblePlanOpen:Click();replacement=assert(H.popup)
+-- Each refused confirmation is dismissed by its click, not left behind.
+NexusFlexiblePlanEntry:Click();NexusFlexiblePlanOpen:Click();replacement=Popup.shown[REPLACE]
 editor.NewWishlist();NexusWishlistNameInput:SetText('Later work')
 local laterState=H.Clone(editor.DebugDraftState())
-check(StaticPopupDialogs[replacement.which].OnAccept(replacement.frame,replacement.data)==false
-    and NexusWishlistNameInput:GetText()=='Later work' and equal(editor.DebugDraftState(),laterState),
-    'old UI confirmation cannot overwrite later editor context')
-NexusFlexiblePlanOpen:Click();replacement=assert(H.popup)
+Popup.Click(replacement,1)
+check(Popup.shown[REPLACE]==nil and NexusWishlistNameInput:GetText()=='Later work'
+    and equal(editor.DebugDraftState(),laterState),'old UI confirmation cannot overwrite later editor context')
+NexusFlexiblePlanOpen:Click();replacement=Popup.shown[REPLACE]
 NexusWishlistNameInput:SetText('Later typed name')
-check(StaticPopupDialogs[replacement.which].OnAccept(replacement.frame,replacement.data)==false
-    and NexusWishlistNameInput:GetText()=='Later typed name','later typed name is bound into confirmation')
-NexusFlexiblePlanOpen:Click();replacement=assert(H.popup)
+Popup.Click(replacement,1)
+check(Popup.shown[REPLACE]==nil and NexusWishlistNameInput:GetText()=='Later typed name'
+    and editor.DebugPendingCount()==0,'later typed name is bound into confirmation')
+NexusFlexiblePlanOpen:Click();replacement=Popup.shown[REPLACE]
 local live=Nexus.GameAdapter.Catalog()
 local priorQuality=live.rows[ids[22]].quality
 live.rows[ids[22]].quality=priorQuality+1
-check(StaticPopupDialogs[replacement.which].OnAccept(replacement.frame,replacement.data)==false
-    and editor.DebugPendingCount()==0 and NexusWishlistNameInput:GetText()=='Later typed name'
+Popup.Click(replacement,1)
+check(Popup.shown[REPLACE]==nil and editor.DebugPendingCount()==0
+    and NexusWishlistNameInput:GetText()=='Later typed name'
     and ChooserText():find('catalog details changed',1,true),'catalog drift after confirmation refuses before reset')
 live.rows[ids[22]].quality=priorQuality
-NexusFlexiblePlanOpen:Click();replacement=assert(H.popup)
-check(StaticPopupDialogs[replacement.which].OnAccept(replacement.frame,replacement.data)==true,
-    'restored required facts allow retry of retained exact choice')
+NexusFlexiblePlanOpen:Click();replacement=Popup.shown[REPLACE]
+Popup.Click(replacement,1)
+check(Popup.shown[REPLACE]==nil and NexusWishlistNameInput:GetText()=='' and editor.DebugPendingCount()==79,
+    'EXPECT restored required facts allow a dismissing retry of the retained exact choice')
 live.rows[ids[22]].quality=9
 check(equal(Rendered(),exact.CanonicalEchoes(manual)),'later catalog mutation cannot change installed pending quality/count')
 live.rows[ids[22]].quality=priorQuality
-NexusFlexiblePlanEntry:Click();NexusFlexiblePlanOpen:Click();replacement=assert(H.popup)
+NexusFlexiblePlanEntry:Click();NexusFlexiblePlanOpen:Click();replacement=Popup.shown[REPLACE]
 check(Count(ids[22],0),'explicit zero unchooses one alternative')
-check(StaticPopupDialogs[replacement.which].OnAccept(replacement.frame,replacement.data)==false
-    and editor.DebugPendingCount()==79,'changed planning choice retires older replacement payload')
+Popup.Click(replacement,1)
+check(Popup.shown[REPLACE]==nil and editor.DebugPendingCount()==79
+    and equal(Rendered(),exact.CanonicalEchoes(manual)) and ChooserText():find('choice changed',1,true),
+    'changed planning choice retires older replacement payload')
 check(Count(ids[22],1),'player can explicitly restore that choice')
 
 -- No frame allocation per alternative or passive refresh; bound membership.

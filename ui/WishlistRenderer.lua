@@ -1513,7 +1513,10 @@ local function EnsureFrame()
 
     local planBtn = CreateFrame("Button", "NexusFlexiblePlanEntry", frame, "UIPanelButtonTemplate")
     planBtn:SetSize(148, 22)
-    planBtn:SetPoint("RIGHT", importBtn, "LEFT", -4, 0)
+    -- Above the Selected Echoes list it can replace, right-aligned with that
+    -- pane and Export: clear of the save-result line, its hover area, Assign
+    -- now, Import and Export in the row above.
+    planBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -154)
     planBtn:SetText("Plan alternatives")
     planBtn:SetScript("OnClick", function() Nexus.WishlistEditor.OpenFlexiblePlanChooser() end)
 
