@@ -21,10 +21,17 @@
 -- existing Saved Build with no assignment, through the live checklist (the
 -- ... menu route), its Assign Wishlist... route to the Echo Journal chooser,
 -- a cancel, the deliberate choice of the existing Wishlist and the
--- checklist/status readback, then one captured-destination change while the
--- chooser is open. Each no-side-effect frontier is measured on its own:
--- passive navigation/cancel, the explicit assignment (one association write
--- only) and the later passive refreshes. Pass-through spies only.
+-- checklist/status readback, then one destination change while the chooser
+-- is open (no chooser callback is delivered there). Each no-side-effect
+-- frontier is measured on its own: passive navigation/cancel, the explicit
+-- assignment (one association write only) and the later passive refreshes.
+-- J2b (fresh boot) measures the delayed chooser callback: a visible,
+-- unassigned candidate's production OnClick is captured before the
+-- destination change and delivered once afterwards, as a SYNTHETIC
+-- queued-callback boundary (no native timing or visible-click claim).
+-- J2c (fresh boot) checks that the J2b oracle rejects a skipped delivery and
+-- a write routed to another Saved Build. Pass-through spies only, apart from
+-- J2c's isolated test-only fault router.
 local V=dofile('tests/prototype/view_regression_support.lua')
 local C=V.Checker('ux_setup_checklist')
 local H,A,writes
@@ -678,43 +685,37 @@ C.scenario('J2 an existing unassigned Saved Build reaches an assigned Wishlist t
    C.expect(f~=nil and J2Readback(Rows(f),J2_FIRE,'W-Free'),'J2: the readback stays the same across refreshes')
   end
   if not f then return end
-  -- 5. One captured-destination change while the chooser is open: the game
-  -- shows Saved Build 1 (One) as active before a choice is made there.
+  -- 5. One destination change while the chooser is open: the game shows Saved
+  -- Build 1 (One) as active. No chooser callback is delivered here: W-Free is
+  -- now Saved Build 2's own Wishlist and the chooser lists only the other
+  -- Wishlists, so it offers no unassigned W-Free row, and an absent W-Free row
+  -- says nothing about whether the chooser closed. The delayed callback of a
+  -- visible, unassigned row is measured in J2b.
   J2CloseChooser();journal:Hide()
   f.assign:Click()
   shown,title=J2Chooser()
   C.expect(shown and title=='Assign to: Fire PvE','J2 stale: the chooser opens for the captured Saved Build 2',title)
   if not shown then return end
   local changeBase=J2Frontier(J)
-  local slotsBefore={}
-  for k,v in pairs(J.slotWrites) do slotsBefore[k]=v end
   H.perks.serverActiveSlot=1;H.Notify();A.Poll()
   local slots=A.Slots()
   local activeOk=C.setup(type(slots)=='table' and slots.activeSlot==1,'J2 stale: fixture: Saved Build 1 (One) is active while the chooser is open',
    type(slots)=='table' and slots.activeSlot or nil)
   local stillShown,nowTitle=J2Chooser()
-  local stale=stillShown and J2Row('W-Free') or nil
-  print('OBSERVED','J2 stale chooser shown='..tostring(stillShown)..' title='..nowTitle)
+  local freeRow=stillShown and J2Row('W-Free') or nil
+  local picker=_G.NexusWishlistOnlyPicker
+  local empty=picker and picker.emptyRow and picker.emptyRow:IsShown() and V.Plain(picker.emptyRow:GetText() or '') or ''
+  local held=J2Stored(2)
+  print('OBSERVED','J2 stale chooser (measured): shown='..tostring(stillShown)..' title='..nowTitle
+   ..' W-Free row listed='..tostring(freeRow~=nil)..' empty row='..empty..' Saved Build 2 holds='
+   ..tostring(type(held)=='table' and held.name or nil)..'; no chooser callback is delivered in J2 (see J2b)')
   if not activeOk then
-   print('OBSERVED','J2 stale: not evaluated after the failed SETUP (Saved Build 1 is not active): the stale choice, the runtime destination GUARD and the stale checklist readback')
-  elseif stale then
-   local named=J2_TITLE_SLOT[nowTitle]
-   J2Heard(function() stale.nameButton:Click() end)
-   local changed,count={},0
-   for k,v in pairs(J.slotWrites) do
-    local n=v-(slotsBefore[k] or 0)
-    if n>0 then changed[#changed+1]=tostring(k);count=count+n end
-   end
-   C.guard(named~=nil and count<=1 and J2Frontier(J).writes-changeBase.writes==count and (count==0 or changed[1]==tostring(named)),
-    'J2 stale: a choice in the open chooser writes only the Saved Build its title names at the click',
-    nowTitle..' -> ['..table.concat(changed,',')..']')
-  else
-   print('OBSERVED','J2 stale: the chooser did not stay open across the context change; no delayed choice was possible (reported limit)')
+   print('OBSERVED','J2 stale: not evaluated after the failed SETUP (Saved Build 1 is not active): the runtime destination GUARD and the stale checklist readback')
   end
   local changed2=J2Frontier(J)
-  C.guard(changed2.uploads==changeBase.uploads and changed2.uploadCalls==changeBase.uploadCalls
+  C.guard(changed2.writes==changeBase.writes and changed2.uploads==changeBase.uploads and changed2.uploadCalls==changeBase.uploadCalls
    and changed2.others==changeBase.others and changed2.auto==changeBase.auto and changed2.orb==changeBase.orb,
-   'J2 stale: the context change and any choice upload, act and spend nothing; Auto unchanged',J2Describe(changed2))
+   'J2 stale: the context change assigns, uploads, acts and spends nothing; Auto unchanged',J2Describe(changed2))
   if activeOk then
    local _,moved=J2Settle(function(m)
     return type(m)=='table' and type(m.progress)=='table' and tonumber(m.progress.activeSlot)==1
@@ -741,6 +742,243 @@ C.scenario('J2 an existing unassigned Saved Build reaches an assigned Wishlist t
   end
  end)
  A.SetLoadoutWishlist,A.UploadWishlist=counted,realUpload
+ if not ok then error(err,0) end
+end)
+
+-- J2b/J2c (issue #131 J2 review fix): the delayed chooser callback. J2's
+-- stale phase cannot exercise it: by then W-Free is Saved Build 2's own
+-- Wishlist and the chooser lists only the other Wishlists. A fresh boot keeps
+-- Saved Build 2 unassigned, so W-Free is a visible, unassigned row of the
+-- chooser that the checklist's Assign Wishlist... opens. Before the
+-- destination change, that row, the production OnClick function installed on
+-- it and the Saved Build the chooser title names are captured. After the
+-- harness has established Saved Build 1 (One) as the destination Nexus acts
+-- on, exactly that captured function is delivered once. This is a SYNTHETIC
+-- queued-callback boundary: the function is called directly, not clicked; no
+-- native timing, frame visibility or visible-click claim is made, and no
+-- current row is looked up again or rebound for the delivery.
+-- Expected under the current contract (ui/JournalTab.lua
+-- AssociateWishlistOnly and AssignWithConsent, Auto OFF; core/GameAdapter.lua
+-- SetLoadoutWishlist): the callback assigns at once to the Saved Build its
+-- chooser captured, which still holds Echoes: exactly one SetLoadoutWishlist
+-- call, for Saved Build 2, no other assignment or role writer, and Saved
+-- Build 1, the destination now, stays unassigned. This records the
+-- captured-target contract and adds no "assign the current destination"
+-- policy. Categories: GUARD for the chooser callback (current behaviour, not
+-- added by the checklist; not executed by the author on M6), EXPECT for the
+-- M7 checklist readback, SETUP for the fixture and the J2c discriminators.
+local J2B_WRITERS={'ConfirmWishlistRoles'}
+for _,k in ipairs(WRITERS) do J2B_WRITERS[#J2B_WRITERS+1]=k end
+local J2B_DEST={SetFirstRunWishlist='first-run',SetFirstLoadoutWishlistIdentity='first-run',
+ ClearFirstRunWishlist='first-run',SetFirstRunWishlistIdentity='first-run',ConfirmWishlistRoles='roles'}
+-- Pass-through spies over every assignment and role writer (with the
+-- destination each call names) and the adapter upload. J.route is J2c's
+-- test-only fault router; it is nil everywhere else. Returns the function
+-- that restores every replaced adapter field.
+local function J2bSpy(log,J)
+ local adapter,saved=A,{}
+ for _,k in ipairs(J2B_WRITERS) do
+  local real=adapter[k]
+  if type(real)=='function' then
+   saved[k]=real
+   adapter[k]=function(...)
+    local first=...
+    log[#log+1]={fn=k,dest=J2B_DEST[k] or tostring(tonumber(first) or first)}
+    local route=J.route and J.route[k]
+    if route then return route(real,...) end
+    return real(...)
+   end
+  end
+ end
+ local upload=adapter.UploadWishlist
+ if type(upload)=='function' then
+  saved.UploadWishlist=upload
+  adapter.UploadWishlist=function(...) J.uploadCalls=J.uploadCalls+1;return upload(...) end
+ end
+ return function() for k,real in pairs(saved) do adapter[k]=real end end
+end
+-- Every stored assignment by destination ('first' is the first-run plan).
+local function J2bLinks()
+ local s=Nexus.Store.State() or {}
+ local out={}
+ for k,r in pairs(type(s.loadoutWishlists)=='table' and s.loadoutWishlists or {}) do
+  out[tostring(k)]=type(r)=='table' and tostring(r.name) or tostring(r)
+ end
+ out.first=type(s.firstRunWishlist)=='table' and tostring(s.firstRunWishlist.name) or tostring(s.firstRunWishlist)
+ return out
+end
+local function J2bChanged(before,after)
+ local keys,seen={},{}
+ for _,t in ipairs({before,after}) do
+  for k in pairs(t) do if not seen[k] then seen[k]=true;keys[#keys+1]=k end end
+ end
+ table.sort(keys)
+ local out={}
+ for _,k in ipairs(keys) do
+  if before[k]~=after[k] then out[#out+1]=k..':'..tostring(before[k])..'>'..tostring(after[k]) end
+ end
+ return out
+end
+-- The measured facts after the boundary: the writer calls and the readback
+-- changes since the capture.
+local function J2bFacts(ctx,log,delivered,raised)
+ local calls={}
+ for i=ctx.calls+1,#log do calls[#calls+1]=log[i] end
+ return {delivered=delivered,raised=raised,calls=calls,named=ctx.named,changed=J2bChanged(ctx.links,J2bLinks())}
+end
+local function J2bCalls(o)
+ local out={}
+ for _,c in ipairs(o.calls) do out[#out+1]=c.fn..'('..c.dest..')' end
+ return table.concat(out,',')
+end
+-- The J2b oracle: the captured callback was delivered and did not raise,
+-- exactly one writer call was made, SetLoadoutWishlist naming the Saved Build
+-- the chooser title named, and the readback changed exactly that Saved Build,
+-- to W-Free. Returns the verdict and every reason it fails.
+local function J2bVerdict(o)
+ local why={}
+ if not o.delivered then why[#why+1]='the captured callback was not delivered' end
+ if o.raised then why[#why+1]='the callback raised: '..o.raised end
+ if #o.calls~=1 then why[#why+1]=#o.calls..' writer calls ['..J2bCalls(o)..']' end
+ local c=o.calls[1]
+ if c and not (c.fn=='SetLoadoutWishlist' and c.dest==tostring(o.named)) then
+  why[#why+1]='writer '..c.fn..' named '..c.dest..', not Saved Build '..tostring(o.named)
+ end
+ local want=tostring(o.named)..':nil>W-Free'
+ if not (#o.changed==1 and o.changed[1]==want) then
+  why[#why+1]='readback changed ['..table.concat(o.changed,',')..'], not ['..want..']'
+ end
+ return #why==0,#why==0 and 'accepted' or table.concat(why,'; ')
+end
+-- A fresh boot up to the boundary: the chooser for Saved Build 2 opened from
+-- the checklist, the visible unassigned W-Free row and its production OnClick
+-- captured, then Saved Build 1 established as the destination. Nil after a
+-- failed SETUP: a missing prerequisite is a failed SETUP, never a pass.
+local function J2bReach(tag,J,log)
+ local journal=J2Host()
+ local model=Refresh()
+ local asg=type(model)=='table' and type(model.assignment)=='table' and model.assignment or {}
+ if not C.setup(asg.state=='unassigned' and J2Stored(2)==nil and not Auto() and not journal:IsShown() and #log==0,
+  tag..': fixture: Saved Build 2 (Fire PvE) is active and unassigned, Auto is OFF, the Echo Journal is closed and nothing is written',
+  tostring(asg.state)..' writers='..#log) then return nil end
+ local f=Open(tag)
+ if not f then return nil end
+ if not C.setup(f.assign~=nil,tag..': fixture: the checklist offers Assign Wishlist...') then return nil end
+ f.assign:Click()
+ local shown,title=J2Chooser()
+ local row=shown and J2Row('W-Free') or nil
+ local button=row and row.nameButton or nil
+ local handler=button and button:GetScript('OnClick') or nil
+ local named=J2_TITLE_SLOT[title]
+ local pre=A.Slots()
+ print('OBSERVED',tag..' before the destination change (measured): chooser shown='..tostring(shown)..' title='..title
+  ..' (names slot '..tostring(named)..') W-Free row visible='..tostring(row~=nil)..' production OnClick='..type(handler)
+  ..' native active slot='..tostring(type(pre)=='table' and pre.activeSlot or nil)..' writers='..#log)
+ if not C.setup(shown and named==2 and row~=nil and type(handler)=='function' and type(pre)=='table' and pre.activeSlot==2 and #log==0,
+  tag..': fixture: before the destination change the chooser for Saved Build 2 shows a visible, unassigned W-Free row with its production OnClick',
+  title) then return nil end
+ local ctx={button=button,handler=handler,title=title,named=named,base=J2Frontier(J),links=J2bLinks(),calls=#log}
+ H.perks.serverActiveSlot=1;H.Notify();A.Poll()
+ local _,moved=J2Settle(function(m)
+  return type(m)=='table' and type(m.progress)=='table' and tonumber(m.progress.activeSlot)==1
+ end)
+ local slots=A.Slots()
+ local selected=type(A.SelectedSavedBuild)=='function' and A.SelectedSavedBuild(slots) or nil
+ if not C.setup(moved and type(slots)=='table' and slots.activeSlot==1 and selected==1,
+  tag..': fixture: the harness established Saved Build 1 (One) as the destination Nexus acts on',
+  tostring(type(slots)=='table' and slots.activeSlot or nil)..'/'..tostring(selected)) then return nil end
+ return ctx
+end
+-- The synthetic queued-callback delivery: the captured function, called once.
+local function J2bDeliver(ctx)
+ local delivered,raised=false,nil
+ local said=J2Heard(function()
+  delivered=true
+  local called,why=pcall(ctx.handler,ctx.button,'LeftButton')
+  if not called then raised=tostring(why) end
+ end)
+ return delivered,raised,said
+end
+
+C.scenario('J2b a delayed chooser callback, captured before the destination change, assigns only the Saved Build its chooser captured',function()
+ NexusActiveWishlistSelector=nil;NexusWishlistOnlyPicker=nil;NexusLoadoutAssociationPanel=nil
+ Boot(2)
+ local log,J={},{slotWrites={},uploadCalls=0}
+ local restore=J2bSpy(log,J)
+ local ok,err=pcall(function()
+  local ctx=J2bReach('J2b',J,log)
+  if not ctx then return end
+  local stillShown,nowTitle=J2Chooser()
+  print('OBSERVED','J2b after the destination change, before delivery (measured): chooser shown='..tostring(stillShown)
+   ..' title='..nowTitle..' captured row visible='..tostring(ctx.button:IsVisible())
+   ..' its OnClick replaced since capture='..tostring(ctx.button:GetScript('OnClick')~=ctx.handler))
+  local delivered,raised,said=J2bDeliver(ctx)
+  local _,settled=J2Settle(function(m)
+   local a=type(m)=='table' and type(m.assignment)=='table' and m.assignment or {}
+   return type(m)=='table' and type(m.progress)=='table' and tonumber(m.progress.activeSlot)==1 and a.state=='unassigned'
+  end)
+  local o=J2bFacts(ctx,log,delivered,raised)
+  local after=J2Frontier(J)
+  print('OBSERVED','J2b synthetic queued-callback delivery (the captured production OnClick called directly once; no native click, timing or visibility claim): delivered='
+   ..tostring(delivered)..' raised='..tostring(raised)..' writers=['..J2bCalls(o)..'] readback changed=['
+   ..table.concat(o.changed,',')..'] said='..said)
+  local accepted,why=J2bVerdict(o)
+  C.guard(accepted,'J2b: the delivered callback makes exactly one association write, SetLoadoutWishlist for Saved Build 2 (the Saved Build its chooser title named), and the readback shows only Saved Build 2 changed, to W-Free',why)
+  C.guard(Has(said,"'W-Free' is now the Wishlist for Saved Build 'Fire PvE'"),
+   'J2b: its visible confirmation names the captured Saved Build, not the destination now',said)
+  C.guard(after.uploads==ctx.base.uploads and after.uploadCalls==ctx.base.uploadCalls and after.others==ctx.base.others
+   and after.auto==ctx.base.auto and after.orb==ctx.base.orb and after.seen==ctx.base.seen,
+   'J2b: the delayed callback uploads, acts and spends nothing; Auto and the Welcome are unchanged',J2Describe(after))
+  local read=A.AssignedWishlist() or {}
+  local captured=A.GetLoadoutWishlist(2)
+  C.guard(settled and tonumber(read.activeSlot)==1 and read.state=='unassigned' and type(captured)=='table' and captured.name=='W-Free',
+   'J2b: production readback: the destination Nexus acts on now (Saved Build 1) stays unassigned, and the captured Saved Build 2 reads W-Free',
+   tostring(read.activeSlot)..'/'..tostring(read.state)..'/'..tostring(type(captured)=='table' and captured.name or nil))
+  local f=Open('J2b current readback')
+  if not f then return end
+  local rows=Rows(f)
+  print('OBSERVED','J2b current checklist rows='..table.concat(rows,' / '))
+  C.expect(J2Truthful(rows,J2_ONE,nil) and not Has(rows[2],'Fire PvE'),
+   'J2b: the checklist names the destination Nexus acts on now (Saved Build 1, unassigned), not the Saved Build the chooser title captured',
+   table.concat(rows,' / '))
+ end)
+ restore()
+ if not ok then error(err,0) end
+end)
+
+C.scenario('J2c fixture discriminators (not product evidence): the J2b oracle rejects a skipped delivery and a write routed to another Saved Build',function()
+ NexusActiveWishlistSelector=nil;NexusWishlistOnlyPicker=nil;NexusLoadoutAssociationPanel=nil
+ Boot(2)
+ local log,J={},{slotWrites={},uploadCalls=0}
+ local restore=J2bSpy(log,J)
+ local ok,err=pcall(function()
+  local ctx=J2bReach('J2c',J,log)
+  if not ctx then return end
+  -- Control 1: the captured callback is not delivered.
+  Refresh()
+  local skipped=J2bFacts(ctx,log,false,nil)
+  local acceptedSkip,whySkip=J2bVerdict(skipped)
+  print('OBSERVED','J2c control 1, delivery skipped (measured): writers=['..J2bCalls(skipped)..'] readback changed=['
+   ..table.concat(skipped.changed,',')..'] oracle: '..whySkip)
+  C.setup(not acceptedSkip and #skipped.calls==0 and #skipped.changed==0,
+   'J2c: fixture discriminator: with the captured callback not delivered there is no writer call and no readback change, and the J2b oracle rejects the outcome',whySkip)
+  -- Control 2: an isolated test-only router below the writer log sends the
+  -- delivered callback's SetLoadoutWishlist to Saved Build 1 instead.
+  J.route={SetLoadoutWishlist=function(real,_,...) return real(1,...) end}
+  local delivered,raised=J2bDeliver(ctx)
+  J.route=nil
+  Refresh()
+  local routed=J2bFacts(ctx,log,delivered,raised)
+  local acceptedRoute,whyRoute=J2bVerdict(routed)
+  local one,two=J2Stored(1),J2Stored(2)
+  print('OBSERVED','J2c control 2, write routed to Saved Build 1 (measured): writers=['..J2bCalls(routed)..'] readback changed=['
+   ..table.concat(routed.changed,',')..'] oracle: '..whyRoute)
+  C.setup(delivered and not raised and not acceptedRoute and #routed.calls==1 and routed.calls[1].dest=='2'
+   and type(one)=='table' and one.name=='W-Free' and two==nil,
+   'J2c: fixture discriminator: when the delivered callback\'s write is routed to Saved Build 1, the writer call still names Saved Build 2, the readback shows Saved Build 1 changed, and the J2b oracle rejects the outcome',whyRoute)
+ end)
+ J.route=nil
+ restore()
  if not ok then error(err,0) end
 end)
 
