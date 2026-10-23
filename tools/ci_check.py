@@ -81,11 +81,13 @@ def check_inventory(names: list[str]) -> list[str]:
 
 
 def python_test_path_ok(path) -> bool:
-    """A registered Python test entry: a relative POSIX path tools/tests/.../test_*.py without '..'."""
+    """A registered Python test entry: a relative POSIX path tools/tests/.../test_*.py, already canonical.
+    Its literal '/'-separated segments are checked, not a normalized path: an empty, '.' or '..' segment
+    is refused, so a './', '//' or trailing '/' spelling of a test file is not accepted as that file."""
     if not isinstance(path, str) or '\\' in path:
         return False
-    parts = pathlib.PurePosixPath(path).parts
-    return (len(parts) >= 3 and parts[:2] == ('tools', 'tests') and '..' not in parts
+    parts = tuple(path.split('/'))
+    return (len(parts) >= 3 and parts[:2] == ('tools', 'tests') and {'', '.', '..'}.isdisjoint(parts)
             and parts[-1].startswith('test_') and parts[-1].endswith('.py'))
 
 

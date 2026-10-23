@@ -486,6 +486,42 @@ def main() -> int:
            and pyrep.get('selected') is False and pyrep.get('results') == [],
            f'exit {result.code}, {len(result.calls)} processes, out {result.out[-4:]}, python_tests {pyrep}')
 
+    # 16. A registered entry must already be spelt canonically. A '.' segment or a repeated, leading or trailing
+    # '/' names the canonical file again; it is refused as malformed before any process starts, beside the
+    # canonical entry or alone. The traversal entry is a control, refused before and after this check. Here
+    # tools/tests holds only the canonical file, so the complete output of each case is known.
+    with tempfile.TemporaryDirectory() as tmp:
+        base = pathlib.Path(tmp)
+        (base / PY).parent.mkdir(parents=True, exist_ok=True)
+        (base / PY).write_text('', encoding='utf-8')
+        lua_inventory = f'inventory: {len(names)} listed tests'
+        unlisted = ('INVENTORY PROBLEM: Python test file not listed in PYTHON_TESTS of tools/run_prototype_tests.py'
+                    f' (it would never run): {PY}')
+        result = ci_check_call(complete, '--inventory-only', prepare=with_runner(python_tests=[PY], root=base))
+        expect('control: the canonical entry alone passes the inventory check when tools/tests holds only that'
+               ' file, exit 0, nothing started',
+               result.code == 0 and result.calls == [] and result.out == [
+                   lua_inventory, f'python inventory: 1 registered Python test files {PY_SCOPE}',
+                   'inventory check passed; no test was executed'],
+               f'exit {result.code}, {len(result.calls)} processes, {result.out[-4:]}')
+        for entry in ('tools/tests/./test_l10n_inventory.py', 'tools//tests/test_l10n_inventory.py',
+                      './tools/tests/test_l10n_inventory.py', 'tools/tests/test_l10n_inventory.py/',
+                      'tools/tests/../test_l10n_inventory.py'):
+            malformed = f'INVENTORY PROBLEM: Python test entry is not a tools/tests/test_*.py path: {entry}'
+            result = ci_check_call(complete, prepare=with_runner(python_tests=[PY, entry], root=base))
+            expect(f'{entry} beside the canonical entry is refused as malformed, the only inventory problem:'
+                   ' exit 1, nothing started',
+                   result.code == 1 and result.calls == [] and result.out == [
+                       lua_inventory, f'python inventory: 2 registered Python test files {PY_SCOPE}', malformed],
+                   f'exit {result.code}, {len(result.calls)} processes, {result.out[-4:]}')
+            result = ci_check_call(complete, prepare=with_runner(python_tests=[entry], root=base))
+            expect(f'{entry} alone is refused as malformed and leaves the canonical file unregistered: exit 1,'
+                   ' nothing started',
+                   result.code == 1 and result.calls == [] and result.out == [
+                       lua_inventory, f'python inventory: 1 registered Python test files {PY_SCOPE}', malformed,
+                       unlisted],
+                   f'exit {result.code}, {len(result.calls)} processes, {result.out[-4:]}')
+
     if failures:
         print('RESULT: FAILED:', '; '.join(failures))
         return 1
