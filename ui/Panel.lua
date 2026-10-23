@@ -1365,6 +1365,11 @@ local function EnsureFrame()
             -- the existing setters change one (M.AutomationMenuItems).
             { text = "Automation settings", notCheckable = true, hasArrow = true,
               menuList = M.AutomationMenuItems(MenuAction) },
+            -- Issue #123: the Nexus-only language chooser (M.LanguageMenuItems).
+            -- Building and showing it reads only; a row click is the one place
+            -- a choice is submitted, through the lifecycle callback.
+            { text = M.LanguageMenuLabel(), notCheckable = true, hasArrow = true,
+              menuList = M.LanguageMenuItems(MenuAction) },
             {
                 -- Opens the style and colour choices as their own menu.
                 text = "Appearance: " .. ((Nexus.Theme and Nexus.Theme.Summary)
@@ -2626,6 +2631,134 @@ function M.AutomationMenuItems(action)
         items[#items + 1] = item
     end
     return items
+end
+
+-- Issue #123: the Nexus-only language chooser of the ... menu. Its facts come
+-- from the lifecycle's read-only LanguageStatus callback (Panel.Init); until
+-- that exists every choice is shown disabled. Opening, hovering and closing
+-- the menu only read. A choice is submitted only by a row click, through the
+-- lifecycle's ChooseLanguage callback, which checks the saved-data authority
+-- again at that moment and alone holds the Store writer: this file never
+-- writes a setting. The result is said once in chat. Nothing is reloaded or
+-- refreshed: a saved choice applies after the next reload or login.
+local LANGUAGE_REASONS = {
+    startup = "Nexus is still starting",
+    capacity = "saved data is kept unchanged after a shared-data capacity refusal",
+    ["read-only"] = "this saved data is kept read-only by this build",
+    authority = "the saved-data owner is not available",
+    drift = "the saved data changed since start-up; reload first",
+    invalid = "that language is not available",
+    failed = "the saved-data owner did not take it",
+}
+local LANGUAGE_SCOPE = "Only three status messages are translated; other Nexus text stays English."
+local LANGUAGE_RELOAD = "A new choice applies after you reload the interface or log in again."
+
+local function LanguageName(status, id)
+    for _, row in ipairs(type(status) == "table" and type(status.languages) == "table"
+        and status.languages or {}) do
+        if type(row) == "table" and row.id == id and type(row.name) == "string" then
+            return row.name
+        end
+    end
+    return "English"
+end
+
+-- The chooser's facts (see above). Reads only.
+function M.LanguageStatus()
+    if callbacks and type(callbacks.LanguageStatus) == "function" then
+        local ok, status = pcall(callbacks.LanguageStatus)
+        if ok and type(status) == "table" then return status end
+    end
+    local status = {active = "enUS", saved = "enUS", pending = false,
+        refusal = "startup", languages = {}}
+    local localization = Nexus.Localization
+    if localization and type(localization.Languages) == "function" then
+        local ok, list = pcall(localization.Languages)
+        if ok and type(list) == "table" then status.languages = list end
+    end
+    if localization and type(localization.ActiveLanguage) == "function" then
+        local ok, id = pcall(localization.ActiveLanguage)
+        if ok and type(id) == "string" then status.active, status.saved = id, id end
+    end
+    return status
+end
+
+-- The ... menu row: the active language, and a pending choice when there is one.
+function M.LanguageMenuLabel()
+    local ok, status = pcall(M.LanguageStatus)
+    if not ok or type(status) ~= "table" then return "Language" end
+    return "Language: " .. LanguageName(status, status.active)
+        .. (status.pending and " (new choice after reload)" or "")
+end
+
+-- The submenu rows. `action` wraps a click (the menu's MenuAction).
+function M.LanguageMenuItems(action)
+    local status = M.LanguageStatus()
+    local refusal = status.refusal
+    local items = {{text = "Nexus language", isTitle = true, notCheckable = true}}
+    for _, row in ipairs(type(status.languages) == "table" and status.languages or {}) do
+        if type(row) == "table" and type(row.id) == "string" and type(row.name) == "string" then
+            local id, label = row.id, row.name
+            if id == status.active then label = label .. " - active" end
+            if status.pending and id == status.saved then
+                label = label .. " - saved, applies after reload"
+            end
+            items[#items + 1] = {text = label, checked = id == status.saved,
+                disabled = refusal ~= nil,
+                func = action(function() M.ChooseLanguage(id) end)}
+        end
+    end
+    items[#items + 1] = {text = LANGUAGE_RELOAD, notCheckable = true, disabled = true}
+    items[#items + 1] = {text = LANGUAGE_SCOPE, notCheckable = true, disabled = true}
+    if status.savedUnsupported then
+        items[#items + 1] = {text = "The saved language is not offered by this build; English is shown.",
+            notCheckable = true, disabled = true}
+    end
+    if status.sessionOnly then
+        items[#items + 1] = {text = "The last choice was not saved, so it will not apply after a reload.",
+            notCheckable = true, disabled = true}
+    end
+    if refusal ~= nil then
+        items[#items + 1] = {text = "Changes unavailable: " .. (LANGUAGE_REASONS[refusal]
+            or "the change was refused") .. ".", notCheckable = true, disabled = true}
+    end
+    return items
+end
+
+-- What a choice did, in words. Reads only.
+function M.LanguageResultText(result, id)
+    local state = type(result) == "table" and result.state or nil
+    local name = LanguageName(M.LanguageStatus(), type(result) == "table" and result.id or id)
+    if state == "saved" then
+        if result.pending then
+            return "Nexus language saved: " .. name .. ". " .. LANGUAGE_RELOAD .. " " .. LANGUAGE_SCOPE
+        end
+        return "Nexus language saved: " .. name .. ". It is already the active language."
+    elseif state == "unchanged" then
+        return "Nexus language is already set to " .. name .. "; nothing was changed."
+            .. (result.pending and (" " .. LANGUAGE_RELOAD) or "")
+    elseif state == "session" then
+        return "The language choice was not saved: only this session's settings took it, and it "
+            .. "would not last through the reload it needs. Nothing changes now."
+    elseif state == "unconfirmed" then
+        return "The language choice could not be confirmed as saved. Check the menu again after a reload."
+    end
+    local reason = type(result) == "table" and result.reason or nil
+    return "The language cannot be changed right now: " .. (LANGUAGE_REASONS[reason]
+        or "the change was refused") .. ". Nothing was changed."
+end
+
+-- A row click: submits the choice through the lifecycle and says the result.
+function M.ChooseLanguage(id)
+    local result
+    if callbacks and type(callbacks.ChooseLanguage) == "function" then
+        local ok, value = pcall(callbacks.ChooseLanguage, id)
+        result = ok and type(value) == "table" and value or {state = "refused", reason = "authority"}
+    else
+        result = {state = "refused", reason = "startup"}
+    end
+    print("|cffffd200Nexus:|r " .. M.LanguageResultText(result, id))
+    return result
 end
 
 -- Whether Auto is selected now, from the runtime's counters (memory only).
