@@ -12,9 +12,10 @@
 --    segment starting with a letter ("area.meaning"). A key names a
 --    meaning; it is never made from English, player or game text.
 --  * text: a Lua string of 1 to MAX_TEXT_BYTES bytes, well-formed UTF-8
---    (lead and continuation bytes), with at least one non-space character,
---    no control byte (0-31, 127) and no "|" (so no colour, link or texture
---    escape). It is shown exactly as stored: no placeholder or formatting.
+--    (the shortest-form encoding of Unicode scalar values only; see
+--    WellFormedUtf8), with at least one non-space character, no control
+--    byte (0-31, 127) and no "|" (so no colour, link or texture escape). It
+--    is shown exactly as stored: no placeholder or formatting.
 --  * entries table: used only when it is a plain table without a
 --    metatable. It is read with next/rawget, never through a metamethod,
 --    and nothing in it is called.
@@ -34,7 +35,7 @@
 --     table with a metatable)      -> English text, "base", "unsupported_pack"
 --  5. no entry for the key         -> English text, "base", "missing_candidate"
 --  6. entry outside the text contract (not a string, empty, only spaces,
---     control byte, "|", too long, malformed UTF-8)
+--     control byte, "|", too long, malformed or non-scalar UTF-8)
 --                                  -> English text, "base", "invalid_candidate"
 --  7. otherwise                    -> the entry, "candidate", nil
 -- A candidate can only replace a reviewed English key, never add one. There
@@ -74,20 +75,40 @@ local function ValidKey(key)
     return not key:find("%.[^a-z]")
 end
 
+-- UTF-8 as the text contract accepts it, checked byte by byte: only the
+-- shortest-form encoding of a Unicode scalar value (U+0000..U+D7FF and
+-- U+E000..U+10FFFF). An overlong form, a surrogate (U+D800..U+DFFF), a value
+-- above U+10FFFF, an invalid lead byte, a stray continuation byte and a
+-- truncated sequence are refused. The second byte's range depends on the
+-- lead; every later continuation byte is 80..BF:
+--   C2..DF -> 80..BF   E0 -> A0..BF   E1..EC -> 80..BF   ED -> 80..9F
+--   EE..EF -> 80..BF   F0 -> 90..BF   F1..F3 -> 80..BF   F4 -> 80..8F
+-- Noncharacters such as U+FFFF and U+10FFFF are scalar values and pass.
+-- Nothing is normalized; the control-byte, "|", space and length rules are
+-- ValidText's own, applied to the same bytes.
 local function WellFormedUtf8(text)
     local index, length = 1, #text
     while index <= length do
         local byte = text:byte(index)
-        local width
+        local width, low, high
         if byte < 0x80 then width = 1
-        elseif byte >= 0xC2 and byte <= 0xDF then width = 2
-        elseif byte >= 0xE0 and byte <= 0xEF then width = 3
-        elseif byte >= 0xF0 and byte <= 0xF4 then width = 4
+        elseif byte >= 0xC2 and byte <= 0xDF then width, low, high = 2, 0x80, 0xBF
+        elseif byte == 0xE0 then width, low, high = 3, 0xA0, 0xBF
+        elseif byte >= 0xE1 and byte <= 0xEC then width, low, high = 3, 0x80, 0xBF
+        elseif byte == 0xED then width, low, high = 3, 0x80, 0x9F
+        elseif byte == 0xEE or byte == 0xEF then width, low, high = 3, 0x80, 0xBF
+        elseif byte == 0xF0 then width, low, high = 4, 0x90, 0xBF
+        elseif byte >= 0xF1 and byte <= 0xF3 then width, low, high = 4, 0x80, 0xBF
+        elseif byte == 0xF4 then width, low, high = 4, 0x80, 0x8F
         else return false end
         if index + width - 1 > length then return false end
-        for offset = 1, width - 1 do
-            local continuation = text:byte(index + offset)
-            if continuation < 0x80 or continuation > 0xBF then return false end
+        if width > 1 then
+            local second = text:byte(index + 1)
+            if second < low or second > high then return false end
+            for offset = 2, width - 1 do
+                local continuation = text:byte(index + offset)
+                if continuation < 0x80 or continuation > 0xBF then return false end
+            end
         end
         index = index + width
     end

@@ -88,6 +88,89 @@ resolves(K,{['reason.save_in_progress']='Other key'},E,'base','missing_candidate
 for i,bad in ipairs({'','   ','\t\n',42,true,{},function()return 'x' end,'Has|cffff0000colour','Line\nbreak','Nul\0byte',string.rep('x',L.MAX_TEXT_BYTES+1),'\255\254bad','\226\128'})do
  resolves(K,{[K]=bad},E,'base','invalid_candidate','invalid candidate falls back to English #'..i)
 end
+-- Review fix (issue #123): candidate and base text is shortest-form UTF-8 for
+-- Unicode scalar values only. Exact bytes come from string.char, so the
+-- fixture does not depend on this file's encoding. Every sample has no
+-- control byte and no "|", has a non-space byte and fits the length limit,
+-- so only the UTF-8 rule decides it. These are byte and Unicode validity
+-- checks, not proof of native glyph rendering.
+local B=string.char
+-- Lead and continuation bytes in range, but not the shortest form of a scalar
+-- value: both ends of the invalid second-byte range of E0, ED, F0 and F4.
+local nonScalar={
+ {'E0 80 80, overlong U+0000',B(0xE0,0x80,0x80)},
+ {'E0 9F BF, overlong U+07FF',B(0xE0,0x9F,0xBF)},
+ {'ED A0 80, surrogate U+D800',B(0xED,0xA0,0x80)},
+ {'ED BF BF, surrogate U+DFFF',B(0xED,0xBF,0xBF)},
+ {'F0 80 80 80, overlong U+0000',B(0xF0,0x80,0x80,0x80)},
+ {'F0 8F BF BF, overlong U+FFFF',B(0xF0,0x8F,0xBF,0xBF)},
+ {'F4 90 80 80, above U+10FFFF',B(0xF4,0x90,0x80,0x80)},
+ {'F4 BF BF BF, above U+10FFFF',B(0xF4,0xBF,0xBF,0xBF)},
+}
+-- Invalid lead bytes, stray continuations, a bad later byte and truncation.
+local malformed={
+ {'C0 80, invalid lead',B(0xC0,0x80)},
+ {'C1 BF, invalid lead',B(0xC1,0xBF)},
+ {'F5 80 80 80, invalid lead',B(0xF5,0x80,0x80,0x80)},
+ {'FF, invalid lead',B(0xFF)},
+ {'80, stray continuation',B(0x80)},
+ {'BF, stray continuation',B(0xBF)},
+ {'C2 78, missing continuation',B(0xC2,0x78)},
+ {'E1 41 80, bad second byte',B(0xE1,0x41,0x80)},
+ {'E0 A0 41, bad third byte',B(0xE0,0xA0,0x41)},
+ {'F0 90 41 80, bad third byte',B(0xF0,0x90,0x41,0x80)},
+ {'F4 8F BF 41, bad fourth byte',B(0xF4,0x8F,0xBF,0x41)},
+ {'E2 82, truncated',B(0xE2,0x82)},
+ {'F0 9F 98, truncated',B(0xF0,0x9F,0x98)},
+ {'F4 8F BF, truncated',B(0xF4,0x8F,0xBF)},
+}
+-- Both ends of each lead's valid range, ordinary non-ASCII text and ASCII.
+-- U+FFFF and U+10FFFF are noncharacters but scalar values, so they pass.
+local scalar={
+ {'C2 80, U+0080',B(0xC2,0x80)},
+ {'DF BF, U+07FF',B(0xDF,0xBF)},
+ {'E0 A0 80, U+0800',B(0xE0,0xA0,0x80)},
+ {'E0 BF BF, U+0FFF',B(0xE0,0xBF,0xBF)},
+ {'E1 80 80, U+1000',B(0xE1,0x80,0x80)},
+ {'EC BF BF, U+CFFF',B(0xEC,0xBF,0xBF)},
+ {'ED 80 80, U+D000',B(0xED,0x80,0x80)},
+ {'ED 9F BF, U+D7FF',B(0xED,0x9F,0xBF)},
+ {'EE 80 80, U+E000',B(0xEE,0x80,0x80)},
+ {'EF BF BF, U+FFFF',B(0xEF,0xBF,0xBF)},
+ {'F0 90 80 80, U+10000',B(0xF0,0x90,0x80,0x80)},
+ {'F0 BF BF BF, U+3FFFF',B(0xF0,0xBF,0xBF,0xBF)},
+ {'F1 80 80 80, U+40000',B(0xF1,0x80,0x80,0x80)},
+ {'F3 BF BF BF, U+FFFFF',B(0xF3,0xBF,0xBF,0xBF)},
+ {'F4 80 80 80, U+100000',B(0xF4,0x80,0x80,0x80)},
+ {'F4 8F BF BF, U+10FFFF',B(0xF4,0x8F,0xBF,0xBF)},
+ {'ordinary non-ASCII text','Caf'..B(0xC3,0xA9)..' '..B(0xE2,0x80,0x94)..' '..B(0xE6,0x97,0xA5,0xE6,0x9C,0xAC)..' '..B(0xF0,0x9F,0x98,0x80)},
+ {'ASCII text','Plain ASCII status text'},
+}
+-- Each sample alone, after ASCII (a truncation stays at the end), between
+-- ASCII, and after valid two-, three- and four-byte scalars, so the check
+-- must advance through the whole string.
+local function contexts(s)
+ return {{'alone',s},{'after ASCII','Ab '..s},{'between ASCII','Ab '..s..' cd'},
+  {'after multi-byte scalars',B(0xC3,0xA9)..B(0xE2,0x80,0x94)..B(0xF0,0x9F,0x98,0x80)..s..'z'}}
+end
+local function isolated(t)
+ return #t>=1 and #t<=L.MAX_TEXT_BYTES and t:find('%S')~=nil and not t:find('[%z\1-\31\127|]')
+end
+for _,group in ipairs({{'non-scalar',nonScalar},{'malformed',malformed}})do
+ for _,case in ipairs(group[2])do for _,c in ipairs(contexts(case[2]))do
+  local label=group[1]..' candidate falls back to English: '..case[1]..' ('..c[1]..')'
+  check(isolated(c[2]),'fixture isolates the UTF-8 rule: '..label)
+  resolves(K,{[K]=c[2]},E,'base','invalid_candidate',label)
+ end end
+end
+for _,case in ipairs(scalar)do
+ for _,c in ipairs(contexts(case[2]))do
+  local label='scalar candidate is accepted: '..case[1]..' ('..c[1]..')'
+  check(isolated(c[2]),'fixture isolates the UTF-8 rule: '..label)
+  resolves(K,{[K]=c[2]},c[2],'candidate',nil,label)
+ end
+ resolves(K,{[K]='Ab '..case[2]..' '..B(0xBF)},E,'base','invalid_candidate','a stray byte after a scalar is still refused: '..case[1])
+end
 local touched=0
 local trap=setmetatable({},{__index=function()touched=touched+1;return 'Injected text' end})
 for i,pack in ipairs({'unsupported-pack',7,false,function()return {} end,trap,setmetatable({[K]='Wrapped text'},{})})do
@@ -101,6 +184,15 @@ for i,key in ipairs({'Reading your saved data','',7,'reason..double','reason.','
 end
 resolves(nil,nil,U,'unavailable','invalid_key','nil key yields the safe status')
 check(L.Diagnostics().misses==misses,'Resolve itself records nothing')
+-- Text counts a non-scalar candidate as any other invalid candidate and
+-- keeps no key for it.
+do
+ local t0=L.Diagnostics()
+ local tx,ts,tw=L.Text(K,{[K]=B(0xED,0xA0,0x80)})
+ local t1=L.Diagnostics()
+ check(tx==E and ts=='base' and tw=='invalid_candidate','Text falls back to English for a surrogate candidate, never its bytes')
+ check(t1.misses-t0.misses==1 and t1.byReason.invalid_candidate-t0.byReason.invalid_candidate==1 and t1.last=='invalid_candidate' and #t1.keys==#t0.keys and t1.keysNotKept==t0.keysNotKept,'a non-scalar candidate is counted as invalid_candidate and keeps no key')
+end
 local d1=L.Diagnostics()
 for i=1,200 do L.Text('reason.fixture_miss_'..i)end
 for _=1,50 do L.Text('reason.fixture_miss_1')end
@@ -128,6 +220,66 @@ check(#big.Keys()==0 and big.Diagnostics().base.oversized,'an oversized base is 
 local partial=assert(reload({['reason.save_in_progress']='Saving is still in progress; wait for its final result',['Bad Key']='Bad',['reason.blank']='  ',['reason.number']=5}))
 local pd=partial.Diagnostics().base
 check(#partial.Keys()==1 and pd.accepted==1 and pd.rejected==3 and select(3,partial.Resolve(K))=='unknown_key','invalid base entries are left out and counted')
+-- Review fix (issue #123): the English base copied at load passes the same
+-- text boundary. A non-scalar or malformed base entry is left out and
+-- counted, is absent from Has and Keys, resolves to the safe status, and a
+-- candidate cannot bring it back. reload() restores the real module and data.
+do
+ local invalidBase={['reason.save_in_progress']='Saving is still in progress; wait for its final result',
+  ['reason.list_preparing']='This list is '..B(0xED,0xA0,0x80)..' prepared'}
+ local rejected={'reason.list_preparing'}
+ for _,group in ipairs({{'non_scalar',nonScalar},{'malformed',malformed}})do
+  for i,case in ipairs(group[2])do
+   for j,value in ipairs({case[2],'Ab '..case[2]..' cd'})do
+    local key='reason.'..group[1]..'_'..i..'_'..j
+    invalidBase[key]=value;rejected[#rejected+1]=key
+   end
+  end
+ end
+ check(count(invalidBase)==#rejected+1 and count(invalidBase)<=L.MAX_BASE_ENTRIES,'invalid base fixture stays within the entry limit')
+ local refusing=assert(reload(invalidBase),'loader with non-scalar and malformed base entries');checks=checks+1
+ local rd=refusing.Diagnostics().base
+ check(rd.present and not rd.oversized and rd.accepted==1 and rd.rejected==#rejected,'non-scalar and malformed base entries are left out and counted')
+ local rk=refusing.Keys()
+ check(#rk==1 and rk[1]=='reason.save_in_progress' and refusing.UNAVAILABLE==U,'only the valid base entry is listed; the safe status is the same')
+ local unknown0=refusing.Diagnostics().byReason.unknown_key
+ for _,key in ipairs(rejected)do
+  check(not refusing.Has(key),'rejected base key is absent from Has: '..key)
+  local text,source,why=refusing.Resolve(key)
+  check(text==U and source=='unavailable' and why=='unknown_key','rejected base key resolves to the safe status: '..key)
+  text,source,why=refusing.Resolve(key,{[key]='Fixture replacement text'})
+  check(text==U and source=='unavailable' and why=='unknown_key','a candidate cannot resurrect a rejected base key: '..key)
+  check(refusing.Text(key)==U,'Text gives the safe status for a rejected base key: '..key)
+ end
+ check(refusing.Diagnostics().byReason.unknown_key-unknown0==#rejected,'each shown rejected base key is counted as unknown_key')
+ local kept,keptSource,keptWhy=refusing.Resolve('reason.save_in_progress')
+ check(kept=='Saving is still in progress; wait for its final result' and keptSource=='base' and keptWhy==nil,'the valid base entry beside them still resolves')
+ Nexus.Localization=refusing
+ local shownBad,shownGood=T.Message('CURSOR_REQUIRED'),T.Message('ROOT_MUTATION_PENDING')
+ Nexus.Localization=real
+ check(shownBad==U..' Details: CURSOR_REQUIRED','a non-scalar base text never reaches the player; the safe status and its code do')
+ check(shownGood=='Saving is still in progress; wait for its final result','a valid base text beside it still reaches the player')
+ local validBase,valid={},{}
+ for i,case in ipairs(scalar)do
+  for j,value in ipairs({case[2],'Ab '..case[2]..' cd'})do
+   local key='reason.scalar_'..i..'_'..j
+   validBase[key]=value;valid[#valid+1]=key
+  end
+ end
+ table.sort(valid)
+ check(#valid<=L.MAX_BASE_ENTRIES,'scalar base fixture stays within the entry limit')
+ local accepting=assert(reload(validBase),'loader with scalar base entries');checks=checks+1
+ local ad=accepting.Diagnostics().base
+ check(ad.present and not ad.oversized and ad.accepted==#valid and ad.rejected==0,'every scalar base entry is accepted')
+ local ak,listed=accepting.Keys(),true
+ for i=1,#valid do listed=listed and ak[i]==valid[i] end
+ check(#ak==#valid and listed,'every scalar base key is listed, sorted')
+ for _,key in ipairs(valid)do
+  local value,source,why=accepting.Resolve(key)
+  check(accepting.Has(key) and value==validBase[key] and source=='base' and why==nil,'scalar base text resolves with its exact bytes: '..key)
+ end
+ check(#L.Keys()==3 and L.Has(K) and L.Resolve(K)==E,'the real English base is unchanged by the loader checks')
+end
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'real seam and data restored after the loader checks')
 Nexus.Localization=partial
 check(T.Message('CURSOR_REQUIRED')==partial.UNAVAILABLE..' Details: CURSOR_REQUIRED','unknown base key reaches the player as the safe status with its code')
