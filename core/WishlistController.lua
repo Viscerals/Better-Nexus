@@ -2002,7 +2002,7 @@ function Controller.New(options)
         end
         -- The editor this upload belongs to: a callback during the host call can
         -- open another one, and the upload is bookkept against this one only.
-        local submitting = state.editingContext
+        local submitting, creating = state.editingContext, state.createTargetContext
         local expected = submitting and submitting.mirrorTokens or nil
         trace.sending, trace.createTargetContext = true, state.createTargetContext
         local ok, err = Adapter.UploadWishlist(slot or 0, name, echoes, expected)
@@ -2022,7 +2022,8 @@ function Controller.New(options)
             end
             -- Service callbacks must not attach a newly edited draft to this
             -- completed upload. Report partial completion; never repeat upload.
-            if draftToken ~= CurrentDraftToken() then
+            if submitting ~= state.editingContext or creating ~= state.createTargetContext
+                or draftToken ~= CurrentDraftToken() then
                 state.applyRetry = nil
                 notify("|cffff6060Nexus:|r Wishlist uploaded, but the editor changed; local targets were not reassigned. Review and save again.")
                 return false, "uploaded_draft_changed"

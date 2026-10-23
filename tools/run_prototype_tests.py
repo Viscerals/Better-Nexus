@@ -313,6 +313,9 @@ DEFAULT_TIMEOUT_SECONDS=45
 # main() refuses a name here that is not in NAMES, so a misspelt name cannot silently get 45 s.
 TEST_TIMEOUT_SECONDS={'catalog_root_capacity':120,'sync_admission_traffic_acceptance':120}
 
+# Keep an accepted Wishlist upload bound to its original editor context.
+NAMES += ['wishlist_upload_context']
+
 def timeout_for(name:str)->int:
     return TEST_TIMEOUT_SECONDS.get(name,DEFAULT_TIMEOUT_SECONDS)
 
