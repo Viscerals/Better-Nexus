@@ -313,7 +313,9 @@ DEFAULT_TIMEOUT_SECONDS=45
 # main() refuses a name here that is not in NAMES, so a misspelt name cannot silently get 45 s.
 TEST_TIMEOUT_SECONDS={'catalog_root_capacity':120,'sync_admission_traffic_acceptance':120}
 
-# Keep an accepted Wishlist upload bound to its original editor context.
+# Issue #132: an accepted Wishlist upload stays bound to the editor/Create context and draft that
+# authorized it (SETUP/EXPECT/GUARD; EXPECT fails at 791cdcc by design: equal-content context-less
+# replacement and the partial notice that names the uploaded Wishlist).
 NAMES += ['wishlist_upload_context']
 
 def timeout_for(name:str)->int:

@@ -137,6 +137,8 @@ function Controller.New(options)
         applying = false,
         createdDraft = nil,
         createdNames = {},
+        -- The identity of the draft in the editor (see NewDraftIdentity).
+        draftSerial = 0,
     }
     local metrics = {
         lockedSkipped = 0,
@@ -155,6 +157,16 @@ function Controller.New(options)
             state.presentationRevision = 1
         end
         return state.presentationRevision
+    end
+
+    -- A new identity for the draft in the editor. It changes whenever a whole
+    -- draft is replaced (New, Copy, Import, opening a Wishlist or a Saved
+    -- Build, loading a list) and never on an edit of the same draft. A save
+    -- compares it after its own upload (TryApply), so an equal-content
+    -- replacement with no editor or Create context is still a replacement.
+    local function NewDraftIdentity()
+        state.draftSerial = state.draftSerial + 1
+        return state.draftSerial
     end
 
     local function CopyRecord(value)
@@ -751,6 +763,7 @@ function Controller.New(options)
         if trustOrder == nil then trustOrder = true end
         -- A loaded list replaces the draft a save result described.
         state.saveResult = nil
+        NewDraftIdentity()
         state.currentDesignTargets=designTargets
         state.pending = {}
         state.pendingLock = {}
@@ -1023,6 +1036,7 @@ function Controller.New(options)
         -- an earlier Create no longer stands for it (New, Copy, Import).
         state.saveResult = nil
         state.createdDraft = nil
+        NewDraftIdentity()
         state.editingContext = nil
         state.createTargetContext = nil
         -- Assignment actions as this new draft begins (see TryApply).
@@ -1810,6 +1824,7 @@ function Controller.New(options)
     local function AlreadyCreated(nameKey, requestedKey)
         local created = state.createdDraft
         if not created or created.createTargetContext ~= state.createTargetContext
+            or created.draftSerial ~= state.draftSerial
             or not created.draftTokens[CurrentDraftToken()] then
             return nil
         end
@@ -1820,10 +1835,14 @@ function Controller.New(options)
     end
 
     -- The upload call of a Create began and did not report that nothing was
-    -- sent. `settled`: the draft did not change during the call, so the draft
-    -- the commit leaves (its fulfilled targets may be rewritten) is that draft.
+    -- sent. `settled`: the draft that authorized the call is still the
+    -- editor's (same contexts, draft identity and contents), so the draft the
+    -- commit leaves (its fulfilled targets may be rewritten) is that draft.
     -- `uncertain`: the call ended in an error, so whether the server received
-    -- it is unknown; it still counts as sent (never repeated blindly).
+    -- it is unknown; it still counts as sent (never repeated blindly). The
+    -- record names the authorizing draft identity: a draft that replaced it
+    -- during the call (New, Copy, Import) is never taken for it, while the
+    -- uploaded name still counts as taken.
     local function NoteCreated(trace, name, requested, settled, uncertain)
         local nameKey = DraftModel.NameKey(name)
         if nameKey ~= "" then state.createdNames[nameKey] = true end
@@ -1831,6 +1850,7 @@ function Controller.New(options)
         if settled then tokens[CurrentDraftToken()] = true end
         state.createdDraft = {
             createTargetContext = trace.createTargetContext,
+            draftSerial = trace.draftSerial,
             draftTokens = tokens,
             name = tostring(name or ""),
             keys = {[nameKey] = true,
@@ -2000,11 +2020,23 @@ function Controller.New(options)
                 .. "it will get.")
             return false, "name_taken"
         end
-        -- The editor this upload belongs to: a callback during the host call can
-        -- open another one, and the upload is bookkept against this one only.
+        -- The draft that authorized this upload: its editor and Create
+        -- contexts, its identity and its contents. A host callback during the
+        -- call can open another Wishlist, begin New/Copy/Import or edit the
+        -- draft; the upload is then bookkept against the authorizing draft
+        -- only. An equal-content replacement with no editor or Create context
+        -- differs from it in identity alone.
         local submitting, creating = state.editingContext, state.createTargetContext
+        local authorizing = state.draftSerial
+        local function SameAuthorizingDraft()
+            return submitting == state.editingContext
+                and creating == state.createTargetContext
+                and authorizing == state.draftSerial
+                and draftToken == CurrentDraftToken()
+        end
         local expected = submitting and submitting.mirrorTokens or nil
         trace.sending, trace.createTargetContext = true, state.createTargetContext
+        trace.draftSerial = authorizing
         local ok, err = Adapter.UploadWishlist(slot or 0, name, echoes, expected)
         -- The call returned: an error raised from here on did not interrupt it.
         trace.returned = true
@@ -2020,12 +2052,14 @@ function Controller.New(options)
                 local own = Adapter.ServerWishlistTokenFor(name, echoes)
                 if own then submitting.mirrorTokens[own] = true end
             end
-            -- Service callbacks must not attach a newly edited draft to this
-            -- completed upload. Report partial completion; never repeat upload.
-            if submitting ~= state.editingContext or creating ~= state.createTargetContext
-                or draftToken ~= CurrentDraftToken() then
+            -- A host callback replaced or edited the authorizing draft: the
+            -- replacement is never assigned, committed, settled or uploaded
+            -- by this save. Report the partial completion; never repeat upload.
+            if not SameAuthorizingDraft() then
                 state.applyRetry = nil
-                notify("|cffff6060Nexus:|r Wishlist uploaded, but the editor changed; local targets were not reassigned. Review and save again.")
+                notify("|cffff6060Nexus:|r '" .. tostring(name) .. "' was uploaded, but the editor changed "
+                    .. "during the upload, so it was not assigned and local targets were not updated. "
+                    .. "Review and save again.")
                 return false, "uploaded_draft_changed"
             end
             -- The draft is the one uploaded: whatever the commit below rewrites
@@ -2201,7 +2235,9 @@ function Controller.New(options)
             -- Wishlist's slot may now show this upload, so it joins the lineage.
             state.applyRetry = nil
             trace.uncertain = true
-            trace.settled = draftToken == CurrentDraftToken()
+            -- Settled only while the authorizing draft is still the editor's
+            -- (the same identity rule as an accepted upload).
+            trace.settled = SameAuthorizingDraft()
             if submitting and type(submitting.mirrorTokens) == "table"
                 and tonumber(submitting.slot) == tonumber(slot)
                 and Adapter.ServerWishlistTokenFor then
@@ -2258,6 +2294,7 @@ function Controller.New(options)
             destination = destination,
             editingContext = state.editingContext,
             createTargetContext = state.createTargetContext,
+            draftSerial = state.draftSerial,
             epoch = ActionEpoch()}
     end
 
@@ -2350,13 +2387,14 @@ function Controller.New(options)
     end
 
     -- Whether a recorded result still describes this editor: the same
-    -- editing/create context and Store owner; for an accepted assignment,
+    -- editing/create context, draft identity and Store owner; for an accepted assignment,
     -- the destination still holds what that save installed (an Assign,
     -- Unassign, Restore or hand-off since then contradicts it); for a new
     -- plan, the name field still holds the saved name.
     local function SaveResultCurrent(result, nameText)
         if result.editingContext ~= state.editingContext
-            or result.createTargetContext ~= state.createTargetContext then
+            or result.createTargetContext ~= state.createTargetContext
+            or result.draftSerial ~= state.draftSerial then
             return false
         end
         if result.epoch ~= ActionEpoch() then return false end
@@ -2750,6 +2788,7 @@ function Controller.New(options)
         local created = state.createdDraft
         if state.editingContext or not created
             or created.createTargetContext ~= state.createTargetContext
+            or created.draftSerial ~= state.draftSerial
             or not created.draftTokens[CurrentDraftToken()] then
             return nil
         end
