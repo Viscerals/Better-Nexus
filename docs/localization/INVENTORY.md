@@ -1,6 +1,9 @@
 # String-literal inventory (L10N-01)
 
-Refs #123. Source pin `18dc5b0313033dbc522bec1ab89c304078aa5645`.
+Refs #123. Source pin `18dc5b0313033dbc522bec1ab89c304078aa5645`. Notes below
+on `T.Message`, English-text coupling and support wrappers were read later, at
+source `66905e7a9be6ee31ead6bb60ef306e9fe5d9f4c9`. They are manual
+classification leads and do not refresh the capture, its counts or its pin.
 
 This is a lexical inventory of the Nexus-owned runtime Lua source. It locates
 every string literal and records its exact value. It does not decide which
@@ -134,7 +137,11 @@ The descriptions come from each file's own header.
 Copy is also built outside `ui/`. These sources were confirmed by reading:
 - `core/UserText.lua`: player-facing terms, reason text, destinations, counts
   and record scope (header at `core/UserText.lua:1-2`);
-- `core/Main.lua`: chat output (`core/Main.lua:23-24`).
+- `core/Main.lua`: chat output (`core/Main.lua:23-24`);
+- `core/SupportReport.lua`: incident, notice and reason lines that
+  `ui/SupportReport.lua` shows, and the capacity lines that `CommandStatus` in
+  `core/Main.lua` prints (see Diagnostics and support exports under
+  [Exclusions](#exclusions)).
 
 Other `core/` and `logic/` files hold literals of every kind, and which of
 them reach a player is not classified here.
@@ -158,18 +165,33 @@ AddOns list. They are not Lua, so the inventory does not include them.
 | Developer error | `ui/OrbPanel.lua:221`: `assert(..., "Orb history projection unavailable")` | not player copy |
 | Diagnostic placeholder | `core/Errors.lua:34`, `core/Errors.lua:43` (`"<unprintable "`, `"unknown"`) | retained diagnostics |
 | Dynamic label | `core/UserText.lua:161-170` (Saved Build label with a user name), `core/UserText.lua:247-254` (count with unit), `core/UserText.lua:301` (`"%d:%02d fight"`), `core/UserText.lua:47-67` (availability-control names from catalog data), `ui/LayoutMetrics.lua:432` (`"Orb mini panel"` or `"Mini"` by width) | the inventory lists each fragment; the assembled sentence exists only at run time |
+| Rewritten status and reason text | `T.Message` returns and `gsub` replacements, for example `"Disabling off-Wishlist "` (`core/UserText.lua:62`), `"Enabling Wishlist "` (`:64`), `"unsupported availability data"` (`:67`), the sentences that begin `"Not saved: "` (`:82-87`), `"This action is not available yet. Check the status or diagnostics. Details: "` (`:88`), `"WISHLIST:"` (`:91`), `"Rolled Echoes this run:"` (`:92`) and `" (server confirmed)"` (`:93`) | displayed; the inputs they match keep their English spelling ([Exclusions](#exclusions); item 4 of [Manual follow-up](#manual-follow-up-before-l10n-02)). A `gsub` replaces only part of a line, and the returns at `:70`, `:73`, `:76`, `:79` and `:88` end with the producer's own English text after `"Details: "`. Examples only; `T.Message` is not completely classified |
 
 ## Exclusions
 
-These are decided by reading, not inferred by the tool. Each keeps its exact
-spelling and is never a translation key to rewrite.
+These are decided by reading, not inferred by the tool. Unless a group is
+marked as a proposal, each listed item keeps its exact spelling and is never a
+translation key to rewrite. A listed example classifies only that literal or
+use, not the rest of its file or line range.
 
 **Codes, identifiers and patterns**
 - Reason and policy codes: the keys of `core/UserText.lua:5-46` (for example
   `ROOT_MUTATION_PENDING`, `orb state unknown`). Diagnostics keep the original
   codes (`core/UserText.lua:1-2`).
-- Lua patterns: `core/UserText.lua:57-102`; `ui/LayoutMetrics.lua:209`, `:215`
-  and `:365`. This includes the `bytes` records.
+- Matching operands: the Lua patterns and plain search strings that code
+  compares with other text. In `T.Message` (`core/UserText.lua:54-104`) they
+  include `"^(L%d+ %-%- )(.*)$"` (`:57`),
+  `"^disabling off%-wishlist tome lever (%d+)$"` (`:61`), the `gsub` pattern
+  `"non%-conformant data"` (`:67`), the plain search `"payload changed"`
+  (`:78`), `"^[A-Z][A-Z0-9_]+$"` (`:88`) and the first argument of each `gsub`
+  at `:89-102`, such as `"TARGET:"` (`:91`) and `" %(synced%)"` (`:93`). Each
+  must keep matching the text its producer writes (manual follow-up item 4).
+  The returns and `gsub` replacements of that function are displayed text,
+  not exclusions (see the rewritten status row under
+  [Copy kinds](#copy-kinds-with-source-examples)), and the other literals of
+  `core/UserText.lua:57-102` are not all classified here.
+- Other Lua patterns: `ui/LayoutMetrics.lua:209`, `:215` and `:365`, and
+  `ui/OrbPanel.lua:106` and `:1039`. These include the four `bytes` records.
 - Slash command words: `core/MainCommands.lua:10-20` and `:40-60`. Localized
   command aliases would need their own decision.
 - Protocol tokens: the class tokens at `core/SyncProtocol.lua:476-481`, and
@@ -206,12 +228,31 @@ reports non-English names is UNKNOWN; this is recorded for L10N-04.
   names come from the game catalog at run time (`core/UserText.lua:47-53`).
 - Localized game names need verified client data (L10N-04).
 
-**Diagnostics and support exports** (proposal)
-- `core/SupportReport.lua`, `core/PeerDebug.lua`, `core/DiagnosticLogs.lua`
-  and `core/Errors.lua` hold support and diagnostic text with its own byte and
-  decoder contracts (`docs/agents/domain.md`, issue #25).
-- Proposal: keep them out of the first translation scope. Player-facing
-  wrapper text such as `ui/SupportReport.lua` stays in scope.
+**Diagnostics and support exports** (proposal; each surface needs a decision)
+- Payload bytes: the copied summary and the prepared report file that
+  `core/SupportReport.lua` builds (`M.Summary`, `M.Prepare`), and diagnostic
+  text in `core/PeerDebug.lua`, `core/DiagnosticLogs.lua` and
+  `core/Errors.lua`, have their own byte and decoder contracts
+  (`docs/agents/domain.md`, issue #25). The summary is shown in the support
+  page's copy box, but it is that payload.
+- Visible wrappers from `core/SupportReport.lua`: `ui/SupportReport.lua` shows
+  `M.IncidentLines` on its page; `M.WrittenNotice` and `M.FilePathHint` (a file
+  path) after a report is prepared; reasons returned by `M.Store`,
+  `M.StorageStatus` and `M.Prepare`, for example
+  `"the support component refused the report"`, inside its own
+  `"Not prepared: "` and `"Support storage: "` lines; and the report's
+  `omissions` after `"This report is partial: "`. `CommandStatus` in
+  `core/Main.lua` prints `M.CatalogCapacityLines` through `Print`.
+- Some of these lines are payload as well: `M.IncidentLines` also writes the
+  incident into the summary and the report, `M.StartupLines` includes
+  `M.CatalogCapacityLines` in both, and `omissions` is part of the stored
+  report's header. Translating their visible use would also change the
+  payload unless the two uses are separated first.
+- Proposal: keep the payload bytes out of the first translation scope, and
+  decide each visible wrapper's surface before translating it. The labels of
+  `ui/SupportReport.lua` stay in scope. Visible text of `core/PeerDebug.lua`,
+  `core/DiagnosticLogs.lua` and `core/Errors.lua` is not classified here; this
+  proposal does not show that their text is never displayed.
 
 **Never translated**: URLs, numbers and colour codes.
 
@@ -247,13 +288,59 @@ whether every runtime text is statically represented.
 
 ## Manual follow-up before L10N-02
 
-1. Classify the `ui/` window families and `core/UserText.lua` into visible,
-   invariant and diagnostic literals, and record the context for each visible
-   one ([KEYS_AND_GLOSSARY.md](KEYS_AND_GLOSSARY.md)).
+1. Classify the `ui/` window families, `core/UserText.lua` and the visible
+   support wrappers of `core/SupportReport.lua` into visible, invariant and
+   diagnostic literals, and record the context for each visible one
+   ([KEYS_AND_GLOSSARY.md](KEYS_AND_GLOSSARY.md)).
 2. List runtime-assembled sentences (fragments such as
    `ui/Panel.lua:381`, the templates in `core/UserText.lua`) for full-sentence
    templates in L10N-04.
 3. Decide how the English-name matching above works under a localized client.
-4. Keep the four located byte patterns invariant (see
+4. English-text coupling: some English text that Nexus produces is matched
+   again by other Nexus code. Translating such a producer alone can stop a
+   match and silently change what a player sees. Localize a coupled producer
+   only together with every consumer that matches it; until then the matching
+   inputs keep their exact English spelling. This inventory requests no
+   runtime change. Representative examples, not a complete list:
+   - `T.Message` (`core/UserText.lua:54-104`) maps exact reasons (`:5-46`),
+     parses prefixes and tome-lever messages (`:57-67`), wraps or replaces
+     messages that contain known fragments or look like codes (`:68-88`) and
+     rewrites parts of the rest (`:89-102`). `Print` (`core/Main.lua:23-24`),
+     the `onStatus` callback that `EnsureAutomationRuntime` passes in
+     `core/Main.lua`, `Readout.Status` and the non-`plain` `AddLine` calls in
+     `ui/JournalTab.lua` pass their text through it. It matches the whole
+     message, so interpolated text such as a Wishlist name can match as well.
+   - `CommandStatus` (`core/Main.lua`) prints `"TARGET: ..."` lines and
+     `"OWNED this run: %d echoes (%s)."` with `"synced"` or
+     `"not synced yet"`. They are shown as `"WISHLIST: ..."` and as
+     `"Rolled Echoes this run: ..."` with `(server confirmed)` or
+     `(waiting for current Echo data from the server)`. The `undemote`
+     callback in `EnsureMainCommands` prints
+     `"flag demotions cleared (they re-arm on fresh evidence)"`, which is
+     shown as its `reasons` value (`core/UserText.lua:45`).
+   - `ui/JournalTab.lua` reads its provider's sections (written by
+     JournalData, per its comments) only in their exact English form:
+     `Section` finds the titles `"Target"`, `"Notes"` and
+     `"Extra copies compared with the plan"`; `Summarize` reads the
+     `"Pending"` title prefix, `"^Pending %((%d+)%)$"`, the
+     `"No wishlist set"` prefix, `TARGET_COUNTS`, `"^Wishlist '(.*)'(.*)$"`
+     and `TARGET_TAGS`; `EstimateLine` needs `NOTES_FIRST` and the
+     `NO_ESTIMATE` texts; `SplitOffLine` removes `OFF_SUFFIXES`; and
+     `TOME_REQUESTS` identifies the request section. A provider line in
+     another form can leave family progress unknown or the summary
+     unavailable, drop the estimate, or show a whole off-Wishlist line as its
+     row label.
+   - `ui/Readout.lua`: `HOLD_TEXT` (`AutoHoldText`) and `HELP_HINT`
+     (`AutoHelpHint`) are keyed by exact English reasons, for example
+     `"manual mode"` in `HOLD_TEXT` (also returned by `AutoAllowed` in
+     `core/Main.lua`) and `"user acting"` in both. `AutoHelpHint` gives no
+     hint for a reason containing `"no confirmed result for"` and its Orb hint
+     for one containing `"Orb"` or `"orb"`. `CardTarget` parses `CardLine`
+     output: it removes the `"[Guaranteed offer] "` prefix and looks for a
+     `QUALITY_NAMES` word (`"Common"` to `"Legendary"`) in parentheses. A
+     guaranteed-offer prefix written another way stays inside the target that
+     `RecommendationWithTarget` appends; a quality written another way drops
+     that target.
+5. Keep the four located byte patterns invariant (see
    [VALIDATION.md](VALIDATION.md#located-byte-patterns)).
-5. Decide whether the TOC `## Title` and `## Notes` text is in scope.
+6. Decide whether the TOC `## Title` and `## Notes` text is in scope.
