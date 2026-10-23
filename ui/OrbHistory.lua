@@ -353,13 +353,23 @@ function M.Header(view)
     end
     local spent, limit = tonumber(view.spent) or 0, tonumber(view.limit) or 0
     local reserved = tonumber(view.reserved) or 0
+    -- The live run's usage is read as it is now (RunLog), while its state is
+    -- the one recorded at its last event. When the run has moved on since
+    -- (Pause records no event), both are said, each for what it is.
+    local recorded = RUN_STATES[view.state] or tostring(view.state or "unknown")
+    local status = recorded
+    if view.liveState ~= nil and view.liveState ~= view.state then
+        status = "Now: " .. (RUN_STATES[view.liveState] or tostring(view.liveState))
+            .. " (last recorded: " .. recorded .. ")"
+    end
     return {
         title = "Orb history",
         which = view.which,
         runLabel = "Run " .. tostring(view.runId),
         wishlist = display(view.wishlist or "none", WISHLIST_BYTES),
         wishlistFull = display(view.wishlist or "none"),
-        status = RUN_STATES[view.state] or tostring(view.state or "unknown"),
+        status = status,
+        recordedStatus = recorded,
         usage = "Orbs used: " .. spent .. " / " .. limit .. " approved",
         increased = view.increased == true,
         pending = reserved > 0 and
@@ -407,12 +417,17 @@ function M.Report(view, resolve, technical)
     line(out, "Run " .. tostring(view.runId) .. "; build "
         .. tostring(view.build or "unknown"))
     line(out, "Assigned Wishlist at start: " .. tostring(view.wishlist or "none"))
+    -- The same usage words as every Orb surface: Orbs used, and pending for a
+    -- requested Orb whose spend is not confirmed.
     line(out, "Approved maximum: " .. tostring(view.limit)
         .. (header.increased and " (increased during the run)" or "")
-        .. "; confirmed usage: " .. tostring(view.spent or 0)
-        .. "; unresolved exposure: " .. tostring(view.reserved or 0))
-    line(out, "Stopping state: " .. header.status
+        .. "; Orbs used: " .. tostring(view.spent or 0)
+        .. "; pending (requested, not confirmed): " .. tostring(view.reserved or 0))
+    line(out, "Stopping state: " .. header.recordedStatus
         .. (view.reason and ("; " .. tostring(view.reason)) or ""))
+    if view.liveState ~= nil and view.liveState ~= view.state then
+        line(out, "Current state: " .. (RUN_STATES[view.liveState] or tostring(view.liveState)))
+    end
     line(out, "Operations recorded: " .. tostring(view.total or 0))
     if header.truncated then line(out, "Note: " .. header.truncated) end
     if technical then

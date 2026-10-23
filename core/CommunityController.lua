@@ -3081,9 +3081,33 @@ function Controller.New(options)
         return true, nil, status
     end
 
-    function M.RetryShare(id)
+    -- The context a Retry is shown in: saved data, catalog, verified owner and
+    -- the catalog's preparation binding (as PublishImportedBuild keeps them).
+    function M.RetryShareContext()
+        local catalog = Catalog()
+        local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        return {database=NexusDB, catalog=catalog, owner=CurrentVerifiedOwnerKey(),
+            binding=preparation and preparation.binding or nil}
+    end
+
+    -- `expected`, when given, is M.RetryShareContext() as the Retry was shown:
+    -- a click that arrives after the player, saved data, catalog or binding
+    -- changed queues nothing (fail closed). Admission, retryOnFull and the
+    -- summary budget are the existing ones.
+    function M.RetryShare(id, expected)
         local retryable, retryWhy = M.CanRetryShare(id)
         if not retryable then return false, retryWhy end
+        if type(expected) == "table" then
+            local now = M.RetryShareContext()
+            if expected.database ~= now.database or expected.catalog ~= now.catalog
+                or expected.owner ~= now.owner
+                or expected.binding ~= nil and expected.binding ~= now.binding then
+                PeerRecord("share_retry_action", {id=tostring(id),
+                    outcome="rejected", reason="player or catalog changed"})
+                return false, "player or catalog changed"
+            end
+        end
         id = tostring(id)
         local record = LoadBuild(id)
         local sync = Nexus and Nexus.Sync
@@ -3420,9 +3444,20 @@ function Controller.New(options)
                     admission.shareStatus = status
                 end
                 operation.admission = admission
+                -- The same hand-off of this listing's DPS best. Its local
+                -- admission is kept apart from the summary's: "queued" when a
+                -- linked record was admitted for sending (queued is not sent),
+                -- "none" when the call reported false: no eligible linked
+                -- record, or every eligible one refused (mode, queue, checks or
+                -- budget), which the completion line leaves unsaid; "unknown"
+                -- when it raised or returned no answer (not proof that nothing
+                -- was queued).
                 local D = Nexus.DpsCapture
                 if D and D.BroadcastBestForBuild then
-                    pcall(D.BroadcastBestForBuild, publishedId)
+                    local called, sentLinked = pcall(D.BroadcastBestForBuild, publishedId)
+                    admission.linkedDps = not called and "unknown"
+                        or sentLinked == true and "queued"
+                        or sentLinked == false and "none" or "unknown"
                 end
             end
             if operation.onComplete then

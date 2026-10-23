@@ -3,7 +3,14 @@
 Nexus helps you work toward an Echo build: plan a Wishlist, follow roll
 recommendations or let Auto act for you, refine with Orbs, share builds and
 compare recorded DPS. This is an experimental build, not a stable release.
-The same guide is in the game: `/nexus help`.
+The in-game Help (`/nexus help`) covers the same topics, but the two are not
+identical; where they differ, the game's own windows are current. In the game,
+**Setup checklist and status** (in the **...** menu, or **Setup checklist** in
+Help) shows which setup steps are true now; it only reads and opens windows.
+The Build Library, Leaderboard, Wishlist Editor, Orb window and the Journal's
+Build Progress page have a **Help** button that opens a Help page (the Build
+Library and Leaderboard close themselves first); it assigns, saves and sends
+nothing.
 
 ## Install and roll back
 
@@ -293,8 +300,16 @@ When it is blocked:
    outside verification or finished Sync. While a change applies, the list says
    **Updating results...**
 3. **Copy into Editor** creates a draft; it does not activate or spend.
-   **Share Build** sends a listing; it is separate from saving a Wishlist or a
-   Saved Build.
+   **Share Build...** on your own Saved Build asks you to confirm first. It then
+   saves the listing on this client and queues a short summary for other Nexus
+   users only if your saved Sync mode (**Sync mode...** beside **Sync Now**) and
+   the summary's size allow; with Sync Off nothing is queued. The listing's
+   Echo list and description are sent only in answers to players who ask for
+   it. A DPS record you hold for this exact build may also be queued separately
+   if your saved Sync mode allows it (Automatic does), and that record includes
+   its Echo list. Queued is not sent, and receipt by other players is not
+   confirmed. A shared build cannot be recalled. Sharing is separate from saving
+   a Wishlist or a Saved Build.
 
 - **Stop Sharing** removes the listing on this client; removal on other clients
   is not confirmed. Stop Sharing, administrator removal and deleting from My
@@ -347,8 +362,8 @@ full SavedVariables or account details publicly.
 ## Commands
 
 - `/nexus help` (also `/nexus guide`, `/nexus tutorial`, and **Help / Getting
-  Started** in the **...** menu and the Welcome window): this guide, also during
-  loading.
+  Started** in the **...** menu and the Welcome window): the in-game Help, also
+  during loading.
 - `/nexus report`: support report.
 - `/nexus editor`: Wishlist Editor.
 - `/nexus orbs`: Orb window; does not spend.

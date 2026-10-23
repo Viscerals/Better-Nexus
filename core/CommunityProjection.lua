@@ -369,9 +369,14 @@ function Projection.New(options)
 
         local editState
         if savedKind == "saved" then
+            -- M7: a Share saves the listing, then queues only a summary when
+            -- the saved Sync mode and its size allow; the listing's Echo list
+            -- goes only in answers to players who ask. A linked DPS record,
+            -- which carries its Echo list, may also be queued under the same
+            -- mode (ui/CommunityRenderer.lua says both in the confirmation).
             editState = validPublishedId
-                and "Shared listing saved on this client. Update Shared Build... sends the current title, description and Echo list after you confirm; receipt by other players is not confirmed."
-                or "Your server Saved Build. Edit its title/description, then use Share Build... to send it to other Nexus users after you confirm."
+                and "Shared listing saved on this client. Update Shared Build... saves your edits after you confirm and queues a summary only if Sync mode and size allow; receipt by other players is not confirmed."
+                or "Your server Saved Build. Edit its title/description; Share Build... shares it after you confirm, queuing a summary only if Sync mode and size allow."
         elseif mine and loadoutLocked then
             editState = "|cffffd200Echo list is read-only: a DPS record is attached.|r Title/description remain editable. Share a new build to use different Echoes."
         elseif mine then

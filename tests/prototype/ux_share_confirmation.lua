@@ -542,6 +542,107 @@ C.scenario('S12 the Share action fits apart from the other actions',function()
  G.UseFont(G.MODELS.default);UIParent:SetSize(1366,768)
 end)
 
+-- Continuation 51 (review38 M7R38-B01/N01): the confirmation and the Share
+-- tooltip tell the listing apart from a linked DPS record. The listing's Echo
+-- list and description are answered only to players who ask. The same
+-- confirmed Share also hands this listing's DPS best to Sync
+-- (core/CommunityController.lua, DpsCapture.BroadcastBestForBuild), and that
+-- record carries its Echo list (core/DpsCapture.lua) whenever the saved Sync
+-- mode admits it (review38's reading of ux_share_linked_dps: admitted under
+-- Automatic, refused under Manual and Off). So a claim that Echo data goes only
+-- to players who ask must name the listing, and a DPS record that is mentioned
+-- must be said to carry its Echo list, under the saved Sync mode and as a
+-- possibility, not a delivery. Read from the real confirmation (opened through
+-- the real action, then cancelled) and the real tooltip, under this fixture's
+-- unchanged Manual mode. The saved mode is not changed here (the final GUARD
+-- keeps it), so this test observes neither the Automatic and Off popups nor the
+-- record's own payload. Short word checks, not the implementation's sentences.
+-- EXPECT: the disclosure review38 asks for. GUARD: what Share already says and
+-- must keep saying, and the hand-off itself. SETUP: the fixture.
+local function Parts(text,clauses)
+ local out={}
+ local ends=clauses and '[%.%?!;]' or '[%.%?!]'
+ for line in (V.Plain(text or '')..'\n'):gmatch('([^\n]*)\n') do
+  local s=line:gsub('%s+',' ')
+  local start=1
+  for i=1,#s do
+   if s:sub(i,i):find(ends) and (i==#s or s:sub(i+1,i+1)==' ') then
+    local part=s:sub(start,i):match('^%s*(.-)%s*$')
+    if part~='' then out[#out+1]=part end
+    start=i+1
+   end
+  end
+  local rest=s:sub(start):match('^%s*(.-)%s*$')
+  if rest~='' then out[#out+1]=rest end
+ end
+ return out
+end
+local function Says(s,word) return tostring(s):lower():find(word,1,true)~=nil end
+-- Requester-only Echo clauses (scoped to the listing or not) and the
+-- sentences naming a DPS record, with what each one lacks.
+local function Disclosure(text)
+ local d={scoped=0,unscoped={},dps=0,noEcho={},unconditioned={}}
+ for _,c in ipairs(Parts(text,true)) do
+  if Says(c,'echo') and Says(c,'only') and not Says(c,'not only') and (Says(c,'ask') or Says(c,'request')) then
+   if Says(c,'listing') then d.scoped=d.scoped+1 else d.unscoped[#d.unscoped+1]=c end
+  end
+ end
+ for _,s in ipairs(Parts(text,false)) do
+  if Says(s,'dps record') or Says(s,'dps best') then
+   d.dps=d.dps+1
+   if not Says(s,'echo') then d.noEcho[#d.noEcho+1]=s end
+   if not ((Says(s,'sync') or Says(s,'automatic')) and (Says(s,'may') or Says(s,' if '))) or Says(s,'deliver') then
+    d.unconditioned[#d.unconditioned+1]=s
+   end
+  end
+ end
+ return d
+end
+
+C.scenario('S13 the confirmation and tooltip tell the listing apart from a linked DPS record with its Echo list',function()
+ C.setup(Nexus.SyncModePolicy.Mode()=='manual','S13: fixture: the saved mode is still Manual',Nexus.SyncModePolicy.Mode())
+ local listing=(Row(m1) or {}).publishedBuildId
+ C.setup(listing~=nil,'S13: fixture: Saved Build 1 has its shared listing (S7)',printable(listing))
+ if listing~=nil then
+  C.guard(Count(dpsBests,listing)>=1,
+   'S13: the confirmed Share of Saved Build 1 handed its listing to the DPS-best hand-off (the linked record this copy describes)',
+   'listing='..printable(listing)..' calls='..Count(dpsBests,listing))
+ end
+ for _,v in ipairs({{tag='S13 share',id=m2,label='Share Build...'},{tag='S13 update',id=m1,label='Update Shared Build...'}}) do
+  local panel,_,before,sent=Open(v.tag,v.id)
+  if panel then
+   local text=slot:IsShown() and slot.which==DIALOG and V.Plain(slot.text or '') or ''
+   C.setup(text~='' and Label(panel.shareBtn)==v.label,v.tag..': fixture: the confirmation of "'..v.label..'" was read',Label(panel.shareBtn))
+   print('OBSERVED',v.tag..' confirmation='..text)
+   local d=Disclosure(text)
+   C.guard(Says(text,'on this client') and Says(text,'sync mode') and Says(text,'size')
+    and Says(text,'cannot be recalled') and Says(text,'cannot confirm who received'),
+    v.tag..': it still says the local save, the Sync mode and size condition, no recall and unknown receipt',text)
+   C.guard(d.dps>=1 and #d.unconditioned==0,
+    v.tag..': it still names a DPS record for this build as possible under the saved Sync mode, not as delivered',
+    table.concat(d.unconditioned,' | '))
+   C.expect(d.dps>=1 and #d.noEcho==0,v.tag..': that DPS record is said to carry its Echo list',table.concat(d.noEcho,' | '))
+   C.expect(d.scoped>=1 and #d.unscoped==0,
+    v.tag..': "only to players who ask" is said of the listing\'s Echo list, not of every Echo list',
+    'scoped='..d.scoped..' unscoped: '..table.concat(d.unscoped,' | '))
+   Dismiss(false)
+   NoShare(v.tag..' Cancel',v.id,before,sent)
+  end
+ end
+ local panel=ShowBuild(m2)
+ local share=panel and panel.shareBtn
+ local tip=share and V.Plain(table.concat(V.TooltipLines(share:GetScript('OnEnter'),share),'\n')) or ''
+ C.setup(tip~='','S13 tooltip: fixture: the Share tooltip was read')
+ print('OBSERVED','S13 tooltip='..tip:gsub('\n',' / '))
+ local t=Disclosure(tip)
+ C.guard(Says(tip,'sync mode') and Says(tip,'size'),'S13 tooltip: it still names the Sync mode and size condition',tip)
+ C.expect(t.dps>=1 and #t.noEcho==0 and #t.unconditioned==0,
+  'S13 tooltip: it names a linked DPS record, with its Echo list, as possible under the saved Sync mode',tip)
+ C.expect(t.scoped>=1 and #t.unscoped==0,
+  'S13 tooltip: "only to players who ask" is said of the listing\'s Echo list, not of every Echo list',
+  'scoped='..t.scoped..' unscoped: '..table.concat(t.unscoped,' | '))
+end)
+
 print('OBSERVED','attempts='..#attempts,'handoffs='..#handoffs,'dpsBestHandoffs='..#dpsBests,
  'background H.sent during the test='..(#H.sent-sentAtStart))
 C.guard(#H.actions==0,'no game action: nothing was activated, saved to the server or spent',#H.actions)

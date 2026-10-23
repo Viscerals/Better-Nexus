@@ -314,8 +314,11 @@ NAMES += ['catalog_idle_frames_witness']
 NAMES += ['catalog_idle_frames_alignment_probe']
 # M5R2-MB1: a confirmed own Saved Build Share is the explicit Share operation; its actual admission or final refusal is stated after the local save; two runtimes (EXPECT fails on closed aeb35417 by design).
 NAMES += ['ux_share_admission']
-# UX M6 (rebased onto accepted M5 9deaa526; not accepted): named Resume target and full-window review after a changed target, fixed separate Pause/Resume, layered recovery/usage/Continue-history wording (EXPECT fails on accepted M5 9deaa526 by design).
+# UX M6 (accepted as M6 0924d06a): named Resume target and full-window review after a changed target, fixed separate Pause/Resume, layered recovery/usage/Continue-history wording (EXPECT predicted to fail on accepted M5 9deaa526, by design; qualified by the executed C2 control, review NB-6).
 NAMES += ['orb_target_review','orb_fixed_pause_resume','orb_recovery_layers']
+# UX M7 (not accepted): setup checklist/status, Orb rendered-key review and recovery vocabulary, Share approval retirement and linked-DPS disclosure, Retry Share feedback, contextual Help (EXPECT predicted to fail on accepted M6 0924d06a, by design; not executed by the author).
+NAMES += ['ux_setup_checklist','ux_status_composition','orb_review_identity','orb_recovery_vocabulary']
+NAMES += ['ux_share_approval_retirement','ux_share_linked_dps','ux_retry_share_feedback','ux_context_help_access']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
