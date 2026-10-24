@@ -353,6 +353,16 @@ for _,chosen in ipairs({false,true})do
   check(panel.approval:GetText():find('1 unconfirmed',1,true) and panel.approval:GetText():find('baseline',1,true),'EXPECT same Start area visibly discloses history risk/baseline')
   local lines=0;for line in (panel.approval:GetText()..'\n'):gmatch('(.-)\n')do lines=lines+1;check(#line*7<=panel.approval:GetWidth(),'GUARD history disclosure fits its real width conservatively')end
   check(lines==2 and lines*17<=panel.approval:GetHeight(),'GUARD complete history acknowledgment fits the actual approval area')
+   check(panel.approval:GetText():find('Start approves this maximum',1,true)
+    and panel.approval:GetText():find('within max',1,true),
+    'EXPECT retained-history Start explicitly approves the maximum and binds recovery checks to it')
+   local tooltip=GameTooltip;local captured;local spends=H.Count('orb-spend')
+   GameTooltip={SetOwner=function()end,AddLine=function(_,text)captured=text end,Show=function()end,Hide=function()end}
+   assert(panel.approvalHit,'SETUP actual approval has the existing full-text hover helper')
+   panel.approvalHit:GetScript('OnEnter')(panel.approvalHit);GameTooltip=tooltip
+   check(captured==panel.approval._nexusFullText and captured:find('current Echoes baseline',1,true)
+    and captured:find('Up to 2 recovery checks within this maximum',1,true) and H.Count('orb-spend')==spends,
+    'GUARD approval hover retains complete baseline/risk/maximum wording and submits nothing')
   panel.start:GetScript('OnClick')(panel.start);panel.start:GetScript('OnClick')(panel.start)
   check(H.Count('orb-spend')==2 and R.Saved().attributionFormat==1 and R.Saved().guid==nil and R.Saved().attributionOwner~=nil,'EXPECT real Start callback carries represented fact and creates older-reader-failclosed envelope')
   H.Offer();assert(M.Stop());H.Result(410002,2);H.Advance(.5)

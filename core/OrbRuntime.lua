@@ -63,7 +63,12 @@ end
 -- Owned scalar phase only: compact rendering must not query active facades.
 function RC.phase()
     local rc=run and run.rc;local stage=rc and rc.stage
+    if rc and rc.automatic and run.state=="STOPPED" then return nil end
     if stage=="checking" or stage=="ready" or stage=="held" or stage=="refused" then return stage end
+end
+function RC.kind()
+    local rc=run and run.rc
+    if rc then return rc.automatic and "automatic" or "manual" end
 end
 local ensureFrame,heldChoiceHint,cleanEvidence
 local function copy(t)
@@ -874,6 +879,7 @@ function M.Confirm(token,representedHistory)
         targets=copy(a.model.targets),entries=copy(config.entries),remaining=copy(a.sources),excluded=copy(a.excluded),
         recycle=a.recycle,automatic=a.automatic,binding=copy(a.binding),name=config.name,
         limit=a.limit,spent=0,reserved=0,uncertain=0,recoveries=0,unconfirmedResults=0,historyKnown=true,recent={},context=live.context,
+        worldSettleUntil=run.worldSettleUntil,
         historyBaseline={owner=Nexus.Store.CurrentOwnerKey(),guid=live.context.guid,entries=copy(a.history)}}
     -- Counters and the log start only now, when a run is really authorized.
     run.id=(logs.current and (tonumber(logs.current.runId) or 0) or 0)+1
@@ -2116,6 +2122,10 @@ local RC_REFUSALS={
     stale_token="This confirmation is no longer current. Nothing was changed.",
     not_ready="The check is not ready to confirm. Nothing was changed.",
 }
+function RC.archiveExitRefusal()
+    local state=RC.archiveInfo()
+    if state~="ok" then return RC_REFUSALS["archive_"..state] end
+end
 function RC.text(rc,eligibleReason)
     if rc and rc.stage=="done" then return RC_DONE end
     if rc and rc.stage=="refused" then return RC_REFUSALS[rc.refusal] or RC_REFUSALS.write_failed end
@@ -2673,7 +2683,13 @@ local function recoveryReason(kind,observing,s,p,proposed)
     end
     if kind=="WAIT_RESULT" and gate and WAIT_RESULT_GATE[gate.gate] then
         local text=WAIT_RESULT_GATE[gate.gate]
-        if gate.gate=="charges" then
+        if gate.gate=="attribution" then
+            local refusal=RC.archiveExitRefusal()
+            if refusal then
+                text="Your Echoes show the recorded gain, but it cannot be attributed to this action. Continue is unavailable. "
+                    ..refusal..KEPT.." No spending restarts."
+            end
+        elseif gate.gate=="charges" then
             text=text:format(tostring(gate.detail and gate.detail.observed),tostring(gate.detail and gate.detail.expected))
         elseif gate.gate=="offer" then
             local id=p and tonumber(tostring(p.selectedKey):match("^(%d+):"))
@@ -2704,6 +2720,11 @@ function M.BlockReason(subject)
     if not run then return nil end
     local p=run.pending
     if p and run.snap and run.snap.attribution then
+        local refusal=RC.archiveExitRefusal()
+        if refusal then
+            return subject.." is blocked: the observed gain cannot be attributed to this action. Continue is unavailable. "
+                ..refusal..KEPT
+        end
         local nextStep=run.running and "Stop this Orb run first, then open" or "Open"
         return subject.." is blocked: the observed gain cannot be attributed to this action. "..nextStep.." /nexus orbs for its explicit checked Continue exit. The record is kept until that check passes and you confirm; no spending restarts."
     end
@@ -3424,7 +3445,7 @@ function M.Status(detail)
         shownTargets,err=P.Normalize(a.entries)
         if not shownTargets then m=nil;stage="targets" end
     end
-    local r={state=run.state,reason=run.reason,error=err,running=run.running,pending=run.pending~=nil,recoveryPhase=RC.phase(),
+    local r={state=run.state,reason=run.reason,error=err,running=run.running,pending=run.pending~=nil,recoveryPhase=RC.phase(),recoveryKind=RC.kind(),
         spent=run.spent,reserved=run.reserved,limit=run.limit,config=copy(config),recent=copy(run.recent),
         uncertain=run.uncertain or 0,historyKnown=run.historyKnown~=false,
         recoveries=run.historyKnown~=false and (run.recoveries or 0) or nil,
@@ -3464,7 +3485,7 @@ end
 function M.CompactStatus()
     init();if run.limit==0 and not run.pending then return nil end
     local remaining=run.displayProgress and run.displayProgress.rolledMissing
-    return {state=run.state,running=run.running,pending=run.pending~=nil,recoveryPhase=RC.phase(),spent=run.spent,reserved=run.reserved,
+    return {state=run.state,running=run.running,pending=run.pending~=nil,recoveryPhase=RC.phase(),recoveryKind=RC.kind(),spent=run.spent,reserved=run.reserved,
         uncertain=run.uncertain or 0,historyKnown=run.historyKnown~=false,
         unconfirmedResults=run.historyKnown~=false and (run.unconfirmedResults or 0) or nil,
         recoveries=run.historyKnown~=false and (run.recoveries or 0) or nil,

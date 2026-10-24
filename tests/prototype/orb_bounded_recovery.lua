@@ -1148,6 +1148,15 @@ for _,kind in ipairs({'full','future','malformed','oversized','changed_choice'})
   local expected=kind=='oversized' and 'entry_too_large' or kind=='changed_choice' and 'receipt_changed' or 'archive_'..kind
   check(not ok and why==expected,'EXPECT '..kind..' refuses deterministically: '..tostring(why))
   check(R.Same(R.Saved(),original) and R.Same(R.SavedRow('orbRecoveryArchive'),archive) and M.BlocksOrdinary(),'GUARD exact original receipt/archive/gate retained on '..kind)
+   if kind=='full' or kind=='future' or kind=='malformed' then
+    check(M.BlockReason('Ordinary rolling'):find('Continue is unavailable',1,true),
+     'EXPECT '..kind..' attribution guidance names the refused exit instead of promising Continue')
+    if kind=='full' then
+     M=R.Reload(H);M.Pump(true);H.granted=H.Clone(H.granted);H.Notify();A.Poll();H.Advance(1)
+     check(M.Status(false).reason:find('Continue is unavailable',1,true),
+      'EXPECT restored attribution gate also names the full-archive refusal')
+    end
+   end
  end)
 end
 r2case('E actual versioned maximal automatic receipt',function()
@@ -1306,6 +1315,42 @@ r2case('unobservable choice query is retired for the entire approval',function()
  H.Advance(40)
  check(queries==1 and M.Status().state=='PAUSED' and M.Status().recoveries==0,
   'EXPECT later receipts do not repeat a choice capability already shown unobservable')
+end)
+r2case('automatic check phases stop with the approved run',function()
+ local H,M,A,O=fresh();quietServer(H,'hold')
+ assert(waitFor(H,function()return M.ContinueView().liveStage=='checking' end),'SETUP admitted automatic check')
+ local before=M.CompactStatus();Nexus.OrbPanel.ShowMini()
+ check(NexusOrbMini.state:GetText():find('Recovery: Checking',1,true),'GUARD automatic phase identifies recovery checking')
+ assert(M.Stop());Nexus.OrbPanel.ShowMini()
+ check(M.CompactStatus().state=='STOPPED' and not M.CompactStatus().recoveryPhase
+  and NexusOrbMini.state:GetText()=='Stopped','EXPECT stopped automatic check is not presented as held or resumable')
+ check(H.Count('orb-spend')==1 and H.Count('take')==0,'GUARD phase rendering changes no actions')
+end)
+r2case('manual Continue phases identify the explicit check',function()
+ local H,M,A,O=R.Class({latch=false});R.Server(H,{mode='hold'});assert(M.ContinueBegin())
+ Nexus.OrbPanel.ShowMini()
+ check(M.CompactStatus().recoveryKind=='manual' and NexusOrbMini.state:GetText():find('Continue: Checking',1,true),
+  'EXPECT manual Continue checking is distinct from automatic recovery')
+ H.Advance(16);Nexus.OrbPanel.ShowMini()
+ check(NexusOrbMini.state:GetText():find('Continue refused',1,true),
+  'EXPECT a refused explicit check remains labelled Continue')
+ check(H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD manual phase rendering submits no spend or choice')
+end)
+r2case('new Confirm carries the remaining classified loading window',function()
+ local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={}
+ assert(A.SetLoadoutWishlistIdentity(1,'One observed copy',{{spellId=410002,quality=2,stacks=1}}))
+ assert(M.Start(2));H.Offer();H.Result(410002,2)
+ assert(not R.Saved() and not M.Status(false).running,'SETUP previous approved run completed and released its receipt')
+ assert(A.SetLoadoutWishlistIdentity(1,'Two observed copies',{{spellId=410002,quality=2,stacks=2}}))
+ H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD')
+ local spends,takes=H.Count('orb-spend'),H.Count('take');assert(M.Start(3))
+ check(H.Count('orb-spend')==spends and not R.Saved(),
+  'EXPECT new approval cannot discard the still-active three-second loading window')
+ H.Advance(2.5)
+ check(H.Count('orb-spend')==spends and H.Count('take')==takes,'GUARD remaining loading time submits nothing')
+ H.Advance(.75)
+ check(H.Count('orb-spend')==spends+1 and R.Saved() and H.Count('take')==takes,
+  'EXPECT the original window expiry permits one freshly guarded new spend')
 end)
 if #r2fail>0 then error(table.concat(r2fail,'\n'),0) end
 print('PASS bounded Orb transition and missed-result recovery checks='..checks)

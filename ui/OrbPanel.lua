@@ -135,9 +135,10 @@ local phases={IDLE="Not started",READY="Preparing next replacement",WAIT_OFFER="
     NO_SOURCES="No safe surplus copies remain",RECOVERY="Previous result is unresolved",
     FINISHED="Finished - limit reached"}
 local recoveryPhases={checking="Recovery: Checking",ready="Recovery ready",held="Recovery held",refused="Recovery refused"}
+local continuePhases={checking="Continue: Checking",ready="Continue ready",held="Continue held",refused="Continue refused"}
 local function phaseText(s)
     local state=phases[s.state] or s.state
-    local recovery=recoveryPhases[s.recoveryPhase]
+    local recovery=(s.recoveryKind=="manual" and continuePhases or recoveryPhases)[s.recoveryPhase]
     return recovery and (recovery.." - "..state) or state
 end
 -- At FINISHED the primary control is the same button that was Pause while the
@@ -269,10 +270,13 @@ local function refresh()
     local s=Nexus.OrbRuntime.Status(advanced);frame.snapshot=s
     frame.historyReview=s.historyReview
     local consent="Start approves this maximum: eligible surplus copies/recycling. Ordinary Auto OFF.\nUp to 2 uncertain recoveries within this maximum; owned Echoes decide completion."
+    local consentFull
     if s.historyCount and s.historyCount>0 then
-        consent=tostring(s.historyCount).." "..s.historyRisk.."\nSafe surplus/recycling; Auto OFF; 2 recoveries. Owned Echoes decide completion."
+        consent="Start approves this maximum + Echo baseline; "..tostring(s.historyCount).." unconfirmed; late gains may arrive.\nSurplus/recycling; Auto OFF; 2 checks within max; owned Echoes decide completion."
+        consentFull="Start approves this maximum. "..tostring(s.historyCount).." "..s.historyRisk
+            .."\nSafe surplus/recycling; ordinary Auto OFF. Up to 2 recovery checks within this maximum; owned Echoes decide completion."
     end
-    setFull(frame.approval,consent)
+    setFull(frame.approval,consent,consentFull)
     local a=s.assignment or {};local busy=s.running or s.pending or s.state=="PAUSED" or s.state=="LIMIT"
     if a.state=="restoring" then setFull(frame.plan,"Restoring assigned Wishlist...")
     else setFull(frame.plan,"Assigned Wishlist: "..name(a.name or "none"),"Assigned Wishlist: "..name(a.name or "none",true)) end
@@ -465,6 +469,7 @@ local function ensure()
     frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,440,24)
     -- Fixed boxes; a status or refusal longer than its box is complete in a tooltip.
     if Nexus.LayoutMetrics then
+        frame.approvalHit=Nexus.LayoutMetrics.FullTextTooltip(frame.approval,frame)
         frame.usageHit=Nexus.LayoutMetrics.FullTextTooltip(frame.usage,frame)
         frame.statusHit=Nexus.LayoutMetrics.FullTextTooltip(frame.status,frame)
         frame.noticeHit=Nexus.LayoutMetrics.FullTextTooltip(frame.notice,frame)
@@ -1087,7 +1092,7 @@ local function miniView()
     if type(s)~="table" then return {kind="malformed"} end
     local v={kind="run",spent=miniCount(s.spent),limit=miniCount(s.limit),reserved=miniCount(s.reserved),
         uncertain=miniCount(s.uncertain),unconfirmedResults=miniCount(s.unconfirmedResults),
-        historyKnown=s.historyKnown,recoveryPhase=s.recoveryPhase,
+        historyKnown=s.historyKnown,recoveryPhase=s.recoveryPhase,recoveryKind=s.recoveryKind,
         remaining=miniCount(s.remaining),state=type(s.state)=="string" and s.state or nil,
         reason=type(s.reason)=="string" and s.reason or nil}
     for _,key in ipairs({"running","pending","canResume"}) do
@@ -1097,6 +1102,7 @@ local function miniView()
         or v.canResume==nil then v.kind="malformed" end
     if (s.historyKnown~=nil and type(s.historyKnown)~="boolean")
         or (s.uncertain~=nil and v.uncertain==nil) or (s.unconfirmedResults~=nil and v.unconfirmedResults==nil)
+        or (s.recoveryKind~=nil and s.recoveryKind~="manual" and s.recoveryKind~="automatic")
         or (s.recoveryPhase~=nil and not recoveryPhases[s.recoveryPhase]) then v.kind="malformed" end
     return v
 end
@@ -1158,7 +1164,7 @@ local function miniMissing(v)
     return "Rolled target copies missing: "..(v.remaining and miniNumber(v.remaining) or "unavailable")
 end
 local function miniKey(v)
-    return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume),tostring(v.recoveryPhase)},"|")
+    return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume),tostring(v.recoveryPhase),tostring(v.recoveryKind)},"|")
 end
 -- A new UI size moves the panel back inside the UI. The panel is smaller
 -- than any UI this client supports (FitToScreen treats less than 640x480 as
