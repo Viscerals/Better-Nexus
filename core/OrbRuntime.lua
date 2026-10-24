@@ -2958,7 +2958,8 @@ function M.Pump(passive)
             if not entriesStillMatch(a) then pause("The selected Wishlist changed; resolve the pending offer manually.");return end
             if p.selectionAttempted then
                 setState("WAIT_RESULT",p.attributionAmbiguous
-                    and "Your Echoes show progress, but it cannot be linked to this attempt. Waiting for bounded recovery; its exposure remains counted."
+                    and (run.settleGate and run.settleGate.gate=="attribution" and WAIT_RESULT_GATE.attribution
+                        or "An earlier unconfirmed attempt may match this source and choice. The current result is not confirmed. Its record and exposure remain counted; no command will be repeated.")
                     or "Waiting for a fresh server response confirming the selected replacement.")
             elseif s.offerPending and #s.board==3 and p.spendConfirmed and not s.hostPending then
                 if p.ambiguous then pause("The spend outcome is now visible. Review the offer and press Resume, or resolve it manually.");return end

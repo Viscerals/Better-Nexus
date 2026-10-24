@@ -501,3 +501,46 @@ do
  if #issues>0 then error(table.concat(issues,'\n'),0)end
  print('PASS R6a6 real assigned interleaving, positive traversal counters and fresh action/mutation controls')
 end
+
+-- R6a9a: the next same-pair decision after a real automatic archive is already
+-- attribution-ambiguous, before any ownership result arrives. That possibility
+-- is not observed progress and does not promise another available recovery.
+do
+ local R=dofile('tests/prototype/orb_recovery_support.lua')
+ local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={}
+ local original=H.Clone(H.granted);assert(M.Start(6));local server=R.Server(H)
+ H.service.RequestChoice=function()
+  SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)
+  server.queue[#server.queue+1]={op=16,body=''}
+ end
+ H.Offer();H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+ for _=1,100 do if H.Count('orb-spend')==2 then break end;H.Advance(.25)end
+ assert(H.Count('orb-spend')==2 and #R.SavedRow('orbRecoveryArchive')==1,
+  'SETUP actual lost-result archive reaches a fresh second submission')
+ H.Offer();H.Advance(.25);M.Pump(true)
+ assert(R.Saved().attributionAmbiguous and H.Count('take')==2 and R.Same(H.granted,original),
+  'SETUP actual same-pair selection is ambiguous with no ownership progress at all')
+ local before=M.Status(false);local issues={}
+ assert(before.state=='WAIT_RESULT' and before.progress.rolledMissing==2,
+  'SETUP real waiting result still lacks both required copies')
+ print('SETUP R6a9a ambiguity before any observed gain PASS')
+ if before.reason:find('show progress',1,true) or before.reason:find('recorded gain',1,true)then
+  issues[#issues+1]='EXPECT pre-attributed ambiguity does not claim observed ownership progress'
+ end
+ if before.reason:find('Waiting for bounded recovery',1,true)then
+  issues[#issues+1]='EXPECT status does not promise another recovery solely from an ambiguity flag'
+ end
+ H.Result(410002,2);M.Pump(true)
+ local observed=M.Status(false)
+ assert(observed.pending and observed.progress.rolledMissing==1 and H.Count('orb-spend')==2,
+  'SETUP actual ownership gain remains unattributed with the receipt and exposure retained')
+ if not observed.reason:find('recorded gain',1,true)then
+  issues[#issues+1]='EXPECT actual attribution hold accurately names the now-observed gain'
+ end
+ assert(observed.spent+observed.reserved+observed.uncertain>=2,
+  'GUARD text change does not refund or hide exposure')
+ M.Stop();assert(H.Count('orb-spend')==2 and H.Count('take')==2,
+  'GUARD truthful status neither repeats a spend/choice nor erases Stop authority')
+ if #issues>0 then error(table.concat(issues,'\n'),0)end
+ print('PASS R6a9a potential ambiguity versus real observed ownership gain')
+end
