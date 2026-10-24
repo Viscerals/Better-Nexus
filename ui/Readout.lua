@@ -120,20 +120,38 @@ end
 -- not reported (charges.arrived == false, or no number) is "?", never 0;
 -- counts the adapter does not trust are marked "~" (estimated). Without a
 -- charges table there is nothing to show (""). Formatting only: it reads no
--- service and changes no count.
+-- service and changes no count. Issue #142: each count is normalized here to
+-- a whole number or unknown and rendered by the named template
+-- "readout.charge_counts" (Nexus.Localization.Format); the " ~" marker is
+-- appended after the complete row. Without the seam the English row is built
+-- here, as before.
 function M.ChargesLine(charges)
     if type(charges) ~= "table" then return "" end
     local arrived = charges.arrived ~= false
     local function Count(value)
         value = tonumber(value)
         if not arrived or value == nil or value ~= value or value < 0
-            or value >= math.huge then return "?" end
-        return tostring(Round(value))
+            or value >= math.huge then return nil end
+        return Round(value)
     end
-    local line = "B:" .. Count(charges.banish) .. " R:" .. Count(charges.reroll)
-        .. " F:" .. Count(charges.freeze)
-    if arrived and charges.trustworthy == false then line = line .. " ~" end
-    return line
+    local banish, reroll, freeze = Count(charges.banish), Count(charges.reroll),
+        Count(charges.freeze)
+    local suffix = (arrived and charges.trustworthy == false) and " ~" or ""
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Format) == "function" then
+        local function Slot(count)
+            if count == nil then return {known = false} end
+            return {known = true, value = count}
+        end
+        local text, source = localization.Format("readout.charge_counts",
+            {banish = Slot(banish), reroll = Slot(reroll), freeze = Slot(freeze)})
+        if type(text) == "string" then
+            if source == "unavailable" then return text end
+            return text .. suffix
+        end
+    end
+    local function Shown(count) return count == nil and "?" or tostring(count) end
+    return "B:" .. Shown(banish) .. " R:" .. Shown(reroll) .. " F:" .. Shown(freeze) .. suffix
 end
 
 -- The legend of that line (its hover). Text only, from GameAdapter.Charges'

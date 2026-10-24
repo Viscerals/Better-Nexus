@@ -29,6 +29,7 @@
 -- L.Resolve(key, pack) -> text, source, reason. It never raises and records
 -- nothing. In this order:
 --  1. key outside the key contract -> UNAVAILABLE, "unavailable", "invalid_key"
+--     (a formatted key, see L.Format -> UNAVAILABLE, "unavailable", "format_requires_arguments")
 --  2. key not in the English base  -> UNAVAILABLE, "unavailable", "unknown_key"
 --  3. pack == nil                  -> English text, "base", nil
 --  4. pack not a plain table (a pack name, number, boolean, function, or a
@@ -47,6 +48,32 @@
 -- invalid or unknown keys are kept (a later one is only counted in
 -- keysNotKept). The record has a fixed size, is never printed to chat, and
 -- Diagnostics() returns a copy of it.
+--
+-- Formatted meanings (issue #142). A code-owned schema (SCHEMAS below) names
+-- a key's placeholders and their type; a translation never does. Its English
+-- entry is a template under the same text contract, in which "{name}" is a
+-- schema placeholder (each exactly once, in any order), "{{" and "}}" are a
+-- literal brace and every other byte, "%" included, is literal. Anything else
+-- ("{1}", "{name:d}", an unknown, missing or repeated name, a lone brace)
+-- makes the template invalid. A formatted key is never static text: Resolve
+-- and Text answer it with UNAVAILABLE, "unavailable",
+-- "format_requires_arguments". L.Format(key, arguments, pack) -> text,
+-- source, reason never raises and, like Text, records each reason:
+--  1. key outside the key contract  -> UNAVAILABLE, "unavailable", "invalid_key"
+--  2. a static text key             -> UNAVAILABLE, "unavailable", "wrong_key_kind"
+--  3. no valid English template     -> UNAVAILABLE, "unavailable", "unknown_key"
+--  4. arguments outside the schema  -> UNAVAILABLE, "unavailable", "invalid_arguments"
+--  5. pack nil, not a plain table, without an entry or with an invalid
+--     template -> the English template, same arguments, "base", and nil,
+--     "unsupported_pack", "missing_candidate" or "invalid_candidate"
+--  6. candidate output above the schema's result limit -> the English
+--     template, same arguments, "base", "output_limit"
+--  7. otherwise                     -> the candidate output, "candidate", nil
+-- English output above the limit is UNAVAILABLE, "unavailable", "output_limit";
+-- a result is never cut. Arguments: a plain table with exactly the schema's
+-- names, each a plain record {known = true, value = N} (N a finite whole
+-- number >= 0, shown with tostring) or {known = false} (shown as "?").
+-- Substitution is one pass: an inserted value is never parsed again.
 
 Nexus = Nexus or {}
 local L = {}
@@ -124,9 +151,124 @@ local function ValidText(text)
     return WellFormedUtf8(text)
 end
 
--- The English base, copied once from the plain data table (see above).
-local base, baseKeys = {}, {}
-local baseLoad = {present = false, accepted = 0, rejected = 0, oversized = false}
+-- Code-owned schemas of the formatted meanings (issue #142). A schema, not a
+-- translation, names each placeholder and its type. A charge row is at most
+-- MAX_TEXT_BYTES - 2 bytes, so the " ~" estimate marker its consumer may
+-- append keeps the whole row within MAX_TEXT_BYTES.
+local CHARGE_RESULT_LIMIT = MAX_TEXT_BYTES - 2
+L.CHARGE_RESULT_LIMIT = CHARGE_RESULT_LIMIT
+local SCHEMAS = {
+    ["readout.charge_counts"] = {fields = {"banish", "reroll", "freeze"},
+        resultLimit = CHARGE_RESULT_LIMIT},
+}
+for _, schema in pairs(SCHEMAS) do
+    schema.index = {}
+    for _, name in ipairs(schema.fields) do schema.index[name] = true end
+end
+
+-- A template under the text contract compiled to literal strings and
+-- {field = name} parts, or nil (grammar above). One pass over at most
+-- MAX_TEXT_BYTES bytes; braces are ASCII, so UTF-8 is split only between
+-- characters.
+local function CompileTemplate(text, schema)
+    if not ValidText(text) then return nil end
+    local parts, literal, seen, used = {}, {}, {}, 0
+    local index, length = 1, #text
+    while index <= length do
+        local byte = text:byte(index)
+        if byte == 123 then -- "{"
+            if text:byte(index + 1) == 123 then
+                literal[#literal + 1] = "{"
+                index = index + 2
+            else
+                local close = text:find("}", index + 1, true)
+                if not close then return nil end
+                local name = text:sub(index + 1, close - 1)
+                if not schema.index[name] or seen[name] then return nil end
+                seen[name], used = true, used + 1
+                if #literal > 0 then
+                    parts[#parts + 1] = table.concat(literal)
+                    literal = {}
+                end
+                parts[#parts + 1] = {field = name}
+                index = close + 1
+            end
+        elseif byte == 125 then -- "}"
+            if text:byte(index + 1) ~= 125 then return nil end
+            literal[#literal + 1] = "}"
+            index = index + 2
+        else
+            local stop = text:find("[{}]", index) or (length + 1)
+            literal[#literal + 1] = text:sub(index, stop - 1)
+            index = stop
+        end
+    end
+    if used ~= #schema.fields then return nil end
+    if #literal > 0 then parts[#parts + 1] = table.concat(literal) end
+    return parts
+end
+
+-- The shown text of one argument slot, or nil. Only a plain record that is
+-- exactly {known = true, value = N} (N a finite whole number >= 0, shown
+-- with tostring) or exactly {known = false} (shown as "?") is admitted, and
+-- at most three of its fields are looked at.
+local function SlotText(slot)
+    if type(slot) ~= "table" or getmetatable(slot) ~= nil then return nil end
+    local fields, key = 0, next(slot)
+    while key ~= nil do
+        fields = fields + 1
+        if fields > 2 then return nil end
+        key = next(slot, key)
+    end
+    local known = rawget(slot, "known")
+    if known == true then
+        local value = rawget(slot, "value")
+        if fields ~= 2 or type(value) ~= "number" or value ~= value or value < 0
+            or value >= math.huge or value ~= math.floor(value) then return nil end
+        return tostring(value)
+    elseif known == false and fields == 1 then
+        return "?"
+    end
+    return nil
+end
+
+-- The shown text of each placeholder, or nil unless the arguments are a
+-- plain table holding exactly the schema's names, each a valid slot.
+local function ArgumentValues(arguments, schema)
+    if type(arguments) ~= "table" or getmetatable(arguments) ~= nil then return nil end
+    local limit, fields, key = #schema.fields, 0, next(arguments)
+    while key ~= nil do
+        fields = fields + 1
+        if fields > limit or not schema.index[key] then return nil end
+        key = next(arguments, key)
+    end
+    if fields ~= limit then return nil end
+    local values = {}
+    for _, name in ipairs(schema.fields) do
+        local shown = SlotText(rawget(arguments, name))
+        if not shown then return nil end
+        values[name] = shown
+    end
+    return values
+end
+
+-- One substitution pass; nil when the result is above the limit.
+local function Render(parts, values, limit)
+    local out = {}
+    for index = 1, #parts do
+        local part = parts[index]
+        out[index] = type(part) == "table" and values[part.field] or part
+    end
+    local text = table.concat(out)
+    if #text > limit then return nil end
+    return text
+end
+
+-- The English base, copied once from the plain data table (see above). A key
+-- with a schema is admitted only as a valid template, never as static text.
+local base, baseKeys, templates = {}, {}, {}
+local baseLoad = {present = false, accepted = 0, rejected = 0, oversized = false,
+    formatted = 0}
 do
     local source = Nexus.LocalizationEnglish
     if type(source) == "table" and getmetatable(source) == nil then
@@ -137,7 +279,14 @@ do
             baseLoad.oversized, baseLoad.rejected = true, count
         else
             for key, text in next, source do
-                if ValidKey(key) and ValidText(text) then
+                local schema = ValidKey(key) and SCHEMAS[key] or nil
+                local parts = schema and CompileTemplate(text, schema) or nil
+                if parts then
+                    templates[key] = parts
+                    baseKeys[#baseKeys + 1] = key
+                    baseLoad.accepted = baseLoad.accepted + 1
+                    baseLoad.formatted = baseLoad.formatted + 1
+                elseif not schema and ValidKey(key) and ValidText(text) then
                     base[key] = text
                     baseKeys[#baseKeys + 1] = key
                     baseLoad.accepted = baseLoad.accepted + 1
@@ -152,6 +301,7 @@ end
 
 local function Resolve(key, pack)
     if not ValidKey(key) then return UNAVAILABLE, "unavailable", "invalid_key" end
+    if templates[key] ~= nil then return UNAVAILABLE, "unavailable", "format_requires_arguments" end
     local english = base[key]
     if english == nil then return UNAVAILABLE, "unavailable", "unknown_key" end
     if pack == nil then return english, "base", nil end
@@ -167,7 +317,8 @@ L.Resolve = Resolve
 
 -- The fixed-size diagnostic record (see above). Local memory only.
 local REASONS = {"invalid_key", "unknown_key", "unsupported_pack",
-    "missing_candidate", "invalid_candidate"}
+    "missing_candidate", "invalid_candidate", "format_requires_arguments",
+    "wrong_key_kind", "invalid_arguments", "output_limit"}
 local diagnostics = {misses = 0, byReason = {}, keys = {}, keysNotKept = 0, last = nil}
 for _, reason in ipairs(REASONS) do diagnostics.byReason[reason] = 0 end
 
@@ -201,12 +352,57 @@ function L.Text(key, pack)
     return text, source, reason
 end
 
--- Whether the English base holds a reviewed text for the key.
-function L.Has(key)
-    return ValidKey(key) and base[key] ~= nil
+-- Formatted meanings: order and contract documented at the top of the file.
+local function FormatResolve(key, arguments, pack)
+    if not ValidKey(key) then return UNAVAILABLE, "unavailable", "invalid_key" end
+    if base[key] ~= nil then return UNAVAILABLE, "unavailable", "wrong_key_kind" end
+    local english, schema = templates[key], SCHEMAS[key]
+    if english == nil or schema == nil then return UNAVAILABLE, "unavailable", "unknown_key" end
+    local values = ArgumentValues(arguments, schema)
+    if not values then return UNAVAILABLE, "unavailable", "invalid_arguments" end
+    local reason
+    if pack ~= nil then
+        if type(pack) ~= "table" or getmetatable(pack) ~= nil then
+            reason = "unsupported_pack"
+        else
+            local raw = rawget(pack, key)
+            local parts = raw ~= nil and CompileTemplate(raw, schema) or nil
+            if raw == nil then
+                reason = "missing_candidate"
+            elseif not parts then
+                reason = "invalid_candidate"
+            else
+                local text = Render(parts, values, schema.resultLimit)
+                if text then return text, "candidate", nil end
+                reason = "output_limit"
+            end
+        end
+    end
+    local text = Render(english, values, schema.resultLimit)
+    if text then return text, "base", reason end
+    return UNAVAILABLE, "unavailable", "output_limit"
 end
 
--- The reviewed English keys, sorted (a copy).
+function L.Format(key, arguments, pack)
+    local text, source, reason = FormatResolve(key, arguments, pack)
+    if reason then Note(key, reason) end
+    return text, source, reason
+end
+
+-- Whether the English base holds a reviewed text or template for the key.
+function L.Has(key)
+    return ValidKey(key) and (base[key] ~= nil or templates[key] ~= nil)
+end
+
+-- "text" for a reviewed static text, "format" for a template, else nil.
+function L.Kind(key)
+    if not ValidKey(key) then return nil end
+    if base[key] ~= nil then return "text" end
+    if templates[key] ~= nil then return "format" end
+    return nil
+end
+
+-- The reviewed English keys of both kinds, sorted (a copy).
 function L.Keys()
     local out = {}
     for index = 1, #baseKeys do out[index] = baseKeys[index] end
@@ -220,7 +416,8 @@ function L.Diagnostics()
     for index = 1, #diagnostics.keys do keys[index] = diagnostics.keys[index] end
     return {
         base = {present = baseLoad.present, accepted = baseLoad.accepted,
-            rejected = baseLoad.rejected, oversized = baseLoad.oversized},
+            rejected = baseLoad.rejected, oversized = baseLoad.oversized,
+            formatted = baseLoad.formatted},
         misses = diagnostics.misses, byReason = byReason, keys = keys,
         keysNotKept = diagnostics.keysNotKept, last = diagnostics.last,
     }

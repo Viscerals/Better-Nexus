@@ -2473,14 +2473,48 @@ local function ApplyCandidate(model, signatures, roll)
     return ApplyModel(model, signatures, roll)
 end
 
+-- Panel is the one owner of the user-text presentation of a model's status
+-- and recommendation (issue #142). Render and SetStatus take RAW text (planner
+-- reasons, runtime status lines) and present it once with UserText.Message.
+-- That conversion maps raw to presented and is not idempotent: presented text,
+-- for example a translation, may hold bytes that a legacy rewrite matches
+-- (ARMED, TARGET:), so presented text is never converted again. A committed
+-- model (M._lastModel) keeps the presented text under its usual field names,
+-- as before, and an explicit record, presentation = {raw = {...}, text =
+-- {...}}, of the raw source of each presented field. A copy of a committed
+-- model may be rendered again: a field that still holds the bytes its own
+-- record presented is presented again from its recorded raw source; any other
+-- value is a raw input. No string is classified by a cache or by its content.
+local function Present(raw)
+    local userText = Nexus.UserText
+    if userText and type(userText.Message) == "function" then
+        return userText.Message(raw)
+    end
+    return raw
+end
+
+local function RawSource(model, field)
+    local value = model[field]
+    local record = rawget(model, "presentation")
+    local raw = type(record) == "table" and rawget(record, "raw") or nil
+    local text = type(record) == "table" and rawget(record, "text") or nil
+    if type(raw) == "table" and type(text) == "table" and type(value) == "string"
+        and rawget(text, field) == value then
+        return rawget(raw, field)
+    end
+    return value
+end
+
 function M.Render(model)
     if type(model) ~= "table" then return false end
     local candidate = DefensiveCopy(model)
-    local rawText = {status=candidate.status,recommendation=candidate.recommendation}
-    if Nexus.UserText then
-        candidate.recommendation=Nexus.UserText.Message(candidate.recommendation)
-        candidate.status=Nexus.UserText.Message(candidate.status)
-    end
+    local raw = {status=RawSource(candidate, "status"),
+        recommendation=RawSource(candidate, "recommendation")}
+    candidate.recommendation = Present(raw.recommendation)
+    candidate.status = Present(raw.status)
+    candidate.presentation = {raw=raw,
+        text={status=candidate.status, recommendation=candidate.recommendation}}
+    local rawText = {status=raw.status,recommendation=raw.recommendation}
     -- The inline Auto line, from this model and the last refused Auto click
     -- (memory only); recomputed on every render, so an old one never stays.
     candidate.autoNote = M.AutoNoteFor(candidate)
@@ -2678,11 +2712,19 @@ function M.NoteAutoClick(before, ok, state)
     return true
 end
 
+-- `status` is a raw status line (Main's onStatus passes the runtime's own),
+-- presented here once, as Render presents it.
 function M.SetStatus(status)
     if not M._lastModel then return false end
-    local nextStatus = SafeText(Nexus.UserText and Nexus.UserText.Message(status) or status)
+    local nextStatus = SafeText(Present(status))
     if SafeText(M._lastModel.status) == nextStatus then return false end
     M._lastModel.status = nextStatus
+    -- The committed record names the raw source of the new presented status.
+    local record = M._lastModel.presentation
+    if type(record) == "table" and type(record.raw) == "table"
+        and type(record.text) == "table" then
+        record.raw.status, record.text.status = status, nextStatus
+    end
     -- Keep the release render (ReleaseRollOnAutoOff) on the current line.
     if renderState.rawText then renderState.rawText.status = status end
     if renderState.signatures then

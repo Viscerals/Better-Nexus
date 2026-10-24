@@ -168,6 +168,33 @@ C.scenario('R5 compact charges: only supplied facts; unknown is not zero; no ser
  C.expect(R.ChargesLine and R.ChargesLine({banish=1,reroll=2,freeze=3})=='B:1 R:2 F:3'
   and R.ChargesLine(nil)=='' and R.ChargesLine({banish=-1,reroll=0/0,freeze=1/0})=='B:? R:? F:?',
   'R5: the formatter keeps only finite non-negative counts')
+ -- Issue #142: the row is rendered by the named template. INJECTION EVIDENCE
+ -- only: a test wrapper passes a non-shipped fixture pack into the real
+ -- formatter; this is not active-language startup or chooser evidence.
+ local seam=Nexus.Localization
+ C.setup(type(seam)=='table' and type(seam.Format)=='function','R5: fixture: the localization seam has the formatter')
+ local wrap={}
+ for key,value in pairs(seam or {}) do wrap[key]=value end
+ wrap.Format=function(key,arguments) return seam.Format(key,arguments,{['readout.charge_counts']='G:{freeze} R:{reroll} B:{banish}'}) end
+ local supplied={banish=2,reroll=1,freeze=0,trustworthy=true,arrived=true}
+ local function Fresh(c) Render(function(x) x.charges=nil end);return Render(function(x) x.charges=c end) end
+ Nexus.Localization=wrap
+ local v1,m1=Fresh(H.Clone(supplied))
+ local v2=Render(function(x) x.charges=H.Clone(supplied) end)
+ local est=Fresh({banish=2,reroll=nil,freeze=0,trustworthy=false,arrived=true})
+ local unk=Fresh({banish=5,reroll=5,freeze=5,trustworthy=false,arrived=false})
+ Nexus.Localization=seam
+ local back=Fresh(H.Clone(supplied))
+ Nexus.Localization=nil
+ local absent=Fresh(H.Clone(supplied))
+ Nexus.Localization=seam
+ C.expect(v1.charges=='G:0 R:1 B:2' and m1.charges.banish==2 and m1.charges.reroll==1 and m1.charges.freeze==0,
+  'R5: INJECTION: a reordered fixture renders through the real formatter and Panel; the counts keep their slots',v1.charges)
+ C.guard(v2.charges=='G:0 R:1 B:2','R5: re-rendering the same facts is stable',v2.charges)
+ C.expect(est.charges=='G:0 R:? B:2 ~' and unk.charges=='G:? R:? B:?',
+  'R5: INJECTION: unknown stays ? and the code-owned ~ follows the whole row',tostring(est.charges)..' | '..tostring(unk.charges))
+ C.guard(back.charges=='B:2 R:1 F:0' and absent.charges=='B:2 R:1 F:0',
+  'R5: the shipped English row, with or without the seam, is unchanged',tostring(back.charges)..' | '..tostring(absent.charges))
 end)
 
 -- Producer integration (M2-charge): the charges the runtime's own decision
@@ -237,6 +264,25 @@ C.scenario('R6 producer: the runtime\'s own charge read reaches the HUD (Auto OF
  C.guard(Shown()==nil and Nexus.Panel._lastModel.charges==nil,'R6: without a board no charges are shown or carried')
  Offer({{spellId=200001,quality=1},{spellId=200050,quality=2},{spellId=200051,quality=3}})
  C.expect(Shown()=='B:20 R:20 F:10','R6: the next board shows its own fresh read',Shown())
+ -- INJECTION EVIDENCE only (a non-shipped fixture through the real formatter):
+ -- the producer still reads charges once per decision and keeps its raw data.
+ local seam=Nexus.Localization
+ local wrapped={}
+ for key,value in pairs(seam or {}) do wrapped[key]=value end
+ wrapped.Format=function(key,arguments) return seam.Format(key,arguments,{['readout.charge_counts']='G:{freeze} R:{reroll} B:{banish}'}) end
+ local push={remainingBanishes=3,totalRerolls=20,usedRerolls=18,totalFreezes=10,usedFreezes=9}
+ Nexus.Localization=wrapped
+ H.run=push
+ Step()
+ line=Shown()
+ Nexus.Localization=seam
+ C.expect(line=='G:1 R:2 B:3' and Same(Nexus.Panel._lastModel.charges,used),
+  'R6: INJECTION: the runtime\'s own read renders through the real formatter; the model keeps the read counts',line)
+ C.guard(push.remainingBanishes==3 and push.usedRerolls==18 and push.usedFreezes==9 and reads==decided,
+  'R6: formatting changes no run data and adds no read',reads..' / '..decided)
+ H.run={remainingBanishes=20,totalRerolls=20,usedRerolls=0,totalFreezes=10,usedFreezes=0}
+ Step()
+ C.guard(Shown()=='B:20 R:20 F:10','R6: the shipped English row returns with the real seam',Shown())
  C.guard(Acts()==acts and Auto()==auto,'R6: Auto OFF throughout: no action was performed and Auto is unchanged')
  SlashCmdList.NEXUS('auto');H.Advance(.5)
  C.setup(Auto(),'R6: fixture: Auto is ON')
