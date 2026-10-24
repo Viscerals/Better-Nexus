@@ -315,5 +315,32 @@ section('9 full distinct rolled build can reserve a safe exit',function()
   'GUARD complete full-build exit plus late reservation stays within unchanged entry caps')
 end)
 
+section('10 invalidated public snapshots cannot mutate cached history projections',function()
+ for _,kind in ipairs({'remove','append','late'})do
+  local H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={}
+  local owner=Nexus.MainInternals.StoreAuthorityOwner
+  assert(owner.UpdateStateV1(function(row)row.orbRecoveryArchive={H.Clone(entry)}end))
+  local original=H.Clone(R.SavedRow('orbRecoveryArchive'))
+  local shown=M.Status(false)
+  assert(shown.canStart and shown.historyCount==1,'SETUP actual Status validates one retained entry')
+  local old=Nexus.Store.State().orbRecoveryArchive
+  assert(owner.UpdateStateV1(function(row)row.cacheOwnershipControl=(row.cacheOwnershipControl or 0)+1 end))
+  local current=Nexus.Store.State().orbRecoveryArchive
+  assert(current~=old and R.Same(current,original),'SETUP unrelated durable write replaced the defensive snapshot')
+  if kind=='remove' then table.remove(old,1)
+  elseif kind=='append' then old[#old+1]=H.Clone(old[1])
+  else old[1].late={{k='future_kind'}} end
+  local plan,why=M.Prepare('assigned',3)
+  check(plan and plan.historyCount==1 and plan.historyRisk~=nil,
+   'EXPECT stale public snapshot '..kind..' cannot change current review count or risk: '..tostring(why)
+   ..' count='..tostring(plan and plan.historyCount))
+  check(M.Status(false).historyCount==1 and R.Same(R.SavedRow('orbRecoveryArchive'),original),
+   'GUARD current disclosure and durable history remain exact after old snapshot '..kind)
+  local started,reason=M.Start(3)
+  check(not started and reason:find('Review the displayed',1,true) and H.Count('orb-spend')==0,
+   'GUARD old snapshot '..kind..' cannot bypass represented-history approval')
+ end
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb recovery archive in the Store: within the caps and the Store bounds, kept by the released and the current build checks='..checks)

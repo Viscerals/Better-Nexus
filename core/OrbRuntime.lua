@@ -1588,6 +1588,9 @@ function RC.memory(guid,p,row)
         and cached.owner==Nexus.Store.CurrentOwnerKey() and sameValue(cached.archive,list) then
         return cached.attempts,cached.list
     end
+    -- Validate and retain our own list and nested entries. A reader can keep
+    -- and edit an older public snapshot even after Store invalidates it.
+    if not row then list=copy(list) end
     local attempts,total={},0
     for _,e in ipairs(list) do
         local edges,bytes=journalMeasure(e)
@@ -1625,7 +1628,7 @@ function RC.memory(guid,p,row)
     end
     if not row then
         RC.memoryCache={guid=guid,baseline=baseline,owner=Nexus.Store.CurrentOwnerKey(),
-            archive=copy(list),attempts=attempts,list=list}
+            archive=list,attempts=attempts,list=list}
     end
     return attempts,list
 end
