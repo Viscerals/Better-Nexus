@@ -425,7 +425,7 @@ do
    if case=='near-entry' then padding=6100-baseBytes-#'legacyData'
    elseif case=='raw-too-large' then padding=6300-baseBytes-#'legacyData'
    else
-    history={};local target=math.floor((28672-baseBytes-#'legacyData'-1-200)/5)
+    history={};local target=math.floor((28672-baseBytes-#'legacyData'-1-20)/5)
     for i=1,5 do
      history[i]=H.Clone(seed)
      history[i].legacyEnvelope=string.rep('e',target-baseBytes-#'legacyEnvelope')
@@ -458,6 +458,12 @@ do
      assert(R.Same(archive[i],e),'GUARD explicit exit neither evicts nor rewrites older records')
     end end
     local before=H.Clone(archive)
+    local rejected=H.Clone(added);rejected.late={};rejected.lateN=4
+    for i=1,4 do rejected.late[i]={k='rejected',ep=A.Orbs.TransportStatus().epoch,w='sender'}end
+    local proposedTotal=bytes(rejected)
+    for i=1,#archive-1 do proposedTotal=proposedTotal+bytes(archive[i])end
+    assert(bytes(rejected)>6144 or proposedTotal>28672,
+     'SETUP exact four-event rejected annotation actually exceeds an original raw cap')
     for _=1,4 do server.Push(1220,'bad',{sender='OtherSender'})end
     M.Pump(true)
     local after=R.SavedRow('orbRecoveryArchive');local total=0
@@ -805,4 +811,118 @@ do
  end
  if #failures>0 then error(table.concat(failures,'\n'),0)end
  print('PASS R6b5 cold and warm loading hold, truthful lazy receipt epochs, expiry and deliberate Pause/Stop')
+end
+
+-- R6c1: independent review reproductions use the real saved/read/annotation
+-- boundaries. Setup facts are checked outside any intentionally caught fault.
+do
+ local R=dofile('tests/prototype/orb_recovery_support.lua');local issues={}
+ local function expect(v,msg)if not v then issues[#issues+1]=msg end end
+ local function gap()
+  local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={};assert(M.Start(6))
+  local server=R.Server(H)
+  H.service.RequestChoice=function()
+   SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME);server.queue[#server.queue+1]={op=16,body=''}
+  end
+  H.Offer();H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+  for _=1,100 do local a=R.SavedRow('orbRecoveryArchive');if a and #a==1 then break end;H.Advance(.25)end
+  assert(H.Count('orb-spend')==1 and #R.SavedRow('orbRecoveryArchive')==1,'SETUP actual archive precedes next submission')
+  return H,M,A,O,server
+ end
+ for _,site in ipairs({'Status','Resume','Pump'})do
+  local ok,why=pcall(function()
+   local H,M,A,O,server=gap();if site~='Pump'then assert(M.Pause())end
+   local archive=H.Clone(R.SavedRow('orbRecoveryArchive'));local ordinal=A.Orbs.TransportStatus().ord
+   local read=A.Orbs.Read;local hit=false
+   A.Orbs.Read=function()hit=true;error('synthetic actual state read failure at '..site)end
+   local contained=pcall(M[site],false);A.Orbs.Read=read
+   assert(hit,'SETUP actual '..site..' reaches the injected native-state read')
+   print('SETUP R6c1 actual state read throw '..site..' PASS')
+   local view=M.CompactStatus()
+   expect(contained,'EXPECT '..site..' contains the actual state read failure')
+   expect(not view.canResume,'EXPECT '..site..' invalidates old choice permission when the actual read throws')
+   expect(view.spent==1 and view.reserved==0 and view.uncertain==0 and view.recoveries==1
+    and view.unconfirmedResults==1 and not view.pending and R.Same(R.SavedRow('orbRecoveryArchive'),archive),
+    'GUARD '..site..' read failure fabricates no exposure, progress, receipt or archive')
+   local resumed=M.Resume()
+   expect(not resumed and H.Count('orb-spend')==1 and A.Orbs.TransportStatus().ord==ordinal,
+    'EXPECT '..site..' cannot re-authorize submission from the unchanged cached empty choice')
+   if H.Count('orb-spend')==1 then
+    server.Push(16,'');M.Status(false)
+    expect(M.Resume()==true and H.Count('orb-spend')==2,
+     'GUARD '..site..' can use the original permit only after a newly classified exact empty reply')
+   end
+   M.Stop()
+  end)
+  if not ok then issues[#issues+1]='SETUP state read '..site..': '..tostring(why)end
+ end
+ local ok,why=pcall(function()
+  local H,M,A,O=R.S.Fresh();H.perks.currentChoice={};H.OrbPlan()
+  local flight=A.InFlight;local hit,admitted,removed=false,false
+  A.InFlight=function(...)
+   local p=R.Saved()
+   if p and p.spendConfirmed~=true and H.Count('orb-spend')==0 then
+    hit=true;admitted=M.CompactStatus().reserved==1;removed=p.removed
+    error('synthetic pre-host InFlight validation failure')
+   end
+   return flight(...)
+  end
+  local contained=pcall(H.Approve,6,false);A.InFlight=flight
+  assert(hit and admitted,'SETUP real durable unsent receipt reaches InFlight validation')
+  print('SETUP R6c1 pre-host InFlight exception PASS')
+  local view=M.CompactStatus()
+  expect(contained and not view.pending and not R.Saved() and view.state=='PAUSED',
+   'EXPECT pre-host InFlight rejection contains the throw and clears the unsent receipt')
+  expect(view.spent==0 and view.reserved==0 and view.uncertain==0 and H.Count('orb-spend')==0,
+   'EXPECT InFlight failure preserves zero known and uncertain spending exposure')
+  local diagnostic=Nexus.Errors.Latest()
+  expect(diagnostic and diagnostic.source=='OrbAdapter.SpendValidation'
+   and diagnostic.message:find('synthetic pre-host InFlight validation failure',1,true),
+   'EXPECT bounded diagnostics retain the original InFlight cause')
+  if not view.pending then expect(M.Resume()==true and H.Count('orb-spend')==1 and O.source==tonumber(removed:match('^(%d+):')),
+   'GUARD known-unsent InFlight cleanup restores the original source quota for explicit Resume')end
+  M.Stop()
+ end)
+ if not ok then issues[#issues+1]='SETUP InFlight: '..tostring(why)end
+ local ok,why=pcall(function()
+  local function bytes(t)
+   local n=0;for k,v in pairs(t)do n=n+#tostring(k)
+    if type(v)=='table'then n=n+bytes(v)elseif type(v)=='string'then n=n+#v else n=n+8 end
+   end;return n
+  end
+  local function ready(history)
+   local H,M,A,O=R.S.Fresh();R.S.SpendOfferNoChoice(H,M,A,O)
+   M=R.Reload(H,function()
+    assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)
+     row.orbRefinement.pending.legacyData=history and 'x' or nil
+     if history then row.orbRecoveryArchive=H.Clone(history)end
+    end))
+   end)
+   H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+   local server=R.Server(H);R.S.Pass(H,M,A,2);assert(M.ContinueBegin())
+   for _=1,100 do if M.ContinueView().stage=='ready'then break end;H.Advance(.25)end
+   assert(M.ContinueConfirm(M.ContinueView().token),'SETUP actual legacy Continue archive')
+   return H,M,A,O,server
+  end
+  local H,M,A,O,server=ready();local seed=H.Clone(R.SavedRow('orbRecoveryArchive')[1]);local base=bytes(seed)
+  local history={};local target=math.floor((28672-base-#'legacyData'-1-200)/5)
+  for i=1,5 do history[i]=H.Clone(seed);history[i].legacyEnvelope=string.rep('e',target-base-#'legacyEnvelope')end
+  H,M,A,O,server=ready(history)
+  local archive=H.Clone(R.SavedRow('orbRecoveryArchive'));assert(#archive==6)
+  local total=0;for _,e in ipairs(archive)do total=total+bytes(e)end
+  local candidate=H.Clone(archive[6]);candidate.late={{k='choice_push',ep=A.Orbs.TransportStatus().epoch}};candidate.lateN=1
+  assert(total-bytes(archive[6])+bytes(candidate)<=28672 and bytes(candidate)<=6144,
+   'SETUP supported late annotation fits the original actual entry/total caps')
+  server.Push(16,'late observation');M.Pump(true)
+  local after=R.SavedRow('orbRecoveryArchive')
+  print('SETUP R6c1 real late producer with raw-cap space PASS')
+  expect(after[6].lateN==1 and R.Same(after[6].late,candidate.late),
+   'EXPECT optional legacy annotation uses raw caps rather than charging future reservations')
+  expect(R.Same(after[6].receipt,archive[6].receipt),'GUARD late producer never rewrites the archived receipt')
+  for i=1,5 do expect(R.Same(after[i],archive[i]),'GUARD late annotation preserves every earlier opaque legacy entry')end
+  expect(H.Count('orb-spend')==1 and H.Count('take')==0,'GUARD optional late evidence submits no gameplay action')
+ end)
+ if not ok then issues[#issues+1]='SETUP raw late capacity: '..tostring(why)end
+ if #issues>0 then error(table.concat(issues,'\n'),0)end
+ print('PASS R6c1 actual state-read exceptions, unsent InFlight cleanup and original raw late-annotation caps')
 end

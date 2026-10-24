@@ -240,5 +240,87 @@ section('8 real archive code facts distinguish absent and invalid',function()
  if #issues>0 then error(table.concat(issues,'\n'),0)end
 end)
 
+section('9 real late rows must validate before their kept count is reported',function()
+ local H,M,A,O,server=World();assert(M.ContinueBegin())
+ assert(Until(H,function()return M.ContinueView().stage=='ready'end))
+ assert(M.ContinueConfirm(M.ContinueView().token),'SETUP real durable archive for late-row facts')
+ local original=H.Clone(R.SavedRow('orbRecoveryArchive')[1]);local owner=Nexus.MainInternals.StoreAuthorityOwner
+ local issues={}
+ local cases={
+  {name='absent'},
+  {name='empty',value={},seen=0,expected=0},
+  {name='valid',value={{k='events_lost'}},seen=1,expected=1},
+  {name='valid typed fields',value={{k='choice_push',ep=0,ch=1,pd=0,nr=false,w='known'}},seen=1,expected=1},
+  {name='valid rows with bad independent seen counter',value={{k='events_lost'}},seen=-1,expected=1},
+  {name='false row',value={false},seen=1,expected='invalid'},
+  {name='unsupported code',value={{k='SYNTHETIC_UNSUPPORTED'}},seen=1,expected='invalid'},
+  {name='bad scalar',value={{k='events_lost',ep='SYNTHETIC_BAD'}},seen=1,expected='invalid'},
+  {name='negative scalar',value={{k='events_lost',ep=-1}},seen=1,expected='invalid'},
+  {name='bad boolean',value={{k='events_lost',nr='SYNTHETIC_BAD'}},seen=1,expected='invalid'},
+  {name='unknown field',value={{k='events_lost',extra='SYNTHETIC_BAD'}},seen=1,expected='invalid'},
+  {name='sparse',value={[2]={k='events_lost'}},seen=1,expected='invalid'},
+ }
+ for _,case in ipairs(cases)do
+  assert(owner.UpdateStateV1(function(row)
+   row.orbRecoveryArchive[1]=H.Clone(original)
+   row.orbRecoveryArchive[1].late=H.Clone(case.value);row.orbRecoveryArchive[1].lateN=case.seen
+  end))
+  local before=H.Clone(R.SavedRow('orbRecoveryArchive'));local projected=M.Archive().entries[1]
+  local report=Nexus.SupportReport.Summary()
+  print('SETUP R6c1 durable late-row '..case.name..' PASS')
+  local expected=case.expected=='invalid' and 'unreadable' or case.expected==nil and 'not recorded' or tostring(case.expected)
+  if projected.late~=case.expected or not report:find('late events kept='..expected,1,true)then
+   issues[#issues+1]='EXPECT '..case.name..' keeps valid count or bounded invalid/absent distinction through the real report'
+  end
+  if case.seen==-1 then check(projected.lateN=='invalid' and report:find('seen=unreadable',1,true),
+   'GUARD bad seen count does not erase a separately valid kept-row count')end
+  check(R.Same(R.SavedRow('orbRecoveryArchive'),before),'GUARD late projection preserves all durable raw data')
+  check(not report:find('SYNTHETIC_',1,true),'GUARD malformed late rows are not dumped into support text')
+ end
+ check(H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD late reporting causes no gameplay action')
+ if #issues>0 then error(table.concat(issues,'\n'),0)end
+end)
+
+section('10 actual malformed archive container counts remain unreadable',function()
+ local H,M,A,O,server=World();assert(M.ContinueBegin())
+ assert(Until(H,function()return M.ContinueView().stage=='ready'end))
+ assert(M.ContinueConfirm(M.ContinueView().token),'SETUP real archive seed for top-level count truth')
+ local original=H.Clone(R.SavedRow('orbRecoveryArchive'));assert(#original==1)
+ local owner=Nexus.MainInternals.StoreAuthorityOwner;local issues={}
+ for _,kind in ipairs({'absent','empty','valid','false','string','sparse','hole','bad entry','future'})do
+  assert(owner.UpdateStateV1(function(row)
+   if kind=='absent'then row.orbRecoveryArchive=nil
+   elseif kind=='empty'then row.orbRecoveryArchive={}
+   elseif kind=='valid'then row.orbRecoveryArchive=H.Clone(original)
+   elseif kind=='false'then row.orbRecoveryArchive=false
+   elseif kind=='string'then row.orbRecoveryArchive='SYNTHETIC_BAD_ARCHIVE'
+   elseif kind=='sparse'then row.orbRecoveryArchive={[2]=H.Clone(original[1])}
+   elseif kind=='hole'then row.orbRecoveryArchive={[1]=H.Clone(original[1]),[3]=H.Clone(original[1])}
+   elseif kind=='bad entry'then row.orbRecoveryArchive={false}
+   else row.orbRecoveryArchive=H.Clone(original);row.orbRecoveryArchive[1].v=2 end
+  end))
+  if kind=='false'then
+   M=R.Reload(H)
+   check(#M.ContinueLog()==0 and R.Saved()==nil and M.ContinueView().reason=='no_receipt',
+    'SETUP report malformed archive without a pending receipt or session attempts')
+  end
+  local before=H.Clone(R.SavedRow('orbRecoveryArchive'));local projected=M.Archive()
+  local report=Nexus.SupportReport.Summary();local numeric=kind=='absent'or kind=='empty'or kind=='valid'
+  local expected=numeric and (kind=='valid'and 1 or 0)or'invalid'
+  local text=numeric and tostring(expected)or'unreadable'
+  print('SETUP R6c1 durable archive container '..kind..' PASS')
+  if projected.count~=expected or not report:find('archive='..text..'/8',1,true)then
+   -- A genuinely empty, no-pending/no-log archive need not create a report section.
+   if not (numeric and expected==0 and not report:find('archive=',1,true))then
+    issues[#issues+1]='EXPECT '..kind..' reports established zero/count or bounded unreadable archive count'
+   end
+  end
+  check(R.Same(R.SavedRow('orbRecoveryArchive'),before),'GUARD container projection never repairs raw archive data')
+  check(not report:find('SYNTHETIC_BAD_ARCHIVE',1,true),'GUARD malformed archive payload never reaches support text')
+ end
+ check(H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD archive-count reporting submits no action')
+ if #issues>0 then error(table.concat(issues,'\n'),0)end
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb recovery window: explicit Check and Continue, withdrawn on change, cancelled on close checks='..checks)

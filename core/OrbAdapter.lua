@@ -578,7 +578,13 @@ function O.Spend(token,key,expected,guard)
     if s.choiceShape=="invalid" then
         return nil,"REJECTED","The current Echo choices are malformed. No Orb was sent.","CHOICE_INVALID"
     end
-    if s.offerPending or #s.board>0 or s.hostPending or A.InFlight() or s.charges<1 then
+    local checked,inFlight=true,false
+    if not s.offerPending and #s.board==0 and not s.hostPending then checked,inFlight=pcall(A.InFlight) end
+    if not checked then
+        recordActionException("OrbAdapter.SpendValidation",inFlight)
+        return nil,"REJECTED","The Orb state check failed. No Orb was sent.","VALIDATION_ERROR"
+    end
+    if s.offerPending or #s.board>0 or s.hostPending or inFlight or s.charges<1 then
         return nil,"REJECTED","Another choice is pending or no Orbs remain."
     end
     if not expected or s.grantedKey~=expected.grantedKey or s.lockedKey~=expected.lockedKey

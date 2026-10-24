@@ -712,12 +712,25 @@ end
 -- A refusal also returns the stage code of its site (readiness diagnostics only).
 -- `display` is true only for M.Status: a display-only read (B.Read("display"),
 -- see OrbAdapter O.Read). Every action path calls inspect() and reads in full.
+local function readState(...)
+    local ok,s,err,stage=pcall(B.Read,...)
+    if not ok then
+        -- This is an actual failed observation, unlike an earlier assignment
+        -- or target refusal. Never reuse its pre-failure empty-choice fact.
+        if run.postRecovery then RC.postUnknown() end
+        if type(Nexus.Errors)=="table" and type(Nexus.Errors.Record)=="function" then
+            pcall(Nexus.Errors.Record,"OrbRuntime.StateRead",s)
+        end
+        return nil,"The current Orb state could not be read. No new action was sent.","state"
+    end
+    return s,err,stage
+end
 local function inspect(display)
     local assignment=assigned()
     if assignment.state~="ready" then return nil,assignment.note or "Assign a Wishlist before starting Orb mode.",assignment,"assignment" end
     local targets,err=P.Normalize(config.entries);if not targets then return nil,err,assignment,"targets" end
     local s,e,stage
-    if display then s,e,stage=B.Read("display") else s,e,stage=B.Read() end
+    if display then s,e,stage=readState("display") else s,e,stage=readState() end
     if not s then return nil,e,assignment,stage end
     local prog=P.Progress(targets,s)
     local sources=P.Sources(targets,s,config.excluded)
@@ -1568,7 +1581,7 @@ function RC.entryBudget(entry)
 end
 function RC.retainedBudget(entry)
     local _,budget,depth,actual=RC.entryBudget(entry)
-    return math.max(actual,math.min(ENTRY_BYTES,budget))
+    return math.max(actual,math.min(ENTRY_BYTES,budget)),actual
 end
 function RC.autoCapacity(list,bytes,adding)
     local total=bytes or 0
@@ -1603,10 +1616,14 @@ end
 function RC.archiveInfo()
     local state=Nexus.Store and Nexus.Store.State and Nexus.Store.State()
     local st,list=archiveOf(state)
-    -- The number of saved entries is shown even when the archive cannot be used (a newer
-    -- format, a full or damaged one): it is a count of what is kept, never a repair.
-    local raw=type(state)=="table" and state[ARCHIVE_KEY] or nil
-    local count=type(raw)=="table" and math.min(#raw,99) or 0
+    -- Only a validated contiguous supported container supplies a record count.
+    -- Present malformed/future values are unreadable, not absent or empty;
+    -- Lua's length of a sparse table is not an established retained count.
+    local count="invalid"
+    if type(state)=="table" then
+        if state[ARCHIVE_KEY]==nil then count=0
+        elseif (st=="ok" or st=="full") and integer(#list,0,99) then count=#list end
+    end
     return st,list or {},count
 end
 -- Rebuild bounded attribution memory from this owner's retained archive. It
@@ -2678,12 +2695,16 @@ function RC.late()
                         end
                         candidate.lateN=math.max(a.n,e.lateN or 0)
                         local edges,bytes,depth=measure(candidate)
-                        local total=RC.retainedBudget(candidate)
+                        local total=bytes
+                        local reservedTotal=RC.retainedBudget(candidate)
                         for _,other in ipairs(r[ARCHIVE_KEY]) do
-                            if other~=e then total=total+RC.retainedBudget(other) end
+                            if other~=e then
+                                local reserve,actual=RC.retainedBudget(other)
+                                total=total+actual;reservedTotal=reservedTotal+reserve
+                            end
                         end
                         if edges>ARCHIVE_EDGES or bytes>ENTRY_BYTES or depth>4 or total>ARCHIVE_BYTES
-                            or (run.pending and not run.pending.restored and total+ENTRY_BYTES>ARCHIVE_BYTES) then
+                            or (run.pending and not run.pending.restored and reservedTotal+ENTRY_BYTES>ARCHIVE_BYTES) then
                             held=true;return
                         end
                         e.late=candidate.late;e.lateN=candidate.lateN;done=true
@@ -2728,14 +2749,9 @@ function M.Archive()
         local late
         if e.late~=nil then
             late="invalid"
-            if type(e.late)=="table" and not getmetatable(e.late) then
-                local n,valid=0,true
-                for key in pairs(e.late) do
-                    n=n+1
-                    if n>RC_LATE_MAX or not integer(key,1,RC_LATE_MAX) then valid=false;break end
-                end
-                if valid and n==#e.late then late=n end
-            end
+            -- Validate the rows, not just array keys. The independent seen
+            -- counter is projected below and cannot erase valid kept rows.
+            if RC.knownLate({late=e.late}) then late=#e.late end
         end
         out.entries[#out.entries+1]={id=type(e.id)=="string" and e.id:sub(1,16) or nil,kind=codeFact(e.kind,"ACK_UNCONFIRMED","AUTO_UNCONFIRMED"),
             spent=numberFact(e.spent,0,100000),limit=numberFact(e.limit,0,100000),
@@ -2898,7 +2914,7 @@ function M.Pump(passive)
     local observed
     local function step()
         if life.phase=="l" then return end
-        local s,err=B.Read()
+        local s,err=readState()
         observed=s
         if not s and run.postRecovery then RC.postUnknown() end
         if not s and run.worldRecovering and run.running then
@@ -3223,7 +3239,7 @@ function M.RunLog(which,from,count)
 end
 function M.Resume()
     init();if run.state~="PAUSED" then return nil,"Only an explicitly paused run can resume." end
-    local s,err=B.Read();if not s then if run.postRecovery then RC.postUnknown() end;return nil,err end
+    local s,err=readState();if not s then if run.postRecovery then RC.postUnknown() end;return nil,err end
     if run.postRecovery then
         local ok,ready,why=pcall(RC.postCheck,s)
         if not ok then RC.postUnknown();return nil,"Recovery observations cannot be classified. Resolve any open offer in the game, or Stop and approve a new run." end

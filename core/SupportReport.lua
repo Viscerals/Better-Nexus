@@ -726,13 +726,14 @@ local function continueLines()
     local adapter = Nexus.GameAdapter and Nexus.GameAdapter.Orbs
     local st = adapter and type(adapter.TransportStatus) == "function" and adapter.TransportStatus() or nil
     local pending = view.reason ~= "no_receipt"
-    local archived = type(archive.count) == "number" and archive.count > 0
+    local archived = (type(archive.count) == "number" and archive.count > 0)
+        or (archive.state~=nil and archive.state~="ok")
     if not (pending or archived or #log > 0) then return out end
     out[#out + 1] = "  continue: stage=" .. codeText(view.liveStage or view.stage)
         .. "; live=" .. (view.liveRecovery and "yes" or "no")
         .. "; manualExitAvailable=" .. (view.eligible == true and "yes" or "no")
         .. "; why not=" .. codeText(view.liveRefusal or view.refusal or view.reason)
-        .. "; archive=" .. bigCount(archive.count) .. "/" .. bigCount(archive.capacity) .. " (" .. codeText(archive.state) .. ")"
+        .. "; archive=" .. archivedCount(archive.count) .. "/" .. bigCount(archive.capacity) .. " (" .. codeText(archive.state) .. ")"
     if type(st) == "table" then
         local c = type(st.counts) == "table" and st.counts or {}
         local r = type(st.rejects) == "table" and st.rejects or {}
