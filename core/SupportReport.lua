@@ -715,6 +715,24 @@ local function replyText(r)
     return "(ordinal " .. bigCount(r.ord) .. ", fields " .. bigCount(r.nf) .. ", pending " .. bigCount(r.pd)
         .. ", balance " .. bigCount(r.ch) .. ", reported change " .. signedCount(r.dl) .. ")"
 end
+local function appendArchivedEntries(out,list)
+    local entries = type(list) == "table" and type(list.entries) == "table" and list.entries or {}
+    for index = math.max(1, #entries - 1), #entries do
+        local e = entries[index]
+        if type(e) == "table" then
+            local version=archivedCount(e.consentVersion)
+            local consent=(version=="not recorded" or version=="unreadable") and version
+                or "v"..version.." "..archivedCode(e.consentPolicy)
+            if version=="not recorded" and e.consentPolicy=="invalid" then consent="unreadable" end
+            out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. archivedCode(e.outcome)
+                .. "; kind=" .. archivedCode(e.kind) .. "; confidence=" .. archivedCode(e.confidence)
+                .. "; run observed spends=" .. archivedCount(e.spent) .. " limit=" .. archivedCount(e.limit)
+                .. "; attempt unknown exposure=" .. archivedCount(e.uncertain)
+                .. "; consent " .. consent
+                .. "; late events kept=" .. archivedCount(e.late) .. " seen=" .. archivedCount(e.lateN)
+        end
+    end
+end
 local function continueLines()
     local runtime = Nexus.OrbRuntime
     local out = {}
@@ -762,23 +780,7 @@ local function continueLines()
         end
     end
     if type(runtime.Archive) == "function" then
-        local list = runtime.Archive()
-        local entries = type(list) == "table" and type(list.entries) == "table" and list.entries or {}
-        for index = math.max(1, #entries - 1), #entries do
-            local e = entries[index]
-            if type(e) == "table" then
-                local version=archivedCount(e.consentVersion)
-                local consent=(version=="not recorded" or version=="unreadable") and version
-                    or "v"..version.." "..archivedCode(e.consentPolicy)
-                if version=="not recorded" and e.consentPolicy=="invalid" then consent="unreadable" end
-                out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. archivedCode(e.outcome)
-                    .. "; kind=" .. archivedCode(e.kind) .. "; confidence=" .. archivedCode(e.confidence)
-                    .. "; run observed spends=" .. archivedCount(e.spent) .. " limit=" .. archivedCount(e.limit)
-                    .. "; attempt unknown exposure=" .. archivedCount(e.uncertain)
-                    .. "; consent " .. consent
-                    .. "; late events kept=" .. archivedCount(e.late) .. " seen=" .. archivedCount(e.lateN)
-            end
-        end
+        appendArchivedEntries(out,runtime.Archive())
     end
     return out
 end
@@ -804,7 +806,16 @@ function M.OrbLines()
         if type(runtime.RunnerView)=="function" then
             local runner=runtime.RunnerView()
             if type(runner)~="table" or runner.initialized~=true then
-                return {"Orb action: unknown (runtime not initialized; no loaded receipt)"}
+                local cold={"Orb action: unknown (runtime not initialized; no loaded receipt)"}
+                if type(runtime.ArchiveDiagnostics)=="function" then
+                    local archive=runtime.ArchiveDiagnostics()
+                    if type(archive)=="table" and ((type(archive.count)=="number" and archive.count>0)
+                        or (archive.state~=nil and archive.state~="ok")) then
+                        cold[#cold+1]="  archive="..archivedCount(archive.count).."/"..bigCount(archive.capacity).." ("..codeText(archive.state)..")"
+                        appendArchivedEntries(cold,archive)
+                    end
+                end
+                return cold
             end
         end
         if view.pending ~= true then

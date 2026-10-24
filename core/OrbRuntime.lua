@@ -1622,7 +1622,22 @@ function RC.archiveInfo()
     local count="invalid"
     if type(state)=="table" then
         if state[ARCHIVE_KEY]==nil then count=0
-        elseif (st=="ok" or st=="full") and integer(#list,0,99) then count=#list end
+        elseif (st=="ok" or st=="full") and integer(#list,0,99) then count=#list
+        elseif st=="future" then
+            -- Counting established outer rows does not interpret their future
+            -- payload or permit Continue. Check every row, including ones the
+            -- version refusal did not reach, and never use sparse-table length.
+            local raw=state[ARCHIVE_KEY];local n,valid=0,true
+            for k,e in pairs(raw) do
+                n=n+1
+                if n>99 or not integer(k,1,99) or type(e)~="table" or getmetatable(e)
+                    or not integer(e.v,1) or (e.v==1 and (type(e.id)~="string" or type(e.cd)~="string" or type(e.receipt)~="table")) then
+                    valid=false;break
+                end
+            end
+            if valid then for i=1,n do if rawget(raw,i)==nil then valid=false;break end end end
+            if valid then count=n end
+        end
     end
     return st,list or {},count
 end
@@ -2719,9 +2734,9 @@ end
 function M.ContinueReason(code)
     return type(code)=="string" and RC_REFUSALS[code] or "Nothing was changed."
 end
--- The archive for the support report and the panel: counts and plain summaries, no receipt.
-function M.Archive()
-    init()
+-- Shared owned-data projection: counts and plain summaries, no receipt,
+-- runtime initialization, game observation, transport read or saved write.
+local function archiveView()
     local astate,list,count=RC.archiveInfo()
     local out={state=astate,count=count,capacity=ARCHIVE_MAX,entries={}}
     -- Preserve presence without returning malformed raw values: nil is an
@@ -2763,6 +2778,12 @@ function M.Archive()
             outcome=childFact(e.resolution,"outcome","UNCONFIRMED")}
     end
     return out
+end
+function M.Archive()
+    init();return archiveView()
+end
+function M.ArchiveDiagnostics()
+    return archiveView()
 end
 -- The last attempts of this session, for the support report. Plain numbers and codes.
 function M.ContinueLog()

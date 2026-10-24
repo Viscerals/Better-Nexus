@@ -287,7 +287,7 @@ section('10 actual malformed archive container counts remain unreadable',functio
  assert(M.ContinueConfirm(M.ContinueView().token),'SETUP real archive seed for top-level count truth')
  local original=H.Clone(R.SavedRow('orbRecoveryArchive'));assert(#original==1)
  local owner=Nexus.MainInternals.StoreAuthorityOwner;local issues={}
- for _,kind in ipairs({'absent','empty','valid','false','string','sparse','hole','bad entry','future'})do
+ for _,kind in ipairs({'absent','empty','valid','false','string','sparse','hole','bad entry','future','future pair','future bad row','future bad known row'})do
   assert(owner.UpdateStateV1(function(row)
    if kind=='absent'then row.orbRecoveryArchive=nil
    elseif kind=='empty'then row.orbRecoveryArchive={}
@@ -297,7 +297,12 @@ section('10 actual malformed archive container counts remain unreadable',functio
    elseif kind=='sparse'then row.orbRecoveryArchive={[2]=H.Clone(original[1])}
    elseif kind=='hole'then row.orbRecoveryArchive={[1]=H.Clone(original[1]),[3]=H.Clone(original[1])}
    elseif kind=='bad entry'then row.orbRecoveryArchive={false}
-   else row.orbRecoveryArchive=H.Clone(original);row.orbRecoveryArchive[1].v=2 end
+   else
+    row.orbRecoveryArchive=H.Clone(original);row.orbRecoveryArchive[1].v=2
+    if kind=='future pair'then row.orbRecoveryArchive[2]={v=3,id='next-format'}
+    elseif kind=='future bad row'then row.orbRecoveryArchive[2]=false
+    elseif kind=='future bad known row'then row.orbRecoveryArchive[2]={v=1}end
+   end
   end))
   if kind=='false'then
    M=R.Reload(H)
@@ -305,8 +310,8 @@ section('10 actual malformed archive container counts remain unreadable',functio
     'SETUP report malformed archive without a pending receipt or session attempts')
   end
   local before=H.Clone(R.SavedRow('orbRecoveryArchive'));local projected=M.Archive()
-  local report=Nexus.SupportReport.Summary();local numeric=kind=='absent'or kind=='empty'or kind=='valid'
-  local expected=numeric and (kind=='valid'and 1 or 0)or'invalid'
+  local report=Nexus.SupportReport.Summary();local numeric=kind=='absent'or kind=='empty'or kind=='valid'or kind=='future'or kind=='future pair'
+  local expected=numeric and (kind=='future pair'and 2 or (kind=='valid'or kind=='future')and 1 or 0)or'invalid'
   local text=numeric and tostring(expected)or'unreadable'
   print('SETUP R6c1 durable archive container '..kind..' PASS')
   if projected.count~=expected or not report:find('archive='..text..'/8',1,true)then
@@ -319,6 +324,57 @@ section('10 actual malformed archive container counts remain unreadable',functio
   check(not report:find('SYNTHETIC_BAD_ARCHIVE',1,true),'GUARD malformed archive payload never reaches support text')
  end
  check(H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD archive-count reporting submits no action')
+ if #issues>0 then error(table.concat(issues,'\n'),0)end
+end)
+
+section('11 truly cold Summary reads owned archive diagnostics without initializing the runner',function()
+ local H,M,A,O,server=World();assert(M.ContinueBegin())
+ assert(Until(H,function()return M.ContinueView().stage=='ready'end));assert(M.ContinueConfirm(M.ContinueView().token))
+ local seed=H.Clone(R.SavedRow('orbRecoveryArchive')[1]);local issues={}
+ for _,kind in ipairs({'absent','empty','valid','false','string','sparse','future','future pair','future bad row'})do
+  local H,M,A,O=R.S.Fresh();local owner=Nexus.MainInternals.StoreAuthorityOwner
+  assert(owner.UpdateStateV1(function(row)
+   if kind=='absent'then row.orbRecoveryArchive=nil
+   elseif kind=='empty'then row.orbRecoveryArchive={}
+   elseif kind=='valid'then row.orbRecoveryArchive={H.Clone(seed)}
+   elseif kind=='false'then row.orbRecoveryArchive=false
+   elseif kind=='string'then row.orbRecoveryArchive='SYNTHETIC_COLD_ARCHIVE'
+   elseif kind=='sparse'then row.orbRecoveryArchive={[2]=H.Clone(seed)}
+   else
+    row.orbRecoveryArchive={{v=2,id='future-row'}}
+    if kind=='future pair'then row.orbRecoveryArchive[2]={v=3}
+    elseif kind=='future bad row'then row.orbRecoveryArchive[2]=false end
+   end
+  end))
+  M=R.Reload(H)
+  assert(M.RunnerView().initialized==false,'SETUP actual post-reload cold owner with no pending receipt')
+  local before=H.Clone(R.SavedRow('orbRecoveryArchive'));local frames=#H.frames;local calls=0
+  local restores={}
+  local function forbid(t,key)
+   local old=t[key];restores[#restores+1]=function()t[key]=old end
+   t[key]=function()calls=calls+1;error('synthetic forbidden cold diagnostic call '..key)end
+  end
+  for _,key in ipairs({'Archive','ContinueView','ContinueLog','Pump','Start','Resume'})do forbid(M,key)end
+  for _,key in ipairs({'Read','TransportStatus','TransportSince','RequestRefresh','RequestOwnershipRefresh'})do forbid(A.Orbs,key)end
+  forbid(owner,'UpdateStateV1')
+  local ok,report=pcall(Nexus.SupportReport.Summary)
+  for _,restore in ipairs(restores)do restore()end
+  assert(ok,'SETUP cold Summary remains callable')
+  print('SETUP R6c2 first cold Summary '..kind..' PASS')
+  local numeric=kind=='absent'or kind=='empty'or kind=='valid'or kind=='future'or kind=='future pair'
+  local count=kind=='future pair'and 2 or (kind=='valid'or kind=='future')and 1 or 0
+  if not numeric then
+   if not report:find('archive=unreadable/8',1,true)then issues[#issues+1]='EXPECT first cold '..kind..' report exposes unreadable retained archive'end
+  elseif count>0 and not report:find('archive='..count..'/8',1,true)then
+   issues[#issues+1]='EXPECT first cold '..kind..' report retains its established count'
+  end
+  if M.RunnerView().initialized~=false or calls~=0 or #H.frames~=frames then
+   issues[#issues+1]='EXPECT cold '..kind..' diagnostics initialize, query and write nothing'
+  end
+  check(R.Same(R.SavedRow('orbRecoveryArchive'),before),'GUARD first cold report preserves raw owned archive')
+  check(not report:find('SYNTHETIC_COLD_ARCHIVE',1,true),'GUARD cold malformed payload is not dumped')
+  check(H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD first cold report sends no gameplay action')
+ end
  if #issues>0 then error(table.concat(issues,'\n'),0)end
 end)
 
