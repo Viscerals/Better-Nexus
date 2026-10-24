@@ -1,5 +1,5 @@
--- EXPECT semantic replacement from a43cf27: classified loading preserves only
--- existing authorization; unclassified entry/reload still revoke it (GUARD).
+-- EXPECT semantic replacement from accepted base bc5f4959: classified loading preserves only
+-- existing authorization; unclassified entry holds actions and logout revokes permission (GUARD).
 local H=dofile('tests/prototype/orbs_support.lua');local M=H.M
 assert(not Nexus.RecomputeStats().autoEnabled and not M.Status().running,'startup permissions OFF')
 SlashCmdList.NEXUS('auto');assert(Nexus.RecomputeStats().autoEnabled,'explicit ordinary permission control')
@@ -14,6 +14,6 @@ H.OrbPlan();assert(M.Start(2));H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENT
 assert(M.Status().running and M.Status().pending and H.Count('orb-spend')==1,'a classified loading screen retains only the approved Orb run')
 SlashCmdList.NEXUS('auto');assert(not Nexus.RecomputeStats().autoEnabled,'ordinary Auto stays OFF while the Orb receipt is unresolved')
 H.Fire('PLAYER_ENTERING_WORLD')
-assert(not M.Status().running and M.Status().pending,'world entry without a preceding leave revokes Orb authorization')
+assert(not M.Status().running and M.Status().pending,'world entry without a preceding leave pauses the Orb run')
 H.Offer();assert(H.Count('take')==0 and H.Count('orb-spend')==1)
-print('PASS session-only ordinary/Orb permissions: kept across a loading screen, revoked on logout and unclassified entry, pending exposure retained')
+print('PASS session-only ordinary/Orb permissions: kept across loading, revoked on logout, held on unclassified entry, pending exposure retained')

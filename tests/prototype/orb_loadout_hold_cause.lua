@@ -1,4 +1,4 @@
--- EXPECT semantic replacement from a43cf27, 4d: Stop remains authoritative
+-- EXPECT semantic replacement from accepted base bc5f4959, 4d: Stop remains authoritative
 -- through later loadout observations; all original hold/evidence guards stay.
 -- Diagnostics for the Orb loadout hold (see orb_loadout_hold_repro). The accepted
 -- code held an unresolved Orb action with one flag, `loadoutChanged`, that eight

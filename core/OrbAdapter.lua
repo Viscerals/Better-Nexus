@@ -1,6 +1,7 @@
 -- Nexus: Orb of Lost Memories game boundary.
--- EchoWeaver Orb mode: only the public OrbService and PerkService calls listed
--- in THIRD_PARTY.md. Capability detection is read-only; no speculative spend/selection.
+-- EchoWeaver Orb mode uses the OrbService, PerkService and OptionsService
+-- contracts and secure SendAddonMessage post-hook described in THIRD_PARTY.md.
+-- Capability detection is read-only; no speculative spend/selection.
 Nexus = Nexus or {}
 local A = assert(Nexus.GameAdapter, "OrbAdapter requires GameAdapter")
 local O = {}
@@ -271,7 +272,8 @@ function O.Read(mode)
     local okB,rawB=call(svc,"GetCurrentChoice")
     if type(A.ObserveChoiceRead)=="function" then pcall(A.ObserveChoiceRead,okB,rawB,"orb_read") end
     if not okB or (rawB~=nil and type(rawB)~="table") then return nil,"The current Echo choices are unavailable.","choice" end
-    -- This action read keeps nil distinct. The audited client clears its
+    -- This action read keeps nil distinct. The inert ProjectEbonhold metadata
+    -- v37 reference (perks_service.lua hash in THIRD_PARTY.md) clears its
     -- cache to nil for an empty response AND for an unparseable response;
     -- only the transport observation can distinguish those during recovery.
     local choiceShape=rawB==nil and "unknown" or "checked"
@@ -361,6 +363,12 @@ function O.Read(mode)
     return s
 end
 function O.SameContext(a,b) return same(a,b) end
+-- Pure scalar display check; no game getters, observers or reconciliation.
+-- Other eligibility facts are the last complete Pump observation. Resume reads
+-- all current authority again before any action.
+function O.OwedDisplayClear()
+    return hostPending(_G.ProjectEbonhold)==false
+end
 function O.SameOwner(a,b)
     return type(a)=="table" and type(b)=="table" and a.pe==b.pe and a.svc==b.svc
         and a.orb==b.orb and a.guid==b.guid and a.generation==b.generation and a.level==b.level
@@ -608,8 +616,9 @@ do
     end
 end
 -- Passive transport observer (035) ---------------------------------------------
--- The audited client (the owner's installed bytes; the reporter's build is NOT
--- verified) delivers every server message through ONE CHAT_MSG_ADDON frame, keeps
+-- The inert ProjectEbonhold metadata v37 reference (network transport hash in
+-- THIRD_PARTY.md; installed tester bytes are unverified) delivers every server
+-- message through ONE CHAT_MSG_ADDON frame, keeps
 -- one handler per opcode, and checks the prefix and the framing, not the sender or
 -- the channel. This observer therefore never registers an opcode handler: it
 -- listens to the same event in a frame of its own, which leaves the game's frame,
@@ -671,9 +680,10 @@ function O.StartChoiceObserver()
     -- service appears later. Query capability is checked separately at use.
     if type(hooksecurefunc)~="function" or type(_G.SendAddonMessage)~="function" then return false end
     T.outgoingAttempted=true
-    local ok=pcall(hooksecurefunc,"SendAddonMessage",function(prefix,payload)
+    local protected=pcall
+    local ok=protected(hooksecurefunc,"SendAddonMessage",function(prefix,payload)
         if A.Orbs~=O then return end
-        if not pcall(observeOutgoing,prefix,payload) then T.outgoingOverflow=true end
+        if not protected(observeOutgoing,prefix,payload) then T.outgoingOverflow=true end
     end)
     if not ok then return false end
     T.outgoingFunction=_G.SendAddonMessage

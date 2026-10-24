@@ -202,6 +202,32 @@ do
  HH.now=HH.now+.25;Probe('ambiguous checking passive pump')
  AA.AssignedWishlist=raw
 end
+do
+ local R=dofile('tests/prototype/orb_recovery_support.lua')
+ local HH,MM,AA,OO=R.S.Fresh();R.S.Loadouts(HH,AA);HH.perks.currentChoice={}
+ local server=R.Server(HH)
+ HH.service.RequestChoice=function()
+  SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME);server.queue[#server.queue+1]={op=16,body=''}
+ end
+ assert(MM.Start(6));HH.Offer();HH.perks.pendingSelectSpellId=nil;HH.perks.currentChoice=nil;OO.offer=false
+ for _=1,160 do if R.SavedRow('orbRecoveryArchive') then break end;HH.Advance(.25)end
+ assert(HH.Count('orb-spend')==1 and not R.Saved(),'SETUP real one-use permit before the successor spend')
+ HH.perks.serverBuildSlots=Filler(15);HH.now=HH.now+.25
+ local raw,spend=AA.AssignedWishlist,AA.Orbs.Spend
+ local outside,inside,inGuard=0,0,false
+ AA.AssignedWishlist=function(...)
+  if inGuard then inside=inside+1 else outside=outside+1 end
+  return raw(...)
+ end
+ AA.Orbs.Spend=function(...)
+  inGuard=true;local values={spend(...)};inGuard=false;return unpack(values)
+ end
+ MM.Pump();AA.AssignedWishlist=raw;AA.Orbs.Spend=spend
+ check(HH.Count('orb-spend')==2 and R.Saved(),'GUARD post-recovery permit admits exactly one real successor')
+ check(outside==1 and inside==1,
+  'BOUND post-recovery spend reuses one pump assignment and makes one fresh guard projection: '..outside..'/'..inside)
+ print('CX04_POST_RECOVERY assignment_reads='..outside..' guard_reads='..inside)
+end
 if #over>0 then
  error('BOUND (expected RED until the CX-04 fix): one Orb pump read the assigned Wishlist more than once outside the action callbacks: '
   ..table.concat(over,'; ')..' ('..#over..' pumps over bound; '..checks..' SETUP/GUARD checks passed)',0)

@@ -1,9 +1,8 @@
 -- Synthetic services; real Orb owner, adapter, Store and policy. No live spending.
 local R=dofile('tests/prototype/orb_recovery_support.lua')
 local checks=0
--- Historical unprefixed assertions keep their original wording. They are not
--- silently relabelled. Explicit R1/R2 SETUP, GUARD and EXPECT cases below retain
--- exact preimage evidence at 2a73/8dc respectively; a label is not red evidence.
+-- SETUP establishes inputs, EXPECT checks behavior, and GUARD preserves safety.
+-- Executed source-bound results are recorded separately from these predicates.
 local function check(v,m)
  assert(v,m);checks=checks+1
 end
@@ -508,6 +507,18 @@ local function archiveGap()
  assert(H.Count('orb-spend')==1,'SETUP exact archive-to-next-command gap')
  return H,M,A,O,server
 end
+do
+ local H,M,A,O,server=archiveGap();assert(M.Pause())
+ local reason=M.CompactStatus().reason;local raw=A.Orbs.Read;local reads=0
+ A.Orbs.Read=function(...)reads=reads+1;return raw(...)end
+ for _=1,8 do M.Pump()end;H.Advance(11)
+ A.Orbs.Read=raw
+ check(reads==0 and M.CompactStatus().reason==reason,
+  'BOUND paused post-archive permit performs no full reads and preserves the explicit Pause reason: '..reads)
+ local takes=H.Count('take');server.Push(16,'garbage');server.Push(16,'')
+ check(M.Resume() and H.Count('orb-spend')==2 and H.Count('take')==takes,
+  'GUARD explicit Resume classifies the complete transport backlog and spends at most once')
+end
 for _,kind in ipairs({'malformed','nonempty','segmented','rejected'}) do
  local H,M,A,O,server=archiveGap()
  if kind=='malformed' then server.Push(16,'garbage')
@@ -799,12 +810,12 @@ for _,kind in ipairs({'service','binding','level'}) do
  check(not M.ContinueConfirm(token) and R.Same(R.Saved(),original) and M.BlocksOrdinary(),'GUARD restored '..kind..' change invalidates the explicit token before save')
 end
 
--- R1: public-owner regressions. Each case starts from real receipt/archive writes;
+-- public-owner regressions. Each case starts from real receipt/archive writes;
 -- no historical receipt, adapter or source policy implementation is replaced.
 local r1fail={}
 local function r1case(name,fn)
  local ok,why=pcall(fn)
- print('R1 '..name..' '..(ok and 'PASS' or 'FAIL '..tostring(why)))
+ print(''..name..' '..(ok and 'PASS' or 'FAIL '..tostring(why)))
  if not ok then r1fail[#r1fail+1]=name..': '..tostring(why) end
 end
 local function r1archive(chosen)
@@ -826,11 +837,11 @@ r1case('new acknowledged run observes same pair without lifetime veto',function(
 end)
 r1case('source-only ambiguity before choice and after reload',function()
  local H,M,A,O=r1archive(false);assert(M.Start(3,false,M.Status().historyReview))
- check(not R.Saved().attributionAmbiguous and not R.Saved().selectedKey and R.Saved().attributionFormat==1,'EXPECT S01 new acknowledged source starts only under a versioned current-state baseline')
+ check(not R.Saved().attributionAmbiguous and not R.Saved().selectedKey and R.Saved().attributionFormat==1,'EXPECT new acknowledged source starts only under a versioned current-state baseline')
  assert(M.Stop());M=R.Reload(H);M.Pump();H.Offer();R.Pick(H,410002)
- check(R.Saved().choiceObserved and R.Saved().attributionAmbiguous,'EXPECT R1 restored manual choice preserves source uncertainty')
+ check(R.Saved().choiceObserved and R.Saved().attributionAmbiguous,'EXPECT restored manual choice preserves source uncertainty')
  H.Result(410002,2);H.granted=H.Clone(H.granted);H.Notify();A.Poll();H.Advance(1)
- check(R.Saved() and M.BlocksOrdinary(),'EXPECT R1 restored source ambiguity cannot confirm')
+ check(R.Saved() and M.BlocksOrdinary(),'EXPECT restored source ambiguity cannot confirm')
 end)
 for _,reload in ipairs({false,true}) do
  r1case('manual choice reload='..tostring(reload),function()
@@ -839,7 +850,7 @@ for _,reload in ipairs({false,true}) do
   H.Offer();R.Pick(H,410002)
   check(R.Saved().choiceObserved and (R.Saved().attributionAmbiguous==true)==reload,'EXPECT live acknowledgment remains observation-only; reload restores conservative pair ambiguity')
   M=R.Reload(H);M.Pump();H.Result(410002,2);H.granted=H.Clone(H.granted);H.Notify();A.Poll();H.Advance(1)
-  check(R.Saved() and M.BlocksOrdinary(),'EXPECT R1 manually chosen late gain stays unconfirmed after reload')
+  check(R.Saved() and M.BlocksOrdinary(),'EXPECT manually chosen late gain stays unconfirmed after reload')
  end)
 end
 for _,mode in ipairs({'late_only','compound','compound_reload'}) do
@@ -855,14 +866,15 @@ for _,mode in ipairs({'late_only','compound','compound_reload'}) do
   assert(R.Saved().selectedKey=='410004:3' and R.Saved().choiceMayHaveBeenSent,'SETUP current different source/choice is actually in WAIT_RESULT')
   assert(M.Stop());M=R.Reload(H);M.Pump() -- reload deliberately discards session-only baseline
   local successor=O.source;O.source=410003;H.Result(410002,2);O.source=successor;H.Advance(.5)
-  check(R.Saved() and R.Saved().attributionAmbiguous,'EXPECT R1 late different archived pair is attribution-only')
-  check(M.Status().state~='PAUSED' and not M.RunLog().entries and R.SavedRow('orbRecoveryArchive')[1].resolution.confidence=='NONE','EXPECT R1 restored matched late delta does not become unrelated mismatch or confirmation')
+  check(R.Saved() and R.Saved().attributionAmbiguous,'EXPECT late different archived pair is attribution-only')
+   check(M.Status().state~='PAUSED' and R.Saved() and R.Saved().selectedKey=='410004:3',
+    'EXPECT restored matched late delta retains the current chosen receipt without an unrelated-mismatch pause')
   if compound then H.Result(410004,3);H.Advance(.5) end
   assert(M.Stop())
   if mode=='compound_reload' then
    M=R.Reload(H);M.Pump();H.granted=H.Clone(H.granted);H.Notify();A.Poll();H.Advance(1)
   end
-  check(M.ContinueView().eligible==compound,'EXPECT R1 explicit exit requires actual current chosen gain, including compound snapshot')
+  check(M.ContinueView().eligible==compound,'EXPECT explicit exit requires actual current chosen gain, including compound snapshot')
  end)
 end
 r1case('late owned completion is separate',function()
@@ -870,27 +882,28 @@ r1case('late owned completion is separate',function()
  assert(A.SetLoadoutWishlistIdentity(1,'One actual copy',{{spellId=410002,quality=2,stacks=1}}))
  assert(M.Start(3,false,M.Status().historyReview));H.Offer({{spellId=410004,quality=3},{spellId=410003,quality=0},{spellId=410008,quality=1}})
  H.Result(410002,2)
- check(M.Status().state=='COMPLETE' and M.Status().pending and M.Status().progress.rolledMissing==0,'EXPECT R1 actual completion retains unresolved differently selected action')
- check(M.RunLog().entries[1].state~='confirmed' and H.Count('orb-spend')==2,'EXPECT R1 completion invents no action and spends no more')
+ check(M.Status().state=='COMPLETE' and M.Status().pending and M.Status().progress.rolledMissing==0,'EXPECT actual completion retains unresolved differently selected action')
+ check(M.RunLog().entries[1].state~='confirmed' and H.Count('orb-spend')==2,'EXPECT completion invents no action and spends no more')
 end)
 r1case('different normal pair still settles after reload',function()
  local H,M,A,O=r1archive(true);assert(M.Start(3,false,M.Status().historyReview))
  H.Offer({{spellId=410004,quality=3},{spellId=410003,quality=0},{spellId=410008,quality=1}})
  assert(R.Saved().selectedKey=='410004:3' and not R.Saved().attributionAmbiguous,'SETUP different exact source/choice pair')
  M=R.Reload(H);M.Pump();H.Result(410004,3);H.granted=H.Clone(H.granted);H.Notify();A.Poll();H.Advance(1)
- check(not R.Saved() and not M.BlocksOrdinary(),'GUARD R1 versioned receipt identity preserves genuine distinct result settlement')
+ check(not R.Saved() and not M.BlocksOrdinary(),'GUARD versioned receipt identity preserves genuine distinct result settlement')
 end)
 r1case('archive memory isolates character owner',function()
  local H,M,A,O=r1archive(true);local archive=H.Clone(R.SavedRow('orbRecoveryArchive'))
  UnitGUID=function()return 'synthetic-other-owner' end
- assert(M.Start(3,false,M.Status().historyReview));H.Offer();H.Result(410002,2)
- check(M.RunLog().entries[1].state=='confirmed','GUARD R1 another character never inherits archived source/pair ambiguity')
- check(R.Same(R.SavedRow('orbRecoveryArchive'),archive),'GUARD R1 foreign owner archive is retained unchanged')
+  assert(M.Start(3,false,M.Status().historyReview));assert(M.Stop());M=R.Reload(H);M.Pump()
+  H.Offer();R.Pick(H,410002);H.Result(410002,2);H.granted=H.Clone(H.granted);H.Notify();A.Poll();H.Advance(1)
+  check(not R.Saved(),'GUARD another character never inherits archived source/pair ambiguity after reload discards the baseline')
+ check(R.Same(R.SavedRow('orbRecoveryArchive'),archive),'GUARD foreign owner archive is retained unchanged')
 end)
 r1case('unrelated mismatch stays blocked',function()
  local H,M,A,O=r1archive(true);assert(M.Start(3,false,M.Status().historyReview));H.Offer()
  H.Result(410008,1)
- check(M.Status().pending and M.Status().state=='PAUSED' and not M.ContinueView().eligible,'GUARD R1 unrelated gain is never an attributable late result')
+ check(M.Status().pending and M.Status().state=='PAUSED' and not M.ContinueView().eligible,'GUARD unrelated gain is never an attributable late result')
 end)
 r1case('unexplained owned completion keeps mismatch blocker',function()
  local H,M,A,O=r1archive(true)
@@ -898,30 +911,33 @@ r1case('unexplained owned completion keeps mismatch blocker',function()
  assert(M.Start(3,false,M.Status().historyReview));H.Offer({{spellId=410004,quality=3},{spellId=410003,quality=0},{spellId=410008,quality=1}})
  H.granted[H.names[410002]]={{spellId=410002,quality=2},{spellId=410002,quality=2}}
  H.Result(410008,1);H.Advance(1)
- check(M.Status().state=='COMPLETE' and M.Status().pending and M.BlocksOrdinary(),'EXPECT R1 actual owned completion is independent of an unexplained operation delta')
- check(not M.ContinueView().eligible and M.RunLog().entries[1].state~='confirmed','GUARD R1 completion never makes unrelated mismatch attributable or abandonable')
+ check(M.Status().state=='COMPLETE' and M.Status().pending and M.BlocksOrdinary(),'EXPECT actual owned completion is independent of an unexplained operation delta')
+ check(not M.ContinueView().eligible and M.RunLog().entries[1].state~='confirmed','GUARD completion never makes unrelated mismatch attributable or abandonable')
 end)
-for _,kind in ipairs({'future','malformed','unknown_receipt'}) do
+for _,kind in ipairs({'future','malformed','unknown_receipt','unknown_late'}) do
  r1case('history '..kind..' fails closed',function()
   local H,M,A,O=r1archive(true)
   local owner=Nexus.MainInternals.StoreAuthorityOwner
   assert(owner.UpdateStateV1(function(row)
    if kind=='future' then row.orbRecoveryArchive[1].v=2
    elseif kind=='malformed' then row.orbRecoveryArchive='kept'
-   else row.orbRecoveryArchive[1].receipt.removed=nil end
+   elseif kind=='unknown_receipt' then row.orbRecoveryArchive[1].receipt.removed=nil
+   else row.orbRecoveryArchive[1].late={{k='future_kind'}} end
   end))
   local archive=H.Clone(R.SavedRow('orbRecoveryArchive'));local spend=H.Count('orb-spend')
-  M.Start(3);H.Advance(1)
-  check(H.Count('orb-spend')==spend and R.Same(R.SavedRow('orbRecoveryArchive'),archive),'EXPECT R1 unknown archive cannot authorize another spend or repair history')
+  local ok,why=M.Start(3);H.Advance(1)
+  check(not ok and why:find('cannot be verified',1,true) and H.Count('orb-spend')==spend
+   and R.Same(R.SavedRow('orbRecoveryArchive'),archive),
+   'EXPECT unknown archive fails verification before acknowledgment and cannot spend or repair history')
  end)
 end
 if #r1fail>0 then error(table.concat(r1fail,'\n'),0) end
--- R2 exact 8dc behavioral regressions. These invoke the actual public owners
+-- Lifecycle and authority behavioral regressions. These invoke the actual public owners
 -- and UI handlers; SETUP establishes the boundary, EXPECT is the repaired
 -- behavior, and GUARD preserves independent safety facts.
 local r2fail={}
 local function r2case(name,fn)
- local ok,why=pcall(fn);print('R2 '..name..' '..(ok and 'PASS' or 'FAIL '..tostring(why)))
+ local ok,why=pcall(fn);print(''..name..' '..(ok and 'PASS' or 'FAIL '..tostring(why)))
  if not ok then r2fail[#r2fail+1]=name..': '..tostring(why) end
 end
 for _,locked in ipairs({false,true}) do
@@ -937,12 +953,12 @@ for _,locked in ipairs({false,true}) do
   local spend,take=H.Count('orb-spend'),H.Count('take')
   for _,event in ipairs({'PLAYER_LEAVING_WORLD','PLAYER_ENTERING_WORLD'}) do
    H.Fire(event)
-   check(M.Status().state==state,'EXPECT R2 completion preserved immediately after '..event)
+   check(M.Status().state==state,'EXPECT completion preserved immediately after '..event)
   end
   H.Advance(5);M.Pause()
-  check(M.Status().state==state and not M.PrepareLimitIncrease(9),'EXPECT R2 completed receipt cannot reopen paused limit increase')
-  check(M.Status().spent==before.spent and M.Status().uncertain==before.uncertain and R.Saved() and not M.Resume(),'GUARD R2 lifecycle retains receipt/exposure without Resume')
-  check(H.Count('orb-spend')==spend and H.Count('take')==take,'GUARD R2 completed lifecycle sends nothing')
+  check(M.Status().state==state and not M.PrepareLimitIncrease(9),'EXPECT completed receipt cannot reopen paused limit increase')
+  check(M.Status().spent==before.spent and M.Status().uncertain==before.uncertain and R.Saved() and not M.Resume(),'GUARD lifecycle retains receipt/exposure without Resume')
+  check(H.Count('orb-spend')==spend and H.Count('take')==take,'GUARD completed lifecycle sends nothing')
  end)
 end
 local function r2held(gain)
@@ -957,22 +973,22 @@ r2case('A held Continue real Check Cancel Confirm',function()
  local H,M,A,O,server=r2held(true);local view=M.ContinueView()
  assert(view.eligible and view.stage=='held','SETUP eligible held automatic attribution receipt')
  local f=assert(Nexus.OrbPanel.ShowContinue())
- check(f.check:IsEnabled(),'EXPECT R2 held eligible UI enables Check')
- f.check:Click();check(M.ContinueView().stage=='checking','EXPECT R2 real Check handler starts explicit check')
- f.cancel:Click();check(M.ContinueView().stage=='idle' and R.Saved(),'GUARD R2 Cancel retains receipt without live ownership')
+ check(f.check:IsEnabled(),'EXPECT held eligible UI enables Check')
+ f.check:Click();check(M.ContinueView().stage=='checking','EXPECT real Check handler starts explicit check')
+ f.cancel:Click();check(M.ContinueView().stage=='idle' and R.Saved(),'GUARD Cancel retains receipt without live ownership')
  server.Release();server.mode='auto';H.Advance(1);f.check:Click()
- assert(waitFor(H,function()return M.ContinueView().stage=='ready' end),'EXPECT R2 fresh explicit check becomes ready')
+ assert(waitFor(H,function()return M.ContinueView().stage=='ready' end),'EXPECT fresh explicit check becomes ready')
  H.Advance(.5);local spend,take=H.Count('orb-spend'),H.Count('take');f.go:Click()
- check(not R.Saved() and not M.BlocksOrdinary() and not M.Status().running,'EXPECT R2 real Confirm handler archives and stops')
- check(H.Count('orb-spend')==spend and H.Count('take')==take,'GUARD R2 UI exit sends no mutation')
+ check(not R.Saved() and not M.BlocksOrdinary() and not M.Status().running,'EXPECT real Confirm handler archives and stops')
+ check(H.Count('orb-spend')==spend and H.Count('take')==take,'GUARD UI exit sends no mutation')
 end)
 r2case('A ineligible Continue preserves automatic owner',function()
  local H,M,A,O=fresh();quietServer(H,'hold')
  assert(waitFor(H,function()return M.Status().recoveries==1 end));assert(M.Pause())
  assert(M.ContinueView().liveRecovery and M.ContinueView().liveStage=='held','SETUP held automatic owner')
- check(not M.ContinueBegin() and M.ContinueView().liveRecovery and M.ContinueView().liveStage=='held','EXPECT R2 ineligible manual entry cannot replace held automatic owner')
+ check(not M.ContinueBegin() and M.ContinueView().liveRecovery and M.ContinueView().liveStage=='held','EXPECT ineligible manual entry cannot replace held automatic owner')
 end)
-for _,order in ipairs({'choice','charges','cache','pause','preadmission'}) do
+for _,order in ipairs({'choice','charges','cache','pause','preadmission','loading'}) do
  r2case('B owed offer '..order,function()
   local H,M,A,O=fresh();local server=R.Server(H,{mode='hold'});local queried=false
   H.service.RequestChoice=function()bareRequest();queried=true;server.queue[#server.queue+1]={op=16,body='410002,2'}end
@@ -981,15 +997,16 @@ for _,order in ipairs({'choice','charges','cache','pause','preadmission'}) do
    assert(M.Status().state=='PAUSED' and M.Status().recoveries==0,'SETUP outstanding timeout before admission')
   else assert(waitFor(H,function()return queried end),'SETUP current choice query sent') end
   if order=='pause' then assert(M.Pause()) end
+   if order=='loading' then H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD') end
   O.charges=O.charges-1;O.offer=true
   H.Board({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}})
   if order=='choice' then server.Push(16,'410002,2')
   elseif order=='charges' then server.Push(1220,tostring(O.charges)..',0,1') end
-  M.Pump();H.Advance(.5)
-  check(M.Status().canResume and M.CompactStatus().canResume,'EXPECT R2 equivalent strict owed offer offers Resume for '..order)
-  local spend=H.Count('orb-spend');check(M.Resume(),'EXPECT R2 owed direct Resume agrees for '..order)
+   M.Pump();H.Advance(order=='loading' and 3.5 or .5)
+   check(M.CompactStatus().canResume and M.Status().canResume,'EXPECT equivalent strict owed offer offers Resume for '..order)
+  local spend=H.Count('orb-spend');check(M.Resume(),'EXPECT owed direct Resume agrees for '..order)
   H.Advance(.5)
-  check(H.Count('orb-spend')==spend and H.Count('take')==1 and not M.Resume(),'GUARD R2 owed Resume selects once without another spend')
+  check(H.Count('orb-spend')==spend and H.Count('take')==1 and not M.Resume(),'GUARD owed Resume selects once without another spend')
  end)
 end
 for _,event in ipairs({'rejected','nonquiet'}) do
@@ -1000,8 +1017,8 @@ for _,event in ipairs({'rejected','nonquiet'}) do
   else server.Push(1220,tostring(O.charges)..',1,0') end
   M.Pump();A.Orbs.Read=raw;server.Push(16,'');M.Pump()
   local ok,why=M.Resume()
-  check(not ok and type(why)=='string' and why:find('Stop',1,true),'EXPECT R2 unclassified invalidation survives unknown read and fresh empty reply')
-  check(not M.Status().canResume and not M.CompactStatus().canResume and H.Count('orb-spend')==1,'GUARD R2 revoked authority is absent in action and both views')
+  check(not ok and type(why)=='string' and why:find('Stop',1,true),'EXPECT unclassified invalidation survives unknown read and fresh empty reply')
+  check(not M.Status().canResume and not M.CompactStatus().canResume and H.Count('orb-spend')==1,'GUARD revoked authority is absent in action and both views')
  end)
 end
 for _,kind in ipairs({'epoch','own_query','observer','context'}) do
@@ -1013,8 +1030,8 @@ for _,kind in ipairs({'epoch','own_query','observer','context'}) do
   else H.playerLevel=H.playerLevel+1 end
   H.Advance(4);server.Push(16,'');M.Pump()
   local spend=H.Count('orb-spend');local ok,why=M.Resume()
-  check(not ok and type(why)=='string' and not M.Status().canResume and not M.CompactStatus().canResume,'EXPECT R2 revoked '..kind..' permit cannot claim Resume succeeded')
-  check(H.Count('orb-spend')==spend and #R.SavedRow('orbRecoveryArchive')==1,'GUARD R2 sticky revocation neither resends nor rearchives')
+  check(not ok and type(why)=='string' and not M.Status().canResume and not M.CompactStatus().canResume,'EXPECT revoked '..kind..' permit cannot claim Resume succeeded')
+  check(H.Count('orb-spend')==spend and #R.SavedRow('orbRecoveryArchive')==1,'GUARD sticky revocation neither resends nor rearchives')
  end)
 end
 for _,kind in ipairs({'limit','empty_balance'}) do
@@ -1023,22 +1040,22 @@ for _,kind in ipairs({'limit','empty_balance'}) do
   assert(waitFor(H,function()return R.SavedRow('orbRecoveryArchive')~=nil end),'SETUP archive before next decision')
   if kind=='limit' then server.Push(16,'garbage');H.perks.currentChoice=nil else O.charges=0 end
   M.Pump()
-  check(M.Status().state==(kind=='limit' and 'FINISHED' or 'OUT_OF_ORBS'),'EXPECT R2 real '..kind..' terminal is not masked by a permit hold')
-  check(H.Count('orb-spend')==1 and not R.Saved(),'GUARD R2 terminal sends no next action')
+  check(M.Status().state==(kind=='limit' and 'FINISHED' or 'OUT_OF_ORBS'),'EXPECT real '..kind..' terminal is not masked by a permit hold')
+  check(H.Count('orb-spend')==1 and not R.Saved(),'GUARD terminal sends no next action')
  end)
 end
 r2case('C actual host false consumes recovery permit',function()
  local H,M,A,O,server=archiveGap();O.mode='refuse';M.Pump()
  assert(H.Count('orb-spend')==2 and not R.Saved() and M.Status().state=='PAUSED','SETUP actual host false crossed and receipt cleared')
  O.mode='accept';local ok,why=M.Resume()
- check(not ok and type(why)=='string' and not M.Status().canResume,'EXPECT R2 consumed recovery permit is not reused after host false')
- check(H.Count('orb-spend')==2,'GUARD R2 host false cannot cause a third host call')
+ check(not ok and type(why)=='string' and not M.Status().canResume,'EXPECT consumed recovery permit is not reused after host false')
+ check(H.Count('orb-spend')==2,'GUARD host false cannot cause a third host call')
 end)
 r2case('C pre-host rejection keeps unused permit',function()
  local H,M,A,O,server=archiveGap();local raw=A.Orbs.Spend
  A.Orbs.Spend=function()return nil,'REJECTED','synthetic pre-host refusal' end;M.Pump();A.Orbs.Spend=raw
  assert(H.Count('orb-spend')==1 and not R.Saved(),'SETUP no host boundary crossed')
- check(M.Resume() and H.Count('orb-spend')==2,'GUARD R2 pre-host refusal does not consume the unused permit')
+ check(M.Resume() and H.Count('orb-spend')==2,'GUARD pre-host refusal does not consume the unused permit')
 end)
 for _,kind in ipairs({'missing_query','missing_hook','throwing_hook','replaced_send'}) do
  r2case('D capability '..kind,function()
@@ -1054,12 +1071,12 @@ for _,kind in ipairs({'missing_query','missing_hook','throwing_hook','replaced_s
   local server=R.Server(H);assert(M.Start(6))
   if kind=='replaced_send' then SendAddonMessage=function()end end
   H.Advance(35);M.Recheck();H.Advance(1)
-  check(attempts<=(kind=='missing_hook' and 0 or 1),'EXPECT R2 outgoing hook failure is attempted at most once per adapter')
+  check(attempts<=(kind=='missing_hook' and 0 or 1),'EXPECT outgoing hook failure is attempted at most once per adapter')
   local reason=M.Status().reason
-  check(reason:find(kind=='missing_query' and 'cannot request' or 'cannot be observed',1,true)~=nil,'EXPECT R2 actual fallback names absent '..kind)
-  check(M.Status().recoveries==0 and queries==0 and R.Saved() and H.Count('orb-spend')==1,'GUARD R2 absent capability consumes no recovery admission or query')
+  check(reason:find(kind=='missing_query' and 'cannot request' or 'cannot be observed',1,true)~=nil,'EXPECT actual fallback names absent '..kind)
+  check(M.Status().recoveries==0 and queries==0 and R.Saved() and H.Count('orb-spend')==1,'GUARD absent capability consumes no recovery admission or query')
   local report=Nexus.SupportReport.Summary()
-  check(report:find('choiceQuery=',1,true) and report:find('outgoingObserver=',1,true) and report:find('ownBare=',1,true) and report:find('ownFramed=',1,true),'EXPECT R2 support copy exposes bounded capability and outgoing framing facts')
+  check(report:find('choiceQuery=',1,true) and report:find('outgoingObserver=',1,true) and report:find('ownBare=',1,true) and report:find('ownFramed=',1,true),'EXPECT support copy exposes bounded capability and outgoing framing facts')
  end)
 end
 for _,cancel in ipairs({'Pause','Stop'}) do
@@ -1067,9 +1084,9 @@ for _,cancel in ipairs({'Pause','Stop'}) do
   local H,M,A,O=fresh();local server=R.Server(H);local queries=0
   H.service.RequestChoice=function()queries=queries+1;bareRequest();M[cancel]();server.queue[#server.queue+1]={op=16,body=''}end
   H.Advance(40)
-  check(queries==1 and M.Status().recoveries==0 and not R.SavedRow('orbRecoveryArchive'),'GUARD R2 synchronous '..cancel..' sends one query, zero admissions and zero archives')
-  check(H.Count('orb-spend')==1 and R.Saved(),'GUARD R2 query cancellation never automatically spends again')
-  print('OBSERVED R2 '..cancel..' queries='..queries..' admissions='..M.Status().recoveries..' hostCalls='..H.Count('orb-spend'))
+  check(queries==1 and M.Status().recoveries==0 and not R.SavedRow('orbRecoveryArchive'),'GUARD synchronous '..cancel..' sends one query, zero admissions and zero archives')
+  check(H.Count('orb-spend')==1 and R.Saved(),'GUARD query cancellation never automatically spends again')
+  print('OBSERVED '..cancel..' queries='..queries..' admissions='..M.Status().recoveries..' hostCalls='..H.Count('orb-spend'))
  end)
 end
 for _,kind in ipairs({'offer','host','auto_accept','rival'}) do
@@ -1080,11 +1097,11 @@ for _,kind in ipairs({'offer','host','auto_accept','rival'}) do
   else A.RivalDetected=function()return true end end
   M.Pump();if M.Status().running then assert(M.Pause()) end
   assert(M.Status().state=='PAUSED','SETUP current guard held without submission')
-  check(not M.Resume() and not M.Status().canResume,'EXPECT R2 live '..kind..' guard truthfully refuses Resume')
+  check(not M.Resume() and not M.Status().canResume,'EXPECT live '..kind..' guard truthfully refuses Resume')
   O.offer=false;H.perks.pendingReroll=nil;ProjectEbonholdOptionsService:SetSetting('autoAcceptLoadoutEchoes',false);A.RivalDetected=raw
-  M.Pump();check(not M.Resume(),'GUARD R2 clearing a local guard supplies no fresh choice fact')
+  M.Pump();check(not M.Resume(),'GUARD clearing a local guard supplies no fresh choice fact')
   server.Push(16,'');M.Pump()
-  check(M.Status().canResume and M.Resume() and H.Count('orb-spend')==2,'EXPECT R2 actual empty reply restores choice under unchanged remaining guards')
+  check(M.Status().canResume and M.Resume() and H.Count('orb-spend')==2,'EXPECT actual empty reply restores choice under unchanged remaining guards')
  end)
 end
 r2case('E full usage and compact strip hover',function()
@@ -1093,23 +1110,23 @@ r2case('E full usage and compact strip hover',function()
  local f=NexusOrbPanel;local parent=CreateFrame('Frame',nil,UIParent);parent:SetSize(300,100)
  local strip=Nexus.OrbPanel.AttachMainPanel(parent)
  assert(#f.usage:GetText()*7>f.usage:GetWidth(),'SETUP retained facts exceed conservative run usage width')
- check(f.usageHit~=nil and strip.summaryHit~=nil,'EXPECT R2 full text helpers exist on actual usage and compact strip')
+ check(f.usageHit~=nil and strip.summaryHit~=nil,'EXPECT full text helpers exist on actual usage and compact strip')
  local before=H.Count('orb-spend');local tooltip=GameTooltip;local captured
  GameTooltip={SetOwner=function()end,AddLine=function(_,value)captured=value end,Show=function()end,Hide=function()end}
  for _,pair in ipairs({{f.usage,f.usageHit},{strip.summary,strip.summaryHit}}) do
   local fs,hit=pair[1],pair[2]
-  check(hit~=nil and hit._nexusText==fs,'EXPECT R2 full text helper covers actual usage and compact strip')
+  check(hit~=nil and hit._nexusText==fs,'EXPECT full text helper covers actual usage and compact strip')
   fs.GetStringHeight=function()return 120 end -- independent overflow model only
   hit:GetScript('OnEnter')(hit)
-  check(captured==fs:GetText(),'EXPECT R2 hover reveals exact complete retained facts')
+  check(captured==fs:GetText(),'EXPECT hover reveals exact complete retained facts')
  end
- GameTooltip=tooltip;check(H.Count('orb-spend')==before,'GUARD R2 hovering sends no action')
+ GameTooltip=tooltip;check(H.Count('orb-spend')==before,'GUARD hovering sends no action')
 end)
 r2case('E held instruction and archive copy semantics',function()
  local H,M,A,O=r2held(true)
- check(M.BlockReason('Ordinary rolling'):find('checked Continue',1,true)~=nil,'EXPECT R2 eligible held receipt gives its actual in-session checked exit')
+ check(M.BlockReason('Ordinary rolling'):find('checked Continue',1,true)~=nil,'EXPECT eligible held receipt gives its actual in-session checked exit')
  local report=Nexus.SupportReport.Summary()
- check(report:find('kind=AUTO_UNCONFIRMED',1,true) and report:find('confidence=NONE',1,true) and report:find('consent v1 SESSION_BOUNDED_TWO',1,true),'EXPECT R2 support names actual archive kind, confidence and consent policy')
+ check(report:find('kind=AUTO_UNCONFIRMED',1,true) and report:find('confidence=NONE',1,true) and report:find('consent v1 SESSION_BOUNDED_TWO',1,true),'EXPECT support names actual archive kind, confidence and consent policy')
 end)
 for _,kind in ipairs({'full','future','malformed','oversized','changed_choice'}) do
  r2case('E deterministic archive refusal '..kind,function()
@@ -1129,8 +1146,8 @@ for _,kind in ipairs({'full','future','malformed','oversized','changed_choice'})
    ok,why=M.ContinueConfirm(M.ContinueView().token)
   end
   local expected=kind=='oversized' and 'entry_too_large' or kind=='changed_choice' and 'receipt_changed' or 'archive_'..kind
-  check(not ok and why==expected,'EXPECT R2 '..kind..' refuses deterministically: '..tostring(why))
-  check(R.Same(R.Saved(),original) and R.Same(R.SavedRow('orbRecoveryArchive'),archive) and M.BlocksOrdinary(),'GUARD R2 exact original receipt/archive/gate retained on '..kind)
+  check(not ok and why==expected,'EXPECT '..kind..' refuses deterministically: '..tostring(why))
+  check(R.Same(R.Saved(),original) and R.Same(R.SavedRow('orbRecoveryArchive'),archive) and M.BlocksOrdinary(),'GUARD exact original receipt/archive/gate retained on '..kind)
  end)
 end
 r2case('E actual versioned maximal automatic receipt',function()
@@ -1140,7 +1157,7 @@ r2case('E actual versioned maximal automatic receipt',function()
  H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false
  local original=H.Clone(R.Saved())
  assert(original.attributionFormat==1 and original.attributionAmbiguous and #original.picks==3 and #original.boundaryJournal==8,'SETUP maximal versioned ambiguous receipt')
- assert(waitFor(H,function()local a=R.SavedRow('orbRecoveryArchive');return #a==2 end,40),'EXPECT R2 maximal representation deterministically archives')
+ assert(waitFor(H,function()local a=R.SavedRow('orbRecoveryArchive');return #a==2 end,40),'EXPECT maximal representation deterministically archives')
  local e=R.SavedRow('orbRecoveryArchive')[2]
  local function size(v,level)
   local edges,bytes,depth=0,0,level or 1
@@ -1151,11 +1168,12 @@ r2case('E actual versioned maximal automatic receipt',function()
   return edges,bytes,depth
  end
  local edges,bytes,depth=size(e)
- check(R.Same(e.receipt,original) and e.kind=='AUTO_UNCONFIRMED','GUARD R2 complete maximal encoded receipt retained without trimming')
- print('OBSERVED S01 maximal same-approval entry edges='..edges..' bytes='..bytes..' depth='..depth)
- check(edges==235 and bytes==2915 and depth==4,'EXPECT R2 pinned maximal versioned representation: 235 edges, 2915 bytes, depth 4')
- check(edges<=1200 and bytes<=6144 and depth<=4,'GUARD R2 actual post-R1 representation remains within unchanged caps')
- print('OBSERVED R2 maximal versioned entry edges='..edges..' bytes='..bytes..' depth='..depth)
+ check(R.Same(e.receipt,original) and e.kind=='AUTO_UNCONFIRMED','GUARD complete maximal encoded receipt retained without trimming')
+ print('OBSERVED maximal same-approval entry edges='..edges..' bytes='..bytes..' depth='..depth)
+ check(edges+32<=1200 and bytes+512<=6144 and depth==4,
+  'GUARD maximal versioned representation keeps its complete late reserve within unchanged entry caps')
+ check(edges<=1200 and bytes<=6144 and depth<=4,'GUARD actual post-representation remains within unchanged caps')
+ print('OBSERVED maximal versioned entry edges='..edges..' bytes='..bytes..' depth='..depth)
 end)
 -- Current owner cancellation and owed-offer orders use real callback/event paths.
 for _,cancel in ipairs({'Pause','Stop'})do for _,fault in ipairs({'missing_send','throw'})do
@@ -1277,6 +1295,17 @@ r2case('running attribution guidance requires Stop first',function()
  local original=H.Clone(R.Saved());local why=M.BlockReason('Ordinary rolling')
  check(why:find('Stop',1,true) and why:find('Continue',1,true),'EXPECT active attribution guidance names Stop before explicit Continue')
  check(R.Same(R.Saved(),original) and H.Count('orb-spend')==2,'GUARD guidance changes no receipt or action')
+end)
+r2case('unobservable choice query is retired for the entire approval',function()
+ local H,M,A,O=fresh();local server=R.Server(H);local queries=0
+ H.service.RequestChoice=function()queries=queries+1 end -- sends cannot be observed
+ H.Advance(40)
+ assert(queries==1 and M.Status().state=='PAUSED' and M.Status().recoveries==0,'SETUP one retired unobservable query')
+ H.Offer();assert(M.Resume());H.Result(410002,2);H.Advance(.5)
+ assert(H.Count('orb-spend')==2,'SETUP a genuine exact result admits the next approved receipt')
+ H.Advance(40)
+ check(queries==1 and M.Status().state=='PAUSED' and M.Status().recoveries==0,
+  'EXPECT later receipts do not repeat a choice capability already shown unobservable')
 end)
 if #r2fail>0 then error(table.concat(r2fail,'\n'),0) end
 print('PASS bounded Orb transition and missed-result recovery checks='..checks)

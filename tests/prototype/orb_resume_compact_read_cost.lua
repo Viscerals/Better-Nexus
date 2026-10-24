@@ -63,11 +63,12 @@ for _=1,120 do if M.ContinueView().liveStage=='checking' then break end;H.Advanc
 check(M.ContinueView().liveStage=='checking','SETUP real automatic check was admitted')
 check(M.Pause(),'SETUP pause the admitted automatic owner')
 H.Offer();H.Advance(.5)
-check(M.ContinueView().liveStage=='held' and M.Status(false).canResume,
- 'SETUP held automatic owner has a current owed offer and fresh Resume eligibility')
+check(M.ContinueView().liveStage=='held',
+ 'SETUP held automatic owner has a current owed offer without a full Status read')
 check(Read('held automatic owed offer').canResume,'EXPECT held automatic compact Resume uses passive facts only')
 -- Display eligibility cannot replace direct Resume's current action guards.
 H.perks.pendingReroll=true
+check(not Read('owed offer gains host latch').canResume,'EXPECT compact-only owed Resume drops immediately for a new host latch')
 check(not M.Resume() and H.Count('take')==0,'GUARD fresh host-pending state refuses real Resume')
 H.perks.pendingReroll=nil
 for i=#originals,1,-1 do local o=originals[i];o[1][o[2]]=o[3]end

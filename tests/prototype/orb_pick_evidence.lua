@@ -1,4 +1,4 @@
--- EXPECT semantic replacement from a43cf27, section 8: deliberate STOPPED
+-- EXPECT semantic replacement from accepted base bc5f4959, section 8: deliberate STOPPED
 -- stays STOPPED across loading rather than silently becoming a resumable pause.
 -- 035 part 1: a manual Echo pick is never lost from the record.
 --

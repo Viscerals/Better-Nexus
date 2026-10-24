@@ -727,7 +727,7 @@ local function RestoredChoice(before)
  end)
  return H,M,A,O
 end
-section('S09 restored first read cannot borrow old lifetime stamp',function()
+section('restored first read cannot borrow old lifetime stamp',function()
  local H,M,A,O=RestoredChoice();local original=H.Clone(R.Saved());local ok,why=M.ContinueBegin()
  check(not ok and why=='choice_recorded','EXPECT no restored attribution exit before an actual baseline for this load')
  check(R.Same(R.Saved(),original) and not R.SavedRow('orbRecoveryArchive') and H.Count('orb-spend')==0,'GUARD first-read refusal preserves original bytes and sends nothing')
@@ -735,14 +735,14 @@ section('S09 restored first read cannot borrow old lifetime stamp',function()
  check(M.ContinueBegin()==true,'GUARD genuinely fresh ownership after this load baseline can admit the narrow attribution check')
 end)
 for _,bad in ipairs({false,'unreadable'})do
- section('S10 unusable restored attribution before '..tostring(bad),function()
+ section('unusable restored attribution before '..tostring(bad),function()
   local H,M,A,O=RestoredChoice(bad);local original=H.Clone(R.Saved());local called,ok=pcall(M.ContinueBegin)
   check(called and not ok,'EXPECT explicit attribution check refuses unusable saved before map without an exception')
   check(R.Same(R.Saved(),original) and not R.SavedRow('orbRecoveryArchive') and H.Count('orb-spend')==0,'GUARD malformed helper input is preserved without fake outcome or action')
  end)
 end
 
-section('S10 archived-delta missing before map is a refusal, not a crash',function()
+section('archived-delta missing before map is a refusal, not a crash',function()
  local H,M,A,O,server=World({latch=false});assert(M.ContinueBegin());assert(Run(H,M,20,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
  local entry=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
  local H,M,A,O=RestoredChoice();local owner=Nexus.MainInternals.StoreAuthorityOwner

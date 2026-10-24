@@ -761,8 +761,9 @@ local function continueLines()
                 out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. codeText(e.outcome)
                     .. "; kind=" .. codeText(e.kind) .. "; confidence=" .. codeText(e.confidence)
                     .. "; run observed spends=" .. bigCount(e.spent) .. " limit=" .. bigCount(e.limit)
-                    .. "; attempt unknown exposure=" .. bigCount(e.uncertain)
-                    .. "; consent v" .. bigCount(e.consentVersion) .. " " .. codeText(e.consentPolicy)
+                    .. "; attempt unknown exposure=" .. (e.uncertain == nil and "not recorded" or bigCount(e.uncertain))
+                    .. "; consent " .. (e.consentVersion == nil and "not recorded"
+                        or "v" .. bigCount(e.consentVersion) .. " " .. codeText(e.consentPolicy))
                     .. "; late events kept=" .. bigCount(e.late) .. " seen=" .. bigCount(e.lateN)
             end
         end

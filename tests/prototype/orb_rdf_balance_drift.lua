@@ -1,4 +1,4 @@
--- EXPECT semantic replacement from a43cf27: classified entry uses WAIT_WORLD
+-- EXPECT semantic replacement from accepted base bc5f4959: classified entry uses WAIT_WORLD
 -- during its settling opportunity; exact result and no-repeat guards stay.
 -- An Orb action whose one-Orb spend was already confirmed, interrupted by a
 -- dungeon loading screen (RDF) and then a reload, settles from its exact

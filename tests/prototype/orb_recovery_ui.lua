@@ -133,6 +133,23 @@ section('5 the help names Continue',function()
  check(orbs:find('Continue:',1,true) and orbs:find('Nexus never continues by itself',1,true),'the Orb help describes Continue and says it is never automatic')
  check(not orbs:find('No exit from that block exists yet',1,true),'and no longer says no exit exists')
  check(orbs:find('not prove',1,true) and orbs:find('older answer',1,true),'it states what stays uncertain')
+ check(orbs:find('at most two recovery checks',1,true) and orbs:find('then refused still uses one',1,true),
+  'Help counts admitted checks, including refusals, rather than only archived outcomes')
+end)
+
+section('7 absent legacy archive facts are distinct from zero and unreadable',function()
+ local H,M=World();local raw=M.Archive
+ local entry={id=string.rep('1',16),kind='ACK_UNCONFIRMED',outcome='UNCONFIRMED',confidence='NONE',spent=1,limit=3}
+ M.Archive=function()return {entries={entry}}end
+ local report=Nexus.SupportReport.Summary()
+ check(report:find('attempt unknown exposure=not recorded; consent not recorded',1,true),
+  'legacy absent exposure and consent say not recorded')
+ entry.uncertain=0;entry.consentVersion=0
+ report=Nexus.SupportReport.Summary()
+ check(report:find('attempt unknown exposure=0; consent v0',1,true),'recorded zero remains zero')
+ entry.uncertain='bad';entry.consentVersion='bad'
+ report=Nexus.SupportReport.Summary();M.Archive=raw
+ check(report:find('attempt unknown exposure=?; consent v?',1,true),'unreadable present facts retain the bounded unreadable marker')
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end

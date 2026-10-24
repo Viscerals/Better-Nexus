@@ -1,4 +1,4 @@
--- EXPECT semantic replacement from a43cf27: WAIT_WORLD keeps approved session
+-- EXPECT semantic replacement from accepted base bc5f4959: WAIT_WORLD keeps approved session
 -- ownership while all actions remain held; diagnostics still settle nothing.
 -- Real addon, synthetic services. Local epochs and observed relations cannot
 -- correlate a server action or establish no spend. Never executes saved Lua.
@@ -57,7 +57,7 @@ local H3,M3=S.Fresh();H3.OrbPlan();local restore=R.BreakStore()
 local ok=M3.Start(2)
 check(not ok and H3.Count('orb-spend')==0 and H3.Count('take')==0,'failed persistence never permits a host call')
 restore()
--- EXPECT semantic replacement from 9aa5ed9: R1 validates retained history
+-- EXPECT semantic replacement from accepted base bc5f4959: validates retained history
 -- before action admission. Unknown history is an authority refusal, not a
 -- diagnostic-budget refusal; diagnostic reads must neither repair nor lift it.
 for _,archive in ipairs({false,{{v=2,id='future',cd='future',receipt={}}}})do

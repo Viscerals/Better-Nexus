@@ -187,14 +187,14 @@ section('4 ambiguous pending identity is versioned before and after choice',func
   if chosen then H.Offer() end
   local original=H.Clone(R.Saved())
   check(original.attributionFormat==1 and original.attributionOwner==UnitGUID('player') and original.guid==nil,
-   'EXPECT R1 real identity is retained in versioned fields, chosen='..tostring(chosen))
+   'EXPECT real identity is retained in versioned fields, chosen='..tostring(chosen))
   check(original.originalSlot==1 and not original.loadoutChanged and original.uncertain==1,
-   'GUARD R1 owner encoding fabricates no loadout change and preserves unknown exposure')
+   'GUARD owner encoding fabricates no loadout change and preserves unknown exposure')
   assert(M.Stop());local spends,takes=H.Count('orb-spend'),H.Count('take')
   M=R.Reload(H);M.Pump()
   if chosen then H.Result(410002,2);H.granted=H.Clone(H.granted);H.Notify();A.Poll();H.Advance(1) end
-  check(R.Saved() and M.BlocksOrdinary(),'EXPECT R1 current reload reads encoded owner but retains attribution blocker')
-  check(H.Count('orb-spend')==spends and H.Count('take')==takes,'GUARD R1 versioned owner restores no action authority')
+  check(R.Saved() and M.BlocksOrdinary(),'EXPECT current reload reads encoded owner but retains attribution blocker')
+  check(H.Count('orb-spend')==spends and H.Count('take')==takes,'GUARD versioned owner restores no action authority')
  end
 end)
 section('5 unknown or conflicting identity versions remain blocked',function()
@@ -208,7 +208,7 @@ section('5 unknown or conflicting identity versions remain blocked',function()
   end})
   local original=H.Clone(R.Saved());M.Pump();H.Advance(1)
   check(M.BlocksOrdinary() and not M.ContinueView().eligible and R.Same(R.Saved(),original),
-   'GUARD R1 '..kind..' owner identity cannot settle, Continue or rewrite the receipt')
+   'GUARD '..kind..' owner identity cannot settle, Continue or rewrite the receipt')
  end
 end)
 
@@ -232,6 +232,87 @@ section('6 passive legacy preservation then one new-evidence safety migration',f
  owner.UpdateStateV1=raw
  check(writes==1 and R.Same(R.Saved(),migrated) and M.BlocksOrdinary(),'GUARD stable new-evidence hold neither rewrites repeatedly nor fabricates server attribution')
  check(H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD restored safety migration restores no action authority')
+end)
+
+section('7 unrelated source-only history cannot explain the current removal',function()
+ assert(entry and not entry.receipt.selectedKey,'SETUP real source-only unconfirmed history')
+ local F=S.Shape();F.receipt.removed='500011:3'
+ local H,M,A,O=S.World(F,{slot=101,known=true,latch=false,charges=49,open=false})
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive={H.Clone(entry)}end))
+ local original=H.Clone(R.Saved())
+ check(original.before[entry.receipt.removed]==1 and original.before[original.removed]==1,
+  'SETUP historical source remains owned while the different current source is removed')
+ for _=1,8 do M.Pump(true)end
+ check(R.Same(R.Saved(),original),
+  'EXPECT current source removal alone preserves the legacy receipt without false ambiguity or migration')
+ -- Observe the real owed offer and the player choice, then a fresh exact result.
+ O.offer=true
+ local cards={};for i,key in ipairs(S.Offer(F))do local id,q=S.IdQ(key);cards[i]={spellId=id,quality=q}end
+ H.Board(cards);M.Pump(true);R.Pick(H,500001)
+ H.granted=S.OwnedMap(F,H,'500001:1',false);O.offer=false;H.perks.currentChoice=nil
+ H.perks.pendingSelectSpellId=nil;H.Notify();A.Poll();H.Advance(.5)
+ check(not R.Saved() and H.Count('orb-spend')==0,
+  'EXPECT different current exact result settles without a fabricated recovery check or spend')
+end)
+
+section('8 unchanged retained archive has bounded repeated observation work',function()
+ local H,M,A,O=R.Class({latch=false})
+ local entries={};for i=1,8 do entries[i]=H.Clone(entry)end
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=entries end))
+ M.Pump(true);M.Status(false)
+ local raw=table.sort;local sorts=0
+ table.sort=function(...)sorts=sorts+1;return raw(...)end
+ local ok,err=pcall(function()for _=1,8 do M.Pump(true);M.Status(false)end end)
+ table.sort=raw;assert(ok,err)
+ print('ARCHIVE_WORK unchanged pump/status sorts='..sorts)
+ check(sorts<=160,'BOUND unchanged archive does not repeat receipt canonicalization on each pump/status: '..sorts)
+ -- A real content revision must invalidate the validated projection.
+ H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={}
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive={H.Clone(entry)}end))
+ check(M.Status(false).historyCount==1,'SETUP valid retained history reaches the review gate')
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive[1].cd='damaged'end))
+ local view=M.Status(false)
+ check(not view.canStart and view.startReason:find('cannot be verified',1,true),
+  'GUARD revised damaged archive fails verification before the review gate')
+end)
+
+section('9 full distinct rolled build can reserve a safe exit',function()
+ ORB_SUPPORT_ECHOES={};for id=600001,600085 do ORB_SUPPORT_ECHOES[#ORB_SUPPORT_ECHOES+1]={id,1}end
+ local H,M,A,O=S.Fresh();ORB_SUPPORT_ECHOES=nil
+ UnitGUID=function()return 'Player-0-0000000001'end
+ H.granted={};H.locked={}
+ for id=600001,600085 do
+  local target=id<=600079 and H.granted or H.locked
+  target[H.names[id]]={{spellId=id,quality=1}}
+ end
+ S.Loadouts(H,A);H.perks.currentChoice={};H.Notify();A.Poll();H.Advance(.5)
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive={H.Clone(entry)}end))
+ local view=M.Status(false)
+ check(view.historyCount==1 and view.canStart,
+  'EXPECT 79 distinct rolled copies and six locks retain a complete bounded exit: '..tostring(view.startReason))
+ assert(M.Start(2,false,view.historyReview))
+ local receipt=R.Saved()
+ check(receipt and receipt.attributionFormat==1 and H.Count('orb-spend')==1,
+  'EXPECT acknowledged full build admits exactly one versioned receipt')
+ local n=0;for _ in pairs(receipt.before)do n=n+1 end
+ check(n==79,'GUARD all 79 actual owned keys remain in the receipt')
+ check(M.BoundaryDiagnostics().mode=='session_only' and not receipt.boundaryJournal,
+  'GUARD only optional diagnostics use session memory when the full journal reserve cannot fit')
+ local server=R.Server(H)
+ H.service.RequestChoice=function()
+  SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME);server.queue[#server.queue+1]={op=16,body=''}
+ end
+ H.Offer();R.Pick(H,410003);R.Pick(H,410004);R.Pick(H,410002)
+ H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false
+ for _=1,180 do if #R.SavedRow('orbRecoveryArchive')==2 then break end;H.Advance(.25)end
+ local archived=R.SavedRow('orbRecoveryArchive')[2]
+ check(archived and archived.kind=='AUTO_UNCONFIRMED' and #archived.receipt.picks==3,
+  'EXPECT full build with all three raw picks retains its real bounded exit: entries='..#R.SavedRow('orbRecoveryArchive')
+  ..' picks='..tostring(archived and archived.receipt.picks and #archived.receipt.picks)..' reason='..tostring(M.Status(false).reason))
+ local edges,bytes,depth=Measure(archived)
+ print('FULL_BUILD_EXIT edges='..edges..' bytes='..bytes..' depth='..depth)
+ check(edges+32<=1200 and bytes+512<=6144 and depth<=4,
+  'GUARD complete full-build exit plus late reservation stays within unchanged entry caps')
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
