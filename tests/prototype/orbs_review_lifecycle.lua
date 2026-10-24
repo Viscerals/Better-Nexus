@@ -175,19 +175,19 @@ print('PASS R6a2 known-unsent guard cases; checks='..guardChecks)
 do
  local R=dofile('tests/prototype/orb_recovery_support.lua')
  local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={}
- local B=A.Orbs;local spend=B.Spend;local hit=false;local boundary
+ local B=A.Orbs;local spend=B.Spend;local hit=false;local boundary;local guardSaved,actualGuardThrew
  B.Spend=function(token,key,expected,guard)
   local accepted,kind,reason,status=spend(token,key,expected,function(live)
    local archive=R.SavedRow('orbRecoveryArchive')
    if H.Count('orb-spend')==1 and archive and #archive==1 then
-    assert(R.Saved() and M.CompactStatus().reserved==1,
-     'SETUP real next unsent receipt follows the actual unconfirmed archive')
+    guardSaved=R.Saved()~=nil and M.CompactStatus().reserved==1
     hit=true
     local original=B.TransportStatus;B.TransportStatus=function()return nil end
     local ok,allowed,why=pcall(guard,live)
     B.TransportStatus=original
-    assert(not ok,'SETUP real postCheck rejects unavailable transport inside the final guard')
-    error(allowed,0)
+    actualGuardThrew=not ok
+    if not ok then error(allowed,0) end
+    return allowed,why
    end
    return guard(live)
   end)
@@ -204,6 +204,8 @@ do
  for _=1,100 do if hit then break end;H.Advance(.25) end
  B.Spend=spend
  assert(hit,'SETUP actual admitted recovery reached the next final guard')
+ assert(guardSaved,'SETUP real next unsent receipt follows the actual unconfirmed archive')
+ assert(actualGuardThrew,'SETUP actual production postCheck threw; this assertion is outside adapter containment')
  print('SETUP R6a2 post-recovery final guard PASS')
  local view=M.CompactStatus()
  assert(boundary=='GUARD_ERROR' and view.state=='PAUSED' and not view.pending and R.Saved()==nil,
@@ -408,12 +410,15 @@ do
  local H,M,A,O,server,original=ready()
  assert(M.ContinueConfirm(M.ContinueView().token),'SETUP small genuine legacy entry archives through production')
  local seed=H.Clone(R.SavedRow('orbRecoveryArchive')[1]);local baseBytes=bytes(seed)
+ server.Push(16,'late observation');H.Advance(2);M.Pump(true)
+ assert(R.SavedRow('orbRecoveryArchive')[1].lateN==1,
+  'EXPECT positive control actually executes the late-annotation producer after an unpadded exit')
  assert(baseBytes<5500,'SETUP production envelope leaves room for meaningful legacy boundary cases')
  local issues={}
  for _,case in ipairs({'near-entry','near-archive','raw-too-large'})do
   local ok,err=pcall(function()
    local history,padding
-   if case=='near-entry' then padding=6000-baseBytes-#'legacyData'
+   if case=='near-entry' then padding=6100-baseBytes-#'legacyData'
    elseif case=='raw-too-large' then padding=6300-baseBytes-#'legacyData'
    else
     history={};local target=math.floor((28672-baseBytes-#'legacyData'-1-200)/5)
@@ -449,11 +454,13 @@ do
      assert(R.Same(archive[i],e),'GUARD explicit exit neither evicts nor rewrites older records')
     end end
     local before=H.Clone(archive)
-    server.Push(16,'late observation');H.Advance(2)
+    for _=1,4 do server.Push(1220,'bad',{sender='OtherSender'})end
+    M.Pump(true)
     local after=R.SavedRow('orbRecoveryArchive');local total=0
     for _,e in ipairs(after)do total=total+bytes(e);assert(bytes(e)<=6144,'GUARD optional late evidence remains entry bounded')end
     assert(total<=28672 and R.Same(after[#after].receipt,original),
      'GUARD later optional annotations cannot exceed archive caps or rewrite the receipt')
+    assert(R.Same(after,before),'GUARD actual rejected late-evidence envelope cannot overrun near-cap entries or total')
    end
    assert(H.Count('orb-spend')==1 and H.Count('take')==0,'GUARD explicit exit and passive annotations send no gameplay action')
   end)
