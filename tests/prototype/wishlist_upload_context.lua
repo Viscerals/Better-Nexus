@@ -46,7 +46,7 @@
 -- column; it neither identifies nor relabels the tree that ran. For a
 -- recognized name, case statuses, the SUMMARY line and the exit are the same
 -- as without it, so an agreement never stands in for a failure; any other
--- value fails the baseline assert before a case runs.
+-- non-empty value fails the baseline assert before a case runs.
 -- Cases (every save goes through the real controller and GameAdapter):
 --   no_switch            opened Wishlist A saved; nothing changes meanwhile
 --   same_content         the callback opens Wishlist B, whose token equals A's
@@ -817,7 +817,7 @@ if ADJUDICATE then
  -- Observed outcomes of this run against the selected prediction column; the
  -- name does not say which tree ran, and the host must record that identity.
  emit('ADJUDICATION',{fixture='wishlist_upload_context',baseline=ADJUDICATE,role=ROLE[ADJUDICATE],
-  basis='observed in this run vs the selected prediction column: for a base or historical commit name, its comparison model (the core/WishlistController.lua of that commit with the supporting modules this fixture loads, not a whole checkout); for successor, the required outcome. Neither is an execution, and the column does not identify the tree that ran; the host must record the identity of that tree',checks=ADJUDICATED.checks,
+  basis='observed in this run vs the selected prediction column: for a base or historical commit name, the outcome predicted for its comparison model (the core/WishlistController.lua of that commit with the current supporting modules and harness this fixture was written against, not a whole checkout and not the modules of the tree that ran); for successor, the required outcome. Neither is an execution, and the column does not identify the tree that ran; the execution host (not the synthetic game host) must record the identity of that tree',checks=ADJUDICATED.checks,
   disagreements=ADJUDICATED.disagreements,incomplete=ADJUDICATED.incomplete})
 end
 -- With no baseline name or a recognized one, the exit follows the case
