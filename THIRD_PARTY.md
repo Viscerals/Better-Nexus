@@ -36,9 +36,13 @@ prefix for four opcodes (the Orb charge reply, the offer, ownership and pick-res
 packets) plus two slot opcodes. It registers no opcode handler, replaces no game
 handler, patches no client file, sends nothing, and keeps only parsed numbers and
 enumerated codes. No source, UI, asset or database of the game's own addon is
-copied. The authorized inert source reference is ProjectEbonhold metadata version
-37, identified below with its SHA-256 and relevant symbols; it does not establish
-the installed tester/client version. See `docs/ORB_RECOVERY_CONTINUE.md`.
+copied. The authorized inert perks-service reference is ProjectEbonhold metadata
+version 37, identified below with its SHA-256 and relevant cache/request symbols.
+That hash does not identify the separate network dispatcher, prefix or charge/slot
+handlers. Earlier owner-supplied snapshot observations informed those compatibility
+assumptions, but no exact dispatcher artifact hash/version was retained here. None
+of these references establishes the installed tester/client version or actual
+server sender/channel conventions. See `docs/ORB_RECOVERY_CONTINUE.md`.
 
 Compatibility exception: `A.RivalDetected()` in `core/GameAdapter.lua` detects
 that separately distributed addon by its exact addon name and slash-command key,

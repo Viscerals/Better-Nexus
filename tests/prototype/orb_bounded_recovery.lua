@@ -46,7 +46,9 @@ local function entryBytes(t)
 end
 do
  local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={};M.Status();Nexus.OrbPanel.Show()
- check(NexusOrbPanel.approval:GetText():find('2 uncertain recoveries',1,true)~=nil,'Start disclosure explains bounded uncertainty before approval')
+ local consent=NexusOrbPanel.approval:GetText()
+ check(consent:find('Up to 2 recovery checks within this maximum',1,true) and not consent:find('uncertain recoveries',1,true),
+  'EXPECT Start bounds admitted checks rather than promising two successful uncertain exits')
 end
 -- A loading transition preserves only the existing session authorization. A
 -- current offer is reconciled once; the runner's idle label cannot answer it.

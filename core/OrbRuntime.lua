@@ -1208,7 +1208,8 @@ local function finishResult(s,p)
     -- nor a later ownership snapshot may turn the terminal run into Resume.
     if run.completed then
         terminal(run.state=="STOPPED" and "STOPPED" or run.completed,
-            "Last replacement confirmed. This Orb run already ended; no spending restarted. Review a new run for different targets.")
+            "Last replacement confirmed. This Orb run already ended; no spending restarted. Review current targets before approving a new run."
+                ..(run.completed=="ROLLED_COMPLETE" and " Orbs cannot change the remaining locked targets." or ""))
         return true
     end
     if run.targetChanged then
@@ -2221,8 +2222,8 @@ function RC.liveReason(reason)
         choice_query_unavailable="This client cannot request the current Echo choice.",choice_request_failed="The current Echo choice request raised an error.",
         charge_refresh_failed="The Orb count refresh raised an error.",ownership_refresh_failed="The Echo refresh failed after the Orb count was requested.",
         refresh_unavailable="The Orb count or Echo refresh is unavailable.",auto_accept="The game's automatic Echo acceptance is no longer known off.",
-        archive_reserved="Automatic recovery history capacity is reserved: two of eight entries and their space remain for explicit recovery.",
-        archive_full="The eight-entry recovery archive is full.",archive_future="A newer recovery archive format is retained unchanged.",
+        archive_reserved="Automatic recovery history capacity is reserved: two of eight entries and their space remain for explicit recovery. Waiting or reload does not free this finite space.",
+        archive_full="The eight-entry recovery archive is full. Waiting or reload does not free space; retained records are not evicted.",archive_future="A newer recovery archive format is retained unchanged.",
         archive_malformed="The recovery archive is unreadable and retained unchanged.",write_failed="The pending record cannot be saved durably.",
         loading_transition="A loading transition cancelled the check.",late_choice="An Echo offer arrived; finish that offer in the game, or use Resume if it is offered for this unchosen action.",
         pending_positive="The game reports a pending Orb offer; finish it in the game.",offer_or_action="An offer, native choice latch or other game action is active; finish it in the game.",

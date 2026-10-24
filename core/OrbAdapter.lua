@@ -642,9 +642,10 @@ do
     end
 end
 -- Passive transport observer (035) ---------------------------------------------
--- The inert ProjectEbonhold metadata v37 reference (network transport hash in
--- THIRD_PARTY.md; installed tester bytes are unverified) delivers every server
--- message through ONE CHAT_MSG_ADDON frame, keeps
+-- The owner's inspected inert snapshot reported delivery through ONE
+-- CHAT_MSG_ADDON frame. Its dispatcher artifact was not hash-pinned; the v37
+-- perks-service hash in THIRD_PARTY.md establishes only the listed cache/request
+-- facts, not the network dispatcher or installed tester bytes. That snapshot keeps
 -- one handler per opcode, and checks the prefix and the framing, not the sender or
 -- the channel. This observer therefore never registers an opcode handler: it
 -- listens to the same event in a frame of its own, which leaves the game's frame,

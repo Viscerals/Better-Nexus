@@ -9,6 +9,13 @@ time renews this allowance. Stop cancels further actions. Logout/reload restores
 only the passive unresolved receipt; it cannot restore run authorization.
 World entry without a preceding leave pauses the run; further action requires
 explicit Resume and its current guards.
+A lightweight observer retains only the three-second pacing deadline when a
+leave/entry pair happens before the first full Orb owner exists. It initializes
+no run and reads no game state. Start may accept approval during that hold but
+submits nothing until it expires. The full owner's receipt epoch and
+`lifecycleObserved` diagnostic still describe only events it actually observed;
+the lightweight hold does not manufacture prior receipt history. Pause/Stop win
+over expiry, and an expired hold supplies no new approval.
 
 ## New approval and finite exit space
 
@@ -81,6 +88,11 @@ result settlement. If the current state is quiet, it may begin a recovery check:
    Existing records and unknown fields are retained without eviction or repair.
    Explicit restored Continue keeps the original eight-entry / 28,672-byte cap;
    that finite archive can still fill. The refusal identifies the protected reserve.
+   Those original explicit-exit caps measure the retained raw entry/total, including
+   opaque legacy fields. They do not retroactively add prospective late-annotation
+   reservations to old entries. Optional late evidence is skipped if it would exceed
+   the actual raw caps; no receipt is changed to make room. New operations and
+   automatic exits still reserve their supported future growth before admission.
 6. Recompute the actual build and safe sources before a new attempt. Never
    replay the old spend or selection. The third unresolved operation pauses.
 
@@ -154,11 +166,19 @@ not create a confirmed action. Reaching the
 exposure maximum is a budget stop, and an exhausted recovery allowance is an
 unresolved pause. Neither is build completion. This path does not address a
 normal `NO_SOURCES` stop: source availability remains based on the actual build.
+If an actual matching result later settles the completed run's last receipt,
+the receipt clears and operation ownership releases, while COMPLETE or
+ROLLED_COMPLETE remains terminal. A later observation of missing or changed
+targets cannot reopen Resume or spending under that ended approval. Deliberate
+Stop remains STOPPED. ROLLED_COMPLETE retains its locked-target limitation.
 
 ## Native limits
 
-The authorized inert reference is ProjectEbonhold metadata version 37; see
-`THIRD_PARTY.md` for the exact artifact identity and symbols. Its getter returns
+The authorized inert perks-service reference is ProjectEbonhold metadata version
+37; see `THIRD_PARTY.md` for that artifact's identity and cache/request symbols.
+Its digest does not pin the separate dispatcher, prefix or charge/slot handlers;
+those compatibility assumptions use earlier unpinned snapshot observations.
+Its getter returns
 its local choice cache. Tester/deployed version equality is not established. An empty choice
 reply clears that cache to nil, but an unparseable choice reply can also clear
 it to nil. Therefore nil remains unknown in passive diagnostics and supplies no
@@ -289,6 +309,14 @@ using the Adapter's fourth typed `HOST_FALSE` return after actual host crossing;
 display wording is not safety authority. A pre-host refusal does not consume it.
 The diagnostic host_call observer runs after the protected invocation, before
 its typed return event, so no diagnostic callback intervenes after the final guard. An ambiguous submission retains its receipt.
+Pre-host validation exceptions and final-guard exceptions are typed known-unsent
+rejections, not ambiguous host calls. Spend rejection restores its unused source
+quota and clears its unsent receipt/reservation. A failing read also invalidates
+post-recovery choice permission without consuming a host-crossing permit or
+inventing exposure/progress. A rejected selection instead retains the actual
+preceding spend receipt, marks that selection refused and never automatically
+reselects. Existing bounded Errors diagnostics retain exception causes, even
+though a failure of the diagnostic recorder cannot turn a rejection into a call.
 
 Missing query or outgoing-hook capability has a named bounded fallback: one
 legacy refresh, no recovery admission, no choice query, retained exposure and
@@ -298,6 +326,15 @@ attempt. Incoming observation installation remains separate. Support copy
 reports availability, outgoing framing counts, actual archive kind/confidence
 and consent policy, with observed run spends separate from each attempt's
 unknown exposure. Full usage and compact-strip text is available on hover.
+The mini view also shows unknown spend, current reservation and unconfirmed
+outcomes together on its existing visible line; missing historical totals stay
+unknown. Archive/report projections distinguish malformed observed numbers and
+codes from absent values, without emitting their raw contents or repairing data.
+Repeated identical holds do not revise history; real transitions still do.
+Content-equal validated history and bounded invalid-content verdicts may be
+reused by passive views. Real changes invalidate them, and actual atomic row
+checks bypass those view caches. Oversized/deep history is not retained by a
+negative cache. No cached verdict grants action authority.
 
 Native clipping, timing, protocol identity and global observer costs remain
 unverified.

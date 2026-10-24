@@ -269,7 +269,7 @@ local function refresh()
     -- The snapshot authorizes nothing: Start, Resume and every spend read again.
     local s=Nexus.OrbRuntime.Status(advanced);frame.snapshot=s
     frame.historyReview=s.historyReview
-    local consent="Start approves this maximum: eligible surplus copies/recycling. Ordinary Auto OFF.\nUp to 2 uncertain recoveries within this maximum; owned Echoes decide completion."
+    local consent="Start approves this maximum: eligible surplus copies/recycling. Ordinary Auto OFF.\nUp to 2 recovery checks within this maximum; owned Echoes decide completion."
     local consentFull
     if s.historyCount and s.historyCount>0 then
         consent="Start approves this maximum + Echo baseline; "..tostring(s.historyCount).." unconfirmed; late gains may arrive.\nSurplus/recycling; Auto OFF; 2 checks within max; owned Echoes decide completion."
@@ -465,7 +465,7 @@ local function ensure()
         notify(primary(n,d.tracking and d.text==nil and shown==frame.limit.shownDraft,frame.historyReview))
     end)
     frame.stop=button(frame,470,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
-    frame.approval=text(frame,20,-221,580,37,"Start approves this maximum: eligible surplus copies/recycling. Ordinary Auto OFF.\nUp to 2 uncertain recoveries within this maximum; owned Echoes decide completion.")
+    frame.approval=text(frame,20,-221,580,37,"Start approves this maximum: eligible surplus copies/recycling. Ordinary Auto OFF.\nUp to 2 recovery checks within this maximum; owned Echoes decide completion.")
     frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,440,24)
     -- Fixed boxes; a status or refusal longer than its box is complete in a tooltip.
     if Nexus.LayoutMetrics then

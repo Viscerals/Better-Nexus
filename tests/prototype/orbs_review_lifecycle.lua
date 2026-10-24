@@ -76,6 +76,10 @@ local function terminalCase(name,changed,locked,stopped)
  expect(view.spent==1 and view.reserved==0 and (view.uncertain or 0)==0,'GUARD actual known spend remains one with no phantom exposure')
  expect(not A.Orbs.IsOwned(),'EXPECT settled terminal releases operation ownership')
  expect(not view.running and not view.canResume,'EXPECT no running or Resume affordance for the terminal approval')
+ expect(not view.reason:find('different targets',1,true),'EXPECT ended approval asks for current review without assuming targets changed')
+ if locked and not stopped then
+  expect(view.reason:find('locked targets',1,true),'EXPECT rolled completion retains the remaining locked-target limitation')
+ end
  local resumed=M.Resume()
  expect(not resumed,'EXPECT a completed or deliberately stopped approval cannot resume')
  expect(not M.PrepareLimitIncrease(7),'GUARD completed/stopped approval cannot reopen a limit increase')

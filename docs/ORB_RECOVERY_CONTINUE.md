@@ -30,7 +30,7 @@ observed the event (a save may have failed), or that the server spent nothing. `
 means the available facts cannot link the action to a result, not that Nexus knows the
 server completed or refused it.
 
-There is one additional attribution-only class. A stopped action with a retained
+There is one additional attribution-only class. A paused or stopped action with a retained
 ambiguous choice can use this same explicit checked exit when fresh ownership
 shows its distinct chosen gain in the original loadout. An exact result or a
 whole compound delta explained by the bounded owner archive can establish this
@@ -38,7 +38,7 @@ gain; unrelated ownership changes cannot. The ambiguity flag
 is assigned before submission and is never enough by itself. The gain establishes
 current build progress, not the operation that caused it. This class works after
 actual completion, exhausted live checks and passive reload, and also directly
-after Stop in the same session. Current owner, binding, locks, loadout and quiet
+after Pause or Stop in the same session. Current owner, binding, locks, loadout and quiet
 state are revalidated at consent and inside the actual atomic write. An ordinary
 recorded choice without that proof stays ineligible.
 
@@ -263,6 +263,10 @@ bytes. The Store data-retention fixture starts, stays writable and keeps eight p
 entries within its shape budget. That preservation probe is not proof that altered
 fixture digests pass Runtime history validation; actual capacity branch fixtures
 use distinct entries produced by the real checked Continue path.
+Explicit legacy Continue measures those original raw entry/total caps, including
+retained unknown fields, without retroactively reserving future optional late
+annotations. An annotation that cannot fit is skipped while the receipt stays
+exact. New-operation and automatic-exit admission still reserve future growth.
 Refuse, never evict, never repair, never delete: a full archive, a malformed one, one written by a
 newer format (`v` above 1), an oversized receipt, an unverified write.
 An absent archive key is empty; a present `false` archive value is malformed,
