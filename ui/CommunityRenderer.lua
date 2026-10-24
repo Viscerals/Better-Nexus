@@ -35,7 +35,7 @@ local SyncModeDialog = {
     MODES = {"automatic", "manual", "off"},
     LABEL = {automatic="Automatic", manual="Manual", off="Off"},
     HELP = {
-        automatic="May send without a click: login requests, answers to other users, new DPS bests with their Record Loadout pages.",
+        automatic="May send without a click: login requests, answers to other users, new character-best DPS (Echoes, locked Echoes, player info) with their Record Loadout pages.",
         manual="Sends only what you start: Sync Now, and a Share with the answers to players who fetch it.",
         off="Sends nothing. Nexus still receives, and local records are kept.",
     },
@@ -2048,11 +2048,17 @@ local function EnsureDetailPanel(parent)
         local off = policy and type(policy.Mode) == "function"
             and policy.Mode() == "off"
         -- What Share does, in order: the local save, then a summary queued
-        -- only if the saved mode and its size admit it; the Echo list and
-        -- description go only in answers to players who ask for it.
+        -- only if the saved mode and its size admit it. The summary carries
+        -- no Echo list or description; the full listing can be sent in
+        -- answers, by addon whisper when one was negotiated, otherwise on the
+        -- shared Sync channel, where other Nexus users may keep a valid copy.
+        -- After the local commit the controller also hands the listing ID to
+        -- DpsCapture.BroadcastBestForBuild, whether or not the summary was
+        -- queued: in Automatic a linked character-best record may be sent.
+        -- The note states these paths; it changes none of them.
         local note = (build.publishedBuildId and "This saves its current title, description and Echo list as an update of your shared listing on this client, "
             or "This saves its title, description and Echo list as your shared listing on this client, ")
-            .. "then queues a short summary for other Nexus users if your saved Sync mode and its size allow; the Echo list and description go only to players who ask for it. "
+            .. "then queues a short summary for other Nexus users if your saved Sync mode and its size allow. The summary has no Echo list or description; the full listing can be sent in answers to other Nexus users' requests, and an answer on the shared Sync channel may be kept by any Nexus user who receives it. In Automatic, if your character's best Training Dummy or Lich King DPS is linked to this listing, Nexus may also send each such DPS record with its Echoes, any locked Echoes and your player info (character name, realm, class, level) without an additional request, even if the summary is not queued. "
             .. "A shared build cannot be recalled: players who receive it keep their copy, and Stop Sharing removes only the listing on this client. "
             .. "Nexus cannot confirm who received it."
             .. (off and " Your saved Sync mode is Off: the listing is saved on this client and not sent." or "")
@@ -2062,7 +2068,7 @@ local function EnsureDetailPanel(parent)
     p.shareBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
         GameTooltip:AddLine("Share this Saved Build",0.9,0.9,0.9,true)
-        GameTooltip:AddLine("Asks you to confirm, then saves it as your shared listing and queues a summary for other Nexus users if your Sync mode and its size allow; its Echo list goes only to players who ask. A shared build cannot be recalled.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("Asks you to confirm, then saves it as your shared listing and queues a summary (no Echo list) for other Nexus users if your Sync mode and its size allow. Its full Echo list can be sent in answers, and an answer on the shared Sync channel may be kept by any Nexus user who receives it. In Automatic, your character's best Training Dummy or Lich King DPS, if linked to it, may also be sent with its Echoes, any locked Echoes and player info, without an additional request. A shared build cannot be recalled.",0.7,0.7,0.7,true)
         GameTooltip:AddLine("Not Copy into Editor, and not saving or activating a server Saved Build.",0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
