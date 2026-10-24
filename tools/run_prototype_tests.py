@@ -315,7 +315,7 @@ DEFAULT_TIMEOUT_SECONDS=45
 TEST_TIMEOUT_SECONDS={'catalog_root_capacity':120,'sync_admission_traffic_acceptance':120}
 
 # Issue #132: an accepted Wishlist upload stays bound to the editor/Create context and draft that
-# authorized it (SETUP/EXPECT/GUARD). Categories are pinned to the fixed public base a43cf27, whose
+# authorized it (SETUP/EXPECT/GUARD). Categories are pinned to the fixed public base bc5f495, whose
 # post-upload check compared the draft token only: EXPECT is predicted from source to fail there
 # (equal-content replacements, the bookkeeping after a host error that follows an equal-content
 # Copy, the partial notice that names the upload and its next step); GUARD is predicted to hold
