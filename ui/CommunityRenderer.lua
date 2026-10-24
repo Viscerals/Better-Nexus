@@ -59,6 +59,14 @@ function SyncModeDialog.Describe(status)
     end
     local label = SyncModeDialog.LABEL[status.effective] or "Automatic"
     if status.explicit then return "Current: " .. label .. ", your saved choice." end
+    if status.storedChoiceState == "recognized" then
+        return "Current: " .. label .. ". Saved choice "
+            .. (SyncModeDialog.LABEL[status.storedChoice] or "unknown") .. " not applied."
+    elseif status.storedChoiceState == "invalid" then
+        return "Current: " .. label .. ". Saved choice invalid; not applied."
+    elseif status.storedChoiceState ~= "absent" then
+        return "Current: " .. label .. ". Saved choice unknown."
+    end
     if status.inheritedSource == "legacy" then
         return "Current: " .. label .. ", from accepted saved settings of another Nexus version (no choice of yours saved)."
     end
