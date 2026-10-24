@@ -99,11 +99,15 @@ print('PASS R6a1 terminal late-settlement cases; checks='..checks)
 -- ambiguous spending. Inject only at the real adapter callback boundary,
 -- after the real runtime has durably saved its reservation.
 local guardFailures,guardChecks={},0
-local function guardCase(name,ownerGetter,manual)
+local function guardCase(name,ownerGetter,single,recordFault)
  local H,M,A,O=S.Fresh()
  H.perks.currentChoice={};H.OrbPlan({{spellId=410002,quality=2,stacks=2}})
  local B=A.Orbs;local spend=B.Spend;local ownerKey=Nexus.Store.CurrentOwnerKey
  local inGuard=false;local sawSaved=false;local sourceKey;local returnedKind,returnedStatus
+ local record=Nexus.Errors.Record;local recordAttempts=0
+ if recordFault then Nexus.Errors.Record=function()
+  recordAttempts=recordAttempts+1;error('synthetic diagnostic recorder failure')
+ end end
  Nexus.Store.CurrentOwnerKey=function(...)
   if inGuard then error('synthetic final-guard owner lookup failure') end
   return ownerKey(...)
@@ -127,8 +131,8 @@ local function guardCase(name,ownerGetter,manual)
   returnedKind,returnedStatus=kind,status
   return accepted,kind,reason,status
  end
- local ok=pcall(H.Approve,6,false,manual)
- inGuard=false;Nexus.Store.CurrentOwnerKey=ownerKey;B.Spend=spend
+ local ok=pcall(H.Approve,6,false,single)
+ inGuard=false;Nexus.Store.CurrentOwnerKey=ownerKey;B.Spend=spend;Nexus.Errors.Record=record
  assert(sawSaved,'SETUP '..name..': guard-only exception reached after durable save')
  print('SETUP R6a2 '..name..' PASS')
  local function expect(value,message)
@@ -142,6 +146,14 @@ local function guardCase(name,ownerGetter,manual)
  expect(view.spent==0 and view.reserved==0 and (view.uncertain or 0)==0,'EXPECT no phantom known or uncertain exposure')
  expect(H.Count('orb-spend')==0 and H.Count('take')==0,'EXPECT no host spend or selection before guard acceptance')
  expect(view.state=='PAUSED' and not view.running,'GUARD rejection pauses without automatic retry')
+ if recordFault then
+  expect(recordAttempts==1,'EXPECT real guarded diagnostic recording was attempted once despite recorder failure')
+ else
+  local entry=Nexus.Errors.Latest()
+  local marker=ownerGetter and 'synthetic final-guard owner lookup failure' or 'synthetic final-guard callback failure'
+  expect(entry and entry.source=='OrbAdapter.SpendGuard' and entry.message:find(marker,1,true)
+   and #entry.message<=2003,'EXPECT the real bounded Errors owner retains the original guard failure cause')
+ end
  local resumed=M.Resume()
  local first
  for _,action in ipairs(H.actions)do if action[1]=='orb-spend' then first=action[2];break end end
@@ -149,7 +161,8 @@ local function guardCase(name,ownerGetter,manual)
  expect(first==tonumber(sourceKey:match('^(%d+):')),'GUARD known-unsent rejection restores the original manual source quota')
  M.Stop()
 end
-for _,case in ipairs({{'callback exception',false,false},{'runtime owner getter exception',true,true}})do
+for _,case in ipairs({{'callback exception',false,false},{'runtime owner getter exception',true,true},
+ {'diagnostic recorder failure',false,false,true}})do
  local ok,err=pcall(guardCase,unpack(case))
  if not ok then guardFailures[#guardFailures+1]='SETUP '..case[1]..': '..tostring(err) end
 end
