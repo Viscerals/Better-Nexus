@@ -76,6 +76,22 @@ local function copy(t)
     local r={};for k,v in pairs(t) do r[k]=copy(v) end;return r
 end
 local function now() return GetTime and GetTime() or 0 end
+-- Loading can finish before the first approved run creates its full receipt
+-- owner. Retain pacing only from those events: no init, game read, receipt
+-- journal or lifecycle epoch is manufactured by this lightweight observer.
+RC.worldHoldUntil=0
+do
+    local left=false
+    local hold=CreateFrame("Frame",nil,UIParent)
+    hold:RegisterEvent("PLAYER_LEAVING_WORLD");hold:RegisterEvent("PLAYER_ENTERING_WORLD")
+    hold:SetScript("OnEvent",function(_,event)
+        if event=="PLAYER_LEAVING_WORLD" then left=true
+        elseif left then
+            left=false;RC.worldHoldUntil=now()+WORLD_SETTLE
+            if run then run.worldSettleUntil=math.max(run.worldSettleUntil or 0,RC.worldHoldUntil) end
+        end
+    end)
+end
 local function integer(n,min,max) return type(n)=="number" and n==math.floor(n) and n>=(min or 0) and n<=(max or 1000000) end
 local function owner()
     return Nexus.MainInternals and Nexus.MainInternals.StoreAuthorityOwner
@@ -887,7 +903,7 @@ function M.Confirm(token,representedHistory)
         targets=copy(a.model.targets),entries=copy(config.entries),remaining=copy(a.sources),excluded=copy(a.excluded),
         recycle=a.recycle,automatic=a.automatic,binding=copy(a.binding),name=config.name,
         limit=a.limit,spent=0,reserved=0,uncertain=0,recoveries=0,unconfirmedResults=0,historyKnown=true,recent={},context=live.context,
-        worldSettleUntil=run.worldSettleUntil,
+        worldSettleUntil=math.max(run.worldSettleUntil or 0,RC.worldHoldUntil),
         historyBaseline={owner=Nexus.Store.CurrentOwnerKey(),guid=live.context.guid,entries=copy(a.history)}}
     -- Counters and the log start only now, when a run is really authorized.
     run.id=(logs.current and (tonumber(logs.current.runId) or 0) or 0)+1

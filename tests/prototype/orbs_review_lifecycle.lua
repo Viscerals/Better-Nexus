@@ -749,3 +749,46 @@ do
  if #failures>0 then error(table.concat(failures,'\n'),0)end
  print('PASS R6b4 exact pre-host containment and no invented exposure/progress or automatic selection')
 end
+
+-- R6b5: an inert loading hold must exist before the lazy full receipt owner.
+-- Its observations must not be relabeled as retained receipt lifecycle epochs.
+do
+ local S=dofile('tests/prototype/orb_loadout_hold_support.lua');local failures={}
+ local function expect(v,msg)if not v then failures[#failures+1]=msg end end
+ for _,mode in ipairs({'cold','warm','pause','stop','expired'})do
+  local H,M,A,O=S.Fresh()
+  if mode=='warm'then
+   H.OrbPlan();H.Approve(1,false);H.Offer();H.Result(410002,2);M.Stop()
+   H.OrbPlan({{spellId=410004,quality=3,stacks=1}})
+  else H.OrbPlan({{spellId=410002,quality=2,stacks=1}})end
+  local before=M.BoundaryDiagnostics();local actions=H.Count('orb-spend')
+  assert(before.lifecycleObserved==(mode=='warm'),'SETUP lazy owner versus warm receipt owner')
+  H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD');H.Advance(.5)
+  local observed=M.BoundaryDiagnostics()
+  assert(observed.lifecycleObserved==(mode=='warm'),'SETUP passive hold does not activate full receipt owner')
+  if mode~='warm'then assert(observed.epoch==0,'SETUP no fabricated full-owner epoch')end
+  if mode=='expired'then H.Advance(3)end
+  assert(M.Start(1),'SETUP R6 retains explicit approval rather than changing Start acceptance')
+  print('SETUP R6b5 '..mode..' actual loading event and explicit approval PASS')
+  if mode=='expired'then
+   expect(H.Count('orb-spend')==actions+1,'expired cold hold permits one explicitly approved host submission')
+  else
+   expect(H.Count('orb-spend')==actions,'no host submission at half-second after '..mode..' entry')
+   if mode=='pause'then assert(M.Pause())elseif mode=='stop'then assert(M.Stop())end
+   H.Advance(2)
+   expect(H.Count('orb-spend')==actions,'no host submission before three-second '..mode..' hold expires')
+   H.Advance(.6)
+   if mode=='pause'or mode=='stop'then
+    expect(H.Count('orb-spend')==actions,'loading hold expiry does not undo deliberate '..mode)
+    if mode=='pause'then
+     expect(M.Resume()==true and H.Count('orb-spend')==actions+1,'only explicit Resume restarts paused approval')
+    else expect(not M.Resume(),'Stop does not become resumable when loading hold expires')end
+   else
+    expect(H.Count('orb-spend')==actions+1,'same explicit '..mode..' approval submits once after hold')
+   end
+  end
+  M.Stop()
+ end
+ if #failures>0 then error(table.concat(failures,'\n'),0)end
+ print('PASS R6b5 cold and warm loading hold, truthful lazy receipt epochs, expiry and deliberate Pause/Stop')
+end
