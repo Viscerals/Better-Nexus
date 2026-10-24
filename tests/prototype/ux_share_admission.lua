@@ -51,19 +51,35 @@
 -- EXPECT (fails on 5c8ad321 by design once that state is reached: there the
 -- listing offers Retry Share, and RetryShare resends it without the Saved
 -- Build's confirmation): the ordinary Build Library detail offers no Retry
--- Share; the real CanRetryShare and RetryShare refuse, pointing to that
--- Saved Build's own confirmed Share action and promising no available
--- source and no send; RetryShare reaches no BroadcastBuildSummary call and
--- no transport admission (measured before any time passes, so Automatic
--- background work is never counted as retry traffic), and none follows.
+-- Share; the real CanRetryShare and RetryShare refuse with one reason that
+-- names a Saved Build, a Share action and confirmation, and promises no
+-- available source and no send; RetryShare reaches no BroadcastBuildSummary
+-- call and no transport admission (measured before any time passes, so
+-- Automatic background work is never counted as retry traffic), and none
+-- follows.
+-- C1 reason follow-up, EXPECT (fails on 68006d08 by design once that state
+-- is reached: there the reason says another attempt uses that Saved Build's
+-- own Share action, which presupposes an available, equivalent route). Read
+-- clause by clause, not as one copied sentence, the reason states the
+-- restriction itself (Retry Share is not offered for a listing made from a
+-- Saved Build); its Share-action guidance is only the generic rule that a
+-- Saved Build's Share action is separate and asks for its own confirmation,
+-- said of any Saved Build (indefinite or conditional), never of one
+-- presupposed Saved Build; and it promises no available or matching Saved
+-- Build, no equivalent retry and no exclusive or update route: import
+-- cleanup can remove the mirror while the listing stays, the mirror's Share
+-- sends the mirror's current title, description and Echoes, and EditBuild
+-- can also share the listing.
 -- GUARD: Stop Sharing stays; the exact own Saved Build offers its existing
--- Update Shared Build... confirmation; opening it and Cancel share nothing;
--- one fresh Accept makes exactly one explicit Share (not a queue-full
--- retry), admitted once; that approval, or the S4 one, accepted again
--- starts nothing. BroadcastBuildSummary calls are counted by a pass-through
--- wrapper (the real function, with its own arguments and results). The
--- generic Share-form retry stays covered, unchanged, by share_pending_status
--- and sync_saved_mode_share_retry.
+-- Update Shared Build... confirmation; Cancel of that open confirmation
+-- shares and sends nothing (counted from after it opened, so Cancel only;
+-- opening and cancelling, counted from before the click, stay exercised in
+-- ux_share_confirmation); one fresh Accept makes exactly one explicit Share
+-- (not a queue-full retry), admitted once; that approval, or the S4 one,
+-- accepted again starts nothing. BroadcastBuildSummary calls are counted by
+-- a pass-through wrapper (the real function, with its own arguments and
+-- results). The generic Share-form retry stays covered, unchanged, by
+-- share_pending_status and sync_saved_mode_share_retry.
 local Pair=dofile('tests/prototype/sync_pair_support.lua')
 local V=dofile('tests/prototype/view_regression_support.lua')
 local printable=V.printable
@@ -695,6 +711,46 @@ C.scenario('C1 Automatic: a failed Share of a Saved Build listing is not retried
   return n
  end
  local function Label(button) return button and V.Plain(button:GetText()) or '' end
+ -- M5 C1 reason follow-up: the refusal reason is read in lower case one
+ -- clause at a time (split at . ; ! ? and line breaks), as semantic facts
+ -- and refused presuppositions, not as one copied sentence.
+ local function Clauses(text)
+  local out={}
+  for s in (V.Plain(text):lower()..'.'):gmatch('([^%.;!?\n]+)') do
+   s=s:gsub('^%s+',''):gsub('%s+$','')
+   if s~='' then out[#out+1]=s end
+  end
+  return out
+ end
+ local function Clause(text,match)
+  for _,s in ipairs(Clauses(text)) do if match(s) then return s end end
+  return nil
+ end
+ local function Has(s,needle) return s:find(needle,1,true)~=nil end
+ local function Word(s,word) return s:find('%f[%a]'..word..'%f[%A]')~=nil end
+ -- A definite reference to one Saved Build presupposes that it is still
+ -- there and matches the failed listing; neither holds in general.
+ local function Definite(s)
+  for _,needle in ipairs({'that saved build','this saved build','the saved build',
+   'its saved build','your saved build'}) do
+   if Has(s,needle) then return needle end
+  end
+  return nil
+ end
+ -- What the reason must not presuppose: a present or matching Saved Build,
+ -- an equivalent retry, or an exclusive or update route.
+ local function Presupposition(text)
+  local t=V.Plain(text):lower()
+  local found=Definite(t)
+  if found then return found end
+  for _,needle in ipairs({'another attempt','instead','identical','equivalent','match','update'}) do
+   if Has(t,needle) then return needle end
+  end
+  for _,word in ipairs({'use','uses','same','only'}) do
+   if Word(t,word) then return word end
+  end
+  return nil
+ end
  local cases={{r=r4,slot=4,outcome='dropped',tag='C1 S4'},{r=r5,slot=5,outcome='rejected',tag='C1 S5'}}
  local function Refused(case)
   local id=case.r and case.r.id
@@ -739,8 +795,27 @@ C.scenario('C1 Automatic: a failed Share of a Saved Build listing is not retried
   C.expect(ok==false and text:find('Saved Build',1,true)~=nil and text:find('Share action',1,true)~=nil
    and text:find('confirm',1,true)~=nil and text:find('available',1,true)==nil
    and text:find('sent',1,true)==nil and text:find('will',1,true)==nil,
-   case.tag..': the real CanRetryShare refuses it and says another attempt uses that Saved Build\'s own confirmed Share action, promising no available source and no send',
+   case.tag..': the real CanRetryShare refuses it; its reason names a Saved Build, a Share action and confirmation, and promises no available source and no send',
    printable(why))
+  -- M5 C1 reason follow-up (EXPECT): what the reason says, clause by clause.
+  local restriction=Clause(text,function(s)
+   return Has(s,'retry share') and (Word(s,'not') or Word(s,'never') or Has(s,"n't"))
+    and Has(s,'offered') and Has(s,'listing') and Has(s,'saved build')
+  end)
+  C.expect(ok==false and restriction~=nil,
+   case.tag..': the reason states the restriction itself: Retry Share is not offered for a listing made from a Saved Build',
+   printable(why))
+  local guidance=Clause(text,function(s) return Has(s,'share action') and Has(s,'confirm') end)
+  C.expect(guidance~=nil
+   and (Word(guidance,'separate') or Word(guidance,'separately') or Has(guidance,'own confirm'))
+   and (Word(guidance,'a saved build') or Word(guidance,'any saved build') or Word(guidance,'if') or Word(guidance,'when'))
+   and Definite(guidance)==nil,
+   case.tag..': its Share-action guidance is only the generic rule: a Saved Build\'s Share action is separate and asks for its own confirmation, said of any Saved Build (indefinite or conditional), never of one presupposed Saved Build',
+   printable(guidance or why))
+  local promise=Presupposition(text)
+  C.expect(promise==nil,
+   case.tag..': it presupposes no available or matching Saved Build, no equivalent retry and no exclusive or update route (no "that Saved Build", "another attempt", "uses", "instead", "only" or "update")',
+   printable(promise)..' in '..printable(why))
   C.expect(retried==false and retryWhy==why and outcome==nil and CallsSince(case.mark)==0
    and AnyAdmissions(case.seq)==0 and #A.H.sent==case.sent and type(after)=='table'
    and after.generation==status.generation and after.terminal==true and after.outcome==case.outcome,
@@ -756,7 +831,8 @@ C.scenario('C1 Automatic: a failed Share of a Saved Build listing is not retried
     case.tag..': and no retry of it follows: no Share admission, hand-off or summary of the listing',#sums..' summary(ies)')
   end
  end
- -- That Saved Build's own confirmed Share stays the way to share it again.
+ -- That exact own Saved Build still exists here and keeps its own confirmed
+ -- Share action (a fixture fact, not a route the refusal reason promises).
  local id=cases[1].id
  local listing=id and catalog.Get(id) or nil
  local mirrorId=type(listing)=='table' and listing.sourceSavedBuildId or nil
@@ -771,10 +847,14 @@ C.scenario('C1 Automatic: a failed Share of a Saved Build listing is not retried
   local note=V.Plain(tostring(popup.arg2 or ''))
   C.guard(note:find('as an update',1,true)~=nil and note:find('cannot be recalled',1,true)~=nil,
    'C1: its confirmation says this sends an update of the listing and cannot be recalled',note)
+  -- Cancel only: this baseline is taken after Confirm has already opened
+  -- the confirmation, so nothing sent on opening is counted here. Opening
+  -- and cancelling, counted from before the click, stay exercised in
+  -- ux_share_confirmation.
   local seq,sent,mark,stamp=PA.seq,#A.H.sent,#calls,listing.lastModified
   A.e.StaticPopup_Hide(DIALOG)
   C.guard(A.H.popup==nil and CallsSince(mark)==0 and AnyAdmissions(seq)==0 and #A.H.sent==sent,
-   'C1: opening its confirmation and Cancel share and send nothing',CallsSince(mark)..' call(s)')
+   'C1: Cancel of its open confirmation shares and sends nothing (counted from after it opened, so Cancel only)',CallsSince(mark)..' call(s)')
   Advance(5)
   local now=catalog.Get(id)
   C.guard(CallsSince(mark)==0 and ShareAdmissions(seq,id)==0 and type(now)=='table' and now.lastModified==stamp,
