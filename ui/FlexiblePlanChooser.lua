@@ -21,6 +21,7 @@ local REASONS = {
     CATALOG_CHANGED="A chosen Echo's catalog details changed. Reset the pool and choose again.",
     EDITOR_CHANGED="The editor changed. Open the draft again to review its replacement.",
     PLAN_CHANGED="The pool or choice changed. Open the draft again to review your choice.",
+    COUNT_PENDING="Count input is pending. Use Set for each edited count before opening a draft.",
 }
 function Factory.Reason(code)
     return REASONS[code] or "This choice cannot be opened. Review the pool and exact counts."
@@ -29,10 +30,19 @@ end
 function Factory.New(options)
     local M = {}
     local ids, captured, chosen = {}, {rows={}}, {}
+    local pending, bindingCounts = {}, false
     local pool, frame, status, budget, search, catalogArea, poolArea
     local catalogRows, poolRows = {}, {}
     local catalogOffset, poolOffset, revision = 0, 0, 0
     local note = ""
+
+    local function HasPending() return next(pending) ~= nil end
+    local function StatusText()
+        if HasPending() and note ~= Factory.Reason("COUNT_PENDING") then
+            return note..(note ~= "" and " " or "")..Factory.Reason("COUNT_PENDING")
+        end
+        return note
+    end
 
     local function Selection()
         local out = {}
@@ -43,7 +53,7 @@ function Factory.New(options)
     end
     local function Say(code)
         note = Factory.Reason(code)
-        if status then status:SetText(note) end
+        if status then status:SetText(StatusText()) end
         return false, code
     end
     local function Refresh()
@@ -79,15 +89,19 @@ function Factory.New(options)
             row.spellId = id
             if id then
                 local value = captured.rows[id]
-                row.label:SetText("#"..id.."  Q"..value.quality.." / max "..value.maxStack.."  "..Display(value.name))
-                row.count:SetText(chosen[id] and tostring(chosen[id]) or "0")
+                row.label:SetText("#"..id.."  Q"..value.quality.." / max "..value.maxStack
+                    .."\nSet: "..tostring(chosen[id] or 0).."  "..Display(value.name))
+                bindingCounts = true
+                row.count:SetText(pending[id] or tostring(chosen[id] or 0))
+                bindingCounts = false
+                row.action:SetText(pending[id] and "Set *" or "Set")
                 row:Show()
             else row:Hide() end
         end
         local total = 0
         for _, count in pairs(chosen) do total = total + count end
         budget:SetText(#ids.." / 256 alternatives     Chosen: "..total.." / 79 ordinary copies")
-        status:SetText(available and note or Factory.Reason("CATALOG_UNAVAILABLE"))
+        status:SetText(available and StatusText() or Factory.Reason("CATALOG_UNAVAILABLE"))
     end
     local function Add(id)
         if captured.rows[id] then return Say("INVALID_ALTERNATIVES") end
@@ -123,6 +137,7 @@ function Factory.New(options)
             if not result then return Say(why) end
         end
         chosen[id] = count > 0 and count or nil
+        pending[id] = nil
         revision, note = revision+1, ""
         Refresh()
         return true
@@ -131,16 +146,19 @@ function Factory.New(options)
         local nextIds = {}
         for _,member in ipairs(ids) do if member ~= id then nextIds[#nextIds+1]=member end end
         ids, chosen[id], captured.rows[id] = nextIds, nil, nil
+        pending[id] = nil
         pool = #ids>0 and Nexus.FlexiblePlanModel.New({alternativeSpellIds=ids,catalog=captured}) or nil
         revision, note = revision+1, ""
         Refresh()
     end
     local function Open()
+        if HasPending() then return Say("COUNT_PENDING") end
         if not pool then return Say("INVALID_SELECTION") end
         local draft, why = pool.Choose(Selection())
         if not draft then return Say(why) end
         local capturedRevision = revision
         return options.openDraft(draft, pool.Alternatives(), function()
+            if HasPending() then return false, "COUNT_PENDING" end
             return capturedRevision == revision
         end, function() frame:Hide() end, Say)
     end
@@ -161,7 +179,7 @@ function Factory.New(options)
         frame:SetClampedToScreen(true);frame:EnableMouse(true)
         if type(UISpecialFrames)=="table" then table.insert(UISpecialFrames,"NexusFlexiblePlanChooser") end
         Label(frame,"Plan alternatives — session only",900,24,22,-16)
-        Label(frame,"Add exact Echo IDs to your pool, then set each chosen count. 0 leaves an alternative unchosen.",970,20,22,-44)
+        Label(frame,"Add exact Echo IDs, then Set each count. Set: shows the committed count; * marks pending input. 0 unchooses.",970,20,22,-44)
         Label(frame,"Hide keeps this pool and choice until reload. Reset clears only this planning session.",970,20,22,-66)
         Label(frame,"Catalog",430,20,22,-94);Label(frame,"Your pool / exact counts",480,20,505,-94)
         search=CreateFrame("EditBox","NexusFlexiblePlanSearch",frame,"InputBoxTemplate")
@@ -189,6 +207,16 @@ function Factory.New(options)
             row.count=CreateFrame("EditBox",nil,row,"InputBoxTemplate")
             row.count:SetSize(32,22);row.count:SetPoint("TOPLEFT",290,-3);row.count:SetAutoFocus(false);row.count:SetMaxLetters(3)
             row.count:SetScript("OnEscapePressed",function(self) self:ClearFocus() end)
+            row.count:SetScript("OnTextChanged",function(self)
+                if bindingCounts or not row.spellId then return end
+                local id, text = row.spellId, self:GetText() or ""
+                local committed = tostring(chosen[id] or 0)
+                if text == (pending[id] or committed) then return end
+                pending[id] = text ~= committed and text or nil
+                revision, note = revision+1, ""
+                row.action:SetText(pending[id] and "Set *" or "Set")
+                status:SetText(StatusText())
+            end)
             row.action=Button(row,nil,"Set",52,function() row.count:ClearFocus();return SetCount(row.spellId,row.count:GetText()) end)
             row.action:SetPoint("LEFT",row.count,"RIGHT",4,0)
             row.remove=Button(row,nil,"Remove",84,function() return Remove(row.spellId) end)
@@ -201,6 +229,7 @@ function Factory.New(options)
         open:SetPoint("BOTTOMRIGHT",-22,18)
         local reset=Button(frame,"NexusFlexiblePlanReset","Reset pool",100,function()
             ids,captured,chosen,pool={},{rows={}},{},nil
+            pending={}
             catalogOffset,poolOffset,revision,note=0,0,revision+1,""
             Refresh()
         end)

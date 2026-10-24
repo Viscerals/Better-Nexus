@@ -304,6 +304,88 @@ local function Rendered()
 end
 local actionBaseline,sentBaseline=#H.actions,#H.sent
 local storeBaseline=H.Clone(NexusDB)
+-- C1a: real count input, Set, Open and original popup acceptance. Only new
+-- EXPECTs collect failures so every mismatch path runs on the unchanged a58.
+do
+    local failures={}
+    local function expect(value,label)
+        print('C1a '..(value and 'PASS ' or 'FAIL ')..label)
+        if not value then failures[#failures+1]=label end
+        checks=checks+1
+    end
+    local function snapshot()
+        return {state=H.Clone(editor.DebugDraftState()),rows=Rendered(),name=NexusWishlistNameInput:GetText(),
+            db=H.Clone(NexusDB),held=H.Clone(H.locked),actions=#H.actions,sends=#H.sent}
+    end
+    local function preserved(before) return equal(snapshot(),before) end
+    local function start()
+        editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+        for i=1,13 do check(Add(ids[i]),'C1a setup exact pool member '..i) end
+        check(Count(ids[1],1),'C1a setup explicitly committed one')
+    end
+    start()
+    local before=snapshot()
+    check(not Count(ids[1],6),'C1a setup real max5 rejection')
+    expect(PoolRow(ids[1]).count:GetText()=='6' and PoolRow(ids[1]).label:GetText():find('Set: 1',1,true)
+        and ChooserText():find('pending',1,true),'rejected6 visibly distinct from committed1')
+    local opened=NexusFlexiblePlanOpen:Click()
+    expect(not opened and preserved(before) and Popup.shown[REPLACE]==nil,
+        'rejected6 Open refuses rather than silently installing committed1')
+    -- Restore the public view after the known a58 mis-install so later real
+    -- paths still run; this is setup, not an EXPECT failure or product stub.
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click()
+    check(Count(ids[1],1),'C1a explicit Set restores one after rejection')
+    before=snapshot()
+    PoolRow(ids[1]).count:SetText('2')
+    NexusFlexiblePlanSearch:SetText('unrelated refresh')
+    NexusFlexiblePlanPool:GetScript('OnMouseWheel')(NexusFlexiblePlanPool,-1000)
+    local rebound=VisibleRow(NexusFlexiblePlanPool,ids[13])
+    check(rebound and rebound.count:GetText()=='0','C1a control recycled row binds another unchosen member')
+    NexusFlexiblePlanHide:Click();NexusFlexiblePlanEntry:Click()
+    expect(PoolRow(ids[1]).count:GetText()=='2' and PoolRow(ids[1]).label:GetText():find('Set: 1',1,true),
+        'valid unsubmitted2 survives refresh scroll rebind hide reopen as pending')
+    opened=NexusFlexiblePlanOpen:Click()
+    expect(not opened and preserved(before),'pending valid2 Open preserves complete editor and protected effects')
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click()
+    check(Count(ids[1],2),'C1a explicit Set2 accepted')
+    NexusFlexiblePlanOpen:Click()
+    if Popup.shown[REPLACE] then Popup.Click(Popup.shown[REPLACE],1) end
+    expect(equal(Rendered(),{{spellId=ids[1],quality=1,stacks=2}}) and editor.DebugPendingCount()==1,
+        'only explicit accepted Set2 installs literal exact2 ordinary row')
+    -- A real nonempty named editor, not a stub openDraft callback.
+    NexusWishlistNameInput:SetText('C1a keep exact2')
+    NexusFlexiblePlanEntry:Click();check(Count(ids[1],1),'C1a clean explicit choice for popup')
+    NexusFlexiblePlanOpen:Click()
+    local request=assert(Popup.shown[REPLACE],'C1a production replacement request exists')
+    before=snapshot()
+    PoolRow(ids[1]).count:SetText('2')
+    Popup.Click(request,1)
+    expect(preserved(before) and Popup.shown[REPLACE]==nil and PoolRow(ids[1]).count:GetText()=='2'
+        and ChooserText():find('pending',1,true),'typed-after-popup accept refuses with editor and pending counts intact')
+    NexusFlexiblePlanEntry:Click();NexusWishlistNameInput:SetText('C1a keep exact2')
+    check(Count(ids[1],1),'C1a explicit restoration for rejected popup control')
+    NexusFlexiblePlanOpen:Click();request=assert(Popup.shown[REPLACE])
+    before=snapshot();check(not Count(ids[1],6),'C1a popup rejected6 setup')
+    Popup.Click(request,1)
+    expect(preserved(before) and PoolRow(ids[1]).count:GetText()=='6',
+        'rejected-after-popup accept refuses without implicit Set or protected effects')
+    NexusFlexiblePlanEntry:Click();NexusWishlistNameInput:SetText('C1a keep exact2')
+    check(Count(ids[1],1),'C1a clean count before edited-and-restored request')
+    NexusFlexiblePlanOpen:Click();request=assert(Popup.shown[REPLACE]);before=snapshot()
+    PoolRow(ids[1]).count:SetText('2');PoolRow(ids[1]).count:SetText('1')
+    Popup.Click(request,1)
+    expect(preserved(before),'editing then restoring text still invalidates older popup context')
+    NexusFlexiblePlanEntry:Click();NexusWishlistNameInput:SetText('C1a keep exact2')
+    check(Count(ids[1],1),'C1a restore one before clean accepted popup')
+    NexusFlexiblePlanOpen:Click();request=assert(Popup.shown[REPLACE])
+    Popup.Click(request,1)
+    expect(equal(Rendered(),{{spellId=ids[1],quality=1,stacks=1}}) and NexusWishlistNameInput:GetText()=='',
+        'fresh popup after explicit Set1 installs literal exact1')
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+    print('C1a completed real paths; failures='..#failures)
+    assert(#failures==0,'EXPECT C1a count consistency: '..table.concat(failures,'; '))
+end
+
 for i=1,100 do check(Add(ids[i]),'explicit catalog Add callback '..i) end
 check(editor.DebugPendingCount()==0,'100 pool members choose no editor rows')
 check(ChooserText():find('100 / 256',1,true) and ChooserText():find('Chosen: 0 / 79',1,true),
@@ -318,6 +400,7 @@ for i=22,100 do check(Count(ids[i],1),'explicit Set count callback '..i) end
 check(not Count(ids[22],2) and ChooserText():find('at most 79',1,true),'UI over-budget refuses without trimming')
 check(not Count(ids[22],6) and ChooserText():find('maximum stack',1,true),'UI over-stack refuses without trimming')
 check(editor.DebugPendingCount()==0,'explicit planning choice preserves current draft until handoff')
+check(Count(ids[22],1),'explicitly restore one after rejected input before handoff')
 NexusFlexiblePlanOpen:Click()
 check(editor.DebugPendingCount()==79,'actual Open callback installs last79')
 check(equal(Rendered(),exact.CanonicalEchoes(manual)),'actual rendered exact last79 matches manual control, including ID held locked')
@@ -347,6 +430,22 @@ check(ChooserText():find('Chosen: 79 / 79',1,true),'hide/reopen retains explicit
 local oldRendered=Rendered()
 check(not Count(ids[22],6) and Popup.shown[CREATE]==savePopup and Popup.shown[REPLACE]==nil,
     'planning refusal preserves active save popup identity')
+local pendingRefusalState=H.Clone(editor.DebugDraftState())
+check(not NexusFlexiblePlanOpen:Click() and Popup.shown[REPLACE]==nil
+    and Popup.shown[CREATE]==savePopup and equal(savePopup.data,saveData)
+    and NexusWishlistNameInput:GetText()=='Keep this draft' and equal(Rendered(),oldRendered)
+    and equal(editor.DebugDraftState(),pendingRefusalState),
+    'C1a rejected count Open preserves full editor and active save identity')
+check(Count(ids[22],1),'explicitly restore one after rejection before replacement consent')
+NexusFlexiblePlanOpen:Click()
+local pendingReplacement=assert(Popup.shown[REPLACE])
+PoolRow(ids[22]).count:SetText('2')
+Popup.Click(pendingReplacement,1)
+check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==savePopup and equal(savePopup.data,saveData)
+    and NexusWishlistNameInput:GetText()=='Keep this draft' and equal(Rendered(),oldRendered)
+    and equal(editor.DebugDraftState(),pendingRefusalState),
+    'C1a pending count popup accept preserves full editor maps destination and active save identity')
+check(Count(ids[22],1),'explicit Set restores committed whole79 before original Cancel control')
 NexusFlexiblePlanOpen:Click()
 local replacement=Popup.shown[REPLACE]
 check(replacement~=nil and editor.DebugPendingCount()==79,

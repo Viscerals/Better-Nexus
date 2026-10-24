@@ -901,7 +901,8 @@ function M.OpenFlexiblePlanChooser()
                 flexiblePlanRequest = request
                 local function Install()
                     if flexiblePlanRequest ~= request then return refuse("EDITOR_CHANGED") end
-                    if not planCurrent() then return refuse("PLAN_CHANGED") end
+                    local current, countReason = planCurrent()
+                    if not current then return refuse(countReason or "PLAN_CHANGED") end
                     if renderer.NameText() ~= name then return refuse("EDITOR_CHANGED") end
                     local ok, reason = intent.Install()
                     if not ok then return refuse(reason) end
