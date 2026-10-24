@@ -192,6 +192,27 @@ again. A loading event is only a reason to start over: it is never readiness.
   own approval;
 * sends nothing but the read-only refresh that Recheck already sends. It is never automatic.
 
+### How the Orb window states an unresolved record (M7, display only)
+
+* A restored receipt reads in layers: what it blocks, what the player can do now (by the actual
+  Continue state), then the runtime's reason, unshortened. M7 applies the same layers to a
+  restored receipt the runtime keeps PAUSED (for example the loadout hold), under its own label
+  "Paused - a result restored after a reload is unresolved…". It stays PAUSED: no state, history,
+  gate, settlement, Continue, limit, authorization or spend rule changes. A run paused in this
+  session keeps "Paused" with its reason.
+* Where Continue is offered (eligible, checking or ready), the headline says the result blocks
+  "until it settles or you continue past it"; otherwise it keeps "until it settles".
+* A receipt saved by an older version without its approved maximum keeps the configured fallback
+  as its gate, but the Orb windows say "maximum not recorded" instead of naming a number
+  (display-only `limitUnrecorded`).
+* The support report's Orb history line takes `RunLog("current")`: while that log belongs to the
+  live run, its `spent=` is the run's live value, and `state=` is the state recorded at the last
+  event (review note NB-5, documented here; core/SupportReport.lua is not changed and does not
+  print the live state).
+* The run history of the current run reads its usage live; when the run state moved on since the
+  last recorded event, its header says "Now: <state> (last recorded: <state>)" and the copied
+  report adds "Current state:".
+
 ### The archive
 
 An array of at most eight entries under the row key `orbRecoveryArchive`. It is its own key because

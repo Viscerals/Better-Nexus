@@ -31,6 +31,11 @@
 -- promise, the Build Library's scroll route). Help's earlier needles are kept
 -- inside those phrases. The mode, default, Store, saved-byte and no-effect
 -- GUARDs are unchanged.
+-- Continuation 52 (review38 M7R38-B01/N01): Help's step 3 no longer reads as
+-- if a new DPS best left only as its Record Loadout page, with the Echo list
+-- only for players who ask. It says that DPS record carries its Echo list, and
+-- scopes the requester-only Echo wording to the page. EXPECT: those two
+-- phrases; the earlier needles stay.
 -- SETUP: the fixture reached its state (a SETUP failure is not red evidence).
 -- Real TOC boots: a format-2 profile (Automatic even though its settings store
 -- "manual") and accepted format-5 profiles with Manual and Off. The fit of the
@@ -255,6 +260,7 @@ local function Run(tag,database,mode,line)
    'Your own Share actions need your click',
    'a new personal DPS best is also shared without a click when this client admits it for sending',
    'first a summary without the Echo list','the Echo list is sent only in later answers to players who ask for it',
+   'That DPS record carries its Echo list','for that page, the Echo list is sent only in later answers to players who ask for it',
    'Nexus removes the old page on this client only',
    'Sync is Automatic: Nexus may send without a click.','asks other Nexus users for shared builds and DPS records',
    'answers their requests with the shared builds and records this client holds',

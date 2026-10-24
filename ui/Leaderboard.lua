@@ -1174,6 +1174,10 @@ local function EnsureFrame()
     local builds=MakeNavButton(frame,"Builds",88); builds:SetPoint("TOPLEFT",18,-12); builds:SetScript("OnClick",function() M.Hide(); if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end end)
     local board=MakeNavButton(frame,"Leaderboard",102); board:SetPoint("LEFT",builds,"RIGHT",4,0); board:SetText("|cffffd200Leaderboard|r"); board:Disable()
     local wish=MakeNavButton(frame,"Wishlists",92); wish:SetPoint("LEFT",board,"RIGHT",4,0); wish:SetScript("OnClick",function() M.Hide(); if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end)
+    -- M7: Help for this window (its Sharing page, which covers the
+    -- Leaderboard). Like the other navigation buttons it replaces this window,
+    -- whose layer is above Help's; it opens a page only.
+    frame._helpNav=MakeNavButton(frame,"Help",56); frame._helpNav:SetPoint("LEFT",wish,"RIGHT",4,0); frame._helpNav:SetScript("OnClick",function() M.Hide(); if Nexus.Help then Nexus.Help.Show("sharing") end end)
 
     searchBox=CreateFrame("EditBox","NexusLeaderboardSearch",frame,"InputBoxTemplate"); searchBox:SetSize(265,22); searchBox:SetPoint("TOPLEFT",18,-50); searchBox:SetAutoFocus(false); searchBox:SetScript("OnTextChanged",RefreshInteractive)
     local ph=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); ph:SetPoint("LEFT",searchBox,"LEFT",6,0); ph:SetText("Search player or build...")
