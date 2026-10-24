@@ -145,10 +145,11 @@ function M.ChargesLine(charges)
         end
         local text, source = localization.Format("readout.charge_counts",
             {banish = Slot(banish), reroll = Slot(reroll), freeze = Slot(freeze)})
-        if type(text) == "string" then
-            if source == "unavailable" then return text end
+        if type(text) == "string" and source ~= "unavailable" then
             return text .. suffix
         end
+        -- Format already recorded the bounded failure. Its generic status
+        -- cannot replace available counts: use the reviewed legacy row below.
     end
     local function Shown(count) return count == nil and "?" or tostring(count) end
     return "B:" .. Shown(banish) .. " R:" .. Shown(reroll) .. " F:" .. Shown(freeze) .. suffix

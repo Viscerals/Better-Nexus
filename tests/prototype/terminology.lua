@@ -342,12 +342,18 @@ do
  for i,bad in ipairs(badTemplates)do
   fmt(F,A,{[CK]=bad},'B:2 R:1 F:0','base','invalid_candidate','an invalid candidate template falls back to English with the same counts #'..i)
  end
+ local missingBefore=F.Diagnostics()
  fmt(F,A,{},'B:2 R:1 F:0','base','missing_candidate','a missing candidate entry falls back to English')
+ local missingAfter=F.Diagnostics()
+ check(missingAfter.misses==missingBefore.misses+1 and missingAfter.byReason.missing_candidate==missingBefore.byReason.missing_candidate+1,'Format missing_candidate records exactly one fallback')
  local touched=0
  local trap={__index=function()touched=touched+1;return FX end,__tostring=function()touched=touched+1;return FX end}
+ local unsupportedBefore=F.Diagnostics()
  for i,pack in ipairs({'unsupported-pack',5,false,function()return FX end,setmetatable({},trap),setmetatable({[CK]=FX},trap)})do
   fmt(F,A,pack,'B:2 R:1 F:0','base','unsupported_pack','an unsupported pack falls back to English #'..i)
  end
+ local unsupportedAfter=F.Diagnostics()
+ check(unsupportedAfter.misses==unsupportedBefore.misses+6 and unsupportedAfter.byReason.unsupported_pack==unsupportedBefore.byReason.unsupported_pack+6,'Format unsupported_pack records exactly six fallbacks')
  local badArgs={'x',5,true,function()end,{},A3(kn(1),kn(1)),
   {banish=kn(1),reroll=kn(1),freeze=kn(1),extra=kn(1)},{banish=kn(1),reroll=kn(1),freeze=kn(1),[1]=kn(1)},
   A3(kn(-1),kn(1),kn(1)),A3(kn(1.5),kn(1),kn(1)),A3(kn(0/0),kn(1),kn(1)),A3(kn(1/0),kn(1),kn(1)),

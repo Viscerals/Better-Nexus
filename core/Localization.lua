@@ -14,8 +14,12 @@
 --  * text: a Lua string of 1 to MAX_TEXT_BYTES bytes, well-formed UTF-8
 --    (the shortest-form encoding of Unicode scalar values only; see
 --    WellFormedUtf8), with at least one non-space character, no control
---    byte (0-31, 127) and no "|" (so no colour, link or texture escape). It
---    is shown exactly as stored: no placeholder or formatting.
+--    byte (0-31, 127) and no "|" (so no colour, link or texture escape).
+--    Static text is shown exactly as stored; formatted meanings use the
+--    named count-template grammar below. Whitespace is ASCII whitespace:
+--    controls are refused, and a string of ASCII spaces alone is refused.
+--    Combining sequences, punctuation and Unicode scalars retain exact bytes.
+--    Identity validates identifiers under a different, stricter policy.
 --  * entries table: used only when it is a plain table without a
 --    metatable. It is read with next/rawget, never through a metamethod,
 --    and nothing in it is called.
@@ -24,12 +28,15 @@
 -- by Nexus.toc, sets Nexus.LocalizationEnglish. Its valid entries are copied
 -- once, here; a later change to that table changes nothing. A base that is
 -- absent, not a plain table or larger than MAX_BASE_ENTRIES is not used at
--- all; an invalid entry is left out. Both are counted in Diagnostics().base.
+-- all; an invalid entry is left out. Diagnostics().base.present is false
+-- for an absent/nonplain base (no entry count is invented). An oversized
+-- plain base records every entry as rejected; other invalid entries count once.
 --
 -- L.Resolve(key, pack) -> text, source, reason. It never raises and records
 -- nothing. In this order:
 --  1. key outside the key contract -> UNAVAILABLE, "unavailable", "invalid_key"
---     (a formatted key, see L.Format -> UNAVAILABLE, "unavailable", "format_requires_arguments")
+--  A valid formatted key is checked next: UNAVAILABLE, "unavailable",
+--     "format_requires_arguments"; it cannot resolve as static text.
 --  2. key not in the English base  -> UNAVAILABLE, "unavailable", "unknown_key"
 --  3. pack == nil                  -> English text, "base", nil
 --  4. pack not a plain table (a pack name, number, boolean, function, or a
@@ -45,12 +52,13 @@
 --
 -- L.Text(key, pack) is Resolve plus the diagnostic record: each result with
 -- a reason is counted by reason, and the first MAX_DIAGNOSTIC_KEYS distinct
--- invalid or unknown keys are kept (a later one is only counted in
--- keysNotKept). The record has a fixed size, is never printed to chat, and
--- Diagnostics() returns a copy of it.
+-- invalid or unknown keys are kept (each later occurrence of a key not
+-- retained increments keysNotKept; it is not a distinct-key count). The record has a fixed size, is never printed to chat, and
+-- Diagnostics() returns a programmatic copy; no diagnostic UI is added here.
 --
 -- Formatted meanings (issue #142). A code-owned schema (SCHEMAS below) names
--- a key's placeholders and their type; a translation never does. Its English
+-- a key's placeholder names; every current slot has the count type defined
+-- below, never a translation-defined type. Its English
 -- entry is a template under the same text contract, in which "{name}" is a
 -- schema placeholder (each exactly once, in any order), "{{" and "}}" are a
 -- literal brace and every other byte, "%" included, is literal. Anything else
@@ -151,8 +159,13 @@ local function ValidText(text)
     return WellFormedUtf8(text)
 end
 
+-- The same scalar-text check for the owned UserText presentation boundary.
+-- This is not an identifier validator; it does not normalize Unicode.
+function L.IsText(value) return ValidText(value) end
+
 -- Code-owned schemas of the formatted meanings (issue #142). A schema, not a
--- translation, names each placeholder and its type. A charge row is at most
+-- translation, names each placeholder. All current slots have the same
+-- typed known/unknown count contract (SlotText). A charge row is at most
 -- MAX_TEXT_BYTES - 2 bytes, so the " ~" estimate marker its consumer may
 -- append keeps the whole row within MAX_TEXT_BYTES.
 local CHARGE_RESULT_LIMIT = MAX_TEXT_BYTES - 2

@@ -78,7 +78,10 @@ local function LocalizedReason(key,code)
         local text,source=localization.Text(key)
         if type(text)=="string" and text~="" then
             if source=="unavailable" then return text.." "..T.Details(code) end
-            return text
+            -- Only an actual validated base/candidate result carries this
+            -- presentation provenance. Arbitrary raw strings never do.
+            return text, (source=="base" or source=="candidate")
+                and type(localization.IsText)=="function" and localization.IsText(text)==true
         end
     end
     if legacyWaitText[code] then return legacyWaitText[code] end -- issue #142, seam absent
@@ -89,7 +92,13 @@ function T.Message(value)
     if reasons[s] then return reasons[s] end
     if localizedReasons[s] then return LocalizedReason(localizedReasons[s],s) end
     local prefix,body=s:match("^(L%d+ %-%- )(.*)$")
-    if prefix then return prefix..T.Message(body) end
+    if prefix then
+        local text,localized=T.Message(body)
+        local combined=prefix..text
+        local localization=Nexus.Localization
+        return combined, localized==true and type(localization)=="table"
+            and type(localization.IsText)=="function" and localization.IsText(combined)==true
+    end
     body=s:match("^waiting: (.*)$")
     if body then return T.Message(body) end
     local id=s:match("^disabling off%-wishlist tome lever (%d+)$")

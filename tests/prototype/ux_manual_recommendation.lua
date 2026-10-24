@@ -19,7 +19,7 @@
 -- but no producer (no charges line from a real decision).
 local V=dofile('tests/prototype/view_regression_support.lua')
 local C=V.Checker('ux_manual_recommendation')
-local H,A
+local H,A,observer
 local PLAN={}
 for i=1,12 do PLAN[#PLAN+1]={spellId=200000+i,quality=i%4,stacks=1} end
 
@@ -32,6 +32,7 @@ local function Boot()
  assert(A.SetLoadoutWishlistIdentity(1,'Synthetic plan',PLAN),'assign the plan')
  if _G.NexusQuickStart and _G.NexusQuickStart:IsShown() then _G.NexusQuickStart:Hide() end
  Nexus.Panel.Show();H.Advance(.5)
+ observer=V.PresentationObserver(H)
 end
 local function Plain(t) return V.Plain(t) end
 -- The HUD's roll area as shown: heading, the three card rows (in order),
@@ -62,7 +63,7 @@ local function Auto() return Nexus.RecomputeStats().autoEnabled==true end
 local function Render(change)
  local model=H.Clone(Nexus.Panel._lastModel)
  change(model)
- assert(Nexus.Panel.Render(model)~=false,'render')
+ assert(observer.Quiet('direct Render',Nexus.Panel.Render,model)~=false,'render')
  return View(),model
 end
 
@@ -180,7 +181,12 @@ C.scenario('R5 compact charges: only supplied facts; unknown is not zero; no ser
  local function Fresh(c) Render(function(x) x.charges=nil end);return Render(function(x) x.charges=c end) end
  Nexus.Localization=wrap
  local v1,m1=Fresh(H.Clone(supplied))
+ local committed1=H.Clone(Nexus.Panel._lastModel.charges)
  local v2=Render(function(x) x.charges=H.Clone(supplied) end)
+ Nexus.Localization=seam
+ local switched=Render(function(x)x.charges=H.Clone(supplied)end)
+ C.guard(switched.charges=='B:2 R:1 F:0','R5: unchanged counts refresh after presentation changes without a clearing render',switched.charges)
+ Nexus.Localization=wrap
  local est=Fresh({banish=2,reroll=nil,freeze=0,trustworthy=false,arrived=true})
  local unk=Fresh({banish=5,reroll=5,freeze=5,trustworthy=false,arrived=false})
  Nexus.Localization=seam
@@ -190,11 +196,57 @@ C.scenario('R5 compact charges: only supplied facts; unknown is not zero; no ser
  Nexus.Localization=seam
  C.expect(v1.charges=='G:0 R:1 B:2' and m1.charges.banish==2 and m1.charges.reroll==1 and m1.charges.freeze==0,
   'R5: INJECTION: a reordered fixture renders through the real formatter and Panel; the counts keep their slots',v1.charges)
+ C.guard(V.Same(m1.charges,supplied),'R5: the supplied caller facts remain unchanged')
+ C.guard(V.Same(committed1,supplied),'R5: the committed model retains the supplied count facts')
  C.guard(v2.charges=='G:0 R:1 B:2','R5: re-rendering the same facts is stable',v2.charges)
  C.expect(est.charges=='G:0 R:? B:2 ~' and unk.charges=='G:? R:? B:?',
   'R5: INJECTION: unknown stays ? and the code-owned ~ follows the whole row',tostring(est.charges)..' | '..tostring(unk.charges))
  C.guard(back.charges=='B:2 R:1 F:0' and absent.charges=='B:2 R:1 F:0',
   'R5: the shipped English row, with or without the seam, is unchanged',tostring(back.charges)..' | '..tostring(absent.charges))
+end)
+
+
+C.scenario('R5 full text recovery and degraded English template',function()
+ Boot()
+ Offer({{spellId=200001,quality=1},{spellId=200050,quality=2},{spellId=200051,quality=3}})
+ local seam=Nexus.Localization
+ local long=string.rep('Long reordered charges ',7)..'G:{freeze} R:{reroll} B:{banish}'
+ local wanted=string.rep('Long reordered charges ',7)..'G:0 R:1 B:2 ~'
+ local wrapped={};for k,v in pairs(seam)do wrapped[k]=v end
+ wrapped.Format=function(key,args)return seam.Format(key,args,{['readout.charge_counts']=long})end
+ Nexus.Localization=wrapped
+ Render(function(m)m.charges={banish=2,reroll=1,freeze=0,arrived=true,trustworthy=false}end)
+ local hover=NexusPanel._chargesHover
+ local lines,ok=observer.Quiet('actual full-text hover',V.TooltipLines,hover:GetScript('OnEnter'),hover)
+ local joined=table.concat(lines,'\n')
+ C.expect(ok and joined:find(wanted,1,true)~=nil,'R5: actual charge hover recovers the complete reordered row and estimate marker',joined)
+ local rec=string.rep('A long recommendation with complete context. ',8)
+ Render(function(m)m.recommendation=rec end)
+ -- The base harness has a constant 14px measurement. Use the existing
+ -- offline word-wrap model for this actual overflow callback (not native fit).
+ local geometry=dofile('tests/prototype/layout_geometry_support.lua')
+ local label=NexusPanel._rollRec;local height=rawget(label,'GetStringHeight')
+ label.GetStringHeight=function(self)return geometry.Rows(self:GetText(),self:GetWidth(),5.5)*12 end
+ hover=NexusPanel._recommendationHover
+ lines,ok={},false
+ if hover and hover:GetScript('OnEnter')then lines,ok=observer.Quiet('actual full-text hover',V.TooltipLines,hover:GetScript('OnEnter'),hover)end
+ rawset(label,'GetStringHeight',height)
+ joined=table.concat(lines,'\n')
+ C.expect(ok and joined:find(rec,1,true)~=nil,'R5: actual recommendation hover recovers the complete current text',joined)
+ -- A newly loaded real seam with a broken English template, then absent base.
+ for _,base in ipairs({{['readout.charge_counts']='broken {banish}'},{}})do
+  local data=Nexus.LocalizationEnglish;Nexus.LocalizationEnglish=base
+  dofile('core/Localization.lua')
+  Nexus.LocalizationEnglish=data
+  local broken=Nexus.Localization;local before=broken.Diagnostics()
+  local row=Nexus.Readout.ChargesLine({banish=2,freeze=0,arrived=true,trustworthy=false})
+  local after=broken.Diagnostics()
+  C.expect(row=='B:2 R:? F:0 ~','R5: an unavailable template retains legacy English counts and estimate semantics',row)
+  C.guard(after.misses==before.misses+1 and after.byReason.unknown_key==before.byReason.unknown_key+1,'R5: unavailable English template records exactly one diagnostic')
+ end
+ Nexus.Localization=seam
+ Render(function(m)m.charges={banish=2,reroll=1,freeze=0};m.recommendation='waiting for three-card board'end)
+ C.guard(NexusPanel._chargesText:GetText()=='B:2 R:1 F:0','R5: normal English committed display restored')
 end)
 
 -- Producer integration (M2-charge): the charges the runtime's own decision
@@ -237,6 +289,13 @@ C.scenario('R6 producer: the runtime\'s own charge read reaches the HUD (Auto OF
  line=Shown()
  C.guard(reads==decided,'R6: still one read per decision after a push',reads..' / '..decided)
  C.expect(line=='B:7 R:5 F:1' and Same(Nexus.Panel._lastModel.charges,used),'R6: changed counts refresh the HUD',line)
+ -- Upstream limitation: a partial push is already normalized by the
+ -- adapter into decision zeros. This guard is characterization, not proof of
+ -- server-known per-field zero counts or freshness.
+ H.run={remainingBanishes=5}
+ Step()
+ C.guard(used.arrived==true and used.reroll==0 and used.freeze==0
+  and Shown()=='B:5 R:0 F:0','R6: partial-push adapter coercion remains an explicit upstream limitation',Shown())
  -- Run data not reported: unknown, never a known 0.
  H.run={}
  Step()
@@ -273,7 +332,8 @@ C.scenario('R6 producer: the runtime\'s own charge read reaches the HUD (Auto OF
  local push={remainingBanishes=3,totalRerolls=20,usedRerolls=18,totalFreezes=10,usedFreezes=9}
  Nexus.Localization=wrapped
  H.run=push
- Step()
+ local observed=observer.Instrument()
+ observed.Run(Step)
  line=Shown()
  Nexus.Localization=seam
  C.expect(line=='G:1 R:2 B:3' and Same(Nexus.Panel._lastModel.charges,used),
@@ -281,7 +341,7 @@ C.scenario('R6 producer: the runtime\'s own charge read reaches the HUD (Auto OF
  C.guard(push.remainingBanishes==3 and push.usedRerolls==18 and push.usedFreezes==9 and reads==decided,
   'R6: formatting changes no run data and adds no read',reads..' / '..decided)
  H.run={remainingBanishes=20,totalRerolls=20,usedRerolls=0,totalFreezes=10,usedFreezes=0}
- Step()
+ observed=observer.Instrument();observed.Run(Step)
  C.guard(Shown()=='B:20 R:20 F:10','R6: the shipped English row returns with the real seam',Shown())
  C.guard(Acts()==acts and Auto()==auto,'R6: Auto OFF throughout: no action was performed and Auto is unchanged')
  SlashCmdList.NEXUS('auto');H.Advance(.5)
