@@ -464,16 +464,25 @@ function Lifecycle.New(options)
     -- callbacks below (Panel.Init); the Store's private writer stays here.
     local languageInitialized = false
     local languageSessionOnly = nil
+    local languageSettings = nil
+    local languageSavedSettings = nil
     local LANGUAGE_READY = {STORE_READY=true, STORE_MUTATION_BUILD_PENDING=true,
         STORE_MUTATION_FINAL_COMMIT_PENDING=true}
 
-    -- The raw saved preference and the settings table it came from. Reads
-    -- only; nothing is normalized or rewritten.
-    local function SavedLanguage(Store)
+    -- The Store's settings may be a validated, mutable session projection.
+    -- Use it to initialize active text, not to promise persistence.
+    local function StoreLanguage(Store)
         if type(Store) ~= "table" or type(Store.Settings) ~= "function" then return nil end
         local ok, settings = pcall(Store.Settings)
         if not ok or type(settings) ~= "table" then return nil end
         return rawget(settings, "uiLanguage"), settings
+    end
+
+    -- Retain the saved source admitted at initialization independently of
+    -- the Store's session projection. Reads never normalize or rewrite it.
+    local function SavedLanguage()
+        if languageSavedSettings then return rawget(languageSavedSettings, "uiLanguage") end
+        return nil
     end
 
     -- One read of the Localization seam; nil when it is absent or fails.
@@ -489,11 +498,18 @@ function Lifecycle.New(options)
     local function InitializeLanguage(Store)
         if languageInitialized then return end
         languageInitialized = true
+        local raw, settings = StoreLanguage(Store)
+        languageSettings = settings
+        local db = Database()
+        local saved = type(db) == "table" and rawget(db, "settings") or nil
+        if type(saved) == "table" and getmetatable(saved) == nil then
+            languageSavedSettings = saved
+        end
         local localization = Nexus.Localization
         local initialize = type(localization) == "table"
             and rawget(localization, "InitializeActiveLanguage") or nil
         if type(initialize) ~= "function" then return end
-        local ok, err = pcall(initialize, (SavedLanguage(Store)))
+        local ok, err = pcall(initialize, raw)
         if not ok then RecordError("Localization.InitializeActiveLanguage", err) end
     end
 
@@ -503,7 +519,7 @@ function Lifecycle.New(options)
     -- session was initialized with (a stub or a reloaded Store module never
     -- lends another Store's writer); no capacity refusal kept saved data
     -- unchanged; the saved root is not read-only; it is still the database
-    -- this session prepared, its settings table is the one the Store serves,
+    -- this session prepared, its settings table is the admitted one the Store serves,
     -- and the bootstrap coordinator is ready on that same database.
     local function LanguageRefusal()
         if not initialized or type(dependencies) ~= "table" then return "startup" end
@@ -527,7 +543,7 @@ function Lifecycle.New(options)
         local settings = rawget(db, "settings")
         if type(settings) ~= "table" or getmetatable(settings) ~= nil then return "drift" end
         local okSettings, current = pcall(Store.Settings)
-        if not okSettings or current ~= settings then return "drift" end
+        if not okSettings or current ~= settings or settings ~= languageSettings then return "drift" end
         local coordinator = bootstrapCoordinator
         if coordinator ~= nil then
             local okState, state = pcall(coordinator.State, coordinator)
@@ -541,7 +557,7 @@ function Lifecycle.New(options)
 
     -- The chooser's facts. Reads only; never calls the writer.
     local function LanguageStatus()
-        local raw = SavedLanguage(dependencies and dependencies.Store)
+        local raw = SavedLanguage()
         local active = LocalizationValue("ActiveLanguage")
         local saved = LocalizationValue("EffectiveLanguage", raw)
         local languages = LocalizationValue("Languages")
@@ -564,9 +580,8 @@ function Lifecycle.New(options)
         end
         local refusal = LanguageRefusal()
         if refusal then return {state="refused", reason=refusal} end
-        local Store = dependencies.Store
         local active = LocalizationValue("ActiveLanguage")
-        local raw = SavedLanguage(Store)
+        local raw = SavedLanguage()
         if raw == id or (raw == nil and id == "enUS") then
             return {state="unchanged", id=id, pending=id ~= active}
         end
@@ -577,7 +592,7 @@ function Lifecycle.New(options)
             return {state="refused", reason="failed"}
         end
         if type(result) == "table" and result.mode == "durable" then
-            if SavedLanguage(Store) ~= id then return {state="unconfirmed", id=id} end
+            if SavedLanguage() ~= id then return {state="unconfirmed", id=id} end
             languageSessionOnly = nil
             return {state="saved", id=id, pending=id ~= active}
         elseif type(result) == "table" and result.mode == "session" then

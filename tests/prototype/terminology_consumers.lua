@@ -299,6 +299,52 @@ do
   local r=Nexus.Panel.ChooseLanguage('frFR')
   check(r.state=='refused' and r.reason=='capacity' and writes.n==0 and F.Serialize(NexusDB)==saved,'capacity refusal: refused before the writer, root unchanged')
  end
+ -- A settings replacement under the admitted root has not itself been
+ -- admitted. Opening the real menu and clicking must preserve both tables.
+ do
+  H=F.Boot(F.Database({version=2}));CountWriter()
+  local admitted=NexusDB.settings
+  check(NexusDB.authorityBundle.storeData.settings==admitted,'fixture: original settings are admitted')
+  NexusDB.settings={uiLanguage='enUS',unknown={keep=true}}
+  local replacement=NexusDB.settings;local frozen=F.Serialize(NexusDB)
+  Nexus.Panel.Show();menu=LanguageMenu()
+  local r=Nexus.Panel.ChooseLanguage('frFR')
+  check(Row(menu,'frFR').disabled==true and r.state=='refused' and r.reason=='drift' and writes.n==0,'replaced settings: disabled and refused before the writer')
+  check(NexusDB.settings==replacement and NexusDB.authorityBundle.storeData.settings==admitted and F.Serialize(NexusDB)==frozen,'replaced settings: both identities and the whole root stay unchanged')
+  NexusDB.settings=admitted
+  r=Nexus.Panel.ChooseLanguage('frFR')
+  check(r.state=='saved' and writes.n==1 and admitted.uiLanguage=='frFR','restoring the admitted settings permits a durable choice')
+ end
+ -- The real Store writer can return session if authority changes at its
+ -- boundary. The real menu must keep the durable preference separate from
+ -- that detached projection, including an earlier durable pending choice.
+ for _,prior in ipairs({false,'frFR'})do
+  H=F.Boot(F.Database({version=2}));CountWriter()
+  Nexus.Panel.Show();menu=LanguageMenu()
+  if prior then Row(menu,prior).func() end
+  local saved=prior or 'enUS';local calls=writes.n
+  local effects=Effects()
+  local owner=Nexus.MainInternals.StoreAuthorityOwner;local original=owner.UpdateSettingsV1
+  local mode,frozen
+  owner.UpdateSettingsV1=function(key,value)
+   NexusDB.settingsVersion=6 -- authority drift at the actual writer boundary
+   frozen=F.Serialize(NexusDB)
+   local result=original(key,value);mode=result and result.mode
+   return result
+  end
+  menu=LanguageMenu();Row(menu,'ruRU').func()
+  check(mode=='session' and writes.n==calls+1 and Nexus.Store.Settings().uiLanguage=='ruRU','fixture: actual writer changed the detached session projection')
+  check(rawget(NexusDB.settings,'uiLanguage')==(prior or nil) and F.Serialize(NexusDB)==frozen and Effects()==effects,'session result: saved preference, whole root and game effects stay unchanged')
+  local status=Nexus.Panel.LanguageStatus()
+  check(status.saved==saved and status.pending==(prior~=false) and status.sessionOnly==true and status.active=='enUS','session result: status describes the durable choice, not the detached projection')
+  menu=LanguageMenu()
+  check(Row(menu,saved).checked==true and Row(menu,'ruRU').checked==false and not Row(menu,'ruRU').text:find('saved',1,true),'session result: reopening the real menu does not label the session choice saved')
+  check(MenuText(menu):find('The last choice was not saved',1,true) and (not prior or Row(menu,prior).text:find('saved, applies after reload',1,true)),'session result: truthful notice preserves any earlier durable pending choice')
+  check(writes.n==calls+1 and F.Serialize(NexusDB)==frozen,'session result: repeated status/menu reads invoke no writer')
+  H=F.Reload();CountWriter()
+  Expect(saved,'session choice discarded after reload')
+  check(Nexus.Panel.LanguageStatus().pending==false and writes.n==0 and F.Serialize(NexusDB)==frozen,'reload: only the original saved choice survives, with no write')
+ end
  -- F. Early start-up, authority drift and a Store the session was not initialized with.
  do
   local early
