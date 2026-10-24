@@ -495,7 +495,8 @@ do
   local rc=upvalue(M.Pump,'RC')
   local canon=upvalue(rc.memory,'canonText');local measure=upvalue(rc.entryBudget,'measure')
   local capacity=rc.receiptCapacity;local counts={canonical=0,measure=0,capacity=0}
-  local getinfo=debug.getinfo;local wasJit=jit.status();jit.off();jit.flush()
+  local getinfo=debug.getinfo;local jitApi=type(jit)=='table' and jit or nil
+  local wasJit=jitApi and jitApi.status();if jitApi then jitApi.off();jitApi.flush()end
   debug.sethook(function()
    local f=getinfo(2,'f').func
    if f==canon then counts.canonical=counts.canonical+1
@@ -503,7 +504,7 @@ do
    elseif f==capacity then counts.capacity=counts.capacity+1 end
   end,'c')
   local ok,err=pcall(fn)
-  debug.sethook();if wasJit then jit.on()end
+  debug.sethook();if wasJit then jitApi.on()end
   assert(ok,err);return counts
  end
  local issues={}
