@@ -2922,8 +2922,10 @@ function M.Pump(passive)
         local displayTargets=a.state=="ready" and P.Normalize(a.entries)
         run.displayProgress=displayTargets and P.Progress(displayTargets,s) or nil
         if run.binding and (not matches(run.binding,a) or not B.SameContext(run.context,s.context)) then
-            run.targetChanged=true
-            if run.state~="STOPPED" then pause("The active loadout or assigned Wishlist changed. The original operation stays pending; Resume requires settlement and a resolved assignment.") end
+            if not run.targetChanged or run.running then
+                run.targetChanged=true
+                if run.state~="STOPPED" then pause("The active loadout or assigned Wishlist changed. The original operation stays pending; Resume requires settlement and a resolved assignment.") end
+            end
         end
         if p then
             run.snap={guid=s.context.guid,open=s.offerPending==true or #s.board>0,attribution=RC.attributionExit(p,s,a)}

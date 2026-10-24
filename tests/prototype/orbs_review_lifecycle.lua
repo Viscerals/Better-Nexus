@@ -274,7 +274,27 @@ local function attributionHold()
   'SETUP actual older-result ambiguity reaches the persistent attribution hold')
  return H,M,A,O
 end
-for _,case in ipairs({{'completion hold',completionHold},{'attribution hold',attributionHold}})do
+-- Actual final-review F1: the first changed binding/context is recorded, but
+-- the subsequent identical held pumps must not alternate writer reasons.
+local function changedHold(setup,native)
+ local H,M,A,O=setup();local revision=M.RunLog().revision
+ if native then H.perks.serverActiveSlot=2;H.Notify();A.Poll()
+ elseif H.perks.serverBuildSlots and H.perks.serverBuildSlots[1]
+  and #(H.perks.serverBuildSlots[1].echoes or {})>0 then
+  assert(A.SetLoadoutWishlistIdentity(1,'Changed while held',{{spellId=410004,quality=3,stacks=1}}))
+ else assert(A.SetFirstLoadoutWishlistIdentity('Changed while held',{{spellId=410004,quality=3,stacks=1}}))end
+ H.Advance(.25);M.Pump(true)
+ local view=M.CompactStatus()
+ assert(M.RunLog().revision>revision and view.pending and not view.running and not view.canResume,
+  'SETUP first real binding/context change records a hold and removes Resume authority')
+ return H,M,A,O
+end
+for _,case in ipairs({
+ {'completion hold',completionHold},{'attribution hold',attributionHold},
+ {'completed hold then assignment change',function()return changedHold(completionHold)end},
+ {'attribution hold then assignment change',function()return changedHold(attributionHold)end},
+ {'attribution hold then native slot change',function()return changedHold(attributionHold,true)end},
+})do
  local ok,err=pcall(heldLog,case[1],case[2])
  if not ok then logFailures[#logFailures+1]=tostring(err) end
 end
