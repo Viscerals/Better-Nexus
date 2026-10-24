@@ -388,7 +388,7 @@ local function refresh()
     local detail=truthful(reason) or s.error or ""
     local cv=Nexus.OrbRuntime.ContinueView()
     local shownStatus,fullStatus
-    if s.state=="RECOVERY" then
+    if s.state=="RECOVERY" or (s.pending and not s.running and cv.explanation==true) then
         shownStatus=RECOVERY_HEADLINE.."\n"..recoveryActions(cv).."\nDetails: "..detail
         fullStatus=shownStatus
     else
@@ -1159,11 +1159,15 @@ function UI.AttachMainPanel(parent)
         f:Show()
         local usage="Orbs used: "..s.spent.." / "..s.limit.." approved"
         local second=s.reserved>0 and (s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending, not confirmed yet")
+            or (s.pending and "Last Orb action is not settled")
             or (s.remaining~=nil and (s.remaining.." target copies remaining")or "Target data unavailable")
         local third=phases[s.state]or s.state
         local what,instruction
         if s.state=="PAUSED" then what,instruction=compactTarget(s.resumeTarget) end
         if instruction then third=instruction end
+        -- CompactStatus has no restored/Continue stage. State the block only;
+        -- Details reads the exact explanation and action in the full window.
+        if s.state=="PAUSED" and s.pending and not s.canResume and not instruction then third="Paused - result must settle" end
         local shown,full=stripLine(second)
         -- While paused, the target takes the second line; a pending Orb then
         -- stays on the third.
