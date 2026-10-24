@@ -119,28 +119,90 @@ do
  r=decide(three,0)
  check(r.reason~='waiting for pending-pick count','planner: a zero horizon stays a valid count')
  local acted,auto=#H.actions,Nexus.RecomputeStats().autoEnabled
+ -- Side effects that presentation must not have: a game action, a Sync send
+ -- through the harness network APIs or a packet admitted to the Sync
+ -- transport, a chat line, a StaticPopup, the Auto consent warning, or a
+ -- change of the Auto selection or of the settings. Only the harness and
+ -- read-only accessors are read.
+ check(type(Nexus.Sync.Stats())=='table' and type(Nexus.OverwriteWarning.IsOpen)=='function','fixture: the Sync transport counters and the consent warning state are readable')
+ local function effects()
+  return {actions=#H.actions,sent=#H.sent,queued=tonumber(Nexus.Sync.Stats().admittedPackets) or 0,
+   chat=#H.chat,popup=H.popup,warning=Nexus.OverwriteWarning.IsOpen()==true,
+   auto=Nexus.RecomputeStats().autoEnabled,settings=H.Clone(Nexus.Store.Settings())}
+ end
+ local function unchanged(a,b)
+  return a.actions==b.actions and a.sent==b.sent and a.queued==b.queued and a.chat==b.chat
+   and a.popup==b.popup and a.warning==b.warning and a.auto==b.auto and same(a.settings,b.settings)
+ end
+ local function packed(...)return {n=select('#',...),...} end
+ -- A direct presentation call, enclosed: none of those effects may occur across it.
+ local function quiet(label,fn,...)
+  local before=effects()
+  local result=packed(fn(...))
+  check(unchanged(before,effects()),'no game action, send, queued packet, chat line, popup, Automation or settings change: '..label)
+  return unpack(result,1,result.n)
+ end
+ -- The two presentation entry points the real runtime calls (Main's render
+ -- and its onStatus), each call enclosed the same way and its raw input
+ -- recorded; the real functions are called through. The runtime calls them
+ -- inside pcall, so a violation is counted here and checked by the caller.
+ local function instrument()
+  local log={render={},status={},calls=0,loud=0}
+  local render,setStatus=Nexus.Panel.Render,Nexus.Panel.SetStatus
+  local function enclosed(fn,...)
+   local before=effects()
+   local result=packed(pcall(fn,...))
+   log.calls=log.calls+1
+   if not unchanged(before,effects())then log.loud=log.loud+1 end
+   if not result[1] then error(result[2],0) end
+   return unpack(result,2,result.n)
+  end
+  Nexus.Panel.Render=function(model,...)
+   if type(model)=='table'then log.render[#log.render+1]={status=model.status,recommendation=model.recommendation}end
+   return enclosed(render,model,...)
+  end
+  Nexus.Panel.SetStatus=function(value,...)log.status[#log.status+1]=value;return enclosed(setStatus,value,...)end
+  function log.restore()Nexus.Panel.Render,Nexus.Panel.SetStatus=render,setStatus end
+  return log
+ end
+ -- A real poll-driven runtime wait. H.Advance also runs unrelated existing
+ -- work (Sync session and transport, scheduler, catalog checks) that may
+ -- legitimately send or print, so the whole window is held only to no game
+ -- action, Auto selection or settings change (Auto is OFF); each
+ -- presentation call the runtime makes inside it is enclosed. The matched
+ -- control below holds a whole producer step to no side effect.
+ local pending=H.service.GetPendingRollsCount
+ local function runtimeWait(cards,noCount)
+  local whole,log=effects(),instrument()
+  if noCount then H.service.GetPendingRollsCount=function()return nil end end
+  H.Board(cards);H.Notify();H.Advance(.6)
+  H.service.GetPendingRollsCount=pending
+  log.restore()
+  local after=effects()
+  check(whole.actions==after.actions and whole.auto==after.auto and same(whole.settings,after.settings),'runtime wait: no game action, Auto selection or settings change')
+  check(log.calls>0 and log.loud==0,'runtime wait: every presentation call the real runtime made was quiet')
+  return log
+ end
  local raws,message={},Nexus.UserText.Message
  Nexus.UserText.Message=function(value,...)raws[tostring(value)]=true;return message(value,...)end
- H.Board({{spellId=200001,quality=1},{spellId=200020,quality=0}});H.Notify();H.Advance(.6)
+ runtimeWait({{spellId=200001,quality=1},{spellId=200020,quality=0}})
  local m3,shown3=H.Clone(Nexus.Panel._lastModel),texts()
- local pending=H.service.GetPendingRollsCount;H.service.GetPendingRollsCount=function()return nil end
- H.Board({{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200022,quality=1}});H.Notify();H.Advance(.6)
+ runtimeWait({{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200022,quality=1}},true)
  Nexus.UserText.Message=message
- H.service.GetPendingRollsCount=pending
  check(raws['waiting: waiting for three-card board'] and raws['waiting: waiting for pending-pick count'],'runtime: the onStatus path receives the raw wait status bytes')
  check(raws['waiting for three-card board'] and raws['waiting for pending-pick count'],'runtime: the panel recommendation carries the raw planner reason')
  check(m3.status==W3 and m3.recommendation==W3 and shown3:find(W3,1,true) and not shown3:find('three-card',1,true),'runtime: the three-card wait reaches the panel model and fontstrings in English')
  check(Nexus.Panel._lastModel.status==WP and Nexus.Panel._lastModel.recommendation==WP and texts():find(WP,1,true),'runtime: an unavailable horizon waits; the pending-pick text keeps its exact lower-case bytes')
  check(#H.actions==acted and Nexus.RecomputeStats().autoEnabled==auto,'runtime: a wait performs nothing and leaves Automation as it was')
- local again=H.Clone(Nexus.Panel._lastModel);assert(Nexus.Panel.Render(again))
+ local again=H.Clone(Nexus.Panel._lastModel);assert(quiet('re-render of the converted model',Nexus.Panel.Render,again))
  check(Nexus.Panel._lastModel.status==WP and Nexus.Panel._lastModel.recommendation==WP,'rendering the converted model again is stable')
- Nexus.Panel.Hide();Nexus.Panel.Show()
+ quiet('hide and reopen',function()Nexus.Panel.Hide();Nexus.Panel.Show()end)
  check(texts():find(WP,1,true) and not texts():find('waiting: ',1,true),'reopen: the same text and no prefix accumulation')
- local prior=H.Clone(Nexus.Panel._lastModel);prior.status='ROOT_MUTATION_PENDING';assert(Nexus.Panel.Render(prior))
+ local prior=H.Clone(Nexus.Panel._lastModel);prior.status='ROOT_MUTATION_PENDING';assert(quiet('render of a distinct previous status',Nexus.Panel.Render,prior))
  check(Nexus.Panel._lastModel.status=='Saving is still in progress; wait for its final result','a distinct previous status is committed by a real render')
- check(Nexus.Panel.SetStatus('waiting: waiting for three-card board')==true and Nexus.Panel._lastModel.status==W3,'SetStatus from the raw three-card wait replaces the distinct status')
- check(Nexus.Panel.SetStatus('waiting: waiting for pending-pick count')==true and Nexus.Panel._lastModel.status==WP,'SetStatus presents the raw pending-pick wait, the runtime onStatus input, once')
- check(Nexus.Panel.SetStatus(WP)==false and Nexus.Panel._lastModel.status==WP,'an equal converted status is a stable no-op')
+ check(quiet('status-only update from the raw three-card wait',Nexus.Panel.SetStatus,'waiting: waiting for three-card board')==true and Nexus.Panel._lastModel.status==W3,'SetStatus from the raw three-card wait replaces the distinct status')
+ check(quiet('status-only update from the raw pending-pick wait',Nexus.Panel.SetStatus,'waiting: waiting for pending-pick count')==true and Nexus.Panel._lastModel.status==WP,'SetStatus presents the raw pending-pick wait, the runtime onStatus input, once')
+ check(quiet('status-only update with the equal converted status',Nexus.Panel.SetStatus,WP)==false and Nexus.Panel._lastModel.status==WP,'an equal converted status is a stable no-op')
  check(Nexus.UserText.Message('pending-pick count')=='Waiting for the remaining-choice count' and Nexus.UserText.Message(WP)==WP,'the older pending-pick mapping stays distinct')
  -- INJECTION EVIDENCE only: a test wrapper passes a non-shipped fixture pack
  -- into the real Text; this is not active-language startup or chooser evidence.
@@ -166,47 +228,110 @@ do
   check(not shown:find('Guaranteed current offer',1,true) and not shown:find('WISHLIST:',1,true)
    and not shown:find('waiting: ',1,true),label..' (no legacy rewrite, no prefix)')
  end
- local function runtimeWait(cards,noCount)
-  if noCount then H.service.GetPendingRollsCount=function()return nil end end
-  H.Board(cards);H.Notify();H.Advance(.6)
-  H.service.GetPendingRollsCount=pending
- end
  local fx={actions=#H.actions,auto=Nexus.RecomputeStats().autoEnabled,diag=L.Diagnostics()}
  inject(complete)
  -- The real runtime: the raw planner reason reaches Panel.Render as the
  -- recommendation and, through onStatus, Panel.SetStatus as the status line.
- local received,setStatus={},Nexus.Panel.SetStatus
- Nexus.Panel.SetStatus=function(value,...)received[#received+1]=value;return setStatus(value,...)end
- runtimeWait({{spellId=200001,quality=1},{spellId=200023,quality=0}})
- Nexus.Panel.SetStatus=setStatus
- check(received[#received]=='waiting: waiting for three-card board','the runtime onStatus hands Panel its raw status line; Panel presents it')
+ local received=runtimeWait({{spellId=200001,quality=1},{spellId=200023,quality=0}})
+ local rendered=received.render[#received.render]
+ check(received.status[#received.status]=='waiting: waiting for three-card board','the runtime onStatus hands Panel its raw status line; Panel presents it')
+ check(rendered~=nil and rendered.recommendation=='waiting for three-card board','the runtime hands Panel.Render the raw planner reason as its recommendation')
  exact(C3,'INJECTION: the runtime three-card wait shows exactly the candidate bytes')
  local copy=H.Clone(Nexus.Panel._lastModel);local pristine=H.Clone(copy)
- assert(Nexus.Panel.Render(copy));assert(Nexus.Panel.Render(Nexus.Panel._lastModel))
+ assert(quiet('INJECTION: render of a copied presented model',Nexus.Panel.Render,copy))
+ assert(quiet('INJECTION: render of the committed model',Nexus.Panel.Render,Nexus.Panel._lastModel))
  check(same(copy,pristine),'Render leaves a copied presented model untouched')
  exact(C3,'INJECTION: a copied presented model and the committed model render again unchanged')
- check(Nexus.RefreshHudView()==true,'the real HUD refresh renders its raw input again')
+ check(quiet('INJECTION: the real HUD refresh',Nexus.RefreshHudView)==true,'the real HUD refresh renders its raw input again')
  exact(C3,'INJECTION: the HUD refresh presents its raw input once')
- Nexus.Panel.Hide();Nexus.Panel.Show()
+ quiet('INJECTION: hide and reopen',function()Nexus.Panel.Hide();Nexus.Panel.Show()end)
  exact(C3,'INJECTION: hide and reopen keep the exact bytes')
  runtimeWait({{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200024,quality=1}},true)
  exact(CP,'INJECTION: the runtime pending-pick wait shows exactly the candidate bytes')
- copy=H.Clone(Nexus.Panel._lastModel);assert(Nexus.Panel.Render(copy))
+ copy=H.Clone(Nexus.Panel._lastModel);assert(quiet('INJECTION: render of a copied pending-pick model',Nexus.Panel.Render,copy))
  exact(CP,'INJECTION: the pending-pick candidate survives a copied-model render')
  runtimeWait({{spellId=200001,quality=1},{spellId=200025,quality=0}})
  exact(C3,'INJECTION: the three-card wait again, without prefix accumulation')
  check(#H.actions==fx.actions and Nexus.RecomputeStats().autoEnabled==fx.auto,'the waits performed nothing and left Automation as it was')
- local side={sent=#H.sent,chat=#H.chat,popup=H.popup}
- check(Nexus.Panel.SetStatus('ROOT_MUTATION_PENDING')==true and Nexus.Panel._lastModel.status==SAVE,'a distinct status from the complete pack')
- check(Nexus.Panel.SetStatus('waiting: waiting for three-card board')==true and Nexus.Panel._lastModel.status==C3,'SetStatus presents the raw wait status once')
+ check(quiet('INJECTION: status-only update with a distinct status',Nexus.Panel.SetStatus,'ROOT_MUTATION_PENDING')==true and Nexus.Panel._lastModel.status==SAVE,'a distinct status from the complete pack')
+ check(quiet('INJECTION: status-only update from the raw wait',Nexus.Panel.SetStatus,'waiting: waiting for three-card board')==true and Nexus.Panel._lastModel.status==C3,'SetStatus presents the raw wait status once')
  local legacy=H.Clone(Nexus.Panel._lastModel);legacy.status='TARGET: fixture';legacy.recommendation='MISSING_REVIEW_CODE'
- assert(Nexus.Panel.Render(legacy));copy=H.Clone(Nexus.Panel._lastModel);assert(Nexus.Panel.Render(copy))
+ assert(quiet('INJECTION: render of a raw legacy reason',Nexus.Panel.Render,legacy));copy=H.Clone(Nexus.Panel._lastModel)
+ assert(quiet('INJECTION: render of the copied legacy model',Nexus.Panel.Render,copy))
  check(Nexus.Panel._lastModel.status=='WISHLIST: fixture'
   and Nexus.Panel._lastModel.recommendation=='This action is not available yet. Check the status or diagnostics. Details: MISSING_REVIEW_CODE',
   'a raw legacy reason gets its reviewed mapping once; a raw unsupported code keeps its detail')
+ -- Matched producer control. Nexus.RefreshPanel runs one explicit real
+ -- automation step (the planner, Main's render and the onStatus path)
+ -- synchronously, outside the update loop: no time advances and no Sync,
+ -- scheduler or lifecycle work runs, so a whole producer step is held to no
+ -- side effect. The same steps run twice with the same runtime state, inputs
+ -- and time: with the shipped English seam, then with the injected candidate
+ -- pack. A first take step brings the runtime status, the logged board and
+ -- the panel model to the same state before each run; the waits after it
+ -- are compared. Raw producer behavior must be identical; only the
+ -- presented bytes may differ.
+ local start={{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200021,quality=1}}
+ local controlSteps={
+  {cards={{spellId=200001,quality=1},{spellId=200026,quality=0}}},
+  {cards={{spellId=200001,quality=1},{spellId=200020,quality=0},{spellId=200027,quality=1}},noCount=true},
+  {cards={{spellId=200001,quality=1},{spellId=200028,quality=0}}},
+ }
+ local function explicitStep(cards,noCount)
+  if noCount then H.service.GetPendingRollsCount=function()return nil end end
+  H.Board(cards)
+  local before=effects()
+  local stepped=Nexus.RefreshPanel()
+  local after=effects()
+  H.service.GetPendingRollsCount=pending
+  local m=Nexus.Panel._lastModel
+  return stepped==true and unchanged(before,after),{status=m.status,recommendation=m.recommendation,shown=texts()}
+ end
+ local function controlled(useCandidate)
+  if useCandidate then inject(complete) else Nexus.Localization=seam end
+  local run={time=H.now,misses=L.Diagnostics().misses,quiet={},presented={},planned={}}
+  local policyDecide=Nexus.Policy.Decide
+  Nexus.Policy.Decide=function(state,...)
+   local action=policyDecide(state,...)
+   run.planned[#run.planned+1]=type(action)=='table' and (tostring(action.type)..'|'..tostring(action.reason)) or 'none'
+   return action
+  end
+  local log=instrument()
+  run.quiet[1],run.start=explicitStep(start)
+  run.startPlanned,run.planned,log.render,log.status=run.planned[1],{},{},{}
+  for i,step in ipairs(controlSteps)do run.quiet[i+1],run.presented[i]=explicitStep(step.cards,step.noCount)end
+  log.restore();Nexus.Policy.Decide=policyDecide
+  run.render,run.status,run.calls,run.loud=log.render,log.status,log.calls,log.loud
+  run.misses=L.Diagnostics().misses-run.misses
+  return run
+ end
+ local english=controlled(false)
+ local candidate=controlled(true)
+ local held=true
+ for i=1,#controlSteps+1 do held=held and english.quiet[i]==true and candidate.quiet[i]==true end
+ check(held,'matched control: each explicit real runtime step ran with no game action, send, queued packet, chat line, popup, Automation or settings change, in English and with the candidate')
+ check(english.calls>0 and english.loud==0 and candidate.loud==0 and english.calls==candidate.calls,'matched control: each presentation call inside those steps was quiet, as often in both runs')
+ check(english.time==candidate.time and english.startPlanned==candidate.startPlanned and tostring(english.startPlanned):find('^take|')~=nil
+  and english.start.status==candidate.start.status and english.start.recommendation==candidate.start.recommendation,
+  'matched control: the same time and take start, presented alike, before both runs')
+ local waits={'waiting for three-card board','waiting for pending-pick count','waiting for three-card board'}
+ local planned,statuses,inputs={},{},{}
+ for i,reason in ipairs(waits)do planned[i],statuses[i]='wait|'..reason,'waiting: '..reason;inputs[i]=english.render[i] and english.render[i].recommendation end
+ check(same(english.planned,planned) and same(candidate.planned,planned),'matched control: identical raw planner decisions')
+ check(same(english.status,statuses) and same(candidate.status,statuses),'matched control: identical raw onStatus inputs')
+ check(#english.render==#waits and same(inputs,waits) and same(english.render,candidate.render),'matched control: identical raw Render inputs carrying the raw planner reasons')
+ for i,want in ipairs({{W3,C3},{WP,CP},{W3,C3}})do
+  for which,run in ipairs({english,candidate})do
+   local p,text=run.presented[i],want[which]
+   check(p.status==text and p.recommendation==text and p.shown:find(text,1,true)~=nil
+    and not p.shown:find('Guaranteed current offer',1,true) and not p.shown:find('WISHLIST:',1,true)
+    and not p.shown:find('waiting: ',1,true),'matched control step '..i..': '..(which==1 and 'English' or 'the candidate')..' presents exactly its own bytes')
+  end
+ end
+ check(english.misses==0 and candidate.misses==0,'matched control: neither run records a fallback')
  check(L.Diagnostics().misses==fx.diag.misses,'the complete pack records no unexpected fallback')
  Nexus.Localization=seam
- check(Nexus.UserText.Message('waiting for three-card board')==W3 and #H.sent==side.sent and #H.chat==side.chat and H.popup==side.popup,'real seam restored; presentation sent, printed and asked nothing')
+ check(Nexus.UserText.Message('waiting for three-card board')==W3,'real seam restored with its exact English')
 end
 Nexus.WishlistEditor.Show();check(texts():find('Build Library',1,true),'T01 actual Wishlist navigation')
 Nexus.CommunityBuilds.Show();check(texts():find('Build Library',1,true),'T01 actual library navigation/title')
