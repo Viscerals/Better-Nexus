@@ -12,25 +12,33 @@
 -- network, provider or resource action. A pass does not show that the native
 -- client reaches these callback sequences, nor that they caused the report.
 --
--- Categories are pinned to the fixed public base a43cf27, whose check after
--- an accepted upload compared the confirmed draft token only:
+-- Categories are pinned to the fixed public base bc5f495 (accepted main), whose
+-- Controller check after an accepted upload compares the confirmed draft token
+-- only (the removed side of the bc5f495...successor diff):
 --   SETUP  the fixture reached the state it names (host window reached,
 --          replacement admitted, token relation as intended, the deliberate
 --          host raise happened). A failed SETUP stops that case and is not
 --          behavior evidence.
---   EXPECT required behavior predicted from source to fail at a43cf27.
---   GUARD  behavior predicted from source to hold at a43cf27; it must keep
+--   EXPECT required behavior predicted from source to fail at bc5f495.
+--   GUARD  behavior predicted from source to hold at bc5f495; it must keep
 --          holding.
 -- Every EXPECT and GUARD event carries `predicted`: the outcome predicted from
--- the Controller source at a43cf27, at 791cdcc (which added the editor/Create
--- context check) and at 9c60456 (which added the draft identity, before this
--- revision's partial-notice wording), and `hold` for the successor. These are
--- source predictions, not executions; the 791cdcc one assumes the rest of that
--- tree matches, since only its Controller was reviewed. With
--- NEXUS_UPLOAD_CONTEXT_BASELINE set to one of those names (or `successor`),
--- each event also says whether the observed outcome agrees with the
--- prediction and one ADJUDICATION line lists the disagreements; the verdict of
--- the run is the same with or without it.
+-- the Controller source at the fixed base bc5f495 and at three historical
+-- comparison identities: a43cf27 (the branch point of this fix, also
+-- token-only), 791cdcc (which added the editor/Create context check) and
+-- 9c60456 (which added the draft identity, before this revision's
+-- partial-notice wording); and `hold` for the successor. These are source
+-- predictions from each Controller alone, not executions, and they claim
+-- nothing about the rest of any of those trees. Only an actual run is
+-- evidence, and only for the tree it ran on, as the host records it; the
+-- output of one tree is never evidence for another.
+-- With NEXUS_UPLOAD_CONTEXT_BASELINE set to one of those names (or
+-- `successor`), each event also says whether the observed outcome of this run
+-- agrees with that name's prediction, and one ADJUDICATION line gives the
+-- name's role and lists the disagreements. The name only selects a prediction
+-- column; it neither identifies nor relabels the tree that ran. Case statuses,
+-- the SUMMARY line and the exit are the same with or without it, so an
+-- agreement never stands in for a failure.
 -- Cases (every save goes through the real controller and GameAdapter):
 --   no_switch            opened Wishlist A saved; nothing changes meanwhile
 --   same_content         the callback opens Wishlist B, whose token equals A's
@@ -66,19 +74,28 @@ local SPEC={
  contextless_host_error={kind='create',active=0,replace='copy',raise=true},
 }
 
--- The controlled baselines the predictions name: the fixed public base, the
--- intermediate context check, and the frozen draft-identity source.
-local BASE,MID,PRIOR='a43cf27','791cdcc','9c60456'
-local BASELINES={BASE,MID,PRIOR}
+-- The baselines the predictions name. BASE is the fixed public base bc5f495
+-- (accepted main). BRANCH a43cf27 (the branch point of this fix), MID 791cdcc
+-- (the intermediate context check) and PRIOR 9c60456 (the frozen
+-- draft-identity source) are historical comparison identities only.
+local BASE,BRANCH,MID,PRIOR='bc5f495','a43cf27','791cdcc','9c60456'
+local BASELINES={BASE,BRANCH,MID,PRIOR}
+-- The meaning of each adjudication name, reported on the ADJUDICATION line.
+local ROLE={[BASE]='fixed public base',[BRANCH]='historical branch point',
+ [MID]='historical intermediate',[PRIOR]='historical intermediate',successor='successor'}
 local HOLDS={}
-local FAILS_BASE={[BASE]=true}
-local FAILS_BASE_MID={[BASE]=true,[MID]=true}
-local FAILS_BEFORE_SUCCESSOR={[BASE]=true,[MID]=true,[PRIOR]=true}
+-- FAILS_BASE: both token-only Controllers (bc5f495 and a43cf27).
+-- FAILS_BASE_MID: those and 791cdcc. FAILS_BEFORE_SUCCESSOR: every baseline.
+local FAILS_BASE={[BASE]=true,[BRANCH]=true}
+local FAILS_BASE_MID={[BASE]=true,[BRANCH]=true,[MID]=true}
+local FAILS_BEFORE_SUCCESSOR={[BASE]=true,[BRANCH]=true,[MID]=true,[PRIOR]=true}
 -- Checks predicted to fail at some baseline; every other check is predicted
 -- to hold at every baseline. Derived from the Controller source of each
--- baseline (the rest of the tree is the same at a43cf27: the fixed-base diff
--- touches only the Controller, this fixture and the runner):
---  * a43cf27 compares only the confirmed draft token after the upload. An
+-- baseline alone: no other module of any baseline tree was compared, and no
+-- equivalence of the rest of a tree is claimed.
+--  * bc5f495 and a43cf27 compare only the confirmed draft token after the
+--    upload (bc5f495: read from its Controller, the removed side of the
+--    bc5f495...successor diff; a43cf27: the earlier derivation, unchanged). An
 --    equal-content replacement passes it, so the original save commits its
 --    design bucket (and, for a Copy, role choices), clears a Copy's evidence
 --    and runs the writer the replacement's context selects: same_content
@@ -89,7 +106,7 @@ local FAILS_BEFORE_SUCCESSOR={[BASE]=true,[MID]=true,[PRIOR]=true}
 --  * 791cdcc adds the editor/Create context identity test; it catches every
 --    replacement except contextless_replaced, where both contexts stay nil.
 --  * Created-draft and result bookkeeping (SentDraft, Create admission,
---    SaveResult) compare contexts and tokens at a43cf27 and 791cdcc, so a
+--    SaveResult) compare contexts and tokens at bc5f495, a43cf27 and 791cdcc, so a
 --    context change already retires them there; an equal-content contextless
 --    replacement, also after a host error, does not.
 --  * 9c60456 adds the draft identity; only the wording of the partial notice
@@ -110,7 +127,7 @@ if ADJUDICATE=='' then ADJUDICATE=nil end
 if ADJUDICATE~=nil then
  local known=ADJUDICATE=='successor'
  for _,name in ipairs(BASELINES)do if ADJUDICATE==name then known=true end end
- assert(known,'NEXUS_UPLOAD_CONTEXT_BASELINE must be a43cf27, 791cdcc, 9c60456 or successor')
+ assert(known,'NEXUS_UPLOAD_CONTEXT_BASELINE must be bc5f495, a43cf27, 791cdcc, 9c60456 or successor')
 end
 local WRITERS={'SetLoadoutWishlist','SetFirstRunWishlist','SetLoadoutWishlistIdentity',
  'SetFirstLoadoutWishlistIdentity','UpdateWishlistAssociationAfterSave','ClearLoadoutWishlist',
@@ -783,9 +800,13 @@ for _,status in ipairs(order)do
 end
 print('SUMMARY wishlist_upload_context '..table.concat(parts,' '))
 if ADJUDICATE then
- emit('ADJUDICATION',{fixture='wishlist_upload_context',baseline=ADJUDICATE,checks=ADJUDICATED.checks,
+ -- Observed outcomes of this run against the named baseline's source
+ -- predictions; the name does not say which tree ran.
+ emit('ADJUDICATION',{fixture='wishlist_upload_context',baseline=ADJUDICATE,role=ROLE[ADJUDICATE],
+  basis='observed in this run vs Controller source prediction',checks=ADJUDICATED.checks,
   disagreements=ADJUDICATED.disagreements,incomplete=ADJUDICATED.incomplete})
 end
+-- The exit follows the case statuses alone; the adjudication never changes it.
 if failed then
  error('wishlist_upload_context: '..table.concat(parts,' ')
   ..' (SETUP_FAILED and RAISED are not behavior evidence)',0)
