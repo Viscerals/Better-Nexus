@@ -2,7 +2,8 @@
 -- the editor/Create context and the draft that authorized it. When a
 -- synchronous host callback replaces that draft, the save reports partial
 -- completion, assigns and commits nothing for the replacement, and uploads
--- nothing more.
+-- nothing more. When the host then raises, the real GameAdapter reports
+-- host_error and the save binds nothing to the replacement either.
 -- Run from the trusted source root with LuaJIT:
 --   luajit tests/prototype/wishlist_upload_context.lua [case]
 -- No argument runs every case, each in a newly loaded synthetic host and
@@ -11,14 +12,25 @@
 -- network, provider or resource action. A pass does not show that the native
 -- client reaches these callback sequences, nor that they caused the report.
 --
--- Categories:
+-- Categories are pinned to the fixed public base a43cf27, whose check after
+-- an accepted upload compared the confirmed draft token only:
 --   SETUP  the fixture reached the state it names (host window reached,
---          replacement admitted, token relation as intended). A failed SETUP
---          stops that case and is not behavior evidence.
---   EXPECT required behavior known to fail at 791cdcc by design: the
---          context-less equal-content replacement, and the partial notice
---          that names the uploaded Wishlist.
---   GUARD  behavior that already holds at 791cdcc and must keep holding.
+--          replacement admitted, token relation as intended, the deliberate
+--          host raise happened). A failed SETUP stops that case and is not
+--          behavior evidence.
+--   EXPECT required behavior predicted from source to fail at a43cf27.
+--   GUARD  behavior predicted from source to hold at a43cf27; it must keep
+--          holding.
+-- Every EXPECT and GUARD event carries `predicted`: the outcome predicted from
+-- the Controller source at a43cf27, at 791cdcc (which added the editor/Create
+-- context check) and at 9c60456 (which added the draft identity, before this
+-- revision's partial-notice wording), and `hold` for the successor. These are
+-- source predictions, not executions; the 791cdcc one assumes the rest of that
+-- tree matches, since only its Controller was reviewed. With
+-- NEXUS_UPLOAD_CONTEXT_BASELINE set to one of those names (or `successor`),
+-- each event also says whether the observed outcome agrees with the
+-- prediction and one ADJUDICATION line lists the disagreements; the verdict of
+-- the run is the same with or without it.
 -- Cases (every save goes through the real controller and GameAdapter):
 --   no_switch            opened Wishlist A saved; nothing changes meanwhile
 --   same_content         the callback opens Wishlist B, whose token equals A's
@@ -31,27 +43,80 @@
 --   contextless_replaced the callback begins an equal-content Copy: both
 --                        contexts stay nil and the token is equal; only the
 --                        draft identity differs
+--   contextless_host_error as contextless_replaced, then the real host wrapper
+--                        raises after the accepted upload and the callback
 local T=dofile('tests/prototype/startup_support.lua')
 
 local CASES={'no_switch','same_content','changed_content','native_only',
- 'create_no_switch','create_replaced','first_run_no_switch','contextless_replaced'}
+ 'create_no_switch','create_replaced','first_run_no_switch','contextless_replaced',
+ 'contextless_host_error'}
 -- kind: what is saved. active: native active slot of the world. replace: what
--- the host callback begins. baseCaught: the replacement changes an editor or
--- Create context identity, which 791cdcc already reports.
+-- the host callback begins. native: the callback changes only the native
+-- active slot. raise: the host raises after the accepted upload and the
+-- callback.
 local SPEC={
  no_switch={kind='opened',active=1},
- same_content={kind='opened',active=1,replace='opened',baseCaught=true},
- changed_content={kind='opened',active=1,replace='opened',baseCaught=true},
+ same_content={kind='opened',active=1,replace='opened'},
+ changed_content={kind='opened',active=1,replace='opened'},
  native_only={kind='opened',active=1,native=true},
  create_no_switch={kind='create',active=1},
- create_replaced={kind='create',active=1,replace='copy',baseCaught=true},
+ create_replaced={kind='create',active=1,replace='copy'},
  first_run_no_switch={kind='create',active=0},
- contextless_replaced={kind='create',active=0,replace='copy',baseCaught=false},
+ contextless_replaced={kind='create',active=0,replace='copy'},
+ contextless_host_error={kind='create',active=0,replace='copy',raise=true},
 }
+
+-- The controlled baselines the predictions name: the fixed public base, the
+-- intermediate context check, and the frozen draft-identity source.
+local BASE,MID,PRIOR='a43cf27','791cdcc','9c60456'
+local BASELINES={BASE,MID,PRIOR}
+local HOLDS={}
+local FAILS_BASE={[BASE]=true}
+local FAILS_BASE_MID={[BASE]=true,[MID]=true}
+local FAILS_BEFORE_SUCCESSOR={[BASE]=true,[MID]=true,[PRIOR]=true}
+-- Checks predicted to fail at some baseline; every other check is predicted
+-- to hold at every baseline. Derived from the Controller source of each
+-- baseline (the rest of the tree is the same at a43cf27: the fixed-base diff
+-- touches only the Controller, this fixture and the runner):
+--  * a43cf27 compares only the confirmed draft token after the upload. An
+--    equal-content replacement passes it, so the original save commits its
+--    design bucket (and, for a Copy, role choices), clears a Copy's evidence
+--    and runs the writer the replacement's context selects: same_content
+--    rewrites Saved Build 2 (UpdateWishlistAssociationAfterSave) and rebinds
+--    B's editor; create_replaced runs no writer (its Create context is gone)
+--    and reports a saved-unassigned success; contextless_replaced runs the
+--    first-run writer. changed_content fails the token test and is partial.
+--  * 791cdcc adds the editor/Create context identity test; it catches every
+--    replacement except contextless_replaced, where both contexts stay nil.
+--  * Created-draft and result bookkeeping (SentDraft, Create admission,
+--    SaveResult) compare contexts and tokens at a43cf27 and 791cdcc, so a
+--    context change already retires them there; an equal-content contextless
+--    replacement, also after a host error, does not.
+--  * 9c60456 adds the draft identity; only the wording of the partial notice
+--    in this revision is still predicted to fail there.
+local PREDICT={
+ same_content={partial=FAILS_BASE,writers=FAILS_BASE,store=FAILS_BASE,savedBuild2=FAILS_BASE,
+  notices=FAILS_BASE,named=FAILS_BASE_MID,wording=FAILS_BEFORE_SUCCESSOR,view=FAILS_BASE},
+ changed_content={named=FAILS_BASE_MID,wording=FAILS_BEFORE_SUCCESSOR},
+ create_replaced={partial=FAILS_BASE,store=FAILS_BASE,notices=FAILS_BASE,named=FAILS_BASE_MID,
+  wording=FAILS_BEFORE_SUCCESSOR,view=FAILS_BASE},
+ contextless_replaced={partial=FAILS_BASE_MID,writers=FAILS_BASE_MID,store=FAILS_BASE_MID,
+  notices=FAILS_BASE_MID,named=FAILS_BASE_MID,wording=FAILS_BEFORE_SUCCESSOR,view=FAILS_BASE_MID,
+  result=FAILS_BASE_MID,sent=FAILS_BASE_MID,admit=FAILS_BASE_MID},
+ contextless_host_error={result=FAILS_BASE_MID,sent=FAILS_BASE_MID,admit=FAILS_BASE_MID},
+}
+local ADJUDICATE=os.getenv('NEXUS_UPLOAD_CONTEXT_BASELINE')
+if ADJUDICATE=='' then ADJUDICATE=nil end
+if ADJUDICATE~=nil then
+ local known=ADJUDICATE=='successor'
+ for _,name in ipairs(BASELINES)do if ADJUDICATE==name then known=true end end
+ assert(known,'NEXUS_UPLOAD_CONTEXT_BASELINE must be a43cf27, 791cdcc, 9c60456 or successor')
+end
 local WRITERS={'SetLoadoutWishlist','SetFirstRunWishlist','SetLoadoutWishlistIdentity',
  'SetFirstLoadoutWishlistIdentity','UpdateWishlistAssociationAfterSave','ClearLoadoutWishlist',
  'ClearFirstRunWishlist','SetFirstRunWishlistIdentity'}
 local PARTIAL='but the editor changed'
+local HOST_FAILURE='synthetic host failure after the accepted upload'
 local ID,OTHER,THIRD,LOCK=201172,201175,201176,200767
 -- What a successful save stores, traced from the real writers
 -- (StoredWishlistRecord), stamped after the two fixture assignments.
@@ -119,6 +184,15 @@ local function ChangedKeys(before,after)
  table.sort(changed)
  return changed
 end
+-- Every key of a table, labelled with its Lua type and sorted, so a string
+-- key "1", a number key 1 and a stray index 0 or 3 are all told apart.
+local function KeySet(t)
+ local out={}
+ if type(t)~='table' then return out end
+ for k in pairs(t)do out[#out+1]=type(k)..':'..tostring(k) end
+ table.sort(out)
+ return out
+end
 local function BySpell(rows)
  local out={}
  for i,row in ipairs(type(rows)=='table' and rows or {})do out[i]=row end
@@ -148,22 +222,39 @@ end
 
 local function run(which,report)
  local spec=SPEC[which]
+ local predict=PREDICT[which] or {}
  local function setup(v,label,observed)
   report.setup=report.setup+1
   emit('SETUP',{case=which,label=label,pass=v==true,observed=observed})
   if v~=true then error({setupFailure=label},0) end
  end
- local function check(category,v,label,observed)
+ -- One EXPECT or GUARD check. `fails` names the baselines this check is
+ -- predicted from source to fail at (PREDICT); the category follows the
+ -- fixed public base: EXPECT when it is predicted to fail there, else GUARD.
+ local function check(v,label,observed,fails)
+  fails=fails or HOLDS
+  local category=fails[BASE] and 'expect' or 'guard'
+  local predicted={successor='hold'}
+  for _,name in ipairs(BASELINES)do predicted[name]=fails[name] and 'fail' or 'hold' end
+  local pass=v==true
+  local event={case=which,label=label,pass=pass,predicted=predicted,observed=observed}
+  if ADJUDICATE then
+   event.agrees=(predicted[ADJUDICATE]=='hold')==pass
+   if not event.agrees then report.disagreements[#report.disagreements+1]=label end
+  end
   report[category]=report[category]+1
-  emit(category:upper(),{case=which,label=label,pass=v==true,observed=observed})
-  if v~=true then local list=report[category..'Failures'];list[#list+1]=label end
+  emit(category:upper(),event)
+  if not pass then
+   local list=report[category..'Failures'];list[#list+1]=label
+   report.firstFailure=report.firstFailure or label
+  end
  end
- local function expect(v,label,observed) check('expect',v,label,observed) end
- local function guard(v,label,observed) check('guard',v,label,observed) end
- -- Holds at 791cdcc only where its context guard already sees the replacement.
- local function caught(v,label,observed) check(spec.baseCaught and 'guard' or 'expect',v,label,observed) end
 
  Nexus=nil;NexusDB={};WishlistRealizerDB=nil
+ -- The NexusDB root the real GameAdapter binds its assignment-action epoch
+ -- to; the injected Store facade below is the only writable owner, so a save
+ -- may neither replace nor write this table.
+ local dbRoot=NexusDB
  local H=dofile('tests/prototype/harness.lua')
  H.playerLevel=80
  wipe(H.db)
@@ -202,6 +293,8 @@ local function run(which,report)
  Nexus={}
  for _,path in ipairs({'core/EchoCatalogSource.lua','logic/Model.lua','core/CandidateEvidence.lua',
   'core/WishlistModel.lua','core/GameAdapter.lua','core/WishlistController.lua'})do dofile(path) end
+ setup(Nexus.MainInternals==nil,
+  'no real Store owner seam is loaded: every write goes through the injected Store facade')
  local backing,settings,account={},{},{}
  local store={State=function()return backing end,Settings=function()return settings end}
  local A=Nexus.GameAdapter
@@ -209,6 +302,14 @@ local function run(which,report)
  local okA,whyA=A.SetLoadoutWishlistIdentity(1,'Wishlist A',H.Clone(originalA),H.Clone(design))
  local okB,whyB=A.SetLoadoutWishlistIdentity(2,'Wishlist B',H.Clone(originalB),H.Clone(design))
  setup(okA==true and okB==true,'two real adapter assignment writes admitted',{A=whyA or 'accepted',B=whyB or 'accepted'})
+ -- The injected Store row (`backing`, what Store.State() returns and what the
+ -- real writers mutate through the facade fallback) holds exactly the two
+ -- fixture assignments, so a stray key a save writes is visible below.
+ setup(T.Equal(KeySet(backing),{'string:loadoutWishlists','string:wishlistAssignmentSerial'})
+  and T.Equal(KeySet(backing.loadoutWishlists),{'number:1','number:2'})
+  and backing.wishlistAssignmentSerial==2,
+  'the injected Store row holds exactly Saved Builds 1 and 2 and their stamp before any save',
+  {row=KeySet(backing),links=KeySet(backing.loadoutWishlists)})
  local messages={}
  local c=Nexus.WishlistInternals.Controller.New({model=Nexus.WishlistModel.New(),store=store,
   accountRoot=function()return account end,notify=function(t)messages[#messages+1]=tostring(t)end})
@@ -229,13 +330,21 @@ local function run(which,report)
  setup(A.Slots().activeSlot==spec.active,'the world starts on its native active slot',A.Slots().activeSlot)
  setup(Nexus.Sync==nil,'Sync runtime is not loaded')
 
+ -- The serialized-token input of the draft shown (contents only).
  local function DraftView()
   local d=c.DebugDraftState()
   return {ordinary=H.Clone(c.CanonicalEchoes()),pending=d.pending,pendingLock=d.pendingLock,
    fulfilled=d.fulfilled,permanent=H.Clone(c.FulfilledDraftTargets()),lockRows=H.Clone(c.PendingLockRows())}
  end
+ -- The replacement as the public controller seam shows it: its token input,
+ -- every draft row (ordinary, locked-slot, permanent target), the draft debug
+ -- state (browse offsets, Copy context, block reason), and its Copy evidence,
+ -- editor and Create contexts. Deep clones, captured inside the host callback
+ -- right after the replacement is admitted and again after the save returns.
  local function ReplacementView()
-  return {draft=DraftView(),candidate=H.Clone(c.CandidateContext()),
+  return {draft=DraftView(),pendingRows=H.Clone(c.PendingRows()),pendingLockRows=H.Clone(c.PendingLockRows()),
+   permanent=H.Clone(c.FulfilledDraftTargets()),debug=H.Clone(c.DebugDraftState()),
+   blocked=c.ApplyBlockReason(),candidate=H.Clone(c.CandidateContext()),
    editing=H.Clone(c.EditingContext()),create=H.Clone(c.CreateTargetContext())}
  end
 
@@ -299,6 +408,9 @@ local function run(which,report)
    {entries=H.Clone(planRows),name='Plan C',class='MAGE'},'Plan C')
   setup(okImport==true and importName=='Plan C' and importCount==3,
    'public Import (LoadImported) admits the Create draft',{why=importWhy})
+  -- The authorizing Create draft carries no Copy evidence: a replacement
+  -- that does (checked inside the callback) is another whole draft even when
+  -- its contents and serialized token are equal.
   setup(c.EditingContext()==nil and c.CandidateContext()==nil,'the Create draft has no editor or Copy context')
   local target=c.CreateTargetContext()
   if spec.active==1 then
@@ -345,37 +457,80 @@ local function run(which,report)
    return r1,r2,r3,r4,r5
   end
  end
+ -- The real GameAdapter upload entry the controller calls (its Adapter is
+ -- this same table): a pass-through recorder of what the adapter returned,
+ -- so the host_error translation is observed at the adapter boundary itself.
+ local adapterReturns={}
+ local adapterUpload=A.UploadWishlist
+ setup(type(adapterUpload)=='function','adapter upload API present: UploadWishlist')
+ A.UploadWishlist=function(...)
+  local r1,r2=adapterUpload(...)
+  adapterReturns[#adapterReturns+1]={ok=r1,reason=r2}
+  return r1,r2
+ end
  local callback={ran=false}
  local host=H.service.UploadServerBuildSlot
  H.service.UploadServerBuildSlot=function(...)
   local accepted=host(...)
   callback.ran,callback.hostAccepted=true,accepted==true
   if callbackAction then
+   -- Notice marks around the callback, so a line it wrote would be shown
+   -- apart from the save's own lines instead of being filtered away.
+   callback.noticesBefore=#messages
    local okCall,callError=pcall(callbackAction,callback)
    if not okCall then callback.error=tostring(callError) end
+   callback.noticesAfter=#messages
+  end
+  if spec.raise then
+   -- The deliberate host failure after the accepted upload and the callback,
+   -- outside the callback's own protection: only the real GameAdapter pcall
+   -- around UploadServerBuildSlot can turn it into host_error.
+   callback.raised=true
+   error(HOST_FAILURE,0)
   end
   return accepted
  end
+ -- Snapshots right before the save, for the owner oracles below: deep clones
+ -- of the injected Store row, of the controller account root and of the
+ -- injected settings, and the identity of the row's assignment map table.
  local before=H.Clone(backing)
+ local accountBefore,settingsBefore=H.Clone(account),H.Clone(settings)
+ local linksRef=backing.loadoutWishlists
  local mark=#messages
  local accepted,reason=c.AcceptApply(data)
  local after=H.Clone(backing)
  local uploads={}
  for _,action in ipairs(H.actions)do if action[1]=='upload' then uploads[#uploads+1]=H.Clone(action) end end
+ -- Every line written since the save began, callback window included; none
+ -- is reset or filtered out after the callback.
  local saveNotices,partial={},{}
  for i=mark+1,#messages do
   saveNotices[#saveNotices+1]=messages[i]
   if messages[i]:find(PARTIAL,1,true) then partial[#partial+1]=messages[i] end
  end
+ local callbackNotices={}
+ for i=(callback.noticesBefore or 0)+1,(callback.noticesAfter or 0) do
+  callbackNotices[#callbackNotices+1]=messages[i]
+ end
  local result=c.SaveResult()
  local afterView=ReplacementView()
  emit('OBSERVED',{case=which,accepted=accepted==true,reason=reason,callback=callback,uploads=uploads,
-  writes=writes,before=before,after=after,result=result,afterView=afterView,
-  nativeActiveSlot=A.Slots().activeSlot,forbidden=forbidden,notices=saveNotices})
+  adapterReturns=adapterReturns,writes=writes,before=before,after=after,result=result,afterView=afterView,
+  nativeActiveSlot=A.Slots().activeSlot,forbidden=forbidden,notices=saveNotices,
+  callbackNotices=callbackNotices,account=account,settings=settings})
 
  -- A callback that was not reached or not admitted is a setup failure.
  setup(callback.ran==true and callback.hostAccepted==true,'the host accepted the upload and its callback boundary was reached')
  setup(callback.error==nil,'the host callback ran without error',callback.error)
+ if callbackAction then
+  setup(#callbackNotices==0,
+   "nothing inside the host callback wrote a notice (source-verified for this data): every line since the save began is the save's own",
+   callbackNotices)
+ end
+ if spec.raise then
+  setup(callback.raised==true,
+   'the host raised after the accepted upload and the callback: a deliberate, witnessed host failure')
+ end
  if spec.replace=='opened' then
   local editing=callback.full and callback.full.editing
   setup(callback.opened==true and type(editing)=='table' and editing.loadoutSlot==2 and editing.slot==102,
@@ -389,48 +544,130 @@ local function run(which,report)
   setup(T.Equal(full.draft,copyView),'the callback Copy projection equals its prechecked token input')
  end
 
- guard(#uploads==1 and uploads[1][2]==uploadSlot and uploads[1][3]==uploadName
+ check(#uploads==1 and uploads[1][2]==uploadSlot and uploads[1][3]==uploadName
   and T.Equal(uploads[1][4],expectedPayload),
   'exactly one host upload: original slot and name, exact ordinary rows, no extra or permanent rows',uploads)
- guard(T.Equal((before.loadoutWishlists or {})[2],(after.loadoutWishlists or {})[2]),
-  'the upload never changes the Saved Build 2 assignment')
+ local adapterOutcome=adapterReturns[1] or {}
+ if spec.raise then
+  check(#adapterReturns==1 and adapterOutcome.ok==false and adapterOutcome.reason=='host_error',
+   'the real GameAdapter turns the raised host call into host_error, once',adapterReturns)
+ else
+  check(#adapterReturns==1 and adapterOutcome.ok==true and adapterOutcome.reason==nil,
+   'the real GameAdapter reports exactly one accepted upload call',adapterReturns)
+ end
+ check(T.Equal((before.loadoutWishlists or {})[2],(after.loadoutWishlists or {})[2]),
+  'the upload never changes the Saved Build 2 assignment',
+  {before=(before.loadoutWishlists or {})[2],after=(after.loadoutWishlists or {})[2]},predict.savedBuild2)
  local zero=true;for _,n in pairs(forbidden)do if n~=0 then zero=false end end
- guard(zero,'zero spend, Take, activation, native Save, Sync or other gameplay calls',forbidden)
- guard(A.Slots().activeSlot==(spec.native and 2 or spec.active),
+ check(zero,'zero spend, Take, activation, native Save, Sync or other gameplay calls',forbidden)
+ check(A.Slots().activeSlot==(spec.native and 2 or spec.active),
   'the native active slot keeps its independent state',A.Slots().activeSlot)
- guard(c.IsApplyPending()==false,'no save retry remains')
+ check(c.IsApplyPending()==false,'no save retry remains')
+ -- Owners outside the injected row: the global NexusDB root (identity and
+ -- deep content), the table the controller's accountRoot returns and the
+ -- injected Store.Settings() table (deep T.Equal against the clones taken
+ -- right before the save), and the identity of the row's assignment map
+ -- (no writer swapped it for another table).
+ check(rawequal(NexusDB,dbRoot) and T.Equal(NexusDB,{}) and WishlistRealizerDB==nil,
+  'the save neither replaces nor writes the NexusDB root',{root=NexusDB,legacy=WishlistRealizerDB})
+ check(T.Equal(account,accountBefore) and T.Equal(settings,settingsBefore),
+  'the save writes neither the controller account root nor the injected settings',
+  {account=account,settings=settings})
+ check(rawequal(backing.loadoutWishlists,linksRef),
+  'no writer replaces the assignment map table of the injected Store row')
 
- if spec.replace then
-  caught(accepted==false and reason=='uploaded_draft_changed',
-   'the replaced draft is reported as partial (uploaded_draft_changed)',{accepted=accepted,reason=reason})
-  caught(#writes==0,'no call to any of the eight assignment writer APIs',writes)
-  caught(T.Equal(before,after),'the whole store is unchanged: every Saved Build, first-run and design bucket')
-  caught(#partial==1,'exactly one partial notice',saveNotices)
-  expect(#partial==1 and partial[1]:find("'"..uploadName.."' was uploaded",1,true)~=nil,
-   'the partial notice names the uploaded Wishlist',saveNotices)
-  caught(T.Equal(callback.full,afterView),
+ -- The explicit replacement Create through the real PrepareApply: its
+ -- confirmation payload names the copy name the controller offers (the
+ -- uploaded name stays taken) and the name the player typed. Cancelled; it
+ -- never reaches the host.
+ local function ReplacementCreate()
+  H.now=H.now+3.1
+  local d2,m2=c.PrepareApply('Plan C')
+  local admitted=type(d2)=='table'
+  check(admitted and m2=='create',
+   'the explicit replacement Create is admitted, not refused as already created',{mode=m2},predict.admit)
+  check(admitted and d2.name=='Plan C (Copy 1)' and d2.requestedName=='Plan C',
+   'the replacement Create is offered as Plan C (Copy 1) for requested Plan C: the uploaded name stays taken',
+   {mode=m2,name=admitted and d2.name or nil,requestedName=admitted and d2.requestedName or nil},predict.admit)
+  if admitted then c.CancelApply(d2) end
+  local n=0;for _,action in ipairs(H.actions)do if action[1]=='upload' then n=n+1 end end
+  check(n==1,'admitting the replacement uploads nothing',n)
+ end
+
+ if spec.raise then
+  check(accepted==false and reason=='host_error','the original save returns host_error',
+   {accepted=accepted,reason=reason})
+  check(#writes==0,'no call to any of the eight assignment writer APIs',writes,predict.writers)
+  check(T.Equal(before,after),'the whole store is unchanged: every Saved Build, first-run and design bucket',
+   {changed=ChangedKeys(before,after)},predict.store)
+  local line=saveNotices[1] or ''
+  check(#saveNotices==1 and #partial==0 and line:find("'Plan C'",1,true)~=nil
+   and line:find('may or may not have reached the server',1,true)~=nil
+   and line:find('nothing was assigned',1,true)~=nil,
+   'exactly one notice in total during the save: the host error, said as may or may not have reached the server',
+   saveNotices,predict.notices)
+  check(T.Equal(callback.full,afterView),
    'the original save leaves the replacement draft, its permanent targets, Copy evidence and contexts as admitted',
-   {callback=callback.full,after=afterView})
-  caught(result==nil,'no result of the original save is shown on the replacement editor',result)
+   {callback=callback.full,after=afterView},predict.view)
+  check(result==nil,'no result of the original save is shown on the replacement editor',result,predict.result)
+  local sent,sentUncertain=c.SentDraft()
+  check(sent==nil,'the replacement draft is not marked as already sent',
+   {name=sent,uncertain=sentUncertain},predict.sent)
+  ReplacementCreate()
+ elseif spec.replace then
+  check(accepted==false and reason=='uploaded_draft_changed',
+   'the replaced draft is reported as partial (uploaded_draft_changed)',{accepted=accepted,reason=reason},predict.partial)
+  check(#writes==0,'no call to any of the eight assignment writer APIs',writes,predict.writers)
+  check(T.Equal(before,after),'the whole store is unchanged: every Saved Build, first-run and design bucket',
+   {changed=ChangedKeys(before,after)},predict.store)
+  check(#partial==1,'exactly one partial notice',saveNotices,predict.notices)
+  check(#saveNotices==1 and #partial==1,
+   'exactly one notice in total during the save, the partial one: no success, uncertain or second line',
+   saveNotices,predict.notices)
+  check(#partial==1 and partial[1]:find("'"..uploadName.."' was uploaded",1,true)~=nil,
+   'the partial notice names the uploaded Wishlist',saveNotices,predict.named)
+  local line=saveNotices[1] or ''
+  check(#saveNotices==1 and line:find('changed no assignment',1,true)~=nil
+   and line:find('any assignment it already had is kept',1,true)~=nil
+   and line:find('nothing is uploaded again',1,true)~=nil
+   and line:find('Echo Journal',1,true)~=nil
+   and not line:find('save again',1,true) and not line:find('not assigned',1,true),
+   'the partial notice says no assignment or locked target changed, an earlier assignment is kept, nothing uploads again, and points to the Echo Journal',
+   saveNotices,predict.wording)
+  check(T.Equal(callback.full,afterView),
+   'the original save leaves the replacement draft, its permanent targets, Copy evidence and contexts as admitted',
+   {callback=callback.full,after=afterView},predict.view)
+  check(result==nil,'no result of the original save is shown on the replacement editor',result,predict.result)
   if spec.kind=='create' then
-   local sent=c.SentDraft()
-   caught(sent==nil,'the replacement draft is not marked as already sent',sent)
-   H.now=H.now+3.1
-   local d2,m2=c.PrepareApply('Plan C')
-   caught(type(d2)=='table' and m2=='create',
-    'the explicit replacement Create is admitted, not refused as already created',{mode=m2})
-   if type(d2)=='table' then c.CancelApply(d2) end
-   local n=0;for _,action in ipairs(H.actions)do if action[1]=='upload' then n=n+1 end end
-   guard(n==1,'admitting the replacement uploads nothing',n)
+   local sent,sentUncertain=c.SentDraft()
+   check(sent==nil,'the replacement draft is not marked as already sent',
+    {name=sent,uncertain=sentUncertain},predict.sent)
+   ReplacementCreate()
   end
  else
-  guard(accepted==true and reason==nil,'the unchanged-context save succeeds',{accepted=accepted,reason=reason})
-  guard(#partial==0,'no partial notice',saveNotices)
+  check(accepted==true and reason==nil,'the unchanged-context save succeeds',{accepted=accepted,reason=reason})
+  check(#partial==0,'no partial notice',saveNotices)
+  -- Every line since the save began, in order, against the notices the
+  -- success path of the Controller source writes for this world.
+  local wanted
+  if spec.kind=='opened' then
+   wanted={'Wishlist saved (3/79 rolled copies planned'}
+  elseif spec.active==1 then
+   wanted={"assigned 'Plan C' to Saved A.",'Wishlist saved (4/79 rolled copies planned'}
+  else
+   wanted={"'Plan C' is the first-run Wishlist target",'Wishlist saved (4/79 rolled copies planned'}
+  end
+  local inOrder=#saveNotices==#wanted
+  for i,fragment in ipairs(wanted)do
+   if not (saveNotices[i] and saveNotices[i]:find(fragment,1,true)) then inOrder=false end
+  end
+  check(inOrder,'the save writes exactly its own success notices, in order, and no other line',
+   {notices=saveNotices,wanted=wanted})
   local writer,destination
   if spec.kind=='opened' then writer,destination='UpdateWishlistAssociationAfterSave',1
   elseif spec.active==1 then writer,destination='SetLoadoutWishlistIdentity',1
   else writer='SetFirstLoadoutWishlistIdentity' end
-  guard(#writes==1 and writes[1].fn==writer and writes[1].ok==true
+  check(#writes==1 and writes[1].fn==writer and writes[1].ok==true
    and (destination==nil or writes[1].args[1]==destination),
    'exactly one writer call in total: '..writer..(destination and ' for Saved Build 1' or ' (first run)'),writes)
   local expectedKeys
@@ -443,49 +680,63 @@ local function run(which,report)
   end
   table.sort(expectedKeys)
   local changed=ChangedKeys(before,after)
-  guard(T.Equal(changed,expectedKeys),'exactly the expected store keys change',changed)
-  guard(after.wishlistAssignmentSerial==3,'one new assignment stamp',after.wishlistAssignmentSerial)
+  check(T.Equal(changed,expectedKeys),'exactly the expected store keys change',changed)
+  check(after.wishlistAssignmentSerial==3,'one new assignment stamp',after.wishlistAssignmentSerial)
   local beforeLinks,afterLinks=before.loadoutWishlists or {},after.loadoutWishlists or {}
   if spec.kind=='opened' then
-   guard(T.Equal(afterLinks[1],EXPECTED_OPENED),
+   check(T.Equal(afterLinks[1],EXPECTED_OPENED),
     'Saved Build 1 holds exactly edited Wishlist A: original slot and name, exact ordinary rows, separate permanent design',afterLinks[1])
-   guard(type(writes[1])=='table' and type(writes[1].args[5])=='table' and writes[1].args[5][LOCK]==true,
+   -- The whole assignment map of the injected row, both directions (T.Equal):
+   -- index 1 is the edited record, index 2 the record from before the save,
+   -- and no other index (0, 3, a string key) exists.
+   check(T.Equal(afterLinks,{[1]=EXPECTED_OPENED,[2]=beforeLinks[2]}),
+    'the whole Saved Build map is exactly 1 = edited Wishlist A and 2 = Wishlist B as before, no other index',
+    KeySet(afterLinks))
+   check(type(writes[1])=='table' and type(writes[1].args[5])=='table' and writes[1].args[5][LOCK]==true,
     'the writer receives the separate permanent design')
-   guard(after.firstRunWishlist==nil,'no first-run target appears')
-   guard(T.Equal(after.lockDesignTargetsBySlot,{[EXPECTED_OPENED.key]={[LOCK]=true}}),
+   check(after.firstRunWishlist==nil,'no first-run target appears')
+   check(T.Equal(after.lockDesignTargetsBySlot,{[EXPECTED_OPENED.key]={[LOCK]=true}}),
     'one design bucket for the saved contents, holding only the permanent target',after.lockDesignTargetsBySlot)
   else
    local record
    if spec.active==1 then
     record=afterLinks[1]
-    guard(after.firstRunWishlist==nil,'no first-run target appears')
+    check(after.firstRunWishlist==nil,'no first-run target appears')
+    -- The whole assignment map of the injected row, both directions.
+    check(T.Equal(afterLinks,{[1]=EXPECTED_CREATE,[2]=beforeLinks[2]}),
+     'the whole Saved Build map is exactly 1 = Plan C and 2 = Wishlist B as before, no other index',
+     KeySet(afterLinks))
    else
     record=after.firstRunWishlist
-    guard(T.Equal(beforeLinks,afterLinks),'every Saved Build assignment is unchanged (no slot-1 handoff over an assignment)')
+    -- The whole map against the one from before the save, whose exact key
+    -- set {1,2} the setup above proved.
+    check(T.Equal(beforeLinks,afterLinks),'every Saved Build assignment is unchanged (no slot-1 handoff over an assignment)',
+     KeySet(afterLinks))
    end
-   guard(T.Equal(record,EXPECTED_CREATE),
+   check(T.Equal(record,EXPECTED_CREATE),
     'the destination holds exactly Plan C: exact ordinary rows, separate permanent design',record)
-   guard(DesignBucketOK(after.lockDesignTargetsBySlot,EXPECTED_CREATE.key),
+   check(DesignBucketOK(after.lockDesignTargetsBySlot,EXPECTED_CREATE.key),
     'one design bucket for Plan C holding only the permanent target',after.lockDesignTargetsBySlot)
-   guard(RoleChoiceOK(after.wishlistRoleChoices),
+   check(RoleChoiceOK(after.wishlistRoleChoices),
     'one role choice: Plan C ordinary rows and its one permanent target',after.wishlistRoleChoices)
   end
   local kind=(spec.kind=='create' and spec.active==0) and 'firstRun' or 'assigned'
-  guard(type(result)=='table' and result.kind==kind,'the save result names the assignment that was written',result)
+  check(type(result)=='table' and result.kind==kind,'the save result names the assignment that was written',result)
   if spec.kind=='create' then
    local sent=c.SentDraft()
-   guard(sent=='Plan C','the created draft is marked as sent',sent)
+   check(sent=='Plan C','the created draft is marked as sent',sent)
    H.now=H.now+3.1
    local d2,m2=c.PrepareApply('Plan C')
-   guard(d2==nil and m2=='already_created','pressing Create again for the created draft is refused',{mode=m2})
+   check(d2==nil and m2=='already_created','pressing Create again for the created draft is refused',{mode=m2})
    local n=0;for _,action in ipairs(H.actions)do if action[1]=='upload' then n=n+1 end end
-   guard(n==1,'the repeated Create uploads nothing',n)
+   check(n==1,'the repeated Create uploads nothing',n)
   end
  end
 end
 
+local ADJUDICATED={checks=0,disagreements={},incomplete={}}
 local function runCase(which)
- local report={setup=0,expect=0,guard=0,expectFailures={},guardFailures={}}
+ local report={setup=0,expect=0,guard=0,expectFailures={},guardFailures={},disagreements={}}
  local ok,err=xpcall(function() run(which,report) end,function(e)
   if type(e)=='table' and e.setupFailure then return e end
   return debug.traceback(tostring(e),2)
@@ -496,8 +747,16 @@ local function runCase(which)
  elseif #report.guardFailures>0 then status='GUARD_FAILED'
  elseif #report.expectFailures>0 then status='EXPECT_RED'
  else status='PASS' end
+ if ADJUDICATE then
+  ADJUDICATED.checks=ADJUDICATED.checks+report.expect+report.guard
+  for _,label in ipairs(report.disagreements)do
+   ADJUDICATED.disagreements[#ADJUDICATED.disagreements+1]=which..': '..label
+  end
+  if status=='SETUP_FAILED' or status=='RAISED' then ADJUDICATED.incomplete[#ADJUDICATED.incomplete+1]=which end
+ end
  emit('CASE_RESULT',{case=which,status=status,setupChecks=report.setup,expectChecks=report.expect,
   guardChecks=report.guard,expectFailures=report.expectFailures,guardFailures=report.guardFailures,
+  firstFailure=report.firstFailure,disagreements=ADJUDICATE and report.disagreements or nil,
   setupFailure=type(err)=='table' and err.setupFailure or nil,
   error=(not ok and type(err)~='table') and err or nil})
  return status
@@ -523,6 +782,10 @@ for _,status in ipairs(order)do
  end
 end
 print('SUMMARY wishlist_upload_context '..table.concat(parts,' '))
+if ADJUDICATE then
+ emit('ADJUDICATION',{fixture='wishlist_upload_context',baseline=ADJUDICATE,checks=ADJUDICATED.checks,
+  disagreements=ADJUDICATED.disagreements,incomplete=ADJUDICATED.incomplete})
+end
 if failed then
  error('wishlist_upload_context: '..table.concat(parts,' ')
   ..' (SETUP_FAILED and RAISED are not behavior evidence)',0)

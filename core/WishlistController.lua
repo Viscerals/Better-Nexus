@@ -2052,14 +2052,19 @@ function Controller.New(options)
                 local own = Adapter.ServerWishlistTokenFor(name, echoes)
                 if own then submitting.mirrorTokens[own] = true end
             end
-            -- A host callback replaced or edited the authorizing draft: the
-            -- replacement is never assigned, committed, settled or uploaded
-            -- by this save. Report the partial completion; never repeat upload.
+            -- A host callback replaced the authorizing draft (another draft
+            -- identity or context) or edited it (same identity, other
+            -- contents): the draft now shown is never assigned, committed,
+            -- settled or uploaded by this save. The notice says what this save
+            -- did not write; an earlier assignment of the uploaded Wishlist is
+            -- not touched. Never repeat the upload.
             if not SameAuthorizingDraft() then
                 state.applyRetry = nil
                 notify("|cffff6060Nexus:|r '" .. tostring(name) .. "' was uploaded, but the editor changed "
-                    .. "during the upload, so it was not assigned and local targets were not updated. "
-                    .. "Review and save again.")
+                    .. "during the upload (another draft was opened or this one was edited). This save "
+                    .. "changed no assignment and updated no locked targets, so any assignment it already "
+                    .. "had is kept; nothing is uploaded again. To edit the uploaded Wishlist, open it from "
+                    .. "the Echo Journal.")
                 return false, "uploaded_draft_changed"
             end
             -- The draft is the one uploaded: whatever the commit below rewrites
