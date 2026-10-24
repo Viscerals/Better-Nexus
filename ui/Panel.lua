@@ -230,6 +230,8 @@ local function ModelSignatures(model)
             charges=model.charges,
             -- The inline Auto line (M.AutoNoteFor) is roll content too.
             autoNote=model.autoNote,
+            callboard=Nexus.CallboardStatus and Nexus.CallboardStatus.GetSummary
+                and Nexus.CallboardStatus.GetSummary() or nil,
         }),
         performance = Signature({
             performance=type(model.progress) == "table" and model.progress.performance or nil,
@@ -1726,6 +1728,122 @@ local function ShowCoreProgress(show)
     end
 end
 
+-- Built lazily: EnsureFrame is at the Lua 3.3.5 upvalue ceiling.
+local function EnsureCallboardWidgets()
+    if not frame or frame._callboardLabel then return end
+    local label = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    label:SetText("CALLBOARD")
+    label:SetJustifyH("LEFT")
+    frame._callboardLabel = label
+    local icon = CreateFrame("Button", nil, frame)
+    icon:SetSize(22, 22)
+    icon:EnableMouse(true)
+    local tex = icon:CreateTexture(nil, "ARTWORK")
+    tex:SetAllPoints()
+    tex:SetTexture("Interface\\Icons\\INV_Misc_Bag_10")
+    icon.texture = tex
+    icon:SetScript("OnEnter", function(self)
+        if Nexus.CallboardStatus and Nexus.CallboardStatus.ShowRewardsTooltip then
+            Nexus.CallboardStatus.ShowRewardsTooltip(self)
+        end
+    end)
+    icon:SetScript("OnLeave", function()
+        if Nexus.CallboardStatus and Nexus.CallboardStatus.HideTooltip then
+            Nexus.CallboardStatus.HideTooltip()
+        end
+    end)
+    frame._callboardIcon = icon
+    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    title:SetJustifyH("LEFT")
+    title:SetJustifyV("TOP")
+    title:SetWordWrap(false)
+    title:SetTextColor(1, 0.82, 0)
+    frame._callboardTitle = title
+    local line = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    line:SetJustifyH("LEFT")
+    line:SetJustifyV("TOP")
+    line:SetWordWrap(false)
+    line:SetTextColor(0.85, 0.85, 0.85)
+    frame._callboardLine = line
+    local divider = frame:CreateTexture(nil, "ARTWORK")
+    divider:SetHeight(1)
+    pcall(function() divider:SetTexture(0.3, 0.3, 0.3, 0.65) end)
+    frame._callboardDivider = divider
+end
+
+local function FillCallboard(summary)
+    EnsureCallboardWidgets()
+    if not summary or summary.observed ~= true then
+        SetVisible(frame._callboardLabel, false)
+        SetVisible(frame._callboardTitle, false)
+        SetVisible(frame._callboardLine, false)
+        SetVisible(frame._callboardIcon, false)
+        SetVisible(frame._callboardDivider, false)
+        return false
+    end
+    local callboard = Nexus.CallboardStatus
+    if callboard and callboard.IconTexture and frame._callboardIcon and frame._callboardIcon.texture then
+        frame._callboardIcon.texture:SetTexture(callboard.IconTexture())
+    end
+    frame._callboardLabel:SetText("CALLBOARD")
+    frame._callboardTitle:SetText(summary.title or "Callboard objective")
+    local detail = ""
+    if type(summary.lines) == "table" and summary.lines[1] then
+        detail = tostring(summary.lines[1])
+        if #summary.lines > 1 then
+            detail = detail .. "  |cff888888+" .. (#summary.lines - 1) .. " more|r"
+        end
+    end
+    frame._callboardLine:SetText(detail ~= "" and detail or "|cff888888No objective details|r")
+    SetVisible(frame._callboardLabel, true)
+    SetVisible(frame._callboardIcon, true)
+    SetVisible(frame._callboardTitle, true)
+    SetVisible(frame._callboardLine, true)
+    SetVisible(frame._callboardDivider, true)
+    return true
+end
+
+-- Manual fallback when LayoutMetrics is unavailable (negative Y from TOPLEFT).
+local function PlaceCallboardManual(top)
+    if not frame or not frame._callboardLabel then return end
+    SetPoint(frame._callboardLabel, "TOPLEFT", frame, "TOPLEFT", 12, top)
+    SetPoint(frame._callboardIcon, "TOPLEFT", frame, "TOPLEFT", 12, top - 14)
+    SetPoint(frame._callboardTitle, "TOPLEFT", frame, "TOPLEFT", 38, top - 14)
+    frame._callboardTitle:SetSize(220, 14)
+    SetPoint(frame._callboardLine, "TOPLEFT", frame, "TOPLEFT", 38, top - 28)
+    frame._callboardLine:SetSize(220, 14)
+    if frame._callboardDivider then
+        SetPoint(frame._callboardDivider, "TOPLEFT", frame, "TOPLEFT", 11, top - 45)
+        frame._callboardDivider:SetSize(250, 1)
+    end
+end
+
+local function PlaceCallboardBox(box, layout)
+    if not box or not frame or not frame._callboardLabel then return end
+    local small = layout and layout.small or 11
+    local function place(widget, x, y, w, h)
+        if not widget then return end
+        widget:ClearAllPoints()
+        widget:SetPoint("TOPLEFT", frame, "TOPLEFT", x, -y)
+        widget:SetSize(w, h)
+    end
+    place(frame._callboardLabel, box.x, box.y, box.w, small)
+    place(frame._callboardIcon, box.x, box.y + small + 2, 22, 22)
+    place(frame._callboardTitle, box.x + 26, box.y + small + 2,
+        math.max(1, box.w - 26), 14)
+    place(frame._callboardLine, box.x + 26, box.y + small + 16,
+        math.max(1, box.w - 26), 14)
+    if frame._callboardDivider then
+        place(frame._callboardDivider, box.x - 1, box.y + box.h - 1, box.w + 2, 1)
+    end
+end
+
+local function RenderCallboard(summary, top)
+    if FillCallboard(summary) then
+        PlaceCallboardManual(top)
+    end
+end
+
 local function ShowPerformance(show)
     SetVisible(performanceLabel, show); SetVisible(setLabelText, show)
     SetVisible(dummyLabel, show); SetVisible(dummyValue, show); SetVisible(dummyGlobal, show); SetVisible(dummyGlobalValue, show); SetVisible(dummyHit, show)
@@ -1950,6 +2068,10 @@ local function ApplyPanelLayout(layout, completed)
     PlacePanelBox(setupImportBtn, boxes.setupCreate)
     PlacePanelBox(completeBadge, boxes.completeTitle)
     PlacePanelBox(completeSubtext, boxes.completeText)
+    if boxes.callboard then
+        EnsureCallboardWidgets()
+        PlaceCallboardBox(boxes.callboard, layout)
+    end
     PlacePanelBox(progressLabel, boxes.progressHeader)
     PlacePanelBox(progressValue, boxes.progressValue)
 
@@ -2094,6 +2216,12 @@ local function ApplyModel(model, signatures, roll)
     -- including level 80 and completed-target boards. Toggling Auto off must
     -- never make the control used to turn it back on disappear.
     local showAutoControl = not noBuild and (rollBlock or (not complete and playerLevel < 80))
+    local callboardSummary = Nexus.CallboardStatus and Nexus.CallboardStatus.GetSummary
+        and Nexus.CallboardStatus.GetSummary() or nil
+    -- Callboard belongs with the difficulty / Soul Ash HUD, not the wishlist
+    -- progress block: keep it while an objective is observed, including the
+    -- no-wishlist setup view.
+    local callboardObserved = callboardSummary and callboardSummary.observed == true
     local responsiveLayout
     if Nexus.LayoutMetrics then
         local metricsOk, fontScale, uiScale, revision =
@@ -2121,6 +2249,7 @@ local function ApplyModel(model, signatures, roll)
                     and Nexus.LayoutMetrics.TextRows(bodyText, 248, fontScale)
                     or 0,
                 cardRows=#cards > 0 or (type(roll) == "table" and roll.cardRows) or false,
+                callboard=callboardObserved and true or false,
             })
             if layoutOk and type(candidate) == "table" then
                 responsiveLayout = candidate
@@ -2135,9 +2264,18 @@ local function ApplyModel(model, signatures, roll)
     frame._buildHeaderText:SetText(name and ("|cff7fd5ff" .. ShortName(name, 29) .. "|r" .. (pr.isCommunityPreview and " |cff888888[Preview]|r" or "")) or "|cff7fd5ffNexus|r")
     frame._switchBtn:SetText("My Builds")
 
+    -- LayoutMetrics owns callboard geometry when present; the manual path
+    -- only reserves height and places widgets when that layout is absent.
+    local callboardTop = statusVisible and -98 or -39
+    local callboardExtra = (not responsiveLayout and callboardObserved) and 50 or 0
+    FillCallboard(callboardObserved and callboardSummary or nil)
+    if not responsiveLayout and callboardObserved then
+        PlaceCallboardManual(callboardTop)
+    end
+
     SetVisible(frame._rollArea, rollBlock)
     frame._rollArea:ClearAllPoints()
-    frame._rollArea:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, statusVisible and -98 or -39)
+    frame._rollArea:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, callboardTop - callboardExtra)
     if rollBlock then
         local activeSlot = tonumber(pr.activeSlot) or 0
         -- Auto stays ON while paused; the heading must not say it is acting.
@@ -2228,9 +2366,9 @@ local function ApplyModel(model, signatures, roll)
     -- uses the server HUD. Live-roll content still gets its own fixed block.
     local contentTop
     if rollBlock then
-        contentTop = statusVisible and -220 or -161
+        contentTop = (statusVisible and -220 or -161) - callboardExtra
     else
-        contentTop = statusVisible and -103 or -44
+        contentTop = (statusVisible and -103 or -44) - callboardExtra
     end
     local statusHeightReduction = statusVisible and 0 or 59
 
@@ -2252,7 +2390,7 @@ local function ApplyModel(model, signatures, roll)
         -- (Create Wishlist is only needed first if no wishlist exists yet),
         -- so it sits right under the instructions instead of sharing a row
         -- with an equally-weighted second option.
-        frame:SetHeight((rollBlock and 428 or 278) - statusHeightReduction)
+        frame:SetHeight((rollBlock and 428 or 278) - statusHeightReduction + callboardExtra)
         SetPoint(setupText, "TOP", frame, "TOP", 0, contentTop - 18)
         local assignment=model.assignment or {}
         local restoring=assignment.state=="restoring" or assignment.state=="loading"
@@ -2271,7 +2409,8 @@ local function ApplyModel(model, signatures, roll)
         -- Once a build is complete, progress text stops being the purpose of the
         -- HUD. The panel becomes a compact replacement for the stock difficulty /
         -- Soul Ash tracker, with Nexus navigation and the player's best DPS.
-        frame:SetHeight((showPerformance and (rollBlock and 430 or 286) or (rollBlock and 292 or 168)) - statusHeightReduction)
+        frame:SetHeight((showPerformance and (rollBlock and 430 or 286) or (rollBlock and 292 or 168))
+            - statusHeightReduction + callboardExtra)
         -- completeBadge/completeSubtext were created and toggled everywhere but
         -- never given text anywhere in this file -- when the server-status HUD
         -- has nothing to show (statusVisible false) and Performance is off, the
@@ -2311,9 +2450,13 @@ local function ApplyModel(model, signatures, roll)
         -- most wishlists design zero locked-slot targets, so the extra
         -- height stays reserved only while it's actually needed.
         local toLockExtra = #toLockNamesCache > 0 and 34 or 0
-        frame:SetHeight((showPerformance and (rollBlock and 448 or 325) or (rollBlock and 388 or 267)) - statusHeightReduction + toLockExtra)
-        SetPoint(progressLabel, "TOPLEFT", frame, "TOPLEFT", 12, contentTop)
-        SetPoint(progressValue, "TOPLEFT", frame, "TOPLEFT", 12, contentTop - 17)
+        if not responsiveLayout then
+            frame:SetHeight((showPerformance and (rollBlock and 448 or 325) or (rollBlock and 388 or 267))
+                - statusHeightReduction + toLockExtra + callboardExtra)
+        end
+        local progressTop = contentTop
+        SetPoint(progressLabel, "TOPLEFT", frame, "TOPLEFT", 12, progressTop)
+        SetPoint(progressValue, "TOPLEFT", frame, "TOPLEFT", 12, progressTop - 17)
         -- M4 (UX-13): rolled copies this run, with the locked targets still to
         -- lock; never "complete" while a locked target is outstanding. The
         -- short form keeps clear of the MISSING TOMES box on the same row.
@@ -2322,18 +2465,18 @@ local function ApplyModel(model, signatures, roll)
             and text.RunProgressText(owned, total, #toLockNamesCache, #unknownTomesCache > 0)
             or string.format("%d / %d rolled copies this run", owned, total))
 
-        SetPoint(needLabel, "TOPLEFT", frame, "TOPLEFT", 12, contentTop - 42)
+        SetPoint(needLabel, "TOPLEFT", frame, "TOPLEFT", 12, progressTop - 42)
         needLabel:SetText("STILL NEEDED")
 
         if #unknownTomesCache > 0 then
             -- Tomes are metadata for the run, not a third content column.
             -- Keep them on the progress line and preserve two clean Echo columns.
             tomesLabel:SetText("MISSING\nTOMES")
-            SetPoint(tomesLabel, "TOPRIGHT", frame, "TOPRIGHT", -26, contentTop - 18)
+            SetPoint(tomesLabel, "TOPRIGHT", frame, "TOPRIGHT", -26, progressTop - 18)
             tomesLabel:SetSize(58, 24)
             tomesLabel:SetJustifyH("RIGHT")
             tomesLabel:SetJustifyV("TOP")
-            SetPoint(tomesValue, "TOPRIGHT", frame, "TOPRIGHT", -10, contentTop - 18)
+            SetPoint(tomesValue, "TOPRIGHT", frame, "TOPRIGHT", -10, progressTop - 18)
             tomesValue:SetSize(18, 14)
             tomesValue:SetJustifyH("RIGHT")
             tomesValue:SetText(tostring(#unknownTomesCache))
@@ -2352,7 +2495,7 @@ local function ApplyModel(model, signatures, roll)
         end
         needText:SetWidth(112)
 
-        SetPoint(needText, "TOPLEFT", frame, "TOPLEFT", 12, contentTop - 58)
+        SetPoint(needText, "TOPLEFT", frame, "TOPLEFT", 12, progressTop - 58)
         local needLines = {}
         local shown = math.min(#missingNamesCache, 2)
         for i = 1, shown do
@@ -2363,8 +2506,8 @@ local function ApplyModel(model, signatures, roll)
         if #missingNamesCache > shown then needLines[#needLines + 1] = "+" .. (#missingNamesCache - shown) .. " more" end
         needText:SetText(#needLines > 0 and table.concat(needLines, "\n") or "|cff888888No remaining demand|r")
 
-        SetPoint(shedLabel, "TOPLEFT", frame, "TOPLEFT", 142, contentTop - 42)
-        SetPoint(shedText, "TOPLEFT", frame, "TOPLEFT", 142, contentTop - 58)
+        SetPoint(shedLabel, "TOPLEFT", frame, "TOPLEFT", 142, progressTop - 42)
+        SetPoint(shedText, "TOPLEFT", frame, "TOPLEFT", 142, progressTop - 58)
         shedText:SetWidth(108)
         local shedLines = {}
         local shedShown = math.min(#shedNamesCache, 2)
@@ -2373,8 +2516,8 @@ local function ApplyModel(model, signatures, roll)
         shedText:SetText(#shedLines > 0 and table.concat(shedLines, "\n") or "|cff888888None|r")
 
         if #toLockNamesCache > 0 then
-            SetPoint(frame.toLockLabel, "TOPLEFT", frame, "TOPLEFT", 12, contentTop - 90)
-            SetPoint(frame.toLockText, "TOPLEFT", frame, "TOPLEFT", 12, contentTop - 106)
+            SetPoint(frame.toLockLabel, "TOPLEFT", frame, "TOPLEFT", 12, progressTop - 90)
+            SetPoint(frame.toLockText, "TOPLEFT", frame, "TOPLEFT", 12, progressTop - 106)
             frame.toLockText:SetWidth(238)
             local toLockLines = {}
             local toLockShown = math.min(#toLockNamesCache, 2)
@@ -2455,6 +2598,13 @@ local function ApplyModel(model, signatures, roll)
 
     RenderBestDps(model, complete, noBuild, activeRoll, statusVisible)
     ApplyPanelLayout(responsiveLayout,complete)
+    -- Re-assert after ApplyPanelLayout: geometry owns positions; this owns
+    -- visibility so complete/setup boards never leave a stale CALLBOARD row.
+    FillCallboard(callboardObserved and callboardSummary or nil)
+    if callboardObserved and responsiveLayout and responsiveLayout.boxes
+        and responsiveLayout.boxes.callboard then
+        PlaceCallboardBox(responsiveLayout.boxes.callboard, responsiveLayout)
+    end
     if frame._autoBtn:IsShown() then
         frame._autoBtn:SetText(AutoLabel(model.auto))
     end

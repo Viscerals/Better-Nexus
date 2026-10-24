@@ -381,6 +381,7 @@ local function PanelKey(spec)
         (tonumber(spec.unknownTomes) or 0) > 0 and 1 or 0,
         spec.orbButton and 1 or 0,tonumber(spec.guidanceRows) or 0,
         spec.cardRows and 1 or 0,
+        spec.callboard and 1 or 0,
     }, "|")
 end
 
@@ -413,6 +414,14 @@ function M.Panel(spec)
         local height = math.max(52, normal + small * 2 + gap * 2)
         Add(layout,"status",10,cursor,width-20,height)
         cursor = cursor + height + gap
+    end
+    if spec.callboard then
+        -- Label + reward pouch row + one objective line + bottom divider.
+        -- Sits with the difficulty / Soul Ash HUD, including the no-wishlist
+        -- setup view.
+        local callboardH = small + 34 + math.max(2, math.floor(gap / 3))
+        Add(layout,"callboard",12,cursor,width-24,callboardH)
+        cursor = cursor + callboardH + gap
     end
     if spec.activeRoll then
         local height = math.max(104, small * 6 + gap * 4)
@@ -525,6 +534,9 @@ function M.Panel(spec)
     if not spec.noBuild and not spec.complete
         and (tonumber(spec.toLockCount) or 0) > 0 then
         legacyMinimum = legacyMinimum + 34
+    end
+    if spec.callboard then
+        legacyMinimum = legacyMinimum + 50
     end
     local footerY = math.max(cursor + gap,
         legacyMinimum - footerHeight - 7)

@@ -569,6 +569,9 @@ function Lifecycle.New(options)
         if Nexus.ServerStatus and Nexus.ServerStatus.Init then
             Nexus.ServerStatus.Init()
         end
+        if Nexus.CallboardStatus and Nexus.CallboardStatus.Init then
+            Nexus.CallboardStatus.Init()
+        end
         Panel.Init({
             ToggleAuto=function()
                 local enabled = automation.ToggleAuto()
