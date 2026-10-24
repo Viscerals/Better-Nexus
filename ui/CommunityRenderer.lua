@@ -35,7 +35,7 @@ local SyncModeDialog = {
     MODES = {"automatic", "manual", "off"},
     LABEL = {automatic="Automatic", manual="Manual", off="Off"},
     HELP = {
-        automatic="May send without a click: login requests, answers to other users, new character-best DPS (Echoes, locked Echoes, player info) with their Record Loadout pages.",
+        automatic="May send without a click: login requests, answers and newly eligible character-best DPS on Training Dummy or Lich King (Echoes, any locked Echoes, player info).",
         manual="Sends only what you start: Sync Now, and a Share with the answers to players who fetch it.",
         off="Sends nothing. Nexus still receives, and local records are kept.",
     },

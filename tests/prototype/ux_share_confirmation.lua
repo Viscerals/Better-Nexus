@@ -54,6 +54,12 @@
 -- answers and fits its 386x51 box under the default and 16 px offline models
 -- and the runtime conservative model (models only, not native pixels);
 -- viewing the dialog saves no mode and starts no grant, admission or send.
+-- M5 qualifier correction (S14), EXPECT (fails on fc43f4b5 by design, after
+-- the dialog and its Automatic option are reached): the Automatic help says
+-- the DPS it may send is newly eligible (an eligibility or qualifying term)
+-- and is the character's best for an encounter (Training Dummy and Lich King
+-- named, or "encounter"), not a best across all encounters. Its former
+-- "with their Record Loadout pages" suffix is not a required clause.
 -- Fake boundary, disclosed: for the Automatic and Off notes SyncModePolicy.Mode
 -- is replaced only during the one synchronous click that builds the note and
 -- restored before any time passes; nothing is applied, saved, queued or sent,
@@ -743,6 +749,16 @@ C.scenario('S14 the Automatic option of the Sync mode dialog names its DPS sends
  C.expect(Word(h,'may') and (Has(h,"character's best") or Has(h,'character-best')) and Has(h,'dps')
   and Has(h,'echoes') and Has(h,'locked') and Has(h,'player info'),
   'S14: the Automatic option says a new character-best DPS may be sent with its Echoes, locked Echoes and player info',help)
+ -- Its qualifiers (M5 qualifier correction), read from the help's DPS
+ -- sentence, not one copied sentence: that DPS is a newly eligible one (an
+ -- eligibility or qualifying term), and the character's best for an
+ -- encounter (both encounter names, or "encounter"), not across all of them.
+ local dpsHelp=Sentence(help,function(s) return Has(s,'dps') end)
+ C.expect(dpsHelp~=nil and (dpsHelp:find('%f[%a]eligib')~=nil or dpsHelp:find('%f[%a]qualif')~=nil),
+  'S14: the Automatic option says the DPS it may send is newly eligible (an eligibility or qualifying term)',help)
+ C.expect(dpsHelp~=nil and (Has(dpsHelp,'training dummy') and Has(dpsHelp,'lich king')
+   or dpsHelp:find('%f[%a]encounter')~=nil) and not Has(dpsHelp,'all encounters'),
+  'S14: the Automatic option scopes that character best to an encounter (Training Dummy or Lich King), not a best across all encounters',help)
  C.guard(Has(h,'without a click') and Has(h,'request') and Has(h,'answer'),
   'S14: it still names the requests and answers Automatic may send without a click',help)
  C.guard(not Has(h,'personal') and not Word(h,'every') and not Word(h,'always') and not Word(h,'will'),
