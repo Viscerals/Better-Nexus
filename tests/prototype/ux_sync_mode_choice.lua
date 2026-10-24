@@ -571,7 +571,10 @@ local function M2Current(d,tag,state,label)
  local lower=text:lower()
  C.expect(text:find('Current: Automatic',1,true)~=nil,tag..': effective Automatic is stated',text)
  if state=='recognized' then
-  C.expect(text:find(label,1,true)~=nil and lower:find('not applied',1,true)~=nil
+  -- Check the saved-choice clause independently: the effective Automatic
+  -- prefix must not stand in for a missing saved Automatic label.
+  local savedClause=lower:match('saved choice%s+(.+)') or ''
+  C.expect(V.Names(savedClause,label) and savedClause:find('not applied',1,true)~=nil
    and not lower:find('no choice saved',1,true),tag..': saved recognized label is present but not applied',text)
  elseif state=='invalid' then
   C.expect(lower:find('invalid',1,true)~=nil and not lower:find('no choice saved',1,true),
