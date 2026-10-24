@@ -280,3 +280,63 @@ for _,case in ipairs({{'completion hold',completionHold},{'attribution hold',att
 end
 if #logFailures>0 then error(table.concat(logFailures,'\n'),0)end
 print('PASS R6a3 persistent hold revision stability and real Stop transitions')
+
+-- R6a4: a temporary assignment display failure is not an observation of the
+-- choice getter. Keep an already classified post-archive fact across that
+-- failure; a real unavailable state read must still withhold spending.
+local statusFailures={}
+for _,fault in ipairs({'assignment','state'})do
+ local ok,err=pcall(function()
+  local R=dofile('tests/prototype/orb_recovery_support.lua')
+  local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={}
+  assert(M.Start(6));local server=R.Server(H)
+  H.service.RequestChoice=function()
+   SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)
+   server.queue[#server.queue+1]={op=16,body=''}
+  end
+  H.Offer();H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+  for _=1,100 do
+   local archive=R.SavedRow('orbRecoveryArchive')
+   if archive and #archive==1 then break end
+   H.Advance(.25)
+  end
+  assert(H.Count('orb-spend')==1 and #R.SavedRow('orbRecoveryArchive')==1,
+   'SETUP pause in actual archive-to-next-command gap')
+  assert(M.Pause());assert(M.CompactStatus().canResume,
+   'SETUP a classified quiet post-recovery observation offers explicit Resume')
+  local assignment,read=A.AssignedWishlist,A.Orbs.Read;local reads=0
+  A.Orbs.Read=function(...)
+   reads=reads+1
+   if fault=='state' then return nil,'Synthetic unavailable state read','state' end
+   return read(...)
+  end
+  if fault=='assignment' then
+   A.AssignedWishlist=function()return{state='restoring',note='Synthetic assignment restore wait'}end
+  end
+  local called,view=pcall(M.Status,false)
+  A.AssignedWishlist=assignment;A.Orbs.Read=read
+  assert(called and view.error and not view.canStart and not view.canResume,
+   'SETUP display reports the actual temporary refusal without a start/resume affordance')
+  assert(reads==(fault=='assignment' and 0 or 1),
+   'SETUP only the real state failure attempted to sample the choice getter')
+  print('SETUP R6a4 '..fault..' display failure PASS')
+  local requests=server.requests
+  if fault=='assignment' then
+   assert(M.Resume() and H.Count('orb-spend')==2,
+    'EXPECT assignment-only display failure does not erase the retained choice observation')
+  else
+   assert(not M.Resume() and H.Count('orb-spend')==1,
+    'GUARD actual state read failure still withholds the unclassified permit')
+   server.Push(16,'')
+   assert(H.Count('orb-spend')==1 and M.Resume() and H.Count('orb-spend')==2,
+    'GUARD only a genuinely new exact empty observation restores explicit Resume')
+  end
+  assert(server.requests==requests,'GUARD display failure/Resume creates no replacement observation query')
+  assert(M.CompactStatus().recoveries==1 and #R.SavedRow('orbRecoveryArchive')==1,
+   'GUARD display handling does not fabricate recovery or archive progress')
+  M.Stop()
+ end)
+ if not ok then statusFailures[#statusFailures+1]=fault..': '..tostring(err)end
+end
+if #statusFailures>0 then error(table.concat(statusFailures,'\n'),0)end
+print('PASS R6a4 non-observation display failure and actual state-failure control')

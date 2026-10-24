@@ -3447,8 +3447,14 @@ function M.Status(detail)
     init();local m,err,failed,stage=inspect(true);local a=m and m.assignment or failed or assigned()
     local resumeRead=m and m.s
     if run.postRecovery and run.state=="PAUSED" then
-        local ok=resumeRead and pcall(RC.postCheck,resumeRead,a)
-        if not ok then RC.postUnknown() end
+        if resumeRead then
+            local ok=pcall(RC.postCheck,resumeRead,a)
+            if not ok then RC.postUnknown() end
+        elseif stage~="assignment" and stage~="targets" then
+            -- Assignment/target refusals precede the state read; only a
+            -- failed state observation can erase its retained choice fact.
+            RC.postUnknown()
+        end
     end
     -- A held run inspects its approved targets, while this view shows the
     -- current assignment. Separately valid rolled/locked inputs can project
