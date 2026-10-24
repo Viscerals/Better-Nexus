@@ -94,3 +94,117 @@ for _,case in ipairs({
 end
 if #failures>0 then error(table.concat(failures,'\n'),0) end
 print('PASS R6a1 terminal late-settlement cases; checks='..checks)
+
+-- R6a2: an exception from the final pre-host guard is known-unsent, not
+-- ambiguous spending. Inject only at the real adapter callback boundary,
+-- after the real runtime has durably saved its reservation.
+local guardFailures,guardChecks={},0
+local function guardCase(name,ownerGetter,manual)
+ local H,M,A,O=S.Fresh()
+ H.perks.currentChoice={};H.OrbPlan({{spellId=410002,quality=2,stacks=2}})
+ local B=A.Orbs;local spend=B.Spend;local ownerKey=Nexus.Store.CurrentOwnerKey
+ local inGuard=false;local sawSaved=false;local sourceKey;local returnedKind,returnedStatus
+ Nexus.Store.CurrentOwnerKey=function(...)
+  if inGuard then error('synthetic final-guard owner lookup failure') end
+  return ownerKey(...)
+ end
+ B.Spend=function(token,key,expected,guard)
+  sourceKey=key
+  local accepted,kind,reason,status=spend(token,key,expected,function(live)
+   local saved=Nexus.Store.State().orbRefinement.pending
+   sawSaved=saved~=nil and saved.spendConfirmed~=true
+    and M.CompactStatus().reserved==1 and H.Count('orb-spend')==0
+   assert(sawSaved,'SETUP '..name..': real durable unsent reservation precedes guard')
+   if not ownerGetter then error('synthetic final-guard callback failure') end
+   -- Restore the injected getter before rethrowing, so runtime cleanup has
+   -- its normal Store boundary. The actual production guard is still called.
+   inGuard=true
+   local ok,allowed,why=pcall(guard,live)
+   inGuard=false
+   if not ok then error(allowed,0) end
+   return allowed,why
+  end)
+  returnedKind,returnedStatus=kind,status
+  return accepted,kind,reason,status
+ end
+ local ok=pcall(H.Approve,6,false,manual)
+ inGuard=false;Nexus.Store.CurrentOwnerKey=ownerKey;B.Spend=spend
+ assert(sawSaved,'SETUP '..name..': guard-only exception reached after durable save')
+ print('SETUP R6a2 '..name..' PASS')
+ local function expect(value,message)
+  guardChecks=guardChecks+1
+  if not value then guardFailures[#guardFailures+1]=name..': '..message end
+ end
+ local view=M.Status(false)
+ expect(ok,'EXPECT guard exception is contained at the adapter boundary')
+ expect(returnedKind=='REJECTED' and returnedStatus=='GUARD_ERROR','EXPECT typed known-unsent guard rejection')
+ expect(not view.pending and Nexus.Store.State().orbRefinement.pending==nil,'EXPECT unsent receipt clears in memory and durable Store')
+ expect(view.spent==0 and view.reserved==0 and (view.uncertain or 0)==0,'EXPECT no phantom known or uncertain exposure')
+ expect(H.Count('orb-spend')==0 and H.Count('take')==0,'EXPECT no host spend or selection before guard acceptance')
+ expect(view.state=='PAUSED' and not view.running,'GUARD rejection pauses without automatic retry')
+ local resumed=M.Resume()
+ local first
+ for _,action in ipairs(H.actions)do if action[1]=='orb-spend' then first=action[2];break end end
+ expect(resumed and H.Count('orb-spend')==1,'EXPECT explicit Resume can make the first actual submission after the fault is removed')
+ expect(first==tonumber(sourceKey:match('^(%d+):')),'GUARD known-unsent rejection restores the original manual source quota')
+ M.Stop()
+end
+for _,case in ipairs({{'callback exception',false,false},{'runtime owner getter exception',true,true}})do
+ local ok,err=pcall(guardCase,unpack(case))
+ if not ok then guardFailures[#guardFailures+1]='SETUP '..case[1]..': '..tostring(err) end
+end
+if #guardFailures>0 then error(table.concat(guardFailures,'\n'),0) end
+print('PASS R6a2 known-unsent guard cases; checks='..guardChecks)
+
+-- The same exception class can occur after an actual bounded archive granted
+-- a one-use post-recovery permit. An unavailable final transport check must
+-- not publish a classified empty choice or a ready Resume affordance.
+do
+ local R=dofile('tests/prototype/orb_recovery_support.lua')
+ local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={}
+ local B=A.Orbs;local spend=B.Spend;local hit=false;local boundary
+ B.Spend=function(token,key,expected,guard)
+  local accepted,kind,reason,status=spend(token,key,expected,function(live)
+   local archive=R.SavedRow('orbRecoveryArchive')
+   if H.Count('orb-spend')==1 and archive and #archive==1 then
+    assert(R.Saved() and M.CompactStatus().reserved==1,
+     'SETUP real next unsent receipt follows the actual unconfirmed archive')
+    hit=true
+    local original=B.TransportStatus;B.TransportStatus=function()return nil end
+    local ok,allowed,why=pcall(guard,live)
+    B.TransportStatus=original
+    assert(not ok,'SETUP real postCheck rejects unavailable transport inside the final guard')
+    error(allowed,0)
+   end
+   return guard(live)
+  end)
+  if hit then boundary=status end
+  return accepted,kind,reason,status
+ end
+ assert(M.Start(6))
+ local server=R.Server(H)
+ H.service.RequestChoice=function()
+  SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)
+  server.queue[#server.queue+1]={op=16,body=''}
+ end
+ H.Offer();H.perks.pendingSelectSpellId=nil;H.perks.currentChoice=nil;O.offer=false
+ for _=1,100 do if hit then break end;H.Advance(.25) end
+ B.Spend=spend
+ assert(hit,'SETUP actual admitted recovery reached the next final guard')
+ print('SETUP R6a2 post-recovery final guard PASS')
+ local view=M.CompactStatus()
+ assert(boundary=='GUARD_ERROR' and view.state=='PAUSED' and not view.pending and R.Saved()==nil,
+  'GUARD post-recovery fault is typed known-unsent and clears its new receipt')
+ assert(view.reserved==0 and view.spent==1 and view.uncertain==0 and view.recoveries==1
+  and view.unconfirmedResults==1 and #R.SavedRow('orbRecoveryArchive')==1,
+  'GUARD failed guard does not invent another exposure, result, check or archive')
+ assert(H.Count('orb-spend')==1 and H.Count('take')==1,'GUARD failed final check invokes no second host action')
+ assert(not view.canResume,'EXPECT final guard failure withholds unclassified post-recovery Resume')
+ assert(not M.Resume() and H.Count('orb-spend')==1,'EXPECT no permit progress is inferred from the guard exception')
+ server.Push(16,'')
+ assert(H.Count('orb-spend')==1,'GUARD fresh observation alone does not restart the paused run')
+ assert(M.Resume() and H.Count('orb-spend')==2,
+  'GUARD a genuinely newer exact empty observation permits one explicit fresh submission')
+ M.Stop()
+ print('PASS R6a2 post-recovery guard classification and fresh-observation control')
+end

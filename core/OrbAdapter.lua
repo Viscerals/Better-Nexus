@@ -573,7 +573,8 @@ function O.Spend(token,key,expected,guard)
     end
     local id=tonumber(tostring(key):match("^(%d+):%d+$"));if not id then return nil,"REJECTED","Invalid source." end
     if guard then
-        local allowed,why=guard(s)
+        local checked,allowed,why=pcall(guard,s)
+        if not checked then return nil,"REJECTED","The final Orb protection check failed. No Orb was sent.","GUARD_ERROR" end
         if allowed~=true then return nil,"REJECTED",why or "Assignment or source protection changed before submission. Resume only after reviewing the current assignment." end
     end
     -- No diagnostic callback may intervene between the last guard and host.
