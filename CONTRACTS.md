@@ -84,9 +84,11 @@ This file has two parts.
   count, the limit and the configured maximum, archives the saved receipt
   unchanged in the character row key `orbRecoveryArchive`, sends no spend and no
   choice (only the read-only refresh requests that Recheck also sends) and is
-  never automatic. A passive observer of the game's own addon-message prefix
-  feeds its strict check; it registers no handler, replaces nothing and sends
-  nothing.
+  never automatic. An incoming passive observer of the game's own addon-message
+  prefix feeds its strict check; it registers no opcode handler and sends
+  nothing. The separate live check requests the current choice and observes
+  outgoing sends with a secure post-hook. That hook may change the global
+  function identity; the original transport implementation is still invoked.
 - **Attribution-only explicit exit.** A stopped receipt, restored or from the
   current session, may use that same checked Continue path when a fresh exact
   distinct chosen gain is actually owned and attribution alone prevents
@@ -115,9 +117,11 @@ This file has two parts.
 - **Downgrades.** New receipts carrying attribution risk or unknown exposure use
   `attributionFormat=1` and retain their real GUID in `attributionOwner`, with
   legacy `guid` absent. The original loadout and other observations are unchanged.
-  Public `a43cf27` Runtime+Adapter cannot interpret that owner identity: its
-  existing owner guard retains the pending receipt and ordinary-action blocker,
-  and refuses its no-choice Continue. The current owner validates and reads the
+  Read-only source inspection of public `a43cf27` Runtime+Adapter shows that it
+  cannot interpret that owner identity: its existing owner guard retains the
+  pending receipt and ordinary-action blocker, and refuses its no-choice Continue.
+  That exact pair was not executed; archive-key retention tests establish a
+  separate data-preservation boundary. The current owner validates and reads the
   versioned identity. Unknown/conflicting versions fail closed. This is a local
   receipt representation, with no global Store migration or fabricated facts.
   Archive byte retention alone is a separate, weaker compatibility claim.

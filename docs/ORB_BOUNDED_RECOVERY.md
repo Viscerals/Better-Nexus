@@ -7,7 +7,8 @@ Start approves the displayed maximum and allows up to **two recovery checks in
 that session run**. Neither a successful replacement, Pause/Resume nor elapsed
 time renews this allowance. Stop cancels further actions. Logout/reload restores
 only the passive unresolved receipt; it cannot restore run authorization.
-World entry without a preceding leave also revokes that authorization.
+World entry without a preceding leave pauses the run; further action requires
+explicit Resume and its current guards.
 
 ## New approval and finite exit space
 
@@ -168,10 +169,9 @@ an empty reply.
 
 At approved Confirm, a secure post-hook of `SendAddonMessage` is installed when
 available. `hooksecurefunc` may change the global function identity; Nexus does
-not replace the transport implementation or register a native opcode handler.
-The installed observation must remain available and unchanged. The original
-transport implementation is not substituted; a secure post-hook may change the
-global function identity. The query must synchronously
+not substitute the transport implementation: the original is still invoked.
+No native opcode handler is registered. The installed observation must remain
+available and unchanged. The query must synchronously
 produce an observed bare `16` send. Any own exact framed-empty `16\t` send during
 the check refuses it, independently of echo counts; a framed send within the
 15-second pre-check lookback also refuses admission. No raw payload is retained.
@@ -279,7 +279,10 @@ current refusal; both status views withhold it. Unknown reads keep the last
 classified transport ordinal, so an intervening rejected or nonquiet event is
 still checked after reads recover. Only a classified exact empty reply can
 restore an uncertain choice fact, with all other guards still valid; it cannot
-undo revocation. Paused checks collect facts without gaining action authority.
+undo revocation. A paused unresolved receipt still collects observations without
+gaining action authority. A paused post-archive permit with no pending receipt
+keeps no full-read pump loop: the full status view or explicit Resume classifies
+its retained transport backlog. Resume performs a fresh action read.
 The approved exposure limit and zero-resource terminal are evaluated before a
 permit wait. An actual host-false result consumes the one-use recovery permit,
 using the Adapter's fourth typed `HOST_FALSE` return after actual host crossing;
@@ -296,9 +299,5 @@ reports availability, outgoing framing counts, actual archive kind/confidence
 and consent policy, with observed run spends separate from each attempt's
 unknown exposure. Full usage and compact-strip text is available on hover.
 
-Synthetic query-callback cancellation characterizations observe one query, zero
-admissions, zero archives and only the original spend for both Pause and Stop.
-They do not establish an unbounded query/spend loop. Production Store invokes
-its durable mutator once; scratch-probe repetition is a separate test boundary,
-not grounds for a Store redesign. Native clipping, timing and protocol identity
-remain unverified.
+Native clipping, timing, protocol identity and global observer costs remain
+unverified.

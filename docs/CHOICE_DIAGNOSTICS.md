@@ -11,8 +11,10 @@ freshness.
   `GetCurrentChoice` read. No additional native read is made. A plain dense
   response containing one to three valid spell-ID rows is `present`; a plain
   explicit empty table is `absent`. Nil, errors, missing APIs and malformed
-  responses are `unknown`. The inspected native cache can be nil after empty or
-  unparseable replies; nil alone cannot establish absence.
+  responses are `unknown`. In the authorized inert ProjectEbonhold metadata v37
+  source (`THIRD_PARTY.md` records the SHA-256 and `GetCurrentChoice`/opcode16
+  symbols), the cache can be nil after empty or unparseable replies. This does
+  not verify the installed tester/client version; nil alone cannot establish absence.
 - `observedAt` is whole client uptime seconds, not UTC. `age` is elapsed client
   time since that evaluation. `recent` means at most one client second old;
   it is a diagnostic sampling bound, never an action or server-response gate.

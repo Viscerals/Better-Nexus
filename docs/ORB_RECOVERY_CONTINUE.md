@@ -79,7 +79,7 @@ new diagnostic field. A failed mandatory write is never retried to admit an acti
 mandatory success, at most one optional journal write is attempted. Diagnostic rejection,
 error or invalid data falls back to session-only evidence and cannot reject that original
 receipt write. This adds one bounded Store attempt on the normal successful live write
-path; its cost is measured separately. Stable reads add no writes. `unsaved`
+path; its cost is unmeasured here. Stable reads add no writes. `unsaved`
 and `durableRetained` distinguish memory observations from a verified Store write. Disk
 durability still depends on the game's normal save; a process crash is not covered.
 
@@ -139,10 +139,12 @@ crash before that is not covered and is not claimed.
 
 ## Part 2a: the passive transport observer (core/OrbAdapter.lua)
 
-The authorized inert client source reference (not a verified tester/deployed installation) delivers
-server messages through one `CHAT_MSG_ADDON` frame, keeps one handler per opcode and checks the
-prefix and the framing, not the sender or the channel. The observer listens to the same event in
-a frame of its own. It registers no opcode handler, replaces nothing, patches no client file and
+The client choice-cache and request facts use the authorized inert ProjectEbonhold
+metadata version 37 reference, with the exact source SHA-256 and symbols in
+`THIRD_PARTY.md`; installed tester/deployed version equality is unverified.
+The incoming observer listens to `CHAT_MSG_ADDON`
+in a frame of its own, classifying the prefix, framing, sender and channel.
+It registers no opcode handler, replaces no game handler, patches no client file and
 sends nothing. It reads the game's own prefix, which no other Nexus code does; it keeps only
 parsed numbers and enumerated codes, never a sender, a name or a payload.
 
@@ -152,8 +154,9 @@ parsed numbers and enumerated codes, never a sender, a name or a payload.
 * Class Q (qualifying, opcode 1220 only): exact prefix, the whisper channel, a sender equal to
   the player's own exact name (a known identity; no cross-realm or short-name alias), a tab and a
   non-empty body, no segmentation, exactly three fields, canonical integers of at most six
-  digits. This follows the strict convention of EbonAPI 2.1.1's bridge. It is a source-backed
-  expectation, not proof of the real server's sender.
+  digits. The whisper/self-name convention follows EbonAPI 2.1.1's strict bridge,
+  a distinct source reference from the v37 client cache/request facts. This is a
+  source-backed expectation, not proof of the real server's sender or channel.
 * Class A: admitted (sender and channel pass) but not qualifying, or an opcode that is followed
   by arrival only (16 offers, 18 ownership, 540 and 542 slot data, 1000 pick results). For those
   opcodes a segmented message is tracked by fragment: the game calls its handler only when every
@@ -249,10 +252,9 @@ actual distinct owned gain, never which operation caused it. `lateN` counts up t
 99, while `late` retains at most four known flat annotations, including
 `events_lost`; they never rewrite the immutable receipt or identify a server action.
 
-Budget review (measured in `orb_recovery_store_compat`, deidentified 034 shape with three full
-pick entries): the current fixture measures 220 edges, 3,091 bytes, depth 4.
-This one shape is not a universal bound on retained unknown fields; admission
-uses the fixed limits and reserves supported future late growth. The deepest table is
+The `orb_recovery_store_compat` fixture covers a receipt with three full pick
+entries. One fixture shape is not a universal bound on retained unknown fields;
+admission uses fixed limits and reserves supported future late growth. The deepest table is
 row (1) > archive (2) > entry (3) > receipt (4) > picks (5) > one pick (6): exactly at the Store's
 own depth bound of 6, not past it. There is no margin: the entry cap (depth 4 below the archive)
 refuses anything deeper, so a later change that adds a level is refused, not written.
@@ -263,8 +265,10 @@ fixture digests pass Runtime history validation; actual capacity branch fixtures
 use distinct entries produced by the real checked Continue path.
 Refuse, never evict, never repair, never delete: a full archive, a malformed one, one written by a
 newer format (`v` above 1), an oversized receipt, an unverified write.
+An absent archive key is empty; a present `false` archive value is malformed,
+is preserved, and refuses Continue and new-run admission.
 
-### Logging for phase two
+### Session and archive diagnostics
 
 Session (the support report, `Nexus.SupportReport.OrbLines`): the strict-path counters (qualifying,
 admitted, rejected; not accepted by identity, sender, channel, segmentation, absent third field,
@@ -280,7 +284,7 @@ sender or player identity is added to these bounded transport annotations.
 The original receipt intentionally retains its original source/choice keys, owned
 map and bounded raw-pick board evidence; those are not transport correlation IDs.
 
-### What stays uncertain (accepted by the owner for phase one)
+### Accepted residual uncertainty for explicit Continue
 
 * the server may still apply a late result for the old action; Nexus reads it as an ordinary change
   and does not link it;
@@ -340,7 +344,5 @@ it does not claim every restored record remains byte-identical after new evidenc
 The restored attribution check requires this load's baseline and a later fresh
 ownership observation; old lifetime selection stamps do not substitute for it.
 
-Exact source-pin executions and failures are retained outside product source.
-Test assertion names describe controls, not proof that every historical category
-was executed RED on one pin. Native timing, fonts, sender/channel conventions,
+Native timing, fonts, sender/channel conventions,
 installed tester version and global observer costs remain unverified.

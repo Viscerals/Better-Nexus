@@ -36,8 +36,9 @@ prefix for four opcodes (the Orb charge reply, the offer, ownership and pick-res
 packets) plus two slot opcodes. It registers no opcode handler, replaces no game
 handler, patches no client file, sends nothing, and keeps only parsed numbers and
 enumerated codes. No source, UI, asset or database of the game's own addon is
-copied; the opcode numbers and the prefix come from reading the owner's installed
-client files and are specific to that build. See `docs/ORB_RECOVERY_CONTINUE.md`.
+copied. The authorized inert source reference is ProjectEbonhold metadata version
+37, identified below with its SHA-256 and relevant symbols; it does not establish
+the installed tester/client version. See `docs/ORB_RECOVERY_CONTINUE.md`.
 
 Compatibility exception: `A.RivalDetected()` in `core/GameAdapter.lua` detects
 that separately distributed addon by its exact addon name and slash-command key,
@@ -74,9 +75,12 @@ archive is no longer used by any test.
 Game API calls used: `OrbService.IsStateKnown/GetCharges/IsOfferPending/
 ConfirmSpend/RequestCharges` and the PerkService choice, granted, locked,
 selection, and refresh calls, including `PerkService.RequestChoice` for the
-bounded live recovery path. The existing `SendAddonMessage` is observed with
-`hooksecurefunc` to distinguish own bare versus framed-empty sends; it is never
-replaced. No action probe or speculative
+bounded live recovery path. The setting `autoAcceptLoadoutEchoes` is read through
+`ProjectEbonholdOptionsService:GetSetting` to guard that request.
+`SendAddonMessage` is observed with a secure
+`hooksecurefunc` post-hook to distinguish own bare versus framed-empty sends.
+The hook may change the global function identity; the original transport
+implementation is still invoked. No action probe or speculative
 spending API is used. Presence/shape checks do not establish native compatibility.
 
 Nexus adaptations are intentional: exact quality and role-aware targets; a

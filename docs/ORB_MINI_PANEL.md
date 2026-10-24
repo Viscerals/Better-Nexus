@@ -17,3 +17,9 @@ outcome totals display unavailable rather than measured zero. A present malforme
 historyKnown/count fact disables mini actions; a typed false historyKnown retains
 the explicit after-reload unknown-history explanation. Full text remains available
 on hover; this is not native font-fit evidence.
+
+Owed-offer Resume eligibility in compact views uses the last complete pump
+observation plus the current native latch scalar. Rendering does not refresh
+active intent, flight, ownership or catalog facades. That display observation is
+not server freshness or permission: explicit Resume reads all current guards
+again before choosing the already-approved offer.

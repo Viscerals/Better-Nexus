@@ -204,13 +204,12 @@ or interference from other game addons.
 New tests exercise the actual Nexus adapter/runtime and mocked game services.
 Exact-role/source/budget and fresh-evidence guards have separate controls
 (`tests/prototype/echoweaver_orb_policy.lua` and the `orbs_*` tests). An earlier
-offline comparison with an outside addon's source (3,000 offer decisions,
-3,000 result diffs, and 10,000 ordinary decisions) is retired (2026-09-24);
+offline comparison with an outside addon's source is retired (2026-09-24);
 it was never a claim of blanket parity.
 
-All tests in this build use Lua 5.4 with the included compatibility shims. They are
-not a LuaJIT, native client, original upstream inventory, or independent review
-result. No Orbs, player resources, live profiles, or game sessions were accessed.
+Offline harnesses and compatibility shims do not establish native client
+behavior or independent review acceptance. Native game behavior and actual
+resource spending remain untested here.
 
 Future native testing needs separate explicit consent, with an expendable approved
 source and a one-Orb limit first. An unresolved server operation must be handled
@@ -220,7 +219,7 @@ in the game, not by deleting the marker or retrying a spend.
 
 - **Start and persistence agree.** Orb preferences and the recovery receipt are written through the Store owner (`StoreAuthorityOwner.UpdateStateV1`). `Store.StateWriteStatus()` (read-only) states whether that write can be durable now: character identity unknown, saved data loading, database or character container missing, a newer schema, or a character row of another shape. Start is enabled only when it can be durable, and its reason names the case. An absent character row is not a refusal: the owner creates it at the explicit Orb write, and the Orb runtime then checks that the durable row holds the data (the owner also reports success for its transient fallback). Reading a view never creates or writes the row. No spend or choice is sent before its receipt is durable; if persistence fails after a spend may have been sent, the unresolved exposure stays.
 - **Idle window work.** One display refresh (every 0.25 s while the window is shown) makes one adapter read. The adapter builds availability rows only for the IDs a read is asked about (targets, owned copies, offered cards), with the same rules per row, instead of rebuilding the whole local Echo catalog on every read; nothing is kept between reads. The source list is prepared only while Advanced is open. Every action (Start, Resume, each spend and selection) reads again; the display snapshot authorizes nothing.
-- Measured offline with the review probe setup (1,000-row catalog, one idle second): before 8 reads, 8 full catalog traversals (8,000 row visits), 16 assignment lookups; after 4 reads, 0 traversals, 8 row builds, 4 assignment lookups. These are work counts, not native frame times.
+- The earlier idle-window work counts predate bounded recovery and its retained-history checks. They do not measure the current refresh path. Current aggregate work and native frame cost are unmeasured here.
 
 New runs with nonempty validated unconfirmed history require the displayed
 current-state baseline acknowledgment. It lasts only for that approval and its
