@@ -3111,7 +3111,8 @@ function M.Pump(passive)
             return RC.postCheck(live,guardAssignment)
         end)
         if accepted or kind=="AMBIGUOUS" then run.postRecovery=nil;run.postRecoveryHeld=nil
-        elseif kind=="REJECTED" and (boundaryStatus=="CHOICE_INVALID" or boundaryStatus=="GUARD_ERROR") then RC.postUnknown()
+        elseif kind=="REJECTED" and (boundaryStatus=="CHOICE_INVALID" or boundaryStatus=="GUARD_ERROR"
+            or boundaryStatus=="VALIDATION_ERROR" or boundaryStatus=="READ_UNAVAILABLE") then RC.postUnknown()
         elseif kind=="REJECTED" and boundaryStatus=="HOST_FALSE" and run.postRecovery then
             -- This typed Adapter fact follows host_call. A host
             -- refusal consumes the one-use permit; pre-host refusals do not.

@@ -553,14 +553,28 @@ function O.Release(token)
 end
 local function validate(token)
     if not owner or token~=owner then return nil,"Orb action ownership is unavailable." end
-    local s,err=O.Read();if not s then return nil,err end
+    local s,err=O.Read();if not s then return nil,err,"READ_UNAVAILABLE" end
     if not same(ownerContext,s.context) then return nil,"The character, loadout, or game service changed. Orb mode is paused." end
     if s.autoAccept or (A.RivalDetected and A.RivalDetected()) then return nil,"Another Echo picker may interfere. Orb mode is paused." end
     if A.DIAGNOSTIC_PASSIVE then return nil,"Actions are blocked in passive diagnostics." end
     return s
 end
+local function recordActionException(source,cause)
+    if type(Nexus.Errors)=="table" and type(Nexus.Errors.Record)=="function" then
+        pcall(Nexus.Errors.Record,source,cause)
+    end
+end
+local function checkedValidation(token,source,reason)
+    local ok,s,err,code=pcall(validate,token)
+    if not ok then
+        recordActionException(source,s)
+        return nil,reason,"VALIDATION_ERROR"
+    end
+    return s,err,code
+end
 function O.Spend(token,key,expected,guard)
-    local s,err=validate(token);if not s then return nil,"REJECTED",err end
+    local s,err,code=checkedValidation(token,"OrbAdapter.SpendValidation","The Orb state check failed. No Orb was sent.")
+    if not s then return nil,"REJECTED",err,code end
     if s.choiceShape=="invalid" then
         return nil,"REJECTED","The current Echo choices are malformed. No Orb was sent.","CHOICE_INVALID"
     end
@@ -575,9 +589,7 @@ function O.Spend(token,key,expected,guard)
     if guard then
         local checked,allowed,why=pcall(guard,s)
         if not checked then
-            if type(Nexus.Errors)=="table" and type(Nexus.Errors.Record)=="function" then
-                pcall(Nexus.Errors.Record,"OrbAdapter.SpendGuard",allowed)
-            end
+            recordActionException("OrbAdapter.SpendGuard",allowed)
             return nil,"REJECTED","The final Orb protection check failed. No Orb was sent.","GUARD_ERROR"
         end
         if allowed~=true then return nil,"REJECTED",why or "Assignment or source protection changed before submission. Resume only after reviewing the current assignment." end
@@ -593,7 +605,8 @@ function O.Spend(token,key,expected,guard)
     return true,"SUBMITTED"
 end
 function O.Select(token,index,expectedBoard,id,guard)
-    local s,err=validate(token);if not s then return nil,"REJECTED",err end
+    local s,err,code=checkedValidation(token,"OrbAdapter.SelectValidation","The Echo state check failed. No selection was sent.")
+    if not s then return nil,"REJECTED",err,code end
     local c=s.board[index]
     for _,other in ipairs(s.board) do
         if c and other.spellId==id and other.quality~=c.quality then
@@ -603,7 +616,14 @@ function O.Select(token,index,expectedBoard,id,guard)
     if not s.offerPending or s.hostPending or not c or not c.selectable or c.spellId~=id
         or not s.catalog[id] or not s.catalog[id].available
         or s.boardKey~=expectedBoard then return nil,"REJECTED","The Orb offer changed or another action is pending." end
-    if guard and guard(s)~=true then return nil,"REJECTED","The assigned target changed before selection. The original pending operation must be resolved." end
+    if guard then
+        local checked,allowed=pcall(guard,s)
+        if not checked then
+            recordActionException("OrbAdapter.SelectGuard",allowed)
+            return nil,"REJECTED","The final Echo protection check failed. No selection was sent. Resolve the original pending operation manually.","GUARD_ERROR"
+        end
+        if allowed~=true then return nil,"REJECTED","The assigned target changed before selection. The original pending operation must be resolved." end
+    end
     selfSelecting=true
     boundary("pick_call",s)
     local ok,v=pcall(ownerContext.svc.SelectPerk,id)

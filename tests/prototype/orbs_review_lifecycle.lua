@@ -624,3 +624,128 @@ do
  if #issues>0 then error(table.concat(issues,'\n'),0)end
  print('PASS R6a9b compact backlog truth with passive bounds and fresh explicit-action control')
 end
+
+-- R6b4: these faults occur AFTER real durable admission but BEFORE either
+-- protected host invocation. Spend cleanup must not invent uncertain use;
+-- selection rejection must retain the actual preceding spend and no reselect.
+do
+ local R=dofile('tests/prototype/orb_recovery_support.lua');local failures={}
+ local function expect(v,message)if not v then failures[#failures+1]=message end end
+ local function quiet(H)
+  local server=R.Server(H)
+  H.service.RequestChoice=function()
+   SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)
+   server.queue[#server.queue+1]={op=16,body=''}
+  end
+  return server
+ end
+ local ok,err=pcall(function()
+  local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={};quiet(H);assert(M.UseAssignedWishlist())
+  local read=A.Orbs.Read;local hit,admitted,removed=false,false
+  A.Orbs.Read=function(...)
+   local saved=R.Saved()
+   if not hit and saved and H.Count('orb-spend')==0 then
+    hit=true;removed=saved.removed
+    admitted=M.CompactStatus().reserved==1 and saved.spendConfirmed~=true
+    error('synthetic pre-host validation read failure')
+   end
+   return read(...)
+  end
+  local contained=pcall(H.Approve,6,false)
+  A.Orbs.Read=read
+  assert(hit and admitted,'SETUP actual Adapter validation reads after saving an unsent reservation')
+  print('SETUP R6b4 known-unsent spend validation failure PASS')
+  local v=M.Status(false)
+  expect(contained,'EXPECT pre-host validation throw does not escape the public action')
+  expect(not v.pending and not R.Saved() and v.state=='PAUSED',
+   'EXPECT known-unsent validation failure clears the receipt and deliberately pauses')
+  expect(v.spent==0 and v.reserved==0 and v.uncertain==0,
+   'EXPECT pre-host validation failure produces no known or uncertain spending exposure')
+  local diagnostic=Nexus.Errors.Latest()
+  expect(diagnostic and diagnostic.source=='OrbAdapter.SpendValidation'
+   and diagnostic.message:find('synthetic pre-host validation read failure',1,true),
+   'EXPECT validation cause is retained by the actual bounded diagnostic owner')
+  H.Advance(20)
+  v=M.CompactStatus();local archive=R.SavedRow('orbRecoveryArchive')
+  expect(H.Count('orb-spend')==0 and not R.Saved() and (not archive or #archive==0)
+   and v.uncertain==0 and v.recoveries==0,
+   'EXPECT definitely-unsent validation cannot later become a fabricated uncertain archive or automatic spend')
+  local resumed=M.Resume();local first
+  for _,a in ipairs(H.actions)do if a[1]=='orb-spend'then first=a[2];break end end
+  expect(resumed and H.Count('orb-spend')==1 and first==tonumber(removed:match('^(%d+):')),
+   'EXPECT explicit Resume uses the restored original source quota for the first actual host invocation')
+  M.Stop()
+ end)
+ if not ok then failures[#failures+1]='SETUP spend validation: '..tostring(err)end
+ for _,fault in ipairs({'throw','unavailable'})do
+  local ok,err=pcall(function()
+   local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={};quiet(H)
+   local spend=A.Orbs.Spend;local hit,admitted=false,false
+   A.Orbs.Spend=function(...)
+    local archive=R.SavedRow('orbRecoveryArchive')
+    if not hit and H.Count('orb-spend')==1 and archive and #archive==1 then
+     hit=true;admitted=R.Saved()~=nil and M.CompactStatus().reserved==1
+     local read=A.Orbs.Read;A.Orbs.Read=function()
+      if fault=='throw'then error('synthetic post-recovery validation read failure')end
+      return nil,'synthetic post-recovery unavailable read','state'
+     end
+     local ok,accepted,kind,reason,status=pcall(spend,...);A.Orbs.Read=read
+     if not ok then error(accepted,0)end
+     return accepted,kind,reason,status
+    end
+    return spend(...)
+   end
+   assert(M.Start(6));H.Offer();H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+   for _=1,100 do if hit then break end;H.Advance(.25)end
+   A.Orbs.Spend=spend
+   assert(hit and admitted,'SETUP actual post-archive next receipt precedes the failing validation read')
+   print('SETUP R6b4 post-recovery '..fault..' validation PASS')
+   local v=M.CompactStatus()
+   expect(not v.pending and not R.Saved() and not v.canResume,
+    'EXPECT post-recovery '..fault..' observation failure clears unsent receipt without claiming fresh permission')
+   expect(v.spent==1 and v.reserved==0 and v.uncertain==0 and v.recoveries==1
+    and v.unconfirmedResults==1 and #R.SavedRow('orbRecoveryArchive')==1 and H.Count('orb-spend')==1,
+    'EXPECT post-recovery '..fault..' validation creates no exposure, progress, duplicate archive or host call')
+   M.Stop()
+  end)
+  if not ok then failures[#failures+1]='SETUP post-recovery '..fault..': '..tostring(err)end
+ end
+ local ok,err=pcall(function()
+  local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={};assert(M.UseAssignedWishlist());H.Approve(6,false)
+  local select=A.Orbs.Select;local hit,admitted,actualThrow=false,false,false
+  A.Orbs.Select=function(token,index,board,id,guard)
+   return select(token,index,board,id,function(live)
+    local saved=R.Saved();hit=true
+    admitted=saved and saved.spendConfirmed==true and saved.selectionAttempted==true
+     and H.Count('orb-spend')==1 and H.Count('take')==0
+    local assigned=A.AssignedWishlist
+    A.AssignedWishlist=function()error('synthetic pre-host selection guard failure')end
+    local ok,allowed,why=pcall(guard,live);A.AssignedWishlist=assigned
+    actualThrow=not ok
+    if not ok then error(allowed,0)end
+    return allowed,why
+   end)
+  end
+  local contained=pcall(H.Offer);A.Orbs.Select=select
+  assert(hit and admitted and actualThrow,'SETUP real selection guard throws after persisting a choice proposal and a real spend')
+  print('SETUP R6b4 known-unsent selection guard failure PASS')
+  local v=M.Status(false);local saved=R.Saved()
+  expect(contained,'EXPECT selection guard exception is contained before SelectPerk')
+  expect(v.pending and saved and saved.spendConfirmed and saved.selectionRefused==true
+   and saved.choiceMayHaveBeenSent==false and saved.selectionAmbiguous==false,
+   'EXPECT known-unsent selection is recorded distinctly while retaining the actual spend receipt')
+  expect(v.spent==1 and v.reserved==0 and v.uncertain==0 and H.Count('orb-spend')==1 and H.Count('take')==0,
+   'EXPECT selection guard failure neither erases real spend nor invents a selection/exposure')
+  local diagnostic=Nexus.Errors.Latest()
+  expect(diagnostic and diagnostic.source=='OrbAdapter.SelectGuard'
+   and diagnostic.message:find('synthetic pre-host selection guard failure',1,true),
+   'EXPECT actual bounded diagnostic owner retains the selection guard cause')
+  H.Advance(20)
+  expect(not M.Resume() and H.Count('orb-spend')==1 and H.Count('take')==0,
+   'EXPECT held known-unsent selection is not automatically retried or resumed')
+  M.Stop()
+ end)
+ if not ok then failures[#failures+1]='SETUP selection guard: '..tostring(err)end
+ if #failures>0 then error(table.concat(failures,'\n'),0)end
+ print('PASS R6b4 exact pre-host containment and no invented exposure/progress or automatic selection')
+end
