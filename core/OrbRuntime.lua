@@ -2678,6 +2678,15 @@ function M.Archive()
         if value==nil then return nil end
         return pickInt(value,lo,hi) or "invalid"
     end
+    local function codeFact(value,first,second)
+        if value==nil then return nil end
+        return (value==first or value==second) and value or "invalid"
+    end
+    local function childFact(parent,key,first,second)
+        if parent==nil then return nil end
+        if type(parent)~="table" or getmetatable(parent) then return "invalid" end
+        return codeFact(parent[key],first,second)
+    end
     for i,e in ipairs(list) do
         if i>ARCHIVE_MAX then break end
         local consentVersion
@@ -2697,14 +2706,14 @@ function M.Archive()
                 if valid and n==#e.late then late=n end
             end
         end
-        out.entries[#out.entries+1]={id=type(e.id)=="string" and e.id:sub(1,16) or nil,kind=(e.kind=="ACK_UNCONFIRMED" or e.kind=="AUTO_UNCONFIRMED") and e.kind or nil,
+        out.entries[#out.entries+1]={id=type(e.id)=="string" and e.id:sub(1,16) or nil,kind=codeFact(e.kind,"ACK_UNCONFIRMED","AUTO_UNCONFIRMED"),
             spent=numberFact(e.spent,0,100000),limit=numberFact(e.limit,0,100000),
             uncertain=numberFact(e.uncertain,0,100000),
-            confidence=type(e.resolution)=="table" and e.resolution.confidence=="NONE" and "NONE" or nil,
+            confidence=childFact(e.resolution,"confidence","NONE"),
             consentVersion=consentVersion,
-            consentPolicy=type(e.consent)=="table" and (e.consent.policy=="SESSION_BOUNDED_TWO" or e.consent.policy=="TWO_OBSERVED") and e.consent.policy or nil,
+            consentPolicy=childFact(e.consent,"policy","SESSION_BOUNDED_TWO","TWO_OBSERVED"),
             late=late,lateN=numberFact(e.lateN,0,RC_LATE_COUNT),
-            outcome=type(e.resolution)=="table" and e.resolution.outcome=="UNCONFIRMED" and "UNCONFIRMED" or nil}
+            outcome=childFact(e.resolution,"outcome","UNCONFIRMED")}
     end
     return out
 end

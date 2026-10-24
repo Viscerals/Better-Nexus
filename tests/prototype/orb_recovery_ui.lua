@@ -192,5 +192,53 @@ section('7 real archive numeric facts distinguish absence, zero and invalid',fun
  if #issues>0 then error(table.concat(issues,'\n'),0)end
 end)
 
+section('8 real archive code facts distinguish absent and invalid',function()
+ local H,M,A,O,server=World();assert(M.ContinueBegin())
+ assert(Until(H,function()return M.ContinueView().stage=='ready'end))
+ assert(M.ContinueConfirm(M.ContinueView().token),'SETUP real durable archive for code-fact projection')
+ local original=H.Clone(R.SavedRow('orbRecoveryArchive')[1]);local owner=Nexus.MainInternals.StoreAuthorityOwner
+ local issues={}
+ local function edit(fn)
+  assert(owner.UpdateStateV1(function(row)row.orbRecoveryArchive[1]=H.Clone(original);fn(row.orbRecoveryArchive[1])end))
+ end
+ edit(function(e)e.kind=nil;e.resolution={};e.consent={v=1}end)
+ local absent=M.Archive().entries[1];local report=Nexus.SupportReport.Summary()
+ check(absent.kind==nil and absent.outcome==nil and absent.confidence==nil and absent.consentPolicy==nil,
+  'GUARD genuinely absent code facts remain absent at the real producer')
+ check(report:find('outcome=none; kind=none; confidence=none',1,true)
+  and report:find('consent v1 none',1,true),'GUARD missing code facts remain distinct from supported NONE')
+ for _,bad in ipairs({'SYNTHETIC_BAD_CODE',false,7})do
+  edit(function(e)e.kind=bad;e.resolution={outcome=bad,confidence=bad};e.consent={v=1,policy=bad}end)
+  local saved=H.Clone(R.SavedRow('orbRecoveryArchive')[1]);local projected=M.Archive().entries[1]
+  local text=Nexus.SupportReport.Summary()
+  print('SETUP R6a8 durable invalid code case '..tostring(bad)..' PASS')
+  if projected.kind~='invalid' or projected.outcome~='invalid' or projected.confidence~='invalid'
+   or projected.consentPolicy~='invalid' then
+   issues[#issues+1]='EXPECT present invalid enum facts survive the producer as bounded invalid markers: '..tostring(bad)
+  end
+  if not (text:find('outcome=unreadable; kind=unreadable; confidence=unreadable',1,true)
+   and text:find('consent v1 unreadable',1,true))then
+   issues[#issues+1]='EXPECT unsupported stored enums are unreadable, never reported absent or NONE: '..tostring(bad)
+  end
+  check(not text:find('SYNTHETIC_BAD_CODE',1,true),'GUARD unsupported raw enum content is not dumped')
+  check(R.Same(R.SavedRow('orbRecoveryArchive')[1],saved),'GUARD reporting preserves malformed retained facts')
+ end
+ edit(function(e)e.resolution='SYNTHETIC_BAD_RESOLUTION';e.consent={v=1,policy='TWO_OBSERVED'}end)
+ local projected=M.Archive().entries[1];report=Nexus.SupportReport.Summary()
+ if projected.outcome~='invalid' or projected.confidence~='invalid'
+  or not report:find('outcome=unreadable',1,true)then
+  issues[#issues+1]='EXPECT malformed present resolution container remains invalid rather than absent'
+ end
+ check(not report:find('SYNTHETIC_BAD_RESOLUTION',1,true),'GUARD malformed resolution exposes no raw payload')
+ edit(function(e)e.kind='AUTO_UNCONFIRMED';e.resolution={outcome='UNCONFIRMED',confidence='NONE'}
+  e.consent={v=1,policy='SESSION_BOUNDED_TWO'}end)
+ projected=M.Archive().entries[1];report=Nexus.SupportReport.Summary()
+ check(projected.kind=='AUTO_UNCONFIRMED' and projected.confidence=='NONE'
+  and report:find('outcome=UNCONFIRMED; kind=AUTO_UNCONFIRMED; confidence=NONE',1,true)
+  and report:find('consent v1 SESSION_BOUNDED_TWO',1,true),'GUARD actual supported enum facts remain exact')
+ check(H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD typed archive reads cause no gameplay action')
+ if #issues>0 then error(table.concat(issues,'\n'),0)end
+end)
+
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end
 print('PASS Orb recovery window: explicit Check and Continue, withdrawn on change, cancelled on close checks='..checks)

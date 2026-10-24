@@ -703,6 +703,9 @@ local function codeText(value)
     if type(value) == "string" and #value <= 24 and value:find("^[%a_]+$") then return value end
     return value == nil and "none" or "unreadable"
 end
+local function archivedCode(value)
+    return value=="invalid" and "unreadable" or codeText(value)
+end
 local function hexText(value)
     if type(value) == "string" and #value <= 16 and value:find("^%x+$") then return value end
     return value == nil and "none" or "unreadable"
@@ -765,9 +768,10 @@ local function continueLines()
             if type(e) == "table" then
                 local version=archivedCount(e.consentVersion)
                 local consent=(version=="not recorded" or version=="unreadable") and version
-                    or "v"..version.." "..codeText(e.consentPolicy)
-                out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. codeText(e.outcome)
-                    .. "; kind=" .. codeText(e.kind) .. "; confidence=" .. codeText(e.confidence)
+                    or "v"..version.." "..archivedCode(e.consentPolicy)
+                if version=="not recorded" and e.consentPolicy=="invalid" then consent="unreadable" end
+                out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. archivedCode(e.outcome)
+                    .. "; kind=" .. archivedCode(e.kind) .. "; confidence=" .. archivedCode(e.confidence)
                     .. "; run observed spends=" .. archivedCount(e.spent) .. " limit=" .. archivedCount(e.limit)
                     .. "; attempt unknown exposure=" .. archivedCount(e.uncertain)
                     .. "; consent " .. consent
