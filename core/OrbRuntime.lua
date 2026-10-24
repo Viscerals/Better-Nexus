@@ -2672,15 +2672,38 @@ function M.Archive()
     init()
     local astate,list,count=RC.archiveInfo()
     local out={state=astate,count=count,capacity=ARCHIVE_MAX,entries={}}
+    -- Preserve presence without returning malformed raw values: nil is an
+    -- absent fact; the bounded constant marks a present unreadable fact.
+    local function numberFact(value,lo,hi)
+        if value==nil then return nil end
+        return pickInt(value,lo,hi) or "invalid"
+    end
     for i,e in ipairs(list) do
         if i>ARCHIVE_MAX then break end
+        local consentVersion
+        if e.consent~=nil then
+            if type(e.consent)=="table" then consentVersion=numberFact(e.consent.v,1,1)
+            else consentVersion="invalid" end
+        end
+        local late
+        if e.late~=nil then
+            late="invalid"
+            if type(e.late)=="table" and not getmetatable(e.late) then
+                local n,valid=0,true
+                for key in pairs(e.late) do
+                    n=n+1
+                    if n>RC_LATE_MAX or not integer(key,1,RC_LATE_MAX) then valid=false;break end
+                end
+                if valid and n==#e.late then late=n end
+            end
+        end
         out.entries[#out.entries+1]={id=type(e.id)=="string" and e.id:sub(1,16) or nil,kind=(e.kind=="ACK_UNCONFIRMED" or e.kind=="AUTO_UNCONFIRMED") and e.kind or nil,
-            spent=pickInt(e.spent,0,100000),limit=pickInt(e.limit,0,100000),
-            uncertain=pickInt(e.uncertain,0,100000),
+            spent=numberFact(e.spent,0,100000),limit=numberFact(e.limit,0,100000),
+            uncertain=numberFact(e.uncertain,0,100000),
             confidence=type(e.resolution)=="table" and e.resolution.confidence=="NONE" and "NONE" or nil,
-            consentVersion=type(e.consent)=="table" and pickInt(e.consent.v,1,1) or nil,
+            consentVersion=consentVersion,
             consentPolicy=type(e.consent)=="table" and (e.consent.policy=="SESSION_BOUNDED_TWO" or e.consent.policy=="TWO_OBSERVED") and e.consent.policy or nil,
-            late=type(e.late)=="table" and #e.late or 0,lateN=pickInt(e.lateN,0,RC_LATE_COUNT) or 0,
+            late=late,lateN=numberFact(e.lateN,0,RC_LATE_COUNT),
             outcome=type(e.resolution)=="table" and e.resolution.outcome=="UNCONFIRMED" and "UNCONFIRMED" or nil}
     end
     return out

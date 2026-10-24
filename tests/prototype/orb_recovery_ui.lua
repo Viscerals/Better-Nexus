@@ -137,19 +137,59 @@ section('5 the help names Continue',function()
   'Help counts admitted checks, including refusals, rather than only archived outcomes')
 end)
 
-section('7 absent legacy archive facts are distinct from zero and unreadable',function()
- local H,M=World();local raw=M.Archive
- local entry={id=string.rep('1',16),kind='ACK_UNCONFIRMED',outcome='UNCONFIRMED',confidence='NONE',spent=1,limit=3}
- M.Archive=function()return {entries={entry}}end
- local report=Nexus.SupportReport.Summary()
- check(report:find('attempt unknown exposure=not recorded; consent not recorded',1,true),
-  'legacy absent exposure and consent say not recorded')
- entry.uncertain=0;entry.consentVersion=0
- report=Nexus.SupportReport.Summary()
- check(report:find('attempt unknown exposure=0; consent v0',1,true),'recorded zero remains zero')
- entry.uncertain='bad';entry.consentVersion='bad'
- report=Nexus.SupportReport.Summary();M.Archive=raw
- check(report:find('attempt unknown exposure=?; consent v?',1,true),'unreadable present facts retain the bounded unreadable marker')
+-- Semantic replacement of the old Archive-stub test: source projection and
+-- formatting are exercised through a real durable production archive. A valid
+-- consent version is1; zero is tested on numeric counts, not invented as v0.
+section('7 real archive numeric facts distinguish absence, zero and invalid',function()
+ local H,M,A,O,server=World()
+ assert(M.ContinueBegin());assert(Until(H,function()return M.ContinueView().stage=='ready'end))
+ assert(M.ContinueConfirm(M.ContinueView().token),'SETUP real production Continue creates a durable archive')
+ local owner=Nexus.MainInternals.StoreAuthorityOwner
+ local original=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
+ local issues={}
+ local function edit(fn)
+  assert(owner.UpdateStateV1(function(row)row.orbRecoveryArchive[1]=H.Clone(original);fn(row.orbRecoveryArchive[1])end))
+ end
+ edit(function(e)e.spent=nil;e.limit=nil;e.uncertain=nil;e.consent=nil;e.late=nil;e.lateN=nil end)
+ local absent=M.Archive().entries[1];local report=Nexus.SupportReport.Summary()
+ check(absent.spent==nil and absent.limit==nil and absent.uncertain==nil and absent.consentVersion==nil,
+  'GUARD genuinely absent numeric facts remain absent at the real producer')
+ if not (report:find('run observed spends=not recorded limit=not recorded',1,true)
+  and report:find('attempt unknown exposure=not recorded; consent not recorded',1,true))then
+  issues[#issues+1]='EXPECT actual absent legacy facts say not recorded without inventing zero'
+ end
+ edit(function(e)e.spent=0;e.limit=0;e.uncertain=0;e.consent={v=1,policy='TWO_OBSERVED'};e.late={};e.lateN=0 end)
+ local zero=M.Archive().entries[1];report=Nexus.SupportReport.Summary()
+ check(zero.spent==0 and zero.limit==0 and zero.uncertain==0 and zero.lateN==0 and zero.consentVersion==1,
+  'GUARD real recorded zeros and supported consent version survive projection')
+ check(report:find('run observed spends=0 limit=0; attempt unknown exposure=0; consent v1',1,true)
+  and report:find('late events kept=0 seen=0',1,true),'GUARD recorded zero remains exactly zero')
+ for _,bad in ipairs({'SYNTHETIC_BAD_NUMERIC',-1,1.5,100001})do
+  edit(function(e)e.spent=bad;e.limit=bad;e.uncertain=bad;e.lateN=bad;e.consent={v=0,policy='TWO_OBSERVED'}end)
+  local saved=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
+  local projected=M.Archive().entries[1];local text=Nexus.SupportReport.Summary()
+  print('SETUP R6a7 durable invalid numeric case '..tostring(bad)..' PASS')
+  if projected.spent~='invalid' or projected.limit~='invalid' or projected.uncertain~='invalid'
+   or projected.lateN~='invalid' or projected.consentVersion~='invalid' then
+   issues[#issues+1]='EXPECT producer retains a bounded invalid marker for present malformed numeric facts: '..tostring(bad)
+  end
+  if not (text:find('run observed spends=unreadable limit=unreadable',1,true)
+   and text:find('attempt unknown exposure=unreadable; consent unreadable',1,true)
+   and text:find('seen=unreadable',1,true))then
+   issues[#issues+1]='EXPECT real producer/consumer does not mislabel present invalid facts as absent: '..tostring(bad)
+  end
+  check(not text:find('SYNTHETIC_BAD_NUMERIC',1,true),'GUARD invalid raw content is never dumped into support text')
+  check(R.Same(R.SavedRow('orbRecoveryArchive')[1],saved),'GUARD projection/report never repairs or rewrites stored evidence')
+ end
+ edit(function(e)e.uncertain=0;e.consent='SYNTHETIC_BAD_CONSENT';e.late='SYNTHETIC_BAD_LATE'end)
+ local projected=M.Archive().entries[1];report=Nexus.SupportReport.Summary()
+ if projected.consentVersion~='invalid' or projected.late~='invalid'
+  or not report:find('consent unreadable',1,true) or not report:find('late events kept=unreadable',1,true)then
+  issues[#issues+1]='EXPECT malformed containing structures do not turn into absent consent or zero events'
+ end
+ check(not report:find('SYNTHETIC_BAD_',1,true),'GUARD malformed containers expose no raw content')
+ check(H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD archive reporting sends no gameplay action')
+ if #issues>0 then error(table.concat(issues,'\n'),0)end
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end

@@ -694,6 +694,11 @@ local function signedCount(value)
     end
     return "?"
 end
+local function archivedCount(value)
+    if value==nil then return "not recorded" end
+    local text=bigCount(value)
+    return text=="?" and "unreadable" or text
+end
 local function codeText(value)
     if type(value) == "string" and #value <= 24 and value:find("^[%a_]+$") then return value end
     return value == nil and "none" or "unreadable"
@@ -758,13 +763,15 @@ local function continueLines()
         for index = math.max(1, #entries - 1), #entries do
             local e = entries[index]
             if type(e) == "table" then
+                local version=archivedCount(e.consentVersion)
+                local consent=(version=="not recorded" or version=="unreadable") and version
+                    or "v"..version.." "..codeText(e.consentPolicy)
                 out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. codeText(e.outcome)
                     .. "; kind=" .. codeText(e.kind) .. "; confidence=" .. codeText(e.confidence)
-                    .. "; run observed spends=" .. bigCount(e.spent) .. " limit=" .. bigCount(e.limit)
-                    .. "; attempt unknown exposure=" .. (e.uncertain == nil and "not recorded" or bigCount(e.uncertain))
-                    .. "; consent " .. (e.consentVersion == nil and "not recorded"
-                        or "v" .. bigCount(e.consentVersion) .. " " .. codeText(e.consentPolicy))
-                    .. "; late events kept=" .. bigCount(e.late) .. " seen=" .. bigCount(e.lateN)
+                    .. "; run observed spends=" .. archivedCount(e.spent) .. " limit=" .. archivedCount(e.limit)
+                    .. "; attempt unknown exposure=" .. archivedCount(e.uncertain)
+                    .. "; consent " .. consent
+                    .. "; late events kept=" .. archivedCount(e.late) .. " seen=" .. archivedCount(e.lateN)
             end
         end
     end
