@@ -173,7 +173,14 @@ if NexusOrbRuntime then NexusOrbRuntime:SetScript('OnUpdate',nil);NexusOrbRuntim
 assert(loadfile('core/OrbAdapter.lua'))('Nexus',{});assert(loadfile('core/OrbRuntime.lua'))('Nexus',{})
 q.M=Nexus.OrbRuntime;u.ShowMini()
 check(q.M.Status().state=='RECOVERY' and q.M.Status().pending and not q.M.Status().running,'real receipt reload remains passive recovery')
-check(not mf.pause:IsEnabled() and not mf.resume:IsEnabled() and mf.stop:IsEnabled() and mf.pending:GetText():find('not settled',1,true),'mini shows real restored pending and keeps Resume disabled')
+local pendingFull=mf.pending._nexusFullText or mf.pending:GetText()
+check(not mf.pause:IsEnabled() and not mf.resume:IsEnabled() and mf.stop:IsEnabled()
+ and pendingFull:find('not settled',1,true) and mf.pending:GetText():find('Outcomes: ?',1,true),
+ 'mini keeps restored pending explanation, visibly unknown prior outcomes and Resume disabled')
+mf.pendingHit:GetScript('OnEnter')(mf.pendingHit)
+check(GameTooltip:GetText()==pendingFull and GameTooltip:GetText():find('not settled',1,true),
+ 'real pending hover exposes the complete restored unsettled explanation')
+mf.pendingHit:GetScript('OnLeave')(mf.pendingHit)
 direct(mf.resume);mf.close:Click();u.ShowMini()
 check(q.Count('orb-spend')==spends and q.Count('take')==takes and q.M.Status().state=='RECOVERY','restored pending click/close/reopen has no replay or spend')
 -- Unknown optional counters are never rendered as measured zero; malformed
