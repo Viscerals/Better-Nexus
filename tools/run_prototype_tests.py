@@ -314,6 +314,15 @@ DEFAULT_TIMEOUT_SECONDS=45
 # main() refuses a name here that is not in NAMES, so a misspelt name cannot silently get 45 s.
 TEST_TIMEOUT_SECONDS={'catalog_root_capacity':120,'sync_admission_traffic_acceptance':120}
 
+# Issue #132: an accepted Wishlist upload stays bound to the editor/Create context and draft that
+# authorized it (SETUP/EXPECT/GUARD). Categories are pinned to the fixed public base bc5f495, whose
+# post-upload check compared the draft token only: EXPECT is predicted from source to fail there
+# (equal-content replacements, the bookkeeping after a host error that follows an equal-content
+# Copy, the partial notice that names the upload and its next step); GUARD is predicted to hold
+# there. Each check also states its source-predicted outcome at 791cdcc (context check) and
+# 9c60456 (draft identity); these are predictions from source, not recorded executions.
+NAMES += ['wishlist_upload_context']
+
 def timeout_for(name:str)->int:
     return TEST_TIMEOUT_SECONDS.get(name,DEFAULT_TIMEOUT_SECONDS)
 
