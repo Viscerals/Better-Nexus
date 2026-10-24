@@ -386,12 +386,16 @@ function Renderer.New(options)
     local function PrepareData(force)
         local controller = ControllerInstance()
         if force and type(controller.BeginSavedLoadoutImport) == "function" then
-            controller.BeginSavedLoadoutImport(true)
+            local started = Measure("community.saved-import",
+                controller.BeginSavedLoadoutImport, true)
+            -- A refused Begin did not complete an earlier failed request.
+            if not started then return 0, false, false end
         end
         if type(controller.HasPendingSavedLoadoutImport) == "function"
             and controller.HasPendingSavedLoadoutImport() then
             return controller.PumpSavedLoadoutImport(25)
         end
+        if force then return 0, false, false end
         return controller.ImportCurrentSavedLoadouts(false)
     end
 
@@ -417,7 +421,8 @@ function Renderer.New(options)
         text = "Lock in '%s'?\nThis overwrites your current active wishlist.",
         button1 = "Lock In", button2 = "Cancel",
         OnAccept = function(_, data)
-            ControllerInstance().AcceptLockIn(data)
+            local accepted = ControllerInstance().AcceptLockIn(data)
+            if accepted then M.Refresh() end
         end,
         timeout=0, whileDead=true, hideOnEscape=true,
     }
@@ -615,6 +620,8 @@ function Renderer.New(options)
     local refreshDirty = false
     local viewDiagnostic = {
         publishedAt=nil,publishedPage=0,
+        -- Last failure remains visible until a successful publication; pending
+        -- replacement work and ordinary invalidation do not confirm recovery.
         projectionCurrent=false,projectionPending=false,projectionError=false,
         bundledCount=0,overlayCount=0,availableCount=0,
         filterMatchedCount=0,qualifyingCount=0,resultCount=0,
@@ -623,11 +630,205 @@ function Renderer.New(options)
     local suppressSearchChange = false
     local virtualStats = {
         created=0,peakActive=0,active=0,results=0,
-        dataRefreshes=0,dataFailures=0,
+        dataRefreshes=0,dataFailures=0,importFailures=0,statusFailures=0,
         dataBinds=0,scrollBinds=0,resizeBinds=0,
         dirtyMarks=0,deferredRefreshes=0,periodicSkips=0,
         first=1,last=0,offset=0,maxOffset=0,
     }
+
+    -- One failure owner exists before either the Library or Share form opens.
+    -- A scoped table avoids adding frame-only locals to the renderer factory.
+    do
+    local FAIL_BACKOFF_BASE, FAIL_BACKOFF_MAX = 0.5, 8
+    local pump = { now = 0, importHoldUntil = 0, statusHoldUntil = 0, failBackoffUntil = 0, interval = 0.1 }
+    viewDiagnostic.pump = pump
+    function pump.ErrorText(err)
+        local errors = Nexus and Nexus.Errors
+        local format = errors and errors.SafeText or tostring
+        local ok, text = pcall(format, err)
+        text = ok and type(text) == "string" and text or "<unprintable error>"
+        local identity = Nexus and Nexus.Identity
+        if identity and type(identity.Utf8Prefix) == "function" then
+            return identity.Utf8Prefix(text, 300)
+        end
+        return text:sub(1, 300)
+    end
+    function pump.RecordError(source, err)
+        local errors = Nexus and Nexus.Errors
+        if errors and type(errors.Record) == "function" then
+            pcall(errors.Record, source, err)
+        end
+    end
+    function pump.RetainStatus(err)
+        virtualStats.statusFailures = virtualStats.statusFailures + 1
+        virtualStats.lastStatusError = pump.ErrorText(err)
+        local now = type(GetTime) == "function" and GetTime() or 0
+        local delay = FAIL_BACKOFF_BASE
+            * (2 ^ math.min(virtualStats.statusFailures - 1, 4))
+        pump.statusHoldUntil = now + math.min(delay, FAIL_BACKOFF_MAX)
+    end
+    function pump.Note()
+        if viewDiagnostic.projectionError then
+            local failures = math.max(1,
+                tonumber(virtualStats.dataFailures) or 1)
+            if failures <= (pump.failuresNoted or 0) then return end
+            pump.failuresNoted = failures
+            -- Only a newly observed failure reads the clock to arm its hold.
+            pump.now = type(GetTime) == "function" and GetTime() or 0
+            local delay = FAIL_BACKOFF_BASE
+                * (2 ^ math.min(failures - 1, 4))
+            if delay > FAIL_BACKOFF_MAX then delay = FAIL_BACKOFF_MAX end
+            pump.failBackoffUntil = pump.now + delay
+        elseif viewDiagnostic.projectionCurrent then
+            pump.failBackoffUntil = 0
+        end
+    end
+    function pump.Revisions()
+        local revisions = Nexus and Nexus.Revisions
+        if not (revisions and type(revisions.Get) == "function") then return 0, 0 end
+        return revisions.Get("BUILD_LIBRARY_CHANGED") or 0,
+            revisions.Get("DPS_CHANGED") or 0
+    end
+    function pump.InvalidateStalePending()
+        if not viewDiagnostic.projectionPending then return end
+        local build, dps = pump.Revisions()
+        if build ~= pump.pendingBuildRevision or dps ~= pump.pendingDpsRevision then
+            -- Only pending truth is invalidated. The failure still owns its
+            -- deadline; the next permitted tick requests the current revision.
+            viewDiagnostic.projectionPending = false
+            viewDiagnostic.projectionCurrent = false
+            refreshDirty = true
+        end
+    end
+    function pump.RefreshContext()
+        -- A new explicit request gets its own chance to run. Keep the last
+        -- failure evidence until that request successfully publishes.
+        pump.failBackoffUntil = 0
+        refreshDirty = true
+        pump.failuresNoted = math.max(pump.failuresNoted or 0,
+            tonumber(virtualStats.dataFailures) or 0)
+        -- Status failure retains its own evidence without blocking the view.
+        -- Only a view exception belongs to this explicit rethrow boundary.
+        pump.Status(false, true)
+        local ok, result, why = pcall(M.RenderRefresh, false, true)
+        if not ok then
+            pump.Retain(result)
+            error(result, 0)
+        end
+        pump.Note()
+        return result, why
+    end
+    -- An escaped refresh used to skip the safety ticker. Keep the error on
+    -- the diagnostic the backoff already reads, and remember the message.
+    function pump.Retain(err)
+        refreshDirty = true
+        -- A display exception cannot cancel an already requested projection.
+        viewDiagnostic.projectionError = true
+        viewDiagnostic.projectionCurrent = false
+        virtualStats.dataFailures =
+            (tonumber(virtualStats.dataFailures) or 0) + 1
+        virtualStats.lastDataError = pump.ErrorText(err)
+        pump.Note()
+    end
+    function pump.GuardedRefresh()
+        local ok, err = pcall(M.RenderRefresh)
+        if ok then return true end
+        pump.Retain(err)
+        return false
+    end
+    function pump.SyncStatus(receiveCount)
+        local now = type(GetTime) == "function" and GetTime() or 0
+        if viewDiagnostic.projectionError and now < pump.failBackoffUntil then
+            return false
+        end
+        -- This renderer label belongs to the view owner, not the independent
+        -- Share form ledger. A failed ticker must still let import work run.
+        local ok, err = pcall(RenderSyncStatus, receiveCount)
+        if not ok then
+            pump.Retain(err)
+            pump.RecordError("Community.SyncStatus", err)
+        end
+        return ok
+    end
+    function pump.Rebind(reason, explicit)
+        local now = type(GetTime) == "function" and GetTime() or 0
+        if not explicit and viewDiagnostic.projectionError
+            and now < pump.failBackoffUntil then return false end
+        local ok, err = pcall(Measure, "community.render", renderBuildWindow, reason)
+        if not ok then
+            pump.Retain(err)
+            -- A user scroll remains immediate and preserves its exact error;
+            -- repeated automatic resize notifications honor the view hold.
+            if explicit then error(err, 0) end
+            pump.RecordError("Community.Resize", err)
+        end
+        return ok
+    end
+    function pump.RetainImport(err)
+        -- Personal import failure does not invalidate a shared publication.
+        -- Keep its evidence until the import finishes, even if All publishes.
+        virtualStats.importFailures = virtualStats.importFailures + 1
+        virtualStats.lastImportError = pump.ErrorText(err)
+        viewDiagnostic.importRetryPending = true
+        pump.now = type(GetTime) == "function" and GetTime() or 0
+        local delay = FAIL_BACKOFF_BASE
+            * (2 ^ math.min(virtualStats.importFailures - 1, 4))
+        pump.importHoldUntil = pump.now + math.min(delay, FAIL_BACKOFF_MAX)
+    end
+    function pump.Import(force)
+        local ok, advanced, pending, started = pcall(PrepareData, force)
+        if not ok then
+            pump.RetainImport(advanced)
+            return false, true
+        end
+        if started == false and viewDiagnostic.importRetryPending then
+            -- Keep a failed open request alive if its source is unavailable.
+            -- No new exception occurred, so do not recharge its error count.
+            pump.now = type(GetTime) == "function" and GetTime() or 0
+            pump.importHoldUntil = pump.now + FAIL_BACKOFF_BASE
+            return true, true
+        end
+        viewDiagnostic.importRetryPending = false
+        pump.importHoldUntil = 0
+        if not pending then virtualStats.lastImportError = nil end
+        return true, pending
+    end
+    function M.PrepareOpenImport()
+        -- Keep the first bounded import unit on open, outside Refresh. The
+        -- same owner contains Begin/pump failures and honors a held reopen.
+        pump.now = type(GetTime) == "function" and GetTime() or 0
+        if pump.now < pump.importHoldUntil then return end
+        pump.Import(true)
+    end
+    function pump.Refresh(respectHold, propagate)
+        if respectHold then
+            pump.now = type(GetTime) == "function" and GetTime() or 0
+            pump.Note()
+        end
+        if not respectHold then pump.Status(false, true) end
+        local ok, result, why = pcall(M.RenderRefresh, respectHold, not respectHold)
+        if not ok then
+            pump.Retain(result)
+            if propagate then error(result, 0) end
+            pump.RecordError("Community.ControllerRefresh", result)
+            return false, "failed"
+        end
+        pump.Note()
+        return result, why
+    end
+    function M.Refresh()
+        -- Explicit callers may request a replacement during an existing hold.
+        return pump.Refresh(false, true)
+    end
+    function M.RefreshAutomatic()
+        -- ViewRefresh retains its existing outer error-log boundary.
+        return pump.Refresh(true, true)
+    end
+    function M.RefreshFromController()
+        -- Display failure cannot abort the controller's remaining completion.
+        return pump.Refresh(true, false)
+    end
+    end
 
     local function PlaceCommunityBox(widget, box)
         if not (widget and box) then return end
@@ -857,6 +1058,39 @@ local function PostStatusText()
     return ShareStatusLine() or ""
 end
 
+do
+    local pump = viewDiagnostic.pump
+    function pump.RenderStatus(onlyChanged)
+        local text = PostStatusText()
+        if onlyChanged and postPopup._shareStatus:GetText() == text then return false end
+        postPopup._shareStatus:SetText(text)
+        return true
+    end
+    function pump.Status(propagate, explicit, onlyChanged)
+        if not (postPopup and postPopup:IsShown() and postPopup._shareStatus) then return true end
+        local now = type(GetTime) == "function" and GetTime() or 0
+        if not explicit and now < pump.statusHoldUntil then return false, "failed" end
+        local ok, err = pcall(pump.RenderStatus, onlyChanged)
+        if not ok then
+            pump.RetainStatus(err)
+            if propagate then error(err, 0) end
+            -- Repeated retries of one active status error must not evict
+            -- unrelated history. Counters and the retry deadline still advance.
+            if pump.statusRecordedError ~= virtualStats.lastStatusError then
+                pump.RecordError("Community.ShareStatus", err)
+                pump.statusRecordedError = virtualStats.lastStatusError
+            end
+            return false, "failed"
+        end
+        -- A no-write poll says nothing about a failed setter's recovery.
+        if err ~= true then return true end
+        virtualStats.lastStatusError = nil
+        pump.statusRecordedError = nil
+        pump.statusHoldUntil = 0
+        return true
+    end
+end
+
 local function RefreshPostWishlistMenu()
     if not postWishlistMenu then return end
     local menu = postWishlistMenu
@@ -983,7 +1217,7 @@ local function EnsurePostPopup()
             -- Share keeps its own sentence; a refusal states its reason.
             print("|cffff6060Nexus:|r "..tostring(value))
             SetPostRefusal(not outcome and tostring(value) or nil)
-            p._shareStatus:SetText(PostStatusText())
+            viewDiagnostic.pump.Status(true, true)
             return
         end
         SetPostRefusal(nil)
@@ -996,14 +1230,19 @@ local function EnsurePostPopup()
     -- shown; it does not depend on the Community window, a view refresh, Sync
     -- housekeeping or a receive window.
     local statusElapsed=0
-    p:SetScript("OnUpdate",function(_,elapsed)
+    local function OnPostStatusUpdate(_,elapsed)
         statusElapsed=statusElapsed+(tonumber(elapsed) or 0)
         if statusElapsed<0.5 then return end
         statusElapsed=0
-        if p._shareStatus then
-            local text=PostStatusText()
-            if p._shareStatus:GetText()~=text then p._shareStatus:SetText(text) end
-        end
+        viewDiagnostic.pump.Status(false, false, true)
+    end
+    p:SetScript("OnUpdate", OnPostStatusUpdate)
+    p:HookScript("OnHide", function(self)
+        self:SetScript("OnUpdate", nil)
+        statusElapsed = 0
+    end)
+    p:HookScript("OnShow", function(self)
+        self:SetScript("OnUpdate", OnPostStatusUpdate)
     end)
     local shareStatus=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); shareStatus:SetPoint("TOPLEFT",16,-396); shareStatus:SetSize(334,96); shareStatus:SetJustifyH("LEFT"); shareStatus:SetJustifyV("TOP"); p._shareStatus=shareStatus
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.ApplyFontTree then
@@ -1018,7 +1257,7 @@ end
 
 RefreshPostPopupPreview = function()
     if not postPopup or not postPopup:IsShown() then return end
-    postPopup._shareStatus:SetText(PostStatusText())
+    viewDiagnostic.pump.Status(true, true)
     local wl, selectedClass = ControllerInstance().PostDraft()
     local echoes = ControllerInstance().WishlistEchoes(wl)
     if not wl or not echoes or #echoes==0 then
@@ -1533,7 +1772,13 @@ local function EnsureDetailPanel(parent)
                 else
                     print("|cffff6060Nexus:|r " .. tostring(value))
                 end
-                M.Refresh()
+                if ticket then
+                    M.RefreshFromController()
+                else
+                    -- The synchronous result belongs to this explicit click;
+                    -- contain its refresh without delaying it behind a hold.
+                    viewDiagnostic.pump.Refresh(false, false)
+                end
             end
             local ok, value, ticket = PublishImportedBuild(selected, Finish)
             if ok == nil and value == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
@@ -1723,7 +1968,7 @@ local function RefreshDetailPanel(buildId, listPending)
         local err, why
         detail, err, why = projection.Detail(buildId, ProjectionContext())
         if not detail then
-            if err then error(err) end
+            if err ~= nil then error(err, 0) end
             if listPending and detailPanel:IsShown()
                 and detailPanel._nexusShownId == buildId then return end
             ShowDetailStatus(listPending and "pending" or why or "unavailable")
@@ -2222,13 +2467,22 @@ local function EnsureFrame()
     frame:SetScript("OnDragStart",function(self) self:StartMoving() end)
     frame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
 
-    local retryTicker, statusTicker, dataTicker = 0, 0, 0
+    local retryTicker, statusTicker, dataTicker, pumpTicker = 0, 0, 0, 0
     local lastReceiving = false
-    frame:SetScript("OnUpdate",function(self,elapsed)
+    local pump = viewDiagnostic.pump
+    -- Named so Hide can detach it. Hidden frames already skip OnUpdate in
+    -- 3.3.5a; clearing the script makes dormancy explicit and prevents any
+    -- accidental re-Show of a child from keeping this pump alive.
+    local function OnFrameUpdate(self,elapsed)
         if not self:IsShown() then return end
         local controller = ControllerInstance()
         local receivingNow = Nexus.Sync and Nexus.Sync.IsReceiving
             and Nexus.Sync.IsReceiving() or false
+        local now = type(GetTime) == "function" and GetTime() or 0
+        pump.now = now
+        pump.InvalidateStalePending()
+        if viewDiagnostic.projectionError and (tonumber(virtualStats.dataFailures) or 0)
+            > (pump.failuresNoted or 0) then pump.Note() end
         retryTicker = retryTicker + elapsed
         if retryTicker >= 0.5 then
             retryTicker = 0
@@ -2246,7 +2500,7 @@ local function EnsureFrame()
             local receiveCount = Nexus.Sync and Nexus.Sync.LastSyncNewCount and Nexus.Sync.LastSyncNewCount() or 0
             if receivingNow and syncStatusText and Nexus.Sync
                 and RenderSyncStatus then
-                RenderSyncStatus(receiveCount)
+                pump.SyncStatus(receiveCount)
             end
 
             -- Build/DPS revisions mark the view dirty while Sync is active.
@@ -2256,28 +2510,93 @@ local function EnsureFrame()
             lastReceiving = receivingNow
         end
 
-        if type(controller.HasPendingSavedLoadoutImport) == "function"
-            and controller.HasPendingSavedLoadoutImport() then
-            local _, pending = PrepareData(false)
-            if not pending then M.Refresh() end
+        local importPending = type(controller.HasPendingSavedLoadoutImport) == "function"
+            and controller.HasPendingSavedLoadoutImport()
+        if not importPending and not viewDiagnostic.importRetryPending then
+            virtualStats.lastImportError = nil
+            pump.importHoldUntil = 0
         end
-        if receiveEnded and refreshDirty then
+        local importDue = (importPending or viewDiagnostic.importRetryPending)
+            and pump.now >= pump.importHoldUntil
+        -- Due import work runs first; All can publish committed shared data
+        -- at the ordinary cadence while that personal import remains pending.
+        -- A receive transition is not evidence that a failed view recovered.
+        if receiveEnded and refreshDirty and not importDue
+            and not (viewDiagnostic.projectionError and now < pump.failBackoffUntil) then
             virtualStats.deferredRefreshes =
                 virtualStats.deferredRefreshes + 1
-            M.Refresh()
-            return
+            if pump.GuardedRefresh() then pump.Note(); return end
         end
-        local projections = Nexus and Nexus.ViewProjections
+
+        -- A saved import is a short state machine and has to advance on the
+        -- frame that needs it; a 10 Hz cap drops slot writes. Ordinary
+        -- refresh and projection work stay on that cadence. A failure is
+        -- recorded before any replacement request, and a contained error
+        -- backs off without stopping a healthy import.
+        -- Receive-window coalescing: while Sync is receiving, hold dirty
+        -- republish (except a gated cold open) until the window ends above.
+        if importDue then
+            local imported, pending = pump.Import(viewDiagnostic.importRetryPending)
+            if imported then
+                if not pending and not (viewDiagnostic.projectionError
+                    and pump.now < pump.failBackoffUntil)
+                    and pump.GuardedRefresh() then pump.Note() end
+            end
+        end
         local coldStart = virtualStats.dataBinds == 0
-        if projections and (not receivingNow or coldStart)
-            and type(projections.PumpBuilds) == "function" then
-            -- A receive window may already be active when the browser first
-            -- opens. Keep that cold persisted projection moving, but retain an
-            -- existing last-good publication until the burst becomes quiet.
-            if receivingNow and coldStart then M.Refresh() end
-            local ok, published, pumpError = pcall(projections.PumpBuilds)
-            if ok and published then M.Refresh() end
-            if ok and pumpError then M.Refresh() end
+        local backingOff = pump.now < pump.failBackoffUntil
+            and viewDiagnostic.projectionError
+        -- Mine has no projection request while its personal import waits.
+        -- Retained All work must not advance or charge its failure to Mine.
+        local mineImportWaiting = (importPending or viewDiagnostic.importRetryPending)
+            and FilterSettings().scope == "mine"
+        local needProjection = (not backingOff) and (not mineImportWaiting) and (refreshDirty
+            or viewDiagnostic.projectionPending or coldStart)
+        if not needProjection then
+            pumpTicker = 0
+        else
+            pumpTicker = pumpTicker + elapsed
+            if pumpTicker >= pump.interval then
+                pumpTicker = 0
+                if ((not importPending and not viewDiagnostic.importRetryPending)
+                    or FilterSettings().scope ~= "mine") and refreshDirty
+                    and not viewDiagnostic.projectionPending
+                    and not receivingNow then
+                    -- MarkDataDirty invalidates stale pending; request a job
+                    -- before PumpBuilds can advance one.
+                    if pump.GuardedRefresh() then pump.Note() end
+                end
+                local projections = Nexus and Nexus.ViewProjections
+                if projections and (not receivingNow or coldStart)
+                    and type(projections.PumpBuilds) == "function" then
+                    -- A receive window may already be active when the browser
+                    -- first opens. Keep that cold persisted projection moving
+                    -- at the ordinary cadence, but retain an existing
+                    -- last-good publication until the burst becomes quiet.
+                    if receivingNow and coldStart and not (FilterSettings().scope == "mine"
+                        and (importPending or viewDiagnostic.importRetryPending)) then
+                        if pump.GuardedRefresh() then pump.Note() end
+                    end
+                    -- A refresh above may have just failed in this callback.
+                    -- Recheck its new hold before advancing the retained job.
+                    backingOff = viewDiagnostic.projectionError
+                        and pump.now < pump.failBackoffUntil
+                    if not backingOff then
+                        local ok, published, pumpError = pcall(projections.PumpBuilds)
+                        if not ok then
+                            pump.Retain(published)
+                        elseif published then
+                            viewDiagnostic.projectionPending = false
+                            if pump.GuardedRefresh() then pump.Note() end
+                        elseif pumpError then
+                            -- PumpBuilds cancelled this failed job. Retain the
+                            -- failure now; ordinary replacement waits for its hold.
+                            viewDiagnostic.projectionPending = false
+                            pump.Retain(pumpError)
+                        end
+                    end
+                end
+            end
         end
 
         -- Cheap safety probe for missed invalidations. An unchanged tick does
@@ -2310,20 +2629,39 @@ local function EnsureFrame()
             end
             -- A missing/failing dirty probe must retain the old safe behavior:
             -- attempt the refresh instead of treating an unknown state as
-            -- current forever.
-            if not receiving and (refreshDirty or current ~= true) then
-                M.Refresh()
+            -- current forever. An active failure hold already owns the retry,
+            -- so this observation must not clear that error.
+            local holdingFailure = viewDiagnostic.projectionError
+                and now < pump.failBackoffUntil
+            if holdingFailure then
+                virtualStats.periodicSkips = virtualStats.periodicSkips + 1
+            elseif not receiving and (refreshDirty or current ~= true) then
+                local refreshOk, refreshErr = pcall(M.RenderRefresh)
+                if refreshOk then pump.Note()
+                else pump.Retain(refreshErr) end
             else
                 virtualStats.periodicSkips = virtualStats.periodicSkips + 1
             end
         end
-    end)
-    frame:Hide()
-    frame:HookScript("OnHide",function()
+    end
+    local function PauseFrameUpdates()
+        frame:SetScript("OnUpdate", nil)
+        retryTicker, statusTicker, dataTicker, pumpTicker = 0, 0, 0, 0
+        -- Hiding pauses work; pending-only reopening cannot prove recovery.
+        -- Keep every failure deadline with its independent owner.
+        pump.now = 0
         if dropPanel then dropPanel:Hide() end
         if sortPanel then sortPanel:Hide() end
         if dropdownShield then dropdownShield:Hide() end
-    end)
+        HidePostMenus()
+    end
+    local function ResumeFrameUpdates()
+        frame:SetScript("OnUpdate", OnFrameUpdate)
+    end
+    frame:SetScript("OnUpdate", OnFrameUpdate)
+    frame:Hide()
+    frame:HookScript("OnHide", PauseFrameUpdates)
+    frame:HookScript("OnShow", ResumeFrameUpdates)
 
     pcall(function()
         frame:SetBackdrop({
@@ -2408,7 +2746,7 @@ local function EnsureFrame()
         row:SetScript("OnClick",function()
             onSelect(item)
             CloseDropdowns()
-            M.Refresh()
+            pump.RefreshContext()
         end)
         panel._rows = panel._rows or {}
         panel._rows[#panel._rows+1] = row
@@ -2529,7 +2867,7 @@ local function EnsureFrame()
         end
         if suppressSearchChange then return end
         ControllerInstance().SetFilter("search", self:GetText() or "")
-        M.Refresh()
+        pump.RefreshContext()
     end)
     local searchLabel = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     searchLabel:SetPoint("LEFT",searchBox,"LEFT",6,0)
@@ -2557,7 +2895,7 @@ local function EnsureFrame()
         ControllerInstance().SetFilter("page", requestedPage)
         searchLabel:Show()
         clearSearchBtn:Hide()
-        M.Refresh()
+        pump.RefreshContext()
     end)
 
     -- Library scope is a direct two-button selector instead of a hidden dropdown.
@@ -2570,7 +2908,7 @@ local function EnsureFrame()
         ControllerInstance().SetFilter("scope", "all")
         ControllerInstance().ClearSelection()
         CloseDropdowns()
-        M.Refresh()
+        pump.RefreshContext()
     end)
     scopeBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
@@ -2591,7 +2929,7 @@ local function EnsureFrame()
         ControllerInstance().SetFilter("scope", "mine")
         ControllerInstance().ClearSelection()
         CloseDropdowns()
-        M.Refresh()
+        pump.RefreshContext()
     end)
     myBuildsBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
@@ -2613,7 +2951,7 @@ local function EnsureFrame()
             filters.currentClassOnly == false)
         ControllerInstance().ClearSelection()
         CloseDropdowns()
-        M.Refresh()
+        pump.RefreshContext()
     end)
     classDropBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
@@ -2652,7 +2990,7 @@ local function EnsureFrame()
             filters.qualifiedOnly == false)
         ControllerInstance().ClearSelection()
         CloseDropdowns()
-        M.Refresh()
+        pump.RefreshContext()
     end
     local function QualifiedTip(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
@@ -2745,7 +3083,7 @@ local function EnsureFrame()
         if (filters.page or 1) <= 1 then return end
         ControllerInstance().SetFilter("page", (filters.page or 1) - 1)
         if scrollBar then scrollBar.value = 0 end
-        M.Refresh()
+        pump.RefreshContext()
     end)
 
     pageText = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
@@ -2763,7 +3101,7 @@ local function EnsureFrame()
         local filters = FilterSettings()
         ControllerInstance().SetFilter("page", (filters.page or 1) + 1)
         if scrollBar then scrollBar.value = 0 end
-        M.Refresh()
+        pump.RefreshContext()
     end)
 
     syncStatusText = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
@@ -2802,7 +3140,7 @@ local function EnsureFrame()
         pcall(function() scrollFrame:SetVerticalScroll(val) end)
         if renderBuildWindow and frame and frame:IsShown()
             and not virtualBinding then
-            Measure("community.render", renderBuildWindow, "scroll")
+            pump.Rebind("scroll", true)
         end
     end
     scrollBar.SetValue = function(_, val) SetScroll(val) end
@@ -2816,7 +3154,7 @@ local function EnsureFrame()
     scrollFrame:SetScript("OnSizeChanged", function()
         if renderBuildWindow and frame and frame:IsShown()
             and not virtualBinding then
-            Measure("community.render", renderBuildWindow, "resize")
+            pump.Rebind("resize", false)
         end
     end)
     frame._virtualListScrollFrame = scrollFrame
@@ -2955,10 +3293,12 @@ function M.DiagnosticSnapshot()
     local dirty = refreshDirty or not current
     local reason
     if not shown then reason = "hidden"
-    elseif base.filterScope == "mine" and base.savedImportPending then
-        reason = "saved-import"
-    elseif viewDiagnostic.projectionPending then reason = "projection-pending"
     elseif viewDiagnostic.projectionError then reason = "projection-error"
+    elseif base.filterScope == "mine" and (base.savedImportPending
+        or viewDiagnostic.importRetryPending) then
+        reason = virtualStats.lastImportError ~= nil
+            and "saved-import-error" or "saved-import"
+    elseif viewDiagnostic.projectionPending then reason = "projection-pending"
     elseif dirty and receiving and viewDiagnostic.publishedPage > 0 then
         reason = "sync-receiving"
     elseif dirty then reason = "dirty"
@@ -2994,11 +3334,14 @@ function M.DiagnosticSnapshot()
         filterQualifiedOnly=base.filterQualifiedOnly ~= false,
         filterSearchActive=base.filterSearchActive == true,
         filterSort=base.filterSort or "dps",filterCategory="builds",
+        projectionError=viewDiagnostic.projectionError == true,
         projectionCurrent=current,projectionPending=
             viewDiagnostic.projectionPending == true,
         projectionDirty=dirty,savedImportPending=
             base.savedImportPending == true,
         savedImportPhase=base.savedImportPhase or "unknown",
+        savedImportError=virtualStats.lastImportError ~= nil,
+        shareStatusError=virtualStats.lastStatusError ~= nil,
         syncReceiving=receiving,
         lastPublicationAge=PublicationAge(viewDiagnostic.publishedAt),
         blockedReason=reason,
@@ -3010,9 +3353,9 @@ function M.MarkDataDirty()
         refreshDirty = true
         virtualStats.dirtyMarks = virtualStats.dirtyMarks + 1
     end
-    viewDiagnostic.projectionPending = false
-    viewDiagnostic.projectionError = false
+    viewDiagnostic.pump.InvalidateStalePending()
     viewDiagnostic.projectionCurrent = false
+    -- Data churn does not erase a failure or release its retry deadline.
     return true
 end
 
@@ -3026,11 +3369,14 @@ end
 -- Refresh  (called every tick while open, and whenever data changes)
 ------------------------------------------------------------------------
 
-function M.Refresh()
-    -- An open Share form follows its Share when that settles, also when the
-    -- Community window is closed.
-    if postPopup and postPopup:IsShown() and postPopup._shareStatus then
-        postPopup._shareStatus:SetText(PostStatusText())
+function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
+    viewDiagnostic.pump.InvalidateStalePending()
+    -- Status has its own failure owner. Automatic label failure cannot block
+    -- independent Library work, including before/without main frame creation.
+    if not statusAlreadyRefreshed then viewDiagnostic.pump.Status(false, false) end
+    if respectHold and viewDiagnostic.projectionError
+        and viewDiagnostic.pump.now < viewDiagnostic.pump.failBackoffUntil then
+        return false, "failed"
     end
     if not frame or not frame:IsShown() then return end
     M.ApplyResponsiveLayout(false)
@@ -3089,10 +3435,13 @@ function M.Refresh()
     -- filter, scope, sort, and page controls truthful before that gate so the
     -- visible browser never looks frozen while its last-good rows stay bound.
     local controller = ControllerInstance()
-    local importPending = fs.scope == "mine"
-        and type(controller.HasPendingSavedLoadoutImport) == "function"
+    local importPending = type(controller.HasPendingSavedLoadoutImport) == "function"
         and controller.HasPendingSavedLoadoutImport()
-    if importPending then
+    -- Show may finish the real import before the next frame callback.
+    if not importPending and not viewDiagnostic.importRetryPending then
+        virtualStats.lastImportError = nil
+    end
+    if fs.scope == "mine" and (importPending or viewDiagnostic.importRetryPending) then
         refreshDirty = true
         -- The rows still shown are the last published ones, not the result
         -- of the current filters.
@@ -3100,7 +3449,6 @@ function M.Refresh()
         if frame._emptyState then frame._emptyState:Hide() end
         frame._resultsStale = true
         viewDiagnostic.projectionPending = false
-        viewDiagnostic.projectionError = false
         viewDiagnostic.projectionCurrent = false
         RenderSyncStatus()
         RefreshDetailPanel(SelectedId(), true)
@@ -3110,8 +3458,16 @@ function M.Refresh()
     -- Build browser contains builds only. DPS rankings are rendered in the
     -- dedicated Leaderboard window.
     local boardRows = nil
+    local pendingBuildRevision, pendingDpsRevision = viewDiagnostic.pump.Revisions()
     local builds, projectionSummary, projectionError =
         Measure("community.projection", SortedBuilds)
+    -- Record the real request result before any host label can throw.
+    viewDiagnostic.projectionPending = type(builds) ~= "table"
+        and projectionError == "pending"
+    if viewDiagnostic.projectionPending then
+        viewDiagnostic.pump.pendingBuildRevision = pendingBuildRevision
+        viewDiagnostic.pump.pendingDpsRevision = pendingDpsRevision
+    end
     if type(builds) ~= "table" then
         if projectionError == "pending" then
             refreshDirty = true
@@ -3123,7 +3479,6 @@ function M.Refresh()
             -- last rows, but must not show their empty text again).
             frame._resultsStale = true
             viewDiagnostic.projectionPending = true
-            viewDiagnostic.projectionError = false
             viewDiagnostic.projectionCurrent = false
             RenderSyncStatus()
             RefreshDetailPanel(SelectedId(), true)
@@ -3134,7 +3489,10 @@ function M.Refresh()
         viewDiagnostic.projectionError = true
         viewDiagnostic.projectionCurrent = false
         virtualStats.dataFailures = virtualStats.dataFailures + 1
-        RenderSyncStatus()
+        virtualStats.lastDataError = viewDiagnostic.pump.ErrorText(projectionError or "Community projection failed")
+        -- Retain this actual projection failure before any further label
+        -- attempt; a secondary presentation fault must not bypass its hold.
+        viewDiagnostic.pump.Note()
         return false, projectionError
     end
     if projectionSummary and fs.page ~= projectionSummary.page then
@@ -3457,7 +3815,7 @@ function M.Refresh()
             virtualStats.active = 0
             virtualStats.first, virtualStats.last = 1, 0
             virtualStats.selectedVisible = false
-            error(err)
+            error(err, 0)
         end
     end
     Measure("community.render", renderBuildWindow, "data")
@@ -3506,6 +3864,7 @@ function M.Refresh()
     viewDiagnostic.projectionPending = false
     viewDiagnostic.projectionError = false
     viewDiagnostic.projectionCurrent = true
+    virtualStats.lastDataError = nil
     refreshDirty = false
     return true
 end
@@ -3522,6 +3881,7 @@ end
 
     function M.Show()
         Measure("community.frame.ensure", EnsureFrame)
+        M.PrepareOpenImport()
         M.ApplyResponsiveLayout(false)
         if Nexus.Panel and Nexus.Panel.AttachMenuFrame then
             Nexus.Panel.AttachMenuFrame(frame)
@@ -3537,7 +3897,11 @@ end
     end
 
     function M.Hide()
-        if frame then frame:Hide() end
+        if not frame then return end
+        -- Hide drives PauseFrameUpdates (OnHide): OnUpdate cleared, menus shut.
+        -- Share/Edit popups are separate UIParent frames and keep their own
+        -- lifetime so an in-flight Share status line can finish while closed.
+        frame:Hide()
     end
 
     function M.IsShown()

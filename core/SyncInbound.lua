@@ -326,7 +326,10 @@ function Inbound.New(options)
                     buildId=buildId,
                     requester=context and context.requester or nil,
                     requestId=context and context.requestId or nil})
-                terminal = acceptPeer(transportSender)
+                -- Peer retention is best-effort; capacity refusal is logged in
+                -- AcceptPeer and must not revoke a completed commit.
+                acceptPeer(transportSender)
+                terminal = true
             end
             return terminal
         end
@@ -652,7 +655,10 @@ function Inbound.New(options)
                 requestId=(parts[5] and parts[5] ~= "")
                     and parts[5] or nil,
             })
-            if accepted then return acceptPeer(protocolSender, parts[6]) end
+            if accepted then
+                acceptPeer(protocolSender, parts[6])
+                return true
+            end
             return false
         end
 
@@ -671,7 +677,8 @@ function Inbound.New(options)
             if not accepted then return false end
             noteInbound({kind="legacy_claim",sender=protocolSender,
                 requester=parts[3],requestId=parts[4]})
-            return acceptPeer(protocolSender)
+            acceptPeer(protocolSender)
+            return true
         end
 
         if code == codes.bucketClaim then
@@ -693,7 +700,8 @@ function Inbound.New(options)
             if not accepted then return false end
             noteInbound({kind="bucket_claim",sender=protocolSender,
                 requester=parts[3],requestId=parts[4]})
-            return acceptPeer(protocolSender)
+            acceptPeer(protocolSender)
+            return true
         end
 
         if code == codes.delete then
@@ -720,7 +728,8 @@ function Inbound.New(options)
                         buildId=parts[3],
                         requester=context and context.requester or nil,
                         requestId=context and context.requestId or nil})
-                    terminal = acceptPeer(protocolSender)
+                    acceptPeer(protocolSender)
+                    terminal = true
                 end
                 return terminal
             end
@@ -761,7 +770,8 @@ function Inbound.New(options)
                     requester=context and context.requester or nil,
                     requestId=context and context.requestId or nil})
                 if changed then requestDataViewRefresh() end
-                terminal = acceptPeer(protocolSender)
+                acceptPeer(protocolSender)
+                terminal = true
                 return terminal
             end
             local accepted, changed, rejection =
@@ -784,7 +794,8 @@ function Inbound.New(options)
             end
             if not handleLoadoutRequest({requester=protocolSender,
                 buildId=parts[3],requestId=requestId}) then return false end
-            return acceptPeer(protocolSender)
+            acceptPeer(protocolSender)
+            return true
         end
 
         if code == codes.loadoutClaim then
@@ -807,7 +818,8 @@ function Inbound.New(options)
             if not accepted then return false end
             noteInbound({kind="loadout_claim",sender=protocolSender,
                 buildId=parts[4],requester=parts[3],requestId=parts[5]})
-            return acceptPeer(protocolSender)
+            acceptPeer(protocolSender)
+            return true
         end
 
         if code == codes.dpsLegacy then
@@ -821,7 +833,8 @@ function Inbound.New(options)
                 return rejectIncoming("invalid DPS transfer")
             end
             if HandleDpsTransfer(parts, channelOwnerSender) then
-                return acceptPeer(protocolSender)
+                acceptPeer(protocolSender)
+                return true
             end
             return false
         end

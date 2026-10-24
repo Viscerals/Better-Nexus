@@ -65,6 +65,7 @@ local function controls(H,A,trace,route)
         check(row.id ~= UNKNOWN and row.id ~= NONCONFORMANT and row.id ~= OPTED_OUT,
             route..' unknown/nonconformant/opted-out controls are not pruned')
         if row.id == REQUIRED then targetSends = targetSends + 1 end
+        -- cadence.leverInterval is 0.5; accepted sends must not bunch tighter.
         if i > 1 then check(row.at-trace[i-1].at >= .5-1e-6, route..' original send spacing retained') end
     end
     check(targetSends <= 1, route..' required enable is never duplicated')
@@ -82,6 +83,7 @@ for _,route in ipairs({'first_run','active_saved'}) do
             check(#trace == 0 and H.disabled[REQUIRED] == true, route..' closed Orb gate sends nothing')
             H.orbKnown = true
         end
+        -- One leverInterval beat (0.5 s); a longer window admits a prune send.
         H.Advance(.25,.05)
         expect(#trace == 1 and trace[1].id == REQUIRED,
             route..' '..scenario..': first eligible action beat must restore required tome before pruning')
@@ -97,12 +99,18 @@ for _,route in ipairs({'first_run','active_saved'}) do
                 expect(pending and pending.want == false and H.disabled[REQUIRED] == true,
                     route..': first accepted required enable remains pending without its mirror')
             end
+            -- Drain the paced 0.5 s queue well before the 30 s pending expiry.
             H.Advance(4,.05)
             check(#trace == EXTRAS+1, route..' one enable plus all six eligible unwanted disables')
             if scenario == 'no_ack' then
                 local pending = Nexus.Store.State().tomeTogglePending[LEVER]
                 check(pending and pending.want == false and H.disabled[REQUIRED] == true,
                     route..' absent acknowledgement never becomes confirmation')
+                -- Expiry is not resubmit permission: a late first effect must
+                -- not be undone by a second toggle after the 30 s window.
+                H.Advance(31,.05)
+                check(#trace == EXTRAS+1, route..' expired unconfirmed enable is not resent')
+                check(H.disabled[REQUIRED] == true, route..' held enable mirror is unchanged after expiry')
             else check(H.disabled[REQUIRED] == false, route..' required tome restored at1') end
         end
         controls(H,A,trace,route)
