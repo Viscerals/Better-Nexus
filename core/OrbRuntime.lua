@@ -1625,28 +1625,42 @@ function RC.memory(guid,p,row)
     -- Atomic writes always provide their actual row and bypass this cache.
     if not row and cached and cached.guid==guid and cached.baseline==baseline
         and cached.owner==Nexus.Store.CurrentOwnerKey() and sameValue(cached.archive,list) then
-        RC.memoryCache=cached
+        RC.memoryCache=not cached.invalid and cached or nil
+        if cached.invalid then return nil end
         return cached.attempts,cached.list
+    end
+    -- Bound every entry before retaining even a negative content verdict.
+    -- An oversized, deep or non-plain archive is never kept by this cache.
+    local total=0
+    for _,e in ipairs(list) do
+        local edges,bytes=journalMeasure(e)
+        if not edges or bytes>ENTRY_BYTES then return nil end
+        local _,_,depth=measure(e);total=total+bytes
+        if depth>4 or total>ARCHIVE_BYTES then return nil end
     end
     -- Validate and retain our own list and nested entries. A reader can keep
     -- and edit an older public snapshot even after Store invalidates it.
     if not row then list=copy(list) end
-    local attempts,total={},0
+    local function invalid()
+        if not row then
+            RC.memoryCaches=RC.memoryCaches or {}
+            RC.memoryCaches[slot]={guid=guid,baseline=baseline,owner=Nexus.Store.CurrentOwnerKey(),archive=list,invalid=true}
+            RC.memoryCache=nil
+        end
+        return nil
+    end
+    local attempts={}
     for _,e in ipairs(list) do
-        local edges,bytes=journalMeasure(e)
-        if not edges or bytes>ENTRY_BYTES then return nil end
-        local _,_,depth=measure(e)
-        total=total+bytes
-        if depth>4 or total>ARCHIVE_BYTES or (e.kind~="AUTO_UNCONFIRMED" and e.kind~="ACK_UNCONFIRMED")
-            or type(e.resolution)~="table" or e.resolution.outcome~="UNCONFIRMED" or e.resolution.confidence~="NONE" then return nil end
+        if (e.kind~="AUTO_UNCONFIRMED" and e.kind~="ACK_UNCONFIRMED")
+            or type(e.resolution)~="table" or e.resolution.outcome~="UNCONFIRMED" or e.resolution.confidence~="NONE" then return invalid() end
         local p=e.receipt;local who=receiptGuid(p)
         if type(who)~="string" or type(p.removed)~="string" or not p.removed:match("^%d+:%d+$")
             or type(p.before)~="table" or not integer(p.before[p.removed],1)
-            or (p.selectedKey~=nil and (type(p.selectedKey)~="string" or not p.selectedKey:match("^%d+:%d+$"))) then return nil end
+            or (p.selectedKey~=nil and (type(p.selectedKey)~="string" or not p.selectedKey:match("^%d+:%d+$"))) then return invalid() end
         for k,v in pairs(p.before) do
-            if type(k)~="string" or not k:match("^%d+:%d+$") or not integer(v,0) then return nil end
+            if type(k)~="string" or not k:match("^%d+:%d+$") or not integer(v,0) then return invalid() end
         end
-        if e.id~=RC.identity(p) or e.cd~=digest(canonText(p)) then return nil end
+        if e.id~=RC.identity(p) or e.cd~=digest(canonText(p)) then return invalid() end
         if who==guid then
             attempts[#attempts+1]={removed=p.removed,selected=hasChoiceEvidence(p) and p.selectedKey or nil,entry=e}
         end

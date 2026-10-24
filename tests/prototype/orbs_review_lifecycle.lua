@@ -532,6 +532,15 @@ do
      'GUARD a real archive mutation invalidates validation and refuses new approval')
     assert(R.SavedRow('orbRecoveryArchive')[1].cd=='damaged',
      'GUARD invalid history is preserved, never repaired or evicted by observation')
+    local damagedHot=measured(M,function()for _=1,8 do M.Pump(true);M.Status(false);H.Advance(.25)end end)
+    print('WORK R6b7 invalid-history canonical='..damagedHot.canonical..' measure='..damagedHot.measure)
+    if damagedHot.canonical~=0 or damagedHot.measure~=0 then
+     issues[#issues+1]='EXPECT stable bounded invalid history reuses its negative verdict instead of repeatedly hashing'
+    end
+    assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive[1].cd=seed.cd end))
+    local restored;local repaired=measured(M,function()restored=M.Status(false)end)
+    assert(repaired.canonical>0 and restored.canStart,
+     'GUARD real corrected history invalidates the negative verdict and revalidates from contents')
    end
    assert(H.Count('orb-spend')==(kind=='assigned-live-pending' and 1 or 0) and H.Count('take')==0,
     'GUARD observation work changes no gameplay actions')
