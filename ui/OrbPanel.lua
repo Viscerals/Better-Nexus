@@ -1158,6 +1158,19 @@ local function miniPending(v)
     end
     return v.pending and "Pending: the last Orb action is not settled" or "Pending: none"
 end
+local function miniPendingLine(v)
+    local shown,full=miniText(miniPending(v))
+    if v.kind=="run" and v.reserved~=nil and v.pending~=nil
+        and (v.uncertain==nil or v.unconfirmedResults==nil or v.historyKnown~=true
+            or v.uncertain>0 or v.unconfirmedResults>0) then
+        -- Keep all three distinct counts visible inside the existing line;
+        -- its hover retains the complete pending/history explanation.
+        shown=miniText("Unknown spend: "..(v.uncertain~=nil and miniNumber(v.uncertain) or "?")
+            .."; Reserved: "..miniNumber(v.reserved).."; Outcomes: "
+            ..(v.historyKnown==true and v.unconfirmedResults~=nil and miniNumber(v.unconfirmedResults) or "?"))
+    end
+    return shown,full
+end
 -- Copies, not families: CompactStatus.remaining is the run's rolled target
 -- copies still missing at its latest check. Absent is unavailable, never 0.
 local function miniMissing(v)
@@ -1192,7 +1205,7 @@ local function miniRender()
     setFull(mini.state,miniText(miniStateText(v)))
     setFull(mini.reason,miniReason(v))
     setFull(mini.usage,miniText(miniUsage(v)))
-    setFull(mini.pending,miniText(miniPending(v)))
+    setFull(mini.pending,miniPendingLine(v))
     setFull(mini.missing,miniText(miniMissing(v)))
     -- An outcome belongs to the state it was shown for; a later change of that
     -- state retires it, so it never describes a newer state.

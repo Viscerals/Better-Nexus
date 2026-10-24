@@ -496,6 +496,10 @@ do
  assert(waitFor(H,function()return H.Count('orb-spend')==2 end));local mini=Nexus.OrbPanel.ShowMini()
  local p=mini.pending;local text=p._nexusFullText or p:GetText()
  check(text:find('Unknown spend: 1',1,true) and text:find('current exposure: 1',1,true),'EXPECT mini retains archived unknown and current reserved exposure together')
+ local visible=p:GetText()
+ check(visible:find('Unknown spend: 1',1,true) and visible:find('Reserved: 1',1,true)
+  and visible:find('Outcomes: 1',1,true) and #visible*7<=p:GetWidth(),
+  'EXPECT actual visible mini line fits unknown spend, current reservation and unconfirmed outcome together')
 end
 
 
