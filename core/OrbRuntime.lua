@@ -1179,6 +1179,14 @@ local function finishResult(s,p)
         run.recovery=nil;if type(B.Unwatch)=="function" then B.Unwatch() end
         terminal("STOPPED","Previous result confirmed. No spending restarted; review a new run explicitly.");return true
     end
+    -- Completion ended this approval even if its final receipt was still
+    -- unresolved. Settling it releases ownership; neither a changed target
+    -- nor a later ownership snapshot may turn the terminal run into Resume.
+    if run.completed then
+        terminal(run.state=="STOPPED" and "STOPPED" or run.completed,
+            "Last replacement confirmed. This Orb run already ended; no spending restarted. Review a new run for different targets.")
+        return true
+    end
     if run.targetChanged then
         setState(run.state=="STOPPED" and "STOPPED" or "PAUSED",run.historyBaseline and #run.historyBaseline.entries>0
             and "Matching ownership observed under the acknowledged baseline; no server action correlation. Review the new assigned Wishlist before any further approval; usage is unchanged."
