@@ -2324,14 +2324,21 @@ function RC.archive(rc,s,p)
         entry.kind="AUTO_UNCONFIRMED";entry.uncertain=run.reserved or 0
         entry.pre.emptyChoice=rc.emptyChoice
     end
-    local edges,bytes,depth=RC.entryBudget(entry)
+    -- Existing explicit receipts keep their original raw exit limits. The
+    -- future late-evidence reserve is an admission rule for automatic work,
+    -- not a new reason to strand a legacy receipt whose exit still fits.
+    local edges,bytes,depth=measure(entry)
+    if rc.automatic then edges,bytes,depth=RC.entryBudget(entry) end
     if edges>ARCHIVE_EDGES or bytes>ENTRY_BYTES or depth>4 then return nil,"entry_too_large" end
     local exists=false
     for _,e in ipairs(list) do if e.id==entry.id and e.cd==entry.cd then exists=true end end
     if not exists then
         if astate=="full" then return nil,"archive_full" end
         local total=bytes
-        for _,e in ipairs(list) do total=total+RC.retainedBudget(e) end
+        for _,e in ipairs(list) do
+            local _,retained=measure(e)
+            total=total+(rc.automatic and RC.retainedBudget(e) or retained)
+        end
         if total>ARCHIVE_BYTES then return nil,"archive_full" end
         if rc.automatic and not RC.autoCapacity(list,bytes,true) then return nil,"archive_reserved" end
     end

@@ -340,3 +340,92 @@ for _,fault in ipairs({'assignment','state'})do
 end
 if #statusFailures>0 then error(table.concat(statusFailures,'\n'),0)end
 print('PASS R6a4 non-observation display failure and actual state-failure control')
+
+-- R6a5: legacy explicit Continue retains the original raw entry/archive caps.
+-- Optional future diagnostics may stop at those caps; they cannot remove the
+-- only existing exit for a genuine restored no-choice receipt.
+do
+ local R=dofile('tests/prototype/orb_recovery_support.lua')
+ local function bytes(t)
+  local n=0
+  for k,v in pairs(t)do
+   n=n+#tostring(k)
+   if type(v)=='table' then n=n+bytes(v)
+   elseif type(v)=='string' then n=n+#v
+   elseif type(v)=='number' or type(v)=='boolean' then n=n+8 end
+  end
+  return n
+ end
+ local function ready(padding,history)
+  local H,M,A,O=R.S.Fresh();R.S.SpendOfferNoChoice(H,M,A,O)
+  M=R.Reload(H,function()
+   assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)
+    if padding then row.orbRefinement.pending.legacyData=string.rep('x',padding)end
+    if history then row.orbRecoveryArchive=H.Clone(history)end
+   end))
+  end)
+  H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+  local server=R.Server(H);R.S.Pass(H,M,A,2)
+  assert(M.ContinueView().eligible,'SETUP genuine restored spent/no-choice receipt has its original explicit exit')
+  local original=H.Clone(R.Saved());assert(M.ContinueBegin())
+  for _=1,100 do if M.ContinueView().stage=='ready' then break end;H.Advance(.25)end
+  assert(M.ContinueView().stage=='ready','SETUP actual quiet two-refresh check reaches explicit consent')
+  return H,M,A,O,server,original
+ end
+ local H,M,A,O,server,original=ready()
+ assert(M.ContinueConfirm(M.ContinueView().token),'SETUP small genuine legacy entry archives through production')
+ local seed=H.Clone(R.SavedRow('orbRecoveryArchive')[1]);local baseBytes=bytes(seed)
+ assert(baseBytes<5500,'SETUP production envelope leaves room for meaningful legacy boundary cases')
+ local issues={}
+ for _,case in ipairs({'near-entry','near-archive','raw-too-large'})do
+  local ok,err=pcall(function()
+   local history,padding
+   if case=='near-entry' then padding=6000-baseBytes-#'legacyData'
+   elseif case=='raw-too-large' then padding=6300-baseBytes-#'legacyData'
+   else
+    history={};local target=math.floor((28672-baseBytes-#'legacyData'-1-200)/5)
+    for i=1,5 do
+     history[i]=H.Clone(seed)
+     history[i].legacyEnvelope=string.rep('e',target-baseBytes-#'legacyEnvelope')
+     assert(bytes(history[i])==target and target<6144,'SETUP genuine older entry retains opaque bounded envelope')
+    end
+    padding=1
+   end
+   local H,M,A,O,server,original=ready(padding,history)
+   local expected=baseBytes+#'legacyData'+padding
+   assert((case=='raw-too-large' and expected>6144) or (case~='raw-too-large' and expected<=6144),
+    'SETUP exact raw entry lies on the intended original-cap side')
+   if history then
+    local total=expected;for _,e in ipairs(history)do total=total+bytes(e)end
+    assert(#history==5 and total<=28672 and total>28100,
+     'SETUP original total byte bound admits this near-full legacy archive')
+   end
+   print('SETUP R6a5 '..case..' PASS raw-entry='..expected)
+   local accepted,reason=M.ContinueConfirm(M.ContinueView().token)
+   if case=='raw-too-large' then
+    assert(not accepted and reason=='entry_too_large' and R.Same(R.Saved(),original)
+     and M.BlocksOrdinary(),'GUARD actual raw oversize still preserves/refuses the original receipt')
+   else
+    assert(accepted,'EXPECT '..case..' explicit legacy exit preserves original caps: '..tostring(reason))
+    assert(not R.Saved() and not M.BlocksOrdinary(),'EXPECT durable explicit exit releases the pending hold')
+    local archive=R.SavedRow('orbRecoveryArchive');local added=archive[#archive]
+    assert(#archive==(history and 6 or 1) and bytes(added)<=6144,
+     'GUARD archive stays within original entry count and raw entry bytes')
+    assert(R.Same(added.receipt,original),'GUARD original opaque receipt remains exact and unconfirmed')
+    if history then for i,e in ipairs(history)do
+     assert(R.Same(archive[i],e),'GUARD explicit exit neither evicts nor rewrites older records')
+    end end
+    local before=H.Clone(archive)
+    server.Push(16,'late observation');H.Advance(2)
+    local after=R.SavedRow('orbRecoveryArchive');local total=0
+    for _,e in ipairs(after)do total=total+bytes(e);assert(bytes(e)<=6144,'GUARD optional late evidence remains entry bounded')end
+    assert(total<=28672 and R.Same(after[#after].receipt,original),
+     'GUARD later optional annotations cannot exceed archive caps or rewrite the receipt')
+   end
+   assert(H.Count('orb-spend')==1 and H.Count('take')==0,'GUARD explicit exit and passive annotations send no gameplay action')
+  end)
+  if not ok then issues[#issues+1]=case..': '..tostring(err)end
+ end
+ if #issues>0 then error(table.concat(issues,'\n'),0)end
+ print('PASS R6a5 original explicit legacy byte caps and bounded optional late evidence')
+end
