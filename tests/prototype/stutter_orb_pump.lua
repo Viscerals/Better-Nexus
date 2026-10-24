@@ -169,6 +169,39 @@ end
 check(H.Count('orb-spend')==3 and H.Count('take')==3,'GUARD three runs, three spends, three selections')
 
 M.Pump,A.AssignedWishlist,A.Slots,A.Orbs.Spend,A.Orbs.Select=rawPump,rawAssigned,rawSlots,rawSpend,rawSelect
+-- A real archived ambiguous source/pair, followed by its live successor gain.
+-- The first matrix above still proves fresh reads inside both host guards.
+do
+ local R=dofile('tests/prototype/orb_recovery_support.lua')
+ local HH,MM,AA,OO=R.S.Fresh();R.S.Loadouts(HH,AA);HH.perks.currentChoice={}
+ local server=R.Server(HH)
+ HH.service.RequestChoice=function()
+  SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME);server.queue[#server.queue+1]={op=16,body=''}
+ end
+ assert(MM.Start(6),'SETUP approved ambiguous successor run')
+ HH.Offer();HH.perks.pendingSelectSpellId=nil;HH.perks.currentChoice=nil;OO.offer=false
+ for _=1,120 do if HH.Count('orb-spend')==2 then break end;HH.Advance(.25)end
+ check(HH.Count('orb-spend')==2 and #R.SavedRow('orbRecoveryArchive')==1,'SETUP real bounded automatic archive and successor')
+ server.mode='hold';HH.Offer();HH.Result(410002,2)
+ check(R.Saved() and R.Saved().attributionAmbiguous and R.Saved().selectedKey=='410002:2',
+  'SETUP current real chosen gain is held for attribution')
+ HH.perks.serverBuildSlots=Filler(15);HH.now=HH.now+.25
+ local reads=0;local raw=AA.AssignedWishlist
+ AA.AssignedWishlist=function(...)reads=reads+1;return raw(...)end
+ local function Probe(label)
+  reads=0;local before=AA.EchoReconcileStats().projections.slots.echoes
+  local spends,takes=HH.Count('orb-spend'),HH.Count('take')
+  MM.Pump(true)
+  local projected=AA.EchoReconcileStats().projections.slots.echoes-before
+  check(R.Saved() and HH.Count('orb-spend')==spends and HH.Count('take')==takes,'GUARD '..label..' retains receipt and submits nothing')
+  Bound(label,{pumps=1,outside=reads,echoes=projected,inside=0,inEchoes=0},15*PER)
+ end
+ Probe('ambiguous pending passive pump')
+ assert(MM.Pause() and MM.ContinueBegin(),'SETUP actual explicit attribution check')
+ check(MM.ContinueView().stage=='checking','SETUP strict attribution check is active')
+ HH.now=HH.now+.25;Probe('ambiguous checking passive pump')
+ AA.AssignedWishlist=raw
+end
 if #over>0 then
  error('BOUND (expected RED until the CX-04 fix): one Orb pump read the assigned Wishlist more than once outside the action callbacks: '
   ..table.concat(over,'; ')..' ('..#over..' pumps over bound; '..checks..' SETUP/GUARD checks passed)',0)

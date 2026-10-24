@@ -1,3 +1,5 @@
+-- EXPECT semantic replacement from a43cf27: WAIT_WORLD keeps approved session
+-- ownership while all actions remain held; diagnostics still settle nothing.
 -- Real addon, synthetic services. Local epochs and observed relations cannot
 -- correlate a server action or establish no spend. Never executes saved Lua.
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
@@ -18,10 +20,11 @@ for i=1,30 do M.Status(false);M.Pump()end
 check(writes==0 and M.BoundaryDiagnostics().retained==retained and R.Same(R.Saved(),stable),'stable reads do not write or append repeated evidence')
 owner.UpdateStateV1=raw
 H.Fire('PLAYER_LEAVING_WORLD');v=M.BoundaryDiagnostics()
-check(v.phase=='l' and v.epoch==1 and not M.Status().running and M.Status().pending,'loading only pauses; exposure retained')
+check(v.phase=='l' and v.epoch==1 and M.Status().state=='WAIT_WORLD' and M.Status().running and M.Status().pending,'loading holds existing authorization; exposure retained')
 check(v.unsaved==false and v.durableRetained==v.retained,'live lifecycle write includes diagnostic boundary')
 H.Fire('PLAYER_ENTERING_WORLD');M.Pump()
--- Vary only observed balance while spending is paused; no action repeats.
+-- Vary only observed balance after classified entry; no action repeats.
+-- A differing balance then pauses; none of these diagnostics settle a spend.
 O.charges=9;M.Pump();v=M.BoundaryDiagnostics()
 check(v.snapshot.chargeRelation=='one_below' and v.snapshot.offerPresent==false and M.RecoveryView().spendObserved==false,'decrement without offer is evidence only')
 O.charges=8;M.Pump();check(M.BoundaryDiagnostics().snapshot.chargeRelation=='lower','lower balance distinct')
@@ -54,24 +57,60 @@ local H3,M3=S.Fresh();H3.OrbPlan();local restore=R.BreakStore()
 local ok=M3.Start(2)
 check(not ok and H3.Count('orb-spend')==0 and H3.Count('take')==0,'failed persistence never permits a host call')
 restore()
--- Insufficient/unknown archive room never changes an otherwise valid spend.
+-- EXPECT semantic replacement from 9aa5ed9: R1 validates retained history
+-- before action admission. Unknown history is an authority refusal, not a
+-- diagnostic-budget refusal; diagnostic reads must neither repair nor lift it.
 for _,archive in ipairs({false,{{v=2,id='future',cd='future',receipt={}}}})do
  local HF,MF,AF,OF=S.Fresh();HF.OrbPlan()
- assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(r)r.orbRecoveryArchive=archive end))
- HF.Approve(2,false)
- check(HF.Count('orb-spend')==1 and R.Saved().boundaryJournal==nil and MF.BoundaryDiagnostics().mode=='session_only','unknown archive stays unchanged; diagnostics do not gate spending')
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(r)r.orbRecoveryArchive=HF.Clone(archive) end))
+ local approved,why=MF.Start(2);assert(not approved and why)
+ local status=MF.Status(false);local diag=MF.BoundaryDiagnostics()
+ check(HF.Count('orb-spend')==0 and HF.Count('take')==0 and R.Saved()==nil
+  and status.state=='IDLE' and not status.running and status.reserved==0
+  and status.startReason=='Retained Orb history cannot be verified. No new Orb action was sent.',
+  'unknown history refuses before receipt or host admission')
+ check(diag.mode=='unavailable' and diag.reason=='no_receipt' and not diag.observed,
+  'history refusal does not claim diagnostic capture or budget exhaustion')
  local _,actual=R.Row();check(R.Same(actual.orbRecoveryArchive,archive),'unknown archive not repaired')
+ local original=HF.Clone(actual);local state=HF.Clone(Nexus.Store.State())
+ local authority=Nexus.MainInternals.StoreAuthorityOwner;local write=authority.UpdateStateV1;local read=AF.Orbs.Read
+ local diagnosticWrites,diagnosticReads=0,0
+ authority.UpdateStateV1=function(...)diagnosticWrites=diagnosticWrites+1;return write(...)end
+ AF.Orbs.Read=function(...)diagnosticReads=diagnosticReads+1;return read(...)end
+ for i=1,30 do check(R.Same(MF.BoundaryDiagnostics(),diag),'unknown-history diagnostic view is stable')end
+ authority.UpdateStateV1=write;AF.Orbs.Read=read
+ check(diagnosticWrites==0 and diagnosticReads==0 and R.Same(actual,original)
+  and R.Same(Nexus.Store.State(),state),'GUARD unknown-history diagnostics make no Orb adapter read or Store write and preserve retained state')
+ check(R.Same(MF.Status(false),status) and HF.Count('orb-spend')==0 and HF.Count('take')==0,
+  'diagnostics preserve the existing authority refusal and send no action')
 end
 local HB,MB,AB,OB=S.Fresh();HB.OrbPlan()
 local read=AB.Orbs.Read
 AB.Orbs.Read=function(...)local s,e,why=read(...);if s then s.lockedKey=string.rep('x',4096)end;return s,e,why end
-HB.Approve(2,false)
-check(HB.Count('orb-spend')==1 and R.Saved().boundaryJournal==nil and MB.BoundaryDiagnostics().reason=='receipt_budget','large existing receipt uses session-only journal without changing host admission')
-local HC,MC,AC,OC=S.Fresh();HC.OrbPlan();local full={}
-for i=1,8 do full[i]={v=1,id='bounded-'..i,cd='bounded-'..i,receipt={}}end
-assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(r)r.orbRecoveryArchive=full end))
-HC.Approve(2,false)
-check(HC.Count('orb-spend')==1 and R.Saved().boundaryJournal==nil and MC.BoundaryDiagnostics().reason=='archive_budget','full archive uses session-only evidence without changing admission')
+local approved=MB.Start(2)
+check(not approved and HB.Count('orb-spend')==0 and not R.Saved(),'EXPECT oversized prospective receipt refuses before pending or host admission')
+-- Fill the eight-entry archive capacity with distinct, valid receipts produced by the
+-- actual checked Continue and atomic Store path, not invalid placeholder history.
+local full,identities={},{}
+for i=1,8 do
+ local HH,MH,AH,OH=R.Class({latch=false,edit=function(row,state)row.logSerial=i;state.logSerial=i end})
+ R.Server(HH);S.Pass(HH,MH,AH,1)
+ local before=HH.Clone(R.Saved())
+ check(MH.ContinueBegin()==true,'SETUP valid retained receipt admits a strict Continue check')
+ for tick=1,80 do if MH.ContinueView().stage=='ready' then break end;HH.Advance(.25)end
+ local cv=MH.ContinueView()
+ check(cv.stage=='ready' and MH.ContinueConfirm(cv.token)==true,'SETUP real checked Continue archives the exact receipt')
+ local entry=R.SavedRow('orbRecoveryArchive')[1]
+ check(R.Same(entry.receipt,before),'GUARD real Continue preserves the entire original receipt')
+ check(entry.kind=='ACK_UNCONFIRMED' and entry.resolution.confidence=='NONE'
+  and not identities[entry.id] and HH.Count('orb-spend')==0 and HH.Count('take')==0,
+  'SETUP distinct real unconfirmed archive, with no spend or result confirmation')
+ identities[entry.id]=true;full[i]=HH.Clone(entry)
+end
+local HC,MC,AC,OC=S.Fresh();HC.OrbPlan()
+assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(r)r.orbRecoveryArchive=HC.Clone(full) end))
+local approved=MC.Start(2,false,MC.Status().historyReview)
+check(not approved and HC.Count('orb-spend')==0 and not R.Saved() and not MC.BlocksOrdinary(),'EXPECT valid full archive refuses a new unarchivable operation before ownership')
 check(R.Same(R.SavedRow('orbRecoveryArchive'),full),'full archive is never evicted to fit diagnostics')
 local HE,ME,AE,OE=S.Fresh();HE.OrbPlan();OE.mode='throw';HE.Approve(2,false)
 local sawError=false;for _,e in ipairs(ME.BoundaryDiagnostics().receiptJournal)do if e.event=='host_error' then sawError=true end end

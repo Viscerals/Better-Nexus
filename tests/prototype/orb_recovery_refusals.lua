@@ -594,7 +594,9 @@ section('24 request failure',function()
  local ok,why=M.ContinueBegin()
  check(ok==true or why==nil,'the check starts')
  H.Advance(.5)
- Refused(H,M,original,'request_failed','a send that failed')
+ -- EXPECT semantic reason refinement: preserve the refusal and unchanged
+ -- receipt checks while identifying the actual failed request.
+ Refused(H,M,original,'charge_refresh_failed','a send that failed')
  orb.RequestCharges=rawRequest
  Begin(M)
  check(Run(H,M,10,'ready'),'the next check is not blocked by the request that never left: '..tostring(M.ContinueView().refusal))
@@ -711,6 +713,45 @@ section('32 texts',function()
  check(why:find('Continue',1,true) and not why:find('block ends only when that action is confirmed',1,true),'the block text allows for Continue: '..why)
  check(M.ContinueReason('reply_changed'):find('reported a change',1,true),'a single answer that reports a change is not called two answers that disagree')
  check(M.ContinueReason('observer_tainted'):find('usually',1,true),'a reload does not always clear a taint')
+end)
+
+-- Restored attribution helpers must use this load's actual baseline and
+-- refuse unusable before maps without throwing or changing the saved receipt.
+local function RestoredChoice(before)
+ local F=S.Shape();local key='500001:1'
+ local H,M,A,O=S.World(F,{slot=101,known=true,latch=false,charges=49,open=false,gain=key,choice=key})
+ M=R.Reload(H,function(row,state)
+  for _,r in ipairs({row,state})do r.attributionAmbiguous=true;r.selectionStamp=0;r.beforeStamp=0
+   if before~=nil then r.before=before end
+  end
+ end)
+ return H,M,A,O
+end
+section('S09 restored first read cannot borrow old lifetime stamp',function()
+ local H,M,A,O=RestoredChoice();local original=H.Clone(R.Saved());local ok,why=M.ContinueBegin()
+ check(not ok and why=='choice_recorded','EXPECT no restored attribution exit before an actual baseline for this load')
+ check(R.Same(R.Saved(),original) and not R.SavedRow('orbRecoveryArchive') and H.Count('orb-spend')==0,'GUARD first-read refusal preserves original bytes and sends nothing')
+ local server=R.Server(H);S.Pass(H,M,A,1);H.granted=H.Clone(H.granted);H.Notify();A.Poll();H.Advance(.5)
+ check(M.ContinueBegin()==true,'GUARD genuinely fresh ownership after this load baseline can admit the narrow attribution check')
+end)
+for _,bad in ipairs({false,'unreadable'})do
+ section('S10 unusable restored attribution before '..tostring(bad),function()
+  local H,M,A,O=RestoredChoice(bad);local original=H.Clone(R.Saved());local called,ok=pcall(M.ContinueBegin)
+  check(called and not ok,'EXPECT explicit attribution check refuses unusable saved before map without an exception')
+  check(R.Same(R.Saved(),original) and not R.SavedRow('orbRecoveryArchive') and H.Count('orb-spend')==0,'GUARD malformed helper input is preserved without fake outcome or action')
+ end)
+end
+
+section('S10 archived-delta missing before map is a refusal, not a crash',function()
+ local H,M,A,O,server=World({latch=false});assert(M.ContinueBegin());assert(Run(H,M,20,'ready'));assert(M.ContinueConfirm(M.ContinueView().token))
+ local entry=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
+ local H,M,A,O=RestoredChoice();local owner=Nexus.MainInternals.StoreAuthorityOwner
+ assert(owner.UpdateStateV1(function(row)row.orbRecoveryArchive={entry}end))
+ M=R.Reload(H,function(row,state)for _,r in ipairs({row,state})do r.before=nil;r.attributionAmbiguous=nil end end)
+ local original=H.Clone(R.Saved());local first=pcall(M.Pump);H.granted=H.Clone(H.granted);H.Notify();A.Poll()
+ local observed,err=pcall(M.Pump)
+ check(first and observed,'EXPECT passive mismatch with missing before map never throws through archived-delta helper: '..tostring(err))
+ check(R.Same(R.Saved(),original) and M.BlocksOrdinary() and H.Count('orb-spend')==0,'GUARD helper refusal retains raw malformed receipt and no action/outcome')
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end

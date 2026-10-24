@@ -73,7 +73,10 @@ archive is no longer used by any test.
 
 Game API calls used: `OrbService.IsStateKnown/GetCharges/IsOfferPending/
 ConfirmSpend/RequestCharges` and the PerkService choice, granted, locked,
-selection, and refresh calls. No action probe or speculative
+selection, and refresh calls, including `PerkService.RequestChoice` for the
+bounded live recovery path. The existing `SendAddonMessage` is observed with
+`hooksecurefunc` to distinguish own bare versus framed-empty sends; it is never
+replaced. No action probe or speculative
 spending API is used. Presence/shape checks do not establish native compatibility.
 
 Nexus adaptations are intentional: exact quality and role-aware targets; a
@@ -84,3 +87,18 @@ charge/diff reconciliation; persistence of passive unresolved-operation evidence
 stricter no-replay behavior for ambiguous spending/selection; and no ordinary
 Automation restart. These adaptations are not a claim of byte-for-byte or
 unconditional behavioral equivalence.
+
+Bounded recovery reference (authorized inert inspection only): ProjectEbonhold
+metadata version 37, `modules/perks/perks_service.lua`, SHA-256
+`52043425c2b32e693e50796ed7ccc6e772b9e93e7b4f0471a698878be6b91f34`.
+Relevant symbols: `GetCurrentChoice` (706-708), `RequestChoice` (591; exported
+at 700), choice handler opcode16 (112-210), `GetGrantedPerks` (735), pick-result
+handler1000 (213-245), and the local `sendToServer` transport. In that reference
+an empty outbound request is bare `16`; an incoming exact empty body is
+`16\t`. The cache getter can return nil after empty or unparseable responses,
+so nil alone is not absence. A nonempty choice response may trigger the game's
+own automatic acceptance. These are scalar compatibility facts, not copied
+implementation. No local export or player report is in this repository.
+The installed tester/client version, actual server delivery and sender/channel
+convention are unverified. See `docs/ORB_BOUNDED_RECOVERY.md` for fail-closed
+behavior when own request observation or qualifying replies are unavailable.

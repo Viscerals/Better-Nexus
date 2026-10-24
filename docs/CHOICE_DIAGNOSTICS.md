@@ -11,7 +11,8 @@ freshness.
   `GetCurrentChoice` read. No additional native read is made. A plain dense
   response containing one to three valid spell-ID rows is `present`; a plain
   explicit empty table is `absent`. Nil, errors, missing APIs and malformed
-  responses are `unknown`. Native nil semantics have not been established.
+  responses are `unknown`. The inspected native cache can be nil after empty or
+  unparseable replies; nil alone cannot establish absence.
 - `observedAt` is whole client uptime seconds, not UTC. `age` is elapsed client
   time since that evaluation. `recent` means at most one client second old;
   it is a diagnostic sampling bound, never an action or server-response gate.
@@ -86,3 +87,11 @@ CPU/frame cost is not measured. Native API empty-response semantics, live loadin
 behavior and clipboard/export bytes have not been tested here. This diagnostics
 PR does not diagnose or fix a particular live Orb failure, add retry policy,
 automatically resume a run, merge code or publish a build.
+
+The separate bounded live recovery path now consumes admitted exact empty-choice
+response evidence, not this diagnostic sample. Its transport status additionally
+exposes bounded scalar `choiceObserver`, `ownBare` and `ownFramed` facts; report
+collection installs no hook and performs no gameplay read. Its outgoing observer
+is installed only by the live owner. Nil stays unknown, retained sample ages
+stay frozen, and none of these support views grants permission. See
+`ORB_BOUNDED_RECOVERY.md` for query effects and native compatibility limits.

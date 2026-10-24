@@ -720,14 +720,19 @@ local function continueLines()
     local pending = view.reason ~= "no_receipt"
     local archived = type(archive.count) == "number" and archive.count > 0
     if not (pending or archived or #log > 0) then return out end
-    out[#out + 1] = "  continue: stage=" .. codeText(view.stage)
-        .. "; available=" .. (view.eligible == true and "yes" or "no")
-        .. "; why not=" .. codeText(view.refusal or view.reason)
+    out[#out + 1] = "  continue: stage=" .. codeText(view.liveStage or view.stage)
+        .. "; live=" .. (view.liveRecovery and "yes" or "no")
+        .. "; manualExitAvailable=" .. (view.eligible == true and "yes" or "no")
+        .. "; why not=" .. codeText(view.liveRefusal or view.refusal or view.reason)
         .. "; archive=" .. bigCount(archive.count) .. "/" .. bigCount(archive.capacity) .. " (" .. codeText(archive.state) .. ")"
     if type(st) == "table" then
         local c = type(st.counts) == "table" and st.counts or {}
         local r = type(st.rejects) == "table" and st.rejects or {}
         out[#out + 1] = "  strict reply path: listening=" .. (st.started == true and "yes" or "no")
+            .. "; choiceQuery=" .. (st.choiceQuery==true and "yes" or "no")
+            .. "; outgoingObserver=" .. (st.choiceObserver==true and "yes" or "no")
+            .. "; outgoingInstallAttempted=" .. (st.outgoingAttempted==true and "yes" or "no")
+            .. "; ownBare=" .. bigCount(st.ownBare) .. "; ownFramed=" .. bigCount(st.ownFramed)
             .. "; observed qualifying=" .. bigCount(c.Q) .. " admitted-unqualified=" .. bigCount(c.A) .. " rejected=" .. bigCount(c.R)
             .. "; not accepted: identity=" .. bigCount(r.identity) .. " sender=" .. bigCount(r.sender)
             .. " channel=" .. bigCount(r.channel) .. " segmented=" .. bigCount(r.segmented)
@@ -754,7 +759,10 @@ local function continueLines()
             local e = entries[index]
             if type(e) == "table" then
                 out[#out + 1] = "  archived: id=" .. hexText(e.id) .. "; outcome=" .. codeText(e.outcome)
-                    .. "; spent=" .. bigCount(e.spent) .. " limit=" .. bigCount(e.limit)
+                    .. "; kind=" .. codeText(e.kind) .. "; confidence=" .. codeText(e.confidence)
+                    .. "; run observed spends=" .. bigCount(e.spent) .. " limit=" .. bigCount(e.limit)
+                    .. "; attempt unknown exposure=" .. bigCount(e.uncertain)
+                    .. "; consent v" .. bigCount(e.consentVersion) .. " " .. codeText(e.consentPolicy)
                     .. "; late events kept=" .. bigCount(e.late) .. " seen=" .. bigCount(e.lateN)
             end
         end
@@ -1218,7 +1226,7 @@ do
     local freshness=codeSet({"recent","stale","transition","unknown"})
     local reasons=codeSet({"observed","nil_response","malformed","no_service","no_getter",
         "read_failed","unobserved","read_blocked","clock_unavailable","stale","transition"})
-    local states=codeSet({"IDLE","READY","WAIT_OFFER","WAIT_SELECT","WAIT_RESULT","RECOVERY","PAUSED",
+    local states=codeSet({"IDLE","READY","WAIT_WORLD","WAIT_OFFER","WAIT_SELECT","WAIT_RESULT","RECOVERY","PAUSED",
         "STOPPED","FINISHED","COMPLETE","ROLLED_COMPLETE","OUT_OF_ORBS","NO_SOURCES","LIMIT","ERROR"})
     local capabilities=codeSet({"NO_ORB_SERVICE","MISSING_STATE","STATE_AWARE","MALFORMED"})
     local serviceStates=codeSet({"ABSENT","UNAVAILABLE","INVALID","UNKNOWN","PENDING","IDLE"})
@@ -1241,7 +1249,7 @@ do
             end
         end
         local runner=accessorFacts("OrbRuntime","RunnerView",{"initialized","state","running","pending",
-            "lifecycleObserved","epoch"}) or {}
+            "lifecycleObserved","epoch","uncertain","reserved","recoveries","unconfirmedResults","historyKnown"}) or {}
         return {
             "Echo choice: presence="..factCode(view.choicePresence,presence).." count="..factCount(view.choiceCount)
                 .." observed="..factFlag(view.observed)
@@ -1260,6 +1268,9 @@ do
             "Orb runner: initialized="..factFlag(runner.initialized).." state="..factCode(runner.state,states)
                 .." running="..factFlag(runner.running).." receipt="..factFlag(runner.pending)
                 .." lifecycleObserved="..factFlag(runner.lifecycleObserved).." ownerEpoch="..factCount(runner.epoch)
+                .." recoveryChecks="..factCount(runner.recoveries).." unconfirmedOutcomes="..factCount(runner.unconfirmedResults)
+                .." uncertainSpendExposure="..factCount(runner.uncertain)
+                .." reserved="..factCount(runner.reserved).." historyKnown="..factFlag(runner.historyKnown)
                 .." (session memory only; IDLE is not choice absence)",
         }
     end
@@ -1842,6 +1853,9 @@ function M.Step(job)
                     .. "; state=" .. safeText(view.state, 32)
                     .. "; spent=" .. safeText(view.spent, 16)
                     .. "/" .. safeText(view.limit, 16)
+                    .. "; reserved=" .. safeText(view.reserved,16)
+                    .. "; unknown spend exposure=" .. safeText(view.uncertain,16)
+                    .. "; unconfirmed outcomes=" .. safeText(view.unconfirmedResults,16)
                     .. "; operations=" .. safeText(view.total, 16)
                 local history = Nexus.OrbHistory
                 if history and type(history.Rows) == "function" then

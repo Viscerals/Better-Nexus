@@ -271,6 +271,21 @@ function O.Read(mode)
     local okB,rawB=call(svc,"GetCurrentChoice")
     if type(A.ObserveChoiceRead)=="function" then pcall(A.ObserveChoiceRead,okB,rawB,"orb_read") end
     if not okB or (rawB~=nil and type(rawB)~="table") then return nil,"The current Echo choices are unavailable.","choice" end
+    -- This action read keeps nil distinct. The audited client clears its
+    -- cache to nil for an empty response AND for an unparseable response;
+    -- only the transport observation can distinguish those during recovery.
+    local choiceShape=rawB==nil and "unknown" or "checked"
+    if type(rawB)=="table" then
+        if getmetatable(rawB) then choiceShape="invalid"
+        else
+            local n=0
+            for k in pairs(rawB) do
+                n=n+1
+                if n>3 or not integer(k,1) or k>3 then choiceShape="invalid";break end
+            end
+            if n~=#rawB then choiceShape="invalid" end
+        end
+    end
     local board,parts={},{}
     for i,c in ipairs(rawB or {}) do
         if i>3 or type(c)~="table" or not integer(c.spellId,1) then return nil,"The current Echo offer is invalid.","choice" end
@@ -336,6 +351,7 @@ function O.Read(mode)
         local built=buildRow(id,row);rawset(t,id,built);return built
     end})
     local s={known=true,charges=charges,offerPending=pending,board=board,boardKey=table.concat(parts,","),
+        choiceShape=choiceShape,
         granted=granted,locked=locks,grantStamp=observations.serial,grantedKey=sig,lockedKey=signature(locks),
         hostPending=host,autoAccept=auto,catalog=rows,context=ctx(pe,svc,orb,display),at=GetTime and GetTime() or 0,
         selectionSerial=selectionSerial,selection=copy(selection),
@@ -537,6 +553,9 @@ local function validate(token)
 end
 function O.Spend(token,key,expected,guard)
     local s,err=validate(token);if not s then return nil,"REJECTED",err end
+    if s.choiceShape=="invalid" then
+        return nil,"REJECTED","The current Echo choices are malformed. No Orb was sent.","CHOICE_INVALID"
+    end
     if s.offerPending or #s.board>0 or s.hostPending or A.InFlight() or s.charges<1 then
         return nil,"REJECTED","Another choice is pending or no Orbs remain."
     end
@@ -545,12 +564,18 @@ function O.Spend(token,key,expected,guard)
         return nil,"REJECTED","The approved source or balance changed before spending."
     end
     local id=tonumber(tostring(key):match("^(%d+):%d+$"));if not id then return nil,"REJECTED","Invalid source." end
-    if guard and guard(s)~=true then return nil,"REJECTED","Assignment or source protection changed before submission. Resume only after reviewing the current assignment." end
-    boundary("host_call",s)
+    if guard then
+        local allowed,why=guard(s)
+        if allowed~=true then return nil,"REJECTED",why or "Assignment or source protection changed before submission. Resume only after reviewing the current assignment." end
+    end
+    -- No diagnostic callback may intervene between the last guard and host.
+    -- Report crossing after the invocation (also when it throws), before its
+    -- typed return event; diagnostics never authorize or cancel this crossing.
     local ok,value=pcall(ownerContext.orb.ConfirmSpend,id,1)
+    boundary("host_call",s)
     boundary(not ok and "host_error" or value==false and "host_false" or value==true and "host_true" or "host_other",nil)
     if not ok then return nil,"AMBIGUOUS","The spend call failed; its server outcome is unknown. No repeat will be sent." end
-    if value==false then return nil,"REJECTED","The game refused the Orb spend." end
+    if value==false then return nil,"REJECTED","The game refused the Orb spend.","HOST_FALSE" end
     return true,"SUBMITTED"
 end
 function O.Select(token,index,expectedBoard,id,guard)
@@ -617,9 +642,43 @@ local TRANSPORT_PREFIX="AAM0x9"
 local TRANSPORT_OPS={[16]=true,[18]=true,[540]=true,[542]=true,[1000]=true,[1220]=true}
 local TRANSPORT_RING,COUNT_CAP=48,1000000
 local T={started=false,epoch=0,ord=0,ring={},requests=0,reqOrd=0,good={},bad={},
+    ownBare=0,ownFramed=0,
     counts={Q=0,A=0,R=0,echo=0,drop=0,other=0,seg=0},
     rejects={identity=0,sender=0,channel=0,segmented=0,third_absent=0,fields_extra=0,malformed=0,range=0,mixed=0}}
 local function bump(t,k) t[k]=math.min((t[k] or 0)+1,COUNT_CAP) end
+local function outgoingReady()
+    return T.outgoingFunction~=nil and _G.SendAddonMessage==T.outgoingFunction
+        and type(hooksecurefunc)=="function" and not T.outgoingOverflow
+end
+function O.RecoveryAvailable()
+    local pe=_G.ProjectEbonhold;local svc=pe and pe.PerkService
+    if type(svc)~="table" or type(svc.RequestChoice)~="function" then return false,"choice_query_unavailable" end
+    if type(hooksecurefunc)~="function" or type(_G.SendAddonMessage)~="function"
+        or (T.outgoingAttempted and not outgoingReady()) then return false,"no_choice_observer" end
+    return true
+end
+local function observeOutgoing(prefix,payload)
+    if prefix~=TRANSPORT_PREFIX then return end
+    local key=payload=="16" and "ownBare" or payload=="16\t" and "ownFramed" or nil
+    if not key then return end
+    if T[key]>=COUNT_CAP then T.outgoingOverflow=true;return end
+    T[key]=T[key]+1
+    if key=="ownFramed" then T.ownFramedAt=GetTime and GetTime() or 0 end
+end
+function O.StartChoiceObserver()
+    if T.outgoingAttempted then return outgoingReady() end
+    -- An approved run observes outgoing framing even if the optional query
+    -- service appears later. Query capability is checked separately at use.
+    if type(hooksecurefunc)~="function" or type(_G.SendAddonMessage)~="function" then return false end
+    T.outgoingAttempted=true
+    local ok=pcall(hooksecurefunc,"SendAddonMessage",function(prefix,payload)
+        if A.Orbs~=O then return end
+        if not pcall(observeOutgoing,prefix,payload) then T.outgoingOverflow=true end
+    end)
+    if not ok then return false end
+    T.outgoingFunction=_G.SendAddonMessage
+    return outgoingReady()
+end
 -- A canonical whole number: digits only (a leading minus only where signed), no
 -- leading zero, no "-0", at most six digits.
 local function canonical(text,signed)
@@ -710,6 +769,9 @@ local function transportCapture(prefix,payload,dist,sender)
         if mid and op~=1220 then segmentNote(op,mid,idxText,totalText,true) end
     elseif op~=1220 then
         rec.cls="A"
+        -- Exact empty SS16 is the native handler's explicit no-choice reply.
+        -- Retain a boolean only. Nil cache alone remains unknown.
+        if op==16 and evt=="16" and rest=="" then rec.emptyChoice=true end
         if mid then
             local state=segmentNote(op,mid,idxText,totalText,false)
             if state=="partial" then bump(T.counts,"seg");return end
@@ -766,7 +828,11 @@ function O.TransportStatus()
     -- retained: how many records the ring holds now (never more than TRANSPORT_RING).
     local retained=0
     for _ in pairs(T.ring) do retained=retained+1 end
+    local pe=_G.ProjectEbonhold;local svc=type(pe)=="table" and pe.PerkService
     return {started=T.started,epoch=T.epoch,ord=T.ord,counts=copyNumbers(T.counts),rejects=copyNumbers(T.rejects),
+        choiceObserver=outgoingReady()==true,ownBare=T.ownBare,ownFramed=T.ownFramed,ownFramedAt=T.ownFramedAt,
+        choiceQuery=type(svc)=="table" and type(svc.RequestChoice)=="function",
+        outgoingAttempted=T.outgoingAttempted==true,
         good=copyNumbers(T.good),bad=copyNumbers(T.bad),requests=T.requests,reqOrd=T.reqOrd,retained=retained}
 end
 -- The relevant records that arrived after ordinal `since`, oldest first, or nil and
@@ -783,16 +849,51 @@ function O.TransportSince(since)
     end
     return out
 end
-function O.RequestRefresh()
+-- A manual Recheck may still obtain the exact ownership result while a charge
+-- reply is outstanding. This sends no second charge request and no choice query.
+function O.RequestOwnershipRefresh()
+    local pe=_G.ProjectEbonhold;local svc=pe and pe.PerkService
+    if type(svc)~="table" or type(svc.RequestGrantedPerks)~="function" then return false,"refresh_unavailable" end
+    if not pcall(svc.RequestGrantedPerks) then return false,"ownership_refresh_failed" end
+    return true
+end
+function O.RequestRefresh(withChoice)
     local pe=_G.ProjectEbonhold;local orb=pe and pe.OrbService;local svc=pe and pe.PerkService
     local a=type(orb)=="table" and type(orb.RequestCharges)=="function"
     local b=type(svc)=="table" and type(svc.RequestGrantedPerks)=="function"
-    if not a or not b then return false,"The client cannot request an Orb/ownership refresh." end
-    local okA=pcall(orb.RequestCharges);local okB=pcall(svc.RequestGrantedPerks)
-    -- The mark is the arrival ordinal at this moment. It is not a correlation: a
+    if not a or not b then return false,"refresh_unavailable" end
+    local choiceReady=type(svc.RequestChoice)=="function"
+    if withChoice and choiceReady and not outgoingReady() then return false,"no_choice_observer" end
+    if withChoice and choiceReady then
+        local opts=_G.ProjectEbonholdOptionsService
+        local ok,value=false,nil
+        if type(opts)=="table" and type(opts.GetSetting)=="function" then ok,value=pcall(opts.GetSetting,opts,"autoAcceptLoadoutEchoes") end
+        if not ok or value~=false then return false,"auto_accept" end
+    end
+    -- Keep the pre-existing charge/ownership refresh when the optional choice
+    -- query is missing, but report failure: partial facts authorize no recovery.
+    local ord=T.ord
+    local okA=pcall(orb.RequestCharges)
+    if not okA then return false,"charge_refresh_failed" end
+    -- Retain the sent request even when a later refresh throws. The mark starts
+    -- before the call, so a synchronous reply is included in serialization too.
+    T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=ord
+    local mark={ord=ord,n=T.requests,epoch=T.epoch,ownBare=T.ownBare}
+    local okB=pcall(svc.RequestGrantedPerks)
+    if not okB then return false,"ownership_refresh_failed",mark end
+    local bareBefore,framedBefore=T.ownBare,T.ownFramed
+    local okCall=not withChoice or (choiceReady and pcall(svc.RequestChoice))
+    local okChoice=okCall
+    if withChoice and choiceReady then
+        okChoice=okChoice and outgoingReady() and T.ownBare>bareBefore and T.ownFramed==framedBefore
+    end
+    -- The mark is the arrival ordinal before the charge call. It is not a correlation: a
     -- reply that arrives later is "observed after refresh began", nothing more. A request
     -- that was not sent has no mark.
-    if not okA then return false end
-    T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=T.ord
-    return okB,nil,{ord=T.ord,n=T.requests,epoch=T.epoch}
+    mark.ownBare=T.ownBare;mark.choiceUnverified=withChoice and choiceReady and not okChoice or nil
+    local why
+    if withChoice and not choiceReady then why="choice_query_unavailable"
+    elseif not okCall then why="choice_request_failed"
+    elseif not okChoice then why="own_choice_request" end
+    return okChoice,why,mark
 end

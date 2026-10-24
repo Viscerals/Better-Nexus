@@ -49,7 +49,10 @@ section('0 a real entry',function()
   return list
  end
  H,M,A,O=R.Class({edit=function(row,state)
-  for _,r in ipairs({row,state}) do r.picks=Picks();r.pickSeen=999;r.pickDropped=999 end
+  for _,r in ipairs({row,state}) do
+   r.picks=Picks();r.pickSeen=999;r.pickDropped=999
+   r.attributionAmbiguous=true;r.uncertain=3
+  end
  end})
  server=R.Server(H)
  S.Pass(H,M,A,2)
@@ -59,6 +62,8 @@ section('0 a real entry',function()
  local waited=0;while waited<20 and M.ContinueView().stage~='ready' do H.Advance(.25);waited=waited+.25 end
  assert(M.ContinueConfirm(M.ContinueView().token))
  entry=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
+ check(entry.receipt.attributionAmbiguous==true and entry.receipt.uncertain==3,
+  'GUARD current archive retains uncertainty fields; legacy key retention below does not establish semantic downgrade safety')
  local edges,bytes,depth=Measure(entry)
  print(string.format('  measured entry (deidentified 034 shape): %d edges, %d bytes, depth %d',edges,bytes,depth))
  check(edges<=1200 and bytes<=6144 and depth<=4,'a real entry is within the entry caps')
@@ -167,6 +172,66 @@ section('3 a newer archive format is kept unchanged',function()
  local _,row=Row(P.B.e)
  local view=P.B.e.Nexus.OrbRuntime.ContinueView()
  check(view.archive.state=='future' and view.archive.count==2,'the view names it: '..tostring(view.archive.state))
+end)
+
+section('4 ambiguous pending identity is versioned before and after choice',function()
+ for _,chosen in ipairs({false,true}) do
+  local H,M,A,O=S.Fresh();S.Loadouts(H,A);H.perks.currentChoice={};assert(M.Start(3))
+  local server=R.Server(H)
+  H.service.RequestChoice=function()
+   SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)
+   server.queue[#server.queue+1]={op=16,body=''}
+  end
+  for _=1,180 do if H.Count('orb-spend')==2 then break end;H.Advance(.25) end
+  assert(H.Count('orb-spend')==2,'SETUP original unknown spend archived')
+  if chosen then H.Offer() end
+  local original=H.Clone(R.Saved())
+  check(original.attributionFormat==1 and original.attributionOwner==UnitGUID('player') and original.guid==nil,
+   'EXPECT R1 real identity is retained in versioned fields, chosen='..tostring(chosen))
+  check(original.originalSlot==1 and not original.loadoutChanged and original.uncertain==1,
+   'GUARD R1 owner encoding fabricates no loadout change and preserves unknown exposure')
+  assert(M.Stop());local spends,takes=H.Count('orb-spend'),H.Count('take')
+  M=R.Reload(H);M.Pump()
+  if chosen then H.Result(410002,2);H.granted=H.Clone(H.granted);H.Notify();A.Poll();H.Advance(1) end
+  check(R.Saved() and M.BlocksOrdinary(),'EXPECT R1 current reload reads encoded owner but retains attribution blocker')
+  check(H.Count('orb-spend')==spends and H.Count('take')==takes,'GUARD R1 versioned owner restores no action authority')
+ end
+end)
+section('5 unknown or conflicting identity versions remain blocked',function()
+ for _,kind in ipairs({'future','conflicting','missing_owner'}) do
+  local H,M,A,O=R.Class({latch=false,edit=function(row,state)
+   for _,p in ipairs({row,state}) do
+    p.attributionFormat=kind=='future' and 2 or 1;p.attributionOwner=p.guid
+    if kind~='conflicting' then p.guid=nil end
+    if kind=='missing_owner' then p.attributionOwner=nil end
+   end
+  end})
+  local original=H.Clone(R.Saved());M.Pump();H.Advance(1)
+  check(M.BlocksOrdinary() and not M.ContinueView().eligible and R.Same(R.Saved(),original),
+   'GUARD R1 '..kind..' owner identity cannot settle, Continue or rewrite the receipt')
+ end
+end)
+
+section('6 passive legacy preservation then one new-evidence safety migration',function()
+ assert(entry and entry.resolution.confidence=='NONE','SETUP real validated historical archive')
+ local H,M,A,O=R.Class({latch=false,edit=function(row,state)
+  for _,r in ipairs({row,state})do r.opaqueEvidence={keep=false,label='preserve'} end
+ end})
+ assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive={H.Clone(entry)}end))
+ local original=H.Clone(R.Saved());assert(original.guid and not original.attributionFormat and not original.attributionAmbiguous,'SETUP genuine legacy restored envelope without invented attribution')
+ for _=1,8 do M.Pump(true)end
+ check(R.Same(R.Saved(),original),'GUARD passive restore/read preserves all original saved bytes')
+ local owner=Nexus.MainInternals.StoreAuthorityOwner;local raw=owner.UpdateStateV1;local writes=0
+ owner.UpdateStateV1=function(...)writes=writes+1;return raw(...)end
+ H.granted=S.OwnedMap(S.Shape(),H,'500001:1',false);H.Notify();A.Poll();H.Advance(.5)
+ local migrated=H.Clone(R.Saved())
+ check(migrated.attributionAmbiguous and migrated.attributionFormat==1 and migrated.attributionOwner==original.guid and migrated.guid==nil,'EXPECT genuinely new ambiguous ownership migrates GUID information into the existing failclosed envelope')
+ for k,v in pairs(original)do if k~='guid'then check(R.Same(migrated[k],v),'GUARD migration retains original field '..k)end end
+ check(writes==1 and R.Same(migrated.opaqueEvidence,original.opaqueEvidence),'GUARD one safety migration retains unknown information')
+ for _=1,12 do M.Pump(true)end
+ owner.UpdateStateV1=raw
+ check(writes==1 and R.Same(R.Saved(),migrated) and M.BlocksOrdinary(),'GUARD stable new-evidence hold neither rewrites repeatedly nor fabricates server attribution')
+ check(H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD restored safety migration restores no action authority')
 end)
 
 if #failures>0 then error(#failures..' section(s) failed:\n'..table.concat(failures,'\n'),0) end

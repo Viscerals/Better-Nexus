@@ -55,8 +55,26 @@ This file has two parts.
   so that permit was removed.) The automation loop evaluates again when this gate
   changes.
 - **Orb mode** is specified in `docs/ORB_MEMORY_MODE.md`. All Orb mutation sits
-  behind `GameAdapter.Orbs`. An unresolved Orb action is never retried, refunded
-  or erased. Recovery after reload is passive. The only exit is the player's
+  behind `GameAdapter.Orbs`. An unresolved command is never replayed or refunded.
+  Within an approved session run, bounded recovery may retain an unresolved
+  receipt in the archive and continue with a new attempt from actual ownership:
+  at most two recovery checks per run, with every uncertain spend still counted
+  toward the same approved maximum. It requires two qualifying quiet balance
+  replies, refreshed ownership, and an exact empty-choice response observed after
+  requesting the current choice, beside unchanged assignment, owner, loadout and
+  locks and no active action. Own request framing must be passively observable;
+  a framed-empty outgoing send invalidates that check. Automatic history leaves
+  two entries and 12,288 bytes for explicit recovery under the existing archive
+  caps. Observed build completion never fabricates per-operation attribution.
+  The session-only quiet permission must remain valid through the next spend's
+  final owner guard; newer uncertain choice evidence invalidates its empty fact.
+  A newer admitted empty reply can restore that fact only with the other current
+  guards unchanged. No added query or allowance reset follows the archive.
+  Nil choice data alone is unknown; timers authorize
+  no recovery. No result or owned Echo is inferred. Stop and Pause cancel further
+  actions; loading preserves only existing session authorization. See
+  `docs/ORB_BOUNDED_RECOVERY.md`. Recovery after logout/reload remains passive.
+  The restored receipt's explicit exit is the player's
   explicit Continue (`docs/ORB_RECOVERY_CONTINUE.md`), for a spend this client
   observed (the one-Orb decrement seen with the offer; no server reply carries a
   spend identity, so Nexus never states it as server-confirmed; the saved
@@ -69,6 +87,40 @@ This file has two parts.
   never automatic. A passive observer of the game's own addon-message prefix
   feeds its strict check; it registers no handler, replaces nothing and sends
   nothing.
+- **Attribution-only explicit exit.** A stopped receipt, restored or from the
+  current session, may use that same checked Continue path when a fresh exact
+  distinct chosen gain is actually owned and attribution alone prevents
+  confirmation. The flag alone is insufficient. Original loadout, owner, locks,
+  current binding and quiet native state are rechecked through the actual atomic
+  save. It archives the unchanged receipt as `ACK_UNCONFIRMED`, confidence `NONE`,
+  keeps observed spend and unknown exposure separately without refund or double
+  charge, ends the old run and only then releases ordinary rolling. It sends no
+  spend, selection or automatic Resume, and consumes no fresh live allowance.
+  Completion from actual ownership and exhaustion of two live checks do not
+  remove this finite explicit exit. Archive/save refusal keeps receipt and gate.
+- **Recovery authority.** Retained completed states survive lifecycle holds and
+  cannot reopen limit approval. Eligible held receipts have the explicit checked
+  Continue exit; an ineligible entry preserves the automatic owner. Equivalent
+  current owed-offer orders share the strict one-choice Resume guards. A revoked
+  post-archive permit stays revoked; unknown reads retain unclassified evidence.
+  Only classified fresh choice evidence updates that fact. Host-false consumes
+  the one-use permit, whereas pre-host refusal does not. Budget/resource terminals
+  precede permit waits. Optional capability absence is explicit, and a real
+  outgoing-hook attempt is latched once per adapter lifetime, including failure.
+- **Retained attribution.** The current character's bounded unconfirmed archive
+  supplies source/pair uncertainty across approvals and passive reloads. Own and
+  observed choices apply it before saving. A late snapshot explained by retained
+  attempts may hold attribution, including a compound delta with the current
+  result; it never confirms an operation. Unrelated deltas remain blocked.
+- **Downgrades.** New receipts carrying attribution risk or unknown exposure use
+  `attributionFormat=1` and retain their real GUID in `attributionOwner`, with
+  legacy `guid` absent. The original loadout and other observations are unchanged.
+  Public `a43cf27` Runtime+Adapter cannot interpret that owner identity: its
+  existing owner guard retains the pending receipt and ordinary-action blocker,
+  and refuses its no-choice Continue. The current owner validates and reads the
+  versioned identity. Unknown/conflicting versions fail closed. This is a local
+  receipt representation, with no global Store migration or fabricated facts.
+  Archive byte retention alone is a separate, weaker compatibility claim.
 - **Passive readiness diagnostics.** `GameAdapter.OwnershipTrustView()` and
   `OrbRuntime.ReadinessView()` return a new table of scalars and fixed codes.
   The first holds the current generation facts and, separately, what the last

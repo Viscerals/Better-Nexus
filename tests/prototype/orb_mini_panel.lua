@@ -176,4 +176,44 @@ check(q.M.Status().state=='RECOVERY' and q.M.Status().pending and not q.M.Status
 check(not mf.pause:IsEnabled() and not mf.resume:IsEnabled() and mf.stop:IsEnabled() and mf.pending:GetText():find('not settled',1,true),'mini shows real restored pending and keeps Resume disabled')
 direct(mf.resume);mf.close:Click();u.ShowMini()
 check(q.Count('orb-spend')==spends and q.Count('take')==takes and q.M.Status().state=='RECOVERY','restored pending click/close/reopen has no replay or spend')
+-- Unknown optional counters are never rendered as measured zero; malformed
+-- present values cannot supply action affordances. Real held/checking phases
+-- remain visible in the compact surfaces without opening Details.
+local recoveryFailures={}
+local function recoveryCase(name,fn)
+ local ok,why=pcall(fn);if not ok then recoveryFailures[#recoveryFailures+1]=name..': '..tostring(why)end
+end
+local function miniModel(model)
+ local q,u,mf=fresh();local raw=q.M.CompactStatus;q.M.CompactStatus=function()return model end;u.ShowMini()
+ return q,u,mf,raw
+end
+recoveryCase('absent unknown spend is unavailable',function()
+ local q,u,mf=miniModel({state='PAUSED',running=false,pending=true,canResume=false,spent=1,limit=3,reserved=1,historyKnown=false})
+ local text=mf.pending._nexusFullText or mf.pending:GetText()
+ check(text:find('Unknown spend: unavailable',1,true) and not text:find('Unknown spend: 0',1,true),'EXPECT absent uncertain count stays unavailable')
+end)
+recoveryCase('absent outcome total is unavailable',function()
+ local q,u,mf=miniModel({state='PAUSED',running=false,pending=true,canResume=false,spent=1,limit=3,reserved=1,uncertain=1,historyKnown=true})
+ local text=mf.pending._nexusFullText or mf.pending:GetText()
+ check(text:find('unconfirmed outcomes: unavailable',1,true) and not text:find('unconfirmed outcomes: 0',1,true),'EXPECT missing earlier outcome total is never coerced to zero')
+end)
+for _,field in ipairs({'historyKnown','uncertain'})do
+ recoveryCase('malformed '..field,function()
+  local model={state='PAUSED',running=false,pending=false,canResume=true,spent=1,limit=3,reserved=0,uncertain=0,historyKnown=true};model[field]=field=='historyKnown' and 'false' or false
+  local q,u,mf=miniModel(model)
+  check(not mf.pause:IsEnabled() and not mf.resume:IsEnabled() and not mf.stop:IsEnabled(),'EXPECT malformed optional '..field..' value is not an action-bearing run view')
+ end)
+end
+recoveryCase('real checking and held phases are visible first',function()
+ local R=dofile('tests/prototype/orb_recovery_support.lua');local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={};assert(M.Start(3))
+ local server=R.Server(H,{mode='hold'});H.service.RequestChoice=function()SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)end
+ for _=1,80 do if M.Status().recoveries==1 then break end;H.Advance(.25)end
+ assert(M.Status().recoveries==1 and M.ContinueView().liveStage=='checking','SETUP actual admitted automatic check')
+ local UI=Nexus.OrbPanel;local mf=UI.ShowMini();local parent=CreateFrame('Frame');parent:SetWidth(280);local strip=UI.AttachMainPanel(parent)
+ check(mf.state:GetText():find('Checking',1,true) and strip.summary:GetText():match('^[^\n]*Checking'),'EXPECT checking phase remains visible at the start of compact status')
+ assert(M.Pause());UI.ShowMini();strip.refresh()
+ check(mf.state:GetText():find('held',1,true) and strip.summary:GetText():match('^[^\n]*held'),'EXPECT held automatic recovery is visible before long exposure text')
+ check(H.Count('orb-spend')==1 and H.Count('take')==0,'GUARD compact display never advances the held owner')
+end)
+if #recoveryFailures>0 then error(table.concat(recoveryFailures,'\n'),0)end
 print('PASS Orb mini real actions, stale/reentrant/failure gates, pending Stop, close/reopen, tooltips and synthetic geometry: '..n..' assertions')
