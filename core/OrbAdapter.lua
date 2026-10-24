@@ -846,6 +846,11 @@ function O.TransportStatus()
         outgoingAttempted=T.outgoingAttempted==true,
         good=copyNumbers(T.good),bad=copyNumbers(T.bad),requests=T.requests,reqOrd=T.reqOrd,retained=retained}
 end
+-- Passive cursor for compact affordances: no map copies, observer start,
+-- backlog classification or query. It is not an action authorization.
+function O.TransportCursor()
+    return T.ord,T.epoch
+end
 -- The relevant records that arrived after ordinal `since`, oldest first, or nil and
 -- "overflow" when the bounded ring no longer covers them.
 function O.TransportSince(since)

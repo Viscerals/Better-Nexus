@@ -544,3 +544,43 @@ do
  if #issues>0 then error(table.concat(issues,'\n'),0)end
  print('PASS R6a9a potential ambiguity versus real observed ownership gain')
 end
+
+-- R6a9b: a compact Resume affordance cannot claim an old classified permit
+-- while a newer real transport event is still unclassified. Compact reads
+-- themselves remain scalar/passive; the full view/action classify the backlog.
+do
+ local R=dofile('tests/prototype/orb_recovery_support.lua')
+ local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={}
+ assert(M.Start(6));local server=R.Server(H)
+ H.service.RequestChoice=function()
+  SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)
+  server.queue[#server.queue+1]={op=16,body=''}
+ end
+ H.Offer();H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+ for _=1,100 do local a=R.SavedRow('orbRecoveryArchive');if a and #a==1 then break end;H.Advance(.25)end
+ assert(H.Count('orb-spend')==1 and #R.SavedRow('orbRecoveryArchive')==1 and M.Pause(),
+  'SETUP actual archive-to-command gap is deliberately paused')
+ assert(M.CompactStatus().canResume,'SETUP a classified quiet permit initially offers Resume')
+ server.Push(16,'malformed choice data')
+ local read,status=A.Orbs.Read,A.Orbs.TransportStatus;local reads,copies=0,0
+ A.Orbs.Read=function(...)reads=reads+1;return read(...)end
+ A.Orbs.TransportStatus=function(...)copies=copies+1;return status(...)end
+ local view
+ for _=1,8 do view=M.CompactStatus()end
+ A.Orbs.Read=read;A.Orbs.TransportStatus=status
+ assert(reads==0 and copies==0,'BOUND compact backlog guard performs no full state/status-map reads')
+ print('SETUP R6a9b newer unclassified real choice event PASS')
+ local issues={}
+ if view.canResume then issues[#issues+1]='EXPECT compact view withholds Resume while its retained backlog is unclassified'end
+ assert(not M.Resume() and H.Count('orb-spend')==1,
+  'GUARD the actual action already rejects the newer malformed observation without consuming a spend')
+ server.Push(16,'')
+ assert(H.Count('orb-spend')==1,'GUARD newer observation alone never resumes the paused run')
+ assert(M.Status(false).canResume and M.CompactStatus().canResume,
+  'GUARD actual full classification restores the affordance after a genuinely newer exact empty reply')
+ assert(M.Resume() and H.Count('orb-spend')==2,
+  'GUARD one explicit action still uses a quiet classified permit at most once')
+ M.Stop()
+ if #issues>0 then error(table.concat(issues,'\n'),0)end
+ print('PASS R6a9b compact backlog truth with passive bounds and fresh explicit-action control')
+end

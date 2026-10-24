@@ -3473,7 +3473,12 @@ end
 -- a different ready, valid assignment only on the explicit action.
 local function resumeOffered(a,s)
     if run.state~="PAUSED" or not run.token or not run.context then return false end
-    if run.postRecovery and (run.postRecovery.revoked or not run.postRecovery.choice) then return false end
+    if run.postRecovery then
+        local permit=run.postRecovery
+        if permit.revoked or not permit.choice or type(B.TransportCursor)~="function" then return false end
+        local ok,ordinal,epoch=pcall(B.TransportCursor)
+        if not ok or not integer(ordinal,0) or ordinal~=permit.scanned or epoch~=permit.tepoch then return false end
+    end
     local p=run.pending
     local rc=run.rc
     local owed=true
