@@ -3078,6 +3078,16 @@ function Controller.New(options)
         if tostring(status.version or "") ~= representedVersion then
             return false, "build changed since the failed Share"
         end
+        -- A listing that comes from a Saved Build (sourceSavedBuildId) is
+        -- shared through that Saved Build's own Share action, which asks to
+        -- confirm. Retry Share would send it again without asking, so it is
+        -- not offered for one. Checked last: every other refusal keeps its
+        -- reason, and a Share-form build is unchanged.
+        if build.sourceSavedBuildId ~= nil then
+            return false, "this listing comes from a Saved Build; another"
+                .. " attempt uses that Saved Build's own Share action, which"
+                .. " asks you to confirm"
+        end
         return true, nil, status
     end
 
