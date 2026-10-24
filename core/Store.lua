@@ -422,6 +422,19 @@ function ReadOnlyRoot.Valid(key, value)
         return value == "stable" or value == "test"
     elseif key == "rollingPolicy" then
         return value == "adaptive" or value == "released"
+    elseif key == "uiLanguage" then
+        -- Issue #123: the Nexus-only UI language. Only an exact ID of the
+        -- enum in data/DefaultProfile.lua (uiLanguages) is adopted into the
+        -- detached view; any other value stays in the saved root as it is,
+        -- and the session shows English.
+        local profile = Nexus.DefaultProfile
+        local enum = profile and type(profile.uiLanguages) == "table"
+            and profile.uiLanguages.ids or nil
+        if type(value) ~= "string" or type(enum) ~= "table" then return false end
+        for _, id in ipairs(enum) do
+            if id == value then return true end
+        end
+        return false
     elseif key == "lastChangelogSeen" then
         return type(value) == "string" and #value <= ReadOnlyRoot.TEXT
     elseif key == "anchorSpellId" then
