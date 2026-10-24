@@ -208,3 +208,75 @@ do
  M.Stop()
  print('PASS R6a2 post-recovery guard classification and fresh-observation control')
 end
+
+-- R6a3: identical passive holds must not invalidate the session history on
+-- every pump. The actual completion and older-result attribution paths run;
+-- no private Runtime state or log data is assigned by these checks.
+local logFailures={}
+local function heldLog(name,setup)
+ local H,M,A,O=setup()
+ M.Pump(true)
+ local before=M.RunLog()
+ assert(before and before.revision>0 and M.CompactStatus().pending,
+  'SETUP '..name..': an actual pending operation has a live session history')
+ print('SETUP R6a3 '..name..' PASS revision='..before.revision)
+ for _=1,12 do M.Pump(true) end
+ local after=M.RunLog()
+ if after.revision~=before.revision then
+  logFailures[#logFailures+1]='EXPECT '..name..': unchanged hold preserves history revision ('..before.revision..' -> '..after.revision..')'
+ end
+ assert(H.Count('orb-spend')==before.spent+(before.reserved or 0),
+  'GUARD passive repeated hold submits no new Orb')
+ assert(after.state==before.state and after.reason==before.reason and after.total==before.total,
+  'GUARD repeated observation retains the same visible history')
+ local revision=after.revision
+ assert(M.Stop(),'GUARD deliberate Stop remains accepted')
+ local stopped=M.RunLog()
+ assert(stopped.state=='STOPPED' and stopped.revision>revision,
+  'GUARD a real Stop transition still invalidates history')
+end
+local function completionHold()
+ local H,M,A,O=S.Fresh();H.perks.currentChoice={}
+ H.OrbPlan({{spellId=410002,quality=2,stacks=2}});H.Approve(6,false);H.Offer()
+ H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+ H.granted=H.Clone(H.granted)
+ H.granted['Desired A']={{spellId=410002,quality=2},{spellId=410002,quality=2}}
+ H.Notify();A.Poll();M.Pump(true)
+ assert(M.CompactStatus().state=='COMPLETE' and M.CompactStatus().pending,
+  'SETUP real completed target observation retains the unresolved receipt')
+ return H,M,A,O
+end
+local function attributionHold()
+ local R=dofile('tests/prototype/orb_recovery_support.lua')
+ local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={}
+ assert(M.Start(6));local server=R.Server(H)
+ H.service.RequestChoice=function()
+  SendAddonMessage(R.PREFIX,'16','WHISPER',R.ME)
+  server.queue[#server.queue+1]={op=16,body=''}
+ end
+ H.Offer();H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+ for _=1,100 do if H.Count('orb-spend')==2 then break end;H.Advance(.25) end
+ assert(H.Count('orb-spend')==2 and #R.SavedRow('orbRecoveryArchive')==1,
+  'SETUP real bounded recovery archives the first receipt and submits the next')
+ H.granted=H.Clone(H.granted)
+ local oldKey=R.SavedRow('orbRecoveryArchive')[1].receipt.removed;local removed=false
+ for _,entries in pairs(H.granted)do for i=#entries,1,-1 do
+  if not removed and entries[i].spellId..':'..entries[i].quality==oldKey then
+   table.remove(entries,i);removed=true
+  end
+ end end
+ assert(removed,'SETUP actual archived source disappears in the later ownership observation')
+ H.granted['Desired A']={{spellId=410002,quality=2}}
+ H.Notify();A.Poll();M.Pump(true)
+ local saved=R.Saved();local log=M.RunLog();local entry=log.entries[#log.entries]
+ assert(saved and saved.attributionAmbiguous and entry.state=='unknown'
+  and entry.reason:find('earlier unconfirmed',1,true),
+  'SETUP actual older-result ambiguity reaches the persistent attribution hold')
+ return H,M,A,O
+end
+for _,case in ipairs({{'completion hold',completionHold},{'attribution hold',attributionHold}})do
+ local ok,err=pcall(heldLog,case[1],case[2])
+ if not ok then logFailures[#logFailures+1]=tostring(err) end
+end
+if #logFailures>0 then error(table.concat(logFailures,'\n'),0)end
+print('PASS R6a3 persistent hold revision stability and real Stop transitions')

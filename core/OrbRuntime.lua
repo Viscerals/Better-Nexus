@@ -259,26 +259,32 @@ end
 local function logUpdate(serial,fields)
     local entry=logEntry(serial)
     if not entry then return end
+    local changed=false
     for key,value in pairs(fields) do
         -- false clears a field: pairs() cannot carry a nil value.
-        if value==false then entry[key]=nil else entry[key]=value end
+        if value==false then value=nil end
+        if entry[key]~=value then entry[key]=value;changed=true end
     end
     local log=logOwned()
     if log then
-        log.spent=run and run.spent or log.spent
-        log.reserved=run and run.reserved or log.reserved
-        log.uncertain=run and run.uncertain or 0;log.unconfirmedResults=run and run.unconfirmedResults or 0
-        logTouch(log)
+        local spent,reserved=run and run.spent or log.spent,run and run.reserved or log.reserved
+        local uncertain,unconfirmed=run and run.uncertain or 0,run and run.unconfirmedResults or 0
+        if log.spent~=spent or log.reserved~=reserved or log.uncertain~=uncertain
+            or log.unconfirmedResults~=unconfirmed then changed=true end
+        log.spent=spent;log.reserved=reserved;log.uncertain=uncertain;log.unconfirmedResults=unconfirmed
+        if changed then logTouch(log) end
     end
 end
 local function logRun(state,reason)
     local log=logOwned()
     if not log then return end
+    local spent,reserved=run and run.spent or log.spent,run and run.reserved or log.reserved
+    local uncertain,unconfirmed=run and run.uncertain or 0,run and run.unconfirmedResults or 0
+    local changed=log.state~=state or log.reason~=reason or log.spent~=spent or log.reserved~=reserved
+        or log.uncertain~=uncertain or log.unconfirmedResults~=unconfirmed
     log.state=state;log.reason=reason
-    log.spent=run and run.spent or log.spent
-    log.reserved=run and run.reserved or log.reserved
-    log.uncertain=run and run.uncertain or 0;log.unconfirmedResults=run and run.unconfirmedResults or 0
-    logTouch(log)
+    log.spent=spent;log.reserved=reserved;log.uncertain=uncertain;log.unconfirmedResults=unconfirmed
+    if changed then logTouch(log) end
 end
 local function changedConfig(before)
     approval=nil
