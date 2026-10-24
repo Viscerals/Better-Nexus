@@ -12,33 +12,41 @@
 -- network, provider or resource action. A pass does not show that the native
 -- client reaches these callback sequences, nor that they caused the report.
 --
--- Categories are pinned to the fixed public base bc5f495 (accepted main), whose
--- Controller check after an accepted upload compares the confirmed draft token
--- only (the removed side of the bc5f495...successor diff):
+-- Categories are pinned to the fixed public base bc5f495 (accepted main),
+-- whose bc5f495:core/WishlistController.lua compares only the confirmed draft
+-- token after an accepted upload. EXPECT and GUARD follow the bc5f495
+-- comparison model defined below:
 --   SETUP  the fixture reached the state it names (host window reached,
 --          replacement admitted, token relation as intended, the deliberate
 --          host raise happened). A failed SETUP stops that case and is not
 --          behavior evidence.
---   EXPECT required behavior predicted from source to fail at bc5f495.
---   GUARD  behavior predicted from source to hold at bc5f495; it must keep
---          holding.
--- Every EXPECT and GUARD event carries `predicted`: the outcome predicted from
--- the Controller source at the fixed base bc5f495 and at three historical
--- comparison identities: a43cf27 (the branch point of this fix, also
--- token-only), 791cdcc (which added the editor/Create context check) and
--- 9c60456 (which added the draft identity, before this revision's
--- partial-notice wording); and `hold` for the successor. These are source
--- predictions from each Controller alone, not executions, and they claim
--- nothing about the rest of any of those trees. Only an actual run is
--- evidence, and only for the tree it ran on, as the host records it; the
+--   EXPECT required behavior predicted to fail in the bc5f495 comparison
+--          model.
+--   GUARD  behavior predicted to hold in the bc5f495 comparison model; it
+--          must keep holding.
+-- Every EXPECT and GUARD event carries `predicted`, one column per name. For
+-- the fixed base bc5f495 and the historical comparison identities a43cf27
+-- (the branch point of this fix, also token-only), 791cdcc (which added the
+-- editor/Create context check) and 9c60456 (which added the draft identity,
+-- before this revision's partial-notice wording), the column is the outcome
+-- predicted for that name's comparison model: the Controller at that exact
+-- commit (<name>:core/WishlistController.lua), considered together with the
+-- supporting modules and harness this current fixture loads (GameAdapter,
+-- WishlistModel, CandidateEvidence and the others). A comparison model is
+-- not a checkout: it claims nothing about the other files of any of those
+-- commits, nor that they equal the current ones. The `successor` column is
+-- `hold` throughout: the required outcome, not a claim that any run produced
+-- it. Predictions are not executions. Only an actual run is evidence, and
+-- only for the tree it ran on, whose identity the host must record; the
 -- output of one tree is never evidence for another.
 -- With NEXUS_UPLOAD_CONTEXT_BASELINE set to one of those names (or
 -- `successor`), each event also says whether the observed outcome of this run
--- agrees with that name's prediction, and one ADJUDICATION line gives the
--- name's role and lists the disagreements. The name only selects a prediction
--- column; it neither identifies nor relabels the tree that ran. Case statuses,
--- the SUMMARY line and the exit are the same with or without it, so an
--- agreement never stands in for a failure.
+-- agrees with that name's column, and one ADJUDICATION line gives the name's
+-- role and lists the disagreements. The name only selects a prediction
+-- column; it neither identifies nor relabels the tree that ran. For a
+-- recognized name, case statuses, the SUMMARY line and the exit are the same
+-- as without it, so an agreement never stands in for a failure; any other
+-- value fails the baseline assert before a case runs.
 -- Cases (every save goes through the real controller and GameAdapter):
 --   no_switch            opened Wishlist A saved; nothing changes meanwhile
 --   same_content         the callback opens Wishlist B, whose token equals A's
@@ -74,7 +82,8 @@ local SPEC={
  contextless_host_error={kind='create',active=0,replace='copy',raise=true},
 }
 
--- The baselines the predictions name. BASE is the fixed public base bc5f495
+-- The baselines the predictions name, each standing for its comparison model
+-- (see the header), not a checkout. BASE is the fixed public base bc5f495
 -- (accepted main). BRANCH a43cf27 (the branch point of this fix), MID 791cdcc
 -- (the intermediate context check) and PRIOR 9c60456 (the frozen
 -- draft-identity source) are historical comparison identities only.
@@ -90,12 +99,14 @@ local FAILS_BASE={[BASE]=true,[BRANCH]=true}
 local FAILS_BASE_MID={[BASE]=true,[BRANCH]=true,[MID]=true}
 local FAILS_BEFORE_SUCCESSOR={[BASE]=true,[BRANCH]=true,[MID]=true,[PRIOR]=true}
 -- Checks predicted to fail at some baseline; every other check is predicted
--- to hold at every baseline. Derived from the Controller source of each
--- baseline alone: no other module of any baseline tree was compared, and no
--- equivalence of the rest of a tree is claimed.
+-- to hold at every baseline. Each prediction is for that baseline's
+-- comparison model: its own core/WishlistController.lua, cited per commit
+-- below, considered together with the supporting modules this current
+-- fixture loads. No other module at any baseline commit was compared, and no
+-- equality of those modules with the current ones is claimed.
 --  * bc5f495 and a43cf27 compare only the confirmed draft token after the
---    upload (bc5f495: read from its Controller, the removed side of the
---    bc5f495...successor diff; a43cf27: the earlier derivation, unchanged). An
+--    upload (bc5f495:core/WishlistController.lua and
+--    a43cf27:core/WishlistController.lua, each read at its own commit). An
 --    equal-content replacement passes it, so the original save commits its
 --    design bucket (and, for a Copy, role choices), clears a Copy's evidence
 --    and runs the writer the replacement's context selects: same_content
@@ -103,14 +114,17 @@ local FAILS_BEFORE_SUCCESSOR={[BASE]=true,[BRANCH]=true,[MID]=true,[PRIOR]=true}
 --    B's editor; create_replaced runs no writer (its Create context is gone)
 --    and reports a saved-unassigned success; contextless_replaced runs the
 --    first-run writer. changed_content fails the token test and is partial.
---  * 791cdcc adds the editor/Create context identity test; it catches every
---    replacement except contextless_replaced, where both contexts stay nil.
+--  * 791cdcc:core/WishlistController.lua adds the editor/Create context
+--    identity test; it catches every replacement except contextless_replaced,
+--    where both contexts stay nil.
 --  * Created-draft and result bookkeeping (SentDraft, Create admission,
---    SaveResult) compare contexts and tokens at bc5f495, a43cf27 and 791cdcc, so a
---    context change already retires them there; an equal-content contextless
---    replacement, also after a host error, does not.
---  * 9c60456 adds the draft identity; only the wording of the partial notice
---    in this revision is still predicted to fail there.
+--    SaveResult) compare contexts and tokens in the bc5f495, a43cf27 and
+--    791cdcc Controller files cited above, so a context change already
+--    retires them there; an equal-content contextless replacement, also
+--    after a host error, does not.
+--  * 9c60456:core/WishlistController.lua adds the draft identity; only the
+--    wording of the partial notice in this revision is still predicted to
+--    fail there.
 local PREDICT={
  same_content={partial=FAILS_BASE,writers=FAILS_BASE,store=FAILS_BASE,savedBuild2=FAILS_BASE,
   notices=FAILS_BASE,named=FAILS_BASE_MID,wording=FAILS_BEFORE_SUCCESSOR,view=FAILS_BASE},
@@ -245,9 +259,9 @@ local function run(which,report)
   emit('SETUP',{case=which,label=label,pass=v==true,observed=observed})
   if v~=true then error({setupFailure=label},0) end
  end
- -- One EXPECT or GUARD check. `fails` names the baselines this check is
- -- predicted from source to fail at (PREDICT); the category follows the
- -- fixed public base: EXPECT when it is predicted to fail there, else GUARD.
+ -- One EXPECT or GUARD check. `fails` names the baselines whose comparison
+ -- model this check is predicted to fail in (PREDICT); the category follows
+ -- the fixed public base: EXPECT when predicted to fail there, else GUARD.
  local function check(v,label,observed,fails)
   fails=fails or HOLDS
   local category=fails[BASE] and 'expect' or 'guard'
@@ -800,13 +814,15 @@ for _,status in ipairs(order)do
 end
 print('SUMMARY wishlist_upload_context '..table.concat(parts,' '))
 if ADJUDICATE then
- -- Observed outcomes of this run against the named baseline's source
- -- predictions; the name does not say which tree ran.
+ -- Observed outcomes of this run against the selected prediction column; the
+ -- name does not say which tree ran, and the host must record that identity.
  emit('ADJUDICATION',{fixture='wishlist_upload_context',baseline=ADJUDICATE,role=ROLE[ADJUDICATE],
-  basis='observed in this run vs Controller source prediction',checks=ADJUDICATED.checks,
+  basis='observed in this run vs the selected prediction column: for a base or historical commit name, its comparison model (the core/WishlistController.lua of that commit with the supporting modules this fixture loads, not a whole checkout); for successor, the required outcome. Neither is an execution, and the column does not identify the tree that ran; the host must record the identity of that tree',checks=ADJUDICATED.checks,
   disagreements=ADJUDICATED.disagreements,incomplete=ADJUDICATED.incomplete})
 end
--- The exit follows the case statuses alone; the adjudication never changes it.
+-- With no baseline name or a recognized one, the exit follows the case
+-- statuses alone; the adjudication never changes it. An unrecognized value
+-- fails the baseline assert near the top instead.
 if failed then
  error('wishlist_upload_context: '..table.concat(parts,' ')
   ..' (SETUP_FAILED and RAISED are not behavior evidence)',0)
