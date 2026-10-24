@@ -60,6 +60,13 @@
 -- and is the character's best for an encounter (Training Dummy and Lich King
 -- named, or "encounter"), not a best across all encounters. Its former
 -- "with their Record Loadout pages" suffix is not a required clause.
+-- M5 disclosure parity (S13), EXPECT for the confirmation note and the Share
+-- tooltip alike (the tooltip fails on 8babe397 by design, after the real
+-- first-Share and update controls are reached; the unchanged note holds them):
+-- Share saves the title, description and Echo list as the shared listing;
+-- the possible summary has neither the Echo list nor the description; answers
+-- can carry the full listing with its description, not just an Echo list; and
+-- the Automatic DPS record may be sent also when the summary is not queued.
 -- Fake boundary, disclosed: for the Automatic and Off notes SyncModePolicy.Mode
 -- is replaced only during the one synchronous click that builds the note and
 -- restored before any time passes; nothing is applied, saved, queued or sent,
@@ -616,16 +623,38 @@ local function UnconditionalDps(text)
    and not Word(s,'always') and not Word(s,'will') and not Has(s,'personal'))
  end)
 end
--- The disclosure checks shared by the confirmation note and the tooltip;
--- `note` adds the fact only the note states.
-local function Disclosure(tag,what,text,note)
+-- A sentence that denies the summary its description, with its Echo list
+-- ("no Echo list or description", "neither ... nor its description") or on
+-- its own ("no description"); one that only names the description does not.
+local function DeniesDescription(s)
+ return s:find('%f[%a]no echo list,? or [%a ]-description')~=nil
+  or s:find('%f[%a]nor [%a ]-description')~=nil or s:find('%f[%a]no description')~=nil
+end
+-- A sentence that says answers can carry the full listing: named so, or with
+-- its description among what can be sent (an Echo list alone is not it).
+local function AnswersCarryListing(s)
+ if not (Has(s,'answer') and (Has(s,'can be sent') or Has(s,'may be sent'))) then return false end
+ return Has(s,'full listing') or (Has(s,'description') and not DeniesDescription(s)
+  and s:find('%f[%a]not [%a ]-description')==nil)
+end
+-- The disclosure checks shared by the confirmation note and the tooltip:
+-- both are read for every clause, the DPS record's independence from the
+-- summary included.
+local function Disclosure(tag,what,text)
  local only=Sentence(text,RequesterOnly)
  C.expect(only==nil,tag..': the '..what..' makes no claim that the listing goes only to players who ask',only)
+ C.expect(Sentence(text,function(s) return Has(s,'save') and Has(s,'listing') and Has(s,'title')
+  and Has(s,'description') and Has(s,'echo list') end)~=nil,
+  tag..': the '..what..' says Share saves the title, description and Echo list as the shared listing',text)
  C.expect(Sentence(text,function(s) return Has(s,'summary') and Has(s,'no echo list') end)~=nil,
   tag..': the '..what..' says the summary carries no Echo list',text)
+ C.expect(Sentence(text,function(s) return Has(s,'summary') and DeniesDescription(s) end)~=nil,
+  tag..': the '..what..' says the summary carries no description either',text)
  C.expect(Sentence(text,function(s) return Has(s,'answer') and (Has(s,'echo list') or Has(s,'full listing'))
   and (Has(s,'can be sent') or Has(s,'may be sent')) end)~=nil,
   tag..': the '..what..' says the full listing can be sent in answers, not only to askers',text)
+ C.expect(Sentence(text,AnswersCarryListing)~=nil,
+  tag..': the '..what..' says answers can carry the full listing with its description, not just an Echo list',text)
  C.expect(Sentence(text,function(s) return Has(s,'sync channel') and (Has(s,'kept') or Has(s,'keep')) end)~=nil,
   tag..': the '..what..' says an answer on the shared Sync channel can be kept by other listeners',text)
  local dps=Sentence(text,function(s) return Has(s,'in automatic') and Has(s,'dps') end)
@@ -633,10 +662,8 @@ local function Disclosure(tag,what,text,note)
  C.expect(dps~=nil and #missing==0,
   tag..': the '..what..' says in Automatic a linked character-best DPS record may also be sent with its Echoes, locked Echoes and player info, unasked',
   dps and ('missing: '..table.concat(missing,', ')) or 'no Automatic DPS statement')
- if note then
-  C.expect(dps~=nil and Has(dps,'summary') and (Has(dps,'not queued') or Has(dps,'not admitted')),
-   tag..': the note does not tie that DPS record to the summary being queued',dps)
- end
+ C.expect(dps~=nil and Has(dps,'summary') and (Has(dps,'not queued') or Has(dps,'not admitted')),
+  tag..': the '..what..' does not tie that DPS record to the summary being queued',dps)
  local loose=UnconditionalDps(text)
  C.guard(loose==nil,tag..': every DPS statement in the '..what..' is conditional on Automatic and promises no send',loose)
  local lower=V.Plain(text):lower()
@@ -680,7 +707,7 @@ C.scenario('S13 the Share confirmation and its tooltip say what may be sent, in 
    local text,tip=ReadShare(tag,id,mode)
    if text then
     print('OBSERVED',tag,'confirmation='..text)
-    Disclosure(tag,'confirmation',text,true)
+    Disclosure(tag,'confirmation',text)
     local t=text:lower()
     local title=tostring((Row(id) or {}).title or '?'):lower()
     C.guard(Has(t,title) and Has(t,clause) and Has(t,'saves') and Has(t,'on this client')
@@ -697,7 +724,7 @@ C.scenario('S13 the Share confirmation and its tooltip say what may be sent, in 
    if tip and mode=='manual' then
     manualTip=tip
     print('OBSERVED','S13 '..case..' tooltip='..tip)
-    Disclosure('S13 '..case..' tooltip','tooltip',tip,false)
+    Disclosure('S13 '..case..' tooltip','tooltip',tip)
     local l=tip:lower()
     C.guard(Has(l,'confirm') and Has(l,'cannot be recalled') and Has(l,'not copy into editor')
      and Has(l,'not saving or activating a server saved build'),
