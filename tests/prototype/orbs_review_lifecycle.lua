@@ -429,3 +429,75 @@ do
  if #issues>0 then error(table.concat(issues,'\n'),0)end
  print('PASS R6a5 original explicit legacy byte caps and bounded optional late evidence')
 end
+
+-- R6a6: count actual archive/capacity traversal function calls, not global
+-- table.sort lookups. The hook observes production functions by identity,
+-- never replaces/calls them, and proves itself on each cold positive control.
+do
+ local R=dofile('tests/prototype/orb_recovery_support.lua')
+ local H,M,A,O=R.S.Fresh();R.S.SpendOfferNoChoice(H,M,A,O)
+ M=R.Reload(H);H.perks.currentChoice=nil;H.perks.pendingSelectSpellId=nil;O.offer=false
+ R.Server(H);R.S.Pass(H,M,A,2);assert(M.ContinueBegin())
+ for _=1,100 do if M.ContinueView().stage=='ready' then break end;H.Advance(.25)end
+ assert(M.ContinueConfirm(M.ContinueView().token),'SETUP real validated archive seed')
+ local seed=H.Clone(R.SavedRow('orbRecoveryArchive')[1])
+ local function upvalue(fn,want)
+  for i=1,100 do local name,value=debug.getupvalue(fn,i)
+   if name==want then return value end;if not name then break end
+  end
+  error('SETUP missing real traversal boundary '..want)
+ end
+ local function measured(M,fn)
+  local rc=upvalue(M.Pump,'RC')
+  local canon=upvalue(rc.memory,'canonText');local measure=upvalue(rc.entryBudget,'measure')
+  local capacity=rc.receiptCapacity;local counts={canonical=0,measure=0,capacity=0}
+  local getinfo=debug.getinfo;local wasJit=jit.status();jit.off();jit.flush()
+  debug.sethook(function()
+   local f=getinfo(2,'f').func
+   if f==canon then counts.canonical=counts.canonical+1
+   elseif f==measure then counts.measure=counts.measure+1
+   elseif f==capacity then counts.capacity=counts.capacity+1 end
+  end,'c')
+  local ok,err=pcall(fn)
+  debug.sethook();if wasJit then jit.on()end
+  assert(ok,err);return counts
+ end
+ local issues={}
+ for _,kind in ipairs({'assigned-live-pending','idle-preflight'})do
+  local ok,err=pcall(function()
+   local H,M,A,O=R.S.Fresh();R.S.Loadouts(H,A);H.perks.currentChoice={}
+   if kind=='assigned-live-pending' then assert(M.Start(6))end
+   local archive={};for i=1,(kind=='assigned-live-pending' and 8 or 1)do archive[i]=H.Clone(seed)end
+   assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=archive end))
+   assert(A.AssignedWishlist().state=='ready','SETUP actual assigned Wishlist reaches the status/preflight boundary')
+   local cold=measured(M,function()M.Pump(true);M.Status(false)end)
+   assert(cold.canonical>0 and cold.measure>0,
+    'SETUP positive traversal control observes actual cold validation/measurement')
+   if kind=='idle-preflight' then assert(cold.capacity>0 and M.Status(false).canStart,
+    'SETUP actual idle preflight reaches prospective receipt capacity')end
+   print('SETUP R6a6 '..kind..' PASS cold='..cold.canonical..'/'..cold.measure..'/'..cold.capacity)
+   local hot=measured(M,function()for _=1,8 do M.Pump(true);M.Status(false);H.Advance(.25)end end)
+   print('WORK R6a6 '..kind..' canonical='..hot.canonical..' measure='..hot.measure..' capacity='..hot.capacity)
+   if hot.canonical~=0 or hot.measure~=0 or hot.capacity~=0 then
+    issues[#issues+1]='EXPECT '..kind..': stable interleaved Status/Pump avoids repeated canonical/capacity traversals'
+   end
+   if kind=='idle-preflight' then
+    local approval
+    local action=measured(M,function()approval=M.Prepare('assigned')end)
+    assert(approval and action.capacity>0,
+     'GUARD actual new approval performs fresh prospective capacity despite the display cache')
+    assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive[1].cd='damaged'end))
+    local view;local revised=measured(M,function()view=M.Status(false)end)
+    assert(revised.canonical>0 and not view.canStart and view.startReason:find('cannot be verified',1,true),
+     'GUARD a real archive mutation invalidates validation and refuses new approval')
+    assert(R.SavedRow('orbRecoveryArchive')[1].cd=='damaged',
+     'GUARD invalid history is preserved, never repaired or evicted by observation')
+   end
+   assert(H.Count('orb-spend')==(kind=='assigned-live-pending' and 1 or 0) and H.Count('take')==0,
+    'GUARD observation work changes no gameplay actions')
+  end)
+  if not ok then issues[#issues+1]=kind..': '..tostring(err)end
+ end
+ if #issues>0 then error(table.concat(issues,'\n'),0)end
+ print('PASS R6a6 real assigned interleaving, positive traversal counters and fresh action/mutation controls')
+end

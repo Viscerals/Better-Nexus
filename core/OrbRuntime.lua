@@ -709,7 +709,7 @@ local function inspect(display)
 end
 -- `m` may be the read that the same display refresh already made. Actions
 -- (Prepare, Confirm) always pass nothing and read fresh.
-local function preflight(automatic,m)
+local function preflight(automatic,m,display)
     local status=writeStatus()
     if status.mode~="durable" then return nil,writeRefusal(status) end
     local err;if not m then m,err=inspect();if not m then return nil,err end end
@@ -768,7 +768,9 @@ local function preflight(automatic,m)
     -- approved key bounds all of them without rereading the same archive.
     local longest
     for key in pairs(permitted) do if not longest or #key>#longest then longest=key end end
-    local bounded,why=RC.receiptCapacity(RC.newReceipt(longest,m.s,1,#list>0))
+    local bounded,why
+    if display then bounded,why=RC.displayCapacity(longest,m.s,list)
+    else bounded,why=RC.receiptCapacity(RC.newReceipt(longest,m.s,1,#list>0)) end
     if not bounded then return nil,why end
     m.permitted=permitted;m.capacity=capacity;return m
 end
@@ -1599,13 +1601,15 @@ function RC.memory(guid,p,row)
     if st~="ok" and st~="full" then return nil end
     if #list>ARCHIVE_MAX then return nil end
     local baseline=p and not p.restored and run.historyBaseline or nil
-    local cached=RC.memoryCache
+    local slot=p and "receipt" or "review"
+    local cached=RC.memoryCaches and RC.memoryCaches[slot]
     -- Store.State is a per-content defensive snapshot. Its nested values are
     -- still writable by readers, so compare the archive to our private copy as
     -- well. This avoids canonicalization/allocations without trusting identity.
     -- Atomic writes always provide their actual row and bypass this cache.
     if not row and cached and cached.guid==guid and cached.baseline==baseline
         and cached.owner==Nexus.Store.CurrentOwnerKey() and sameValue(cached.archive,list) then
+        RC.memoryCache=cached
         return cached.attempts,cached.list
     end
     -- Validate and retain our own list and nested entries. A reader can keep
@@ -1647,8 +1651,10 @@ function RC.memory(guid,p,row)
         attempts=effective
     end
     if not row then
-        RC.memoryCache={guid=guid,baseline=baseline,owner=Nexus.Store.CurrentOwnerKey(),
+        cached={guid=guid,baseline=baseline,owner=Nexus.Store.CurrentOwnerKey(),
             archive=list,attempts=attempts,list=list}
+        RC.memoryCaches=RC.memoryCaches or {}
+        RC.memoryCaches[slot]=cached;RC.memoryCache=cached
     end
     return attempts,list
 end
@@ -1691,6 +1697,21 @@ function RC.newReceipt(key,s,serial,acknowledged)
     if acknowledged then p.attributionFormat=1;p.attributionOwner=p.guid;p.guid=nil end
     return p
 end
+-- Display capacity reuses only the byte/shape verdict for the same validated
+-- archive and complete prospective receipt inputs. Actions never use it.
+function RC.displayCapacity(key,s,list)
+    local cached=RC.displayCapacityCache
+    if cached and cached.list==list and cached.key==key and cached.granted==s.grantedKey
+        and cached.locked==s.lockedKey and cached.guid==s.context.guid and cached.slot==s.context.slot
+        and cached.charges==s.charges and cached.stamp==s.grantStamp and cached.selection==s.selectionSerial then
+        return cached.bounded,cached.why
+    end
+    local bounded,why=RC.receiptCapacity(RC.newReceipt(key,s,1,#list>0))
+    RC.displayCapacityCache={list=list,key=key,granted=s.grantedKey,locked=s.lockedKey,
+        guid=s.context.guid,slot=s.context.slot,charges=s.charges,stamp=s.grantStamp,
+        selection=s.selectionSerial,bounded=bounded,why=why}
+    return bounded,why
+end
 function RC.receiptCapacity(p)
     -- 400 edges / 4096 bytes bound the supported journal (8 flat rows),
     -- three raw picks, offer/choice/loadout fields and archive envelope.
@@ -1719,8 +1740,13 @@ end
 function RC.spendCapacity(p,row)
     local _,list=RC.memory(p and receiptGuid(p) or (run.context and run.context.guid),p,row)
     if not list then return nil,RC.HISTORY_UNVERIFIED end
-    local total=ENTRY_BYTES
-    for _,e in ipairs(list) do total=total+RC.retainedBudget(e) end
+    local cached=not row and RC.memoryCache
+    local total=cached and cached.list==list and cached.retainedBytes
+    if not total then
+        total=ENTRY_BYTES
+        for _,e in ipairs(list) do total=total+RC.retainedBudget(e) end
+        if cached and cached.list==list then cached.retainedBytes=total end
+    end
     if #list>=ARCHIVE_MAX or total>ARCHIVE_BYTES then
         return nil,"Retained Orb history has no reserved space for another unresolved outcome. No new Orb action was sent; ordinary rolling remains available."
     end
@@ -3496,7 +3522,9 @@ function M.Status(detail)
     r.persistence={mode=status.mode,reason=status.reason,rowPresent=status.rowPresent}
     local can,why
     if status.mode~="durable" then why=writeRefusal(status)
-    elseif m then can,why=preflight(true,m)
+    elseif m and not run.running and not run.pending and run.state~="PAUSED" and run.state~="LIMIT" then
+        can,why=preflight(true,m,true)
+    elseif m then why=run.reason
     else why=err end
     r.canStart=not run.running and not run.pending and run.state~="PAUSED" and run.state~="LIMIT" and can~=nil
     r.startReason=why

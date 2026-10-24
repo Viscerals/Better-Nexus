@@ -251,12 +251,22 @@ local function NewApproved(H,M,A)
  assert(A.SetFirstLoadoutWishlistIdentity('Near cap follow-on',{{spellId=410002,quality=2,stacks=2}}))
  assert(M.UseAssignedWishlist());local shown=M.Status();return M.Start(3,false,shown.historyReview)
 end
-section('11 entry reserves late evidence',function()
+-- Strict semantic replacement of the 290b02d reserve-refusal oracle: a
+-- pre-existing explicit receipt uses the original raw 6144-byte exit cap.
+-- Future late reservation remains mandatory for prospective/automatic work;
+-- true raw oversize still refuses without discarding any evidence.
+section('11 legacy entry keeps its original raw exit cap',function()
  local H,M,A,O,server=Padded(3550);local original=H.Clone(R.Saved());local v=Ready(H,M)
  local ok,why=M.ContinueConfirm(v.token)
- check(ok==nil and why=='entry_too_large','EXPECT entry admission reserves bounded late evidence before clearing pending')
- check(R.Same(R.Saved(),original) and R.SavedRow('orbRecoveryArchive')==nil
-  and H.Count('orb-spend')==0 and H.Count('take')==0,'GUARD reserve refusal preserves every original receipt field and action gate')
+  check(ok==true,'EXPECT explicit legacy exit is not tightened by optional late headroom: '..tostring(why))
+  local entry=R.SavedRow('orbRecoveryArchive')[1]
+  check(Bytes(entry)>5700 and Bytes(entry)<=6144 and R.Same(entry.receipt,original)
+   and not R.Saved() and H.Count('orb-spend')==0 and H.Count('take')==0,
+   'GUARD original-cap exit retains exact evidence and performs no gameplay action')
+  H,M,A,O,server=Padded(4200);original=H.Clone(R.Saved());v=Ready(H,M)
+  ok,why=M.ContinueConfirm(v.token)
+  check(ok==nil and why=='entry_too_large' and R.Same(R.Saved(),original)
+   and R.SavedRow('orbRecoveryArchive')==nil,'GUARD true raw oversize still preserves and refuses the receipt')
 end)
 section('12 late evidence stays within caps',function()
  local H,M,A,O,server=Padded(3000);local original=H.Clone(R.Saved());local v=Ready(H,M)
@@ -269,7 +279,9 @@ section('12 late evidence stays within caps',function()
  assert(NewApproved(H,M,A))
  check(H.Count('orb-spend')==1,'EXPECT bounded late evidence does not poison retained history for a new approved action')
 end)
-section('13 total reserves late evidence',function()
+-- Strict semantic replacement of the 290b02d reserved-total refusal: preserve
+-- the original raw 28672-byte explicit exit cap, plus an actual full control.
+section('13 legacy total keeps its original raw exit cap',function()
  local entries={}
  for i=1,4 do
   local H,M,A,O,server=Padded(3000,i);local v=Ready(H,M)
@@ -279,9 +291,19 @@ section('13 total reserves late evidence',function()
  local H,M,A,O,server=Padded(3000,5)
  assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=H.Clone(entries)end))
  local original=H.Clone(R.Saved());local v=Ready(H,M);local ok,why=M.ContinueConfirm(v.token)
- check(ok==nil and why=='archive_full','EXPECT total admission reserves all remaining late envelopes within28672 bytes')
- check(R.Same(R.Saved(),original) and R.Same(R.SavedRow('orbRecoveryArchive'),entries),
-  'GUARD total reserve refusal never evicts history or changes pending')
+  check(ok==true,'EXPECT raw-bounded legacy explicit exit does not reserve optional future metadata: '..tostring(why))
+  local all=H.Clone(R.SavedRow('orbRecoveryArchive'));local total=0
+  for i,e in ipairs(all)do total=total+Bytes(e);if i<=4 then
+   check(R.Same(e,entries[i]),'GUARD explicit exit preserves each original history entry')
+  end end
+  check(#all==5 and total<=28672 and R.Same(all[5].receipt,original) and not R.Saved(),
+   'GUARD raw-bounded exit retains exact receipt and stays within original archive caps')
+  H,M,A,O,server=Padded(100,6)
+  assert(Nexus.MainInternals.StoreAuthorityOwner.UpdateStateV1(function(row)row.orbRecoveryArchive=H.Clone(all)end))
+  original=H.Clone(R.Saved());v=Ready(H,M);ok,why=M.ContinueConfirm(v.token)
+  check(ok==nil and why=='archive_full' and R.Same(R.Saved(),original)
+   and R.Same(R.SavedRow('orbRecoveryArchive'),all),
+   'GUARD true raw archive exhaustion still refuses without eviction or receipt loss')
 end)
 section('14 legacy headroom cannot be overrun by diagnostics',function()
  local H,M,A,O,server=Padded(3000);local v=Ready(H,M)
