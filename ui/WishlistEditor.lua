@@ -126,6 +126,8 @@ local wishlistRenderer
 local HideServerEchoUI
 local serverHideHooks = {}
 local wishlistController
+local flexiblePlanChooser
+local flexiblePlanRequest
 
 local function SyncFulfilledDraftTargets()
     M._fulfilledDraftTargets =
@@ -872,6 +874,90 @@ end
 
 function M.DebugDraftState()
     return wishlistController.DebugDraftState()
+end
+
+StaticPopupDialogs["NEXUS_FLEXIBLE_PLAN_REPLACE"] = {
+    -- Accepting installs through the controller's single-use intent; its new
+    -- draft cancels the current Save confirmation and any confirmed Save waiting
+    -- to retry (WishlistController CancelApply). The consent says so, and that
+    -- Cancel keeps both.
+    text = "Open your exact choice as a new Wishlist draft?\nThis replaces the current editor draft and its"
+        .. " destination context. It also cancels any pending Save: an open Save confirmation or a"
+        .. " confirmed Save waiting to retry is not sent. The new draft is saved only when you save it."
+        .. " Cancel keeps the current draft and any pending Save.",
+    button1 = "Open new draft", button2 = "Cancel",
+    -- OnAccept returns nothing, like the other Nexus confirmations. Its data
+    -- is one owned, single-use request. An install attempt (installed or
+    -- refused) or its own Cancel retires it; a newer request passes the older
+    -- one as StaticPopup_Hide data, so only that popup is asked to hide. A
+    -- late or replayed old Accept or Cancel is rejected by request identity
+    -- alone: it installs nothing and asks no popup to hide, so a newer
+    -- replacement and other dialogs such as Save are kept. Popup lifetime
+    -- is modelled only by the offline synthetic host of the handoff fixture:
+    -- a true OnAccept return keeps a dialog shown; nil or false lets the
+    -- click hide it. No versioned client or FrameXML export backs that model,
+    -- so native return handling, pooling, reuse and timing are NOT_RUN.
+    OnAccept = function(_, request) if request then request.Install() end end,
+    OnCancel = function(_, request) if request then request.Cancel() end end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+
+function M.OpenFlexiblePlanChooser()
+    if not flexiblePlanChooser then
+        flexiblePlanChooser = Nexus.FlexiblePlanChooser.New({
+            catalog=wishlistController.CatalogProjection,
+            openDraft=function(draft, alternatives, planCurrent, installed, refuse)
+                local renderer = RendererInstance()
+                local name = renderer.NameText()
+                local intent, why = wishlistController.PrepareNewExactDraft(draft, alternatives)
+                if not intent then return refuse(why) end
+                local request, former = {}, flexiblePlanRequest
+                flexiblePlanRequest = request
+                -- This request supersedes an older one, whether it asks again or
+                -- installs directly. The older popup is retired by its own request
+                -- identity, so no newer replacement or other dialog is dismissed.
+                if former then StaticPopup_Hide("NEXUS_FLEXIBLE_PLAN_REPLACE", former) end
+                -- The replacement popup can be accepted while the chooser is hidden:
+                -- a current request's refusal shows the chooser (pool, choice and
+                -- pending input kept) and then states the same reason in it.
+                local function RevealRefusal(code)
+                    flexiblePlanChooser.Show()
+                    return refuse(code)
+                end
+                local function Install()
+                    if flexiblePlanRequest ~= request then return refuse("EDITOR_CHANGED") end
+                    -- Single use: the attempt retires the request before any check. A
+                    -- refused request therefore cannot install when the former name,
+                    -- count or context is restored and its old callback is replayed.
+                    flexiblePlanRequest = nil
+                    local current, countReason = planCurrent()
+                    if not current then return RevealRefusal(countReason or "PLAN_CHANGED") end
+                    if renderer.NameText() ~= name then return RevealRefusal("EDITOR_CHANGED") end
+                    local ok, reason = intent.Install()
+                    if not ok then return RevealRefusal(reason) end
+                    RolePicker.Hide()
+                    SyncFulfilledDraftTargets()
+                    renderer.Prepare({attach=true, style=true, close=true})
+                    renderer.SetNameText("")
+                    HideServerEchoUI()
+                    renderer.ShowFrame()
+                    installed()
+                    M.Refresh()
+                    return true
+                end
+                request.Install = Install
+                request.Cancel = function()
+                    if flexiblePlanRequest == request then flexiblePlanRequest = nil end
+                end
+                if intent.replaces or name ~= "" then
+                    StaticPopup_Show("NEXUS_FLEXIBLE_PLAN_REPLACE",nil,nil,request)
+                    return true
+                end
+                return Install()
+            end,
+        })
+    end
+    flexiblePlanChooser.Show()
 end
 
 function M.OpenForCandidate(candidate)

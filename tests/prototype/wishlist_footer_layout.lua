@@ -112,4 +112,115 @@ lines('Planned rolled copies: 1/79','Locked targets: 0/6  \226\128\162  1 Echo/q
 c.BeginNewWishlist();r.Refresh()
 check(#visible()==0,'empty draft has no stranded rows')
 lines('Planned rolled copies: 0/79','Locked targets: 0/6  \226\128\162  0 Echo/quality entries')
+
+-- #47 F2: the Plan alternatives entry stays clear of the save-result line,
+-- its hover area, Assign now, Import/Export and its other neighbours. Each
+-- rectangle is resolved from the anchors of real production controls by the
+-- shared geometry support; native pixels, z-order and click precedence are
+-- NOT_RUN. A real controller save through a synthetic host boundary gives a
+-- truthful result row in both widths: unassigned with Assign now, and not
+-- saved without it. Positive controls run before any disjointness check.
+local G=dofile('tests/prototype/layout_geometry_support.lua')
+local gmodel,gstate,gaccount,grows=Nexus.WishlistModel.New(),{},{},{}
+for i=1,3 do grows[291000+i]={spellId=291000+i,name='Geometry '..i,quality=0,maxStack=5,groupId=0} end
+local gcatalog,uploads,uploadOk={rows=grows},0,true
+local gc=Nexus.WishlistInternals.Controller.New({model=gmodel,accountRoot=function()return gaccount end,
+ store={State=function()return gstate end,Settings=function()return {} end},notify=function()end})
+gc.Initialize({Catalog=function()return gcatalog end,WishlistKey=function()return 'geometry' end,
+ Slots=function()return {activeSlot=0,maxSlots=5,bySlot={}} end,
+ UploadWishlist=function()uploads=uploads+1;return uploadOk end})
+local gr=Nexus.WishlistInternals.Renderer.New({controller=gc,family=gmodel.Family,
+ draftKey=gmodel.DraftKey,echoListTotal=gmodel.EchoListTotal})
+local gframe=gr.Prepare();gr.ShowFrame()
+gc.BeginNewWishlist();gc.AddPending(grows[291001]);gr.SetNameText('Geometry plan');gr.Refresh()
+local function gchild(pred)
+ for _,f in ipairs(gframe.children)do if pred(f)then return f end end
+end
+local function gnamed(name)return gchild(function(f)return f:GetName()==name end)end
+local function glabelled(text)return gchild(function(f)return f.kind=='Button' and f:GetText()==text end)end
+local function gresult()
+ for _,t in ipairs(gframe.regions)do
+  local s=G.Visible(t:GetText())
+  if t.kind=='FontString' and t:IsShown() and (s:find('^Saved') or s:find('^Not saved'))then return t,s end
+ end
+end
+local function ghover(text)
+ return gchild(function(f)local p=f.points[1]
+  return f.kind=='Frame' and p~=nil and p[2]==text and f:GetScript('OnEnter')~=nil end)
+end
+local function gsave()
+ local button=gchild(function(f)return f.kind=='Button' and f:IsVisible() and f:GetText()=='Create unassigned' end)
+ check(button~=nil,'a shown Create unassigned control')
+ H.popup=nil;button:Click()
+ local popup=H.popup;StaticPopup_Hide()
+ check(popup~=nil and popup.which=='WISHLISTREALIZER_CREATE_WISHLIST','Create unassigned asks for its own confirmation')
+ return popup
+end
+local whole=G.Rect(gframe,gframe)
+local function control(f,label)
+ check(f~=nil,label..' exists')
+ check(f:IsVisible() and f:GetWidth()>0 and f:GetHeight()>0,label..' is shown with a nonzero size')
+ local box=G.Rect(f,gframe)
+ check(box[3]>box[1] and box[4]>box[2] and G.Inside(box,whole),label..' resolves inside the editor '..G.Text(box))
+ return box
+end
+local popup=gsave()
+check(gc.AcceptApply(popup.data)==true and uploads==1,'one accepted upload through the synthetic host')
+gr.Refresh()
+local text,line=gresult()
+check(line~=nil and line:find('Not assigned',1,true)~=nil,'a truthful unassigned save result is shown: '..tostring(line))
+local importBtn,exportBtn=glabelled('Import'),glabelled('Export')
+local assignBtn,planBtn=gnamed('NexusWishlistAssignNowButton'),gnamed('NexusFlexiblePlanEntry')
+local importBox,exportBox=control(importBtn,'Import'),control(exportBtn,'Export')
+local textBox=control(text,'save-result line')
+local hoverBox=control(text and ghover(text),'save-result hover area')
+local assignBox=control(assignBtn,'Assign now')
+local displayBox=control(glabelled('Display Settings'),'Display Settings')
+local listBox=control(gchild(function(f)return f.scripts.OnMouseWheel and f.width==332 end),'Selected Echoes list')
+local toggleBox=control(gchild(function(f)local p=f.points[1]
+ return f.kind=='CheckButton' and p~=nil and type(p[2])=='table' and p[2].kind=='Button' end),
+ 'locked-slot automation toggle')
+local planBox=control(planBtn,'Plan alternatives')
+importBtn:Click()
+check(H.popup~=nil and H.popup.which=='NEXUS_IMPORT_WISHLIST','Import still opens its paste dialog')
+StaticPopup_Hide();exportBtn:Click()
+check(H.popup~=nil and H.popup.which=='NEXUS_EXPORT_WISHLIST','Export still opens its copy dialog')
+StaticPopup_Hide()
+local openChooser,opens=Nexus.WishlistEditor.OpenFlexiblePlanChooser,0
+Nexus.WishlistEditor.OpenFlexiblePlanChooser=function()opens=opens+1 end
+planBtn:Click();Nexus.WishlistEditor.OpenFlexiblePlanChooser=openChooser
+check(opens==1,'Plan alternatives still opens the session chooser')
+-- A synthetic Echo Journal route boundary observes the original Assign now.
+local journal,routed=Nexus.JournalTab,nil
+Nexus.JournalTab={CanOpenBuilds=function()return true end,OpenBuilds=function(v)routed=v end}
+assignBtn:Click();Nexus.JournalTab=journal
+check(routed==true and not gframe:IsShown() and uploads==1,
+ 'Assign now still closes the editor for the Echo Journal chooser and uploads nothing')
+gr.ShowFrame();gr.Refresh()
+check(gresult()==text and G.Visible(text:GetText())==line and assignBtn:IsVisible(),
+ 'the reopened editor shows the same result and Assign now')
+print('OBSERVED Plan alternatives '..G.Text(planBox)..' result '..G.Text(textBox)..' Assign now '..G.Text(assignBox))
+local function clear(label,box)
+ check(G.Apart(planBox,box),'Plan alternatives '..G.Text(planBox)..' is clear of '..label..' '..G.Text(box))
+end
+clear('Import',importBox);clear('Export',exportBox);clear('the save-result line',textBox)
+clear('the save-result hover area',hoverBox);clear('Assign now',assignBox)
+clear('Display Settings',displayBox);clear('the Selected Echoes list',listBox)
+clear('the locked-slot automation toggle',toggleBox)
+check(G.Apart(textBox,assignBox) and G.Apart(assignBox,importBox) and G.Apart(importBox,exportBox),
+ 'the result line, Assign now, Import and Export keep separate places')
+uploadOk=false;gr.SetNameText('Refused plan');gr.Refresh()
+popup=gsave()
+check(gc.AcceptApply(popup.data)==false and uploads==2,'the synthetic host refuses the second upload')
+gr.Refresh()
+text,line=gresult()
+check(line~=nil and line:find('^Not saved')~=nil and not assignBtn:IsShown(),
+ 'a truthful not-saved result is shown without Assign now: '..tostring(line))
+check(importBtn:IsVisible() and exportBtn:IsVisible() and planBtn:IsVisible(),
+ 'Import, Export and Plan alternatives stay shown beside a not-saved result')
+textBox=control(text,'full-width save-result line')
+hoverBox=control(text and ghover(text),'full-width save-result hover area')
+check(textBox[3]>assignBox[1],'the not-saved line takes the width Assign now otherwise shares')
+clear('the full-width save-result line',textBox);clear('the full-width save-result hover area',hoverBox)
+check(G.Apart(textBox,importBox),'the full-width result line stays clear of Import')
 print('PASS wishlist_footer_layout checks='..checks)

@@ -1511,6 +1511,15 @@ local function EnsureFrame()
     importBtn:SetText("Import")
     importBtn:SetScript("OnClick", function() StaticPopup_Show("NEXUS_IMPORT_WISHLIST") end)
 
+    local planBtn = CreateFrame("Button", "NexusFlexiblePlanEntry", frame, "UIPanelButtonTemplate")
+    planBtn:SetSize(148, 22)
+    -- Above the Selected Echoes list it can replace, right-aligned with that
+    -- pane and Export: clear of the save-result line, its hover area, Assign
+    -- now, Import and Export in the row above.
+    planBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -154)
+    planBtn:SetText("Plan alternatives")
+    planBtn:SetScript("OnClick", function() Nexus.WishlistEditor.OpenFlexiblePlanChooser() end)
+
     -- Tracking status: shows EXACTLY what the addon currently believes
     -- the active wishlist is, rather than a bare "no wishlist" that reads
     -- as "you have none" when really it can also mean "you have several
