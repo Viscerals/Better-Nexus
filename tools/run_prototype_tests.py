@@ -310,6 +310,21 @@ NAMES += ['ux_save_intents','ux_auto_assignment_consent','ux_automation_scope']
 NAMES += ['ux_save_retry_intent','ux_assignment_consent_routes']
 # UX M4: captured destination presentation, one qualified count vocabulary, record scope/detail and terminology lint (EXPECT fails on accepted M3 ab3cb307 by design).
 NAMES += ['ux_destination_context','ux_qualified_counts','ux_record_scope_terms']
+# UX M5: a separate, confirmed Share of your own Saved Build (Copy stays draft-only); the saved Sync mode shown, never set, in one vocabulary matching actual sends (EXPECT fails on accepted M4 23109b90 by design).
+NAMES += ['ux_share_confirmation','ux_sync_disclosure','ux_sync_disclosure_sends']
+# UX M5 14d: the optional account-level Sync mode choice (LP-12), its applied transitions, the Library status fit (MB1) and the automatic DPS Record Loadout page disclosure (MB2) (EXPECT fails on preimage d15ba07c by design).
+NAMES += ['ux_sync_mode_choice','ux_sync_mode_transitions','ux_sync_status_fit','ux_sync_dps_page']
+# M5 catalog cause witness (first stage): replays catalog_idle_frames lines 11-117 and prints passive C1-C5 observations of its preparation-window frame; no remedy (the first full-run failure at catalog_idle_frames:113 stays NOT_ESTABLISHED).
+NAMES += ['catalog_idle_frames_witness']
+# M5 P-ALIGN-1 alignment probe: fresh in-process boots that vary only the idle frames before the first write of the catalog_idle_frames sequence and record how the preparation-window ticket settles; observation only, no remedy (the first full-run failure at catalog_idle_frames:113 stays NOT_ESTABLISHED).
+NAMES += ['catalog_idle_frames_alignment_probe']
+# M5R2-MB1: a confirmed own Saved Build Share is the explicit Share operation; its actual admission or final refusal is stated after the local save; two runtimes (EXPECT fails on closed aeb35417 by design).
+NAMES += ['ux_share_admission']
+# UX M6 (accepted as M6 0924d06a): named Resume target and full-window review after a changed target, fixed separate Pause/Resume, layered recovery/usage/Continue-history wording (EXPECT predicted to fail on accepted M5 9deaa526, by design; qualified by the executed C2 control, review NB-6).
+NAMES += ['orb_target_review','orb_fixed_pause_resume','orb_recovery_layers']
+# UX M7 (not accepted): setup checklist/status, Orb rendered-key review and recovery vocabulary, Share approval retirement and linked-DPS disclosure, Retry Share feedback, contextual Help (EXPECT predicted to fail on accepted M6 0924d06a, by design; not executed by the author).
+NAMES += ['ux_setup_checklist','ux_status_composition','orb_review_identity','orb_recovery_vocabulary']
+NAMES += ['ux_share_approval_retirement','ux_share_linked_dps','ux_retry_share_feedback','ux_context_help_access']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

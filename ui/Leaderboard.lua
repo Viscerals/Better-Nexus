@@ -1190,6 +1190,10 @@ local function EnsureFrame()
     local builds=MakeNavButton(frame,"Builds",88); builds:SetPoint("TOPLEFT",18,-12); builds:SetScript("OnClick",function() M.Hide(); if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end end)
     local board=MakeNavButton(frame,"Leaderboard",102); board:SetPoint("LEFT",builds,"RIGHT",4,0); board:SetText("|cffffd200Leaderboard|r"); board:Disable()
     local wish=MakeNavButton(frame,"Wishlists",92); wish:SetPoint("LEFT",board,"RIGHT",4,0); wish:SetScript("OnClick",function() M.Hide(); if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end)
+    -- M7: Help for this window (its Sharing page, which covers the
+    -- Leaderboard). Like the other navigation buttons it replaces this window,
+    -- whose layer is above Help's; it opens a page only.
+    frame._helpNav=MakeNavButton(frame,"Help",56); frame._helpNav:SetPoint("LEFT",wish,"RIGHT",4,0); frame._helpNav:SetScript("OnClick",function() M.Hide(); if Nexus.Help then Nexus.Help.Show("sharing") end end)
 
     searchBox=CreateFrame("EditBox","NexusLeaderboardSearch",frame,"InputBoxTemplate"); searchBox:SetSize(265,22); searchBox:SetPoint("TOPLEFT",18,-50); searchBox:SetAutoFocus(false); searchBox:SetScript("OnTextChanged",RefreshInteractive)
     local ph=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); ph:SetPoint("LEFT",searchBox,"LEFT",6,0); ph:SetText("Search player or build...")
@@ -1219,6 +1223,22 @@ local function EnsureFrame()
         else print("|cffff6060Nexus:|r "..tostring(reason or "sync unavailable")) end
         M.RefreshStatus()
     end)
+    -- The same Sync words as the Build Library's Sync Now and Help. Reading
+    -- the saved mode writes nothing; Off and Manual are SyncModePolicy's text.
+    syncBtn:SetScript("OnEnter",function(self)
+        GameTooltip:SetOwner(self,"ANCHOR_TOP")
+        GameTooltip:AddLine("Sync Now",1,1,1)
+        GameTooltip:AddLine("Asks other Nexus users for shared builds and DPS records.",0.8,0.8,0.8,true)
+        local policy=Nexus.SyncModePolicy
+        local mode=policy and type(policy.Mode)=="function" and policy.Mode() or nil
+        local modeText=mode=="automatic" and "Sync is Automatic: Nexus may send without a click (login requests, answers to other users, your new DPS bests with your character name)."
+            or mode and type(policy.Text)=="function" and policy.Text(mode) or nil
+        if modeText then GameTooltip:AddLine(modeText,1,0.82,0,true) end
+        GameTooltip:AddLine("With Automatic, a new personal DPS best (with its Echo list) and its Record Loadout build page may be sent, each only if this client admits it: the page as a summary first, its Echo list only in later answers to players who ask. Sending is not delivery.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("Sent means it left this client, not that anyone stored it. Received means it arrived here; stored means this client kept it.",0.7,0.7,0.7,true)
+        GameTooltip:Show()
+    end)
+    syncBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
     dummyBtn=MakeTab(frame,"Training Dummy",118); dummyBtn:SetPoint("TOPLEFT",18,-82); dummyBtn:SetScript("OnClick",function() category="dummy"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
     lkBtn=MakeTab(frame,"Lich King",100); lkBtn:SetPoint("LEFT",dummyBtn,"RIGHT",5,0); lkBtn:SetScript("OnClick",function() category="lk"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)
     combinedBtn=MakeTab(frame,"Both records",112); combinedBtn:SetPoint("LEFT",lkBtn,"RIGHT",5,0); combinedBtn:SetScript("OnClick",function() category="combined"; selectedKey=nil; classMenu:Hide(); RefreshInteractive() end)

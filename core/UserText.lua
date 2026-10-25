@@ -229,6 +229,117 @@ function T.DestinationLines(d)
     return lines
 end
 
+-- M7: the setup checklist, worded from current facts only (Panel.SetupFacts).
+-- Steps: start-up, the destination Nexus would act on and its Wishlist. Each
+-- row is {key, label, status, text}; status is "done", "todo", "waiting" or
+-- "unknown". Loading, restoring, unavailable and not-known are never "done",
+-- and whether the Welcome was seen or closed is not a fact here. complete is
+-- true only when all three steps are done now.
+T.CHECK_MARKS = {done = "[done]", todo = "[to do]", waiting = "[waiting]", unknown = "[not known]", info = "[info]"}
+function T.SetupChecklist(f)
+    f = type(f) == "table" and f or {}
+    local rows = {}
+    local function row(key, label, status, text)
+        rows[#rows + 1] = {key = key, label = label, status = status, text = text}
+    end
+    if f.startup == "ready" then
+        row("startup", "Start-up", "done", "Local saved data is restored.")
+    elseif f.startup == "loading" then
+        row("startup", "Start-up", "waiting", "Local saved data is still being restored (see the loading panel).")
+    else
+        row("startup", "Start-up", "unknown", "Start-up status cannot be read.")
+    end
+    local d = type(f.destination) == "table" and f.destination or nil
+    if f.startup ~= "ready" then
+        row("destination", "Destination", "unknown", "Not known until start-up finishes.")
+        row("wishlist", "Wishlist", "unknown", "Not known until start-up finishes.")
+        return {rows = rows, complete = false}
+    end
+    if not d then
+        row("destination", "Destination", "unknown", "The Nexus panel has not shown a run yet.")
+        row("wishlist", "Wishlist", "unknown", "The Nexus panel has not shown a run yet.")
+        return {rows = rows, complete = false}
+    end
+    local label = T.SavedBuildLabel(d.slot, d.name)
+    local destinationDone = false
+    if d.kind == "savedBuild" and d.empty then
+        row("destination", "Destination", "todo", (label or "The selected Saved Build")
+            .. " holds no Echoes, so a Wishlist cannot be assigned to it. Load a Saved Build that holds Echoes in the game's build window.")
+    elseif d.kind == "savedBuild" and d.unavailable then
+        row("destination", "Destination", "unknown", (label or "The Saved Build") .. " is not available right now.")
+    elseif d.kind == "savedBuild" and d.active == true then
+        destinationDone = true
+        row("destination", "Destination", "done", (label or "A Saved Build") .. " is active in the game.")
+    elseif d.kind == "savedBuild" then
+        row("destination", "Destination", "unknown", "A Saved Build's plan is in use, but which Saved Build is active is not confirmed.")
+    elseif d.kind == "firstRun" then
+        destinationDone = true
+        row("destination", "Destination", "done", "The first-run target (no Saved Build in use).")
+    elseif d.kind == "unknown" then
+        row("destination", "Destination", "waiting", d.reason == "restoring"
+            and "Not known yet: the saved assignment is being restored."
+            or "Not known yet: Saved Build data is not loaded.")
+    else
+        row("destination", "Destination", "unknown", "Not confirmed right now.")
+    end
+    local wishlist = T.SafeName(d.wishlist)
+    local state = d.wishlistState
+    local wishlistDone = false
+    if d.empty then
+        row("wishlist", "Wishlist", "todo", "Needs a Saved Build that holds Echoes first.")
+    elseif state == "assigned" then
+        wishlistDone = true
+        row("wishlist", "Wishlist", "done", (wishlist and ("'" .. wishlist .. "'") or "A Wishlist") .. " is assigned.")
+    elseif state == "unassigned" then
+        row("wishlist", "Wishlist", "todo", "None assigned. Assign Wishlist... opens the chooser; nothing is assigned until you choose. No Wishlist yet? Create one in the Wishlist Editor.")
+    elseif state == "restoring" then
+        row("wishlist", "Wishlist", "waiting", "The saved assignment is being restored.")
+    elseif state == "unavailable" then
+        row("wishlist", "Wishlist", "unknown", (wishlist and ("'" .. wishlist .. "' is ") or "The assignment is ") .. "unavailable right now.")
+    else
+        row("wishlist", "Wishlist", "unknown", "Not known right now.")
+    end
+    return {rows = rows, complete = f.startup == "ready" and destinationDone and wishlistDone}
+end
+
+-- M7: Auto, Sync and Orb status as information lines (not setup steps). OFF
+-- and no Orb run are complete answers; an unread fact says it is not known.
+local SYNC_MODE_LINES = {
+    automatic = "Sync: Automatic. Nexus may send shared builds and DPS records without a click; what is sent may reach no one.",
+    manual = "Sync: Manual. Nexus sends only what you start (Sync Now or Share).",
+    off = "Sync: Off. Nexus sends nothing; local records are kept.",
+}
+local ORB_STATE_WORDS = {PAUSED = "paused", RECOVERY = "an earlier Orb result is unresolved",
+    LIMIT = "maximum reached", FINISHED = "finished", STOPPED = "stopped"}
+function T.StatusLines(f)
+    f = type(f) == "table" and f or {}
+    local lines = {}
+    if f.auto == true then
+        local held = T.SafeName(f.autoNote or f.paused, 200)
+        lines[#lines + 1] = "Auto: ON" .. (held and (" - not acting now: " .. held) or "")
+    elseif f.auto == false then
+        lines[#lines + 1] = "Auto: OFF. Recommendations only; turning Auto ON is your choice (read its warning first)."
+    else
+        lines[#lines + 1] = "Auto: not known right now."
+    end
+    local sync = SYNC_MODE_LINES[f.syncMode]
+    if sync then
+        lines[#lines + 1] = sync .. (f.syncExplicit == false and " (Not a choice you saved.)" or "")
+    else
+        lines[#lines + 1] = "Sync: mode not known right now."
+    end
+    if f.orb == false then
+        lines[#lines + 1] = "Orbs (optional): no Orb run approved this session."
+    elseif type(f.orb) == "table" then
+        local words = f.orb.running and "running" or ORB_STATE_WORDS[f.orb.state]
+            or ("in state " .. tostring(f.orb.state) .. " (see Open Orbs)")
+        lines[#lines + 1] = "Orbs (optional): run " .. words .. (f.orb.pending and "; a result is pending." or ".")
+    else
+        lines[#lines + 1] = "Orbs (optional): status not known right now."
+    end
+    return lines
+end
+
 -- One count vocabulary. These are different units and are never merged:
 -- planned copies (the plan), rolled copies this run, the Wishlist's copies
 -- found in a Saved Build, locked targets, and Echo families represented (a

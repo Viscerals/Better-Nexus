@@ -534,11 +534,47 @@ function M.Panel(spec)
 end
 
 local CONTROL_ORDER = {"search","scope","mine","class","qualified","sort"}
-local ACTION_ORDER = {"sync","share"}
+local ACTION_ORDER = {"sync","mode","share"}
 local CONTROL_BASE = {
     search=165,scope=84,mine=84,class=128,qualified=112,sort=126,
-    sync=88,share=110,
+    sync=88,mode=96,share=110,
 }
+-- The Build Library status region: rows of its composed text (count, the
+-- latest Share and the current Sync mode) under the conservative text model,
+-- bounded so a very long Share sentence cannot push the list off the window.
+-- The bound holds the longest supported composition at the largest supported
+-- font scale (2.0, 14 px per character in a 720 px status): an 80-byte Share
+-- title in the terminal sentence with its bounded reason, Retry Share, the
+-- locked-target sentence and the roles, the count line and the Automatic line
+-- need about 17 rows there; 8 rows held only the font scale 1 texts.
+local STATUS_MAX_ROWS = 20
+-- The window also stays inside the visible UI (M5 queue item 2). The layout
+-- (height) is laid out as before: every status row, the controls and the
+-- minimum list/detail body. While it fits the UI height less this margin
+-- (FitToScreen's), the window shows all of it. Otherwise the window is that
+-- tall (windowHeight) and the renderer scrolls the laid-out content inside
+-- it (scrollRange), so every control, the whole status and the list/detail
+-- can be brought on screen. Nothing is scaled, shortened or hidden. A UI
+-- size under FitToScreen's plausible minimum is not acted on.
+local COMMUNITY_VIEWPORT_MARGIN = 24
+local COMMUNITY_VIEWPORT_MIN_WIDTH, COMMUNITY_VIEWPORT_MIN_HEIGHT = 640, 480
+
+local function StatusLine(scale)
+    return math.max(17, math.ceil(13 * Clamp(scale or 1, 0.75, 2)))
+end
+
+-- Community only: visual rows the status text needs at `width`, 1..20.
+function M.CommunityStatusRows(text, width, scale)
+    local rows = M.TextRows(text, math.max(1, tonumber(width) or 1), scale)
+    return math.max(1, math.min(STATUS_MAX_ROWS, rows))
+end
+
+-- Community only: the status height that holds `rows` rows at `scale`.
+function M.CommunityStatusHeight(rows, scale)
+    rows = math.max(1, math.min(STATUS_MAX_ROWS, math.floor(tonumber(rows) or 2)))
+    local gap = math.ceil(6 * Clamp(scale or 1, 0.75, 2))
+    return math.max(28, rows * StatusLine(scale) + gap)
+end
 
 local function LabelKey(labels)
     local out = {}
@@ -552,7 +588,9 @@ local function CommunityKey(spec)
     return table.concat({Round(spec.width or 1040,1),
         Round(spec.height or 640,1),Round(spec.fontScale or 1,3),
         Round(spec.uiScale or 1,3),tonumber(spec.revision) or 0,
-        LabelKey(labels)},"|")
+        LabelKey(labels),"s" .. tostring(tonumber(spec.statusRows) or 0),
+        "v" .. tostring(Round(spec.viewportWidth or 0,1)) .. "x"
+            .. tostring(Round(spec.viewportHeight or 0,1))},"|")
 end
 
 local function ControlWidth(name, label, scale, available)
@@ -637,14 +675,22 @@ function M.Community(spec)
         metaY,nextWidth,metaHeight)
     layout.hitboxes.next = nextBox
     cursor = metaY + metaHeight + gap
-    local statusHeight = math.max(28, small * (spec.syncActive and 2 or 2) + gap)
+    -- The detail keeps its heading, a two-row action footer and at least
+    -- three lines of its scrolled body; the list needs less.
+    local minimumBody = math.max(150,math.ceil(133 * scale))
+    -- Without a measured row count the original two-row reserve stands; with
+    -- one, the status holds every measured row (up to STATUS_MAX_ROWS).
+    local statusHeight = math.max(28, small * 2 + gap)
+    local measuredRows = tonumber(spec.statusRows)
+    if measuredRows then
+        statusHeight = M.CommunityStatusHeight(measuredRows, scale)
+    end
+    layout.statusRows = measuredRows or nil
+    layout.statusLine = StatusLine(scale)
     Add(layout,"status",20,cursor,width-40,statusHeight)
     cursor = cursor + statusHeight + gap
 
     local bodyTop = cursor
-    -- The detail keeps its heading, a two-row action footer and at least
-    -- three lines of its scrolled body; the list needs less.
-    local minimumBody = math.max(150,math.ceil(133 * scale))
     local height = math.max(requestedHeight, bodyTop + minimumBody + 20)
     local bodyHeight = height - bodyTop - 20
     local bodyGap = math.max(16,math.ceil(20 * scale))
@@ -661,6 +707,26 @@ function M.Community(spec)
     Add(layout,"emptyState",30,bodyTop+gap,listWidth-20,
         math.min(bodyHeight-gap*2,small*5),false)
     layout.height = height
+    -- The window shown on screen (see COMMUNITY_VIEWPORT_MARGIN): the whole
+    -- layout while it fits the UI height less the margin, otherwise that
+    -- height, with the rest reached by scrolling. viewportFit says whether
+    -- the window, with its margin, lies inside the UI size; it is nil when
+    -- no plausible UI size was given (the window then shows the layout).
+    layout.windowHeight, layout.scrollRange = height, 0
+    local viewportWidth = tonumber(spec.viewportWidth)
+    local viewportHeight = tonumber(spec.viewportHeight)
+    if viewportWidth and viewportHeight
+        and viewportWidth >= COMMUNITY_VIEWPORT_MIN_WIDTH
+        and viewportHeight >= COMMUNITY_VIEWPORT_MIN_HEIGHT then
+        local windowHeight = math.min(height,
+            math.floor(viewportHeight - COMMUNITY_VIEWPORT_MARGIN))
+        layout.windowHeight = windowHeight
+        layout.scrollRange = height - windowHeight
+        layout.viewportWidth, layout.viewportHeight = viewportWidth, viewportHeight
+        layout.viewportMargin = COMMUNITY_VIEWPORT_MARGIN
+        layout.viewportFit = windowHeight <= viewportHeight - COMMUNITY_VIEWPORT_MARGIN
+            and width <= viewportWidth - COMMUNITY_VIEWPORT_MARGIN
+    end
     layout.cardPoolLimit = math.max(1,math.min(19,
         math.ceil(bodyHeight / 92) + 4))
     local cardWidth = math.max(220,listWidth-20)

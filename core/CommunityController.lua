@@ -3081,9 +3081,33 @@ function Controller.New(options)
         return true, nil, status
     end
 
-    function M.RetryShare(id)
+    -- The context a Retry is shown in: saved data, catalog, verified owner and
+    -- the catalog's preparation binding (as PublishImportedBuild keeps them).
+    function M.RetryShareContext()
+        local catalog = Catalog()
+        local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        return {database=NexusDB, catalog=catalog, owner=CurrentVerifiedOwnerKey(),
+            binding=preparation and preparation.binding or nil}
+    end
+
+    -- `expected`, when given, is M.RetryShareContext() as the Retry was shown:
+    -- a click that arrives after the player, saved data, catalog or binding
+    -- changed queues nothing (fail closed). Admission, retryOnFull and the
+    -- summary budget are the existing ones.
+    function M.RetryShare(id, expected)
         local retryable, retryWhy = M.CanRetryShare(id)
         if not retryable then return false, retryWhy end
+        if type(expected) == "table" then
+            local now = M.RetryShareContext()
+            if expected.database ~= now.database or expected.catalog ~= now.catalog
+                or expected.owner ~= now.owner
+                or expected.binding ~= nil and expected.binding ~= now.binding then
+                PeerRecord("share_retry_action", {id=tostring(id),
+                    outcome="rejected", reason="player or catalog changed"})
+                return false, "player or catalog changed"
+            end
+        end
         id = tostring(id)
         local record = LoadBuild(id)
         local sync = Nexus and Nexus.Sync
@@ -3327,7 +3351,9 @@ function Controller.New(options)
             pendingPublications[id] = nil
             -- Existing polling callers consume the terminal receipt. A renderer
             -- that already received its callback starts a new explicit update.
-            if type(onComplete) ~= "function" then return prior.ok, prior.value end
+            if type(onComplete) ~= "function" then
+                return prior.ok, prior.value, nil, prior.admission
+            end
         end
         local source = LoadBuild(id)
         if Identity.SavedMirrorKind(source) ~= "saved" then
@@ -3386,6 +3412,13 @@ function Controller.New(options)
         source.publishedBuildId = publishedId
         source.recordBuildId = publishedId
         source.lastPublishedAt = stamp
+        -- The context this Share was confirmed in, as EditBuild keeps it: a
+        -- commit that settles after the player, saved data or catalog changed
+        -- is saved locally but queues nothing.
+        local catalog, database = Catalog(), NexusDB
+        local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        local binding = preparation and preparation.binding
         local operation = {state="pending",ok=nil,value=nil,finalized=false}
         local function Finish(ok, value)
             if operation.finalized then return end
@@ -3393,17 +3426,44 @@ function Controller.New(options)
             operation.state, operation.ok, operation.value = "complete", ok,
                 value
             if ok then
-                BroadcastIfPossible(record)
+                -- Saved locally is not queued, and queued is not sent. This
+                -- is the owner's explicit Share of this exact listing: it is
+                -- tracked as one, without a queue-full retry, and its actual
+                -- admission or final refusal (saved mode, size, Sync
+                -- unavailable) is kept for the caller.
+                local admission = {localSaved=true,queueAdmitted=false}
+                local current = catalog and type(catalog.ManualPreparationStatus) == "function"
+                    and catalog.ManualPreparationStatus() or nil
+                if database ~= NexusDB or catalog ~= Catalog()
+                    or localOwner ~= CurrentVerifiedOwnerKey()
+                    or binding ~= nil and (not current or binding ~= current.binding) then
+                    admission.queueReason = "player or catalog changed"
+                else
+                    local admitted, reason, status = BroadcastIfPossible(record, {explicit=true})
+                    admission.queueAdmitted, admission.queueReason = admitted == true, reason
+                    admission.shareStatus = status
+                end
+                operation.admission = admission
+                -- The same hand-off of this listing's DPS best. Its local
+                -- admission is kept apart from the summary's: "queued" when a
+                -- linked record was admitted for sending (queued is not sent),
+                -- "none" when the call reported false: no eligible linked
+                -- record, or every eligible one refused (mode, queue, checks or
+                -- budget), which the completion line leaves unsaid; "unknown"
+                -- when it raised or returned no answer (not proof that nothing
+                -- was queued).
                 local D = Nexus.DpsCapture
                 if D and D.BroadcastBestForBuild then
-                    pcall(D.BroadcastBestForBuild, publishedId)
+                    local called, sentLinked = pcall(D.BroadcastBestForBuild, publishedId)
+                    admission.linkedDps = not called and "unknown"
+                        or sentLinked == true and "queued"
+                        or sentLinked == false and "none" or "unknown"
                 end
             end
             if operation.onComplete then
-                operation.onComplete(ok, value, operation.ticket)
+                operation.onComplete(ok, value, operation.ticket, operation.admission)
             end
         end
-        local catalog = Catalog()
         if not (catalog and type(catalog.BeginCatalogMaintenance) == "function"
             and type(catalog.MaintenanceReplaceRow) == "function"
             and type(catalog.CommitMaintenance) == "function") then
@@ -3441,7 +3501,7 @@ function Controller.New(options)
             end, catalog.CommitMaintenance(handle))
         if committed then
             Finish(true, publishedId)
-            return true, publishedId
+            return true, publishedId, nil, operation.admission
         end
         if commitWhy == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
             operation.ticket = ticket

@@ -7,6 +7,8 @@ local HELP_LEVEL=40
 local pages={
  {id="start",title="Getting started",text=[[Start here: the page buttons above open any page directly. Setup / Welcome reopens the first-launch guide; it is information only, saves nothing and never turns Auto ON. Assign Wishlist... opens the Echo Journal with its Wishlist chooser for the Saved Build the Journal shows; nothing is assigned until you choose a Wishlist there.
 
+Setup checklist (also in the ... menu) shows what Nexus can read now: start-up, the Saved Build Nexus would act on, its assigned Wishlist, Auto, Sync and any Orb run. A step is done only when that is true now; unknown or still loading is never shown as done, and closing the Welcome is not a setup step. Its buttons only open the same windows as here.
+
 This is an experimental build. Back up your Nexus folder and WTF with WoW closed before testing. Reading this guide never spends, assigns, activates, or sends a Sync request.
 
 Before you turn Auto ON: With Auto ON, Nexus may replace that active Saved Build with a better finished run; at level 80 after a finished run, that can happen right after you turn Auto ON or change the assignment. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. It treats the slot as a working copy, not a protected archive. Keep Auto OFF if you want it left unchanged. Auto starts OFF each session.
@@ -66,9 +68,9 @@ Nexus does not keep rerolls back for later in a run. These rules are not a guara
 Reading the panel: Needed, Target already met, Not on Wishlist and Different quality from target describe the current choice. Frozen offer is a card kept by Freeze. Priority numbers in advanced diagnostics are not DPS or percentages. EXTRA COPIES are rolled copies above exact Wishlist targets. Target 2/current 5 means 3 extras. This display deletes nothing. [Guaranteed offer] means the server marks this offer guaranteed. Overlay: [X] meets the requested copy count; [~] some; [ ] none. These symbols are not network or loading states.
 
 When it is blocked: "Waiting for the game to confirm the last Echo action." means an action was sent and has no confirmed result yet. Do not choose again or reload; wait. "Auto waiting" means Auto stays ON and holds its actions for such a result, or for an action the game still shows pending. "Auto rechecking" means it also asks the game again for your granted Echoes, at a slow pace and only while that could settle the wait; a request is not an answer and nothing is resent. The game gives Nexus no receipt for an Echo selection. If the matching grant never appears, or another selection of the same Echo makes it impossible to tell which one was granted, Nexus keeps waiting until a new run. Turning Auto off and on does not end that wait. A reload ends Nexus's tracking of it without learning or cancelling the result. Point at the Auto button to see what Auto is doing now and why. "No Echo choice is showing." means only that no choice is on screen now. It does not mean the run is finished, and it is not a reason to retry. "Auto ON — paused" means Auto stays ON but is not acting; the line below it says why and what helps (the ... button's Status line has it too). When an Auto click leaves Auto OFF, the same place says why. Waiting for current Echo data means automatic choices wait for ownership confirmation; it is not Sync status. Ordinary rolling stays paused during active or unknown Orb offers.]]},
- {id="sharing",title="Shared builds and DPS",text=[[1. Click Build Library on the Nexus panel. Use the scope buttons to switch between All Shared and Mine (your Saved Builds and shared listings; not the game's My Builds page).
+ {id="sharing",title="Shared builds and DPS",text=[[1. Click Build Library on the Nexus panel. Use the scope buttons to switch between All Shared and Mine (your Saved Builds and shared listings; not the game's My Builds page). If the Build Library is taller than your screen (for example with large text), its content scrolls: use the bar at its right edge, or the mouse wheel over the window outside the build list and the build details, which scroll on their own.
 2. Require both DPS records: when checked, only builds with both a Training Dummy and a Lich King record that this client holds are listed. When unchecked, that requirement is off; other filters still apply. A record shows what this client holds. It is not build quality, outside verification, or finished Sync. While a filter change is applied, the list says Updating results...
-3. Copy into Editor creates a draft; it does not activate or spend. Share Build sends a listing to other users; it is separate from saving a Wishlist or a server Saved Build.
+3. Copy into Editor creates a draft; it does not activate, spend or share. Your own Share actions need your click: on your own Saved Build, Share Build... at the right asks you to confirm first, and the Share Build form shares when you press its Share Build button. With Sync set to Automatic, a new personal DPS best is also shared without a click when this client admits it for sending. That DPS record carries its Echo list, and it comes with an automatic "Record Loadout" build page: first a summary without the Echo list; for that page, the Echo list is sent only in later answers to players who ask for it. A page whose summary does not fit one chat line is not sent; with Manual or Off it is kept here and not sent. Sending is not delivery: Nexus cannot confirm that anyone receives or keeps what it sent. A shared build cannot be recalled: players who receive it keep their copy. Sharing is separate from saving a Wishlist or a server Saved Build.
 
 Removing: Stop Sharing, an administrator removing a shared record, and deleting one of your builds under Mine are different actions. Read each confirmation. Stop Sharing removes the listing here; removal on other clients is not confirmed. Removing a shared listing does not delete your server build or Wishlist.
 
@@ -78,25 +80,36 @@ Locked targets on shared builds: players on this version receive a build's locke
 
 Leaderboard: Training Dummy, Lich King and Both records tabs. Both records ranks by the highest single result; an average is display-only. DPS capture needs Details! and its supported events.
 
-Sync Now asks for shared builds and records. Preparing, request sent, receiving updates, and finished are distinct. Do not flood the sharing network or send test traffic.]]},
+Sync Now asks for shared builds and records. Preparing, request sent, receiving updates, and finished are distinct. Do not flood the sharing network or send test traffic.
+
+What Sync sends: your saved Sync mode decides. To choose it, click Sync mode... beside Sync Now in the Build Library, pick Automatic, Manual or Off, and click Apply. Opening it, Cancel, X, Escape and closing the Build Library change nothing. Apply saves only your choice for this account and sends nothing by itself. Without a choice of yours, Sync is Automatic, except where accepted saved settings from another Nexus version (formats 3 to 5) chose Off or Manual; your own choice replaces that. A saved file this version keeps read-only cannot take a choice. The Build Library status and the Sync Now tooltips show your current mode.
+- Sync is Automatic: Nexus may send without a click. After login it asks other Nexus users for shared builds and DPS records, it answers their requests with the shared builds and records this client holds, and, when this client admits it for sending, it shares each new personal DPS best with your character name, realm, class, level and Echo list, together with that best's automatic "Record Loadout" build page (a summary first; the Echo list only in later answers to players who ask). Each of these leaves only if this client admits it: a record or summary that is too large, fails its checks or finds the send queue full stays here. What leaves may still reach no one.
+- Sync is Manual: Nexus sends only what you start (Sync Now or Share).
+- Sync is Off: Nexus sends nothing. Local records are kept.
+In every mode Nexus joins its hidden Sync chat channel and can receive what others send. Changing the mode cannot recall anything already sent; work that was waiting follows the new mode when it would be sent.
+When a newer best replaces an automatic Record Loadout page, Nexus removes the old page on this client only. It sends no removal, so players who already received the page keep it.
+
+Sync words: queued means waiting to send. Sent means it left this client; receipt is not confirmed. Received means it arrived here. Stored means this client kept it after its checks. A listed build or record is one this client stored; it does not show which other players have it.]]},
  {id="orbs",title="Orbs / Lost Memories",text=[[Before you start: Orb mode refines existing rolled Echoes toward the assigned Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace locked Echo slots, and it stops when rolled targets are complete. Opening the window, Open Orbs..., Help and Max spend nothing.
 
 1. Open /nexus orbs, Orbs / Lost Memories in the ... menu, or Open Orbs... on the Nexus panel (shown with Orb guidance). Check the assigned Wishlist, missing rolled copies and the confirmed Orb balance. Loading or unavailable data is not a zero balance.
 2. Set the maximum. Until you type an amount, it follows your confirmed Orb balance, up to 1000. Typing an amount stops that; Max returns to following the balance. A typed amount must be a whole number from 1 to 10,000. A maximum saved by an earlier version is kept.
 3. Click Start. Start approves the maximum shown and automatic use of eligible surplus copies, including safe recycling. Starting disables ordinary Automation; it does not automatically re-enable it. Locked and required copies stay protected. The approved maximum does not change during the run. If unconfirmed history exists, the same Start area shows its count and late-result risk; Start accepts current Echoes as this run's baseline without settling old actions. Reload requires a new deliberate review.
-4. Watch the run. Actual owned Echoes decide completion. Start permits at most two recovery checks within the same maximum; a check that is admitted and then refused still uses one. Unknown spend exposure stays counted. A classified loading screen holds actions, restarts the pending timer on entry and allows a three-second settling opportunity. Stop and Pause stay authoritative. No safe source still ends the run.
+4. Watch the run. It continues after each confirmed result; actual owned Echoes decide completion. Start permits at most two recovery checks within the same maximum; a check that is admitted and then refused still uses one. Unknown spend exposure stays counted. A classified loading screen holds actions, restarts the pending timer on entry and allows a three-second settling opportunity. Stop and Pause stay authoritative. No safe source still ends the run. Orbs used counts spent Orbs against the approved maximum; pending means an Orb was requested and its spend is not confirmed yet. If a record saved by an earlier version has no approved maximum, the Orb windows say the maximum was not recorded instead of naming one.
 
 The game's auto-accept and other addons' pickers must be off. If the game has no Orb service, only Orb mode is unavailable and ordinary rolling still works. If the Orb service exists but Nexus cannot read its state, ordinary rolling waits too. Login, reconnect, new resources or reload never restart spending.
 
-Closing the window does not stop an approved run. Use Pause or Stop. The main Nexus panel keeps compact progress and Pause/Resume/Stop.
+Closing the window does not stop an approved run. Use Pause or Stop. During a run, Pause and Resume are separate buttons in fixed places, so pressing Pause twice never resumes. The main Nexus panel keeps compact progress with the same Pause, Resume and Stop.
 
 After a finished run: click Start new run, review the maximum, then click Confirm new run. If the maximum changes, review it and press Start new run again.
 
-When it is blocked: Pause/Stop prevents new submissions, not a spend already accepted; a pending result may still settle. Changing the active loadout, assignment or targets pauses new actions; Resume adopts the new target and keeps the same maximum. Advanced has optional exclusions and Recheck. Recheck only asks for balance and ownership data; it is not a replay or a fix.
+When it is blocked: Pause/Stop prevents new submissions, not a spend already accepted; a pending result may still settle. Changing the active loadout, assignment or targets pauses new actions. While paused, the Orb window, the main panel and the mini panel name the Wishlist that Resume would use. After a change, an operation already submitted settles first. Then click Review target in the Orb window and Resume there: Resume adopts the new target and keeps the same maximum. Review target spends nothing. It acts only on the target shown when you click it; if the target changed just before, nothing is reviewed and the window shows the new one. If the assignment changed and came back to the run's own Wishlist, the window says the target is back, and Review target is still needed. After a loading screen a paused run may no longer own its action: then Resume is not offered; Stop, then approve a new run. Advanced has optional exclusions and Recheck. Recheck only asks for balance and ownership data; it is not a replay or a fix.
 
-Unresolved result: an Orb action without a confirmed result keeps its spending exposure and blocks new Orb runs and ordinary rolling. Relogging, reloading, changing builds, returning to the old loadout, Resume or pressing controls again do not clear it. Recheck can request the confirming data; pressing it does not clear the record. Nexus never retries or refunds it, and never deletes the record. Do not clear saved data.
+Unresolved result: an Orb action without a confirmed result keeps its spending exposure and blocks new Orb runs and ordinary rolling. The Orb window shows what is blocked, then what you can do now, then the details. A result restored after a reload that keeps the run paused reads the same way, labelled Paused. Where Continue... is offered, the window says the result blocks until it settles or you continue past it. Relogging, reloading, changing builds, returning to the old loadout, Resume or pressing controls again do not clear it. Recheck can request the confirming data; pressing it does not clear the record. Nexus never retries or refunds it, and never deletes the record. Do not clear saved data.
 
 Only one manual case can confirm it: after a reload, if that action's offer is still open in the game's offer window and matches the saved record, choose in that window. Nexus confirms the action only from the exact matching result. If Nexus had proposed an Echo, only that same Echo can be confirmed; the Orb window names it. If the action ended while Nexus could not observe it, it cannot be confirmed.
+
+Reloading: a reload never clears the record, refunds or repeats an Orb, or settles the action by itself. For Orbs, Nexus suggests a reload only in these cases, and its message says which: the game still holds an earlier Orb choice (the Orb window names the Echo to choose after the reload); a submitted action that cannot be confirmed, which Continue may then handle; a game packet Nexus could not accept; or local saved data that could not be read. Otherwise do not reload; follow the Orb window. To report a problem, type /nexus report before any reload. Run history clears on reload or logout; after a reload the Continue window says the earlier steps are not listed, and the saved record is kept. The history of the current run shows its usage as it is now; when the run has changed since its last recorded step (Pause records none), the header says the current state and the last recorded one.
 
 Continue: a restored observed spend with no recorded choice and no open offer can use this explicit exit. Stop first if an attribution-ambiguous run is still running. A stopped attribution-ambiguous choice can also use it when fresh ownership shows its distinct chosen gain; unrelated changes and the ambiguity flag alone are insufficient. This remains available after actual completion, exhausted live checks and reload, when its current checks pass. Nexus asks twice, read-only, for the Orb count and Echoes, checks quiet unchanged state, then waits for your confirmation. It archives the original receipt UNCONFIRMED with no confidence, ends the old run and releases ordinary rolling only after saving. Observed spend stays counted once; unknown charge exposure stays unknown without a refund. No spend, choice or automatic Resume is sent. The finite archive holds at most eight entries and can fill. Every new spend reserves room for its possible exit before Auto is disabled or authority acquired. A full restored pending record stays preserved and blocked; Continue cannot make room by deleting history. A new Orb run needs new approval of its maximum and any disclosed history baseline. Two uncorrelated answers do not prove that the server is finished or that no older answer is still on its way. Nexus never continues by itself. Older readers may retain a versioned record with an unsupported-owner message; that message does not establish another character acted. Return to this build to review eligibility; this does not restart spending.]]},
  {id="troubleshooting",title="Problems and bug reports",text=[[If something goes wrong: do not reload, relog, spend Orbs, reroll or change builds to recreate it. Do not clear logs or reset saved data.
@@ -205,8 +218,9 @@ local function ensure()
         frame.tabs[i]=t
     end
     -- The primary setup path. Each button only navigates (H.OpenSetup,
-    -- H.OpenAssignment, H.OpenEditor); none assigns, spends, sends or turns
-    -- Auto ON, and a route that cannot open says why in the note below.
+    -- H.OpenAssignment, H.OpenEditor, H.OpenChecklist); none assigns, spends,
+    -- sends or turns Auto ON, and a route that cannot open says why in the
+    -- note below.
     local function action(x,w,label,fn)
         local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("TOPLEFT",x,-68);f:SetSize(w,22)
         f:SetText(label);f:SetFrameLevel(HELP_LEVEL+2);f:SetScript("OnClick",fn);return f
@@ -214,6 +228,7 @@ local function ensure()
     action(20,150,"Setup / Welcome",function()H.OpenSetup()end)
     action(176,160,"Assign Wishlist...",function()H.OpenAssignment()end)
     action(342,140,"Wishlist Editor",function()H.OpenEditor()end)
+    frame.checklist=action(488,140,"Setup checklist",function()H.OpenChecklist()end)
     frame.note=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall");frame.note:SetPoint("TOPLEFT",20,-93)
     frame.note:SetSize(615,13);frame.note:SetJustifyH("LEFT");frame.note:SetText("")
     -- Register the completed window once, including its owned navigation
@@ -236,10 +251,11 @@ local function LocalToolsReady()
     local ok,s=pcall(Nexus.StartupStatus)
     return ok and type(s)=="table" and s.coreReady==true
 end
+-- The reason is also returned, so a caller window can show it itself.
 local function Refuse(text)
     if frame and frame.note then frame.note:SetText("|cffffd200"..text.."|r");frame.noteIndex=index end
     print("|cffffd200Nexus:|r "..text)
-    return false
+    return false, text
 end
 -- Setup / Welcome: the informational replay (QuickStart.ShowSetup).
 function H.OpenSetup()
@@ -274,6 +290,18 @@ function H.OpenAssignment()
     local editor=_G.NexusEditorFrame
     if editor and editor.IsShown and editor:IsShown() then editor:Hide() end
     journal.OpenBuilds(true)
+    return true
+end
+-- Setup checklist: the read-only checklist and status (QuickStart). It reads
+-- current facts only and is available during loading, where it says what is
+-- not known yet.
+function H.OpenChecklist()
+    local quick=Nexus.QuickStart
+    if not (quick and type(quick.ShowChecklist)=="function") then
+        return Refuse("The setup checklist is not available.")
+    end
+    if frame then frame:Hide() end
+    quick.ShowChecklist()
     return true
 end
 -- Wishlist Editor: the editor as /nexus editor opens it.

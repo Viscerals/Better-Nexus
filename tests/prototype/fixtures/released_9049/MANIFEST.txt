@@ -40,7 +40,7 @@ core/WishlistModel.lua|46250|4824fb91|copy
 core/WishlistController.lua|68182|57cbee08|copy
 core/SyncProtocol.lua|25702|d079bbc3|copy
 third_party/ChatThrottleLib.lua|7389|c3006b36|tree
-core/SyncModePolicy.lua|5205|1babd869|tree
+core/SyncModePolicy.lua|5205|1babd869|copy
 core/SyncWire.lua|10469|4446e552|copy
 core/SyncTransport.lua|47281|71a0ba3c|copy
 core/SyncCompatibility.lua|15187|b0295175|copy

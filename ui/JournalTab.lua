@@ -583,12 +583,31 @@ local function CountsHover()
     return countsHover
 end
 
--- The page's two buttons, created once in the scrolled content.
+-- The page's buttons, created once in the scrolled content.
 local function PageButton(kind)
-    local b = kind == "details" and detailsButton or buildsButton
+    local b = kind == "details" and detailsButton or kind == "help" and M._pageHelpButton
+        or kind == "builds" and buildsButton or nil
     if b then return b end
     b = CreateFrame("Button", nil, child, "UIPanelButtonTemplate")
-    if kind == "details" then
+    if kind == "help" then
+        -- M7: contextual Help, passive. It opens the Wishlists Help page above
+        -- the Journal and changes nothing here: it assigns, saves, sends,
+        -- rolls, spends and turns nothing on. Kept on the module table.
+        M._pageHelpButton = b
+        b:SetSize(56, 22)
+        b:SetText("Help")
+        b:SetScript("OnClick", function()
+            if Nexus.Help and Nexus.Help.Show then Nexus.Help.Show("wishlists") end
+        end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("Help", 1, 1, 1)
+            GameTooltip:AddLine("Opens Help on Wishlists and locked targets. Opening it changes nothing on this page.",
+                0.82, 0.82, 0.82, true)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    elseif kind == "details" then
         detailsButton = b
         b:SetSize(112, 22)
         b:SetScript("OnClick", function()
@@ -807,6 +826,18 @@ local function DoRefresh()
     else
         builds:Hide()
     end
+    -- Help joins the same row after the shown buttons; where the row is too
+    -- narrow for it (content width + 12, at least 292), it takes a row of its
+    -- own below, so it never covers another button or line.
+    local help = PageButton("help")
+    local helpX, helpY = noTarget and 280 or 124, cy
+    if helpX + 56 > width + 6 then
+        helpX, helpY = 6, cy - 26
+        cy = cy - 26
+    end
+    help:ClearAllPoints()
+    help:SetPoint("TOPLEFT", child, "TOPLEFT", helpX, helpY)
+    help:Show()
     cy = cy - 30
 
     if detailsShown then

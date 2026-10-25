@@ -11,6 +11,209 @@ local Renderer = {}
 -- it says nothing about the record's Echoes, locked targets or DPS.
 local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity not established.|r"
 
+-- The current Sync mode, in the words Help, the Welcome and the Leaderboard
+-- use. Off and Manual are core/SyncModePolicy.lua's own text. Automatic names
+-- what that mode may send without a click (traced in
+-- docs/9020_SYNC_AND_NO_GUARANTEE.md). Reading the mode writes nothing.
+local SYNC_AUTOMATIC_TEXT = "Sync is Automatic: Nexus may send without a click (login requests, answers to other users, your new DPS bests with your character name)."
+local function SyncModeLine()
+    local policy = Nexus and Nexus.SyncModePolicy
+    if not (policy and type(policy.Mode) == "function") then return nil end
+    local mode = policy.Mode()
+    if mode == "automatic" then return SYNC_AUTOMATIC_TEXT end
+    return type(policy.Text) == "function" and policy.Text(mode) or nil
+end
+
+-- The one optional Sync mode choice (beside Sync Now). Opening it makes an
+-- uncommitted draft of the current effective mode; selecting an option
+-- changes only the draft. Cancel, X, Escape (UISpecialFrames), closing the
+-- Build Library, reopening it and a stale draft discard the draft and write
+-- nothing. Only Apply calls SyncModePolicy.ApplyChoice, which saves through
+-- the Store owner and reports the result read back from the Store. Neither
+-- opening nor Apply starts, flushes or pumps any Sync work.
+local SyncModeDialog = {
+    MODES = {"automatic", "manual", "off"},
+    LABEL = {automatic="Automatic", manual="Manual", off="Off"},
+    HELP = {
+        automatic="May send without a click: login requests, answers to other users, new DPS bests with their Record Loadout pages.",
+        manual="Sends only what you start: Sync Now, and a Share with the answers to players who fetch it.",
+        off="Sends nothing. Nexus still receives, and local records are kept.",
+    },
+    REASON = {
+        database="no saved data is loaded",
+        ["saved-format"]="this saved data uses a format this version keeps read-only",
+        loading="saved data is still loading",
+        lifecycle="saved data is not usable right now",
+        settings="the saved settings are not usable",
+        stale="the saved data changed after this window opened; open Sync mode again",
+        replaced="saved data was replaced after loading; reload the interface first",
+        ["invalid-value"]="that is not a Sync mode",
+        unavailable="saving is not available",
+        ["not read back"]="the saved choice could not be read back",
+    },
+}
+
+function SyncModeDialog.Describe(status)
+    if type(status) ~= "table" then
+        return "Current: unknown (the saved-data owner is not available)."
+    end
+    local label = SyncModeDialog.LABEL[status.effective] or "Automatic"
+    if status.explicit then return "Current: " .. label .. ", your saved choice." end
+    if status.inheritedSource == "legacy" then
+        return "Current: " .. label .. ", from accepted saved settings of another Nexus version (no choice of yours saved)."
+    end
+    return "Current: " .. label .. ", the default (no choice saved)."
+end
+
+function SyncModeDialog.Select(mode)
+    local d = SyncModeDialog.frame
+    if not (d and d._draft and SyncModeDialog.LABEL[mode]) then return end
+    d._draft.mode = mode
+    for _, option in ipairs(d.options) do option:SetChecked(option.mode == mode) end
+end
+
+function SyncModeDialog.Ensure()
+    local d = SyncModeDialog.frame
+    if d then return d end
+    d = CreateFrame("Frame", "NexusSyncModeDialog", UIParent)
+    SyncModeDialog.frame = d
+    d:SetSize(460, 430)
+    d:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+    d:SetFrameStrata("FULLSCREEN_DIALOG")
+    d:EnableMouse(true)
+    d:Hide()
+    pcall(function()
+        d:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile=true, tileSize=32, edgeSize=32,
+            insets={left=11, right=12, top=12, bottom=11}})
+    end)
+    d.title = d:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    d.title:SetPoint("TOP", 0, -16)
+    d.title:SetText("Sync mode")
+    local function Text(name, template, y, height)
+        local fs = d:CreateFontString(nil, "OVERLAY", template)
+        fs:SetPoint("TOPLEFT", 24, y)
+        fs:SetSize(412, height)
+        fs:SetJustifyH("LEFT")
+        fs:SetJustifyV("TOP")
+        d[name] = fs
+        return fs
+    end
+    Text("current", "GameFontHighlightSmall", -44, 34)
+    d.options = {}
+    for index, mode in ipairs(SyncModeDialog.MODES) do
+        local top = -86 - (index - 1) * 74
+        local option = CreateFrame("CheckButton", nil, d, "UIRadioButtonTemplate")
+        option:SetSize(20, 20)
+        option:SetPoint("TOPLEFT", 24, top)
+        option.mode = mode
+        option.label = d:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        option.label:SetPoint("TOPLEFT", 50, top - 2)
+        option.label:SetSize(386, 17)
+        option.label:SetJustifyH("LEFT")
+        option.label:SetText(SyncModeDialog.LABEL[mode])
+        option.help = d:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        option.help:SetPoint("TOPLEFT", 50, top - 20)
+        option.help:SetSize(386, 51)
+        option.help:SetJustifyH("LEFT")
+        option.help:SetJustifyV("TOP")
+        option.help:SetText(SyncModeDialog.HELP[mode])
+        option:SetScript("OnClick", function(self) SyncModeDialog.Select(self.mode) end)
+        d.options[index] = option
+    end
+    Text("note", "GameFontDisableSmall", -312, 34):SetText(
+        "Apply saves only your choice. It sends nothing by itself, and messages already sent stay sent.")
+    Text("result", "GameFontHighlightSmall", -350, 34)
+    d.apply = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
+    d.apply:SetSize(84, 22)
+    d.apply:SetPoint("BOTTOMRIGHT", -112, 16)
+    d.apply:SetText("Apply")
+    d.apply:SetScript("OnClick", function() SyncModeDialog.Apply() end)
+    d.cancel = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
+    d.cancel:SetSize(84, 22)
+    d.cancel:SetPoint("BOTTOMRIGHT", -20, 16)
+    d.cancel:SetText("Cancel")
+    d.cancel:SetScript("OnClick", function() d:Hide() end)
+    d.close = CreateFrame("Button", nil, d, "UIPanelCloseButton")
+    d.close:SetSize(32, 32)
+    d.close:SetPoint("TOPRIGHT", -4, -4)
+    d.close:SetScript("OnClick", function() d:Hide() end)
+    -- Every way the window goes away discards the draft; nothing is saved.
+    d:SetScript("OnHide", function(self) self._draft = nil; self._onApplied = nil end)
+    if type(UISpecialFrames) == "table" then
+        table.insert(UISpecialFrames, "NexusSyncModeDialog")
+    end
+    local theme = Nexus.Theme
+    if theme and theme.StyleWindow then pcall(theme.StyleWindow, d, 0.97) end
+    return d
+end
+
+function SyncModeDialog.Open(owner, onApplied)
+    local d = SyncModeDialog.Ensure()
+    -- Reopening replaces the draft: the earlier one is discarded unsaved.
+    if d:IsShown() then d:Hide() end
+    if owner and not owner._nexusSyncModeHooked then
+        owner._nexusSyncModeHooked = true
+        owner:HookScript("OnHide", function()
+            local dialog = SyncModeDialog.frame
+            if dialog and dialog:IsShown() then dialog:Hide() end
+        end)
+    end
+    local policy = Nexus.SyncModePolicy
+    local status = policy and type(policy.Choice) == "function" and policy.Choice() or nil
+    d._draft = {mode=status and status.effective or "automatic",
+        token=status and status.token or nil}
+    d._onApplied = onApplied
+    d.current:SetText(SyncModeDialog.Describe(status))
+    if status and status.writable then
+        d.apply:Enable()
+        d.result:SetText("")
+    else
+        d.apply:Disable()
+        d.result:SetText("Sync mode cannot be changed here: "
+            .. (SyncModeDialog.REASON[status and status.reason] or "saving is not available")
+            .. ". Nothing will be saved.")
+    end
+    SyncModeDialog.Select(d._draft.mode)
+    d:Show()
+    return d
+end
+
+function SyncModeDialog.Apply()
+    local d = SyncModeDialog.frame
+    local draft = d and d:IsShown() and d._draft
+    if not draft then return false, "no-draft" end
+    local policy = Nexus.SyncModePolicy
+    if not (policy and type(policy.ApplyChoice) == "function") then
+        d.result:SetText("Not saved: saving is not available.")
+        return false, "unavailable"
+    end
+    local ok, result, status = policy.ApplyChoice(draft.mode, draft.token)
+    local chosen = SyncModeDialog.LABEL[draft.mode]
+    local now = type(status) == "table" and SyncModeDialog.LABEL[status.effective] or "unknown"
+    local line
+    if ok then
+        line = result == "unchanged"
+            and ("Unchanged: " .. chosen .. " was already your saved choice. Nothing was written or sent.")
+            or ("Saved: your Sync mode is now " .. now .. ". Nothing was sent by this change.")
+        d.current:SetText(SyncModeDialog.Describe(status))
+        d._draft = {mode=status.effective, token=status.token}
+        local applied = d._onApplied
+        if type(applied) == "function" then pcall(applied, result, status) end
+    else
+        line = "Not saved: " .. (SyncModeDialog.REASON[result] or tostring(result))
+            .. ". Your Sync mode is still " .. now .. "."
+        if result == "stale" then
+            d._draft = nil
+            d.apply:Disable()
+        end
+    end
+    d.result:SetText(line)
+    print("|cff7fd5ffNexus:|r Sync mode: " .. line)
+    return ok, result, status
+end
+
 local function DisplayRemoteText(value, maxBytes, allowEmpty, allowLineBreaks)
     local identity = Nexus and Nexus.Identity
     if not (identity and type(identity.DisplaySafeText) == "function") then
@@ -170,8 +373,11 @@ local function LayoutDetailPanel(p)
     metrics.FitButtonWidth(p.lockBtn, 130, inner)
     metrics.FitButtonWidth(p.retryShareBtn, 130, inner)
     metrics.FitButtonWidth(p.editBtn, 96, inner)
-    local primary = p.retryShareBtn:IsShown() and p.retryShareBtn or p.lockBtn
-    local left = {primary}
+    -- A Saved Build mirror hides Copy (lockBtn); its Share stands apart on
+    -- the right, where Stop Sharing stands for other own builds.
+    local left = {}
+    if p.retryShareBtn:IsShown() then left[1] = p.retryShareBtn
+    elseif p.lockBtn:IsShown() then left[1] = p.lockBtn end
     if p.editBtn:IsShown() then left[#left+1] = p.editBtn end
     local x, rows = 8, 1
     for _, button in ipairs(left) do
@@ -181,12 +387,15 @@ local function LayoutDetailPanel(p)
         button:SetPoint("BOTTOMLEFT", p, "BOTTOMLEFT", x, 8 + (rows-1)*(buttonH+gap))
         x = x + w + 6
     end
-    if p.deleteBtn:IsShown() then
-        p.deleteBtn:SetHeight(buttonH)
-        local w = metrics.FitButtonWidth(p.deleteBtn, 104, inner)
+    local right = p.deleteBtn:IsShown() and p.deleteBtn
+        or p.shareBtn and p.shareBtn:IsShown() and p.shareBtn or nil
+    if right then
+        right:SetHeight(buttonH)
+        local w = metrics.FitButtonWidth(right,
+            right == p.deleteBtn and 104 or 130, inner)
         if x + w > width - 8 then rows = rows + 1 end
-        p.deleteBtn:ClearAllPoints()
-        p.deleteBtn:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -8,
+        right:ClearAllPoints()
+        right:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -8,
             8 + (rows-1)*(buttonH+gap))
     end
     local footer = 8 + rows*buttonH + (rows-1)*gap + gap
@@ -293,6 +502,8 @@ end
 function Renderer.New(options)
     options = type(options) == "table" and options or {}
     local M = {}
+    -- Read-only: the current Sync mode line (status and Sync Now tooltip).
+    M.SyncModeLine = SyncModeLine
 
     local Controller = assert(options.controller,
         "CommunityRenderer requires controller intentions")
@@ -830,10 +1041,15 @@ function Renderer.New(options)
     end
     end
 
+    -- Laid-out widgets live in the window's scrolled content (EnsureFrame), so
+    -- the client clips them to the window and scrolling moves them together.
+    -- At scroll 0 the content's top-left is the window's: the same places.
     local function PlaceCommunityBox(widget, box)
         if not (widget and box) then return end
+        local content = frame._content or frame
+        if widget:GetParent() ~= content then widget:SetParent(content) end
         widget:ClearAllPoints()
-        widget:SetPoint("TOPLEFT",frame,"TOPLEFT",box.x,-box.y)
+        widget:SetPoint("TOPLEFT",content,"TOPLEFT",box.x,-box.y)
         widget:SetSize(box.w,box.h)
     end
 
@@ -856,8 +1072,57 @@ function Renderer.New(options)
         return width, height
     end
 
+    -- The visible UI the whole window must stay inside (nil when it cannot
+    -- be read). LayoutMetrics.Community gives the window height for it.
+    local function ViewportSize()
+        if not (UIParent and type(UIParent.GetWidth) == "function"
+            and type(UIParent.GetHeight) == "function") then return nil, nil end
+        local okWidth, viewportWidth = pcall(UIParent.GetWidth,UIParent)
+        local okHeight, viewportHeight = pcall(UIParent.GetHeight,UIParent)
+        viewportWidth = okWidth and tonumber(viewportWidth) or nil
+        viewportHeight = okHeight and tonumber(viewportHeight) or nil
+        if not (viewportWidth and viewportHeight and viewportWidth > 0
+            and viewportHeight > 0) then return nil, nil end
+        return viewportWidth, viewportHeight
+    end
+
+    -- The one route that moves the window's content: the mouse wheel over the
+    -- window or its scroll bar, and dragging the bar, all come here. The
+    -- offset stays inside the current layout's scroll range (0 when the
+    -- whole layout fits), and the bar follows it.
+    local function SetContentScroll(offset)
+        local scroll = frame and frame._contentScroll
+        if not scroll then return 0 end
+        local layout = frame._responsiveLayout
+        local range = type(layout) == "table"
+            and math.max(0, tonumber(layout.scrollRange) or 0) or 0
+        offset = math.floor((tonumber(offset) or 0) + 0.5)
+        offset = math.max(0, math.min(range, offset))
+        frame._contentOffset = offset
+        scroll:SetVerticalScroll(offset)
+        local bar = frame._contentBar
+        if bar and bar:GetValue() ~= offset then bar:SetValue(offset) end
+        return offset
+    end
+
+    -- One wheel notch: two status lines at the current font scale.
+    local function ContentWheelStep()
+        local layout = frame and frame._responsiveLayout
+        local line = type(layout) == "table" and tonumber(layout.statusLine) or 17
+        return math.max(24, 2 * line)
+    end
+
     local function ApplyCommunityLayout(layout)
-        frame:SetSize(layout.width,layout.height)
+        -- The window is as tall as the layout allows on screen; the content
+        -- keeps the whole layout and scrolls inside it.
+        local windowHeight = tonumber(layout.windowHeight) or layout.height
+        frame:SetSize(layout.width,windowHeight)
+        local contentScroll, content = frame._contentScroll, frame._content
+        if contentScroll and content then
+            contentScroll:SetSize(layout.width,windowHeight)
+            content:SetSize(layout.width,layout.height)
+            pcall(function() contentScroll:UpdateScrollChildRect() end)
+        end
 
         local boxes = layout.boxes
         PlaceCommunityBox(frame._titleText,boxes.title)
@@ -871,6 +1136,7 @@ function Renderer.New(options)
         PlaceCommunityBox(sortToggle,boxes.sort)
         PlaceCommunityBox(frame._actionLabel,boxes.actionLabel)
         PlaceCommunityBox(syncBtn,boxes.sync)
+        PlaceCommunityBox(frame._modeBtn,boxes.mode)
         PlaceCommunityBox(frame._postBtn,boxes.share)
         PlaceCommunityBox(resultText,boxes.result)
         PlaceCommunityBox(prevPageBtn,boxes.prev)
@@ -880,6 +1146,17 @@ function Renderer.New(options)
         PlaceCommunityBox(frame._listClip,boxes.list)
         PlaceCommunityBox(frame._emptyState,boxes.emptyState)
         PlaceCommunityBox(detailPanel,boxes.detail)
+        if frame._searchLabel and frame._content
+            and frame._searchLabel:GetParent() ~= frame._content then
+            frame._searchLabel:SetParent(frame._content)
+        end
+        if detailPanel then detailPanel:SetFrameLevel(frame:GetFrameLevel() + 10) end
+        local contentBar = frame._contentBar
+        if contentBar then
+            local range = math.max(0, tonumber(layout.scrollRange) or 0)
+            contentBar:SetMinMaxValues(0,range)
+            if range > 0 then contentBar:Show() else contentBar:Hide() end
+        end
 
         if detailPanel and boxes.detail then
             local inner = math.max(120,boxes.detail.w-20)
@@ -904,6 +1181,16 @@ function Renderer.New(options)
         local keyOk, runtimeKey = pcall(owner.RuntimeKey,
             "community",width,height)
         if not keyOk then return false end
+        -- The status region's measured rows are part of the geometry: a
+        -- change of rows re-lays the window once; equal rows reuse it.
+        local statusRows = tonumber(frame._nexusStatusRows)
+        runtimeKey = runtimeKey .. "/s" .. tostring(statusRows or 0)
+        -- The UI size sets the window height and scroll range
+        -- (LayoutMetrics.Community), so a new UI size re-lays the window
+        -- once; an unchanged one reuses it.
+        local viewportWidth, viewportHeight = ViewportSize()
+        runtimeKey = runtimeKey .. "/v" .. tostring(viewportWidth or 0)
+            .. "x" .. tostring(viewportHeight or 0)
         if not force and frame._nexusRuntimeLayoutKey == runtimeKey then
             return false
         end
@@ -916,12 +1203,14 @@ function Renderer.New(options)
             syncActive=Nexus.Sync and Nexus.Sync.IsReceiving
                 and Nexus.Sync.IsReceiving() or false,
             results=virtualStats.results,
+            statusRows=statusRows,
+            viewportWidth=viewportWidth,viewportHeight=viewportHeight,
             labels={
                 search="Search title, author, or description",
                 scope="All Shared",mine="Mine",
                 class="Current Class Only",qualified="Require both DPS records",
                 sort="Sort: Highest DPS",sync="Listening...",
-                share="Share Build",
+                mode="Sync mode...",share="Share Build",
             },
         })
         if not layoutOk or type(layout) ~= "table" then return false end
@@ -936,6 +1225,9 @@ function Renderer.New(options)
         frame._nexusRuntimeLayoutKey = runtimeKey
         frame._nexusLayoutKey = layout.key
         frame._responsiveLayout = layout
+        -- A new size, font or status keeps the scrolled place inside the new
+        -- range (back to 0 when everything fits).
+        SetContentScroll(frame._contentOffset or 0)
         return true
     end
 
@@ -1043,6 +1335,26 @@ local function ShareStatusLine()
         or (state == "preparing" or state == "stopped" or state == "saved") and "|cffffc040"
         or "|cff4dff80"
     return colour .. text .. "|r", state
+end
+
+-- M7: the detail line shown with Retry Share, from Sync's own record of the
+-- stopped Share (CanRetryShare's status) and the current saved Sync mode. It
+-- states the refusal and the mode as they are; showing it starts nothing.
+function M.RetryStateText(status, mode)
+    status = type(status) == "table" and status or {}
+    local policy = Nexus.SyncModePolicy
+    local reason = type(status.reason) == "string" and status.reason or nil
+    local why = tostring(status.outcome or "stopped")
+    if reason and policy and type(policy.IsModeReason) == "function" and policy.IsModeReason(reason) then
+        why = why .. ", by the saved Sync mode"
+    elseif reason and reason ~= "" and reason ~= "none" and reason ~= why then
+        why = why .. ": " .. reason:gsub("%.+$", "")
+    end
+    local now = mode == "off" and "Sync is Off now: a Retry is refused and nothing is sent; Sync mode... changes that."
+        or mode == "manual" and "Sync is Manual now: Retry Share queues it again only when you click."
+        or mode == "automatic" and "Retry Share queues it again only when you click."
+        or "The current Sync mode could not be read."
+    return "Last Share was not sent (" .. why .. "). " .. now
 end
 
 -- The result of the user's own last Share click belongs to the form. A refusal
@@ -1738,9 +2050,9 @@ local function EnsureDetailPanel(parent)
     -- (see the OnClick handler below), so this resolves against the DPS
     -- record's own lockedEchoes first, same as the display just above it --
     -- carrying locked-Echo intent over whether the source was another
-    -- player's build or your own. For a build that's a mirror of your OWN
-    -- current server loadout, the same button instead means "publish it"
-    -- (see RefreshDetailPanel's label).
+    -- player's build or your own. It only ever makes a draft: a mirror of
+    -- your OWN server Saved Build hides it and offers Share as a separate,
+    -- confirmed action instead (p.shareBtn below).
     p.lockBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
     p.lockBtn:SetSize(130,22)
     p.lockBtn:SetPoint("BOTTOMLEFT",8,8)
@@ -1755,42 +2067,8 @@ local function EnsureDetailPanel(parent)
             print("|cffff6060Nexus:|r Copy unavailable: the full rolled Echo list is still arriving.")
             return
         end
-        if IsSavedMirror(b) then
-            if pendingUploads[selected] then return end
-            local displayTitle = b.displayTitle or DisplayRemoteText(
-                b.title or "Saved Build", 1024, false) or "Saved Build"
-            local operation = {id=selected,done=false}
-            local function Finish(ok, value, ticket)
-                if operation.done then return end
-                if ticket and (pendingUploads[selected] ~= operation
-                    or operation.ticket ~= ticket) then return end
-                operation.done = true
-                if pendingUploads[selected] == operation then pendingUploads[selected] = nil end
-                if ok then
-                    print("|cff4dff80Nexus:|r shared '" .. displayTitle
-                        .. "' to community builds.")
-                else
-                    print("|cffff6060Nexus:|r " .. tostring(value))
-                end
-                if ticket then
-                    M.RefreshFromController()
-                else
-                    -- The synchronous result belongs to this explicit click;
-                    -- contain its refresh without delaying it behind a hold.
-                    viewDiagnostic.pump.Refresh(false, false)
-                end
-            end
-            local ok, value, ticket = PublishImportedBuild(selected, Finish)
-            if ok == nil and value == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
-                operation.ticket = ticket
-                pendingUploads[selected] = operation
-                p.lockBtn:SetText("Sharing...")
-                print("|cff7fd5ffNexus:|r sharing '" .. displayTitle .. "'...")
-            else
-                Finish(ok == true, value)
-            end
-            return
-        end
+        -- Copy never shares. A mirror's Share is p.shareBtn and its confirmation.
+        if IsSavedMirror(b) then return end
         if type(b.echoes) ~= "table" or #b.echoes == 0 then
             ControllerInstance().RequestLoadout(selected)
             print("|cff7fd5ffNexus:|r this build is still completing its background sync. Try again shortly.")
@@ -1816,15 +2094,10 @@ local function EnsureDetailPanel(parent)
     end)
     p.lockBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        local b = ControllerInstance().SelectedBuild()
-        if IsSavedMirror(b) then
-            GameTooltip:AddLine("Publish this saved loadout",0.9,0.9,0.9,true)
-            GameTooltip:AddLine("Shares this build with other Nexus users. This is not saving or activating a server loadout.",0.7,0.7,0.7,true)
-        else
-            GameTooltip:AddLine("Review before applying",0.9,0.9,0.9,true)
-            GameTooltip:AddLine("Opens this build as a draft in the Wishlist Editor, name pre-filled. Any",0.7,0.7,0.7,true)
-            GameTooltip:AddLine("Echoes it had locked show up as designed locked slots you can adjust.",0.7,0.7,0.7,true)
-        end
+        GameTooltip:AddLine("Review before applying",0.9,0.9,0.9,true)
+        GameTooltip:AddLine("Opens this build as a draft in the Wishlist Editor, name pre-filled. Any",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("Echoes it had locked show up as designed locked slots you can adjust.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("A draft only: it does not activate, spend or share anything.",0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
     p.lockBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1852,18 +2125,33 @@ local function EnsureDetailPanel(parent)
         local controller = ControllerInstance()
         local ok, why, outcome
         if type(controller.RetryShare) == "function" then
-            ok, why, outcome = controller.RetryShare(selected)
+            -- The context this Retry was shown in (see the detail refresh):
+            -- a click after the player, saved data or catalog changed queues
+            -- nothing.
+            ok, why, outcome = controller.RetryShare(selected, self._nexusRetryContext)
         else
             ok, why = false, "not retryable"
         end
         outcome = type(outcome) == "table" and outcome or {}
+        local build = LoadBuild(selected)
+        local name = "'" .. tostring(build and (build.displayTitle or DisplayRemoteText(
+            build.title or "this build", 1024, false)) or "this build") .. "'"
+        local policy = Nexus.SyncModePolicy
         if ok and outcome.retryPending then
-            print("|cffffc040Nexus:|r Share retry is waiting for one bounded Sync queue slot.")
+            print("|cffffc040Nexus:|r Share retry of " .. name
+                .. " is waiting for one bounded Sync queue slot. Nothing is sent until it is admitted.")
         elseif ok then
-            print("|cff4dff80Nexus:|r Share retry queued. Peer storage confirmation is unavailable.")
+            print("|cff4dff80Nexus:|r Share retry of " .. name
+                .. " queued its summary. Queued is not sent: sending and receipt by other players are not confirmed.")
         else
-            print("|cffff6060Nexus:|r Share retry failed: "
-                .. tostring(why or "not retryable") .. ".")
+            -- The saved mode's own refusal is stated as it is (the existing
+            -- CanRetryShare/mode rules; showing it enables nothing).
+            if policy and type(policy.IsModeReason) == "function" and policy.IsModeReason(why) then
+                print("|cffffc040Nexus:|r Share retry of " .. name .. " not sent: " .. tostring(why))
+            else
+                print("|cffff6060Nexus:|r Share retry of " .. name .. " failed: "
+                    .. tostring(why or "not retryable"):gsub("%.+$", "") .. ". Nothing was queued by this click.")
+            end
             self._nexusRetryConsumed = false
             M.Refresh()
         end
@@ -1872,6 +2160,7 @@ local function EnsureDetailPanel(parent)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
         GameTooltip:AddLine("Retry this failed Share",0.9,0.9,0.9,true)
         GameTooltip:AddLine("Resends the exact saved build only after you click; no automatic terminal retry occurs.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("Your saved Sync mode still decides: with Sync Off, a Retry is refused and nothing is sent.",0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
     p.retryShareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1894,6 +2183,203 @@ local function EnsureDetailPanel(parent)
             M.Refresh()
         end
     end)
+
+    -- Share of your own Saved Build: a separate action at the right of the
+    -- action row, never the draft-only Copy button, and only after a
+    -- confirmation that says a shared build cannot be recalled. The
+    -- confirmation approves one exact build: the owner and the content that
+    -- PublishImportedBuild sends (title, description, Echoes and locked
+    -- Echoes, publication). Accept re-reads it and shares nothing when any of
+    -- that changed, or when the Library was closed; Cancel and Escape do
+    -- nothing. One approval starts at most one Share; it is not a guarantee
+    -- that the Share is sent exactly once, and it does not stop Sync.
+    -- M7: only the latest confirmation shown is live (p._nexusShareApproval).
+    -- Hiding it (Cancel, Escape, a newer confirmation in its place) or closing
+    -- the Library retires it, so a late Accept of a retired one shares nothing.
+    -- The identity also covers the published listing's link, which
+    -- PublishImportedBuild carries into the update.
+    local function ShareIdentity(build)
+        if not (IsSavedMirror(build) and IsOwnBuild(build)) then return nil end
+        local listing = build.publishedBuildId and LoadBuild(build.publishedBuildId) or nil
+        local parts = {CandidatePart(build.id), CandidatePart(build.ownerKey),
+            CandidatePart(build.title),
+            CandidatePart(build.userDescription or build.description),
+            CandidatePart(build.publishedBuildId),
+            CandidatePart(type(listing) == "table" and listing.link or nil)}
+        for _, list in ipairs({build.echoes, build.lockedEchoes}) do
+            parts[#parts + 1] = "#"
+            for _, e in ipairs(type(list) == "table" and list or {}) do
+                parts[#parts + 1] = CandidatePart(e.spellId or e.id)
+                    .. CandidatePart(e.quality)
+                    .. CandidatePart(e.stacks or e.count or 1)
+                    .. CandidatePart(e.locked == true)
+            end
+        end
+        return table.concat(parts, "|")
+    end
+
+    local function ConfirmedShare(data)
+        if type(data) ~= "table" or data.id == nil or data.used then return end
+        data.used = true
+        local id = data.id
+        if pendingUploads[id] then return end
+        local displayTitle = tostring(data.title or "Saved Build")
+        if data.retired or p._nexusShareApproval ~= data then
+            print("|cffffc040Nexus:|r Share cancelled: the confirmation for '" .. displayTitle
+                .. "' was closed or replaced before it was accepted. Nothing was shared.")
+            M.Refresh()
+            return
+        end
+        p._nexusShareApproval = nil
+        if not parent:IsShown() or ShareIdentity(LoadBuild(id)) ~= data.identity then
+            print("|cffffc040Nexus:|r Share cancelled: '" .. displayTitle
+                .. "' changed, or the Build Library was closed, after the confirmation opened. Nothing was shared.")
+            M.Refresh()
+            return
+        end
+        local operation = {id=id,done=false}
+        -- `admission` is the controller's actual queue result for the saved
+        -- listing: queued (not sent), or the final refusal and its reason.
+        local function Finish(ok, value, ticket, admission)
+            if operation.done then return end
+            if ticket and (pendingUploads[id] ~= operation
+                or operation.ticket ~= ticket) then return end
+            operation.done = true
+            if pendingUploads[id] == operation then pendingUploads[id] = nil end
+            if ok then
+                local saved = "Saved '" .. displayTitle .. "' locally as your shared listing"
+                local policy = Nexus.SyncModePolicy
+                local reason = type(admission) == "table" and admission.queueReason or nil
+                -- The listing's DPS-best hand-off is admitted on its own; a
+                -- refusal of the summary says nothing about it.
+                local linked = type(admission) == "table" and admission.linkedDps or nil
+                local linkedText = linked == "queued"
+                    and " A DPS record linked to this build was queued separately; queued is not sent."
+                    or linked == "unknown" and " Whether a linked DPS record was queued was not reported."
+                    or ""
+                if type(admission) ~= "table" then
+                    -- A completion that reports no queue result claims none.
+                    print("|cff4dff80Nexus:|r " .. saved
+                        .. ". Whether Sync queued it was not reported. Sending and receipt by other players are not confirmed.")
+                elseif admission.queueAdmitted == true then
+                    print("|cff4dff80Nexus:|r " .. saved
+                        .. " and queued its summary. Queued is not sent: sending and receipt by other players are not confirmed."
+                        .. linkedText)
+                elseif policy and type(policy.Text) == "function"
+                    and reason ~= nil and reason == policy.Text("off") then
+                    print("|cffffc040Nexus:|r " .. saved
+                        .. " — not sent: your saved Sync mode is Off." .. linkedText)
+                else
+                    print("|cffffc040Nexus:|r " .. saved
+                        .. " — its summary was not queued, so nothing was sent for it: "
+                        .. tostring(reason or "Sync unavailable"):gsub("%.+$", "") .. "." .. linkedText)
+                end
+            else
+                print("|cffff6060Nexus:|r Not shared: '" .. displayTitle
+                    .. "' — " .. tostring(value):gsub("%.+$", "")
+                    .. ". Nothing was saved or sent.")
+            end
+            M.Refresh()
+        end
+        local ok, value, ticket, admission = PublishImportedBuild(id, Finish)
+        if ok == nil and value == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
+            operation.ticket = ticket
+            pendingUploads[id] = operation
+            if SelectedId() == id then
+                p.shareBtn:SetText("Sharing...")
+                p.shareBtn:Disable()
+            end
+            print("|cff7fd5ffNexus:|r Preparing '" .. displayTitle
+                .. "' to share — not sent yet. The local catalog is finishing earlier work first.")
+        else
+            Finish(ok == true, value, nil, admission)
+        end
+    end
+
+    StaticPopupDialogs["NEXUS_SHARE_SAVED_BUILD"] = {
+        text = "Share '%s' with other Nexus users?\n%s",
+        button1 = "Share", button2 = "Cancel",
+        OnShow = function(self)
+            -- Above the DIALOG Library, as Stop Sharing; the shared slot's
+            -- own layer returns on hide.
+            if self._nexusShareStrata == nil then
+                self._nexusShareStrata = self:GetFrameStrata()
+            end
+            self:SetFrameStrata("FULLSCREEN_DIALOG")
+        end,
+        OnHide = function(self)
+            local strata = self._nexusShareStrata
+            if strata then
+                self._nexusShareStrata = nil
+                self:SetFrameStrata(strata)
+            end
+            -- A hidden confirmation is retired. The client runs Accept before
+            -- it hides the dialog, so this never cancels an Accept.
+            local data = self.data
+            if type(data) == "table" then
+                data.retired = true
+                if p._nexusShareApproval == data then p._nexusShareApproval = nil end
+            end
+        end,
+        OnAccept = function(_, data) ConfirmedShare(data) end,
+        timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
+    }
+    parent:HookScript("OnHide", function()
+        p._nexusShareApproval = nil
+        if type(StaticPopup_Visible) == "function"
+            and StaticPopup_Visible("NEXUS_SHARE_SAVED_BUILD") then
+            StaticPopup_Hide("NEXUS_SHARE_SAVED_BUILD")
+        end
+    end)
+
+    p.shareBtn = CreateFrame("Button",nil,p,"UIPanelButtonTemplate")
+    p.shareBtn:SetSize(130,22)
+    p.shareBtn:SetPoint("BOTTOMRIGHT",-8,8)
+    p.shareBtn:SetText("Share Build...")
+    p.shareBtn:Hide()
+    p.shareBtn:SetScript("OnClick", function()
+        local selected = SelectedId()
+        if selected == nil or pendingUploads[selected] then return end
+        local build = LoadBuild(selected)
+        local identity = ShareIdentity(build)
+        if not identity then
+            print("|cffff6060Nexus:|r Share unavailable: this is not your own Saved Build. Nothing was shared.")
+            M.Refresh()
+            return
+        end
+        local displayTitle = build.displayTitle or DisplayRemoteText(
+            build.title or "Saved Build", 1024, false) or "Saved Build"
+        local policy = Nexus.SyncModePolicy
+        local off = policy and type(policy.Mode) == "function"
+            and policy.Mode() == "off"
+        -- What Share does, in order: the local save, then a summary queued
+        -- only if the saved mode and its size admit it; the listing's Echo
+        -- list and description go only in answers to players who ask for it.
+        -- The DPS-best hand-off after it (core/CommunityController.lua) may
+        -- also queue a linked DPS record under the same saved mode. That
+        -- record carries its Echo list and is not an answer to a request, so
+        -- the note says both (review38 B01/N01).
+        local note = (build.publishedBuildId and "This saves its current title, description and Echo list as an update of your shared listing on this client, "
+            or "This saves its title, description and Echo list as your shared listing on this client, ")
+            .. "then queues a short summary for other Nexus users if your saved Sync mode and its size allow; the listing's Echo list and description are sent only in answers to players who ask for it. "
+            .. "It is listed with your character name, realm and class. "
+            .. "A DPS record you hold for this exact build may also be queued separately if your saved Sync mode allows it, and that record includes its Echo list. "
+            .. "A shared build cannot be recalled: players who receive it keep their copy, and Stop Sharing removes only the listing on this client. "
+            .. "Nexus cannot confirm who received it."
+            .. (off and " Your saved Sync mode is Off: the listing is saved on this client and not sent." or "")
+        -- This confirmation becomes the only live approval (see ShareIdentity).
+        local approval = {id=selected,identity=identity,title=displayTitle}
+        p._nexusShareApproval = approval
+        StaticPopup_Show("NEXUS_SHARE_SAVED_BUILD", displayTitle, note, approval)
+    end)
+    p.shareBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self,"ANCHOR_TOP")
+        GameTooltip:AddLine("Share this Saved Build",0.9,0.9,0.9,true)
+        GameTooltip:AddLine("Asks you to confirm, then saves it as your shared listing and queues a summary for other Nexus users if your Sync mode and its size allow; the listing's Echo list is sent only in answers to players who ask. A DPS record you hold for this exact build, with its Echo list, may also be queued separately if your Sync mode allows it. A shared build cannot be recalled.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("Not Copy into Editor, and not saving or activating a server Saved Build.",0.7,0.7,0.7,true)
+        GameTooltip:Show()
+    end)
+    p.shareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     parent._detailPanel = p
     detailPanel = p
@@ -2159,8 +2645,8 @@ local function RefreshDetailPanel(buildId, listPending)
         end
     elseif IsSavedMirror(build) then
         local state = PublishedBuildId(build)
-            and "Shared. Share Build again to update the shared title, description, or Echo list."
-            or "Your server Saved Build. Edit its title/description, then Share Build to send it to other Nexus users."
+            and "Shared listing saved on this client. Update Shared Build... saves your edits after you confirm and queues a summary only if Sync mode and size allow; receipt by other players is not confirmed."
+            or "Your server Saved Build. Edit its title/description; Share Build... shares it after you confirm, queuing a summary only if Sync mode and size allow."
         detailPanel.editState:SetText(state)
         detailPanel.editState:Show()
     elseif mine and loadoutLocked then
@@ -2189,21 +2675,40 @@ local function RefreshDetailPanel(buildId, listPending)
         else
             detailPanel.retryShareBtn:Enable()
         end
+        -- The click acts in the context drawn here (RetryShare refuses a
+        -- changed player, saved data or catalog), and the reason Retry is
+        -- offered is stated, with the current mode.
+        detailPanel.retryShareBtn._nexusRetryContext = type(controller.RetryShareContext) == "function"
+            and controller.RetryShareContext() or nil
+        local policy = Nexus.SyncModePolicy
+        local mode = policy and type(policy.Mode) == "function" and policy.Mode() or nil
+        detailPanel.editState:SetText(M.RetryStateText(retryStatus, mode))
+        detailPanel.editState:Show()
         detailPanel.lockBtn:Hide()
+        detailPanel.shareBtn:Hide()
         detailPanel.retryShareBtn:Show()
     else
         detailPanel.retryShareBtn:Hide()
-        detailPanel.lockBtn:Show()
+        -- A mirror offers no draft Copy; your own mirror offers Share apart.
+        if IsSavedMirror(build) then
+            detailPanel.lockBtn:Hide()
+            if mine then detailPanel.shareBtn:Show() else detailPanel.shareBtn:Hide() end
+        else
+            detailPanel.shareBtn:Hide()
+            detailPanel.lockBtn:Show()
+        end
         detailPanel.retryShareBtn._nexusRetryGeneration = nil
         detailPanel.retryShareBtn._nexusRetryConsumed = false
+        detailPanel.retryShareBtn._nexusRetryContext = nil
     end
-    if pendingUploads[SelectedId()] then
-        detailPanel.lockBtn:SetText("Sharing...")
+    if IsSavedMirror(build) then
+        local pending = pendingUploads[SelectedId()] ~= nil
+        detailPanel.shareBtn:SetText(pending and "Sharing..."
+            or detail and detail.shareText
+            or (PublishedBuildId(build) and "Update Shared Build..." or "Share Build..."))
+        if pending then detailPanel.shareBtn:Disable() else detailPanel.shareBtn:Enable() end
     elseif detail then
         detailPanel.lockBtn:SetText(detail.actionText)
-    elseif IsSavedMirror(build) then
-        detailPanel.lockBtn:SetText(
-            PublishedBuildId(build) and "Update Shared Build" or "Share Build")
     else
         detailPanel.lockBtn:SetText(not hasLoadout and "Request full Echo list" or "Copy into Editor")
     end
@@ -2673,6 +3178,54 @@ local function EnsureFrame()
     end)
     pcall(function() frame:SetBackdropColor(0.16,0.165,0.175,0.90) end)
 
+    -- Scrolled content ----------------------------------------------------
+    -- Every laid-out widget is placed in this content (PlaceCommunityBox).
+    -- It is as tall as the layout; the window is as tall as the visible UI
+    -- allows (LayoutMetrics.Community windowHeight), and when the layout is
+    -- taller the content scrolls: the mouse wheel over the window and the bar
+    -- at its right edge move it (SetContentScroll). The bar is shown only
+    -- while there is something to scroll.
+    local contentScroll = CreateFrame("ScrollFrame",nil,frame)
+    contentScroll:SetPoint("TOPLEFT",frame,"TOPLEFT",0,0)
+    contentScroll:SetSize(1040,640)
+    contentScroll:EnableMouseWheel(true)
+    local content = CreateFrame("Frame",nil,contentScroll)
+    content:SetSize(1040,640)
+    contentScroll:SetScrollChild(content)
+    frame._contentScroll, frame._content, frame._contentOffset = contentScroll, content, 0
+    local contentBar = CreateFrame("Slider",nil,frame)
+    contentBar:SetOrientation("VERTICAL")
+    contentBar:SetWidth(16)
+    contentBar:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-4,-40)
+    contentBar:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-4,12)
+    contentBar:SetMinMaxValues(0,0)
+    contentBar:SetValueStep(1)
+    contentBar:SetValue(0)
+    contentBar:EnableMouseWheel(true)
+    contentBar:SetFrameLevel(frame:GetFrameLevel() + 20)
+    pcall(function()
+        contentBar:SetThumbTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
+        local thumb = contentBar:GetThumbTexture()
+        if thumb then thumb:SetSize(16,24) end
+        contentBar:SetBackdrop({
+            bgFile="Interface\\Buttons\\UI-SliderBar-Background",
+            edgeFile="Interface\\Buttons\\UI-SliderBar-Border",
+            tile=true, tileSize=8, edgeSize=8,
+            insets={left=3,right=3,top=6,bottom=6},
+        })
+    end)
+    contentBar:Hide()
+    frame._contentBar = contentBar
+    contentBar:SetScript("OnValueChanged",function(_,value)
+        SetContentScroll(value)
+    end)
+    local function WheelContent(_,delta)
+        SetContentScroll((frame._contentOffset or 0)
+            - (tonumber(delta) or 0) * ContentWheelStep())
+    end
+    contentScroll:SetScript("OnMouseWheel",WheelContent)
+    contentBar:SetScript("OnMouseWheel",WheelContent)
+
     -- Title bar ---------------------------------------------------------
     local titleText = frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
     titleText:SetPoint("TOP",0,-12)
@@ -2682,6 +3235,8 @@ local function EnsureFrame()
 
     local closeBtn = CreateFrame("Button",nil,frame,"UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT",-6,-6)
+    -- It stays at the window's corner, above the scrolled content.
+    closeBtn:SetFrameLevel(frame:GetFrameLevel() + 20)
 
     -- A single click-away layer and one-open-menu rule make every selector
     -- behave like the same control instead of three unrelated popup frames.
@@ -2843,6 +3398,19 @@ local function EnsureFrame()
         if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end
     end)
 
+    -- M7: Help for this window (its Sharing page). Like the other navigation
+    -- buttons it replaces this window, whose layer is above Help's; it opens
+    -- a page only and shares, sends or changes nothing.
+    frame._helpNav = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
+    frame._helpNav:SetSize(56,22)
+    frame._helpNav:SetPoint("LEFT",wishlistBtn,"RIGHT",4,0)
+    frame._helpNav:SetText("Help")
+    frame._helpNav:SetScript("OnClick",function()
+        CloseDropdowns()
+        frame:Hide()
+        if Nexus.Help then Nexus.Help.Show("sharing") end
+    end)
+
     -- Browse toolbar ----------------------------------------------------
     local browseLabel = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     browseLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -64)
@@ -2870,6 +3438,7 @@ local function EnsureFrame()
         pump.RefreshContext()
     end)
     local searchLabel = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
+    frame._searchLabel = searchLabel
     searchLabel:SetPoint("LEFT",searchBox,"LEFT",6,0)
     searchLabel:SetText("Search title, author, or description...")
     searchBox:SetScript("OnEditFocusGained",function() searchLabel:Hide(); CloseDropdowns() end)
@@ -3047,11 +3616,32 @@ local function EnsureFrame()
     end)
     syncBtn:SetScript("OnEnter",function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:AddLine("Refresh community data",1,1,1)
-        GameTooltip:AddLine("Ask nearby Nexus users for builds and DPS records.",0.8,0.8,0.8,true)
+        GameTooltip:AddLine("Sync Now",1,1,1)
+        GameTooltip:AddLine("Asks other Nexus users for shared builds and DPS records.",0.8,0.8,0.8,true)
+        local modeText = M.SyncModeLine()
+        if modeText then GameTooltip:AddLine(modeText,1,0.82,0,true) end
+        GameTooltip:AddLine("With Automatic, a new personal DPS best (with its Echo list) and its Record Loadout build page may be sent, each only if this client admits it: the page as a summary first, its Echo list only in later answers to players who ask. Sending is not delivery.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("Sent means it left this client, not that anyone stored it. Received means it arrived here; stored means this client kept it.",0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
     syncBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
+
+    -- The one Sync mode choice, beside Sync Now. Opening it is a draft only.
+    frame._modeBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
+    frame._modeBtn:SetSize(96,22)
+    frame._modeBtn:SetPoint("TOPRIGHT",-128,-104)
+    frame._modeBtn:SetText("Sync mode...")
+    frame._modeBtn:SetScript("OnClick",function()
+        CloseDropdowns()
+        M.OpenSyncModeChoice()
+    end)
+    frame._modeBtn:SetScript("OnEnter",function(self)
+        GameTooltip:SetOwner(self,"ANCHOR_TOP")
+        GameTooltip:AddLine("Sync mode",1,1,1)
+        GameTooltip:AddLine("Choose Automatic, Manual or Off. Opening it shows the current mode and changes nothing; only Apply saves your choice.",0.8,0.8,0.8,true)
+        GameTooltip:Show()
+    end)
+    frame._modeBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
 
     local postBtn = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     postBtn:SetSize(110,22)
@@ -3109,6 +3699,8 @@ local function EnsureFrame()
     syncStatusText:SetPoint("TOPLEFT",378,-108)
     syncStatusText:SetSize(632,14)
     syncStatusText:SetJustifyH("LEFT")
+    -- The responsive layout sizes this region to the rows its text needs.
+    syncStatusText:SetJustifyV("TOP")
 
     -- Left: scrollable card list -----------------------------------------
     -- Clip region (SetClipsChildren is retail-only on 3.3.5 -- same class
@@ -3241,8 +3833,12 @@ RenderSyncStatus = function(receiveCount)
                 and tonumber(sync.LastSyncNewCount())) or 0
         local remaining = type(sync.ReceiveTimeLeft) == "function"
             and tonumber(sync.ReceiveTimeLeft()) or 0
+        -- M5R-NB18: IsReceiving is the window in which answers are accepted
+        -- (a time, not evidence that anything arrives), so it is "listening
+        -- for answers"; "new" is what this client stored. Reception in
+        -- progress is the Leaderboard's "N receiving" (inbound transfers).
         syncStatusText:SetText(string.format(
-            "|cff4dff80Listening %ds (%d new); %d bundled + %d overlay; %d available; %d shown of %d results|r",
+            "|cff4dff80Listening for answers %ds (%d new); %d bundled + %d overlay; %d available; %d shown of %d results|r",
             math.ceil(math.max(0,remaining)),receiveCount,bundled,overlay,
             available,shown,results))
     else
@@ -3257,7 +3853,7 @@ RenderSyncStatus = function(receiveCount)
                 bundled,overlay,available,shown,results,added,version))
         else
             syncStatusText:SetText(string.format(
-                "|cff888888%d bundled + %d overlay; %d available; %d shown of %d results; catalog %s. Sync Now checks the nearby mesh.|r",
+                "|cff888888%d bundled + %d overlay; %d available; %d shown of %d results; catalog %s. Sync Now asks other Nexus users.|r",
                 bundled,overlay,available,shown,results,version))
         end
     end
@@ -3270,14 +3866,35 @@ RenderSyncStatus = function(receiveCount)
     if shareLine then
         syncStatusText:SetText((syncStatusText:GetText() or "") .. "\n" .. shareLine)
     end
-    -- A saved Off or Manual Sync mode is stated, with what it does.
-    local policy = Nexus.SyncModePolicy
-    local modeText = policy and type(policy.Text) == "function" and policy.Text() or nil
+    -- The current Sync mode is stated in every mode, with what it does.
+    local modeText = SyncModeLine()
     if modeText then
         syncStatusText:SetText((syncStatusText:GetText() or "") .. "\n|cffffd100" .. modeText .. "|r")
     end
     if syncBtn then syncBtn:SetText(preparing and "Preparing..."
         or receiving and "Listening..." or "Sync Now") end
+    -- The status region holds every row of this text. Its rows are measured
+    -- against the width the layout gave it; only a change of rows re-lays
+    -- the window (once), so ordinary refreshes reuse the current geometry.
+    local metrics = Nexus.LayoutMetrics
+    local layout = frame and frame._responsiveLayout
+    local box = type(layout) == "table" and layout.boxes and layout.boxes.status
+    if box and metrics and type(metrics.CommunityStatusRows) == "function" then
+        local rows = metrics.CommunityStatusRows(syncStatusText:GetText(),
+            box.w, layout.scale)
+        if rows ~= frame._nexusStatusRows then
+            frame._nexusStatusRows = rows
+            M.ApplyResponsiveLayout(true)
+        end
+    end
+end
+
+-- The Sync mode choice beside Sync Now. A successful Apply only re-renders
+-- this view's status line so it states the new mode; it requests nothing.
+function M.OpenSyncModeChoice()
+    return SyncModeDialog.Open(frame, function()
+        if frame and frame:IsShown() then RenderSyncStatus() end
+    end)
 end
 
 function M.DiagnosticSnapshot()
