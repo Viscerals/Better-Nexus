@@ -4,11 +4,23 @@ local Factory = {}
 Nexus.FlexiblePlanChooser = Factory
 
 local ROWS, HEIGHT = 12, 32
+-- The pool row's Set button keeps its original 52 px and widens to fit its
+-- changing label ("Set *" marks pending input) up to 81 px: in the 495 px
+-- row the count box ends at 322, and Set, two 4 px gaps and the 84 px
+-- Remove button must end by 495.
+local SET_MIN, SET_MAX = 52, 81
 local function Plain(value) return type(value) == "table" and getmetatable(value) == nil end
 local function Display(value)
     local identity = Nexus.Identity
     return identity and identity.DisplaySafeText
         and identity.DisplaySafeText(value or "", 256, true) or ""
+end
+-- A button whose label changes is sized to that label (LayoutMetrics
+-- FitButtonWidth, docs/UI_TEXT_LAYOUT.md).
+local function SetActionLabel(button, text)
+    button:SetText(text)
+    local metrics = Nexus.LayoutMetrics
+    if metrics and metrics.FitButtonWidth then metrics.FitButtonWidth(button, SET_MIN, SET_MAX) end
 end
 local REASONS = {
     INVALID_SELECTION="Choose exact Echo counts before opening a draft.",
@@ -89,12 +101,14 @@ function Factory.New(options)
             row.spellId = id
             if id then
                 local value = captured.rows[id]
-                row.label:SetText("#"..id.."  Q"..value.quality.." / max "..value.maxStack
-                    .."\nSet: "..tostring(chosen[id] or 0).."  "..Display(value.name))
+                -- One line, the committed count first: it stays visible before a
+                -- long exact name, and the row tooltip shows the whole line.
+                row.label:SetText("Set: "..tostring(chosen[id] or 0).."  #"..id.."  Q"..value.quality
+                    .." / max "..value.maxStack.."  "..Display(value.name))
                 bindingCounts = true
                 row.count:SetText(pending[id] or tostring(chosen[id] or 0))
                 bindingCounts = false
-                row.action:SetText(pending[id] and "Set *" or "Set")
+                SetActionLabel(row.action, pending[id] and "Set *" or "Set")
                 row:Show()
             else row:Hide() end
         end
@@ -203,7 +217,11 @@ function Factory.New(options)
             catalogRows[i]=row
             row=CreateFrame("Frame",nil,poolArea)
             row:SetSize(495,HEIGHT);row:SetPoint("TOPLEFT",0,-(i-1)*HEIGHT)
-            row.label=Label(row,"",280,30,0,0)
+            row.label=Label(row,"",280,HEIGHT,0,0)
+            -- One line at the row height (docs/UI_TEXT_LAYOUT.md); while it is shortened
+            -- the row's tooltip shows it whole, so the row takes mouse input.
+            row:EnableMouse(true)
+            if Nexus.LayoutMetrics then Nexus.LayoutMetrics.OneLineLabel(row.label,row,HEIGHT) end
             row.count=CreateFrame("EditBox",nil,row,"InputBoxTemplate")
             row.count:SetSize(32,22);row.count:SetPoint("TOPLEFT",290,-3);row.count:SetAutoFocus(false);row.count:SetMaxLetters(3)
             row.count:SetScript("OnEscapePressed",function(self) self:ClearFocus() end)
@@ -214,10 +232,10 @@ function Factory.New(options)
                 if text == (pending[id] or committed) then return end
                 pending[id] = text ~= committed and text or nil
                 revision, note = revision+1, ""
-                row.action:SetText(pending[id] and "Set *" or "Set")
+                SetActionLabel(row.action, pending[id] and "Set *" or "Set")
                 status:SetText(StatusText())
             end)
-            row.action=Button(row,nil,"Set",52,function() row.count:ClearFocus();return SetCount(row.spellId,row.count:GetText()) end)
+            row.action=Button(row,nil,"Set",SET_MIN,function() row.count:ClearFocus();return SetCount(row.spellId,row.count:GetText()) end)
             row.action:SetPoint("LEFT",row.count,"RIGHT",4,0)
             row.remove=Button(row,nil,"Remove",84,function() return Remove(row.spellId) end)
             row.remove:SetPoint("LEFT",row.action,"RIGHT",4,0)
