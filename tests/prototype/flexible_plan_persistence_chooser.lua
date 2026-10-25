@@ -6,9 +6,10 @@
 -- here; the MAIN PRESENTATION block at the end drives the visible Save pool /
 -- Load saved buttons, the persistence status line and editor-opened readback
 -- across fresh boots. Its EDITOR COEXISTENCE block drives the real editor Save
--- retry and replacement request beside pool Save/Load. Still PENDING here:
--- unverified fault injection; unknown, future, read-only, malformed, loading,
--- owner and root refusal presentation in the UI; docs, the final full suite,
+-- retry and replacement request beside pool Save/Load. Its FAILURE AND
+-- REFUSAL block covers unverified fault injection and unknown, future,
+-- read-only, malformed, loading, owner and root refusal presentation in the
+-- UI. Still PENDING here: docs, the final full suite,
 -- content checks and independent UltraCode reviews. The popup host is the identity-aware
 -- synthetic host of flexible_plan_editor_handoff. Native StaticPopup pooling,
 -- return handling, timing and game behaviour are NOT_RUN.
@@ -184,7 +185,7 @@ check(opened==0 and #H.actions==actions,'reload Load opens no draft and performs
 -- the persistence status from the fixed line at (22,-66). The font models are
 -- the offline layout_geometry_support models, not native measurement.
 -- Unknown/future/read-only presentation and unverified fault injection are
--- queued for a later slice. The EDITOR COEXISTENCE block at the end of this
+-- covered by the FAILURE AND REFUSAL block at its end. The EDITOR COEXISTENCE block at the end of this
 -- block covers the editor Save-retry/replace interplay.
 do
     local A,B=310001,310002
@@ -314,11 +315,13 @@ do
     local quiet=Effects()
     local fits=Hover(G.MODELS.default,false)
     local overflows=Hover(G.MODELS.double,true)
+    local wide=Hover(G.MODELS.px16,true)
     for _,k in ipairs(FONT) do methods[k]=savedFont[k] end
     for _,k in ipairs(TIP) do GameTooltip[k]=savedTip[k] end
     _G.NexusFontNormal=savedObject
     check(fits,'default font model: the persistence text fits its box and hover adds no tooltip')
     check(overflows,'2.0 font model: the persistence text overflows its fixed box; hover shows all of it, leave hides it')
+    check(wide,'16 px face model: the persistence text overflows its fixed box; hover shows all of it, leave hides it')
     check(Persisted()==T.EMPTY and Same(G.Rect(persist,root),{22,66,992,86}),'hover keeps the persistence text and box')
     Quiet(quiet,'hovering the persistence line')
 
@@ -719,10 +722,302 @@ do
         check(Nexus.GameAdapter.UploadWishlist==realUpload and ctl.PendingApply()==nil and Popup.shown[CREATE]==nil
             and Popup.shown[LOAD]==nil and Popup.shown[CLEAR]==nil and Popup.shown[REPLACE]==nil,
             'COEXIST cleanup restores the public upload function and leaves no popup or waiting Save')
-        -- PENDING acceptance, not covered by this block: unverified fault
-        -- injection; unknown, future, read-only, malformed, loading, owner and
-        -- root refusal presentation in the UI; docs, the final full suite,
-        -- content checks and independent UltraCode Spec/Standards reviews.
+        -- PENDING acceptance, not covered by this block: docs, the final full
+        -- suite, content checks and independent UltraCode Spec/Standards
+        -- reviews. Fault injection and refusal presentation follow below.
+    end
+
+    -- FAILURE AND REFUSAL (#151 failure/refusal presentation slice). Fresh
+    -- serialized F.Boot data, the real editor entry, the rendered controls and
+    -- the identity-aware popup host above. Faults and the read counter wrap only
+    -- the real owner seam StoreAuthorityOwner.PlanPoolReadV1, as
+    -- flexible_plan_persistence_store does, and every wrapper is restored. The
+    -- other root and owner use the real NexusDB root and UnitName seams, each
+    -- confirmed by a CONTROL read and restored; the loading case is the real
+    -- core/Store.lua reloaded without its lifecycle. No facade result, receipt,
+    -- status field or chooser state is fabricated. Font models are offline aids;
+    -- native StaticPopup, fonts, timing and game behaviour are NOT_RUN.
+    do
+        local KEY='flexiblePlanPoolV1'
+        local R={
+            RESTORED='Not confirmed: this save could not be verified; the earlier saved pool was restored. Your pool is kept.',
+            MAYBE='Not confirmed: this save could not be verified, so the saved pool may have changed. Load saved to check it. Your pool is kept.',
+            CHANGED='Unsaved changes.',
+            STALE='The saved pool changed elsewhere. Save pool is refused until you Load saved or Reset.',
+            MATCHES='This pool matches the saved pool.',
+            FUTURE='The saved pool is from a newer Nexus version. It is kept unchanged; Save pool and removing it are refused.',
+            UNREADABLE='The saved pool cannot be read. It is kept unchanged; Save pool and removing it are refused.',
+            RO_LOAD='Saved data is read-only: Load saved can restore it; Save pool is refused.',
+            LOADING='Saved data is still loading.',
+            NOTE='1 Echo in this pool no longer matches the catalog; its saved details and count are kept.',
+        }
+        local function Reason(code) return Nexus.FlexiblePlanChooser.Reason(code) end
+        local function Starts(prefix) return Persisted():sub(1,#prefix)==prefix end
+        -- Player text only: no refusal code such as SAVED_FUTURE.
+        local function NoCode(text) return not text:find('%u%u%u') and not text:find('_',1,true) end
+        -- The whole saved root except this character's pool key, read without changing it.
+        local function Without(db)
+            local chars = rawget(db, 'chars')
+            local owned = type(chars) == 'table' and rawget(chars, F.OWNER) or nil
+            local memo, tables = {}, 0
+            local function Copy(v, depth)
+                if type(v) ~= 'table' then return v end
+                if memo[v] then return memo[v] end
+                tables = tables + 1
+                assert(tables <= 100000 and depth <= 64, 'Without: saved graph past the test copy bound')
+                assert(getmetatable(v) == nil, 'Without: plain saved data only')
+                local out = {}
+                memo[v] = out
+                local skip = owned ~= nil and rawequal(v, owned)
+                for k, x in next, v do
+                    if not (skip and k == KEY) then out[k] = Copy(x, depth + 1) end
+                end
+                return out
+            end
+            return F.Serialize(Copy(db, 1))
+        end
+        local function Outside() return Without(NexusDB) end
+        -- A forwarding wrapper on the real owner read: counts every read and
+        -- applies effect to read number at only.
+        local function Wrap(at,effect)
+            local O=Nexus.MainInternals.StoreAuthorityOwner
+            local real,w=O.PlanPoolReadV1,{n=0}
+            O.PlanPoolReadV1=function()
+                w.n=w.n+1
+                local r=real()
+                if w.n==at then return effect(r,O) end
+                return r
+            end
+            function w.Restore() O.PlanPoolReadV1=real;return O.PlanPoolReadV1==real end
+            return w
+        end
+        local function Blank(r) r.present,r.copy=false,nil;return r end
+
+        -- Setup: a fresh boot and a saved pool 310001x3 310002x1.
+        local fx=Open(F.Boot(F.Database(),Seed))
+        local made=Add(A) and Count(A,3) and Add(B) and Count(B,1)
+        NexusFlexiblePlanSave:Click()
+        check(made and Persisted()==T.SAVED and F.Serialize(Raw())==Record({3,1}),
+            'FAILURE setup Save pool writes 310001x3 310002x1 through the visible controls')
+
+        -- Bounded reads: the counter is installed after the first Show.
+        local held,db=Raw(),F.Serialize(NexusDB)
+        local persist,area=LabelAt(-66),nil
+        for _,f in ipairs(H.frames) do if f._nexusText==persist then area=f end end
+        local reads=Wrap()
+        PoolRow(A).count:SetText('2');PoolRow(A).count:SetText('3')
+        PoolRow(A).count:SetText('9');PoolRow(A).action:Click()
+        local rejected=PoolStatus():sub(1,#Reason('STACK_LIMIT'))==Reason('STACK_LIMIT')
+        PoolRow(A).count:SetText('3');PoolRow(A).action:Click()
+        NexusFlexiblePlanSearch:SetText('Del');NexusFlexiblePlanSearch:SetText('')
+        for _,a in ipairs({NexusFlexiblePlanCatalog,NexusFlexiblePlanPool}) do
+            a:GetScript('OnMouseWheel')(a,-1);a:GetScript('OnMouseWheel')(a,1)
+        end
+        area:GetScript('OnEnter')(area);area:GetScript('OnLeave')(area)
+        check(rejected and reads.n==0 and Rendered(A)==3 and Rendered(B)==1 and PoolStatus()=='' and Persisted()==R.MATCHES
+            and rawequal(Raw(),held) and F.Serialize(NexusDB)==db,
+            'BOUNDED typing, a rejected and a restored Set, search, scroll and hover read no saved pool and write nothing')
+        NexusFlexiblePlanEntry:Click();local shown=reads.n
+        NexusFlexiblePlanLoad:Click();local loaded=reads.n
+        NexusFlexiblePlanReset:Click();local reset=reads.n
+        check(shown==1 and loaded==2 and reset==3 and Persisted()==T.UNSAVED_EMPTY and rawequal(Raw(),held)
+            and F.Serialize(NexusDB)==db,'BOUNDED explicit Show, Load saved and Reset read once each and write nothing')
+        check(reads.Restore(),'BOUNDED the counter is removed from the real owner read')
+        NexusFlexiblePlanLoad:Click()
+        if Popup.shown[LOAD] then Click(Popup.shown[LOAD],1) end
+        check(Rendered(A)==3 and Rendered(B)==1 and Persisted()==T.LOADED,'BOUNDED setup Load saved restores 310001x3 310002x1')
+        Quiet(fx,'BOUNDED reads')
+
+        -- Unverified Save: the post-write reread mismatches; the owner restores.
+        Count(A,2)
+        held=Raw();local outside=Outside()
+        local fault=Wrap(4,Blank)
+        NexusFlexiblePlanSave:Click()
+        check(fault.n>=4 and fault.Restore(),'FAULT CONTROL the post-write reread was reached and the real owner read is restored')
+        check(rawequal(Raw(),held) and F.Serialize(Raw())==Record({3,1}) and Outside()==outside,
+            'FAULT a post-write reread mismatch restores the exact earlier saved record; nothing else in the saved root changes')
+        check(Persisted()==R.RESTORED..' '..T.UNSAVED and Rendered(A)==2 and Rendered(B)==1 and not Persisted():find(T.SAVED,1,true),
+            'FAULT the status says Not confirmed and restored, never Saved; the current pool and counts stay unsaved')
+        NexusFlexiblePlanSave:Click()
+        check(Persisted()==T.SAVED and F.Serialize(Raw())==Record({2,1}),'FAULT CONTROL without the fault Save pool writes 310001x2')
+
+        -- Unverified Save: a newer record arrives through the real UpdateStateV1.
+        Count(A,1)
+        outside=Outside()
+        local newer={version=1,ids={A},quality={2},maxStack={5},groupId={7},counts={4}}
+        fault=Wrap(4,function(r,O) O.UpdateStateV1(function(row) rawset(row,KEY,newer) end);return Blank(r) end)
+        NexusFlexiblePlanSave:Click()
+        check(fault.n>=4 and fault.Restore() and rawequal(Raw(),newer) and Outside()==outside,
+            'FAULT a newer record written through the real UpdateStateV1 during the reread is kept, never rolled back')
+        check(Persisted()==R.MAYBE..' '..R.CHANGED..' '..R.STALE and Rendered(A)==1 and Rendered(B)==1,
+            'FAULT the status says the saved pool may have changed and keeps the current intent')
+        NexusFlexiblePlanSave:Click()
+        check(rawequal(Raw(),newer) and Rendered(A)==1 and Rendered(B)==1
+            and Persisted()=='Not saved: the saved pool changed after this session last read it. Your pool is kept. '..R.CHANGED,
+            'FAULT a later Save pool cannot overwrite the newer record with the earlier intent')
+        NexusFlexiblePlanLoad:Click()
+        if Popup.shown[LOAD] then Click(Popup.shown[LOAD],1) end
+        check(Rendered(A)==4 and Budget():find('^1 / 256 alternatives%s+Chosen: 4 / 79 ordinary copies$')~=nil
+            and Persisted()==T.LOADED,'FAULT CONTROL an explicit Load saved shows exactly the newer record')
+        Quiet(fx,'FAULT injection')
+
+        -- Another root, then another owner, while the session keeps its work.
+        local made2=Add(B) and Count(B,2)
+        NexusFlexiblePlanSave:Click()
+        check(made2 and Persisted()==T.SAVED and F.Serialize(Raw())==Record({4,2}),'CONTEXT setup Save pool writes 310001x4 310002x2')
+        local probe=Nexus.FlexiblePlanStore.New({store=Nexus.Store})
+        local base=probe.Read()
+        local realRoot,rootText,actions,sent=NexusDB,F.Serialize(NexusDB),#H.actions,#H.sent
+        NexusDB=H.Clone(realRoot)
+        local foreign=probe.Read()
+        check(NexusDB~=realRoot and F.Serialize(NexusDB)==rootText
+            and (foreign.mode~='durable' or foreign.root~=base.root or foreign.ownerKey~=base.ownerKey),
+            'CONTEXT CONTROL a byte-identical copy of the saved root is another root for the real data owner')
+        NexusFlexiblePlanEntry:Click()
+        local current=Persisted()
+        NexusFlexiblePlanSave:Click()
+        local refused,copyText=Starts('Not saved: '),F.Serialize(NexusDB)
+        NexusDB=realRoot
+        check(not current:find(T.SAVED,1,true) and (current:find('refused',1,true) or current:find('unavailable',1,true)
+            or current:find('loading',1,true))~=nil,'CONTEXT after Show the status no longer says Saved for the other root: '..current)
+        check(refused and copyText==rootText and F.Serialize(realRoot)==rootText and not Persisted():find(T.SAVED,1,true),
+            'CONTEXT Save pool of the retained session refuses the other root; neither root is written')
+        local back=probe.Read()
+        check(back.mode=='durable' and back.root==base.root and back.bytes==base.bytes and #H.actions==actions and #H.sent==sent,
+            'CONTEXT the real saved root is restored; no action or send')
+        Count(B,1);NexusFlexiblePlanLoad:Click()
+        local ask=Popup.shown[LOAD]
+        StaticPopup_Show(CREATE,nil,nil,{other=true})
+        local editorSave,saveHides=Popup.shown[CREATE],Hidden(CREATE)
+        db=F.Serialize(NexusDB)
+        local realName=UnitName
+        UnitName=function() return 'OtherTester','Ebonhold' end
+        foreign=probe.Read()
+        check(ask~=nil and (foreign.mode~='durable' or foreign.ownerKey~=base.ownerKey),
+            'CONTEXT CONTROL another character name makes the real data owner read another owner')
+        NexusFlexiblePlanEntry:Click()
+        if ask then Click(ask,1) end
+        local lateLoad=Starts('Not loaded: the pool or the saved pool changed after you asked. Your pool is kept. '..R.CHANGED)
+        NexusFlexiblePlanSave:Click()
+        local lateSave=Starts('Not saved: ')
+        UnitName=realName
+        check(lateLoad and lateSave and Rendered(A)==4 and Rendered(B)==1 and F.Serialize(NexusDB)==db
+            and Popup.shown[CREATE]==editorSave and Hidden(CREATE)==saveHides,
+            'CONTEXT under another owner a late Load Accept and Save pool refuse; the pool, saved root and Save popup are kept')
+        if ask then StaticPopupDialogs[LOAD].OnAccept(ask.frame,ask.data);StaticPopupDialogs[LOAD].OnCancel(ask.frame,ask.data) end
+        check(UnitName==realName and Rendered(A)==4 and Rendered(B)==1 and Popup.shown[CREATE]==editorSave and Hidden(CREATE)==saveHides,
+            'CONTEXT the replayed Load request installs and hides nothing after the name is restored')
+        NexusFlexiblePlanReset:Click()
+        check(Persisted()==T.UNSAVED_EMPTY and F.Serialize(NexusDB)==db and F.Serialize(Raw())==Record({4,2})
+            and Popup.shown[CREATE]==editorSave and Popup.shown[LOAD]==nil and #H.actions==actions and #H.sent==sent,
+            'CONTEXT an explicit Reset rebinds the empty session to the restored owner without a write or a popup change')
+        StaticPopup_Hide(CREATE)
+
+        -- Stale catalog facts after a fresh boot with changed Echo details.
+        local function Seed2(h) h.AddEcho(A,'Delta',3,4,8);h.AddEcho(B,'Epsilon',1,3,9) end
+        fx=Open(F.Reload(Seed2))
+        held=Raw()
+        NexusFlexiblePlanLoad:Click()
+        check(F.Serialize(held)==Record({4,2}) and Rendered(A)==4 and Rendered(B)==2
+            and PoolRow(A).label:GetText():find('Q2 / max 5',1,true)~=nil and Persisted()==T.LOADED..' '..R.NOTE,
+            'CATALOG Load saved keeps the saved facts and counts and reports the changed Echo')
+        NexusFlexiblePlanOpen:Click()
+        check(PoolStatus()==Reason('CATALOG_CHANGED') and NexusFlexiblePlanChooser:IsShown() and Rendered(A)==4 and Rendered(B)==2
+            and PoolRow(A).label:GetText():find('Q2 / max 5',1,true)~=nil and Persisted()==T.LOADED..' '..R.NOTE
+            and rawequal(Raw(),held) and F.Serialize(Raw())==Record({4,2}),
+            'CATALOG Open as new Wishlist draft refuses the changed facts; the pool, counts, status and saved record stay')
+        Quiet(fx,'CATALOG the refused Open')
+        PoolRow(A).remove:Click()
+        local removed=Persisted()==T.UNSAVED and Rendered(B)==2
+            and Budget():find('^1 / 256 alternatives%s+Chosen: 2 / 79 ordinary copies$')~=nil
+        Add(A)
+        check(removed and Rendered(A)==0 and Rendered(B)==2 and PoolRow(A).label:GetText():find('Q3 / max 4',1,true)~=nil
+            and Persisted()==T.UNSAVED and rawequal(Raw(),held),
+            'CATALOG an explicit Remove and Add capture the current facts with 0 chosen; 310002x2 and the unsaved status stay')
+        Count(A,2);NexusFlexiblePlanSave:Click()
+        check(Persisted()==T.SAVED and F.Serialize(Raw())==F.Serialize({version=1,ids={B,A},quality={1,3},maxStack={3,4},groupId={9,8},counts={2,2}}),
+            'CATALOG CONTROL Save pool stores the re-added current facts after an explicit Set, keeping 310002x2')
+        Quiet(fx,'CATALOG Remove, Add, Set and Save pool')
+
+        -- Future, unsupported and malformed saved pools after a fresh boot.
+        local UNREAD='the saved pool cannot be read and is kept unchanged.'
+        for _,case in ipairs({
+            {'FUTURE version 2 with unknown fields',{version=2,ids={A},counts={1},futureNote={keep='future'}},R.FUTURE,
+                'the saved pool is from a newer Nexus version and is kept unchanged.'},
+            {'UNSUPPORTED v1 with an extra field',{version=1,ids={A},quality={2},maxStack={5},groupId={7},counts={1},extra='keep'},R.UNREADABLE,UNREAD},
+            {'MALFORMED sparse v1',{version=1,ids={[1]=A,[3]=B},quality={2,1},maxStack={5,3},groupId={7,9},counts={1,1}},R.UNREADABLE,UNREAD},
+        }) do
+            local name,record,status,why=case[1],case[2],case[3],case[4]
+            rawset(NexusDB.chars[owner],KEY,record)
+            local seeded=F.Serialize(record)
+            fx=Open(F.Reload(Seed))
+            held,db=Raw(),F.Serialize(NexusDB)
+            local first=Persisted()
+            Add(A);Count(A,2)
+            local dirty=Persisted()
+            NexusFlexiblePlanLoad:Click()
+            local load,asked=Persisted(),Popup.shown[LOAD]
+            NexusFlexiblePlanSave:Click()
+            local save,kept=Persisted(),Rendered(A)==2
+            NexusFlexiblePlanReset:Click();NexusFlexiblePlanSave:Click()
+            local clear=Persisted()
+            check(F.Serialize(held)==seeded and first==status and dirty==R.CHANGED..' '..status,
+                name..': a fresh boot keeps the saved bytes and says why they cannot be used')
+            check(load=='Not loaded: '..why..' Your pool is kept. '..R.CHANGED and asked==nil
+                and save=='Not saved: '..why..' Your pool is kept. '..R.CHANGED and kept,
+                name..': Load saved and Save pool refuse and keep the current choices')
+            check(clear=='Not saved: '..why..' Your pool is kept.' and Popup.shown[CLEAR]==nil,
+                name..': saving an empty pool does not ask to remove the saved pool and refuses')
+            check(rawequal(Raw(),held) and F.Serialize(NexusDB)==db and NoCode(first..dirty..load..save..clear),
+                name..': the saved record identity and the whole saved root stay; no internal code is shown')
+            Quiet(fx,name..' refusals')
+        end
+
+        -- Loading: the real Store module reloaded before its lifecycle runs.
+        local MI,keep,oldStore=Nexus.MainInternals,{},Nexus.Store
+        for k,v in pairs(MI) do keep[k]=v end
+        db=F.Serialize(NexusDB)
+        dofile('core/Store.lua')
+        local lc=NewChooser(true)
+        lc.Show()
+        local loadingShown=Persisted()
+        NexusFlexiblePlanLoad:Click();local loadingLoad=Persisted()
+        NexusFlexiblePlanSave:Click();local loadingSave=Persisted()
+        for k in pairs(MI) do MI[k]=nil end
+        for k,v in pairs(keep) do MI[k]=v end
+        Nexus.MainInternals,Nexus.Store=MI,oldStore
+        check(loadingShown==R.LOADING and loadingLoad=='Not loaded: saved data is still loading. Your pool is kept.'
+            and loadingSave:sub(1,11)=='Not saved: ' and loadingSave:find(R.LOADING,1,true)~=nil and F.Serialize(NexusDB)==db,
+            'LOADING a Store module before its lifecycle shows still loading; Load saved and Save pool refuse and write nothing')
+        check(MI.StoreAuthorityOwner==keep.StoreAuthorityOwner
+            and Nexus.FlexiblePlanStore.New({store=Nexus.Store}).Read().mode=='durable','LOADING the real data owner is restored')
+
+        -- Read-only settings format 6 with a valid saved pool.
+        local function Raw6() return NexusDB.chars[F.OWNER][KEY] end
+        local REC6={version=1,ids={A,B},quality={2,1},maxStack={5,3},groupId={7,9},counts={2,1}}
+        fx=Open(F.Boot(F.Database({version=6,mutate=function(d) d.chars[F.OWNER]=F.Row({[KEY]=REC6}) end}),Seed))
+        held,db=Raw6(),F.Serialize(NexusDB)
+        local roFirst=Persisted()
+        Add(A);Count(A,1)
+        local roDirty=Persisted()
+        NexusFlexiblePlanLoad:Click()
+        local roAsk=Popup.shown[LOAD]
+        if roAsk then Click(roAsk,1) end
+        check(F.Serialize(held)==Record({2,1}) and roFirst==T.HAS..' '..R.RO_LOAD and roDirty==R.CHANGED..' '..R.RO_LOAD
+            and roAsk~=nil and Rendered(A)==2 and Rendered(B)==1 and Persisted()==T.LOADED..' '..R.RO_LOAD,
+            'READ-ONLY format 6 shows the saved pool; an explicit Load saved restores its exact rows and counts')
+        Count(A,1)
+        local detached=rawequal(Raw6(),held) and F.Serialize(held)==Record({2,1})
+        NexusFlexiblePlanSave:Click()
+        local roSave=Persisted()
+        NexusFlexiblePlanReset:Click();NexusFlexiblePlanSave:Click()
+        local roClear=Popup.shown[CLEAR]
+        if roClear then Click(roClear,1) end
+        check(detached and roSave=='Not saved: saved data is read-only. Your pool is kept. '..R.CHANGED and roClear~=nil
+            and Persisted()=='Not removed: saved data is read-only. Your pool is kept. '..R.CHANGED,
+            'READ-ONLY the loaded rows are detached; Save pool and removing the saved pool are refused')
+        check(rawequal(Raw6(),held) and F.Serialize(NexusDB)==db,'READ-ONLY the whole saved root is unchanged')
+        Quiet(fx,'READ-ONLY refusals')
     end
 end
 print(string.format('flexible_plan_persistence_chooser: %d passed, %d failed',passed,failed))

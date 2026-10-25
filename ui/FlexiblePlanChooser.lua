@@ -453,8 +453,11 @@ function Factory.New(options)
     -- read. A finished outcome is shown until the session changes; an
     -- unverified one until the next Save or Load. It never says Saved unless a
     -- verified Save or Clear completed.
-    local function Outcome(seen)
+    local function Outcome(seen, stale)
         if phase ~= "unverified" and phaseRevision ~= revision then return nil end
+        -- A finished Save, Clear or Load is not current once the latest read
+        -- shows other saved data, owner, root or mode: never a stale Saved.
+        if stale and (phase == "saved" or phase == "loaded") then return nil end
         if phase == "saved" then
             if phaseOp == "clear" then return PERSIST.CLEARED, "done" end
             return cleanBytes == nil and PERSIST.SAVED_EMPTY or PERSIST.SAVED, "done"
@@ -486,7 +489,7 @@ function Factory.New(options)
             and (staleFlag == true or Differs(latest, observed))
         local parts = {}
         if loadRequest then parts[1] = PERSIST.ASK_LOAD elseif clearRequest then parts[1] = PERSIST.ASK_CLEAR end
-        local outcome, covers = Outcome(seen)
+        local outcome, covers = Outcome(seen, stale)
         parts[#parts + 1] = outcome
         local writable = mode == "durable" and not stale
         if Dirty() then
@@ -598,7 +601,10 @@ function Factory.New(options)
             cleanBytes, staleFlag = bytes, false
             return Persist("saved", result.unchanged and "UNCHANGED" or nil)
         elseif result.state == "unverified" then
-            observed, latest = result.receipt, result.receipt or latest
+            -- Unverified never rebinds: the receipt this session was bound to stays,
+            -- so a record read afterwards is stale and Save pool is refused until
+            -- an explicit Load saved or Reset.
+            latest = result.receipt or latest
             return Persist("unverified", result.reason or "SAVE_UNVERIFIED")
         end
         local reason = result.reason or "SAVE_REFUSED"
