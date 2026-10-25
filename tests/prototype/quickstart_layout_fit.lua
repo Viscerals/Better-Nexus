@@ -31,8 +31,9 @@ local MODELS={{name='default',char=5.5,line=12},{name='conservative',char=7.0,li
 -- geometry that already held: the Auto Yes / No captions and fits, the
 -- first-launch Close answer's fit, the unchanged answer heights, the ordinary
 -- Welcome Close fit, the 110 / 520 answer row, the 74x24 Close in the 420 px
--- Welcome and the Welcome entries' texts. SETUP (check) is the fixture's own
--- precondition. A result that depends on a failed caption EXPECT says so.
+-- Welcome and the Welcome entries' texts. SETUP (a check so labelled) is the
+-- fixture's own precondition; an untagged check asserts a precondition,
+-- behaviour or geometry. A result that depends on a failed caption EXPECT says so.
 -- The verdict fails on any failed EXPECT or RAISED case. Setup and guards still
 -- assert; inside a label case, a failed one is reported as a RAISED case.
 -- Every case restores the harness measurement, the font object and
@@ -255,7 +256,7 @@ function welcomeFit(m,label)
  check(qs:IsShown() and qs.sync,label..': the Welcome and its Sync line are shown')
  fits(close,'Close',m,label,closeDep,74,24)
  local w2,h2,r=qs:GetWidth(),qs:GetHeight(),G.Rect(close,qs)
- check(G.Inside(r,{11,12,w2-12,h2-11}) and w2<=1024 and h2/2+55<=384,label..': Close inside the window border, window on the smallest UI '..G.Text(r))
+ guard(G.Inside(r,{11,12,w2-12,h2-11}) and w2<=1024 and h2/2+55<=384,label..': Close inside the window border, window on the smallest UI '..G.Text(r)..closeDep)
  local others={hint,qs.sync}
  for i=1,#order-1 do others[#others+1]=buttons[order[i]] end
  local hr,same=G.Rect(hint,qs),true
@@ -264,7 +265,7 @@ function welcomeFit(m,label)
  guard(r[3]==w2-24 and r[4]==h2-20,label..': Close follows the right edge at BOTTOMRIGHT -24/20 '..G.Text(r)..closeDep)
  guard(w2>=420 and r[1]-hr[3]>=8 and (w2==420 or r[1]-hr[3]==8),label..': the window stays 420 px unless Close needs room, then grows only to keep Close 8 px right of the hint ['..w2..']'..closeDep)
  for _,o in ipairs(others)do
-  local box=G.Rect(o,qs);check(G.Apart(r,box),label..': Close apart from the hint, Sync line or control at '..G.Text(box))
+  local box=G.Rect(o,qs);guard(G.Apart(r,box),label..': Close apart from the hint, Sync line or control at '..G.Text(box)..closeDep)
  end
 end
 for _,m in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.small,G.MODELS.double})do
@@ -288,8 +289,9 @@ check(autoAccepted==0 and not NexusOverwriteWarning:IsShown() and #H.actions==ac
 -- answered Continue above, and the real first-time Welcome is neither closed
 -- nor acknowledged. Each step hides the Welcome (a plain Hide: no Finish,
 -- nothing recorded) and enters it again through the real ShowIfFirstTime
--- (the first-time window) or the real ShowSetup (the informational replay,
--- entered hidden because it refits only a hidden Welcome). Nothing shows the
+-- (the first-time window) or the real ShowSetup (the informational replay;
+-- it returns early, without a refit, on a shown first-time Welcome and can refit
+-- a shown informational one, hence the hide before each entry). Nothing shows the
 -- Welcome between an entry and its oracle (welcomeFit). At 2.0 scale, with
 -- the text measured and unmeasured and LayoutMetrics present and absent,
 -- Close must grow (EXPECT: newly required sizing); at the default model it
@@ -524,9 +526,9 @@ do
    Nexus,NexusDB={LayoutMetrics=c.metrics and lm or nil},db
    fresh=dofile('ui/OverwriteWarning.lua')
    check(type(fresh)=='table' and fresh~=ow and Nexus.OverwriteWarning==fresh and nexus.OverwriteWarning==ow,label..': a fresh public warning module in its own namespace')
-   check(fresh.EnsureOnboarding()=='pending' and fresh.IsOpen(),label..': its EnsureOnboarding opens the first-launch warning')
+   guard(fresh.EnsureOnboarding()=='pending' and fresh.IsOpen(),label..': its EnsureOnboarding opens the first-launch warning')
    local w=rawget(_G,'NexusOverwriteWarning')
-   check(w and w~=wOrig and w:IsShown() and w.yes and w.no and w.close and not w.yes:IsEnabled() and not w.no:IsEnabled(),label..': a fresh warning is shown, its answers held for the reading interval')
+   guard(w and w~=wOrig and w:IsShown() and w.yes and w.no and w.close and not w.yes:IsEnabled() and not w.no:IsEnabled(),label..': a fresh warning is shown, its answers held for the reading interval')
    local named=expect(w.yes:GetText()==CONTINUE and w.no:GetText()=='Close',label..': answers read exactly "'..CONTINUE..'" / "Close" ['..tostring(w.yes:GetText())..' / '..tostring(w.no:GetText())..']')
    local dep=named and '' or ' [depends on the failed caption EXPECT]'
    for _,a in ipairs({{w.yes,CONTINUE,o.yes},{w.no,'Close',o.no}})do
@@ -535,16 +537,16 @@ do
     local line=label..': one complete '..c.m.line..' px line fits "'..caption..'" ['..tostring(bh)..']'
     ;(caption=='Close' and guard or expect)(G.Length(caption)*c.m.char+CAPS<=bw,label..': the whole "'..caption..'" fits its button width ['..tostring(bw)..']'..dep)
     ;(caption=='Close' and guard or expect)(bw==want,label..': "'..caption..'" takes the stated fallback width '..want..' px ['..tostring(bw)..']'..dep)
-    if c.m.line<=28 then check(c.m.line<=bh,line) else expect(c.m.line<=bh,line..dep) end
+    if c.m.line<=28 then guard(c.m.line<=bh,line..dep) else expect(c.m.line<=bh,line..dep) end
    end
    local ww,wh=w:GetWidth(),w:GetHeight()
    ;(o.window==520 and guard or expect)(ww==o.window,label..': the window takes the stated width '..o.window..' px ['..tostring(ww)..']'..dep)
    local yes,no=G.Rect(w.yes,w),G.Rect(w.no,w)
-   check(G.Inside(yes,{5,5,ww-5,wh-5}) and G.Inside(no,{5,5,ww-5,wh-5}) and ww<=1024,label..': answers inside a window on the smallest UI '..G.Text(yes)..G.Text(no))
-   check(no[3]==ww-24 and no[4]==wh-20 and yes[3]==no[1]-14 and yes[4]==no[4] and G.Apart(yes,no),label..': answers keep their 24 px edge and 14 px gap without overlap '..G.Text(yes)..G.Text(no))
+   guard(G.Inside(yes,{5,5,ww-5,wh-5}) and G.Inside(no,{5,5,ww-5,wh-5}) and ww<=1024,label..': answers inside a window on the smallest UI '..G.Text(yes)..G.Text(no)..dep)
+   guard(no[3]==ww-24 and no[4]==wh-20 and yes[3]==no[1]-14 and yes[4]==no[4] and G.Apart(yes,no),label..': answers keep their 24 px edge and 14 px gap without overlap '..G.Text(yes)..G.Text(no)..dep)
    for _,other in ipairs(w.children)do
     if other~=w.yes and other~=w.no and other:IsShown() then
-     local r=G.Rect(other,w);check(G.Apart(yes,r) and G.Apart(no,r),label..': answers apart from the control at '..G.Text(r))
+     local r=G.Rect(other,w);guard(G.Apart(yes,r) and G.Apart(no,r),label..': answers apart from the control at '..G.Text(r)..dep)
     end
    end
   end,debug.traceback)
@@ -559,30 +561,30 @@ do
   end)
   restore()
   if not ok then error(err,0) end
-  check(closed and next(db)==nil and not fresh.IsOpen(),label..': its own Close (X) hides it and stops its countdown; its synthetic NexusDB stays empty')
+  guard(closed and next(db)==nil and not fresh.IsOpen(),label..': its own Close (X) hides it and stops its countdown; its synthetic NexusDB stays empty')
  end
  local function welcomeCase(c,label,o)
   local ok,err=xpcall(function()
    inject(c,dismissal)
    Nexus.QuickStart.Show()
-   check(rawget(_G,'NexusQuickStart')==qsOrig and qsOrig:IsShown() and not ow.IsOpen() and not wOrig:IsShown(),label..': the deliberate Welcome is shown, over no warning')
+   guard(rawget(_G,'NexusQuickStart')==qsOrig and qsOrig:IsShown() and not ow.IsOpen() and not wOrig:IsShown(),label..': the deliberate Welcome is shown, over no warning')
    local w2,h2,bw,bh=qsOrig:GetWidth(),qsOrig:GetHeight(),dismissal:GetWidth(),dismissal:GetHeight()
    local line=label..': one complete '..c.m.line..' px line fits Close ['..tostring(bh)..']'..closeDep
    ;(c.m==G.MODELS.default and guard or expect)(G.Length('Close')*c.m.char+CAPS<=bw,label..': the whole "Close" fits its button width ['..tostring(bw)..']'..closeDep)
    ;(c.m==G.MODELS.default and guard or expect)(bw==o.close and bh==o.closeH,label..': Close takes the stated fallback size '..o.close..'x'..o.closeH..' ['..tostring(bw)..'x'..tostring(bh)..']'..closeDep)
-   if c.m.line<=24 then check(c.m.line<=bh,line) else expect(c.m.line<=bh,line) end
+   if c.m.line<=24 then guard(c.m.line<=bh,line) else expect(c.m.line<=bh,line) end
    ;(c.m==G.MODELS.default and guard or expect)(w2==o.welcome,label..': the Welcome takes the stated width '..o.welcome..' px ['..tostring(w2)..']'..closeDep)
    local r=G.Rect(dismissal,qsOrig)
-   check(G.Inside(r,{11,12,w2-12,h2-11}) and w2<=1024 and h2/2+55<=384,label..': Close inside the window border, window on the smallest UI '..G.Text(r))
+   guard(G.Inside(r,{11,12,w2-12,h2-11}) and w2<=1024 and h2/2+55<=384,label..': Close inside the window border, window on the smallest UI '..G.Text(r)..closeDep)
    for _,other in ipairs(others)do
-    local box=G.Rect(other,qsOrig);check(G.Apart(r,box),label..': Close apart from the hint, Sync line or control at '..G.Text(box))
+    local box=G.Rect(other,qsOrig);guard(G.Apart(r,box),label..': Close apart from the hint, Sync line or control at '..G.Text(box)..closeDep)
    end
   end,debug.traceback)
   restore()
   local hidden=pcall(function() qsOrig:Hide() end)
   pcall(function() dismissal:SetWidth(dw);dismissal:SetHeight(dh);qsOrig:SetWidth(qw);qsOrig:SetHeight(qh) end)
   if not ok then error(err,0) end
-  check(hidden and not qsOrig:IsShown() and ow.EnsureOnboarding()==outcome and not ow.IsOpen() and T.Equal(rawget(_G,'NexusDB'),dbSnap) and #H.actions==actions1 and #H.sent==sent1,label..': hidden again; the original warning outcome, saved data, actions and sends are unchanged')
+  guard(hidden and not qsOrig:IsShown() and ow.EnsureOnboarding()==outcome and not ow.IsOpen() and T.Equal(rawget(_G,'NexusDB'),dbSnap) and #H.actions==actions1 and #H.sent==sent1,label..': hidden again; the original warning outcome, saved data, actions and sends are unchanged')
  end
  for _,c in ipairs(CASES)do
   local name=', '..c.m.name..', '..c.fault..(c.metrics and ', LayoutMetrics' or ', no LayoutMetrics')
@@ -594,9 +596,9 @@ do
   and UISpecialFrames==specials and #specials==#special and rawget(dismissal,'GetTextWidth')==rawWidth0 and (type(fontOrig)~='table' or rawget(fontOrig,'GetFont')==fontRaw0)
  for i,v in ipairs(special)do same=same and specials[i]==v end
  for _,k in ipairs(KEYS)do same=same and rawget(rm,k)==measure0[k] end
- check(same,'fault cases restore the namespace, saved data, windows, font object, measurement, helper, widget override, special frames and model')
- check(T.Equal(rawget(_G,'NexusDB'),dbSnap) and #H.actions==actions1 and #H.sent==sent1,'fault cases change no saved data and submit, send and spend nothing')
- check(not ow.IsOpen() and ow.EnsureOnboarding()==outcome and not wOrig:IsShown() and wOrig.yes:GetText()==yes1 and wOrig.no:GetText()==no1 and wOrig:GetWidth()==width1 and shape()==shape0,'fault cases keep the original warning outcome, answers and width and the closed Welcome as it was')
+ guard(same,'fault cases restore the namespace, saved data, windows, font object, measurement, helper, widget override, special frames and model')
+ guard(T.Equal(rawget(_G,'NexusDB'),dbSnap) and #H.actions==actions1 and #H.sent==sent1,'fault cases change no saved data and submit, send and spend nothing')
+ guard(not ow.IsOpen() and ow.EnsureOnboarding()==outcome and not wOrig:IsShown() and wOrig.yes:GetText()==yes1 and wOrig.no:GetText()==no1 and wOrig:GetWidth()==width1 and shape()==shape0,'fault cases keep the original warning outcome, answers and width and the closed Welcome as it was')
 end
 if #missed+#raised>0 then
  error('quickstart_layout_fit: '..#missed..' EXPECT(s) failed (collected) and '..#raised..' case(s) raised a SETUP or GUARD failure; first: '..tostring(missed[1] or raised[1]),0)

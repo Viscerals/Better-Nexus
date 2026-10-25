@@ -166,7 +166,7 @@ end
 -- scale as LayoutMetrics' status line (26 px at scale 2). Close is never
 -- below the original 74x24. The window stays 420 px unless a wider Close
 -- needs room to keep its original 8 px gap from the 290 px hint
--- (x 24..314). Hint, Sync, body and buttons keep their sizes. The controls on
+-- (x 24..314). Hint, Sync, body and other buttons keep their sizes. The controls on
 -- the right (Import, Leaderboard, Orbs and Close) are anchored to the right
 -- edge, directly or through Import, so they follow a widened right edge; the
 -- centred title and subtitle stay centred. This is an

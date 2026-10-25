@@ -250,8 +250,8 @@ local ANSWER_W, ANSWER_GAP, ANSWER_EDGE, WINDOW_W = 110, 14, 24, 520
 -- an offline-model result (tests/prototype/quickstart_layout_fit.lua, with
 -- the 24 px end-cap allowance of FitButtonWidth, not a measurement of the
 -- native button template); native pixel fit is NOT_RUN. LayoutMetrics
--- (FitButtonWidth: the client's text width or its conservative model, plus
--- the template's end caps) loads after this module and standalone tests
+-- (FitButtonWidth: the client's text width or its conservative model, plus a
+-- stated 24 px end-cap allowance) loads after this module and standalone tests
 -- omit it; without it the same rule runs here: the client's text width, or
 -- LayoutMetrics' conservative model (7 px per visible character, or 0.70 em
 -- of the 10 px font at the runtime font scale read from NexusFontNormal as
