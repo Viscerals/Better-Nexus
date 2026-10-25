@@ -116,6 +116,11 @@ function Controller.New(options)
         pendingSeeded = false,
         editingContext = nil,
         createTargetContext = nil,
+        -- Display-only origin of a draft with neither context above, set
+        -- where that draft begins ("reset", "copy", "firstRun", "unknown").
+        -- Read only by M.DestinationPresentation; never a destination,
+        -- default or Save authority.
+        destinationOrigin = nil,
         awaitingWishlist = nil,
         scrollOffset = 0,
         pickOffset = 0,
@@ -644,6 +649,67 @@ function Controller.New(options)
     function M.EditingContext() return CopyRecord(state.editingContext) end
     function M.IsEditing() return state.editingContext ~= nil end
     function M.CreateTargetContext() return CopyRecord(state.createTargetContext) end
+    -- A passive destination descriptor (the UserText DestinationFields d
+    -- table) for the editor's destination strip. It reads only the captured
+    -- contexts and the display-only origin, plus the two facts its caller
+    -- passes: the Slots observation the renderer already made and the
+    -- character the HUD already cached for this world session. It calls no
+    -- getter, adapter, Store or service and changes nothing; Save still uses
+    -- SaveDestination/TryApply, never this. A captured Saved Build is never
+    -- retargeted to the active one, a captured Wishlist name is never called
+    -- assigned, and a missing row or unknown stays unknown.
+    function M.DestinationPresentation(slots, character)
+        local d = {}
+        if type(character) == "string" and character ~= "" then
+            d.character = character
+        end
+        local context, target = state.editingContext, state.createTargetContext
+        local slot, name
+        if context then
+            d.origin = "opened"
+            -- The Wishlist this editor opened, as captured: its assignment
+            -- now is not stated (wishlistState stays nil).
+            d.wishlist = context.name
+            slot, name = tonumber(context.loadoutSlot), context.loadoutName
+            if not slot then
+                if context.destination == "first" then
+                    d.kind, d.captured = "firstRun", true
+                else
+                    d.kind, d.reason = "none", "unboundPlan"
+                end
+                return d
+            end
+        elseif type(target) == "table" and tonumber(target.loadoutSlot) then
+            d.origin = "newDraft"
+            slot, name = tonumber(target.loadoutSlot), target.loadoutName
+        else
+            local origin = state.destinationOrigin
+            d.origin = origin or "none"
+            if origin == "firstRun" then
+                d.kind, d.captured = "firstRun", true
+            elseif origin == "unknown" then
+                d.kind, d.reason = "unknown", "notLoaded"
+            elseif origin == "copy" then
+                d.kind, d.reason = "none", "unboundPlan"
+            else
+                d.kind, d.reason = "none", "noDestination"
+            end
+            return d
+        end
+        d.kind, d.slot, d.captured = "savedBuild", slot, true
+        -- Only the supplied row of that same captured slot: its name when
+        -- none was captured, and whether it is empty now. A missing row
+        -- claims nothing.
+        local rows = type(slots) == "table" and slots.bySlot or nil
+        local row = type(rows) == "table" and rows[slot] or nil
+        name = tostring(name or "")
+        if name == "" and type(row) == "table" then name = tostring(row.name or "") end
+        if name ~= "" then d.name = name end
+        if type(row) == "table" and type(row.echoes) == "table" and #row.echoes == 0 then
+            d.empty = true
+        end
+        return d
+    end
     function M.CandidateContext()
         local context = state.candidateContext
         return context and {
@@ -1025,6 +1091,7 @@ function Controller.New(options)
         state.createdDraft = nil
         state.editingContext = nil
         state.createTargetContext = nil
+        state.destinationOrigin = "reset"
         -- Assignment actions as this new draft begins (see TryApply).
         state.draftActions = Adapter and Adapter.AssignmentActionSnapshot
             and Adapter.AssignmentActionSnapshot() or nil
@@ -1071,6 +1138,7 @@ function Controller.New(options)
                 return nil, reason
             end
             M.ResetNewWishlistDraft()
+            state.destinationOrigin = "copy"
             state.pendingSeeded = true
             state.pending = prepared.pending
             state.pendingLock = prepared.pendingLock
@@ -1090,6 +1158,7 @@ function Controller.New(options)
             return DraftModel.TrimName(current.title)
         end
         M.ResetNewWishlistDraft()
+        state.destinationOrigin = "copy"
         state.pendingSeeded = true
         M.LoadPendingEchoes(type(candidate) == "table" and candidate.echoes or {})
         return type(candidate) == "table" and DraftModel.TrimName(candidate.title) or ""
@@ -1236,6 +1305,14 @@ function Controller.New(options)
             if name == "" then name = "Saved Build " .. tostring(active) end
             state.createTargetContext = {loadoutSlot = active, loadoutName = name}
         end
+        -- Display-only origin, from the slots this begin already read: slot
+        -- data not loaded is unknown; otherwise no populated Saved Build was
+        -- selected, the first-run case of the Journal's rule. No branch or
+        -- destination changes here.
+        if not state.createTargetContext then
+            state.destinationOrigin = (type(slots) ~= "table" or slots.activeKnown == false)
+                and "unknown" or "firstRun"
+        end
     end
 
     function M.BeginShow()
@@ -1254,6 +1331,10 @@ function Controller.New(options)
             return M.BeginWishlist(firstRun, nil), "wishlist", false
         end
         M.ResetNewWishlistDraft()
+        -- Display-only origin, from the slots this begin already read (see
+        -- BeginNewWishlist).
+        state.destinationOrigin = (type(slots) ~= "table" or slots.activeKnown == false)
+            and "unknown" or "firstRun"
         return true, "new", false
     end
 

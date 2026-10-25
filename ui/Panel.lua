@@ -35,6 +35,12 @@ local renderState = {
     -- The committed model's status and recommendation before the user-text
     -- conversion (it is not idempotent), for a render of that same model.
     rawText=nil,
+    -- Destination character observation (ObserveDestinationCharacter):
+    -- the world-session phase (nil before an entered world, "entered",
+    -- "leaving", "loggedOut") and the latest validated capture in it.
+    -- Memory only; presentation only.
+    destinationWorld=nil,
+    destinationCharacter=nil,
 }
 local renderStats = {
     calls=0, layouts=0, skipped=0, statusOnly=0,
@@ -578,6 +584,36 @@ function M.DestinationFacts(model)
     -- presented as its assignment.
     if d.empty then d.wishlist, d.wishlistState = nil, nil end
     return d
+end
+
+-- View observation of the character Main's existing capture validated, for
+-- the destination strip. event: "PLAYER_LEAVING_WORLD" / "PLAYER_LOGOUT"
+-- clear and block the cache; "PLAYER_ENTERING_WORLD" clears it and admits a
+-- later capture; "capture" stores that capture (nil included) only inside an
+-- entered world. Memory only: no read, no model, Store or assignment change.
+function M.ObserveDestinationCharacter(character, event)
+    if event == "PLAYER_LEAVING_WORLD" then
+        renderState.destinationWorld, renderState.destinationCharacter = "leaving", nil
+    elseif event == "PLAYER_LOGOUT" then
+        renderState.destinationWorld, renderState.destinationCharacter = "loggedOut", nil
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        renderState.destinationWorld, renderState.destinationCharacter = "entered", nil
+    elseif event == "capture" and renderState.destinationWorld == "entered" then
+        renderState.destinationCharacter =
+            (type(character) == "string" and character ~= "") and character or nil
+    end
+end
+
+-- The latest validated capture in the current world session, else nil.
+-- Pure: it initializes, reads and updates nothing else, and no earlier
+-- model or saved name stands in.
+function M.CachedDestinationCharacter()
+    local character = renderState.destinationCharacter
+    if renderState.destinationWorld == "entered"
+        and type(character) == "string" and character ~= "" then
+        return character
+    end
+    return nil
 end
 
 -- M7 (UX setup checklist and status): the current facts the checklist words

@@ -510,6 +510,13 @@ local function BuildHudDisplayModel(base)
             and player == UNKNOWNOBJECT) then
         input.character = player
     end
+    -- Presentation fact only: this same validated capture (nil included)
+    -- for the HUD's session-scoped destination cache. No other read; no
+    -- model, Store or assignment change.
+    local destinationPanel = Panel or Nexus.Panel
+    if destinationPanel then
+        DisplayCall(destinationPanel.ObserveDestinationCharacter, input.character, "capture")
+    end
     local progress = type(baseSnapshot.progress) == "table"
         and baseSnapshot.progress or {}
     local echoes = type(progress.dpsEchoes) == "table" and progress.dpsEchoes or nil
@@ -854,6 +861,12 @@ EH:SetScript("OnEvent", function(_, event, ...)
         local adapter=Adapter or Nexus.GameAdapter
         local observe=adapter and adapter.ObserveChoiceWorldEvent
         if type(observe)=="function" then pcall(observe,event) end
+        -- The HUD's cached destination character holds only inside this
+        -- world session: leave/logout block it, entering admits a fresh
+        -- existing capture. Presentation only.
+        local panel=Panel or Nexus.Panel
+        local observeDestination=panel and panel.ObserveDestinationCharacter
+        if type(observeDestination)=="function" then pcall(observeDestination,nil,event) end
         -- A loading screen inside this session keeps Auto selected and holds
         -- actions; logout or an unclassified entry turns it OFF.
         if AutomationRuntime and AutomationRuntime.OnWorldEvent(event)=="revoked" and Panel.SetAuto then
