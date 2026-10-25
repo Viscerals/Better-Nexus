@@ -25,6 +25,12 @@
 -- (the reason whole, no guessed target) in a form that holds before and after,
 -- and adds one EXPECT for the layered paused form. L4 (this session) keeps its
 -- GUARD unchanged.
+-- F1 successor against 752b91fe: L1b's former Paused+reason GUARD is
+-- replaced by restored-record layer EXPECTs. Its strip pending/block EXPECT
+-- also fails there; navigation, hover, geometry and action gates are GUARDs.
+-- M7+F1 composition (conflict resolution only; not executed by this
+-- resolution): L1b keeps M7's GUARD and paused-layer EXPECT beside F1's
+-- Layered consumer checks, which are given M7's paused Continue headline.
 -- Oracles:
 --  * the real Orb window, Continue window, strip, mini panel and history page;
 --  * the real OrbRuntime (Status, ContinueView, RunLog, BlocksOrdinary);
@@ -33,6 +39,7 @@
 -- Real Store/OrbRuntime/OrbAdapter/GameAdapter; synthetic game services only.
 -- No native recovery, reload or historical-cause claim.
 local V=dofile('tests/prototype/view_regression_support.lua')
+local G=dofile('tests/prototype/layout_geometry_support.lua')
 local C=V.Checker('orb_recovery_layers')
 local R=dofile('tests/prototype/orb_recovery_support.lua');local S=R.S
 local HEADLINE='Previous result is unresolved: no new Orb run or ordinary roll until it settles.'
@@ -137,10 +144,52 @@ C.scenario('L1b loadout-uncertain restored record: paused, no guessed target, no
   'L1b: the window shows the runtime reason whole, with no guessed Resume target',text)
  C.expect(text==PAUSED_HEADLINE_CONTINUE..'\nWhat you can do: Continue... below checks the game, then asks you to confirm.\nDetails: '..s.reason,
   'L1b: the restored paused record reads in layers under its own label, Continue named',text)
+ local lines=Layered(f,M,'L1b',PAUSED_HEADLINE_CONTINUE)
+ C.expect(lines[2]=='What you can do: Continue... below checks the game, then asks you to confirm.',
+  'L1b: the paused restored record names its actual explicit Continue action',lines[2])
+ C.guard(cv.explanation==true and not s.running and not s.canResume and not c.canResume,
+  'L1b: restored explanation is independent of the blocked Resume target')
  C.guard(f.cont:IsShown() and f.cont:GetText()=='Continue...' and not f.resume:IsEnabled() and M.BlocksOrdinary(),
   'L1b: Continue stays the explicit way on; no Resume; ordinary rolling stays blocked')
  local mini=Nexus.OrbPanel.ShowMini()
  C.guard(mini.state:GetText()=='Paused - a pending result must settle first' and not mini.resume:IsEnabled(),'L1b: the mini panel offers no Resume',mini.state:GetText())
+ C.guard(mini.pending:GetText()=='Pending: the last Orb action is not settled' and s.spent>0 and s.reserved==0,
+  'L1b: a spent unsettled action is not an unconfirmed request',mini.pending:GetText())
+ local complete=mini.reason._nexusFullText or mini.reason:GetText()
+ C.guard(complete==s.reason,'L1b: the mini retains the complete runtime reason',complete)
+ local hovered,hoverOK=V.TooltipLines(function()mini.reasonHit:GetScript('OnEnter')(mini.reasonHit)end)
+ C.guard(hoverOK and hovered[1]==s.reason,'L1b: actual mini hover exposes that complete reason',hovered[1])
+ mini.reasonHit:GetScript('OnLeave')(mini.reasonHit)
+ C.guard(f:GetWidth()==620 and f:GetHeight()==445 and f.status:GetWidth()==580 and f.status:GetHeight()==74
+  and mini:GetWidth()==356 and mini:GetHeight()==196,'L1b: the existing full and mini geometry is retained')
+ -- Supply font measurement only: the actual fixed-box tooltip owns the
+ -- overflow decision and must expose the exact rendered text when needed.
+ local measured=G.Rows(f.status:GetText(),f.status:GetWidth(),G.MODELS.px16.char)*G.MODELS.px16.line
+ local realHeight=f.status.GetStringHeight
+ f.status.GetStringHeight=function()return measured end
+ local detail,detailOK=V.TooltipLines(function()f.statusHit:GetScript('OnEnter')(f.statusHit)end)
+ f.status.GetStringHeight=realHeight
+ C.guard(detailOK and (measured<=f.status:GetHeight() or detail[1]==f.status:GetText()),
+  'L1b: overflow in the stated 16px model has actual full-status hover access',detail[1])
+ f.statusHit:GetScript('OnLeave')(f.statusHit)
+ f:Hide();C.setup(not f:IsVisible(),'L1b: the full window is closed before Open Orbs')
+ mini.open:Click()
+ C.guard(f:IsVisible() and f.cont:IsVisible() and f.cont:GetText()=='Continue...',
+  'L1b: actual Open Orbs opens the full window and explicit Continue')
+ Layered(f,M,'L1b Open Orbs',PAUSED_HEADLINE_CONTINUE)
+ f:Hide();Nexus.Panel.Show();H.Advance(.3)
+ local bar=NexusPanel and NexusPanel._orbControls
+ C.setup(bar and bar:IsVisible() and not f:IsVisible(),'L1b: the real main panel shows its strip with the full window closed')
+ bar.refresh()
+ local strip=Lines(bar.summary._nexusFullText or bar.summary:GetText())
+ C.expect(strip[2]=='Last Orb action is not settled' and strip[3]=='Paused - result must settle',
+  'L1b: the strip shows a truthful generic pending/block cue without guessing Continue',bar.summary:GetText())
+ C.guard(bar.details:IsVisible() and bar.details:GetText()=='Details' and not bar.resume:IsEnabled()
+  and bar:GetHeight()==100 and bar.summary:GetHeight()==52,'L1b: existing Details, blocked Resume and strip geometry remain')
+ bar.details:Click()
+ C.guard(f:IsVisible() and f.cont:IsVisible() and f.cont:GetText()=='Continue...',
+  'L1b: actual Details opens the full window and explicit Continue')
+ Layered(f,M,'L1b Details',PAUSED_HEADLINE_CONTINUE)
  mini.resume:GetScript('OnClick')(mini.resume)
  C.guard(mini.notice:GetText()=='Not resumed: a pending result must settle.','L1b: a mini Resume that reaches the handler is refused',mini.notice:GetText())
  C.guard(not M.Resume(),'L1b: the runtime refuses Resume for the restored record')
@@ -197,6 +246,16 @@ C.scenario('L4 held game choice in this session: state-specific reload advice, n
  C.expect(w.history:GetText()=='','L4: an action of this session gets no cleared-history note')
  C.guard(not M.ContinueView().explanation,'L4: fixture: the record is not a restored one')
  w:Hide()
+ f:Hide();Nexus.Panel.Show();H.Advance(.3)
+ local bar=NexusPanel and NexusPanel._orbControls
+ C.setup(bar and bar:IsVisible(),'L4: the actual current-session strip is visible')
+ bar.refresh()
+ C.expect(bar.summary:GetText():find('Last Orb action is not settled',1,true)~=nil
+  and bar.summary:GetText():find('Paused - result must settle',1,true)~=nil,
+  'L4: the same compact cue states the current unresolved action without claiming restoration',bar.summary:GetText())
+ bar.details:Click()
+ C.guard(f:IsVisible() and f.status:GetText()=='Paused\n'..M.Status().reason,
+  'L4: Details keeps the current-session runtime instruction without a restored headline')
  C.guard(H.Count('orb-spend')==1 and H.Count('take')==1,'L4: nothing more was sent')
 end)
 

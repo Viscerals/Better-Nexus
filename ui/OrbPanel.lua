@@ -445,9 +445,15 @@ local function refresh()
     local detail=truthful(reason) or s.error or ""
     local cv=Nexus.OrbRuntime.ContinueView()
     local shownStatus,fullStatus
-    -- s.recovery is present only for a receipt restored after a reload.
-    if s.state=="RECOVERY" or (s.state=="PAUSED" and s.recovery~=nil) then
-        local headline=recoveryHeadline(s.state,cv)
+    -- s.recovery is present only for a receipt restored after a reload. A
+    -- pending, nonrunning record whose Continue view offers its explanation
+    -- (restored, or an explicit attribution exit) reads in the same layers.
+    if s.state=="RECOVERY" or (s.state=="PAUSED" and s.recovery~=nil)
+        or (s.pending and not s.running and cv.explanation==true) then
+        -- Only a restored record that stays PAUSED takes the paused label;
+        -- any other held record keeps the generic unresolved headline.
+        local restoredPaused=s.state=="PAUSED" and s.recovery~=nil
+        local headline=recoveryHeadline(restoredPaused and "PAUSED" or "RECOVERY",cv)
         -- A live automatic recovery check keeps its owned phase first; a
         -- restored record keeps its layered headline (Continue is its action line).
         if s.recoveryKind=="automatic" and recoveryPhases[s.recoveryPhase] then
@@ -1246,11 +1252,15 @@ function UI.AttachMainPanel(parent)
             ..((s.unconfirmedResults or 0)>0 and ("; unconfirmed outcomes: "..s.unconfirmedResults) or "")
             ..(s.historyKnown==false and "; earlier outcome/check totals unavailable after reload" or "")
         local second=s.reserved>0 and (s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending, not confirmed yet")
+            or (s.pending and "Last Orb action is not settled")
             or (s.remaining~=nil and (s.remaining.." target copies remaining")or "Target data unavailable")
         local third=phases[s.state]or s.state
         local what,instruction
         if s.state=="PAUSED" then what,instruction=compactTarget(s.resumeTarget) end
         if instruction then third=instruction end
+        -- CompactStatus has no restored/Continue stage. State the block only;
+        -- Details reads the exact explanation and action in the full window.
+        if s.state=="PAUSED" and s.pending and not s.canResume and not instruction then third="Paused - result must settle" end
         local shown,full=stripLine(second)
         -- While paused, the target takes the second line; a pending Orb then
         -- stays on the third.
