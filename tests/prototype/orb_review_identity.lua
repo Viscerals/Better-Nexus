@@ -56,6 +56,30 @@ local function SettledPausedRun()
  return f
 end
 local function Has(text,needle) return tostring(text or ''):find(needle,1,true)~=nil end
+-- F5 strip oracle for I3 (meanings against the runtime's facts, not the
+-- product's wording or cut): the shown row naming the target by its quoted
+-- name, whole or its quoted start (at least three characters) cut with
+-- "...", and that row's words outside the name.
+local function TargetRow(text,name)
+ for line in (tostring(text or '')..'\n'):gmatch('(.-)\n') do
+  local a,b=line:find("'"..name.."'",1,true)
+  for keep=#name-1,math.min(3,#name),-1 do
+   if a then break end
+   a,b=line:find("'"..name:sub(1,keep).."...",1,true)
+  end
+  if a then return line,line:sub(1,a-1)..' '..line:sub(b+1) end
+ end
+ return nil,''
+end
+-- The strip's fact for a compact read: the requested Orbs pending, the
+-- unsettled last action, or the rolled copies left ('?' when unknown).
+local function StripFact(text,c)
+ local t=tostring(text or ''):lower()
+ if (c.reserved or 0)>0 then return t:find('%f[%d]'..c.reserved..'%f[%D][^;%c]-pending')~=nil end
+ if c.pending then return t:find('not settled',1,true)~=nil end
+ local n=c.remaining~=nil and ('%f[%d]'..c.remaining..'%f[%D]') or '%?'
+ return t:find(n..'[^;%c]-cop')~=nil and not t:find('not settled',1,true)
+end
 
 C.scenario('I1 a Review target click after the target changed under the button reviews nothing',function()
  Fresh()
@@ -130,7 +154,25 @@ C.scenario('I3 a target that changed and came back is called back, and still nee
   C.guard(not f.resume:IsEnabled() and f.review:IsShown(),'I3: Resume still waits for Review target')
   local bar=Strip()
   local summary=bar and bar.summary:GetText() or ''
-  C.expect(Has(summary,"Target back to 'Orb test'"),'I3: the strip calls it back',summary)
+  -- F5 current-contract adaptation: the strip row keeps the actual fact
+  -- beside the bounded name and the short returned kind, called back, not
+  -- new; the complete "Target back to ..." caption with the exact name, the
+  -- complete fact and the review instruction are on the strip's hover.
+  local sc=M.CompactStatus() or {}
+  local row,outside=TargetRow(summary,'Orb test')
+  C.expect(row~=nil and V.Names(outside,'back') and not V.Names(outside,'new') and not V.Names(outside,'same')
+   and StripFact(outside,sc) and #row*7<=bar.summary:GetWidth(),'I3: the strip calls it back',summary)
+  local tip,tipOK={},false
+  if bar then
+   tip,tipOK=V.TooltipLines(function()bar.summaryHit:GetScript('OnEnter')(bar.summaryHit)end)
+   bar.summaryHit:GetScript('OnLeave')(bar.summaryHit)
+  end
+  local whole=tipOK and tip[1] or ''
+  C.expect(whole~='' and whole==bar.summary._nexusFullText and Has(whole,"Target back to 'Orb test'") and not Has(whole,'New target')
+   and StripFact(whole,sc) and Has(whole,'review it in the Orb window'),
+   'I3: hovering the strip gives the exact returned target, its fact and where to review it',whole)
+  C.guard(bar~=nil and not bar.resume:IsEnabled() and not bar.primary:IsEnabled() and bar.stop:IsEnabled(),
+   'I3: the strip still leaves the returned target to the review and keeps Stop')
   local mini=UI.ShowMini()
   C.expect(mini.state:GetText()=='Paused - review the target in Open Orbs','I3: the mini panel says where to review it',mini.state:GetText())
   Direct(mini.resume)

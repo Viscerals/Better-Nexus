@@ -4,8 +4,15 @@
 -- retire it: a late Accept of a retired confirmation says "Share cancelled"
 -- and shares nothing. A live confirmation still shares its own confirmed build
 -- once, also when the selection moved. The confirmation also says the listing
--- carries the character name, realm and class, and that a DPS record held for
--- this exact build may be queued separately if the saved mode allows.
+-- carries the character name, realm and class, and that in Automatic a linked
+-- character-best Training Dummy or Lich King DPS record may also be sent with
+-- its Echoes, locked Echoes and player info without an additional request,
+-- also when the summary is not queued. That R1 text check follows the D2/D3
+-- oracle (M5 donor 45036fbc, root-adjudicated); its former check for "a DPS
+-- record you hold for this exact build ... if your saved Sync mode allows it"
+-- is superseded and kept only as history in R1. The retirement, Cancel,
+-- Escape, reopen, newer-confirmation, moved-selection and no-effect checks
+-- are unchanged.
 -- Categories (view_regression_support): EXPECT is behaviour added in M7
 -- (predicted to fail on accepted M6 0924d06a, where a retired confirmation's
 -- late Accept still shared; not executed by the author); GUARD already holds
@@ -166,8 +173,46 @@ C.scenario('R1 the confirmation discloses identity and a possible linked DPS rec
  local text=V.Plain(slot.text or '')
  print('OBSERVED','R1 confirmation='..text)
  C.expect(text:find('character name, realm and class',1,true)~=nil,'R1: it says the listing carries your character name, realm and class',text)
- C.expect(text:find('DPS record you hold for this exact build may also be queued separately',1,true)~=nil
-  and text:find('if your saved Sync mode allows it',1,true)~=nil,'R1: it says a linked DPS record may also be queued, by the saved mode',text)
+ -- D2/D3 (M5 donor 45036fbc, root-adjudicated oracle): the former check for
+ -- "DPS record you hold for this exact build may also be queued separately"
+ -- and "if your saved Sync mode allows it" is superseded and kept only as
+ -- this history (it read as any best you hold, sent under any permitting
+ -- mode). The linked record is the character's best for Training Dummy or
+ -- Lich King that Automatic may send with its Echoes, locked Echoes and
+ -- player info without an additional request, also when the summary is not
+ -- queued. Read one sentence at a time in lower case (split at . ; ! ? before
+ -- a space), by semantic words, not one copied sentence; every sentence
+ -- naming DPS stays conditional on Automatic and promises nothing. A text
+ -- read only: no Automatic send is exercised here (the mode stays Manual).
+ local function Has(s,needle) return s:find(needle,1,true)~=nil end
+ local function Word(s,word) return s:find('%f[%a]'..word..'%f[%A]')~=nil end
+ local auto,loose=nil,{}
+ for s in (text:lower():gsub('%s+',' ')..' '):gmatch('(.-[%.;!?])%s') do
+  if Has(s,'dps') then
+   if auto==nil and Has(s,'in automatic') then auto=s end
+   if not (Has(s,'in automatic') and Word(s,'may')) or Word(s,'will') or Word(s,'always')
+    or Word(s,'every') or Has(s,'deliver') or Has(s,'personal') or Has(s,'you hold') then
+    loose[#loose+1]=s
+   end
+  end
+ end
+ local facts={
+  {'in Automatic, if, may',function(s) return Has(s,'in automatic') and Word(s,'if') and Word(s,'may') end},
+  {'linked',function(s) return Has(s,'linked') end},
+  {"the character's best",function(s) return Has(s,"character's best") or Has(s,'character-best') end},
+  {'Training Dummy and Lich King',function(s) return Has(s,'training dummy') and Has(s,'lich king') end},
+  {'Echoes and locked Echoes',function(s) return Has(s,'echoes') and Has(s,'locked echoes') end},
+  {'player info',function(s) return Has(s,'player info') end},
+  {'without an additional request',function(s) return Has(s,'without an additional request')
+   or Has(s,'without anyone asking') or Has(s,'unasked') end},
+  {'also when the summary is not queued',function(s) return Has(s,'summary')
+   and (Has(s,'not queued') or Has(s,'not admitted') or Has(s,'refused')) end},
+ }
+ local missing={}
+ for _,fact in ipairs(facts) do if not (auto and fact[2](auto)) then missing[#missing+1]=fact[1] end end
+ C.expect(auto~=nil and #missing==0 and #loose==0,
+  'R1: it says Automatic may also send a linked character-best Training Dummy or Lich King DPS record with its Echoes, unasked, also when the summary is not queued; no DPS sentence is unconditional',
+  (auto and ('missing: '..table.concat(missing,', ')) or 'no Automatic DPS sentence')..' | loose: '..table.concat(loose,' | ')..' | '..text)
  C.guard(text:find('cannot be recalled',1,true)~=nil and text:find('cannot confirm who received',1,true)~=nil,'R1: the recall and receipt statements stay',text)
  Dismiss(false)
 end)

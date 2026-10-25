@@ -87,7 +87,10 @@ local MAX_RESPONSE_BYTES = 16384
 local MAX_RESPONSE_SEND_SECONDS = 75
 local MAX_RESPONSE_TRANSFERS = 8
 local MAX_RESPONSE_CONCURRENT_TRANSFERS = 8
-local MAX_KNOWN_PEERS = 512
+-- Strict admission bound for retained peer identities (session MarkPeer map).
+-- New identities above this are refused with an explicit reason; existing
+-- rows may still refresh lastSeen.
+local MAX_KNOWN_PEERS = 256
 local SEND_INTERVAL   = 1.10   -- conservative channel pacing; avoids server chat spam/mutes
 local RECEIVE_WINDOW  = 60     -- compatibility/status timer; receiving is always enabled
 local INFLIGHT_GRACE  = 30     -- seconds to finish an interrupted chunk transfer
@@ -3774,9 +3777,15 @@ end
 local function AcceptPeer(sender, version)
     local parsed = version and Nexus.Version and Nexus.Version.Parse
         and Nexus.Version.Parse(version) or nil
-    local marked = Session.MarkPeer(sender,
+    local marked, why = Session.MarkPeer(sender,
         parsed and parsed.normalized or nil)
-    if marked and parsed and Nexus.Updates and Nexus.Updates.Observe then
+    if not marked then
+        stats.peerAdmissionRejected = (stats.peerAdmissionRejected or 0) + 1
+        LogEvent("RX", "REJECT peer identity '%s': %s",
+            tostring(sender), tostring(why or "admission refused"))
+        return false, why or "admission refused"
+    end
+    if parsed and Nexus.Updates and Nexus.Updates.Observe then
         pcall(Nexus.Updates.Observe, parsed, sender)
     end
     return true
@@ -4398,97 +4407,111 @@ Sync._phases.steps = {
 -- it: the update still runs every step in order.
 Sync._defaultSteps = Sync._phases.steps
 
-function Sync.OnUpdate(elapsed)
-    -- The phase state lives on the module table because this chunk is at the
-    -- Lua 5.1 local limit, which makes it writable from outside. Measurement
-    -- must never be able to stop the update, so it is read defensively once
-    -- and skipped entirely if anything replaced it.
-    -- Every field of that table is read with rawget and written with rawset,
-    -- so a metatable on it cannot raise on the guard line and stop all sync.
-    local phases = Sync._phases
-    if type(phases) ~= "table" or type(rawget(phases, "clock")) ~= "function"
-        or type(rawget(phases, "record")) ~= "function" then
-        phases = nil
-    end
-    -- The steps ARE the update, so they are never taken from the measurement
-    -- table while the list built at load is intact: emptying, replacing or
-    -- decoying Sync._phases.steps changes nothing. The copy there is read only
-    -- if the load-time list itself was lost.
-    -- STATED LIMIT, not a protection claim: both references are fields of the
-    -- module table, so whichever is read first wins, and whatever replaces
-    -- Sync._defaultSteps replaces the work. The list cannot be held in an
-    -- upvalue instead: this chunk is AT the Lua 5.1 limit of 200 locals in one
-    -- function, and even a block-scoped local here fails to compile
-    -- ("core/Sync.lua: main function has more than 200 local variables").
-    -- What is closed is the measurement path; an addon that overwrites another
-    -- addon's module fields can stop that addon, and always could.
-    local steps = Sync._defaultSteps
-    if type(steps) ~= "table" or #steps == 0 then
-        steps = phases and rawget(phases, "steps") or nil
-        if type(steps) ~= "table" then steps = nil end
-    end
-    -- Every clock and record call goes through pcall: a raising clock is a
-    -- measurement failure, and a measurement failure must never be a sync
-    -- failure. One raise disables measurement for this update and no more.
-    local function readClock()
-        if not phases then return nil end
-        local ok, value = pcall(rawget(phases, "clock"))
-        if ok and type(value) == "number" then return value end
-        phases = nil
-        return nil
-    end
-    local updateStarted = readClock()
-    local detail = phases and (tonumber(rawget(phases, "armed")) or 0) > 0
-        and updateStarted ~= nil
-    for index = 1, steps and #steps or 0 do
-        -- rawget on the LIST too, not only on the entry: `#` ignores __len in
-        -- Lua 5.1, so a list with a hole below its length reaches __index, and
-        -- a raising one there would raise out of the update on every frame.
-        local entry = rawget(steps, index)
-        -- rawget for the same reason as the phase table: a step entry carrying
-        -- a metatable must not raise on the guard line and stop every step
-        -- after it. Its `run` is called directly, so a failing step is still a
-        -- real failure of that step and reaches the owner isolation.
-        local run = type(entry) == "table" and rawget(entry, "run") or nil
-        if type(run) == "function" then
-            local skipped = false
-            local skip = rawget(entry, "skip")
-            if type(skip) == "function" then
-                local okSkip, result = pcall(skip)
-                skipped = okSkip and result and true or false
+-- Cap the 11 sync phases at 20 Hz. The accumulator lives in this factory's
+-- locals (not the chunk's 200-local budget, and not a Sync.* global field).
+Sync.OnUpdate = (function()
+    local UPDATE_INTERVAL = 0.05
+    local updateAccum = 0
+
+    return function(elapsed)
+        updateAccum = updateAccum + (tonumber(elapsed) or 0)
+        if updateAccum < UPDATE_INTERVAL then return end
+        -- Hand phases the real elapsed since the last run so tickers advance
+        -- correctly under hitching; then clear for the next 0.05s window.
+        elapsed = updateAccum
+        updateAccum = 0
+
+        -- The phase state lives on the module table because this chunk is at the
+        -- Lua 5.1 local limit, which makes it writable from outside. Measurement
+        -- must never be able to stop the update, so it is read defensively once
+        -- and skipped entirely if anything replaced it.
+        -- Every field of that table is read with rawget and written with rawset,
+        -- so a metatable on it cannot raise on the guard line and stop all sync.
+        local phases = Sync._phases
+        if type(phases) ~= "table" or type(rawget(phases, "clock")) ~= "function"
+            or type(rawget(phases, "record")) ~= "function" then
+            phases = nil
+        end
+        -- The steps ARE the update, so they are never taken from the measurement
+        -- table while the list built at load is intact: emptying, replacing or
+        -- decoying Sync._phases.steps changes nothing. The copy there is read only
+        -- if the load-time list itself was lost.
+        -- STATED LIMIT, not a protection claim: both references are fields of the
+        -- module table, so whichever is read first wins, and whatever replaces
+        -- Sync._defaultSteps replaces the work. The list cannot be held in an
+        -- upvalue instead: this chunk is AT the Lua 5.1 limit of 200 locals in one
+        -- function, and even a block-scoped local here fails to compile
+        -- ("core/Sync.lua: main function has more than 200 local variables").
+        -- What is closed is the measurement path; an addon that overwrites another
+        -- addon's module fields can stop that addon, and always could.
+        local steps = Sync._defaultSteps
+        if type(steps) ~= "table" or #steps == 0 then
+            steps = phases and rawget(phases, "steps") or nil
+            if type(steps) ~= "table" then steps = nil end
+        end
+        -- Every clock and record call goes through pcall: a raising clock is a
+        -- measurement failure, and a measurement failure must never be a sync
+        -- failure. One raise disables measurement for this update and no more.
+        local function readClock()
+            if not phases then return nil end
+            local ok, value = pcall(rawget(phases, "clock"))
+            if ok and type(value) == "number" then return value end
+            phases = nil
+            return nil
+        end
+        local updateStarted = readClock()
+        local detail = phases and (tonumber(rawget(phases, "armed")) or 0) > 0
+            and updateStarted ~= nil
+        for index = 1, steps and #steps or 0 do
+            -- rawget on the LIST too, not only on the entry: `#` ignores __len in
+            -- Lua 5.1, so a list with a hole below its length reaches __index, and
+            -- a raising one there would raise out of the update on every frame.
+            local entry = rawget(steps, index)
+            -- rawget for the same reason as the phase table: a step entry carrying
+            -- a metatable must not raise on the guard line and stop every step
+            -- after it. Its `run` is called directly, so a failing step is still a
+            -- real failure of that step and reaches the owner isolation.
+            local run = type(entry) == "table" and rawget(entry, "run") or nil
+            if type(run) == "function" then
+                local skipped = false
+                local skip = rawget(entry, "skip")
+                if type(skip) == "function" then
+                    local okSkip, result = pcall(skip)
+                    skipped = okSkip and result and true or false
+                end
+                if not skipped then
+                    local started = detail and readClock() or nil
+                    run(elapsed)
+                    if started and phases then
+                        pcall(rawget(phases, "record"), rawget(entry, "name"), started)
+                    end
+                end
             end
-            if not skipped then
-                local started = detail and readClock() or nil
-                run(elapsed)
-                if started and phases then
-                    pcall(rawget(phases, "record"), rawget(entry, "name"), started)
+        end
+        if phases and updateStarted then
+            local finished = readClock()
+            if finished then
+                local total = finished - updateStarted
+                local threshold = tonumber(rawget(phases, "thresholdMs")) or 50
+                if total >= 0 then
+                    rawset(phases, "lastTotal", total)
+                    local highest = tonumber(rawget(phases, "maxTotal"))
+                    if not highest or total > highest then
+                        rawset(phases, "maxTotal", total)
+                    end
+                    if total >= threshold then
+                        rawset(phases, "slowUpdates",
+                            (tonumber(rawget(phases, "slowUpdates")) or 0) + 1)
+                        rawset(phases, "armed", tonumber(rawget(phases, "window")) or 20)
+                    else
+                        local armed = tonumber(rawget(phases, "armed")) or 0
+                        if armed > 0 then rawset(phases, "armed", armed - 1) end
+                    end
                 end
             end
         end
     end
-    if phases and updateStarted then
-        local finished = readClock()
-        if finished then
-            local total = finished - updateStarted
-            local threshold = tonumber(rawget(phases, "thresholdMs")) or 50
-            if total >= 0 then
-                rawset(phases, "lastTotal", total)
-                local highest = tonumber(rawget(phases, "maxTotal"))
-                if not highest or total > highest then
-                    rawset(phases, "maxTotal", total)
-                end
-                if total >= threshold then
-                    rawset(phases, "slowUpdates",
-                        (tonumber(rawget(phases, "slowUpdates")) or 0) + 1)
-                    rawset(phases, "armed", tonumber(rawget(phases, "window")) or 20)
-                else
-                    local armed = tonumber(rawget(phases, "armed")) or 0
-                    if armed > 0 then rawset(phases, "armed", armed - 1) end
-                end
-            end
-        end
-    end
-end
+end)()
 
 -- Safe before catalog/hash readiness: only expire or disconnect a retained
 -- request. This never pumps recovery, hashes, or transport ahead of their gate.

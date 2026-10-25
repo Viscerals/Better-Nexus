@@ -21,7 +21,9 @@ local db=U.Serialize(NexusDB)
 for _=1,25 do F.Arm(W,plan)end
 local later=F.Facts(W)
 expect(later.revision==first.revision and later.retained==first.retained and later.dropped==first.dropped,'two-lever unchanged evaluation does not churn ring/revision')
-expect(W.O.reads-reads==50 and #W.O.calls==calls,'two existing member reads per evaluation, no diagnostic reads/sends')
+-- Two disable candidates: StepArm's disable scan and Level-1 progress counts
+-- each call LeverHasKnownMember once per lever (four discovery reads / arm).
+expect(W.O.reads-reads==100 and #W.O.calls==calls,'four discovery probes per two-lever arm, no diagnostic sends')
 expect(U.Serialize(NexusDB)==db,'normal no-op observer path writes no Store/SV fields')
 local beforeRevision=later.revision
 later.arm.gate='PRIVATE_TOME_SENTINEL';later.events[1].code='PRIVATE_TOME_SENTINEL';later.tracked.pending='PRIVATE_TOME_SENTINEL'

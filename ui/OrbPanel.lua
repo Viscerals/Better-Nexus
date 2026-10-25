@@ -94,7 +94,7 @@ local function inactiveControls()
     editLimit(false)
     if frame.cont then frame.cont:Hide()end
     -- With no run read, Start alone holds its place, disabled like the rest.
-    if frame.review then frame.review.drawnKey=nil;frame.review:Hide()end
+    if frame.review then frame.review:Hide();frame.review.drawnKey,frame.review.shownKey,frame.review.shownAction=nil,nil,nil end
     if frame.pause then frame.pause:Hide();frame.resume:Hide();frame.start:Show()end
     for _,b in ipairs(frame.mutations)do b:Disable()end
     frame.advanced:Hide();frame:SetHeight(RUN_H)
@@ -126,6 +126,10 @@ end
 -- key). Memory only: another assignment, leaving that state or closing the
 -- window clears it. It writes and sends nothing and can only withhold Resume;
 -- Resume itself still makes every runtime check and adopts what it reads.
+-- Review target and Cancel review act only on the exact target (key) and the
+-- action their button showed at the last refresh (its shownKey and
+-- shownAction): a click after the target changed reviews nothing, clears the
+-- review and refreshes, so the new target needs its own deliberate review.
 local review={key=nil}
 local function changedTarget(t) return type(t)=="table" and t.kind=="changed" end
 local function reviewHeld(t)
@@ -423,8 +427,13 @@ local function refresh()
     local detail=truthful(reason) or s.error or ""
     local cv=Nexus.OrbRuntime.ContinueView()
     local shownStatus,fullStatus
-    -- s.recovery is present only for a receipt restored after a reload.
-    if s.state=="RECOVERY" or (s.state=="PAUSED" and s.recovery~=nil) then
+    -- s.recovery is present only for a receipt restored after a reload, and
+    -- cv.explanation marks a restored record that is not running (the F1
+    -- explanation path, also when it is stopped). Both read in layers; the
+    -- headline keeps a PAUSED record's own label and names Continue only
+    -- where it is offered (recoveryHeadline).
+    if s.state=="RECOVERY" or (s.state=="PAUSED" and s.recovery~=nil)
+        or (s.pending and not s.running and cv.explanation==true) then
         shownStatus=recoveryHeadline(s.state,cv).."\n"..recoveryActions(cv).."\nDetails: "..detail
         fullStatus=shownStatus
     else
@@ -466,12 +475,15 @@ local function refresh()
         if cv.explanation==true or cv.eligible==true or stage=="checking" or stage=="ready" or stage=="refused" or stage=="done" then frame.cont:Show()else frame.cont:Hide()end
     end
     -- Review target shares Continue's place and is never shown with it.
-    -- The button acts only on the target it was drawn for: a click after the
-    -- target changed underneath it reviews nothing (see the handler).
+    -- The button acts only on the exact target it was drawn for and the
+    -- action it showed (drawnKey, shownKey, shownAction): a click after the
+    -- target or its review changed underneath it reviews and cancels nothing
+    -- (see the handler).
     if changedTarget(target) and target.key~=nil and not frame.cont:IsShown() then
         frame.review.drawnKey=target.key
         frame.review:SetText(held and "Review target" or "Cancel review");frame.review:Show();frame.review:Enable()
-    else frame.review.drawnKey=nil;frame.review:Hide() end
+        frame.review.shownKey,frame.review.shownAction=target.key,held and "review" or "cancel"
+    else frame.review:Hide();frame.review.drawnKey,frame.review.shownKey,frame.review.shownAction=nil,nil,nil end
     if advanced then frame.advanced:Show()else frame.advanced:Hide()end
     selected(frame.advancedToggle,advanced)
     frame:SetHeight(advanced and RUN_H_ADVANCED or RUN_H)
@@ -620,21 +632,29 @@ local function ensure()
     frame.cont:Hide()
     -- The deliberate review of a changed Resume target (see `review`). Review
     -- and Cancel review only record or clear it: nothing is resumed or spent.
+    -- A click acts only on the exact target and action this button showed;
+    -- a target that changed since the last refresh is never reviewed by it.
     frame.review=button(frame,470,-364,130,"Review target",function()
+        local shownKey,shownAction=frame.review.shownKey,frame.review.shownAction
         local t=Nexus.OrbRuntime.Status().resumeTarget
         local drawn=frame.review.drawnKey
         if not (changedTarget(t) and t.key~=nil) then
             review.key=nil;frame.notice:SetText("No changed target to review. Nothing was changed.")
-        elseif drawn~=t.key then
-            -- The fresh target is not the one this button was drawn for:
-            -- neither review nor cancel it unseen. Withholding stays.
+        elseif drawn==nil or shownKey==nil or drawn~=t.key or shownKey~=t.key then
+            -- The fresh target is not the one this button was drawn and shown
+            -- for: neither review nor cancel it unseen. Withholding stays.
             review.key=nil
-            frame.notice:SetText("The target changed after it was shown; nothing was reviewed. Check the target shown now.")
-        elseif review.key==t.key then
-            review.key=nil;frame.notice:SetText("Review cancelled. Resume stays withheld; nothing was spent.")
-        else
+            frame.notice:SetText("The target changed after it was shown; nothing was reviewed. Check the target shown now, then review it again. Nothing was spent.")
+        elseif not ((shownAction=="review" and reviewHeld(t)) or (shownAction=="cancel" and review.key==t.key)) then
+            -- The action shown no longer matches the fresh review state: a
+            -- stale Cancel review never becomes a review, nor the reverse.
+            -- The review is left as it is.
+            frame.notice:SetText("The review changed after it was shown; nothing was reviewed or cancelled. Check the target shown now. Nothing was spent.")
+        elseif shownAction=="review" then
             review.key=t.key
             frame.notice:SetText("Reviewed: Resume would use "..quotedName(t).." with the same maximum. Nothing was spent.")
+        else
+            review.key=nil;frame.notice:SetText("Review cancelled. Resume stays withheld; nothing was spent.")
         end
         UI.Refresh()
     end)
@@ -708,6 +728,7 @@ local function ensure()
     -- review.
     frame:SetScript("OnHide",function()
         editLimit(false);confirmNewRun=false;confirmAmount=nil;review.key=nil
+        frame.review.shownKey,frame.review.shownAction=nil,nil
         if logFrame then logFrame:Hide()end
     end)
     local elapsed=0;frame:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;UI.Refresh()end end)
@@ -1199,6 +1220,15 @@ function UI.AttachMainPanel(parent)
         elseif #v>STRIP_CHARS then cut=v:sub(1,STRIP_CHARS-3):gsub("[\192-\255][\128-\191]*$","").."..." end
         return (cut:gsub("|","||")),(v:gsub("|","||"))
     end
+    -- A paused target line: the second line's fact first, then the target
+    -- name, cut on a character boundary so the short kind caption after it
+    -- stays on the line; stripLine still bounds and escapes the whole line.
+    local function targetLine(fact,n,tag)
+        local room=math.max(4,STRIP_CHARS-#fact-#tag-3)
+        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then n=Nexus.LayoutMetrics.Truncate(n,room)
+        elseif #n>room then n=n:sub(1,room-3):gsub("[\192-\255][\128-\191]*$","").."..." end
+        return fact.."; "..n.." "..tag
+    end
     f.refresh=function()
         local s=Nexus.OrbRuntime.CompactStatus()
         if not s then f:Hide();return end
@@ -1206,16 +1236,32 @@ function UI.AttachMainPanel(parent)
         local usage=s.limitKnown==false and ("Orbs used: "..s.spent.."; max not recorded")
             or ("Orbs used: "..s.spent.." / "..s.limit.." approved")
         local second=s.reserved>0 and (s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending, not confirmed yet")
+            or (s.pending and "Last Orb action is not settled")
             or (s.remaining~=nil and (s.remaining.." target copies remaining")or "Target data unavailable")
         local third=phases[s.state]or s.state
         local what,instruction
         if s.state=="PAUSED" then what,instruction=compactTarget(s.resumeTarget) end
         if instruction then third=instruction end
+        -- CompactStatus has no restored/Continue stage. State the block only;
+        -- Details reads the exact explanation and action in the full window.
+        if s.state=="PAUSED" and s.pending and not s.canResume and not instruction then third="Paused - result must settle" end
         local shown,full=stripLine(second)
-        -- While paused, the target takes the second line; a pending Orb then
-        -- stays on the third.
+        -- While paused, the target shares the second line: that line's fact in
+        -- short first, then the bounded name and a short kind caption. The
+        -- tooltip keeps the complete target and fact lines; a pending Orb then
+        -- also stays on the third.
         if what then
-            shown,full=stripLine(what)
+            local t=s.resumeTarget
+            local fact=s.reserved>0 and (s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending")
+                or (s.pending and "last Orb not settled")
+                or (s.remaining~=nil and (s.remaining..(s.remaining==1 and " copy left" or " copies left")) or "? copies left")
+            local line=fact.."; "..what
+            if t.kind~="unavailable" then
+                line=targetLine(fact,t.name~=nil and ("'"..tostring(t.name):gsub("%c"," ").."'") or "an unnamed Wishlist",
+                    t.kind=="changed" and (t.returned and "(back)" or "(new)") or "(same)")
+            end
+            local _,whatFull=stripLine(what)
+            shown,full=stripLine(line),whatFull.."\n"..full
             if s.reserved>0 and third=="Paused" then third="Paused - "..s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending" end
         end
         setFull(f.summary,usage.."\n"..shown.."\n"..third,usage.."\n"..full.."\n"..third)
@@ -1345,14 +1391,8 @@ local function miniReason(v)
         local _,detail=miniText(MINI_UNREAD[v.kind]..(v.error~=nil and (" "..tostring(v.error)) or ""))
         return MINI_UNREAD_TEXT,MINI_UNREAD_TEXT.." "..detail
     end
-    -- Paused: the line names what Resume would act on; the run's reason stays
-    -- complete in the tooltip.
-    local what=v.state=="PAUSED" and compactTarget(v.target) or nil
-    if what then
-        local shown,full=miniText(what)
-        local _,reason=miniText(truthful(v.reason))
-        return shown,reason~="" and (full..". "..reason) or full
-    end
+    -- The run's current reason, as the runtime reports it (absent shows
+    -- nothing). A paused run's Resume target is named on the missing line.
     return miniText(truthful(v.reason))
 end
 local function miniUsage(v)
@@ -1372,12 +1412,40 @@ local function miniPending(v)
     if v.reserved>0 then
         return "Pending: "..miniNumber(v.reserved)..(v.reserved==1 and " Orb" or " Orbs").." requested, not confirmed yet"
     end
-    return v.pending and "Pending: the last Orb action is not settled" or "Pending: none"
+    return v.pending and "Last Orb result is not settled" or "Pending: none"
 end
 -- Copies, not families: CompactStatus.remaining is the run's rolled target
 -- copies still missing at its latest check. Absent is unavailable, never 0.
 local function miniMissing(v)
     return "Rolled target copies missing: "..(v.remaining and miniNumber(v.remaining) or "unavailable")
+end
+-- The missing line. While paused, when compactTarget names what Resume would
+-- act on, the line shows the rolled copies count first ("?" is unavailable,
+-- never 0), then the target's name in quotes, "(unnamed)" for a nameless
+-- Wishlist or "target ?" while the target is unknown. It is kept to 30
+-- columns (the 332 px line at the offline doubled-font model's 11 px per
+-- character, not a native measurement): a longer name is cut on a character
+-- boundary inside its quotes. The hover keeps the complete count, the
+-- complete target with its kind and the line's meaning.
+local function miniMissingLine(v)
+    local shown,full=miniText(miniMissing(v))
+    local what=v.kind=="run" and v.state=="PAUSED" and compactTarget(v.target) or nil
+    if not what then return shown,full end
+    local _,target=miniText(what)
+    local t,tail=v.target,"target ?"
+    shown="Rolled missing: "..(v.remaining and miniNumber(v.remaining) or "?").."; "
+    if t.kind~="unavailable" then
+        tail="(unnamed)"
+        if t.name~=nil then
+            local name=(tostring(t.name):gsub("%c"," "))
+            local room=math.max(4,math.floor(MINI_TEXT_W/11)-#shown-2)
+            if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then name=Nexus.LayoutMetrics.Truncate(name,room)
+            elseif #name>room then name=name:sub(1,room-3):gsub("[\192-\255][\128-\191]*$","").."..." end
+            tail="'"..name:gsub("|","||").."'"
+        end
+    end
+    shown=shown..tail
+    return shown,full..". "..target
 end
 local function miniKey(v)
     return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume),
@@ -1410,7 +1478,7 @@ local function miniRender()
     setFull(mini.reason,miniReason(v))
     setFull(mini.usage,miniText(miniUsage(v)))
     setFull(mini.pending,miniText(miniPending(v)))
-    setFull(mini.missing,miniText(miniMissing(v)))
+    setFull(mini.missing,miniMissingLine(v))
     -- An outcome belongs to the state it was shown for; a later change of that
     -- state retires it, so it never describes a newer state.
     local key=miniKey(v)

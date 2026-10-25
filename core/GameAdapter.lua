@@ -13,6 +13,13 @@ Nexus.GameAdapter = {}
 local A = Nexus.GameAdapter
 A.DIAGNOSTIC_PASSIVE = false
 
+-- Hot-path WoW API locals (Poll and its callees run ~5 Hz). UnitLevel is
+-- captured once. GetTime stays global so offline fixtures can replace it
+-- after load (tome pause provenance) without adding another New-scope local
+-- at the 200-local ceiling. IsAddOnLoaded stays on _G for the same reason
+-- (rival_picker_detection).
+local UnitLevel = UnitLevel
+
 -- Tome observations are session-only. No Store/history owner is used here.
 -- The working arm summary and 16 ring rows are allocated once, not per beat.
 -- Repeated multi-lever scans commit only if their final primitive facts change.
@@ -22,7 +29,8 @@ do
     local eventFields = {"seq","kind","code","lever","want","member","rawKind","cur","age","visited","passed"}
     local codes = {not_observed=true,auto=true,permission=true,plan=true,advisor=true,
         discovery=true,pause=true,spacing=true,eligible=true,opt_out=true,disabled=true,
-        visit_done=true,candidate=true,no_known_member=true,accepted=true,refused=true,
+        visit_done=true,expired_retry=true,candidate=true,no_known_member=true,
+        accepted=true,refused=true,
         passive=true,["no api"]=true,["unknown lever"]=true,["non-conformant lever"]=true,
         ["not level 1"]=true,pending=true,already=true,mirror_match=true,
         catalog_missing=true,expired=true,first=true,loadout=true,unknown=true}
@@ -316,6 +324,9 @@ local latchSince, deadLatch = {}, {}
 local slotsRetryAt, slotsRetries = nil, 0
 local slotsRefreshAt = 0
 local lastAutoAcceptState, lastRivalState = nil, nil
+-- Recycled scratch arrays for Poll callees that previously allocated {} every
+-- beat (ReconcileLegacyAssignments gate walk; ResolveInFlight board fingerprint).
+local legacyPartsScratch, legacyPlanScratch, resolvePartsScratch = {}, {}, {}
 local echoNotificationPending = false
 local echoSnapshot = nil
 local echoActiveSlot = 0
@@ -4181,6 +4192,30 @@ function A.DisabledLevers()
     return out
 end
 
+-- Typed current member observation for a single lever. DisabledLevers omits
+-- unreadable answers, so an absent key is not proof of enabled. Returns
+-- "disabled" (any readable true), "enabled" (every member is boolean false),
+-- or "unknown" (no members, mixed/unreadable answers, or no API).
+function A.LeverMirrorKind(leverId)
+    local cat = A.Catalog()
+    local svc = PS()
+    if not cat or not svc then return "unknown" end
+    local lv = cat.levers[leverId]
+    if not lv then return "unknown" end
+    local yes, no, unreadable, members = 0, 0, 0, lv.members or {}
+    if #members == 0 then return "unknown" end
+    for i = 1, #members do
+        local value = SafeCall(svc.IsTomeEchoDisabled, members[i])
+        if value == true then yes = yes + 1
+        elseif value == false then no = no + 1
+        else unreadable = unreadable + 1 end
+    end
+    if unreadable > 0 then return "unknown" end
+    if yes > 0 then return "disabled" end
+    if no > 0 then return "enabled" end
+    return "unknown"
+end
+
 function A.ToggleLever(leverId, wantDisabled)
     if A.DIAGNOSTIC_PASSIVE then
         A.TomeObservationAttempt(leverId,wantDisabled,"passive",0,"not_evaluated")
@@ -4202,6 +4237,9 @@ function A.ToggleLever(leverId, wantDisabled)
     if (UnitLevel("player") or 0) ~= 1 then A.TomeObservationAttempt(leverId,wantDisabled,"not level 1",0,"not_evaluated");return false, "not level 1" end
     local st = Store and Store.State()
     local pending = st and st.tomeTogglePending or {}
+    -- Per-lever only: another lever may be toggled while this one awaits
+    -- ReconcileTomePending. Blocking the same lever prevents a second
+    -- ToggleTomeEcho from flipping direction before the mirror settles.
     if pending[leverId] then A.TomeObservationAttempt(leverId,wantDisabled,"pending",0,"not_evaluated");return false, "pending" end
     -- effective state: any member disabled OR pending counts as disabled
     local cur = false
@@ -4234,12 +4272,19 @@ function A.ToggleLever(leverId, wantDisabled)
     return false, "refused"
 end
 
--- called from the poll: clear pending entries the server has confirmed
--- (mirror matches the requested direction) or that expired (30s) with no
--- reply. Expiry only counts once the session's mirror is authoritative
+-- called from the poll: clear pending entries the client mirror has confirmed
+-- or that expired with no match. Confirmation is NOT an aura or spell buff
+-- check: it re-reads ProjectEbonholdOptionsService:IsTomeEchoDisabled for
+-- each lever member (the same client catalog mirror DisabledLevers uses).
+-- Expiry is not proof that resubmission is safe: ToggleTomeEcho is a
+-- non-idempotent toggle, so a late first effect can be undone by a second
+-- call. AutomationRuntime visit-latches an accepted request and will not
+-- send another in that direction during the same level-1 visit.
+-- Expiry only counts once the session's discovery mirror is authoritative
 -- (first SS-530 arrived) and clamps timestamps from a previous boot
 -- (GetTime() restarts at reboot -- a persisted future timestamp would
 -- otherwise never expire).
+local TOME_PENDING_EXPIRE = 30
 local function ReconcileTomePending()
     local st = Store and Store.State()
     -- Every shaped row has this map, usually empty. With nothing pending the
@@ -4265,23 +4310,31 @@ local function ReconcileTomePending()
             sentAt = now
         end
         local lv = cat.levers[lever]
-        local cur, rawKind = false, "not_evaluated"
+        local cur, rawKind, readable = false, "not_evaluated", false
         if lv then
             for i = 1, #lv.members do
                 local value = SafeCall(svc.IsTomeEchoDisabled, lv.members[i])
-                if type(value) ~= "boolean" then rawKind = "mixed"
-                elseif rawKind == "not_evaluated" then rawKind = "boolean" end
-                if value then cur = true; break end
+                if type(value) == "boolean" then
+                    readable = true
+                    if rawKind == "not_evaluated" then rawKind = "boolean" end
+                    if value then cur = true; break end
+                else
+                    rawKind = "mixed"
+                end
             end
         end
-        local confirmed = lv and (cur == want)
-        local expired = mirrorLive and (now - sentAt) > 30
+        -- Only confirm from a readable boolean mirror. An unreadable member
+        -- answer must not count as "already enabled" (cur stays false). Age
+        -- still expires the pending entry so the UI is not stuck; expiry
+        -- does not authorize a second ToggleTomeEcho.
+        local confirmed = lv and readable and (cur == want)
+        local expired = mirrorLive and (now - sentAt) > TOME_PENDING_EXPIRE
         if confirmed or not lv or expired then
             A.TomeObservationResolve(lever,want,confirmed and "mirror_match"
                 or (not lv and "catalog_missing" or "expired"),cur,rawKind,now-sentAt)
-            -- clear silently: a genuine failure just leaves the echo in the
-            -- pool (mild), and we no longer disable unknown tomes (the cause
-            -- of the old per-lever "no confirmation" chat spam)
+            -- clear pending; a genuine failure just leaves the echo in the
+            -- pool (mild), and we no longer disable unknown tomes (the old
+            -- "no confirmation" spam)
             map[lever] = nil
             leverProjectionRevision = leverProjectionRevision + 1
         end
@@ -4522,8 +4575,9 @@ local function ResolveInFlight()
             local ch = p.currentChoice
             local resolvedSig = nil
             if type(ch) == "table" then
-                local parts = {}
-                for i = 1, #ch do parts[#parts + 1] = tostring(ch[i].spellId) end
+                local parts = resolvePartsScratch
+                for i = #parts, 1, -1 do parts[i] = nil end
+                for i = 1, #ch do parts[i] = tostring(ch[i].spellId) end
                 resolvedSig = table.concat(parts, ",")
             end
             -- The client's latch cleared. That ends the latch wait, not the
@@ -5126,8 +5180,10 @@ function A.RivalDetected()
     -- automation pauses while one is loaded. The addon name and slash-command
     -- key below belong to a separately distributed picker: they are exact
     -- compatibility detection keys, not Nexus names (THIRD_PARTY.md).
+    -- Read IsAddOnLoaded from _G each call so tests can replace the global.
+    local isAddOnLoaded = _G.IsAddOnLoaded
     return _G.EchoOptimizer ~= nil
-        or (type(IsAddOnLoaded) == "function" and IsAddOnLoaded("LoadoutPilot"))
+        or (type(isAddOnLoaded) == "function" and isAddOnLoaded("LoadoutPilot"))
         or (type(SlashCmdList) == "table" and type(SlashCmdList.LOADOUTPILOT) == "function")
 end
 
@@ -5886,10 +5942,19 @@ local function ReconcilePendingEchoState()
 end
 
 -- Rare Tome of Echo items use the stock bind-on-use popup. Pause only
--- Nexus's automatic ToggleTomeEcho traffic before the first click and for a
--- settling window after the item disappears. The popup remains stock-owned;
--- inspection below is read-only and secondary to carried-bag detection.
+-- Nexus's automatic ToggleTomeEcho traffic while that confirmation is visible
+-- and for a settling window after it closes. The popup remains stock-owned;
+-- inspection below is read-only. Carried bag copies are NOT a pause reason:
+-- lever arming uses ProjectEbonholdOptionsService:ToggleTomeEcho (a service
+-- call), so an inventory "Tome of Echo" would otherwise block level-1 wishlist
+-- enable/disable forever whenever one sits in bags.
+--
+-- Transaction boundary: the 0.2s Poll sample of StaticPopup visibility alone
+-- can miss a fast bind confirm (open+accept between polls). Native bind
+-- events and a StaticPopup_Show hook start the settle window immediately so
+-- a skipped sample cannot leave ToggleTomeEcho running through the confirm.
 local BIND_SETTLE_SECONDS = 20
+local bindBoundaryInstalled = false
 
 local function IsBindConfirmation(which, popupText)
     local key = tostring(which or ""):upper()
@@ -5900,29 +5965,37 @@ end
 
 local function HoldTomeMutations()
     tomeMutationPausedUntil = math.max(tomeMutationPausedUntil,
-        (GetTime and GetTime() or 0) + BIND_SETTLE_SECONDS)
+        (GetTime() or 0) + BIND_SETTLE_SECONDS)
 end
 
-local function EchoTomeInBags()
-    if type(GetContainerNumSlots) ~= "function"
-        or type(GetContainerItemLink) ~= "function" then
-        return false
+local function InstallBindTransactionBoundary()
+    if bindBoundaryInstalled then return end
+    bindBoundaryInstalled = true
+    -- Instant edge when the client requests bind confirmation. Cover the
+    -- common 3.3.5 names; pcall so a missing USE_BIND_CONFIRM does not fault.
+    local frame = CreateFrame("Frame")
+    frame:SetScript("OnEvent", function()
+        HoldTomeMutations()
+    end)
+    local events = {
+        "EQUIP_BIND_CONFIRM",
+        "AUTOEQUIP_BIND_CONFIRM",
+        "LOOT_BIND_CONFIRM",
+        "USE_BIND_CONFIRM",
+    }
+    for i = 1, #events do
+        pcall(frame.RegisterEvent, frame, events[i])
     end
-    for bag = 0, 4 do
-        local slots = tonumber(SafeCall(GetContainerNumSlots, bag)) or 0
-        for slot = 1, slots do
-            local link = SafeCall(GetContainerItemLink, bag, slot)
-            if type(link) == "string" then
-                local name = SafeCall(GetItemInfo, link)
-                    or link:match("%[(.-)%]")
-                if tostring(name or ""):lower():find(
-                    "tome of echo", 1, true) then
-                    return true
-                end
+    -- USE_BIND (Tome of Echo bag use) is often StaticPopup-only with no
+    -- dedicated event on 3.3.5. Hook Show so the settle window starts the
+    -- instant the dialog appears, before the next Poll sample.
+    if type(hooksecurefunc) == "function" then
+        hooksecurefunc("StaticPopup_Show", function(which)
+            if IsBindConfirmation(which, nil) then
+                HoldTomeMutations()
             end
-        end
+        end)
     end
-    return false
 end
 
 local function VisibleBindConfirmation()
@@ -5942,22 +6015,23 @@ local function VisibleBindConfirmation()
 end
 
 function A.TomeMutationPaused()
-    -- Preserve the existing short circuit: a positive bag detector does not
-    -- inspect popups. Retain that attribution rather than guessing both ran.
+    InstallBindTransactionBoundary()
     local source
-    if EchoTomeInBags() then source="bag"
-    elseif VisibleBindConfirmation() then source="popup" end
-    if source then
+    if VisibleBindConfirmation() then
+        source = "popup"
         HoldTomeMutations()
     end
-    local now=GetTime and GetTime() or 0
-    local paused=now<tomeMutationPausedUntil
+    local now = GetTime() or 0
+    local paused = now < tomeMutationPausedUntil
     A.TomeObservationPause(source or (paused and "settling" or "clear"),
-        math.max(0,tomeMutationPausedUntil-now))
+        math.max(0, tomeMutationPausedUntil - now))
     return paused
 end
 
 local function InstallHooks()
+    -- Bind settle must arm before the first 0.2s Poll sample; PE hooks below
+    -- may still be absent on early PEW, but StaticPopup/events are client-local.
+    InstallBindTransactionBoundary()
     local pe = PE()
     if not pe then return end
     if pe.PerkUI and type(pe.PerkUI.Show) == "function"
@@ -6241,8 +6315,9 @@ function A.AutomationSignature()
         granted=echoGenerations.granted,
         locked=echoGenerations.locked,
         discovery=echoGenerations.discovery,
-        tomeSafety=(EchoTomeInBags() or VisibleBindConfirmation())
-            and true or false,
+        -- Bind-popup only (same rule as TomeMutationPaused): bag copies of a
+        -- Tome of Echo must not flip the five-second automation signature.
+        tomeSafety=VisibleBindConfirmation() and true or false,
         state=state,
         settings=settings,
         associations=associations,
@@ -6256,7 +6331,8 @@ end
 -- only the Echo reconciliation and its active-slot generation. It runs the
 -- same reconciliation as AutomationSignature, and nothing of the rest of that
 -- five-second check (the character-row comparison through the Store mutation
--- entry, the bag scan for a Tome, the settings), whose results it discarded.
+-- entry, the bind-popup tome-safety probe, the settings), whose results it
+-- discarded.
 --
 -- Display-only opt-in (NX-02): only the boolean `true` (the Orb display read,
 -- OrbAdapter O.Read("display")) may reuse the last clean display scan for less
@@ -6383,7 +6459,8 @@ local function ReconcileLegacyAssignments()
     -- The attempt is keyed on the slot mirror's generation and on WHICH legacy
     -- records exist: a record that appears later (a Restore) is tried at once,
     -- not only after the mirror next changes.
-    local parts = {}
+    local parts = legacyPartsScratch
+    for i = #parts, 1, -1 do parts[i] = nil end
     for index, saved in pairs(links) do
         local wanted = LegacyAssignmentSlot(saved)
         if wanted then parts[#parts + 1] = tostring(index) .. ":" .. tostring(wanted) end
@@ -6398,7 +6475,7 @@ local function ReconcileLegacyAssignments()
         .. "|" .. tostring(NexusDB) .. "|" .. tostring(echoGenerations.slots)
         .. "|" .. table.concat(parts, ",")
     if legacyAssignmentsChecked == gate then return end
-    local now = GetTime and GetTime() or 0
+    local now = GetTime() or 0
     if now < legacyAssignmentsRetryAt then return end
     -- UpdateStateV1 falls back to a transient row (and still returns true) while
     -- the store cannot write the character's row durably; that is not a write.
@@ -6412,7 +6489,8 @@ local function ReconcileLegacyAssignments()
     local slots = A.Slots()
     if not slots then return end
     local live = LiveWishlistCandidates(slots)
-    local plan, incomplete = {}, false
+    local plan, incomplete = legacyPlanScratch, false
+    for i = #plan, 1, -1 do plan[i] = nil end
     for index, saved in pairs(links) do
         local wanted = LegacyAssignmentSlot(saved)
         if wanted then
@@ -6429,6 +6507,8 @@ local function ReconcileLegacyAssignments()
                         if type(c.key) ~= "string" or c.key == "" then
                             incomplete = true
                         else
+                            -- Plan rows are rare (only while the gate is open);
+                            -- recycling the row tables would need stable keys.
                             plan[#plan + 1] = {index = index, wanted = wanted,
                                 slot = c.slot, key = c.key, name = c.name}
                         end
@@ -6490,6 +6570,7 @@ end
 
 -- Main drives this from its OnUpdate (~0.2s cadence)
 function A.Poll()
+    local now = GetTime()
     ObserveRunBoundary()
     InstallHooks()
     ReconcilePendingBoardState()
@@ -6521,18 +6602,18 @@ function A.Poll()
     -- data has been seen at least once (handles the empty-{} window after a
     -- reset/reload); bounded so it never spins
     if not ownedSeen and pewDone and ownedRequestAt
-        and (GetTime() - ownedRequestAt) > 5 and ownedRetries < 5 then
+        and (now - ownedRequestAt) > 5 and ownedRetries < 5 then
         A.RequestGranted()
     end
     -- Keep the active Echo Wishlist selection fresh. The player can switch
     -- which designed build is active while the addon is already running, and
     -- the old slot snapshot may otherwise leave us targeting a previous
     -- wishlist. Refresh periodically; RequestSlots() itself is rate-limited.
-    if pewDone and GetTime() >= (slotsRefreshAt or 0) then
+    if pewDone and now >= (slotsRefreshAt or 0) then
         if A.RequestSlots() then
-            slotsRefreshAt = GetTime() + 5
+            slotsRefreshAt = now + 5
         else
-            slotsRefreshAt = GetTime() + 1
+            slotsRefreshAt = now + 1
         end
     end
 
@@ -6540,11 +6621,11 @@ function A.Poll()
     -- empty reply can be framed tab-less and silently dropped -- never an
     -- unbounded "waiting for slot data"
     if pewDone and slotsRetries < 5
-        and (GetTime() - (slotsRetryAt or -99)) > 6 then
+        and (now - (slotsRetryAt or -99)) > 6 then
         local svc = PS()
         if svc and SafeCall(svc.GetServerBuildSlots) == nil then
             if A.RequestSlots() then
-                slotsRetryAt = GetTime()
+                slotsRetryAt = now
                 slotsRetries = slotsRetries + 1
             end
         end

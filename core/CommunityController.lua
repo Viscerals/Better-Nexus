@@ -3078,6 +3078,20 @@ function Controller.New(options)
         if tostring(status.version or "") ~= representedVersion then
             return false, "build changed since the failed Share"
         end
+        -- Retry Share is not offered for a listing made from a Saved Build
+        -- (sourceSavedBuildId): it would send the listing again without the
+        -- confirmation that a Saved Build's Share action asks for. No
+        -- equivalent route is promised: import cleanup can remove the Saved
+        -- Build mirror while this listing stays; a later Share of the mirror
+        -- sends the mirror's current title, description and Echoes, which
+        -- can differ from this failed listing; and EditBuild can also share
+        -- an edited revision of this owned listing. Checked last: every
+        -- other refusal keeps its reason, and a Share-form build is unchanged.
+        if build.sourceSavedBuildId ~= nil then
+            return false, "Retry Share is not offered for a listing made from"
+                .. " a Saved Build; a Saved Build's Share action is separate"
+                .. " and asks for its own confirmation"
+        end
         return true, nil, status
     end
 

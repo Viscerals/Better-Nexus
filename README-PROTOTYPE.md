@@ -301,15 +301,25 @@ When it is blocked:
    **Updating results...**
 3. **Copy into Editor** creates a draft; it does not activate or spend.
    **Share Build...** on your own Saved Build asks you to confirm first. It then
-   saves the listing on this client and queues a short summary for other Nexus
-   users only if your saved Sync mode (**Sync mode...** beside **Sync Now**) and
-   the summary's size allow; with Sync Off nothing is queued. The listing's
-   Echo list and description are sent only in answers to players who ask for
-   it. A DPS record you hold for this exact build may also be queued separately
-   if your saved Sync mode allows it (Automatic does), and that record includes
-   its Echo list. Queued is not sent, and receipt by other players is not
-   confirmed. A shared build cannot be recalled. Sharing is separate from saving
-   a Wishlist or a Saved Build.
+   saves its title, description and Echo list as your shared listing on this
+   client and queues a short summary for other Nexus users only if your saved
+   Sync mode (**Sync mode...** beside **Sync Now**) and the summary's size
+   allow; with Sync Off nothing is queued. The summary has no Echo list or
+   description. The full listing, with its description and Echo list, can be
+   sent in answers to other Nexus users' requests. An answer can go on the
+   shared Sync channel, where any Nexus user who receives it may keep a valid
+   copy. In Automatic, if your character's best DPS on the Training Dummy
+   (a fight of at least 30 seconds) or the Lich King (at least 20 seconds) is
+   newly eligible and linked to this listing, Nexus may also send each such
+   DPS record with its Echoes, any locked Echoes and your player info (such as
+   character name, realm, class and level) without an additional request,
+   even if the summary is not queued. A personal best for these exact Echoes
+   that is lower than your character's best for that encounter stays on this
+   client. Receiving such a DPS record alone can give a player a Record
+   Loadout page with its Echoes that they can view and copy. The Manual and
+   Off Sync modes refuse these automatic DPS sends. Queued is not sent, and
+   receipt by other players is not confirmed. A shared build cannot be
+   recalled. Sharing is separate from saving a Wishlist or a Saved Build.
 
 - **Stop Sharing** removes the listing on this client; removal on other clients
   is not confirmed. Stop Sharing, administrator removal and deleting from My
