@@ -433,7 +433,7 @@ local function CreateToLockWidgets(f)
     local layout = Nexus.LayoutMetrics
     f.toLockLabel = f:CreateFontString(nil, "OVERLAY",
         layout and layout.FontObject("small") or "GameFontDisableSmall")
-    f.toLockLabel:SetText("LOCKED TARGETS")
+    f.toLockLabel:SetText((Nexus.Localization.Text("panel.heading.locked_targets")))
     f.toLockLabel:SetTextColor(0.7, 0.45, 1)
     f.toLockText = f:CreateFontString(nil, "OVERLAY",
         layout and layout.FontObject("small") or "GameFontHighlightSmall")
@@ -444,13 +444,13 @@ local function CreateToLockWidgets(f)
     f.toLockHit:SetScript("OnEnter", function(self)
         if #toLockNamesCache == 0 then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Locked targets remaining", 1, 1, 1)
-        GameTooltip:AddLine("These targets are planned for your locked Echo slots (a plan designs at most six target copies).", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("Acquire the exact requested Echo and quality first.", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("Owned copies still need to be placed in locked Echo slots.", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("Current locked Echo slots and card Freeze are separate.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.locked_remaining"), 1, 1, 1)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.locked_plan"), 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.locked_acquire"), 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.locked_placement"), 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.locked_not_freeze"), 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Still need to acquire:", 0.85, 0.6, 1)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.locked_acquire_list"), 0.85, 0.6, 1)
         for i, name in ipairs(toLockNamesCache) do
             GameTooltip:AddLine("  • " .. name, 0.85, 0.7, 1)
             if i >= 25 then
@@ -461,11 +461,17 @@ local function CreateToLockWidgets(f)
             end
         end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Click to open Wishlist Editor", 0.4, 0.8, 1)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.open_wishlist_editor"), 0.4, 0.8, 1)
         GameTooltip:Show()
     end)
     f.toLockHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.toLockHit:SetScript("OnMouseUp", function() if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end)
+    -- Issue #143: the heading keeps one line in its fixed layout box. While the
+    -- client shortens it, this row's own hover adds the complete heading
+    -- (LayoutMetrics.OneLineLabel); ApplyPanelLayout still owns its box.
+    if layout and type(layout.OneLineLabel) == "function" then
+        layout.OneLineLabel(f.toLockLabel, f.toLockHit, 11, "ANCHOR_RIGHT")
+    end
 end
 
 local function SetVisible(widget, shown)
@@ -815,7 +821,7 @@ local function EnsureFrame()
     frame._switchBtn = switchBtn
     switchBtn:SetSize(90, 19)
     switchBtn:SetPoint("TOPLEFT", 10, -26)
-    switchBtn:SetText("My Builds")
+    switchBtn:SetText((Nexus.Localization.Text("panel.button.my_builds")))
     switchBtn:SetScript("OnClick", function()
         CloseOtherNexusWindows()
         if Nexus.JournalTab and Nexus.JournalTab.OpenBuilds then
@@ -832,8 +838,8 @@ local function EnsureFrame()
     end)
     switchBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Open My Builds", 1, 1, 1)
-        GameTooltip:AddLine("Open the server My Builds page. Choosing a different Saved Build there changes the active loadout.", 0.75, 0.75, 0.75, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.open_my_builds"), 1, 1, 1)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.my_builds_destination"), 0.75, 0.75, 0.75, true)
         -- M4 (UX-04): what this panel's run belongs to, from the facts the
         -- shown model already carries (M.DestinationLines). Read-only.
         local lines = M.DestinationLines(M._lastModel)
@@ -1065,12 +1071,23 @@ local function EnsureFrame()
     pcall(function() rollDivider:SetTexture(0.3, 0.3, 0.3, 0.65) end)
 
     progressLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    progressLabel:SetText("PROGRESS")
+    progressLabel:SetText((Nexus.Localization.Text("panel.heading.progress")))
+    -- Issue #143: each mapped heading stays one line in its fixed layout box.
+    -- While the client shortens a longer heading, a hover over it shows the
+    -- complete heading (LayoutMetrics.OneLineLabel). Created once here, shown
+    -- and hidden with the heading (ShowCoreProgress). Frame fields, not new
+    -- locals: EnsureFrame is at the Lua 5.1 upvalue limit.
+    frame._progressLabelHit = HitFrame(frame, progressLabel)
+    frame._progressLabelHit:Hide()
+    Nexus.LayoutMetrics.OneLineLabel(progressLabel, frame._progressLabelHit, 11)
     progressValue = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     progressValue:SetTextColor(1, 0.5, 0.2)
 
     needLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    needLabel:SetText("STILL NEEDED")
+    needLabel:SetText((Nexus.Localization.Text("panel.heading.still_needed")))
+    frame._needLabelHit = HitFrame(frame, needLabel)
+    frame._needLabelHit:Hide()
+    Nexus.LayoutMetrics.OneLineLabel(needLabel, frame._needLabelHit, 11)
 
     tomesLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     tomesLabel:SetText("MISSING\nTOMES")
@@ -1151,14 +1168,17 @@ local function EnsureFrame()
             end
         end
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Click to open Wishlist Editor", 0.4, 0.8, 1)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.open_wishlist_editor"), 0.4, 0.8, 1)
         GameTooltip:Show()
     end)
     needHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
     needHit:SetScript("OnMouseUp", function() if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end)
 
     shedLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    shedLabel:SetText("EXTRA COPIES")
+    shedLabel:SetText((Nexus.Localization.Text("panel.heading.extra_copies")))
+    frame._shedLabelHit = HitFrame(frame, shedLabel)
+    frame._shedLabelHit:Hide()
+    Nexus.LayoutMetrics.OneLineLabel(shedLabel, frame._shedLabelHit, 11)
     shedText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     shedText:SetSize(136, 46)
     shedText:SetJustifyH("LEFT")
@@ -1248,7 +1268,7 @@ local function EnsureFrame()
     -- step is explicit and immediately reachable from onboarding.
     setupGetStartedBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     setupGetStartedBtn:SetSize(126, 24)
-    setupGetStartedBtn:SetText("Assign Wishlist")
+    setupGetStartedBtn:SetText((Nexus.Localization.Text("panel.button.assign_wishlist")))
     setupGetStartedBtn:SetScript("OnClick", function()
         local journal = Nexus.JournalTab
         if journal and journal.OpenBuilds then
@@ -1275,26 +1295,26 @@ local function EnsureFrame()
     end)
     setupGetStartedBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Assign Wishlist", 1, 1, 1)
-        GameTooltip:AddLine("Opens the Echo Journal with its Wishlist chooser for this loadout. Nothing is assigned until you choose a Wishlist there.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.assignment_heading"), 1, 1, 1)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.assignment_chooser"), 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
     end)
     setupGetStartedBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     setupImportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     setupImportBtn:SetSize(126, 24)
-    setupImportBtn:SetText("Create Wishlist")
+    setupImportBtn:SetText((Nexus.Localization.Text("panel.button.create_wishlist")))
     setupImportBtn:SetScript("OnClick", function()
         CloseOtherNexusWindows()
         if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end
     end)
     setupImportBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Import or create a wishlist", 1, 1, 1)
-        GameTooltip:AddLine("Paste a wishlist string or build one directly in Nexus.", 0.9, 0.9, 0.9, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.create_wishlist_heading"), 1, 1, 1)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.create_wishlist_source"), 0.9, 0.9, 0.9, true)
         -- M4 (M2 O1): this button only opens the editor. The editor's own
         -- Create & assign / Create unassigned actions are what save.
-        GameTooltip:AddLine("This opens the Wishlist editor with a draft. Nothing is saved or assigned until you press Create & assign or Create unassigned there.", 0.75, 0.75, 0.75, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.create_wishlist_draft"), 0.75, 0.75, 0.75, true)
         GameTooltip:Show()
     end)
     setupImportBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1810,6 +1830,8 @@ local function ShowCoreProgress(show)
     local showToLock = show and #toLockNamesCache > 0
     if frame then
         SetVisible(frame.toLockLabel, showToLock); SetVisible(frame.toLockText, showToLock); SetVisible(frame.toLockHit, showToLock)
+        -- Issue #143: the mapped headings' full-text hovers follow their headings.
+        SetVisible(frame._progressLabelHit, show); SetVisible(frame._needLabelHit, show); SetVisible(frame._shedLabelHit, show)
     end
 end
 
@@ -2220,7 +2242,7 @@ local function ApplyModel(model, signatures, roll)
     LayoutFooter(showAutoControl, complete and not noBuild)
 
     frame._buildHeaderText:SetText(name and ("|cff7fd5ff" .. ShortName(name, 29) .. "|r" .. (pr.isCommunityPreview and " |cff888888[Preview]|r" or "")) or "|cff7fd5ffNexus|r")
-    frame._switchBtn:SetText("My Builds")
+    frame._switchBtn:SetText((Nexus.Localization.Text("panel.button.my_builds")))
 
     SetVisible(frame._rollArea, rollBlock)
     frame._rollArea:ClearAllPoints()
@@ -2409,7 +2431,7 @@ local function ApplyModel(model, signatures, roll)
             or string.format("%d / %d rolled copies this run", owned, total))
 
         SetPoint(needLabel, "TOPLEFT", frame, "TOPLEFT", 12, contentTop - 42)
-        needLabel:SetText("STILL NEEDED")
+        needLabel:SetText((Nexus.Localization.Text("panel.heading.still_needed")))
 
         if #unknownTomesCache > 0 then
             -- Tomes are metadata for the run, not a third content column.
@@ -2782,7 +2804,7 @@ local LANGUAGE_REASONS = {
     invalid = "that language is not available",
     failed = "the saved-data owner did not take it",
 }
-local LANGUAGE_SCOPE = "Only six messages are translated: five status messages and the Banish/Reroll/Freeze count row; other Nexus text stays English."
+local LANGUAGE_SCOPE = "Only selected main-panel labels and tooltips, status messages and the compact charge-count row are translated; other Nexus text stays English. Translations are drafts pending fluent and native review."
 local LANGUAGE_RELOAD = "A new choice applies after you reload the interface or log in again."
 
 local function LanguageName(status, id)

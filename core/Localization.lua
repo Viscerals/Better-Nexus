@@ -4,9 +4,10 @@
 -- asks for a stable semantic key ("reason.save_in_progress") and gets text.
 -- This file reads no game API, client locale, saved data or setting, and it
 -- prints, sends, schedules or saves nothing. Its state is the English base
--- and the optional packs copied at load (each pack covers at most the
--- six-message cohort: five static messages and the charge-row template; all
--- other Nexus text stays English), the
+-- and the optional packs copied at load (draft text, pending fluent and
+-- native review, for reviewed English keys only: a bounded subset of Panel
+-- labels and tooltips, status messages and the readout charge-row template;
+-- all other Nexus text stays English), the
 -- session's active language (set once from the ID its caller supplies, see
 -- below) and the fixed-size diagnostic record below.
 --
