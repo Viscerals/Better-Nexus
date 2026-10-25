@@ -1423,14 +1423,8 @@ local function miniReason(v)
         local _,detail=miniText(MINI_UNREAD[v.kind]..(v.error~=nil and (" "..tostring(v.error)) or ""))
         return MINI_UNREAD_TEXT,MINI_UNREAD_TEXT.." "..detail
     end
-    -- Paused: the line names what Resume would act on; the run's reason stays
-    -- complete in the tooltip.
-    local what=v.state=="PAUSED" and compactTarget(v.target) or nil
-    if what then
-        local shown,full=miniText(what)
-        local _,reason=miniText(truthful(v.reason))
-        return shown,reason~="" and (full..". "..reason) or full
-    end
+    -- The run's current reason, as the runtime reports it (absent shows
+    -- nothing). A paused run's Resume target is named on the missing line.
     return miniText(truthful(v.reason))
 end
 local function miniUsage(v)
@@ -1477,6 +1471,20 @@ end
 local function miniMissing(v)
     return "Rolled target copies missing: "..(v.remaining and miniNumber(v.remaining) or "unavailable")
 end
+-- The missing line. While paused, when compactTarget names what Resume would
+-- act on, the line also shows that after its count. The count keeps its kind
+-- (rolled copies; "?" is unavailable, never 0) and stays first, so a line
+-- that is too long is cut on a character boundary only inside the target.
+-- The hover keeps the complete count, the complete target and the line's
+-- meaning.
+local function miniMissingLine(v)
+    local shown,full=miniText(miniMissing(v))
+    local what=v.kind=="run" and v.state=="PAUSED" and compactTarget(v.target) or nil
+    if not what then return shown,full end
+    local _,target=miniText(what)
+    shown=miniText("Rolled copies missing: "..(v.remaining and miniNumber(v.remaining) or "?").."; "..what)
+    return shown,full..". "..target
+end
 local function miniKey(v)
     return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume),
         tostring(v.recoveryPhase),tostring(v.recoveryKind),tostring(v.target and v.target.kind)},"|")
@@ -1508,7 +1516,7 @@ local function miniRender()
     setFull(mini.reason,miniReason(v))
     setFull(mini.usage,miniText(miniUsage(v)))
     setFull(mini.pending,miniPendingLine(v))
-    setFull(mini.missing,miniText(miniMissing(v)))
+    setFull(mini.missing,miniMissingLine(v))
     -- An outcome belongs to the state it was shown for; a later change of that
     -- state retires it, so it never describes a newer state.
     local key=miniKey(v)
