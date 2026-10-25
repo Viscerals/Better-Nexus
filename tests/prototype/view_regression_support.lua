@@ -284,4 +284,111 @@ function V.TooltipLines(fn,...)
  return lines,result[1],result[2]
 end
 
+-- Bounded presentation observer. Sync.Stats initializes three diagnostic view
+-- fields, so call it ONCE at setup and retain its live monotonic counter table.
+-- RecomputeStats' adapter getters copy counters; Store.Settings is warmed here.
+-- This observes the harness's modeled mutation APIs, not arbitrary deferred
+-- client work or direct writes subsequently undone inside an unmodeled API.
+function V.Same(a,b,seen)
+ if type(a)~='table' or type(b)~='table'then return a==b end
+ seen=seen or {};if seen[a]then return seen[a]==b end;seen[a]=b
+ for k,v in pairs(a)do if not V.Same(v,b[k],seen)then return false end end
+ for k in pairs(b)do if a[k]==nil then return false end end
+ return true
+end
+function V.PresentationObserver(H)
+ local O={events=0}
+ local stats=Nexus.Sync.Stats()
+ assert(type(stats)=='table' and type(stats.admittedPackets)=='number','SETUP: numeric transport admissions')
+ Nexus.Store.Settings()
+ local adapter=Nexus.GameAdapter
+ local assignment=adapter.AssignmentActionSnapshot()
+ assert(type(assignment.tokens)=='table' and next(assignment.tokens)~=nil,'SETUP: nonempty assignment tokens')
+ function O.Snapshot()
+  local runtime=Nexus.RecomputeStats()
+  assert(type(stats.admittedPackets)=='number','transport admissions remain numeric')
+  return {actions=#H.actions,sent=#H.sent,queued=stats.admittedPackets,chat=#H.chat,
+   events=O.events,popup=H.popup,warning=Nexus.OverwriteWarning.IsOpen(),auto=runtime.autoEnabled,
+   settings=H.Clone(Nexus.Store.Settings()),assignment=adapter.AssignmentActionSnapshot(),
+   granted=H.grantedRequests,slots=H.slotRequests,
+   pending=Nexus.Scheduler.Pending(),nextStepAt=runtime.nextStepAt}
+ end
+ -- Wrappers forward all returns/errors and are always removed before a caller
+ -- (including C.scenario) receives an error. Count attempts, including a popup
+ -- shown and hidden or a failed actor operation, rather than only final state.
+ function O.Measure(fn,...)
+  local saved,installed={},{}
+  local function hook(owner,key)
+   if type(owner)~='table' or type(owner[key])~='function'then return end
+   installed[owner]=installed[owner] or {};if installed[owner][key]then return end
+   installed[owner][key]=true
+   local own,original=rawget(owner,key),owner[key]
+   saved[#saved+1]={owner,key,own}
+   owner[key]=function(...)O.events=O.events+1;return original(...)end
+  end
+  hook(_G,'print');hook(_G,'StaticPopup_Show');hook(_G,'SendChatMessage');hook(_G,'SendAddonMessage')
+  for _,owner in ipairs({DEFAULT_CHAT_FRAME,UIErrorsFrame,ChatFrame1})do hook(owner,'AddMessage')end
+  for _,key in ipairs({'RequestAuto','CancelAuto'})do hook(Nexus.OverwriteWarning,key)end
+  for _,key in ipairs({'After','Every','Cancel'})do hook(Nexus.Scheduler,key)end
+  hook(Nexus,'RequestRecompute');hook(Nexus,'DisableOrdinaryAutomation')
+  local authority=Nexus.MainInternals and Nexus.MainInternals.StoreAuthorityOwner
+  hook(authority,'UpdateSettingsV1');hook(authority,'UpdateStateV1')
+  for _,key in ipairs({'SelectPerk','BanishPerk','FreezePerk','RequestReroll','LockPerk','UnlockPerk',
+   'ToggleTomeEcho','ActivateServerBuildSlot','SaveServerBuildSlot','UploadServerBuildSlot',
+   'RequestServerBuildSlots','RequestGrantedPerks'})do hook(H.service,key)end
+  for _,key in ipairs({'SetFirstRunWishlist','SetFirstRunWishlistIdentity','ClearFirstRunWishlist',
+   'SetLoadoutWishlistIdentity','SetFirstLoadoutWishlistIdentity','SetLoadoutWishlist','ClearLoadoutWishlist'})do hook(adapter,key)end
+  for _,key in ipairs({'Start','Confirm','Prepare','ContinueConfirm','ConfirmLimit','Pause','Stop','Resume',
+   'SetLimit','SetRecycle','SetSource','Exclude','ClearExclusions','Recheck'})do hook(Nexus.OrbRuntime,key)end
+  local function restore()
+   for i=#saved,1,-1 do local s=saved[i];rawset(s[1],s[2],s[3])end
+  end
+  local before,after
+  local result=Pack(pcall(function(...)
+   before=O.Snapshot()
+   local value=Pack(pcall(fn,...))
+   after=O.Snapshot()
+   return value
+  end,...))
+  restore()
+  if not result[1]then error(result[2],0)end
+  return result[2],V.Same(before,after),before,after
+ end
+ function O.Quiet(label,fn,...)
+  local result,quiet=O.Measure(fn,...)
+  if not result[1]then error(result[2],0)end
+  assert(quiet,'presentation effects: '..label)
+  return unpack(result,2,result.n)
+ end
+ function O.Instrument()
+  local log={render={},status={},calls=0,loud=0,errors=0}
+  local render,status=Nexus.Panel.Render,Nexus.Panel.SetStatus
+  local function enclosed(fn,...)
+   local measured=Pack(pcall(O.Measure,fn,...))
+   log.calls=log.calls+1
+   if not measured[1]then log.errors=log.errors+1;error(measured[2],0)end
+   local result,quiet=measured[2],measured[3]
+   if not quiet then log.loud=log.loud+1 end
+   if not result[1] or (fn==render and result[2]==false)then log.errors=log.errors+1 end
+   if not result[1]then error(result[2],0)end
+   return unpack(result,2,result.n)
+  end
+  Nexus.Panel.Render=function(model,...)
+   log.render[#log.render+1]=H.Clone(model);return enclosed(render,model,...)
+  end
+  Nexus.Panel.SetStatus=function(value,...)
+   log.status[#log.status+1]=value;return enclosed(status,value,...)
+  end
+  function log.restore()Nexus.Panel.Render,Nexus.Panel.SetStatus=render,status end
+  function log.Run(fn,...)
+   local result=Pack(pcall(fn,...));log.restore()
+   if not result[1]then error(result[2],0)end
+   assert(log.calls>0 and log.loud==0 and log.errors==0,'runtime presentation calls/errors/effects')
+   return unpack(result,2,result.n)
+  end
+  return log
+ end
+ return O
+end
+
 return V
