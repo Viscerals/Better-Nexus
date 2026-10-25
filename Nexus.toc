@@ -10,6 +10,8 @@ data\Release.lua
 data\DefaultProfile.lua
 data\BundledBuilds.lua
 logic\Version.lua
+data\LocalizationEnglish.lua
+core\Localization.lua
 core\UserText.lua
 core\Performance.lua
 core\StutterAlertIntegration.lua
