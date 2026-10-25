@@ -1464,15 +1464,15 @@ local function miniPending(v)
     if v.reserved==nil or v.pending==nil then return "Pending: unavailable" end
     if v.uncertain==nil or v.unconfirmedResults==nil or v.historyKnown~=true
         or v.uncertain>0 or v.unconfirmedResults>0 then
-        return (v.pending and "Pending: not settled; " or "").."Unknown spend: "..(v.uncertain~=nil and miniNumber(v.uncertain) or "unavailable").."; current exposure: "..miniNumber(v.reserved)
+        return (v.pending and "Last Orb result not settled; " or "").."Unknown spend: "..(v.uncertain~=nil and miniNumber(v.uncertain) or "unavailable").."; current exposure: "..miniNumber(v.reserved)
             ..(v.historyKnown~=true and (v.historyKnown==false and "; earlier outcome/check totals unavailable after reload" or "; earlier outcome/check totals unavailable")
                 or "; unconfirmed outcomes: "..(v.unconfirmedResults~=nil and miniNumber(v.unconfirmedResults) or "unavailable"))
-            ..(v.pending and "; action pending" or "")
+            ..(v.pending and "; awaiting Orb result" or "")
     end
     if v.reserved>0 then
         return "Pending: "..miniNumber(v.reserved)..(v.reserved==1 and " Orb" or " Orbs").." requested, not confirmed yet"
     end
-    return v.pending and "Pending: the last Orb action is not settled" or "Pending: none"
+    return v.pending and "Last Orb result is not settled" or "Pending: none"
 end
 local function miniPendingLine(v)
     local shown,full=miniText(miniPending(v))
