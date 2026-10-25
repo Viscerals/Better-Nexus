@@ -1,9 +1,13 @@
 -- Nexus: ui/CallboardStatus.lua
 -- Read-only mirror of the accepted Callboard objective and its difficulty
--- rewards. Sources: EbonAPI.Ebonhold.Objectives and EbonholdQuestTracker (the
--- PE tracker shown in fstack). Never falls back to generic WatchFrame/quest-
--- watch entries (that grabbed unrelated quests like "One More Door") and
--- never calls SelectQuestLogEntry. Stock trackers stay until the Nexus row
+-- rewards. Sources: EbonAPI.Ebonhold.Objectives and the objectiveData of the
+-- tracker reward bag. EbonholdQuestTracker text (the PE tracker shown in
+-- fstack) never names an objective: it only selects or adds progress to one
+-- those sources established. Two different known positive quest IDs are two
+-- objectives even under one title, and neither lends the other quest-log
+-- progress or reward rows. Never falls back to generic WatchFrame/quest-watch
+-- entries (that grabbed unrelated quests like "One More Door") and never
+-- calls SelectQuestLogEntry. Stock trackers stay until the Nexus row
 -- for the same objective is visible, and only the state Nexus changed is
 -- restored. Passive reward reads do not drive foreign enter/leave handlers.
 
@@ -16,8 +20,11 @@ local elapsed = 0
 local cachedSummary = { observed = false }
 local cachedSignature = ""
 local remembered
-local scrapedRewards
-local scrapedForTitle
+-- Reward rows read from a tooltip the game showed, kept with the identity of
+-- the objective its owner named: { rows, title, questId }.
+local scraped
+-- Identity of the last observed objective; it keeps a known positive ID.
+local lastIdentity
 local showingOwnTooltip = false
 local hookedObjectivesUI = false
 local hookedQuestTracker = false
@@ -112,6 +119,39 @@ local function ObjectiveBlurb(objective)
     return text ~= "" and text or nil
 end
 
+local function PositiveId(value)
+    local id = tonumber(value) or 0
+    if id > 0 then return id end
+    return 0
+end
+
+-- An objective identity: its normalized title and its positive quest ID, or
+-- 0 when none is known.
+local function ObjectiveIdentity(objective)
+    local title = QuestTitle(objective)
+    if not title then return nil end
+    return {
+        title = NormalizeTitle(title),
+        questId = PositiveId(objective.questId or objective.id),
+    }
+end
+
+-- Two different known positive quest IDs name two objectives, whatever their
+-- titles. A missing ID is no conflict.
+local function IdsConflict(a, b)
+    a, b = PositiveId(a), PositiveId(b)
+    return a > 0 and b > 0 and a ~= b
+end
+
+-- The same objective: one nonempty normalized title and no ID conflict.
+local function SameIdentity(a, b)
+    if type(a) ~= "table" or type(b) ~= "table" then return false end
+    if type(a.title) ~= "string" or a.title == "" or a.title ~= b.title then
+        return false
+    end
+    return not IdsConflict(a.questId, b.questId)
+end
+
 local function SnapshotObjective(objective)
     if type(objective) ~= "table" then return nil end
     local title = QuestTitle(objective)
@@ -152,7 +192,7 @@ local function ReadActiveObjective()
     if service and type(service.GetActiveObjective) == "function" then
         local active = CallService(service, "GetActiveObjective")
         if type(active) == "table" and QuestTitle(active) then
-            return active
+            return active, "active"
         end
     end
     local ok, bagData = pcall(function()
@@ -164,7 +204,7 @@ local function ReadActiveObjective()
         return type(bag) == "table" and bag.objectiveData or nil
     end)
     if ok and type(bagData) == "table" and QuestTitle(bagData) then
-        return bagData
+        return bagData, "bag"
     end
     return nil
 end
@@ -174,42 +214,57 @@ local function ReadCurrentObjectives()
     return type(list) == "table" and list or nil
 end
 
+-- The quest-log row of this objective, and whether the log holds its title
+-- under another known positive quest ID. Such a row is another quest: its
+-- progress and ID are never this objective's, and while it is there a
+-- same-title row without an ID does not stand in for the objective either.
 local function QuestLogMatch(objective)
-    local ok, match = pcall(function()
+    local ok, match, conflict = pcall(function()
         local title = QuestTitle(objective)
-        local questId = tonumber(objective and (objective.questId or objective.id)) or 0
-        if (not title or title == "") and questId <= 0 then return nil end
+        local questId = PositiveId(objective and (objective.questId or objective.id))
+        if (not title or title == "") and questId <= 0 then return nil, false end
         if type(GetNumQuestLogEntries) ~= "function" or type(GetQuestLogTitle) ~= "function" then
-            return nil
+            return nil, false
         end
         local want = title and NormalizeTitle(title) or nil
         local count = GetNumQuestLogEntries() or 0
-        local idOnly = nil
+        local idOnly, exact, untagged, conflicting = nil, nil, nil, false
         for i = 1, count do
             -- 3.3.5 + Ebonhold: title, level, tag, suggestedGroup, isHeader, isCollapsed, isComplete, isDaily, questID
             local logTitle, _, _, _, isHeader, _, isComplete, _, logQuestId = GetQuestLogTitle(i)
             if not isHeader then
+                local logId = PositiveId(logQuestId)
                 local row = {
                     title = Strip(logTitle or title or ""),
                     index = i,
-                    questId = tonumber(logQuestId) or questId,
+                    questId = logId > 0 and logId or questId,
                     isComplete = tonumber(isComplete) or 0,
                 }
                 -- A stored id can name a different log row than the objective
                 -- title. Progress from that row is not this objective's.
                 if want and want ~= "" and logTitle and NormalizeTitle(logTitle) == want then
-                    return row
+                    if questId > 0 and logId == questId then
+                        exact = exact or row
+                    elseif IdsConflict(questId, logId) then
+                        conflicting = true
+                    else
+                        untagged = untagged or row
+                    end
                 end
-                if not idOnly and questId > 0 and tonumber(logQuestId) == questId then
+                if not idOnly and questId > 0 and logId == questId then
                     idOnly = row
                 end
             end
         end
-        if want and want ~= "" then return nil end
-        return idOnly
+        if want and want ~= "" then
+            if exact then return exact, conflicting end
+            if conflicting then return nil, true end
+            return untagged, false
+        end
+        return idOnly, false
     end)
-    if not ok then return nil end
-    return match
+    if not ok then return nil, false end
+    return match, conflict == true
 end
 
 local function QuestLogLinesForIndex(index, isComplete)
@@ -863,20 +918,27 @@ end
 -- Legitimate sources for the callboard quest:
 --   1. ProjectEbonhold.ObjectivesService.GetActiveObjective() / ObjectiveTrackerFrame.rewardBagFrame.objectiveData
 --   2. ProjectEbonhold.ObjectivesService.GetCurrentObjectives() matched against the quest log
---   3. EbonholdQuestTracker when ObjectiveTrackerFrame is active
+--   3. an objective remembered from those sources that still matches
+-- EbonholdQuestTracker text names no objective: a shown ObjectiveTrackerFrame
+-- does not make its first ordinary quest a Callboard one. A tracker title only
+-- selects, or adds progress lines to, an objective of that title from a source
+-- above, and not while the quest log holds that title under another known
+-- quest ID.
 local function ResolveObjective()
     local _, trackerTexts = CollectTrackerTexts()
     local trackerObj, trackerLines = ParseTrackerQuest(trackerTexts)
+    local trackerTitle = trackerObj and NormalizeTitle(trackerObj.title) or nil
+    if trackerTitle == "" then trackerTitle = nil end
 
-    local active = ReadActiveObjective()
+    local active, activeSource = ReadActiveObjective()
     if type(active) == "table" and QuestTitle(active) then
         local snap = Remember(active)
         if snap then
             local useLines = nil
-            if trackerObj and NormalizeTitle(snap.title) == NormalizeTitle(trackerObj.title) then
+            if trackerTitle and NormalizeTitle(snap.title) == trackerTitle then
                 useLines = trackerLines
             end
-            return snap, useLines
+            return snap, useLines, activeSource
         end
     end
 
@@ -885,72 +947,106 @@ local function ResolveObjective()
         for i = 1, #list do
             local snap = SnapshotObjective(list[i])
             if snap then
-                if trackerObj and NormalizeTitle(snap.title) == NormalizeTitle(trackerObj.title) then
+                local tracked = trackerTitle ~= nil and NormalizeTitle(snap.title) == trackerTitle
+                local logMatch, conflict = QuestLogMatch(snap)
+                if logMatch or (tracked and not conflict) then
                     Remember(list[i])
-                    return snap, trackerLines
-                end
-                if QuestLogMatch(snap) then
-                    Remember(list[i])
-                    local useLines = nil
-                    if trackerObj and NormalizeTitle(snap.title) == NormalizeTitle(trackerObj.title) then
-                        useLines = trackerLines
-                    end
-                    return snap, useLines
+                    return snap, tracked and trackerLines or nil, "list"
                 end
             end
         end
     end
 
-    if trackerObj then
-        if remembered and NormalizeTitle(remembered.title) == NormalizeTitle(trackerObj.title) then
-            return remembered, trackerLines
-        end
-        local root = ObjectiveTrackerRoot()
-        local bagShown = root and type(root.IsShown) == "function" and root:IsShown()
-        if bagShown then
-            return trackerObj, trackerLines
+    if remembered and trackerTitle and NormalizeTitle(remembered.title) == trackerTitle then
+        local logMatch, conflict = QuestLogMatch(remembered)
+        if logMatch or not conflict then
+            return remembered, trackerLines, "remembered"
         end
     end
 
     if remembered and QuestLogMatch(remembered) then
-        return remembered, nil
+        return remembered, nil, "remembered"
     end
 
-    return nil, nil
+    return nil, nil, nil
+end
+
+-- Tooltip reward rows follow one objective. Its removal ends them, and so
+-- does a change to another objective identity, unless the capture names the
+-- new objective by its own positive quest ID. The identity kept for that
+-- comparison holds on to a known ID, so the same objective read later without
+-- one does not hide a conflict with the next objective.
+local function TrackRewardIdentity(identity)
+    if not identity then
+        if lastIdentity then scraped = nil end
+        lastIdentity = nil
+        return
+    end
+    if lastIdentity and SameIdentity(lastIdentity, identity) then
+        if identity.questId <= 0 then identity.questId = lastIdentity.questId end
+    elseif lastIdentity then
+        local own = scraped ~= nil and scraped.questId > 0
+            and scraped.questId == identity.questId and scraped.title == identity.title
+        if not own then scraped = nil end
+    end
+    lastIdentity = identity
 end
 
 local function BuildSummary()
     local ok, summary = pcall(function()
-        local objective, trackerLines = ResolveObjective()
+        local objective, trackerLines, source = ResolveObjective()
         local title = QuestTitle(objective)
         if not title then
+            TrackRewardIdentity(nil)
             return { observed = false }
         end
-        local logMatch = QuestLogMatch(objective)
-        if logMatch and NormalizeTitle(logMatch.title or "") ~= NormalizeTitle(title) then
+        local identity = ObjectiveIdentity(objective)
+        local logMatch, logConflict = QuestLogMatch(objective)
+        if logMatch and NormalizeTitle(logMatch.title or "") ~= identity.title then
             logMatch = nil
         end
-        local lines = trackerLines
-        if (not lines or #lines == 0) and logMatch
-            and NormalizeTitle(logMatch.title or "") == NormalizeTitle(title) then
+        -- Tracker text carries no quest ID. While the log holds this title
+        -- under another known ID, that text can be the other quest's.
+        local lines, progressSource = nil, nil
+        if not logConflict and type(trackerLines) == "table" and #trackerLines > 0 then
+            lines = trackerLines
+            progressSource = "tracker"
+        end
+        if not lines and logMatch then
             lines = QuestLogLinesForIndex(logMatch.index, logMatch.isComplete)
+            if lines and #lines > 0 then progressSource = "questlog" else lines = nil end
         end
         local blurb = ObjectiveBlurb(objective)
-        if (not lines or #lines == 0) and blurb then
+        if not lines and blurb then
             lines = { blurb }
+            progressSource = "objective"
         end
-        local apiRewards = CollectRewardRows(objective)
-        local normTitle = NormalizeTitle((logMatch and logMatch.title) or title)
-        local rewards = (type(apiRewards) == "table" and #apiRewards > 0) and apiRewards
-            or (scrapedForTitle == normTitle and scrapedRewards)
-            or {}
+        -- The objective's own positive ID stays authoritative. A matched log
+        -- row lends its ID only to an objective without one.
+        local questId = identity.questId
+        if questId <= 0 and logMatch then questId = PositiveId(logMatch.questId) end
+        identity.questId = questId
+        TrackRewardIdentity(identity)
+        local rewards = CollectRewardRows(objective)
+        local rewardSource = nil
+        if type(rewards) == "table" and #rewards > 0 then
+            rewardSource = "api"
+            for i = 1, #rewards do rewards[i].source = "api" end
+        elseif scraped and SameIdentity(scraped, identity) then
+            rewards = scraped.rows
+            rewardSource = "tooltip"
+        else
+            rewards = {}
+        end
         return {
             observed = true,
             title = (logMatch and logMatch.title) or title,
             lines = lines or {},
-            questId = (logMatch and logMatch.questId and logMatch.questId > 0 and logMatch.questId)
-                or tonumber(objective.questId or objective.id) or 0,
+            questId = questId,
             rewards = rewards,
+            source = source,
+            progressSource = progressSource,
+            rewardSource = rewardSource,
         }
     end)
     if not ok or type(summary) ~= "table" then
@@ -1042,20 +1138,40 @@ local function EnsureEbonholdHooks()
     end
 end
 
-local function TooltipSourceTitle()
+-- Identity of the objective a shown tooltip belongs to, from the objectiveData
+-- of its owner or of the owner's parent. A parent of the same title supplies a
+-- positive ID the owner lacks; one of the same title under another known ID
+-- leaves the source ambiguous, and it names no objective. Reads only: no
+-- handler of the owner runs and the tooltip is left as the game drew it.
+local function TooltipSourceIdentity()
     if not GameTooltip or type(GameTooltip.GetOwner) ~= "function" then
         return nil
     end
-    local ok, owner = pcall(GameTooltip.GetOwner, GameTooltip)
-    if not ok or type(owner) ~= "table" then return nil end
-    local data = owner.objectiveData
-    if type(data) ~= "table" and type(owner.GetParent) == "function" then
-        local okParent, parent = pcall(owner.GetParent, owner)
-        if okParent and type(parent) == "table" then
-            data = parent.objectiveData
+    local ok, identity = pcall(function()
+        local owner = GameTooltip.GetOwner(GameTooltip)
+        if type(owner) ~= "table" then return nil end
+        local parentData = nil
+        if type(owner.GetParent) == "function" then
+            local okParent, parent = pcall(owner.GetParent, owner)
+            if okParent and type(parent) == "table" then
+                parentData = parent.objectiveData
+            end
         end
-    end
-    return QuestTitle(data)
+        local data = owner.objectiveData
+        if type(data) ~= "table" then
+            data, parentData = parentData, nil
+        end
+        local found = ObjectiveIdentity(data)
+        if not found or found.title == "" then return nil end
+        local above = ObjectiveIdentity(parentData)
+        if above and above.title == found.title then
+            if IdsConflict(found.questId, above.questId) then return nil end
+            if found.questId <= 0 then found.questId = above.questId end
+        end
+        return found
+    end)
+    if not ok then return nil end
+    return identity
 end
 
 function M.Init()
@@ -1071,8 +1187,8 @@ function M.Init()
         refreshQueued = true
         fastPollRemaining = math.max(fastPollRemaining, 10)
         if event == "PLAYER_ENTERING_WORLD" then
-            scrapedRewards = nil
-            scrapedForTitle = nil
+            -- A new world inherits no reward rows read before it.
+            scraped = nil
             local service = ObjectivesService()
             if service and type(service.RequestObjectives) == "function" then
                 pcall(service.RequestObjectives)
@@ -1099,12 +1215,12 @@ function M.Init()
         pcall(GameTooltip.HookScript, GameTooltip, "OnShow", function()
             if showingOwnTooltip then return end
             local rows = ReadTooltipRewardRows()
-            local sourceTitle = TooltipSourceTitle()
-            if not rows or not sourceTitle then return end
-            scrapedRewards = rows
-            scrapedForTitle = NormalizeTitle(sourceTitle)
-            if cachedSummary and cachedSummary.observed
-                and NormalizeTitle(cachedSummary.title or "") == scrapedForTitle then
+            local source = TooltipSourceIdentity()
+            if not rows or not source then return end
+            for i = 1, #rows do rows[i].source = "tooltip" end
+            scraped = { rows = rows, title = source.title, questId = source.questId }
+            if cachedSummary and cachedSummary.observed and lastIdentity
+                and SameIdentity(lastIdentity, scraped) then
                 refreshQueued = true
             end
         end)

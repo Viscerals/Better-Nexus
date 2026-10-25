@@ -707,7 +707,7 @@ do
   local host={facts={shown=true,committed=true,hadFailure=false},
    objective=o.objective,log={{title='Callboard Quest',id=77}}}
   Nexus={};UIParent={}
-  GameTooltip=nil;hooksecurefunc=nil;EbonAPI=nil
+  GameTooltip=o.tooltip;hooksecurefunc=nil;EbonAPI=nil
   ObjectiveTrackerFrame=o.root;EbonholdQuestTracker=o.tracker
   ProjectEbonholdQuestTracker=nil;WatchFrame=o.watch
   ProjectEbonholdDB={questTracker={watchedQuests={}}}
@@ -717,7 +717,7 @@ do
   GetNumQuestLogEntries=function() return #host.log end
   GetQuestLogTitle=function(i)
    local q=host.log[i]
-   if q then return q.title,80,nil,nil,nil,nil,nil,nil,q.id end
+   if q then return q.title,80,nil,nil,nil,nil,q.complete,nil,q.id end
   end
   UnitLevel=function() return 80 end
   ProjectEbonhold={ObjectivesService={GetActiveObjective=function() return host.objective end}}
@@ -1049,6 +1049,189 @@ do
   host.Scan()
   check(host.status.GetSummary().observed==false and root.alpha==0.35 and root.mouse==true,
    'an objective that disappears gives it back')
+ end)
+
+ -- Part C2: objective identity and reward attribution, through the same host,
+ -- its scanner, GetSummary and ShowRewardsTooltip. The synthetic GameTooltip
+ -- is drawn by the game for its own owner and only read by Nexus, through the
+ -- OnShow hook Init installs. Two known positive quest IDs that differ are two
+ -- objectives even under one title. Synthetic source behaviour only.
+ local function RewardTooltip()
+  local tip={left={},right={},hooks={},writes=0}
+  for i=1,8 do
+   _G['GameTooltipTextLeft'..i]={GetText=function() return tip.left[i] end}
+   _G['GameTooltipTextRight'..i]={GetText=function() return tip.right[i] end}
+  end
+  function tip:HookScript(event,fn) self.hooks[event]=fn end
+  function tip:NumLines() return #self.left end
+  function tip:GetOwner() return self.owner end
+  function tip:SetOwner(owner) self.writes=self.writes+1;self.owner=owner end
+  function tip:ClearAllPoints() end
+  function tip:SetPoint() end
+  function tip:ClearLines() self.writes=self.writes+1;self.left,self.right={},{} end
+  function tip:AddLine(text)
+   self.writes=self.writes+1;self.left[#self.left+1]=tostring(text);self.right[#self.left]=''
+  end
+  function tip:AddDoubleLine(l,r)
+   self.writes=self.writes+1;self.left[#self.left+1]=tostring(l);self.right[#self.left]=tostring(r)
+  end
+  function tip:Hide() self.writes=self.writes+1 end
+  function tip:Show() if self.hooks.OnShow then self.hooks.OnShow(self) end end
+  -- The game shows its own reward tooltip for owner.
+  function tip:Observe(owner,ash)
+   self.owner=owner
+   self.left,self.right={'Rewards by Difficulty','Normal'},{'',tostring(ash)}
+   self:Show()
+  end
+  function tip:Drawn() return table.concat(self.left,'|')..'|'..table.concat(self.right,'|') end
+  return tip
+ end
+ -- Ordinary quest tracker text: a header, an ordinary quest and its progress.
+ local function TrackerTexts(tracker,texts)
+  function tracker:GetChildren()
+   local out={}
+   for i=1,#texts do out[i]={text=texts[i]} end
+   return unpack(out)
+  end
+ end
+
+ Case('same-title quest log row under another quest ID',function()
+  local host=CallboardHost({objective=Objective(true),root=StockObject(0.35,true)})
+  -- The log holds this title under quest 900 and in a row without an ID;
+  -- neither is quest 77.
+  host.log={{title='Callboard Quest',id=900,complete=1},{title='Callboard Quest',complete=-1}}
+  host.Scan()
+  local summary=host.status.GetSummary()
+  local text=table.concat(summary.lines or {},'|')
+  check(summary.observed==true and summary.questId==77,
+   'the active objective keeps its own quest ID, not that of a same-title log row: '..tostring(summary.questId))
+  check(text=='Bring the tome' and summary.progressSource=='objective',
+   'no progress of the other quest, and no same-title row without an ID in its place: '..text)
+  check(summary.rewards[1] and summary.rewards[1].ash==1200 and summary.rewardSource=='api'
+   and summary.rewards[1].source=='api','its own API reward rows stay attributed to it')
+  -- Control: the row with the matching ID is this objective, after the other one.
+  host.log={{title='Callboard Quest',id=900,complete=-1},{title='Callboard Quest',id=77,complete=1}}
+  host.Scan()
+  summary=host.status.GetSummary()
+  text=table.concat(summary.lines or {},'|')
+  check(summary.questId==77 and text:find('Ready for turn-in',1,true)~=nil
+   and text:find('Failed',1,true)==nil and summary.progressSource=='questlog',
+   'the log row with the matching ID gives its progress: '..text)
+  -- Control: with no ID on the log side the title still matches.
+  host.log={{title='Callboard Quest',complete=1}}
+  host.Scan()
+  summary=host.status.GetSummary()
+  check(summary.questId==77
+   and table.concat(summary.lines or {},'|'):find('Ready for turn-in',1,true)~=nil,
+   'a same-title row without an ID is a title fallback when no ID conflicts')
+ end)
+
+ Case('tooltip owner identity',function()
+  local tip=RewardTooltip()
+  local host=CallboardHost({objective=Objective(false),root=StockObject(0.35,true),tooltip=tip})
+  host.Scan()
+  check(#(host.status.GetSummary().rewards or {})==0,'fixture: the objective has no API reward rows')
+  tip:Observe({objectiveData={title='Callboard Quest',questId=900}},3000)
+  host.Scan()
+  check(#(host.status.GetSummary().rewards or {})==0,
+   'rows under a same-title tooltip owner with another quest ID are not attributed to this objective')
+  local other={objectiveData={title='Callboard Quest',questId=900}}
+  tip:Observe({objectiveData={title='Callboard Quest'},GetParent=function() return other end},3500)
+  host.Scan()
+  check(#(host.status.GetSummary().rewards or {})==0,
+   'an owner without an ID does not override the conflicting ID its parent objective holds')
+  local own={objectiveData={title='Callboard Quest',questId=77}}
+  local owner={GetParent=function() return own end}
+  tip:Observe(owner,4000)
+  host.Scan()
+  local summary=host.status.GetSummary()
+  check(summary.rewards[1] and summary.rewards[1].ash==4000 and summary.rewards[1].source=='tooltip'
+   and summary.rewardSource=='tooltip',
+   'the parent objective with the matching ID attributes the observed rows to this objective')
+  check(tip.writes==0 and tip.owner==owner and tip.left[2]=='Normal',
+   'reading the game tooltip changed neither its owner nor its lines')
+  local row={}
+  host.status.ShowRewardsTooltip(row)
+  check(tip.owner==row and tip:Drawn():find('4K Ash',1,true)~=nil,
+   'the Nexus rewards tooltip shows the attributed rows')
+ end)
+
+ Case('same-title objective change and removal',function()
+  local tip=RewardTooltip()
+  local host=CallboardHost({objective=Objective(false),root=StockObject(0.35,true),tooltip=tip})
+  host.Scan()
+  tip:Observe({objectiveData={title='Callboard Quest'}},3000)
+  host.Scan()
+  local summary=host.status.GetSummary()
+  check(summary.questId==77 and summary.rewards[1] and summary.rewards[1].ash==3000,
+   'fixture: a capture whose owner has no ID is attributed to the observed objective by its title')
+  local row={}
+  host.status.ShowRewardsTooltip(row)
+  check(tip:Drawn():find('3K Ash',1,true)~=nil,'fixture: the Nexus rewards tooltip shows those rows')
+  -- The board moves on to another objective under the same title.
+  host.objective={title='Callboard Quest',questId=900,objectiveText='Bring the other tome'}
+  host.log={{title='Callboard Quest',id=900}}
+  host.Scan()
+  summary=host.status.GetSummary()
+  check(summary.observed==true and summary.questId==900
+   and (summary.lines or {})[1]=='Bring the other tome','fixture: the new objective is observed')
+  check(#(summary.rewards or {})==0,
+   'it does not inherit the reward rows cached for the old objective of the same title')
+  host.status.ShowRewardsTooltip(row)
+  check(tip:Drawn():find('not available',1,true)~=nil and tip:Drawn():find('3K Ash',1,true)==nil,
+   'and the Nexus rewards tooltip says its rewards are not available')
+  tip:Observe({objectiveData={title='Callboard Quest',questId=900}},5000)
+  host.Scan()
+  summary=host.status.GetSummary()
+  check(summary.rewards[1] and summary.rewards[1].ash==5000,'its own observed rows are attributed')
+  -- The objective is removed, and then the same one is observed again.
+  host.objective=nil;host.log={}
+  host.Scan()
+  check(host.status.GetSummary().observed==false,'fixture: the objective is gone')
+  host.objective={title='Callboard Quest',questId=900,objectiveText='Bring the other tome'}
+  host.log={{title='Callboard Quest',id=900}}
+  host.Scan()
+  summary=host.status.GetSummary()
+  check(summary.observed==true and #(summary.rewards or {})==0,
+   'rows read before a removal are not inherited afterwards')
+ end)
+
+ Case('ordinary tracker without a Callboard source',function()
+  local root=StockObject(0.35,true)
+  local tracker=StockObject(0.8,true)
+  TrackerTexts(tracker,{'Quests','One More Door','0/1 Doors'})
+  local host=CallboardHost({objective=nil,root=root,tracker=tracker})
+  host.log={{title='One More Door',id=901}}
+  host.Scan()
+  local summary=host.status.GetSummary()
+  check(summary.observed==false,
+   'a shown objective tracker does not make its first ordinary quest a Callboard objective: '
+   ..tostring(summary.title))
+  check(root.alphaSets+root.mouseSets+tracker.alphaSets+tracker.mouseSets==0,
+   'and no stock state is changed for it')
+  -- Control: the objectiveData of the reward bag is an authoritative source.
+  local bag=StockObject(1,true,root)
+  bag.objectiveData={title='Callboard Quest',questId=77,objectiveText='Bring the tome'}
+  root.rewardBagFrame=bag
+  host.Scan()
+  summary=host.status.GetSummary()
+  check(summary.observed==true and summary.title=='Callboard Quest' and summary.questId==77
+   and (summary.lines or {})[1]=='Bring the tome' and summary.source=='bag',
+   'the reward bag objective is observed, without the progress of the ordinary tracked quest')
+ end)
+
+ Case('current objective list matched by quest ID',function()
+  local host=CallboardHost({objective=nil,root=StockObject(0.35,true)})
+  local other={title='Callboard Quest',questId=900,objectiveText='Another board',normalSoulAshes=9000}
+  local own={title='Callboard Quest',questId=77,objectiveText='Bring the tome',normalSoulAshes=1200}
+  ProjectEbonhold.ObjectivesService.GetCurrentObjectives=function() return {other,own} end
+  host.Scan()
+  local summary=host.status.GetSummary()
+  check(summary.observed==true and (summary.lines or {})[1]=='Bring the tome'
+   and summary.rewards[1] and summary.rewards[1].ash==1200,
+   'the current objective whose quest ID the log holds is observed with its own progress and rewards')
+  check(summary.questId==77 and summary.source=='list' and summary.rewardSource=='api',
+   'and attributed to the matched current-objective list and its API fields')
  end)
 
  check(#failures==0,'Callboard stock ownership: '..table.concat(failures,' | '))
