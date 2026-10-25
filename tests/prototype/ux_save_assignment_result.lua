@@ -249,15 +249,16 @@ C.scenario('A01/A11/A12 Create for the captured Saved Build',function()
  C.guard(row~=nil and ResultRow()==row,'A01: the server listing the new Wishlist keeps the result',ResultRow())
  C.guard(Uploads()==n and Writes()==1,'A01: no further upload or assignment from refreshing',Writes())
  Quiet('A01',before)
- -- Another Create of the same draft, cancelled: nothing happens (A07).
+ -- Another Create of the same draft is refused without a new confirmation
+ -- (create-once): nothing is uploaded, assigned or queued (A07).
  local mid=State()
- button('Create Wishlist'):Click()
- C.setup(H.popup~=nil,'A07: fixture: the confirmation is open')
- StaticPopupDialogs[H.popup.which].OnCancel(H.popup.frame,H.popup.data);H.popup=nil
+ local refused=Heard(function() button('Create Wishlist'):Click() end)
+ C.setup(H.popup==nil and refused:find('already created',1,true)~=nil,
+  'A07: fixture: create-once refuses a second Create without a new confirmation')
  C.guard(Uploads()==mid.uploads and Writes()==mid.writes and #H.sent==mid.sent and Facts()==mid.facts
-  and not Nexus.WishlistEditor.IsApplyPending(),'A07: cancelling Create uploads, assigns, sends and queues nothing')
+  and not Nexus.WishlistEditor.IsApplyPending(),'A07: a refused second Create uploads, assigns, sends and queues nothing')
  Quiet('A07',mid)
- C.guard(row~=nil and ResultRow()==row,'A07: cancelling keeps the current result',ResultRow())
+ C.guard(row~=nil and ResultRow()==row,'A07: a refused second Create keeps the current result',ResultRow())
  -- A11: a real edit retires the result; a passive refresh does not restore it.
  selected(201175).plus:Click()
  C.guard(row~=nil and ResultRow()==nil,'A11: a real draft edit retires the result',ResultRow())

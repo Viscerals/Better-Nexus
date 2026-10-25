@@ -640,7 +640,7 @@ local VIEW_SORTS = {dps=true,recent=true,title=true}
 local VIEW_CATEGORIES = {builds=true,dummy=true,lk=true,combined=true}
 local VIEW_PHASES = {idle=true,slots=true,cleanup=true,unknown=true}
 local VIEW_REASONS = {
-    none=true,hidden=true,["saved-import"]=true,
+    none=true,hidden=true,["saved-import"]=true,["saved-import-error"]=true,
     ["projection-pending"]=true,["projection-error"]=true,
     ["sync-receiving"]=true,dirty=true,["not-published"]=true,
     unavailable=true,unknown=true,
@@ -665,11 +665,13 @@ local function ViewVersion(value)
 end
 
 local function ViewSnapshot(owner, expectedView)
-    local value = {}
+    local value, available = {}, false
     if type(owner) == "table"
         and type(owner.DiagnosticSnapshot) == "function" then
         local ok, result = pcall(owner.DiagnosticSnapshot)
-        if ok and type(result) == "table" then value = result end
+        if ok and type(result) == "table" then
+            value, available = result, true
+        end
     end
     local age = tonumber(value.lastPublicationAge)
     if not age or age ~= age or age >= math.huge or age <= -math.huge then
@@ -699,10 +701,15 @@ local function ViewSnapshot(owner, expectedView)
         filterSort=ViewToken(value.filterSort, VIEW_SORTS, "dps"),
         filterCategory=ViewToken(value.filterCategory,
             VIEW_CATEGORIES, expectedView == "community" and "builds" or "lk"),
+        snapshotAvailable=available,
+        projectionError=value.projectionError == true,
+        projectionErrorKnown=available and type(value.projectionError) == "boolean",
         projectionCurrent=value.projectionCurrent == true,
         projectionPending=value.projectionPending == true,
         projectionDirty=value.projectionDirty ~= false,
         savedImportPending=value.savedImportPending == true,
+        savedImportError=value.savedImportError == true,
+        shareStatusError=value.shareStatusError == true,
         savedImportPhase=ViewToken(value.savedImportPhase,
             VIEW_PHASES, "unknown"),
         syncReceiving=value.syncReceiving == true,lastPublicationAge=age,
@@ -740,6 +747,17 @@ local function AddViewSnapshot(out, owner, expectedView)
         tostring(state.projectionDirty),tostring(state.savedImportPending),
         state.savedImportPhase,tostring(state.syncReceiving),age,
         state.blockedReason)
+    local viewError = state.projectionErrorKnown
+        and tostring(state.projectionError) or "unknown"
+    if expectedView == "community" then
+        out[#out + 1] = string.format(
+            "  faults view=error:%s saved_import=error:%s share_status=error:%s",
+            viewError,
+            state.snapshotAvailable and tostring(state.savedImportError) or "unknown",
+            state.snapshotAvailable and tostring(state.shareStatusError) or "unknown")
+    else
+        out[#out + 1] = "  faults view=error:" .. viewError
+    end
 end
 
 local function LogText_State()
