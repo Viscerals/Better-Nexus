@@ -97,8 +97,22 @@ local function Remaining()
     return math.max(0, math.ceil(5 - (now - active.startedAt)))
 end
 
+-- An explicit No, Close (X) or Escape of the first-launch warning continues
+-- to the existing informational setup (QuickStart.ShowSetup), opened after
+-- this request is revoked and hidden so that it finds no open warning. That
+-- route records no acknowledgement, grants no consent and never turns Auto
+-- ON. A missing or failing route opens nothing; there is no consent fallback.
+local function ShowInformation()
+    local quick = Nexus.QuickStart
+    if type(quick) ~= "table" or type(quick.ShowSetup) ~= "function" then return false end
+    return (pcall(quick.ShowSetup))
+end
+
 local UpdateCountdown
-local function Finish(yes, closing)
+-- explicit: true only from the No and Close (X) buttons and the Escape key
+-- handler. A raw OnHide (the frame hidden by another route) and CancelAuto
+-- pass none, so they decline only.
+local function Finish(yes, closing, explicit)
     if not active then return false end
     if not closing and Remaining() > 0 then
         UpdateCountdown()
@@ -117,6 +131,13 @@ local function Finish(yes, closing)
         -- first-time navigation after reading; this grants no Auto permission.
         if request.kind == "onboarding" and Nexus.QuickStart then Nexus.QuickStart.ShowIfFirstTime() end
         if request.accept then return request.accept() end
+    end
+    -- A declined first-launch warning continues to information only, and only
+    -- for the saved root and character it was opened for: a stale answer
+    -- opens nothing for another context. Auto answers never navigate.
+    if not yes and explicit == true and request.kind == "onboarding"
+        and request.database == NexusDB and request.ownerKey == CurrentOwner() then
+        ShowInformation()
     end
     return false
 end
@@ -181,12 +202,23 @@ local function EnsureFrame()
     frame.yes:SetPoint("BOTTOMRIGHT",-148,20); frame.no:SetPoint("BOTTOMRIGHT",-24,20)
     frame.yes:SetText("Yes"); frame.no:SetText("No")
     frame.yes:SetScript("OnClick",function() return Finish(true,false) end)
-    frame.no:SetScript("OnClick",function() return Finish(false,false) end)
+    frame.no:SetScript("OnClick",function() return Finish(false,false,true) end)
     frame.close = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     frame.close:SetSize(24,24); frame.close:SetPoint("TOPRIGHT",-14,-14); frame.close:SetText("X")
-    frame.close:SetScript("OnClick",function() return Finish(false,true) end)
+    frame.close:SetScript("OnClick",function() return Finish(false,true,true) end)
+    -- Hidden by another route: decline only, with no navigation. A raw
+    -- client UISpecialFrames close (this frame's name is listed below) hides
+    -- the frame and so reaches only this OnHide; it is deliberately not an
+    -- explicit answer and opens nothing. The explicit Escape route is the
+    -- OnKeyDown script below. Offline, tests/prototype/ux_setup_replay.lua
+    -- S7 (and S1) call that registered key script directly with "ESCAPE" and
+    -- press no native key. Whether the native client delivers an Escape press
+    -- to this keyboard-enabled frame, how that relates to the UISpecialFrames
+    -- close and in which order, and whether that same Escape also closes the
+    -- Welcome opened here are NOT_RUN: an unverified native boundary, not a
+    -- proven defect, and not checked against a client export.
     frame:SetScript("OnHide",function() if active then Finish(false,true) end end)
-    frame:SetScript("OnKeyDown",function(_,key) if key == "ESCAPE" then Finish(false,true) end end)
+    frame:SetScript("OnKeyDown",function(_,key) if key == "ESCAPE" then Finish(false,true,true) end end)
     UISpecialFrames[#UISpecialFrames+1] = "NexusOverwriteWarning"
     if Nexus.Theme and Nexus.Theme.StyleButton then
         Nexus.Theme.StyleButton(frame.yes); Nexus.Theme.StyleButton(frame.no)
