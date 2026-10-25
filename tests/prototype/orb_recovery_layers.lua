@@ -155,9 +155,12 @@ C.scenario('L1b loadout-uncertain restored record: paused, no guessed target, no
  local unknown,exposure=tonumber(cm.uncertain),tonumber(cm.reserved)
  local counts=unknown and exposure and ('Unknown spend: '..string.format('%d',unknown)..'; Reserved: '
   ..string.format('%d',exposure)..'; Outcomes: ?') or nil
- local pendingFull=unknown and exposure and ('Pending: not settled; Unknown spend: '..string.format('%d',unknown)
+ -- F4 wording adaptation of this one constructed literal (still a GUARD):
+ -- the unsettled last result leads and the explanation ends awaiting its Orb
+ -- result; the separate unknown-spend, exposure and history facts are kept.
+ local pendingFull=unknown and exposure and ('Last Orb result not settled; Unknown spend: '..string.format('%d',unknown)
   ..'; current exposure: '..string.format('%d',exposure)
-  ..'; earlier outcome/check totals unavailable after reload; action pending') or nil
+  ..'; earlier outcome/check totals unavailable after reload; awaiting Orb result') or nil
  C.guard(counts~=nil and cm.pending==true and cm.historyKnown==false and mini.pending:GetText()==counts
   and mini.pending:GetText():find('requested',1,true)==nil and s.spent>0 and s.reserved==0,
   'L1b: a spent unsettled action is not an unconfirmed request; the pending line shows its separate counts',mini.pending:GetText())
