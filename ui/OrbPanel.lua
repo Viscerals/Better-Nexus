@@ -94,7 +94,7 @@ local function inactiveControls()
     editLimit(false)
     if frame.cont then frame.cont:Hide()end
     -- With no run read, Start alone holds its place, disabled like the rest.
-    if frame.review then frame.review:Hide()end
+    if frame.review then frame.review:Hide();frame.review.shownKey,frame.review.shownAction=nil,nil end
     if frame.pause then frame.pause:Hide();frame.resume:Hide();frame.start:Show()end
     for _,b in ipairs(frame.mutations)do b:Disable()end
     frame.advanced:Hide();frame:SetHeight(RUN_H)
@@ -126,6 +126,10 @@ end
 -- key). Memory only: another assignment, leaving that state or closing the
 -- window clears it. It writes and sends nothing and can only withhold Resume;
 -- Resume itself still makes every runtime check and adopts what it reads.
+-- Review target and Cancel review act only on the exact target (key) and the
+-- action their button showed at the last refresh (its shownKey and
+-- shownAction): a click after the target changed reviews nothing, clears the
+-- review and refreshes, so the new target needs its own deliberate review.
 local review={key=nil}
 local function changedTarget(t) return type(t)=="table" and t.kind=="changed" end
 local function reviewHeld(t)
@@ -429,10 +433,12 @@ local function refresh()
             or stage=="checking" and "Check progress..." or (stage=="ready" or cv.eligible==true) and "Continue..." or "Why blocked...")
         if cv.explanation==true or cv.eligible==true or stage=="checking" or stage=="ready" or stage=="refused" or stage=="done" then frame.cont:Show()else frame.cont:Hide()end
     end
-    -- Review target shares Continue's place and is never shown with it.
+    -- Review target shares Continue's place and is never shown with it. A
+    -- click may act only on the exact target and action shown here.
     if changedTarget(target) and target.key~=nil and not frame.cont:IsShown() then
         frame.review:SetText(held and "Review target" or "Cancel review");frame.review:Show();frame.review:Enable()
-    else frame.review:Hide() end
+        frame.review.shownKey,frame.review.shownAction=target.key,held and "review" or "cancel"
+    else frame.review:Hide();frame.review.shownKey,frame.review.shownAction=nil,nil end
     if advanced then frame.advanced:Show()else frame.advanced:Hide()end
     selected(frame.advancedToggle,advanced)
     frame:SetHeight(advanced and RUN_H_ADVANCED or RUN_H)
@@ -580,15 +586,21 @@ local function ensure()
     frame.cont:Hide()
     -- The deliberate review of a changed Resume target (see `review`). Review
     -- and Cancel review only record or clear it: nothing is resumed or spent.
+    -- A click acts only on the exact target and action this button showed;
+    -- a target that changed since the last refresh is never reviewed by it.
     frame.review=button(frame,470,-364,130,"Review target",function()
+        local shownKey,shownAction=frame.review.shownKey,frame.review.shownAction
         local t=Nexus.OrbRuntime.Status().resumeTarget
         if not (changedTarget(t) and t.key~=nil) then
             review.key=nil;frame.notice:SetText("No changed target to review. Nothing was changed.")
-        elseif review.key==t.key then
-            review.key=nil;frame.notice:SetText("Review cancelled. Resume stays withheld; nothing was spent.")
-        else
+        elseif shownKey==nil or t.key~=shownKey then
+            review.key=nil
+            frame.notice:SetText("Not reviewed: the Resume target changed after it was shown. Read the new target, then review it again. Nothing was spent.")
+        elseif shownAction=="review" then
             review.key=t.key
             frame.notice:SetText("Reviewed: Resume would use "..quotedName(t).." with the same maximum. Nothing was spent.")
+        else
+            review.key=nil;frame.notice:SetText("Review cancelled. Resume stays withheld; nothing was spent.")
         end
         UI.Refresh()
     end)
@@ -662,6 +674,7 @@ local function ensure()
     -- review.
     frame:SetScript("OnHide",function()
         editLimit(false);confirmNewRun=false;confirmAmount=nil;review.key=nil
+        frame.review.shownKey,frame.review.shownAction=nil,nil
         if logFrame then logFrame:Hide()end
     end)
     local elapsed=0;frame:SetScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;UI.Refresh()end end)
