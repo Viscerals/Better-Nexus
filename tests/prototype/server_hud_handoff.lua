@@ -1234,6 +1234,102 @@ do
    'and attributed to the matched current-objective list and its API fields')
  end)
 
+ -- Part C3: reward fidelity and the tracker identity rule, through the same
+ -- host, its scanner, GetSummary and ShowRewardsTooltip. API XP stays XP: no
+ -- money is derived from it, and money is what the source states. A passive
+ -- single-line tooltip row keeps its own difficulty label. A watched quest of
+ -- the same title under another known positive quest ID is another quest.
+ Case('literal XP and explicit money',function()
+  local tip=RewardTooltip()
+  local o=Objective(false);o.normalXp=5000
+  local host=CallboardHost({objective=o,root=StockObject(0.35,true),tooltip=tip})
+  host.Scan()
+  local summary=host.status.GetSummary()
+  local first=(summary.rewards or {})[1]
+  check(first and first.label=='Normal' and first.xp==5000 and first.copper==0
+   and summary.rewardSource=='api',
+   'API XP at level 80 stays XP and no money is derived from it: '..tostring(first and first.copper))
+  local row={}
+  host.status.ShowRewardsTooltip(row)
+  local drawn=tip:Drawn()
+  check(drawn:find('5000 XP',1,true)~=nil and drawn:find('MoneyFrame',1,true)==nil,
+   'the Nexus rewards tooltip states the literal XP and no coin: '..drawn)
+  o=Objective(false);o.normalXp=5000;o.normalMoney=45000;o.hc1Xp=7000;o.hc1Gold=3
+  host.objective=o
+  host.Scan()
+  summary=host.status.GetSummary()
+  local normal,hc1=(summary.rewards or {})[1],(summary.rewards or {})[2]
+  check(normal and normal.copper==45000 and normal.xp==5000 and hc1 and hc1.label=='Hardcore I'
+   and hc1.copper==30000 and hc1.xp==7000,
+   'explicitly supplied money and gold stay the observed amounts beside their XP')
+  host.status.ShowRewardsTooltip(row)
+  drawn=tip:Drawn()
+  check(drawn:find('|cffffffff4|r',1,true)~=nil and drawn:find('|cffffffff50|r',1,true)~=nil
+   and drawn:find('|cffffffff3|r',1,true)~=nil and drawn:find('UI-GoldIcon',1,true)~=nil,
+   'and the Nexus rewards tooltip shows that observed money: '..drawn)
+ end)
+
+ Case('single-line passive Hardcore II and III rows',function()
+  local tip=RewardTooltip()
+  local host=CallboardHost({objective=Objective(false),root=StockObject(0.35,true),tooltip=tip})
+  host.Scan()
+  check(#(host.status.GetSummary().rewards or {})==0,'fixture: the objective has no API reward rows')
+  -- The game draws each difficulty and its amount on one line for its own owner.
+  tip.owner={objectiveData={title='Callboard Quest',questId=77}}
+  tip.left={'Rewards by Difficulty','Hardcore II 2000','Hardcore III 3000','Hardcore IV 4000'}
+  tip.right={'','','',''}
+  tip:Show()
+  host.Scan()
+  local summary=host.status.GetSummary()
+  local labels={}
+  for i,r in ipairs(summary.rewards or {}) do
+   labels[i]=tostring(r.label)..'='..tostring(r.ash)..'/'..tostring(r.source)
+  end
+  local seen=table.concat(labels,',')
+  check(seen=='Hardcore II=2000/tooltip,Hardcore III=3000/tooltip,Hardcore IV=4000/tooltip'
+   and summary.rewardSource=='tooltip',
+   'each observed row keeps its own longest difficulty label, never a shorter prefix: '..seen)
+  local row={}
+  host.status.ShowRewardsTooltip(row)
+  local drawn=tip:Drawn()
+  check(drawn:find('Hardcore II|Hardcore III|Hardcore IV|',1,true)~=nil
+   and drawn:find('2K Ash',1,true)~=nil and drawn:find('3K Ash',1,true)~=nil,
+   'and the Nexus rewards tooltip shows Hardcore II and III with their own amounts: '..drawn)
+ end)
+
+ Case('same-title watched quest under another quest ID',function()
+  local watch=StockObject(0.9,true)
+  local root=StockObject(0.35,true,watch)
+  local bag=StockObject(1,true,root)
+  root.rewardBagFrame=bag
+  local tracker=StockObject(0.8,true)
+  local collapse=StockObject(1,true,tracker)
+  tracker.collapse=collapse
+  local own={title='Callboard Quest',questId=991901,objectiveText='Bring the tome',
+   normalSoulAshes=1200,normalMoney=45000}
+  local host=CallboardHost({objective=own,root=root,tracker=tracker,watch=watch})
+  host.log={{title='Callboard Quest',id=991901},{title='Callboard Quest',id=991999}}
+  host.Scan()
+  check(host.status.GetSummary().questId==991901 and tracker.alpha==0 and collapse.mouse==false
+   and watch.alpha==0 and root.alpha==0,
+   'fixture: nothing else is watched and every stock role is replaced')
+  ProjectEbonholdDB.questTracker.watchedQuests[991999]=true
+  host.Scan()
+  check(tracker.alpha==0.8 and collapse.mouse==true and watch.alpha==0.9,
+   'a watched same-title quest under another known quest ID gives the tracker, its collapse control and WatchFrame back')
+  check(root.alpha==0 and root.mouse==false and bag.alpha==0 and bag.mouse==false,
+   'while the covered objective root and its reward bag stay replaced')
+  ProjectEbonholdDB.questTracker.watchedQuests[991999]=nil
+  ProjectEbonholdDB.questTracker.watchedQuests[991901]=true
+  host.Scan()
+  check(tracker.alpha==0 and collapse.mouse==false and watch.alpha==0,
+   'watching the objective under its own quest ID keeps the tracker roles replaced')
+  host.Cover(false)
+  check(tracker.alpha==0.8 and collapse.mouse==true and watch.alpha==0.9 and root.alpha==0.35
+   and root.mouse==true and bag.alpha==1 and bag.mouse==true,
+   'and hiding the row gives every exact original back')
+ end)
+
  check(#failures==0,'Callboard stock ownership: '..table.concat(failures,' | '))
 end
 

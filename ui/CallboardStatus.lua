@@ -509,8 +509,11 @@ local function TrackerOnlyHasCallboard(summary)
                 local isWatched = clientWatched[questIndex] == true
                     or (watched ~= nil and qid > 0 and watched[qid] == true)
                 if isWatched then
+                    -- A watched quest of the same title under another known
+                    -- positive quest ID is another quest, not this objective.
                     local isCallboard = (wantId > 0 and qid == wantId)
-                        or (wantTitle ~= "" and NormalizeTitle(logTitle) == wantTitle)
+                        or SameIdentity({ title = wantTitle, questId = wantId },
+                            { title = NormalizeTitle(logTitle), questId = qid })
                     if not isCallboard then
                         return false
                     end
@@ -752,6 +755,20 @@ local function MatchDifficultyLabel(text)
     return nil
 end
 
+-- The longest difficulty label that begins this normalized text. Labels
+-- are prefixes of one another ("hardcore i" of "hardcore ii" and
+-- "hardcore iii"), so the choice is by length and never by pairs order:
+-- Hardcore I cannot claim a Hardcore II or III line.
+local function LongestDifficultyPrefix(normalized)
+    local bestKey, bestLabel = nil, nil
+    for k, canonical in pairs(DIFFICULTY_LABELS) do
+        if normalized:sub(1, #k) == k and (not bestKey or #k > #bestKey) then
+            bestKey, bestLabel = k, canonical
+        end
+    end
+    return bestKey, bestLabel
+end
+
 -- In the PE tooltip: "451 [gold icon] 11 [silver icon] 60 [copper icon] 59169500 [ash icon]".
 -- Strip "|T...|t" texture tags first so icon dimensions/paths cannot pollute
 -- the numbers. Also understands formatted "59.2M Ash" / "103K Ash" so a re-parse
@@ -828,13 +845,11 @@ local function ReadTooltipRewardRows()
         if not label then
             -- Single-line fallback when difficulty and numbers share LeftN.
             local stripped = Strip(leftRaw:gsub("|T.-|t", " "))
-            for k, canonical in pairs(DIFFICULTY_LABELS) do
-                if NormalizeTitle(stripped):sub(1, #k) == k then
-                    label = canonical
-                    if rightRaw == "" then
-                        rightRaw = stripped:sub(#k + 1)
-                    end
-                    break
+            local key, canonical = LongestDifficultyPrefix(NormalizeTitle(stripped))
+            if key then
+                label = canonical
+                if rightRaw == "" then
+                    rightRaw = stripped:sub(#key + 1)
                 end
             end
         end
@@ -887,7 +902,6 @@ end
 
 local function CollectRewardRows(objective)
     local rows = {}
-    local playerLevel = (type(UnitLevel) == "function" and tonumber(UnitLevel("player"))) or 80
     local isProfession = (tonumber(objective and objective.questType) or 1) == 4
     local maxIdx = isProfession and 1 or #REWARD_ROWS
     for i = 1, maxIdx do
@@ -899,9 +913,8 @@ local function CollectRewardRows(objective)
         if gold > 0 and copper <= 0 then
             copper = math.floor(gold) * 10000
         end
-        if copper <= 0 and xp > 0 and playerLevel >= 80 then
-            copper = math.floor(xp * 6 / 10)
-        end
+        -- XP stays XP: no money is derived from it. Money is only the
+        -- copper or gold the source states.
         if ash > 0 or xp > 0 or copper > 0 then
             rows[#rows + 1] = {
                 label = spec.label,
