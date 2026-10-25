@@ -352,7 +352,7 @@ check(T.Message('STORE_PENDING')=='This action is not available yet. Check the s
 Nexus.Localization=real
 check(T.Message('STORE_PENDING')=='Reading your saved data' and L.Diagnostics().misses==d3.misses,'real seam restored with its record untouched')
 check(#H.actions==before.actions and #H.sent==before.sent and H.popup==before.popup and #H.chat==before.chat,'synchronous seam calls cause no observed action, send, StaticPopup or chat')
-check(Nexus.RecomputeStats().autoEnabled==before.auto,'seam changes no Automation state')
+check(Nexus.RecomputeStats().autoEnabled==before.auto,'seam leaves the Auto selection unchanged')
 check(same(Nexus.Store.State(),state0) and same(Nexus.Store.Settings(),settings0),'GUARD synchronous seam calls preserve full detached assigned state and settings')
 check(warning.IsOpen()==warningOpen and (NexusOverwriteWarning and NexusOverwriteWarning:IsShown() or false)==warningShown,'GUARD real overwrite warning open/visible state unchanged')
 -- No scheduler window or Orb/resource mutation is claimed here. Those

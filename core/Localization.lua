@@ -43,7 +43,7 @@
 --  4. pack not a plain table (a pack name, number, boolean, function, or a
 --     table with a metatable)      -> English text, "base", "unsupported_pack"
 --  5. no entry for the key         -> English text, "base", "missing_candidate"
---  6. entry outside the text contract (not a string, empty, only spaces,
+--  6. entry outside the text contract (not a string, empty, only ASCII whitespace,
 --     control byte, "|", too long, malformed or non-scalar UTF-8)
 --                                  -> English text, "base", "invalid_candidate"
 --  7. otherwise                    -> the entry, "candidate", nil
