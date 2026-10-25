@@ -315,7 +315,7 @@ NAMES += ['catalog_idle_frames_witness']
 NAMES += ['catalog_idle_frames_alignment_probe']
 # M5R2-MB1: a confirmed own Saved Build Share is the explicit Share operation; its actual admission or final refusal is stated after the local save; two runtimes (EXPECT fails on closed aeb35417 by design).
 NAMES += ['ux_share_admission']
-# UX M6 (rebased onto accepted M5 9deaa526; not accepted): named Resume target and full-window review after a changed target, fixed separate Pause/Resume, layered recovery/usage/Continue-history wording (EXPECT fails on accepted M5 9deaa526 by design).
+# UX M6: named Resume target and its full-window review after a target change, fixed separate Pause/Resume, and layered recovery, usage and Continue-history wording on the Orb window, strip, mini panel and history (real handlers, synthetic services).
 NAMES += ['orb_target_review','orb_fixed_pause_resume','orb_recovery_layers']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.

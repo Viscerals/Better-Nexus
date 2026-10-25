@@ -123,7 +123,7 @@ C.scenario('L1b loadout-uncertain restored record: paused, no guessed target, no
   'L1b: Continue stays the explicit way on; no Resume; ordinary rolling stays blocked')
  local mini=Nexus.OrbPanel.ShowMini()
  C.guard(mini.state:GetText()=='Paused - a pending result must settle first' and not mini.resume:IsEnabled(),'L1b: the mini panel offers no Resume',mini.state:GetText())
- C.guard(mini.pending:GetText()=='Pending: the last Orb action is not settled' and s.spent>0 and s.reserved==0,
+ C.guard(mini.pending:GetText()=='Last Orb result is not settled' and s.spent>0 and s.reserved==0,
   'L1b: a spent unsettled action is not an unconfirmed request',mini.pending:GetText())
  local complete=mini.reason._nexusFullText or mini.reason:GetText()
  C.guard(complete==s.reason,'L1b: the mini retains the complete runtime reason',complete)
