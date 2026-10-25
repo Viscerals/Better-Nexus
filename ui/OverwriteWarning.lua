@@ -6,12 +6,17 @@ local frame, active, onboardingOutcome
 local TEXT_HEAD = "Auto can overwrite your active game Saved Build. It may replace Echoes you value, including Echoes obtained with Orbs. Nexus cannot undo that save or recover spent Orbs.\n\nAfter a finished run at level 80, changing the assignment or saving edits to its assigned Wishlist can cause replacement without a new run.\n\n"
 local TEXT_TAIL = "Choose No to keep Auto OFF. Opening this warning does not enable Auto."
 local TEXT = TEXT_HEAD .. TEXT_TAIL
+-- The first-launch warning's answers are Continue / Close (BindAnswers), so its
+-- closing choice names Close. The Auto warning and any other kind keep TEXT_TAIL.
+local ONBOARDING_TEXT = TEXT_HEAD .. "Choose Close to keep Auto OFF. Opening this warning does not enable Auto."
 
 -- The Auto warning (kind "auto") also lists what Auto may do, from the
 -- current permissions (Readout.AutomationScopeLines, read only), and what it
 -- does to tomes (Readout.TOME_PARAGRAPH), before the closing choice. The
--- first-launch warning keeps TEXT. Reading changes nothing.
+-- first-launch warning keeps TEXT_HEAD and ends with its own Close choice
+-- (ONBOARDING_TEXT), with or without Readout. Reading changes nothing.
 local function BodyText(kind)
+    if kind == "onboarding" then return ONBOARDING_TEXT end
     local readout = Nexus.Readout
     if kind ~= "auto" or not (readout and type(readout.AutomationScopeLines) == "function") then return TEXT end
     local store, internals = Nexus.Store, Nexus.MainInternals
