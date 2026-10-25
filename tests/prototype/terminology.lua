@@ -500,6 +500,22 @@ do
  local IDS={'enUS','frFR','deDE','esES','plPL','ptBR','ruRU'}
  local NAMES={enUS='English',frFR='Fran\195\167ais',deDE='Deutsch',esES='Espa\195\177ol',plPL='Polski',
   ptBR='Portugu\195\170s (Brasil)',ruRU='\208\160\209\131\209\129\209\129\208\186\208\184\208\185'}
+ -- Issue #142 six-message cohort: the exact authored draft bytes of the three
+ -- newer keys in each pack, and the charge row each renders for banish 0,
+ -- reroll unknown and freeze 7. Literal expectations, not derived from data.
+ local W3K,WPK,CHK='reason.wait_three_choices','reason.wait_pending_pick_count','readout.charge_counts'
+ local AUTHORED={
+  frFR={[W3K]="En attente des trois prochains choix d'Echo",[WPK]='en attente du nombre de choix restants',[CHK]='Ban:{banish} Rel:{reroll} Gel:{freeze}'},
+  deDE={[W3K]='Warten auf die n\195\164chsten drei Echo-Auswahlen',[WPK]='warten auf die Anzahl ausstehender Auswahlen',[CHK]='Verb:{banish} Neu:{reroll} Einfr:{freeze}'},
+  esES={[W3K]='Esperando las pr\195\179ximas tres opciones de Echo',[WPK]='esperando el n\195\186mero de elecciones pendientes',[CHK]='Dest:{banish} Rel:{reroll} Cong:{freeze}'},
+  plPL={[W3K]='Oczekiwanie na kolejne trzy wybory Echo',[WPK]='oczekiwanie na liczb\196\153 pozosta\197\130ych wybor\195\179w',[CHK]='Wygn:{banish} Przel:{reroll} Zamr:{freeze}'},
+  ptBR={[W3K]='Aguardando as pr\195\179ximas tr\195\170s escolhas de Echo',[WPK]='aguardando a contagem de escolhas pendentes',[CHK]='Banir:{banish} Rolar:{reroll} Cong:{freeze}'},
+  ruRU={[W3K]='\208\158\208\182\208\184\208\180\208\176\208\189\208\184\208\181 \209\129\208\187\208\181\208\180\209\131\209\142\209\137\208\184\209\133 \209\130\209\128\209\145\209\133 \208\178\208\176\209\128\208\184\208\176\208\189\209\130\208\190\208\178 Echo',
+   [WPK]='\208\190\208\182\208\184\208\180\208\176\208\189\208\184\208\181 \209\135\208\184\209\129\208\187\208\176 \208\190\209\129\209\130\208\176\208\178\209\136\208\184\209\133\209\129\209\143 \208\178\209\139\208\177\208\190\209\128\208\190\208\178',
+   [CHK]='\208\152\208\183\208\179:{banish} \208\159\208\181\209\128:{reroll} \208\151\208\176\208\188:{freeze}'},
+ }
+ local CHARGE07={frFR='Ban:0 Rel:? Gel:7',deDE='Verb:0 Neu:? Einfr:7',esES='Dest:0 Rel:? Cong:7',plPL='Wygn:0 Przel:? Zamr:7',
+  ptBR='Banir:0 Rolar:? Cong:7',ruRU='\208\152\208\183\208\179:0 \208\159\208\181\209\128:? \208\151\208\176\208\188:7'}
  local enum=Nexus.DefaultProfile.uiLanguages
  check(type(enum)=='table' and enum.default=='enUS' and type(enum.ids)=='table' and #enum.ids==#IDS,'the preference enum is declared with its English default')
  for i,id in ipairs(IDS)do check(enum.ids[i]==id,'preference enum ID '..i..' is '..id)end
@@ -513,15 +529,14 @@ do
  check(L.ActiveLanguage()=='enUS' and select(2,L.ActiveLanguage())==true,'the English profile starts with English active, initialized once')
  local d=L.Diagnostics()
  check(d.packs.present and d.packs.adopted==6 and d.packs.refused==0 and #d.packs.rows==6 and d.language.active=='enUS','every real pack is adopted at load')
- for _,row in ipairs(d.packs.rows)do check(row.accepted==3 and row.rejected==0,'real pack '..row.id..' has all three entries')end
+ for _,row in ipairs(d.packs.rows)do check(row.accepted==6 and row.rejected==0,'real pack '..row.id..' has all six entries: three original static, two newer static and the charge-row template')end
  local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
  local packData=penv.Nexus and penv.Nexus.LocalizationPacks
  check(count(penv)==1 and count(penv.Nexus)==1 and type(packData)=='table' and getmetatable(packData)==nil and count(packData)==6,'the pack data file sets one plain table of six packs and calls nothing')
  -- The normative original pack cohort (issue #123): the three static status
- -- messages each real optional pack translates, with their existing exact
- -- English bytes. It is named apart from the expanded English cohort above,
- -- whose newer issue #142 meanings have no pack entry and stay English (or an
- -- explicit injected candidate) under any selected language.
+ -- messages with their existing exact English bytes, kept as a named control.
+ -- Each real pack now also holds the issue #142 six-message additions: the two
+ -- newer static wait reasons and the charge-row template (AUTHORED above).
  local packCohort={
   {'ROOT_MUTATION_PENDING','reason.save_in_progress','Saving is still in progress; wait for its final result'},
   {'CURSOR_REQUIRED','reason.list_preparing','This list is still being prepared'},
@@ -534,14 +549,21 @@ do
   check(row and row[1]==case[1] and row[3]==case[3] and data[case[2]]==case[3] and L.Kind(case[2])=='text','SETUP original pack-cohort row keeps its code, key and exact English bytes: '..case[2])
  end
  for _,case in ipairs(cohort)do if not packKeys[case[2]] then newer[#newer+1]=case end end
- check(#packCohort==3 and #newer==2 and #cohort==#packCohort+#newer and newer[1][2]=='reason.wait_three_choices' and newer[2][2]=='reason.wait_pending_pick_count','SETUP the original pack cohort is three of the five static English meanings; the two newer ones are English-only')
+ check(#packCohort==3 and #newer==2 and #cohort==#packCohort+#newer and newer[1][2]=='reason.wait_three_choices' and newer[2][2]=='reason.wait_pending_pick_count','SETUP the original pack cohort is three of the five static English meanings; the two newer ones are the issue #142 wait reasons')
  for _,case in ipairs(newer)do check(L.Kind(case[2])=='text' and data[case[2]]==case[3],'SETUP newer static English meaning keeps its exact bytes: '..case[2])end
  for i=2,#IDS do
   local id=IDS[i];local pack=packData[id]
-  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and count(pack.entries)==3,'pack '..id..': its own name and exactly the three original pack-cohort entries')
-  local onlyOriginal=true
-  for key in pairs(pack.entries)do onlyOriginal=onlyOriginal and packKeys[key]==true end
-  check(onlyOriginal,'pack '..id..' holds only original pack-cohort keys: no newer English-only meaning or template')
+  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and count(pack.entries)==6,'pack '..id..': its own name and exactly the six-message cohort entries')
+  local onlyCohort=true
+  for key in pairs(pack.entries)do onlyCohort=onlyCohort and (packKeys[key]==true or AUTHORED[id][key]~=nil) end
+  check(onlyCohort,'pack '..id..' holds only six-message cohort keys: no other English key')
+  for _,key in ipairs({W3K,WPK,CHK})do
+   local text=pack.entries[key]
+   check(text==AUTHORED[id][key] and isolated(text) and text~=data[key],'pack '..id..' '..key..': exactly the authored draft bytes, not the English')
+  end
+  for _,case in ipairs(newer)do
+   resolves(case[2],{[case[2]]=pack.entries[case[2]]},AUTHORED[id][case[2]],'candidate',nil,'pack '..id..' '..case[2]..' passes the text contract')
+  end
   for _,case in ipairs(packCohort)do
    local text=pack.entries[case[2]]
    check(type(text)=='string' and #text>=8 and isolated(text) and text~=case[2] and not text:find('[%%{}<>]') and not text:find('TODO',1,true) and not text:find('TBD',1,true),'pack '..id..' '..case[2]..': drafted text, not a key or a placeholder')
@@ -556,6 +578,37 @@ do
   Nexus.Localization,Nexus.LocalizationPacks=real,realPacks
   return ok and module~=real and module or nil
  end
+ -- Issue #142 six-message cohort: each real pack, selected once through the
+ -- fixed-session initialization, gives its exact authored draft for every
+ -- message through ordinary Text and Format calls (no explicit pack), and the
+ -- real Readout charge row renders it. Expected rows are literal, not derived.
+ do
+  local args={banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}}
+  for i=2,#IDS do
+   local id=IDS[i]
+   local m=assert(reloadPacks(realPacks),'loader with the real packs: '..id);checks=checks+1
+   local mt,ms,mw=m.Format(CHK,args)
+   check(mt=='B:0 R:? F:7' and ms=='base' and mw==nil,'before initialization the charge row is the English template: '..id)
+   check(m.InitializeActiveLanguage(id)==id,'SETUP the real pack is selected: '..id)
+   local m0=m.Diagnostics()
+   for _,case in ipairs(cohort)do
+    local want=packKeys[case[2]] and packData[id].entries[case[2]] or AUTHORED[id][case[2]]
+    local text,source,why=m.Text(case[2])
+    check(type(want)=='string' and text==want and source=='candidate' and why==nil and text~=case[3],'active '..id..' Text gives its pack text: '..case[2])
+    check(m.Resolve(case[2])==case[3],'Resolve stays the English base under '..id..': '..case[2])
+   end
+   mt,ms,mw=m.Format(CHK,args)
+   check(mt==CHARGE07[id] and ms=='candidate' and mw==nil and mt~='B:0 R:? F:7','active '..id..' Format renders its authored charge row: 0 stays 0, unknown is ?')
+   check(m.Diagnostics().misses==m0.misses,'the complete real '..id..' pack records no fallback')
+   Nexus.Localization=m
+   local line,wait=Nexus.Readout.ChargesLine({banish=0,freeze=7}),T.Message('waiting: waiting for pending-pick count')
+   Nexus.Localization=real
+   check(line==CHARGE07[id] and wait==AUTHORED[id][WPK],'the real Readout and UserText consumers show the active '..id..' drafts')
+   mt,ms,mw=m.Format(CHK,args,{})
+   check(mt=='B:0 R:? F:7' and ms=='base' and mw=='missing_candidate','an explicit {} pack still decides alone under '..id)
+  end
+  check(Nexus.Localization==real and L.ActiveLanguage()=='enUS' and L.Format(CHK,args)=='B:0 R:? F:7','the real English session is untouched by the per-pack loads')
+ end
  local fresh=assert(reloadPacks(realPacks),'loader with the real packs');checks=checks+1
  check(fresh.ActiveLanguage()=='enUS' and select(2,fresh.ActiveLanguage())==false,'a new module starts with English, not yet initialized')
  check(fresh.Text(K)==E and select(2,fresh.Text(K))=='base','before initialization Text is English')
@@ -568,34 +621,49 @@ do
   if packKeys[case[2]] then
    check(type(want)=='string' and text==want and source=='candidate' and why==nil,'ordinary Text uses the active pack: '..case[2])
   else
-   check(want==nil and text==case[3] and source=='base' and why=='missing_candidate','a newer static meaning the selected frFR pack lacks falls back to its exact English: '..case[2])
+   check(type(want)=='string' and want==AUTHORED.frFR[case[2]] and text==want and source=='candidate' and why==nil,'ordinary Text uses the authored frFR draft of a newer static meaning: '..case[2])
   end
   local rtext,rsource,rwhy=fresh.Resolve(case[2])
   check(rtext==case[3] and rsource=='base' and rwhy==nil,'Resolve stays pure: without a pack it is the English base: '..case[2])
   check(fresh.Resolve(case[2],{[case[2]]='Fixture text'})=='Fixture text' and fresh.Text(case[2],{[case[2]]='Fixture text'})=='Fixture text','an explicit pack still decides alone: '..case[2])
  end
  local active1=fresh.Diagnostics()
- check(active1.misses-active0.misses==#newer and active1.byReason.missing_candidate-active0.byReason.missing_candidate==#newer and active1.last=='missing_candidate' and #active1.keys==#active0.keys and active1.keysNotKept==active0.keysNotKept,'each newer English fallback under frFR is counted once as missing_candidate and keeps no key')
+ check(active1.misses==active0.misses and active1.byReason.missing_candidate==active0.byReason.missing_candidate and #active1.keys==#active0.keys and active1.keysNotKept==active0.keysNotKept,'the complete real frFR pack records no fallback for its five static messages (partial-pack fallback is covered by fixtures below)')
  local charge={banish={known=true,value=2},reroll={known=false},freeze={known=true,value=0}}
  local ct,cs,cw=fresh.Format('readout.charge_counts',charge)
- check(fresh.Kind('readout.charge_counts')=='format' and ct=='B:2 R:? F:0' and cs=='base' and cw==nil,'with frFR selected a formatted meaning without an explicit pack uses the English template and typed known/unknown counts')
+ check(fresh.Kind('readout.charge_counts')=='format' and ct=='Ban:2 Rel:? Gel:0' and cs=='candidate' and cw==nil,'with frFR selected a formatted meaning without an explicit pack uses the active frFR template and typed known/unknown counts')
  ct,cs,cw=fresh.Format('readout.charge_counts',charge,{['readout.charge_counts']='G:{freeze} R:{reroll} B:{banish}'})
- check(ct=='G:0 R:? B:2' and cs=='candidate' and cw==nil,'with frFR selected only an explicit NON-SHIPPED candidate template replaces it')
+ check(ct=='G:0 R:? B:2' and cs=='candidate' and cw==nil,'with frFR selected an explicit NON-SHIPPED candidate template still decides alone')
  check(fresh.Diagnostics().misses==active1.misses and charge.banish.value==2 and charge.reroll.known==false and charge.reroll.value==nil and charge.freeze.value==0,'formatting without a fallback records nothing and leaves its arguments untouched')
+ do
+  local e0=fresh.Diagnostics()
+  for _,c in ipairs({{{},'missing_candidate'},{{['readout.charge_counts']='B:{banish} R:{reroll}'},'invalid_candidate'},{'unsupported-pack','unsupported_pack'}})do
+   local t,s,w=fresh.Format('readout.charge_counts',charge,c[1])
+   check(t=='B:2 R:? F:0' and s=='base' and w==c[2],'with frFR selected an explicit pack still decides alone: '..c[2]..' falls back to English, not to the active pack')
+  end
+  local t,s,w=fresh.Format('readout.not_reviewed',charge)
+  check(t==U and s=='unavailable' and w=='unknown_key','an unknown formatted key keeps the safe status with a pack active')
+  local e1=fresh.Diagnostics()
+  check(e1.misses-e0.misses==4 and e1.byReason.missing_candidate-e0.byReason.missing_candidate==1 and e1.byReason.invalid_candidate-e0.byReason.invalid_candidate==1 and e1.byReason.unsupported_pack-e0.byReason.unsupported_pack==1 and e1.byReason.unknown_key-e0.byReason.unknown_key==1,'each explicit Format fallback under frFR is counted once')
+ end
  Nexus.Localization=fresh
  local shown={}
  for _,case in ipairs(cohort)do shown[case[1]]=T.Message(case[1])end
+ local chargeRow=Nexus.Readout.ChargesLine({banish=0,freeze=7,trustworthy=false})
  Nexus.Localization=real
  for _,case in ipairs(packCohort)do check(shown[case[1]]==packData.frFR.entries[case[2]] and shown[case[1]]~=case[3],'UserText shows the selected frFR pack text: '..case[1])end
- for _,case in ipairs(newer)do check(shown[case[1]]==case[3],'UserText keeps the exact English of a newer meaning under the selected frFR pack: '..case[1])end
+ for _,case in ipairs(newer)do check(shown[case[1]]==AUTHORED.frFR[case[2]] and shown[case[1]]~=case[3],'UserText shows the authored frFR draft of a newer meaning: '..case[1])end
+ check(chargeRow=='Ban:0 Rel:? Gel:7 ~','the real Readout charge row renders the selected frFR template, then its estimate marker')
  local ut,us,uw=fresh.Text(K,'unsupported-pack')
  check(ut==E and us=='base' and uw=='unsupported_pack','an explicit unsupported pack falls back to English, not to the active pack')
  check(fresh.Text('reason.not_reviewed')==U and select(2,fresh.Text('reason.not_reviewed'))=='unavailable','an unknown key keeps the safe status with a pack active')
  local again,second=fresh.InitializeActiveLanguage('deDE')
  check(again=='frFR' and second==false and fresh.Text(K)==packData.frFR.entries[K],'a repeated initialization never switches mid-session')
  realPacks.frFR.entries[K]='Changed after load';realPacks.frFR.name='Changed name'
- check(fresh.Text(K)==packData.frFR.entries[K] and fresh.Languages()[2].name==NAMES.frFR,'packs are copied at load: a later data change changes nothing')
+ realPacks.frFR.entries[CHK]='X:{freeze}{reroll}{banish}'
+ check(fresh.Text(K)==packData.frFR.entries[K] and fresh.Languages()[2].name==NAMES.frFR and fresh.Format(CHK,charge)=='Ban:2 Rel:? Gel:0','packs are copied at load: a later data change, template included, changes nothing')
  realPacks.frFR.entries[K]=packData.frFR.entries[K];realPacks.frFR.name=NAMES.frFR
+ realPacks.frFR.entries[CHK]=packData.frFR.entries[CHK]
  local unsupported={n=12,nil,'','fr','frfr','FRFR','fr_FR','fr-FR','enGB','xxXX',42,true,{}}
  for i=1,unsupported.n do
   local m=assert(reloadPacks(realPacks))
@@ -633,6 +701,69 @@ do
  local pm=assert(reloadPacks(fixture))
  check(pm.InitializeActiveLanguage('plPL')=='plPL' and pm.Text(K)==E and pm.Text('reason.saved_data_reading')=='Fixture read text','a function entry is left out; its valid neighbour is shown')
  check(touched==touched0,'pack metamethods are never invoked')
+ -- Issue #142 bridge: every real pack is complete now, so deliberate partial
+ -- and malformed fixture packs keep the missing-key fallback and the load-time
+ -- template refusal covered. reloadPacks restores the real seam and packs.
+ do
+  local CK='readout.charge_counts'
+  local args={banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}}
+  local original={}
+  for _,case in ipairs(packCohort)do original[case[2]]=packData.frFR.entries[case[2]]end
+  local partialPacks={frFR={name=NAMES.frFR,entries=original},
+   deDE={name=NAMES.deDE,entries={[CK]='E:{freeze} N:{reroll} V:{banish}',[K]='Fixture list draft'}},
+   esES={name=NAMES.esES,entries={[CK]='B:{banish} R:{reroll}',[W3K]='Fixture wait draft'}},
+   plPL={name=NAMES.plPL,entries={[CK]=7,[WPK]='Fixture count draft'}},
+   ptBR={name=NAMES.ptBR,entries={[CK]='{banish}{reroll}'..B(0xED,0xA0,0x80)..'{freeze}'}}}
+  local pm=assert(reloadPacks(partialPacks),'loader with partial fixture packs');checks=checks+1
+  local pd=pm.Diagnostics().packs
+  local r=pd.rows
+  check(pd.adopted==5 and pd.refused==1 and #r==5
+   and r[1].id=='frFR' and r[1].accepted==3 and r[1].rejected==0
+   and r[2].id=='deDE' and r[2].accepted==2 and r[2].rejected==0
+   and r[3].id=='esES' and r[3].accepted==1 and r[3].rejected==1
+   and r[4].id=='plPL' and r[4].accepted==1 and r[4].rejected==1
+   and r[5].id=='ptBR' and r[5].accepted==0 and r[5].rejected==1,'a valid template is copied; a malformed, non-string or non-scalar template is refused at load and counted while its siblings and pack stay governed by the existing rules')
+  check(pm.InitializeActiveLanguage('frFR')=='frFR','SETUP the partial frFR fixture pack is selected')
+  local p0=pm.Diagnostics()
+  for _,case in ipairs(packCohort)do check(pm.Text(case[2])==original[case[2]],'the partial frFR fixture shows its original entry: '..case[2])end
+  for _,case in ipairs(newer)do
+   local t,s,w=pm.Text(case[2])
+   check(t==case[3] and s=='base' and w=='missing_candidate','a newer static meaning a partial pack lacks falls back to its exact English: '..case[2])
+  end
+  local ft,fs,fw=pm.Format(CK,args)
+  check(ft=='B:0 R:? F:7' and fs=='base' and fw=='missing_candidate','a charge row a partial pack lacks falls back to the English template with the same counts')
+  local p1=pm.Diagnostics()
+  check(p1.misses-p0.misses==#newer+1 and p1.byReason.missing_candidate-p0.byReason.missing_candidate==#newer+1 and p1.last=='missing_candidate' and #p1.keys==#p0.keys and p1.keysNotKept==p0.keysNotKept,'each partial-pack fallback is counted once as missing_candidate and keeps no key')
+  Nexus.Localization=pm
+  local partialRow,partialWait=Nexus.Readout.ChargesLine({banish=0,freeze=7}),T.Message('waiting for three-card board')
+  Nexus.Localization=real
+  check(partialRow=='B:0 R:? F:7' and partialWait=='Waiting for the next three Echo choices','the real Readout and UserText show the exact English for keys the partial pack lacks')
+  local dm=assert(reloadPacks(partialPacks),'loader with partial fixture packs for deDE');checks=checks+1
+  check(dm.InitializeActiveLanguage('deDE')=='deDE','SETUP the reordered deDE fixture is selected')
+  partialPacks.deDE.entries[CK]='Changed:{banish}{reroll}{freeze}'
+  ft,fs,fw=dm.Format(CK,args)
+  check(ft=='E:7 N:? V:0' and fs=='candidate' and fw==nil,'a reordered fixture template copied at load is the active row; each count stays in its own slot and a later data change changes nothing')
+  partialPacks.deDE.entries[CK]='E:{freeze} N:{reroll} V:{banish}'
+  local tt,ts,tw=dm.Text(CK)
+  check(tt==dm.UNAVAILABLE and ts=='unavailable' and tw=='format_requires_arguments','an active template is never static text')
+  check(dm.Text(K)=='Fixture list draft','the static sibling of a copied template is shown')
+  for _,case in ipairs({{'esES',W3K,'Fixture wait draft'},{'plPL',WPK,'Fixture count draft'},{'ptBR',nil,nil}})do
+   local m=assert(reloadPacks(partialPacks),'loader with partial fixture packs for '..case[1]);checks=checks+1
+   check(m.InitializeActiveLanguage(case[1])==case[1],'SETUP a pack with a refused template is still adopted: '..case[1])
+   ft,fs,fw=m.Format(CK,args)
+   check(ft=='B:0 R:? F:7' and fs=='base' and fw=='missing_candidate','a template refused at load falls back to English: '..case[1])
+   if case[2] then check(m.Text(case[2])==case[3],'the valid sibling of a refused template is shown: '..case[1])end
+  end
+  -- Only a key that holds an admitted English template may carry one.
+  Nexus.LocalizationEnglish={[CK]='B:{banish} R:{reroll}',[K]=E}
+  local noTemplate=reloadPacks({frFR={name=NAMES.frFR,entries={[CK]='Ban:{banish} Rel:{reroll} Gel:{freeze}',[K]='Fixture list draft'}}})
+  Nexus.LocalizationEnglish=realData
+  noTemplate=assert(noTemplate,'loader with an invalid English template');checks=checks+1
+  local nr=noTemplate.Diagnostics().packs.rows[1]
+  check(nr and nr.id=='frFR' and nr.accepted==1 and nr.rejected==1,'a pack template for a key without an admitted English template is refused and counted')
+  check(noTemplate.InitializeActiveLanguage('frFR')=='frFR' and select(3,noTemplate.Format(CK,args))=='unknown_key' and noTemplate.Text(K)=='Fixture list draft','a pack never adds a template; its static sibling is shown')
+  check(Nexus.Localization==real and Nexus.LocalizationPacks==realPacks and Nexus.LocalizationEnglish==realData,'real seam, packs and English data restored after the partial-pack fixtures')
+ end
  local none=assert(reloadPacks(nil),'loader without pack data');checks=checks+1
  check(#none.Languages()==1 and not none.Diagnostics().packs.present and none.InitializeActiveLanguage('frFR')=='enUS' and none.Text(K)==E,'without pack data only English is offered')
  local profileEnum=Nexus.DefaultProfile.uiLanguages
