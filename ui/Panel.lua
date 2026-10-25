@@ -2700,7 +2700,7 @@ local LANGUAGE_REASONS = {
     invalid = "that language is not available",
     failed = "the saved-data owner did not take it",
 }
-local LANGUAGE_SCOPE = "Only three status messages are translated; other Nexus text stays English."
+local LANGUAGE_SCOPE = "Only six messages are translated: five status messages and the Banish/Reroll/Freeze count row; other Nexus text stays English."
 local LANGUAGE_RELOAD = "A new choice applies after you reload the interface or log in again."
 
 local function LanguageName(status, id)

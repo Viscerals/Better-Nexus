@@ -491,7 +491,14 @@ do
  local IDS={'frFR','deDE','esES','plPL','ptBR','ruRU'}
  local COHORT={{'ROOT_MUTATION_PENDING','reason.save_in_progress','Saving is still in progress; wait for its final result'},
   {'CURSOR_REQUIRED','reason.list_preparing','This list is still being prepared'},
-  {'STORE_PENDING','reason.saved_data_reading','Reading your saved data'}}
+  {'STORE_PENDING','reason.saved_data_reading','Reading your saved data'},
+  {'waiting for three-card board','reason.wait_three_choices','Waiting for the next three Echo choices'},
+  {'waiting for pending-pick count','reason.wait_pending_pick_count','waiting for pending-pick count'}}
+ -- Issue #142: the row the real Readout shows for banish 0, reroll unknown and
+ -- freeze 7 under each active language (literal expectations).
+ local CHARGES={enUS='B:0 R:? F:7',frFR='Ban:0 Rel:? Gel:7',deDE='Verb:0 Neu:? Einfr:7',esES='Dest:0 Rel:? Cong:7',
+  plPL='Wygn:0 Przel:? Zamr:7',ptBR='Banir:0 Rolar:? Cong:7',
+  ruRU='\208\152\208\183\208\179:0 \208\159\208\181\209\128:? \208\151\208\176\208\188:7'}
  local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
  local PACKS=assert(penv.Nexus and penv.Nexus.LocalizationPacks,'pack data');checks=checks+1
  local function Want(id,case)return id=='enUS' and case[3] or PACKS[id].entries[case[2]] end
@@ -545,6 +552,9 @@ do
    check(model.status==case[1] and model.recommendation==case[1],label..': the raw reason stays the input: '..case[1])
    check(Nexus.Panel._lastModel.status==want and NexusPanel._rollRec:GetText()==want and NexusPanel._rollArea:IsShown(),label..': the panel fontstring shows it: '..case[1])
   end
+  local slots={banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}}
+  check(Nexus.Readout.ChargesLine({banish=0,freeze=7})==CHARGES[id] and Nexus.Readout.ChargesLine({banish=0,freeze=7,trustworthy=false})==CHARGES[id]..' ~',label..': the real Readout charge row of the active language; known 0 is 0 and unknown is ?')
+  check(Nexus.Localization.Format('readout.charge_counts',slots,{})=='B:0 R:? F:7',label..': an explicit {} pack still gives the English row')
  end
  -- A. English default: an absent preference, nothing added at start-up; menu reads write nothing.
  H=F.Boot(F.Database({version=2}))
@@ -557,7 +567,7 @@ do
  local menu,rows=LanguageMenu()
  check(menu and rows==1 and menu.hasArrow and type(menu.menuList)=='table','the ... menu has exactly one Language row with a submenu')
  local text=MenuText(menu)
- check(Row(menu,'enUS') and text:find('three status messages',1,true) and text:find('other Nexus text stays English',1,true),'English and the partial result are listed')
+ check(Row(menu,'enUS') and text:find('Only six messages are translated: five status messages and the Banish/Reroll/Freeze count row',1,true) and text:find('other Nexus text stays English',1,true) and not text:find('three status messages',1,true),'English and the partial six-message result are listed')
  for _,id in ipairs(IDS)do
   check(Row(menu,id) and not Row(menu,id).disabled,'the chooser lists '..id..' by its own name, enabled')
   check(not text:find(id,1,true) and not menu.text:find(id,1,true),'no internal language ID is shown: '..id)

@@ -4,8 +4,9 @@
 -- asks for a stable semantic key ("reason.save_in_progress") and gets text.
 -- This file reads no game API, client locale, saved data or setting, and it
 -- prints, sends, schedules or saves nothing. Its state is the English base
--- and the optional packs copied at load (each pack covers only the three
--- reviewed status messages; all other Nexus text stays English), the
+-- and the optional packs copied at load (each pack covers at most the
+-- six-message cohort: five static messages and the charge-row template; all
+-- other Nexus text stays English), the
 -- session's active language (set once from the ID its caller supplies, see
 -- below) and the fixed-size diagnostic record below.
 --
@@ -71,8 +72,10 @@
 -- every other ID names one pack. A pack is adopted only when it is a plain
 -- table whose name (its autonym: the text contract, at most MAX_NAME_BYTES)
 -- and plain entries table (at most MAX_BASE_ENTRIES entries) pass; an entry
--- is copied only when its key is a reviewed English key and its text passes
--- the text contract. Anything else is left out and counted in
+-- is copied only when its key is a reviewed English static key and its text
+-- passes the text contract, or its key holds an admitted English template
+-- (issue #142) and its text compiles under that key's code-owned schema
+-- (CompileTemplate). Anything else is left out and counted in
 -- Diagnostics().packs: a missing or invalid entry falls back to English for
 -- its key, and a refused or absent pack is not offered. Packs are read with
 -- next/rawget only and copied once, here; a later change to the data table
@@ -116,8 +119,9 @@
 --  2. a static text key             -> UNAVAILABLE, "unavailable", "wrong_key_kind"
 --  3. no valid English template     -> UNAVAILABLE, "unavailable", "unknown_key"
 --  4. arguments outside the schema  -> UNAVAILABLE, "unavailable", "invalid_arguments"
---  5. pack nil, not a plain table, without an entry or with an invalid
---     template -> the English template, same arguments, "base", and nil,
+--  5. pack nil with no active pack (English active or not yet initialized),
+--     pack not a plain table, without an entry or with an invalid template
+--     -> the English template, same arguments, "base", and nil,
 --     "unsupported_pack", "missing_candidate" or "invalid_candidate"
 --  6. candidate output above the schema's result limit -> the English
 --     template, same arguments, "base", "output_limit"
@@ -127,8 +131,11 @@
 -- names, each a plain record {known = true, value = N} (N a finite whole
 -- number >= 0, shown with tostring) or {known = false} (shown as "?").
 -- Substitution is one pass: an inserted value is never parsed again.
--- Format does not use the active language: a copied pack holds only static
--- reviewed keys, so with no pack a formatted meaning is the English template.
+-- CHANGED CONTRACT (issue #142): as with Text, a nil pack selects the active
+-- language's copied pack, which may hold a template copied at load, so an
+-- ordinary consumer such as ui/Readout.lua shows the active language. An
+-- explicit pack (including {} or an invalid candidate) still decides alone,
+-- and Resolve and FormatResolve stay pure supplied-pack owners.
 
 Nexus = Nexus or {}
 local L = {}
@@ -425,7 +432,15 @@ do
         if entries and count <= MAX_BASE_ENTRIES then
             local copy, accepted = {}, 0
             for key, text in next, entries do
-                if ValidKey(key) and base[key] ~= nil and ValidText(text) then
+                -- Issue #142: a key holding an admitted English template is
+                -- copied only as a template that compiles under its schema.
+                local schema = ValidKey(key) and templates[key] ~= nil and SCHEMAS[key] or nil
+                if schema then
+                    if CompileTemplate(text, schema) then
+                        copy[key] = text
+                        accepted = accepted + 1
+                    end
+                elseif ValidKey(key) and base[key] ~= nil and ValidText(text) then
                     copy[key] = text
                     accepted = accepted + 1
                 end
@@ -517,7 +532,11 @@ local function FormatResolve(key, arguments, pack)
     return UNAVAILABLE, "unavailable", "output_limit"
 end
 
+-- The row a player-facing consumer shows: FormatResolve plus the record.
+-- Without a pack it uses the active language's pack, as Text does (see the
+-- issue #142 CHANGED CONTRACT at the top of the file).
 function L.Format(key, arguments, pack)
+    if pack == nil then pack = active.entries end
     local text, source, reason = FormatResolve(key, arguments, pack)
     if reason then Note(key, reason) end
     return text, source, reason
