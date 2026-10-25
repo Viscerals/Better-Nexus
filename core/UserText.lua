@@ -189,6 +189,52 @@ local DESTINATION_WORDS = {
 }
 local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true, restoring = true}
 
+-- Compact alternatives (DestinationFields only). Display metadata: the value
+-- and tooltip stay the authoritative disclosure and grant no assignment.
+-- compact is a complete shorter value (a bare name stays whole); the state
+-- cell's minimum is its shortest atomic label, for a cell too narrow for
+-- compact. Both are chosen from the descriptor codes, never cut from or
+-- parsed out of the worded value, and a state label is shown whole. A
+-- Wishlist meaning word precedes its name, so a shortened name never reads
+-- as assigned; only an assigned Wishlist shows its name alone.
+-- Compressed markers (each disclosed in full by the tooltip):
+--   "?"        not known or not confirmed (never unassigned, first-run or active)
+--   "#2 Name"  Saved Build slot 2, then its name
+--   "On"/"Off" the Saved Build is / is not active in the game
+--   "N/A"      unavailable right now
+--   "Refused"  the Saved Build holds no Echoes, so any assignment is refused
+--   "1st"      first-run target (no Saved Build in use)
+--   "Wait"     the saved assignment is being restored
+--   "Capt."    shown as captured earlier; never the current state or assignment
+local SAVED_BUILD_STATE_COMPACT = {
+    unavailable = {compact = "Unavailable", minimum = "N/A"},
+    empty = {compact = "Empty", minimum = "Empty"},
+    active = {compact = "Active", minimum = "On"},
+    inactive = {compact = "Inactive", minimum = "Off"},
+    unconfirmed = {compact = "Unconfirmed", minimum = "?"},
+    notStated = {compact = "Not known", minimum = "?"},
+}
+local DESTINATION_COMPACT = {
+    firstRun = {build = "None", compact = "First run", minimum = "1st"},
+    restoring = {build = "?", compact = "Restoring", minimum = "Wait"},
+    unknown = {build = "?", compact = "Not loaded", minimum = "?"},
+    unconfirmed = {build = "?", compact = "Unconfirmed", minimum = "?"},
+    none = {build = "?", compact = "None", minimum = "None"},
+}
+-- A stated Wishlist assignment state in compact words.
+local function WishlistCompact(wishlist, state)
+    if state == "assigned" then
+        return wishlist or "Assigned"
+    elseif state == "unassigned" then
+        return "None"
+    elseif state == "unavailable" then
+        return wishlist and ("N/A: " .. wishlist) or "N/A"
+    elseif state == "restoring" then
+        return "Restoring"
+    end
+    return wishlist and ("?: " .. wishlist) or "?"
+end
+
 -- A fixed phrase with its first letter raised when asked (ASCII words only,
 -- never a name).
 local function Lead(text, capital)
@@ -289,51 +335,67 @@ end
 -- "||"). A later fitting step shows it as it is, or shortens it only at a
 -- UTF-8 character boundary that does not split an escaped pipe pair; it
 -- never sanitizes or escapes it again, and the tooltip keeps the whole text.
+-- Each record also has compact, a complete shorter value, and the state
+-- record minimum, its shortest atomic label (see the compact markers above).
 function T.DestinationFields(d)
     d = type(d) == "table" and d or {}
     local p = DestinationParts(d)
     local captured = d.captured == true and p.kind ~= "none"
-    local build, stateWords
+    local build, stateWords, buildCompact, stateShort
     if p.kind == "savedBuild" then
         local name, slot = T.SafeName(d.name), Whole(d.slot)
         if slot and slot < 1 then slot = nil end
         if name and slot then
             build = name .. " (slot " .. slot .. ")"
+            buildCompact = "#" .. slot .. " " .. name
         elseif slot then
             build = "Slot " .. slot
+            buildCompact = "#" .. slot
         else
             build = name or Lead("the selected Saved Build", true)
+            buildCompact = name or "Selected"
         end
         stateWords = SAVED_BUILD_STATE_WORDS[p.state] or "active state not known"
+        stateShort = SAVED_BUILD_STATE_COMPACT[p.state] or SAVED_BUILD_STATE_COMPACT.notStated
     else
         build = Lead(DESTINATION_WORDS[p.kind].build, true)
         stateWords = DESTINATION_WORDS[p.kind].state
+        buildCompact = DESTINATION_COMPACT[p.kind].build
+        stateShort = DESTINATION_COMPACT[p.kind]
     end
     local noAssignment = p.kind == "savedBuild" and d.empty and true or false
     local stated = WISHLIST_STATES[d.wishlistState] == true
-    local wishlist
+    local wishlist, wishlistCompact
     if noAssignment then
         local words = "no valid assignment (the Saved Build holds no Echoes)"
         wishlist = p.wishlist and (p.wishlist .. " - " .. words) or Lead(words, true)
+        wishlistCompact = p.wishlist and ("Refused: " .. p.wishlist) or "Refused"
     elseif stated then
         wishlist = WishlistWords(p.wishlist, d.wishlistState, true)
+        wishlistCompact = WishlistCompact(p.wishlist, d.wishlistState)
     elseif p.wishlist then
         wishlist = p.wishlist .. (captured and " (captured)" or " (assignment not known)")
+        wishlistCompact = "?: " .. p.wishlist
     else
         wishlist = "Not known"
+        wishlistCompact = "?"
     end
-    local state
+    local state, stateCompact, stateMinimum
     if captured then
         state = "Captured; " .. stateWords
             .. ((noAssignment or stated) and "" or "; assignment not checked")
+        stateCompact, stateMinimum = "Captured: " .. stateShort.compact, "Capt."
     else
         state = Lead(stateWords, true)
+        stateCompact, stateMinimum = stateShort.compact, stateShort.minimum
     end
     local fields = {
-        {key = "character", label = "Character", value = p.character or "Not known"},
-        {key = "savedBuild", label = "Saved Build", value = build},
-        {key = "wishlist", label = "Wishlist", value = wishlist},
-        {key = "state", label = "State", value = state},
+        {key = "character", label = "Character", value = p.character or "Not known",
+            compact = p.character or "?"},
+        {key = "savedBuild", label = "Saved Build", value = build, compact = buildCompact},
+        {key = "wishlist", label = "Wishlist", value = wishlist, compact = wishlistCompact},
+        {key = "state", label = "State", value = state, compact = stateCompact,
+            minimum = stateMinimum},
     }
     local tooltip = {}
     for index = 1, #fields do
