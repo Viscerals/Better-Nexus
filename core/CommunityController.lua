@@ -3078,6 +3078,20 @@ function Controller.New(options)
         if tostring(status.version or "") ~= representedVersion then
             return false, "build changed since the failed Share"
         end
+        -- Retry Share is not offered for a listing made from a Saved Build
+        -- (sourceSavedBuildId): it would send the listing again without the
+        -- confirmation that a Saved Build's Share action asks for. No
+        -- equivalent route is promised: import cleanup can remove the Saved
+        -- Build mirror while this listing stays; a later Share of the mirror
+        -- sends the mirror's current title, description and Echoes, which
+        -- can differ from this failed listing; and EditBuild can also share
+        -- an edited revision of this owned listing. Checked last: every
+        -- other refusal keeps its reason, and a Share-form build is unchanged.
+        if build.sourceSavedBuildId ~= nil then
+            return false, "Retry Share is not offered for a listing made from"
+                .. " a Saved Build; a Saved Build's Share action is separate"
+                .. " and asks for its own confirmation"
+        end
         return true, nil, status
     end
 
@@ -3327,7 +3341,9 @@ function Controller.New(options)
             pendingPublications[id] = nil
             -- Existing polling callers consume the terminal receipt. A renderer
             -- that already received its callback starts a new explicit update.
-            if type(onComplete) ~= "function" then return prior.ok, prior.value end
+            if type(onComplete) ~= "function" then
+                return prior.ok, prior.value, nil, prior.admission
+            end
         end
         local source = LoadBuild(id)
         if Identity.SavedMirrorKind(source) ~= "saved" then
@@ -3386,6 +3402,13 @@ function Controller.New(options)
         source.publishedBuildId = publishedId
         source.recordBuildId = publishedId
         source.lastPublishedAt = stamp
+        -- The context this Share was confirmed in, as EditBuild keeps it: a
+        -- commit that settles after the player, saved data or catalog changed
+        -- is saved locally but queues nothing.
+        local catalog, database = Catalog(), NexusDB
+        local preparation = catalog and type(catalog.ManualPreparationStatus) == "function"
+            and catalog.ManualPreparationStatus() or nil
+        local binding = preparation and preparation.binding
         local operation = {state="pending",ok=nil,value=nil,finalized=false}
         local function Finish(ok, value)
             if operation.finalized then return end
@@ -3393,17 +3416,33 @@ function Controller.New(options)
             operation.state, operation.ok, operation.value = "complete", ok,
                 value
             if ok then
-                BroadcastIfPossible(record)
+                -- Saved locally is not queued, and queued is not sent. This
+                -- is the owner's explicit Share of this exact listing: it is
+                -- tracked as one, without a queue-full retry, and its actual
+                -- admission or final refusal (saved mode, size, Sync
+                -- unavailable) is kept for the caller.
+                local admission = {localSaved=true,queueAdmitted=false}
+                local current = catalog and type(catalog.ManualPreparationStatus) == "function"
+                    and catalog.ManualPreparationStatus() or nil
+                if database ~= NexusDB or catalog ~= Catalog()
+                    or localOwner ~= CurrentVerifiedOwnerKey()
+                    or binding ~= nil and (not current or binding ~= current.binding) then
+                    admission.queueReason = "player or catalog changed"
+                else
+                    local admitted, reason, status = BroadcastIfPossible(record, {explicit=true})
+                    admission.queueAdmitted, admission.queueReason = admitted == true, reason
+                    admission.shareStatus = status
+                end
+                operation.admission = admission
                 local D = Nexus.DpsCapture
                 if D and D.BroadcastBestForBuild then
                     pcall(D.BroadcastBestForBuild, publishedId)
                 end
             end
             if operation.onComplete then
-                operation.onComplete(ok, value, operation.ticket)
+                operation.onComplete(ok, value, operation.ticket, operation.admission)
             end
         end
-        local catalog = Catalog()
         if not (catalog and type(catalog.BeginCatalogMaintenance) == "function"
             and type(catalog.MaintenanceReplaceRow) == "function"
             and type(catalog.CommitMaintenance) == "function") then
@@ -3441,7 +3480,7 @@ function Controller.New(options)
             end, catalog.CommitMaintenance(handle))
         if committed then
             Finish(true, publishedId)
-            return true, publishedId
+            return true, publishedId, nil, operation.admission
         end
         if commitWhy == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
             operation.ticket = ticket
