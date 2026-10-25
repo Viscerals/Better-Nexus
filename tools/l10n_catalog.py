@@ -22,8 +22,14 @@ declaration is not evidence of fluent competence, contributor rights or native
 truth. main(), appended last, is the bounded read-only confined-root command
 line (B3b) around catalog_report. It adds only root, input and Nexus.toc
 load-order checks (CatalogCliError, stable .code) and passes the exact input
-bytes to catalog_report unchanged. Full validation is an implemented draft
-(IMPLEMENTED_DRAFT). Required-CI registration is implemented in source:
+bytes to catalog_report unchanged. The legacy fullValidation value
+IMPLEMENTED_DRAFT denotes a scoped draft for the currently adopted static
+keys and the single code-owned charge-count template, not whole #147;
+NOTICE['validationScope'], copied into the catalog_report and command-line
+report records, states that plural variants, dynamic-key coverage per
+family, runtime load/fallback parity, per-pack translator provenance/rights
+and approved terminology validation are not implemented by this component.
+Required-CI registration is implemented in source:
 tools/tests/test_l10n_catalog.py is registered in PYTHON_TESTS of
 tools/run_prototype_tests.py, and tools/ci_check.py runs it as its own
 process. Independent review and the human, native and UI gates are still
@@ -148,7 +154,8 @@ NOTICE = {
     'tool': 'tools/l10n_catalog.py',
     'status': STATUS,
     'fullValidation': 'IMPLEMENTED_DRAFT',
-    'message': 'catalog validator and report CLI implemented and registered in required CI; independent review pending',
+    'validationScope': 'Scoped draft for currently adopted static keys and the single code-owned charge-count template; not whole #147. Plural variants, dynamic-key coverage per family, runtime load/fallback parity, per-pack translator provenance/rights and approved terminology validation are not implemented by this component.',
+    'message': 'scoped static-catalog draft registered in source for required CI; independent review and human, native and full-UI gates pending',
 }
 
 _INVENTORY = pathlib.Path(__file__).resolve().parent / 'l10n_inventory.py'
@@ -400,8 +407,10 @@ def parse_packs(source: bytes) -> dict:
 # the two JSON documents strictly and checks all four against the runtime
 # contract of core/Localization.lua, restated below as fixed constants. It
 # reads and writes no file, imports or runs no Lua or runtime code and calls
-# nothing in the data. Coverage counts, review and native evidence, TOC order,
-# reports and the command line are later tasks.
+# nothing in the data. This section is only that schema API. The coverage and
+# evidence report API (B3a) and the Nexus.toc order check and read-only
+# command line (B3b) follow in later sections of this file. Review and native
+# acceptance and native client facts stay separate; nothing here attests them.
 
 VALIDATION_CODES = (
     'json-not-utf8', 'json-invalid', 'json-duplicate-member', 'json-nonstandard-constant',
@@ -1198,6 +1207,7 @@ def catalog_report(english_source: bytes, packs_source: bytes, key_context_json:
         'tool': _TOOL_PATH,
         'status': STATUS,
         'fullValidation': NOTICE['fullValidation'],
+        'validationScope': NOTICE['validationScope'],
         'inputs': inputs,
         'categories': list(ENTRY_CATEGORIES),
         'englishBaseline': {
@@ -1489,6 +1499,7 @@ def main(argv=None) -> int:
         'tool': _TOOL_PATH,
         'status': STATUS,
         'fullValidation': NOTICE['fullValidation'],
+        'validationScope': NOTICE['validationScope'],
         'notice': dict(NOTICE),
         'requireComplete': 'requested' if require_complete else 'not_requested',
         'exitCode': exit_code,

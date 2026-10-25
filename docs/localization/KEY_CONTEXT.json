@@ -147,7 +147,7 @@
     {"source": "core/SupportReport.lua", "status": "PENDING_CLASSIFICATION", "note": "visible wrappers; payload bytes keep their own decoder contract"},
     {"source": "ui/FlexiblePlanChooser.lua", "status": "PENDING_CLASSIFICATION", "note": "loaded by Nexus.toc at the base pin; not in the historical inventory window table"},
     {"source": "Nexus.toc and companion/NexusSupport/NexusSupport.toc Title and Notes", "status": "PENDING_CLASSIFICATION", "note": "visible in the client's AddOns list; scope undecided"},
-    {"source": "other core/ and logic/ files", "status": "PENDING_CLASSIFICATION", "note": "which literals reach a player is not classified"}
+    {"source": "other Nexus.toc and companion Lua files not otherwise listed in these window families or other-copy rows (including data/Release.lua, data/DefaultProfile.lua, data/BundledBuilds.lua and ui/VirtualList.lua)", "status": "PENDING_CLASSIFICATION", "note": "which literals reach a player is not classified"}
   ],
   "visibleTextDenominator": "NOT_ESTABLISHED",
   "historicalLeads": [

@@ -396,11 +396,14 @@ class FullCoveragePlan(unittest.TestCase):
             self.assertIn("| " + name + " | #" + str(issue) + " |", self.text)
 
 
-# B1 parser foundation (Refs #147): public grammar tests for the parser-only
-# tools/l10n_catalog.py. The tests use only parse_english, parse_packs and
-# CatalogSyntaxError, on exact bytes, against independent literal tables and
-# error codes. No Lua is executed, imported or evaluated. Metadata, review,
-# coverage, path and full command-line fixtures belong to later tasks.
+# B1 parser foundation (Refs #147): public grammar tests of parse_english,
+# parse_packs and CatalogSyntaxError of tools/l10n_catalog.py, on exact bytes,
+# against independent literal tables and error codes. No Lua is executed,
+# imported or evaluated. The parser class also holds one direct command-line
+# characterization: it runs the tool as a script on this repository and
+# compares each report record with catalog_report on the same input bytes.
+# The schema API, coverage report and command-line cases are in the later
+# sections of this file.
 
 import importlib.util
 import os
@@ -420,7 +423,8 @@ CATALOG_NOTICE = {
     "tool": "tools/l10n_catalog.py",
     "status": "IMPLEMENTED_DRAFT_REVIEW_PENDING",
     "fullValidation": "IMPLEMENTED_DRAFT",
-    "message": "catalog validator and report CLI implemented and registered in required CI; independent review pending",
+    "validationScope": "Scoped draft for currently adopted static keys and the single code-owned charge-count template; not whole #147. Plural variants, dynamic-key coverage per family, runtime load/fallback parity, per-pack translator provenance/rights and approved terminology validation are not implemented by this component.",
+    "message": "scoped static-catalog draft registered in source for required CI; independent review and human, native and full-UI gates pending",
 }
 
 CATALOG_CURRENT_ENGLISH = {
@@ -843,11 +847,15 @@ class CatalogParserGrammar(unittest.TestCase):
 
 
 # B2 schema API (Refs #147): public tests of validate_catalog_data and
-# CatalogValidationError. The baseline is the exact current six-key source and
-# metadata; each case changes one thing in memory and passes exact bytes. The
-# expectations are independent literals, not the implementation's tables. No
-# Lua is executed, main() is not invoked here, and coverage counts, evidence
-# and the report command line belong to later tasks.
+# CatalogValidationError. The cases were written against the six-key English
+# base and its metadata. Their fixtures are independent of the implementation:
+# the exact bytes of the four inputs in this checkout, the literal English and
+# pack tables of the B1 section, the loaded JSON documents and the literal
+# scalar and template cases below. Each case changes one thing in memory and
+# passes exact bytes to the real schema API; the expectations are independent
+# literals, not the implementation's tables. No Lua is executed and main() is
+# not invoked here. Coverage counts and evidence (B3a) and the command line
+# (B3b) are tested in the later sections of this file.
 
 import copy
 
@@ -1563,6 +1571,8 @@ class CatalogCoverageReport(unittest.TestCase):
         })
         self.assertIn(REPORT_NOT_EVIDENCE, self.catalog.EVIDENCE_NOTICE)
         self.assertEqual(self.catalog.NOTICE["fullValidation"], "IMPLEMENTED_DRAFT")
+        self.assertEqual(self.catalog.NOTICE["validationScope"], CATALOG_NOTICE["validationScope"])
+        self.assertEqual(self.report()["validationScope"], CATALOG_NOTICE["validationScope"])
         plan = " ".join(read_text("docs/localization/FULL_COVERAGE.md").split())
         for required in ("catalog_report", "CatalogEvidenceError", REPORT_NOT_EVIDENCE, "B3b",
                          "IMPLEMENTED_DRAFT", "Author execution of the new tests: NOT_RUN"):
@@ -2123,6 +2133,58 @@ def cli_tree(root):
     return sorted(entries, key=lambda entry: entry[0])
 
 
+# The portable read-fault pair of test_unreadable_input_is_a_stable_error
+# runs this in a separate isolated Python (-I -B), as the OS-error cases of
+# tools/tests/test_l10n_inventory.py do. It loads the tool from its file,
+# makes pathlib.Path.<operation> raise OSError(EACCES) for every path whose
+# final component is <name> and calls the tool's real public main() with the
+# remaining arguments. When main() returns, it writes each path given to that
+# operation, each injected fault and the returned value to the record file,
+# outside the input root. Nothing else is replaced. No file permission is
+# changed, nothing in the input root is imported or run and, unlike the
+# command-line children of cli_run, this child writes no bytecode.
+CLI_FAULT_DRIVER = '''\
+import errno, importlib.util, json, pathlib, sys
+tool, operation, name, record = sys.argv[1:5]
+argv = sys.argv[5:]
+spec = importlib.util.spec_from_file_location('l10n_catalog_under_fault', tool)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+real = getattr(pathlib.Path, operation)
+calls, injected = [], []
+def failing(self, *args, **kwargs):
+    calls.append(str(self))
+    if self.name == name:
+        injected.append(str(self))
+        raise OSError(errno.EACCES, 'injected filesystem fault', str(self))
+    return real(self, *args, **kwargs)
+setattr(pathlib.Path, operation, failing)
+code = module.main(argv)
+with open(record, 'w', encoding='ascii') as handle:
+    json.dump({'operation': operation, 'name': name, 'calls': calls,
+               'injected': injected, 'returned': code}, handle)
+raise SystemExit(code)
+'''
+
+
+def cli_fault_run(test, root, operation, name):
+    """Run CLI_FAULT_DRIVER in a new isolated process on main(["--root", root]),
+    with root as the working directory and pathlib.Path.<operation> failing
+    for name. Return the completed process and the driver's record, read from
+    a new temporary directory outside root. If the driver wrote no record,
+    the test fails; the control is never skipped or passed."""
+    holder = tempfile.TemporaryDirectory()
+    test.addCleanup(holder.cleanup)
+    record = Path(holder.name) / "fault-record.json"
+    command = [sys.executable, "-I", "-B", "-c", CLI_FAULT_DRIVER, str(CATALOG_TOOL),
+               operation, name, str(record), "--root", str(root)]
+    run = subprocess.run(command, capture_output=True, cwd=str(root))
+    if not record.is_file():
+        test.fail("the fault driver wrote no record (exit %r): %r"
+                  % (run.returncode, run.stderr[-500:]))
+    return run, json.loads(record.read_bytes().decode("ascii"))
+
+
 def cli_link_directory(test, link, target):
     """Create link as a directory symlink to target. Where Windows refuses an
     unprivileged symlink, create a junction instead. If both fail, the test
@@ -2237,6 +2299,7 @@ class CatalogCommandLine(unittest.TestCase):
             self.assertEqual(record["notice"], CATALOG_NOTICE)
             self.assertEqual((record["status"], record["fullValidation"]),
                              (SCHEMA_STATUS, "IMPLEMENTED_DRAFT"))
+            self.assertEqual(record["validationScope"], CATALOG_NOTICE["validationScope"])
             self.assertEqual((record["toc"]["source"], record["toc"]["sha256"],
                               record["toc"]["byteLength"]),
                              ("Nexus.toc", hashlib.sha256(toc).hexdigest(), len(toc)))
@@ -2419,7 +2482,40 @@ class CatalogCommandLine(unittest.TestCase):
         root = self.make_root()
         target = root.joinpath(*name.split("/"))
         data = target.read_bytes()
-        cache = catalog_pycache_names()
+        tree, cache = cli_tree(root), catalog_pycache_names()
+        resolved = [root.resolve(strict=True).joinpath(*source.split("/"))
+                    for source in CLI_INPUTS]
+        stop, unused = CLI_INPUTS.index(name), "UNUSED.json"
+        self.assertNotIn(unused, [path.name for path in resolved])
+        # The permanent matched pair runs the real main() on this root through
+        # CLI_FAULT_DRIVER on every platform. With read_bytes failing only for a
+        # name that no input has, its output must equal that of the normal
+        # command line on the same root, input hashes included. With read_bytes
+        # failing for the release file, it must take the real input-unreadable
+        # path and stop there. Each driver record lists the paths given to
+        # read_bytes and those it faulted, so a missing injection fails here.
+        plain = self.run_cli(root, "--root", root)
+        control, control_record = cli_fault_run(self, root, "read_bytes", unused)
+        fault, fault_record = cli_fault_run(self, root, "read_bytes", target.name)
+        self.assertEqual(cli_tree(root), tree)
+        self.assertEqual(catalog_pycache_names(), cache)
+        self.record(plain, 0)
+        report = self.record(control, 0)
+        self.assertEqual(control.stdout, plain.stdout)
+        self.assertEqual(report["report"], self.expected(root))
+        self.assertEqual([row["sha256"] for row in report["report"]["inputs"]]
+                         + [report["toc"]["sha256"]],
+                         [hashlib.sha256(path.read_bytes()).hexdigest() for path in resolved])
+        self.assert_error(fault, "CatalogCliError", "input-unreadable", subject=name)
+        for driver, failing, paths, injected, returned in (
+                (control_record, unused, resolved, [], 0),
+                (fault_record, target.name, resolved[:stop + 1], [resolved[stop]], 2)):
+            self.assertEqual((driver["operation"], driver["name"], driver["returned"]),
+                             ("read_bytes", failing, returned))
+            self.assertEqual([Path(path) for path in driver["calls"]], paths)
+            self.assertEqual([Path(path) for path in driver["injected"]], injected)
+        # The real OS control, in addition to the pair: a Windows byte-range
+        # lock, or mode 000 where this account is actually refused the file.
         if os.name == "nt":
             import msvcrt
             with open(str(target), "rb") as handle:
@@ -2430,17 +2526,30 @@ class CatalogCommandLine(unittest.TestCase):
                     handle.seek(0)
                     msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, len(data))
         else:
+            mode = target.stat().st_mode & 0o7777
             target.chmod(0)
             try:
-                if os.access(str(target), os.R_OK):
-                    self.skipTest("limitation: this account can still read a mode-000 file, so "
-                                  "the unreadable-input control is not established here")
-                run = cli_run("--root", root, cwd=root)
+                try:
+                    with open(str(target), "rb"):
+                        denied = False
+                except PermissionError:
+                    denied = True
+                if denied:
+                    run = cli_run("--root", root, cwd=root)
             finally:
-                target.chmod(0o644)
+                target.chmod(mode)
+            self.assertEqual(target.stat().st_mode & 0o7777, mode)
+            if not denied:
+                # Limitation: this account still reads a mode-000 file (root
+                # or a privileged container), so no real OS permission denial
+                # is established here. The injected fault result above is
+                # reused instead; it proves the read-error handling of the
+                # command line, not that the OS enforces file permissions.
+                run = fault
         self.assertEqual(catalog_pycache_names(), cache)
         self.assert_error(run, "CatalogCliError", "input-unreadable", subject=name)
         self.assertEqual(target.read_bytes(), data)
+        self.assertEqual(cli_tree(root), tree)
 
     def test_symlink_or_junction_escape_is_refused(self):
         data = {name: self.raw[name] for name in CLI_INPUTS[:2]}

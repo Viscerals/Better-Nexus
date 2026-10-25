@@ -29,7 +29,7 @@ It accepts no issue: not #139, not #147 and no later gate.
 |---|---|---|
 | Release languages | `RELEASE_LANGUAGES.json`: product choices, client evidence, review and session states, and the `entryReview` declaration contract with no declaration recorded | none in this slice |
 | Keys and context | `KEY_CONTEXT.json`: six keys, byte limits, grammar, families | none in this slice |
-| Validator | `tools/l10n_catalog.py`, status `IMPLEMENTED_DRAFT_REVIEW_PENDING`: syntax parser, pure schema API `validate_catalog_data`, pure coverage report API `catalog_report` on exact in-memory bytes, and the read-only confined-root command line around `catalog_report` (B3b); full validation IMPLEMENTED_DRAFT | independent review |
+| Validator | `tools/l10n_catalog.py`, status `IMPLEMENTED_DRAFT_REVIEW_PENDING`: syntax parser, pure schema API `validate_catalog_data`, pure coverage report API `catalog_report` on exact in-memory bytes, and the read-only confined-root command line around `catalog_report` (B3b); scoped static-catalog validation IMPLEMENTED_DRAFT (not whole #147) | independent review |
 | Tests | `tools/tests/test_l10n_catalog.py`: assertions on these public documents, public parser, schema and report API tests, and subprocess tests of the command line on the repository and on temporary public-only roots | independent review; host validation against the final source pin |
 | Required CI | registered in source (`REGISTERED_IN_PYTHON_TESTS`): `tools/tests/test_l10n_catalog.py` is the second entry of `PYTHON_TESTS` in `tools/run_prototype_tests.py`, run by `tools/ci_check.py` as its own process | independent review; host and hosted-CI validation against the final source pin |
 
@@ -147,8 +147,13 @@ Each gate needs its own evidence and acceptance; passing one accepts no other.
 3. #143, #144, #145 full UI: every window family below, in author batches.
 4. #146 native: client locale, alias, font, glyph and layout evidence;
    NOT_RUN.
-5. #147 validation: the validator, fixtures and required-CI registration
-   above.
+5. #147 validation: open. This component supplies only the scoped
+   static-catalog validator, fixtures and required-CI registration above,
+   for the currently adopted static keys and the single code-owned
+   charge-count template; independent review is pending. Plural variants,
+   dynamic-key coverage per family, runtime load/fallback parity, per-pack
+   translator provenance/rights and approved terminology validation
+   remain #147 criteria that this component does not implement.
 6. #148 pack gate and #149 union gate: separate later acceptance.
 
 ## Author batches
@@ -178,7 +183,14 @@ family complete.
 
 Other visible core and support copy (`core/UserText.lua`, `core/Main.lua`,
 `core/SupportReport.lua` wrappers, TOC Title and Notes,
-`ui/FlexiblePlanChooser.lua`) stays pending classification. No complete
+`ui/FlexiblePlanChooser.lua`) stays pending classification, and so does
+every other `Nexus.toc` and companion Lua file not otherwise listed in a
+window family or other-copy row, including `data/Release.lua`,
+`data/DefaultProfile.lua`, `data/BundledBuilds.lua` and `ui/VirtualList.lua`;
+which of their literals reach a player is not classified. This is a
+pending-classification register only: it is not proof that any of these
+files contains UI copy, not an exhaustive semantic inventory and no
+permission to import a corpus. No complete
 denominator is claimed. The 25,355 lexical literals and the 21-key #143
 preparation are leads at their own pins.
 
