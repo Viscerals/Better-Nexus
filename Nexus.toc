@@ -11,6 +11,7 @@ data\DefaultProfile.lua
 data\BundledBuilds.lua
 logic\Version.lua
 data\LocalizationEnglish.lua
+data\LocalizationPacks.lua
 core\Localization.lua
 core\UserText.lua
 core\Performance.lua
