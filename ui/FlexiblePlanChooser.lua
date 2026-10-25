@@ -193,7 +193,7 @@ function Factory.New(options)
         frame:SetClampedToScreen(true);frame:EnableMouse(true)
         if type(UISpecialFrames)=="table" then table.insert(UISpecialFrames,"NexusFlexiblePlanChooser") end
         Label(frame,"Plan alternatives — session only",900,24,22,-16)
-        Label(frame,"Add exact Echo IDs, then Set each count. Set: shows the committed count; * marks pending input. 0 unchooses.",970,20,22,-44)
+        local help=Label(frame,"Add exact Echo IDs, then Set each count. Set: shows the committed count; * marks pending input. 0 unchooses.",970,20,22,-44)
         Label(frame,"Hide keeps this pool and choice until reload. Reset clears only this planning session.",970,20,22,-66)
         Label(frame,"Catalog",430,20,22,-94);Label(frame,"Your pool / exact counts",480,20,505,-94)
         search=CreateFrame("EditBox","NexusFlexiblePlanSearch",frame,"InputBoxTemplate")
@@ -243,6 +243,15 @@ function Factory.New(options)
         end
         budget=Label(frame,"",970,20,22,-546)
         status=Label(frame,"",970,36,22,-570)
+        -- Fixed multi-line boxes keep their size (docs/UI_TEXT_LAYOUT.md): while
+        -- the count help or the status overflows its box, as at a large font
+        -- scale, a hover area over it shows the complete text (LayoutMetrics
+        -- FullTextTooltip). Created once with the chooser; nothing moves.
+        local metrics = Nexus.LayoutMetrics
+        if metrics and metrics.FullTextTooltip then
+            metrics.FullTextTooltip(help, frame)
+            metrics.FullTextTooltip(status, frame)
+        end
         local open=Button(frame,"NexusFlexiblePlanOpen","Open as new Wishlist draft",224,Open)
         open:SetPoint("BOTTOMRIGHT",-22,18)
         local reset=Button(frame,"NexusFlexiblePlanReset","Reset pool",100,function()
