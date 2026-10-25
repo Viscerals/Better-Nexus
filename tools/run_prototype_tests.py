@@ -307,6 +307,8 @@ NAMES += ['ux_save_intents','ux_auto_assignment_consent','ux_automation_scope']
 NAMES += ['ux_save_retry_intent','ux_assignment_consent_routes']
 # UX M4: captured destination presentation, one qualified count vocabulary, record scope/detail and terminology lint (EXPECT fails on accepted M3 ab3cb307 by design).
 NAMES += ['ux_destination_context','ux_qualified_counts','ux_record_scope_terms']
+# #151 Stage A1: pure local-pool codec (EXPECT fails on docs-only 15dace7 by design; Store/UI slices follow).
+NAMES += ['flexible_plan_persistence_codec']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
