@@ -176,12 +176,20 @@ check(not lateIntent.Install() and controller.CanonicalEchoes()[1].spellId==ids[
 check(uploads==0,'controller preparation/refusal/install sends no upload')
 
 -- Synthetic StaticPopup boundary, original to this fixture; the shared
--- harness stays untouched. It models one supplied scalar only: after the
--- accept button, a true OnAccept return keeps that dialog shown and nil or
--- false lets the click hide it. Each dialog is tracked by its own `which`,
--- so hiding one confirmation never hides another. Cancel is modelled as
--- OnCancel then hide, and OnShow is not run. Native StaticPopup frames,
--- reuse, timing and the installed client version are not modelled (NOT_RUN).
+-- harness stays untouched. It models one supplied scalar of the accept
+-- button: a true OnAccept return keeps that dialog shown and nil or false
+-- lets the click hide it. Each dialog is tracked by its own `which`, so
+-- hiding one confirmation never hides another. It also models the optional
+-- data of StaticPopup_Hide(which,data): a hide applies only when data is nil
+-- or is the shown record's own data, and each hide is counted. A Show for
+-- the same `which` replaces its synthetic record without a hide. Native
+-- pooled-frame reuse and override timing are not modelled, so such a Show
+-- is no evidence that a former popup was explicitly retired. That needs a
+-- hide observed before any later Show (the record gone, or its hide count).
+-- Cancel is modelled as OnCancel then hide, and OnShow is not run. Native
+-- StaticPopup frames, data filtering, return handling, pooling, reuse,
+-- timing and the installed client version are NOT_RUN; no exact versioned
+-- client or FrameXML export was consulted.
 local REPLACE,CREATE='NEXUS_FLEXIBLE_PLAN_REPLACE','WISHLISTREALIZER_CREATE_WISHLIST'
 local Popup={shown={},hidden={}}
 function StaticPopup_Show(which,a,b,data)
@@ -344,11 +352,24 @@ end
 -- the replacement popup's own Cancel and Accept then act on it. The consent
 -- must say that accepting cancels that pending Save. Only those disclosure
 -- EXPECTs collect failures; every setup, Cancel and Accept control is a hard
--- check, so an unchanged consent reports through completion. New and Reset
--- restore the editor and planning session before the original paths take
--- their baselines; the adapter's spacing stays, and no later path uploads.
+-- check, so an unchanged consent reports through completion. Under the
+-- spacing, an upload attempt is refused before the host call. One small
+-- counter at the public GameAdapter.UploadWishlist boundary forwards each
+-- call to its unmodified implementation, so it shows that the replacement
+-- and the late callbacks attempt no upload. New and Reset restore the
+-- editor and planning session. The public harness clock (H.Advance) then
+-- ends the spacer's real window and the public function is restored. Both
+-- happen before the original paths take their baselines, so their no-upload
+-- checks run where an upload would reach the host.
 do
     local failures={}
+    local realUpload,uploadCalls,uploadWhy=Nexus.GameAdapter.UploadWishlist,0,nil
+    Nexus.GameAdapter.UploadWishlist=function(...)
+        uploadCalls=uploadCalls+1
+        local ok,why=realUpload(...)
+        uploadWhy=why
+        return ok,why
+    end
     local function expect(value,label)
         print('PENDING SAVE '..(value and 'PASS ' or 'FAIL ')..label)
         if not value then failures[#failures+1]=label end
@@ -399,15 +420,21 @@ do
             label=saveButton and saveButton:GetText(),applyPending=editor.IsApplyPending(),
             retry=retry and {slot=retry.slot,name=retry.name,rows=Literal(retry.echoes)},
             save=tostring(Popup.shown[CREATE]),db=H.Clone(NexusDB),held=H.Clone(H.locked),
-            actions=#H.actions,sends=#H.sent}
+            actions=#H.actions,sends=#H.sent,
+            -- and the attempts at the public upload boundary, refused or not
+            uploads=uploadCalls}
     end
     editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
     check(owner.PendingApply()==nil and not editor.IsApplyPending() and editor.DebugPendingCount()==0
-        and Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and Budget(0,0),
-        'PENDING SAVE setup an empty editor and planning session with no Save waiting')
+        and Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and Budget(0,0) and uploadCalls==0,
+        'PENDING SAVE setup an empty editor and planning session with no Save waiting and no upload attempt')
     local spaced=Nexus.GameAdapter.UploadWishlist(0,'Pending save spacer',{{spellId=410004,quality=0,stacks=1}})
     local spacedActions,spacedSends=#H.actions,#H.sent
-    check(spaced,'PENDING SAVE setup a real GameAdapter upload of a synthetic spacer starts the service spacing')
+    -- The adapter stamps its spacing clock with this time on the spacer's
+    -- accepted upload. It refuses another upload until GetTime() is 3 s past it.
+    local spacerAt=GetTime()
+    check(spaced and uploadCalls==1 and (H.actions[spacedActions] or {})[1]=='upload',
+        'PENDING SAVE setup a real GameAdapter upload of a synthetic spacer, forwarded by the counter to the host, starts the service spacing')
     check(Add(A) and Add(B) and Count(A,2) and Count(B,1) and Budget(2,3),
         'PENDING SAVE setup explicit choice 410002x2 410003x1 through real Add and Set')
     NexusFlexiblePlanOpen:Click()
@@ -432,8 +459,8 @@ do
     check(retry.slot==0 and retry.name==SAVE_NAME and equal(Literal(retry.echoes),SAVED)
         and retry.echoes==savePopup.data.echoes,
         'PENDING SAVE the retry holds the accepted payload itself: slot 0, its name and literal 410002x2 410003x1')
-    check(#H.actions==spacedActions and #H.sent==spacedSends,
-        'PENDING SAVE no further upload, action or send happens during the spacing')
+    check(#H.actions==spacedActions and #H.sent==spacedSends and uploadCalls==2 and uploadWhy=='spacing',
+        'PENDING SAVE the confirmed Save makes exactly one real upload attempt, refused by the spacing; no further upload, action or send happens during the spacing')
     local retryEchoes,savedMap=retry.echoes,owner.PendingRows()
     NexusFlexiblePlanEntry:Click()
     check(NexusFlexiblePlanChooser:IsShown() and Shows(A,2,'2','Set') and Shows(B,1,'1','Set') and Budget(2,3),
@@ -490,9 +517,17 @@ do
         'PENDING SAVE it installs exactly 410002x1 410005x4 with empty locked and fulfilled maps')
     check(owner.EditingContext()==nil and owner.CreateTargetContext()==nil and owner.CandidateContext()==nil
         and owner.SaveResult('')==nil and owner.SentDraft()==nil and NexusWishlistNameInput:GetText()=='',
-        'PENDING SAVE the new draft has a fresh unnamed context and no earlier Save identity')
-    check(equal({db=H.Clone(NexusDB),held=H.Clone(H.locked),actions=#H.actions,sends=#H.sent},effects),
-        'PENDING SAVE the replacement uploads, saves, assigns, shares and spends nothing')
+        'PENDING SAVE safety invariant: the new draft is unnamed and holds no editing, target or candidate context, Save result or sent draft (those were nil before this Accept too; not retirement proof)')
+    -- Those contexts, the Save result and the sent draft were nil before this
+    -- Accept as well: a spacing wait records no result and sends no Create.
+    -- The invariant above is therefore a safety check, not proof that the
+    -- Save was retired. That proof comes from three places: the real retry's
+    -- nonnil-to-nil transition above, the stale Save callback and pump below,
+    -- and the upload-attempt count, which stays at the spacer's and the
+    -- confirmed Save's two attempts.
+    check(equal({db=H.Clone(NexusDB),held=H.Clone(H.locked),actions=#H.actions,sends=#H.sent},effects)
+        and uploadCalls==2,
+        'PENDING SAVE the replacement uploads, saves, assigns, shares and spends nothing; its preparations, Cancel and Accepts attempt no further upload')
     local after=snapshot()
     StaticPopupDialogs[CREATE].OnAccept(savePopup.frame,savePopup.data)
     editor._PumpApplyRetry()
@@ -505,6 +540,33 @@ do
         and editor.DebugPendingCount()==0 and NexusWishlistNameInput:GetText()=='' and owner.PendingApply()==nil
         and not editor.IsApplyPending() and Status()=='' and Budget(0,0),
         'PENDING SAVE checks leave an empty editor, no popup or waiting Save and an empty planning session')
+    -- The spacer's real spacing window is still open here, after the retry
+    -- retired and New and Reset cleaned up. A probe with an invalid exact
+    -- target, sent to the unmodified implementation, is refused at that guard
+    -- before validation and never reaches the host.
+    local probe={{spellId=0,quality=0,stacks=1}}
+    local openOk,openWhy=realUpload(0,'Pending save probe',probe)
+    check(openOk==false and openWhy=='spacing' and GetTime()-spacerAt<3 and uploadCalls==2,
+        'PENDING SAVE after retirement and cleanup the real spacer window is still open; the old Save callback, pump and cleanup attempted no upload')
+    local advanceFrom=#H.actions
+    -- End that window through the public harness clock, using the adapter's
+    -- exact 3 s guard. Quarter-second steps are exact binary fractions, so the
+    -- clock ends exactly 3 s after the spacer. The default .05 steps round
+    -- short here and would stop just under 3 s, which the strict guard still
+    -- refuses. Without this H.Advance line the window stays open, and the
+    -- expired check below fails.
+    H.Advance(3,0.25)
+    local advanced,revived=#H.actions,false
+    for i=advanceFrom+1,advanced do
+        if H.actions[i][1]=='upload' then revived=true end
+    end
+    check(uploadCalls==2 and not revived and owner.PendingApply()==nil and not editor.IsApplyPending(),
+        'PENDING SAVE advancing revives no retry and makes no upload attempt or host upload')
+    Nexus.GameAdapter.UploadWishlist=realUpload
+    local expiredOk,expiredWhy=Nexus.GameAdapter.UploadWishlist(0,'Pending save probe',probe)
+    check(GetTime()-spacerAt>=3 and expiredOk==false and expiredWhy=='invalid exact Echo target'
+        and #H.actions==advanced,
+        'PENDING SAVE the real spacer window has expired: 3 s after the spacer the restored public upload passes its spacing guard and refuses the invalid probe before any host call')
     print('PENDING SAVE completed real paths; failures='..#failures)
     assert(#failures==0,'EXPECT replacement consent discloses the canceled pending Save: '..table.concat(failures,'; '))
 end
