@@ -930,4 +930,465 @@ C.scenario('B2 first-run row keeps its captured first-run target at font scale 2
  end
 end)
 
+-- Origins: a new draft that captured no destination shows the current facts
+-- in its destination row by the Journal's rule, never a capture. No Saved
+-- Build in use is the first-run target. A populated Saved Build selected now
+-- (also the one kept while a Wishlist above maxSlots is natively active) is
+-- none captured, never that Saved Build. An unreadable active slot or a
+-- missing row is not loaded yet. The row never shows a captured first-run
+-- target, a stale begin origin or a retarget. EXPECT: the shown Saved Build
+-- and State cells, then the row's own hover once they are shown (the opened
+-- and copy cases above keep the capture policy). GUARD: no capture,
+-- assignment, game effect or Auto change. Fixture state is read through
+-- the public Slots and SelectedSavedBuild ports only; no role is set.
+do
+ local ALPHA={name='Alpha',verified=true,echoes=E1}
+ -- The full, compact and minimum values of the Saved Build and State cells.
+ local WORDS={
+  firstRun={build={'none in use','none'},state={'first-run target (no saved build in use)','first run','1st'}},
+  none={build={'none captured','?'},state={'none captured','none'}},
+  unknown={build={'not loaded yet','?'},state={'saved build data is not loaded yet','not loaded','?'}},
+ }
+ local function Esc(s) return (s:gsub('(%p)','%%%1')) end
+ -- A positive capture cue; the negative None captured is not one.
+ local function Captures(text)
+  local t=V.Plain(text):lower():gsub('none captured','')
+  return t:find('captured',1,true)~=nil or t:find('%f[%w]c:')~=nil
+ end
+ -- A name or a slot that this draft never captured.
+ local function Mentions(text,bad)
+  local t=V.Plain(text):lower()
+  for _,b in ipairs(bad) do
+   if type(b)=='number' then
+    for _,p in ipairs({'slot%s*','#','build%s+'}) do
+     if t:find(p..b..'%f[%D]') then return b end
+    end
+   elseif V.Names(t,b) then return b end
+  end
+  return nil
+ end
+ -- One shown cell value: whole, case-insensitive, with an optional label.
+ local function In(s,list,label)
+  s=s:lower():gsub('^%s+',''):gsub('%s+$',''):gsub('^'..label..':%s*','')
+  for _,v in ipairs(list) do if s==v then return true end end
+  return false
+ end
+ local function Set(active,alpha)
+  local rows=H.Clone(H.perks.serverBuildSlots or {})
+  if alpha then rows[1]=H.Clone(ALPHA) end
+  H.perks.serverBuildSlots=rows;H.perks.serverActiveSlot=active
+  H.Notify();A.Poll();H.Advance(2)
+ end
+ -- Fixture state through the public ports only (a read observes and sets nothing).
+ local function Port(tag,active,sel,kept,alpha)
+  local s=A.Slots()
+  if not C.expect(type(A.SelectedSavedBuild)=='function','Origins '..tag..': the public SelectedSavedBuild port exists') then return nil end
+  local got,isKept=A.SelectedSavedBuild(s)
+  local rows=type(s)=='table' and type(s.bySlot)=='table' and s.bySlot or {}
+  local one=type(rows[1])=='table' and #(rows[1].echoes or {}) or 0
+  local known=type(s)=='table' and ((active==nil and s.activeKnown==false)
+   or (active~=nil and s.activeKnown~=false and s.activeSlot==active))
+  local ok=known and got==sel and (isKept==true)==kept and (one>0)==alpha and rows[2]==nil
+  local seen=type(s)=='table' and (tostring(s.activeKnown)..'/'..tostring(s.activeSlot)..' row1='..one
+   ..' selected='..tostring(got)..'/'..tostring(isKept)) or 'no slots'
+  return C.setup(ok,'Origins '..tag..': fixture: native active '..tostring(active or 'unreadable')
+   ..', selected Saved Build '..tostring(sel)..(kept and ' (kept)' or ''),seen) and s or nil
+ end
+ local function Begun(tag)
+  return C.setup(NexusEditorFrame and NexusEditorFrame:IsShown() and Ctrl().CreateTargetContext()==nil
+   and not Ctrl().IsEditing(),'Origins '..tag..': fixture: a new draft that captured no Saved Build')
+ end
+ local function NoTarget(tag)
+  C.guard(Ctrl().CreateTargetContext()==nil and not Ctrl().IsEditing(),
+   'Origins '..tag..': the draft still captured no Saved Build and edits none')
+ end
+ -- Every line that the row's own public hover writes.
+ local function Hover(row)
+  local hits=type(row.hits)=='table' and (rawget(row.hits,'kind') and {row.hits} or row.hits) or {}
+  local lines,n,raised={},0,nil
+  for _,f in pairs(hits) do
+   local enter=type(f)=='table' and rawget(f,'kind') and f:IsVisible() and f:GetScript('OnEnter')
+   if enter then
+    n=n+1
+    local got,ok,err=V.TooltipLines(enter,f)
+    if not ok then raised=V.printable(err) end
+    for _,l in ipairs(got) do lines[#lines+1]=V.Plain(l) end
+    local leave=f:GetScript('OnLeave')
+    if leave then pcall(leave,f) end
+   end
+  end
+  return table.concat(lines,' / '),n,raised
+ end
+ local function Row(tag,kinds,bad)
+  local row=NexusEditorFrame and NexusEditorFrame:IsVisible() and NexusEditorFrame._destinationRow
+  if not C.expect(type(row)=='table' and type(row.cells)=='table','Origins '..tag..': the editor shows its destination row') then return end
+  local t,why=RowCells(row)
+  local line=table.concat(t,' / ')
+  C.expect(#why==0,'Origins '..tag..': the four cells are shown whole inside the row',line..' ('..table.concat(why,'; ')..')')
+  if #row.cells~=4 or t[1]=='' or t[2]=='' or t[3]=='' or t[4]=='' then return end
+  local kind
+  for _,k in ipairs(kinds) do
+   if In(t[2],WORDS[k].build,'saved build') and In(t[4],WORDS[k].state,'state') then kind=k end
+  end
+  C.expect(kind~=nil and not Captures(line) and not Mentions(line,bad),
+   'Origins '..tag..': the shown Saved Build and State cells read '..table.concat(kinds,' or ')
+   ..' with no capture cue and no Saved Build it did not capture',line)
+  local tip,n,raised=Hover(row)
+  local w,low=WORDS[kind or kinds[1]],tip:lower()
+  C.expect(n>0 and raised==nil and low:find('saved build:?%s*'..Esc(w.build[1]))~=nil
+   and low:find('state:?%s*'..Esc(w.state[1]))~=nil and not Captures(tip) and not Mentions(tip,bad),
+   'Origins '..tag..': the row hover then states that whole meaning with nothing captured',raised or tip)
+ end
+ local function Run(label,fn)
+  C.scenario('Origins '..label,function()
+   local ok,err=pcall(fn)
+   pcall(Close)
+   if not ok then error(err,0) end
+  end)
+ end
+ Run('A: a new draft at native 0 follows the populated, kept and missing current facts',function()
+  Boot({active=0,slots={[107]={name='W-Free',verified=false,echoes=EF}}})
+  local others,auto,facts=Others(),Auto(),Facts()
+  local bad={'Alpha','W-Free',1}
+  if not Port('A0',0,nil,false,false) then return end
+  SlashCmdList.NEXUS('editor');H.Advance(1)
+  if not Begun('A0') then return end
+  -- No Saved Build in use: the current first-run target or none, never captured.
+  Row('A0 native 0',{'firstRun','none'},bad)
+  Set(1,true)
+  if Port('A1',1,1,false,true) then Row('A1 Saved Build 1 populated and active',{'none'},bad) end
+  NoTarget('A1')
+  -- Wishlist 107 is above maxSlots, so the kept Saved Build 1 stays selected.
+  Set(107)
+  if Port('A2',107,1,true,true) then Row('A2 Wishlist 107 active, Saved Build 1 kept',{'none'},bad) end
+  NoTarget('A2')
+  Set(2)
+  local s=Port('A3',2,2,false,true)
+  if s then
+   Row('A3 native 2 without its row',{'unknown'},{'Alpha','W-Free',1,2})
+   local P=Ctrl().DestinationPresentation
+   if C.expect(type(P)=='function','Origins A3: the controller has DestinationPresentation') then
+    local d0,d1=P(s,CHARACTER,0),P(s,CHARACTER,1)
+    local ok=type(d0)=='table' and type(d1)=='table'
+    C.expect(ok and d0.kind=='unknown' and d1.kind=='unknown' and d0.captured~=true and d1.captured~=true
+     and d0.slot==nil and d1.slot==nil,
+     'Origins A3: a selected scalar that differs from native 2 (0 or 1) stays unknown, never first-run or Saved Build 1',
+     ok and (tostring(d0.kind)..'/'..tostring(d1.kind)) or 'no descriptor')
+   end
+  end
+  NoTarget('A3')
+  Quiet('Origins A',others,auto)
+  C.guard(Writes()==0 and Facts()==facts,'Origins A: no assignment written (unchanged)',Facts())
+ end)
+ Run('B: a draft begun while the active slot is unreadable follows the known facts',function()
+  Boot({active=0,slots={[107]={name='W-Free',verified=false,echoes=EF}}})
+  local others,auto,facts=Others(),Auto(),Facts()
+  local bad={'Alpha','W-Free',1}
+  Set(nil)
+  if not Port('B0',nil,nil,false,false) then return end
+  SlashCmdList.NEXUS('editor');H.Advance(1)
+  if not Begun('B0') then return end
+  Row('B0 active slot unreadable',{'unknown'},bad)
+  Set(0)
+  if Port('B1',0,nil,false,false) then Row('B1 native 0 now known',{'firstRun'},bad) end
+  Set(1,true)
+  if Port('B2',1,1,false,true) then Row('B2 Saved Build 1 populated and active',{'none'},bad) end
+  NoTarget('B2')
+  Quiet('Origins B',others,auto)
+  C.guard(Writes()==0 and Facts()==facts,'Origins B: no assignment written (unchanged)',Facts())
+ end)
+end
+-- Lifecycle and read profile of the destination row's held observation
+-- (the view-only Panel.destinationSessionRevision). An uncaptured draft,
+-- begun at active 0 and then naturally observing the populated Saved Build
+-- 1, holds a current observation; the HUD is hidden (Panel.Hide) while the
+-- editor stays shown. Only real world events (H.Fire), Main's existing HUD
+-- capture (Nexus.RefreshHudView) and natural server revisions (H.perks,
+-- H.Notify, A.Poll) drive it; that one public scalar is assigned only for
+-- the corruption control and restored on every exit. EXPECT: a new,
+-- missing, malformed or other revision drops the held facts, which do not
+-- revive (not by a fresh capture of the same name, not by the restored
+-- token) before the next natural cold observation. GUARD: accepted
+-- behaviour (cached character, reacquisition, captured Saved Build, warm
+-- read profile, no effect). SETUP: fixture state, including that each
+-- measured refresh stayed warm, so only the revision can drop the facts.
+-- Cells are read as shown (RowCells); the full identity from the row's own
+-- hover areas only after that. Offline synthetic only; native NOT RUN.
+do
+ local NOT_LOADED={label='Saved Build data not loaded yet',build={'Not loaded yet','?'},
+  state={'Saved Build data is not loaded yet','Not loaded','?'},
+  tip={{'saved build','not loaded yet'},{'state','saved build data is not loaded yet'}}}
+ local NONE={label='no destination captured',build={'None captured','?'},state={'None captured','None'},
+  tip={{'saved build','none captured'},{'state','none captured'}}}
+ local FIRST={label='the first-run target',build={'None in use','None'},
+  state={'First-run target (no Saved Build in use)','First run','1st'},
+  tip={{'saved build','none in use'},{'state','first-run target (no saved build in use)'}}}
+ local function Esc(s) return (tostring(s):lower():gsub('(%p)','%%%1')) end
+ -- Shown text (an optional Label: prefix aside) that is one of the literal
+ -- alternatives, or one of them cut at its end.
+ local function Is(text,alternatives,label)
+  local shown=V.Plain(text):lower()
+  for _,t in ipairs({shown,label and shown:match('^'..Esc(label)..':%s*(.-)$') or nil}) do
+   local stem=t:match('^(.-)%.%.%.$') or t:match('^(.-)\226\128\166$')
+   for _,a in ipairs(alternatives) do
+    a=a:lower()
+    if t==a or (stem and #stem>=3 and #stem<#a and a:sub(1,#stem)==stem) then return true end
+   end
+  end
+  return false
+ end
+ local function Has(tip,pair) return tip:find(Esc(pair[1])..':?%s*'..Esc(pair[2]))~=nil end
+ local function ValidRev(v) return type(v)=='number' and v>=0 and v<math.huge and v==math.floor(v) end
+ -- The editor's destination row as shown, then, only while it is shown,
+ -- every line its own hover areas disclose (plain, lower case).
+ local function Read()
+  local row=NexusEditorFrame and NexusEditorFrame._destinationRow
+  local s={t={'','','',''},bad={'no destination row'},tip=''}
+  if type(row)=='table' and type(row.cells)=='table' then
+   s.t,s.bad=RowCells(row)
+   local lines={}
+   if row:IsVisible() and type(row.hits)=='table' then
+    for _,h in ipairs(row.hits) do
+     local enter=type(h)=='table' and h:IsVisible() and h:GetScript('OnEnter')
+     if enter then
+      for _,l in ipairs((V.TooltipLines(function() enter(h) end))) do lines[#lines+1]=V.Plain(l):lower() end
+      local leave=h:GetScript('OnLeave');if leave then pcall(leave,h) end
+     end
+    end
+   end
+   s.tip=table.concat(lines,'\n')
+  end
+  s.detail=table.concat(s.t,' | ')..(#s.bad>0 and (' bad='..table.concat(s.bad,'; ')) or '')
+  return s
+ end
+ local function Shows(kind,tag,s,want)
+  C[kind](#s.bad==0 and Is(s.t[2],want.build,'saved build') and Is(s.t[4],want.state,'state'),
+   tag..': the shown Saved Build and State cells read '..want.label,s.detail)
+  C[kind](Has(s.tip,want.tip[1]) and Has(s.tip,want.tip[2]) and not s.tip:find('shown as captured earlier',1,true),
+   tag..': the row hover, read once shown, discloses '..want.label..', not captured',(s.tip:gsub('\n',' / ')))
+ end
+ local function Person(tag,s,known)
+  C.guard(#s.bad==0 and Is(s.t[1],known and {CHARACTER} or {'Not known','?'},'character')
+   and Has(s.tip,{'character',known and CHARACTER or 'not known'}),
+   tag..': the shown character cell and hover read '..(known and CHARACTER or 'not known'),s.detail)
+ end
+ -- The one public view scalar, assigned for fn only and restored on every exit.
+ local function WithRev(value,fn)
+  local panel=Nexus.Panel
+  local prior=panel.destinationSessionRevision
+  panel.destinationSessionRevision=value
+  local ok,err=pcall(fn)
+  panel.destinationSessionRevision=prior
+  if not ok then error(err,0) end
+ end
+
+ C.scenario('lifecycle: world sessions, revision corruption and warm reads of the destination row',function()
+  Boot({active=0,slots=World()})
+  local P,Ed=Nexus.Panel,Nexus.WishlistEditor
+  local slash=SlashCmdList and SlashCmdList.NEXUS
+  if not (type(P)=='table' and type(P.Hide)=='function' and type(P.CachedDestinationCharacter)=='function'
+   and type(Ed)=='table' and type(Ed.Refresh)=='function' and type(Nexus.RefreshHudView)=='function'
+   and type(slash)=='function') then
+   C.expect(false,'lifecycle: the public editor, HUD hide, cached character and HUD capture exist');return
+  end
+  slash('editor');Nexus.RefreshHudView();Ed.Refresh()
+  local found,ctl=pcall(Ctrl)
+  if not found then C.expect(false,'lifecycle: the editor controller is reachable',ctl);return end
+  local function Uncaptured()
+   local c,t=Ctx(),type(ctl.CreateTargetContext)=='function' and ctl.CreateTargetContext() or nil
+   return c.loadoutSlot==nil and c.name==nil and not (type(t)=='table' and tonumber(t.loadoutSlot))
+  end
+  C.setup(NexusEditorFrame and NexusEditorFrame:IsVisible() and Uncaptured(),
+   'lifecycle: a new draft is open at active 0 and captured no destination')
+  local row=NexusEditorFrame and NexusEditorFrame._destinationRow
+  if type(row)~='table' or type(row.cells)~='table' then
+   C.expect(false,'lifecycle: the editor shows its destination row');return
+  end
+  local s=Read()
+  Shows('guard','begun at active 0',s,FIRST);Person('begun at active 0',s,true)
+  local n,restore,noName={},{},false
+  -- Counting wrappers of existing public getters, server reads and UnitName.
+  local function Wrap(t,k,key,via)
+   local real=t[k]
+   if type(real)~='function' then return end
+   n[key]=0
+   t[k]=function(...) n[key]=n[key]+1;if via then return via(real,...) end;return real(...) end
+   restore[#restore+1]=function() t[k]=real end
+  end
+  local ok,err=pcall(function()
+   for _,w in ipairs({{A,'Slots','slots'},{A,'SelectedSavedBuild','selected'},{A,'GetLoadoutWishlist','loadout'},
+    {A,'Wishlist','wishlist'},{A,'Level','level'},{H.service,'GetServerBuildSlots','backend'},
+    {H.service,'GetServerActiveSlot','active'}}) do Wrap(w[1],w[2],w[3]) end
+   Wrap(_G,'UnitName','unit',function(real,unit,...) if noName and unit=='player' then return nil end;return real(unit,...) end)
+   local function Reads() return (n.slots or 0)+(n.selected or 0)+(n.backend or 0)+(n.active or 0) end
+   local function Profile(d)
+    local out={}
+    for _,k in ipairs({'slots','selected','loadout','wishlist','backend','active','unit','level'}) do
+     out[#out+1]=k..'='..(d[k] or 0)
+    end
+    return table.concat(out,' ')
+   end
+   -- A natural server revision: its existing cold reads are expected and
+   -- counted here, apart from the warm profile.
+   local function Server(tag,active)
+    local r0=Reads()
+    H.perks.serverActiveSlot=active;H.Notify();A.Poll();H.Advance(1);Ed.Refresh()
+    C.setup(Reads()>r0,tag..': the natural server revision to active '..active..' made its existing reads',Reads()-r0)
+    return Read()
+   end
+   local function Refresh(tag)
+    local r0=Reads()
+    Ed.Refresh()
+    C.setup(Reads()==r0 and NexusEditorFrame:IsVisible(),
+     tag..': the editor stays shown and this refresh is warm (no Slots, selected or server slot read)',Reads()-r0)
+    return Read()
+   end
+   local function Char(tag,want)
+    local u=n.unit or 0
+    local count,value=select('#',P.CachedDestinationCharacter()),P.CachedDestinationCharacter()
+    C.guard(count==1 and value==want and (n.unit or 0)==u,
+     tag..': the cached character is '..tostring(want)..' (one value, no UnitName read)',
+     tostring(value)..' values='..count..' reads='..((n.unit or 0)-u))
+   end
+   -- Five quiet public refreshes: their reads and whether the row held still.
+   local function Warm()
+    local before=Read()
+    local s0={}
+    for k,v in pairs(n) do s0[k]=v end
+    for _=1,5 do Ed.Refresh() end
+    local d,idle={},0
+    for k,v in pairs(n) do d[k]=v-(s0[k] or 0);if k~='level' then idle=idle+d[k] end end
+    return d,idle==0 and table.concat(before.t,'|')==table.concat(Read().t,'|')
+   end
+   s=Server('natural active 1',1)
+   Shows('guard','natural active 1',s,NONE);Person('natural active 1',s,true)
+   C.guard(Uncaptured(),'natural active 1: the draft adopted no Saved Build',Ctx().loadoutSlot)
+   local token=P.destinationSessionRevision
+   C.expect(ValidRev(token),'lifecycle: the Panel publishes a valid world-session revision',token)
+   local d0,idle0=Warm()
+   C.guard(idle0 and (d0.level or 0)==5,
+    'quiet before: five warm refreshes read Level 5 times and no Slots, selected, Wishlist, server slot or UnitName; the row holds still',Profile(d0))
+   local others,w0,u0,auto,facts=Others(),Writes(),(Uploads()),Auto(),Facts()
+   restore[#restore+1]=function() if type(P.Show)=='function' then P.Show() end end
+   P.Hide()
+   C.setup(NexusEditorFrame:IsVisible(),'lifecycle: the HUD is hidden and the editor stays shown')
+   H.Fire('PLAYER_LEAVING_WORLD');Char('leave',nil)
+   local left=P.destinationSessionRevision
+   C.expect(ValidRev(left) and left~=token,'leave: a new valid world-session revision is published',tostring(token)..' -> '..tostring(left))
+   s=Refresh('leave');Shows('expect','leave',s,NOT_LOADED);Person('leave',s,false)
+   Nexus.RefreshHudView();Char('capture while leaving',nil)
+   s=Refresh('capture while leaving');Shows('expect','capture while leaving',s,NOT_LOADED);Person('capture while leaving',s,false)
+   H.Fire('PLAYER_ENTERING_WORLD');Char('entry alone',nil)
+   local entered=P.destinationSessionRevision
+   C.expect(ValidRev(entered) and ValidRev(left) and entered>left,'entry: a newer valid world-session revision is published',
+    tostring(left)..' -> '..tostring(entered))
+   s=Refresh('entry alone');Shows('expect','entry alone',s,NOT_LOADED);Person('entry alone',s,false)
+   local u=n.unit or 0
+   Nexus.RefreshHudView()
+   C.guard((n.unit or 0)>u,'fresh capture: Main made its existing UnitName read',(n.unit or 0)-u)
+   Char('fresh capture',CHARACTER)
+   s=Refresh('fresh capture of the same name');Shows('expect','fresh capture of the same name',s,NOT_LOADED)
+   Person('fresh capture of the same name',s,true)
+   noName=true;Nexus.RefreshHudView();noName=false;Char('unknown capture',nil)
+   s=Refresh('unknown capture');Shows('expect','unknown capture',s,NOT_LOADED);Person('unknown capture',s,false)
+   Nexus.RefreshHudView();Char('known again',CHARACTER)
+   s=Refresh('known again');Shows('expect','known again',s,NOT_LOADED);Person('known again',s,true)
+   local d1,idle1=Warm()
+   C.guard(idle1 and (d1.level or 0)==(d0.level or 0),
+    'quiet after: the dropped facts force no cold refresh and add no read; the row holds still',Profile(d1)..'; before '..Profile(d0))
+   -- Corruption control: each case first reacquires the current truth
+   -- through the next natural cold observation.
+   local seq={2,0,1,0,2,1,0}
+   local cases={{'negative',-1},{'fractional',2.5},{'infinite',math.huge},{'not a number',0/0},
+    {'a string','1'},{'another valid integer'},{'missing',nil,true}}
+   for i,case in ipairs(cases) do
+    local tag='revision '..case[1]
+    s=Server(tag,seq[i])
+    Shows('guard',tag..': the next natural cold observation reacquires',s,seq[i]==0 and FIRST or NONE)
+    local prior=P.destinationSessionRevision
+    if not ValidRev(prior) then C.expect(false,tag..': a prior valid revision exists to restore',prior);break end
+    WithRev(case[1]=='another valid integer' and prior+3 or case[2],function()
+     s=Refresh(tag);Shows('expect',tag,s,NOT_LOADED);Person(tag,s,true)
+     if case[3] then
+      s=Server(tag..', cold',1)
+      Shows('expect',tag..': a cold observation without a valid revision is not held',s,NOT_LOADED)
+     end
+    end)
+    C.setup(rawequal(P.destinationSessionRevision,prior),tag..': the prior valid revision is restored',P.destinationSessionRevision)
+    s=Refresh(tag..' restored');Shows('expect',tag..' restored',s,NOT_LOADED);Person(tag..' restored',s,true)
+   end
+   s=Server('final',2)
+   Shows('guard','final: the next natural cold observation reacquires',s,NONE)
+   C.guard(Uncaptured(),'corruption: the draft adopted no Saved Build',Ctx().loadoutSlot)
+   H.Fire('PLAYER_LOGOUT');Char('logout',nil)
+   Nexus.RefreshHudView();Char('capture after logout',nil)
+   Ed.Refresh();Person('logout',Read(),false)
+   Quiet('lifecycle',others,auto)
+   C.guard(Writes()==w0 and (Uploads())==u0 and Facts()==facts,'lifecycle: no assignment write, upload or stored assignment change',
+    'writes='..Writes()..'/'..w0..' uploads='..(Uploads())..'/'..u0..' '..Facts())
+  end)
+  noName=false
+  for i=#restore,1,-1 do pcall(restore[i]) end
+  if not ok then error(err,0) end
+ end)
+
+ C.scenario('lifecycle: a captured Saved Build survives world and revision invalidations',function()
+  BoundWorld(1)
+  local P,Ed=Nexus.Panel,Nexus.WishlistEditor
+  local row=NexusEditorFrame and NexusEditorFrame._destinationRow
+  if not (type(P)=='table' and type(P.Hide)=='function' and type(Ed)=='table' and type(Ed.Refresh)=='function'
+   and type(Nexus.RefreshHudView)=='function' and type(row)=='table' and type(row.cells)=='table') then
+   C.expect(false,'captured: the public editor, HUD hide, HUD capture and destination row exist');return
+  end
+  -- Healthy capture (setup only). BoundWorld opens the W-Six candidate,
+  -- which carries no Saved Build name, so its Six is only the current row
+  -- shown, never a captured name. Saved Build 6 is selected through the
+  -- controller's public SelectLoadout, which the editor's own Saved Build
+  -- selector calls: it reads the row name Six and opens the linked W-Six
+  -- with it. Nothing is activated, saved or assigned; the effects baseline
+  -- below is still taken after this.
+  local ctl,picked,mode=Ctrl(),false,nil
+  if type(ctl.SelectLoadout)=='function' then picked,mode=ctl.SelectLoadout(6) end
+  Ed.Refresh()
+  local cap=Ctx()
+  C.setup(picked==true and mode=='wishlist' and cap.loadoutSlot==6 and cap.name=='W-Six' and cap.loadoutName=='Six',
+   'captured: fixture: selecting Saved Build 6 captured its name Six with W-Six before any invalidation',
+   tostring(picked)..'/'..tostring(mode)..' '..tostring(cap.loadoutSlot)..'/'..tostring(cap.name)..'/'..tostring(cap.loadoutName))
+  local restore={}
+  local ok,err=pcall(function()
+   Nexus.RefreshHudView()
+   local others,w0,u0,auto,facts=Others(),Writes(),(Uploads()),Auto(),Facts()
+   -- Current facts may be dropped (an unstated active state is allowed); the
+   -- captured slot and name stay, never active and never retargeted.
+   local function Held(tag,known)
+    Ed.Refresh()
+    local s=Read()
+    local state=V.Plain(s.t[4]):lower()
+    state=state:match('^state:%s*(.-)$') or state
+    local claimsActive=state=='c:+' or state=='captured: active'
+     or (state:find('^captured; active')~=nil and state:find('^captured; active state')==nil)
+    C.guard(#s.bad==0 and Is(s.t[2],{'Six (slot 6)','#6 Six'},'saved build')
+     and (state:find('^captured[;:]')~=nil or state:find('^c:')~=nil) and not claimsActive and Ctx().loadoutSlot==6,
+     tag..': the shown cells keep the captured Saved Build Six (slot 6), captured, never active or retargeted',s.detail)
+    C.guard(Has(s.tip,{'saved build','six (slot 6)'}) and s.tip:find('shown as captured earlier',1,true)~=nil,
+     tag..': the row hover, read once shown, discloses Six (slot 6) as captured',(s.tip:gsub('\n',' / ')))
+    Person(tag,s,known)
+   end
+   Held('captured: opened',true)
+   restore[#restore+1]=function() if type(P.Show)=='function' then P.Show() end end
+   P.Hide()
+   C.setup(NexusEditorFrame:IsVisible(),'captured: the HUD is hidden and the editor stays shown')
+   H.Fire('PLAYER_LEAVING_WORLD');Held('captured: leave',false)
+   H.Fire('PLAYER_ENTERING_WORLD');Nexus.RefreshHudView();Held('captured: entry and fresh capture',true)
+   H.perks.serverActiveSlot=2;H.Notify();A.Poll();H.Advance(1);Held('captured: natural active 2',true)
+   WithRev(nil,function() Held('captured: revision missing',true) end)
+   Held('captured: revision restored',true)
+   Quiet('captured',others,auto)
+   C.guard(Writes()==w0 and (Uploads())==u0 and Facts()==facts,'captured: no assignment write, upload or stored assignment change',
+    'writes='..Writes()..'/'..w0..' uploads='..(Uploads())..'/'..u0..' '..Facts())
+  end)
+  for i=#restore,1,-1 do pcall(restore[i]) end
+  if not ok then error(err,0) end
+ end)
+end
 C.finish('(confirmations name the captured destination; first-run labelled; no guessed destination)')
