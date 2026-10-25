@@ -142,7 +142,12 @@ local function EnsureCommunityController()
     if not (factory and type(factory.New) == "function") then return nil end
     communityController = factory.New({
         refresh=function()
-            if type(M.Refresh) == "function" then M.Refresh() end
+            -- A view failure must not interrupt a controller completion.
+            if communityRenderer and type(communityRenderer.RefreshFromController) == "function" then
+                Measure("community.refresh", communityRenderer.RefreshFromController)
+            elseif type(M.Refresh) == "function" then
+                M.Refresh()
+            end
         end,
     })
     return communityController
@@ -335,6 +340,11 @@ function M.Refresh()
     return RendererInstance().Refresh()
 end
 
+function M.RefreshAutomatic()
+    if StartupStatus().state~="ready" then return false,"pending" end
+    return Measure("community.refresh", RendererInstance().RefreshAutomatic)
+end
+
 function M.ShowPostBuild()
     if M.WaitForStartup("Community",M.ShowPostBuild) then return false,"pending" end
     return RendererInstance().ShowPostBuild()
@@ -384,17 +394,6 @@ function M.GetViewMode() return "builds" end
 function M.Show()
     if M.WaitForStartup("Community",M.Show) then return false,"pending" end
     return Measure("community.show", function()
-        local controller = ControllerInstance()
-        Measure("community.saved-import",
-            controller.BeginSavedLoadoutImport, true)
-        -- Preserve the bounded first import unit on open, but keep it outside
-        -- Renderer.Refresh so public filters and cached page clicks never
-        -- become personal-reconciliation work.
-        if type(controller.HasPendingSavedLoadoutImport) == "function"
-            and controller.HasPendingSavedLoadoutImport()
-            and type(controller.PumpSavedLoadoutImport) == "function" then
-            controller.PumpSavedLoadoutImport(25)
-        end
         return RendererInstance().Show()
     end)
 end

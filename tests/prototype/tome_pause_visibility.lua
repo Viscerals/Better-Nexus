@@ -11,7 +11,8 @@ local cases={
  {name='visible_bind',popup=true,hold=true},
  {name='bind_without_visibility_api',popup=true,hold=true,noVisibility=true},
  {name='hidden_after_visible_bind',popup=true,hold=true,hideAfter=true},
- {name='carried_item',bag=true,hold=true},
+ -- Bag occupancy alone must not pause: only a visible bind confirmation does.
+ {name='carried_item',bag=true,hold=false},
  {name='unrelated_popup',popup=true,unrelated=true},
  {name='auto_off',auto=false},
  {name='permission_off',permission=false},

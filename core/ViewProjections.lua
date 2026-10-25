@@ -1328,15 +1328,20 @@ local function PumpLeaderboardJob(job, unit)
     return false
 end
 
+-- Recycled each Pump call so a 10 Hz UI pump creates no per-tick tables.
+local pumpUnit = {
+    sourceRows=0,comparisons=0,sortMoves=0,joins=0,copies=0,
+}
+
 local function Pump(kind)
     local job = jobs[kind]
     if not job then return false end
     local currentKey = kind == "builds"
         and BuildKey(job.filters) or LeaderboardKey(job.filters)
     if currentKey ~= job.key then CancelJob(kind); return false end
-    local unit = {
-        sourceRows=0,comparisons=0,sortMoves=0,joins=0,copies=0,
-    }
+    local unit = pumpUnit
+    unit.sourceRows, unit.comparisons, unit.sortMoves = 0, 0, 0
+    unit.joins, unit.copies = 0, 0
     local published, err
     if kind == "builds" then
         published, err = PumpBuildJob(job, unit)

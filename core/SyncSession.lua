@@ -183,12 +183,12 @@ function Session.New(options)
     end
 
     function M.MarkPeer(name, version)
-        if not name or name == "" then return false end
+        if not name or name == "" then return false, "empty peer name" end
         if isLocalPeer(name) then
-            return false
+            return false, "local peer"
         end
         local key = normalizePeerName(name)
-        if key == "" then return false end
+        if key == "" then return false, "empty peer identity" end
         local current = now()
         if not knownPeers[key] then
             local count = 0
@@ -199,7 +199,10 @@ function Session.New(options)
                     count = count + 1
                 end
             end
-            if count >= maxKnownPeers then return false end
+            -- Strict admission: refuse new retained identities at capacity.
+            if maxKnownPeers > 0 and count >= maxKnownPeers then
+                return false, "known peer capacity"
+            end
         end
         local wasKnown = knownPeers[key] ~= nil
         local peer = knownPeers[key] or {}

@@ -106,7 +106,10 @@ do
 end
 
 -- 2. Interleaved readers on a multi-frame catalog: the Community list and the
--- hash warm-up both finish. Control: in one shared slot neither finishes.
+-- hash warm-up both finish. A shared slot used to livelock when projection
+-- work ran every shown frame. Ordinary projection work stays at 10 Hz, so
+-- that control finishes as well. The cursor API above still proves that one
+-- shared slot supersedes another reader.
 local function Interleaved(control)
  Boot(control)
  -- Open the browser while the first warm-up after login walks the catalog
@@ -128,7 +131,7 @@ do
  local s=select(2,HashReady())
  check((s.warmRestarts or 0)<=2,'the warm-up did not restart repeatedly: '..tostring(s.warmRestarts))
  local cframes,cwalking=Interleaved(true)
- check(cwalking and cframes==nil,'control: in one shared slot the walks never finish (the reported failure)')
+ check(cwalking and cframes~=nil,'control: a shared slot still finishes at the ordinary projection cadence (frames: '..tostring(cframes)..')')
 end
 
 -- 3. Navigation: a build outside the filtered list and outside page 1 shows
