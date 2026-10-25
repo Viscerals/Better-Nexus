@@ -1,4 +1,4 @@
--- Session-only ordinary planning. Membership never supplies a choice.
+-- Ordinary planning pool with explicit local Save/Load (#151). Membership never supplies a choice.
 Nexus = Nexus or {}
 local Factory = {}
 Nexus.FlexiblePlanChooser = Factory
@@ -59,6 +59,69 @@ if type(StaticPopupDialogs) == "table" then
     }
 end
 
+-- #151 visible persistence status: the fixed line under the count help, apart
+-- from the pool status at the bottom. Plain player text only: no Store, API or
+-- refusal code is shown.
+local PERSIST = {
+    NONE="Saving is unavailable here. Hide keeps this pool until reload; Reset clears only this session.",
+    EMPTY="Not saved. Save pool stores this character's planning pool; Load saved restores it. Hide keeps this session; Reset clears only this session.",
+    NEW="Not saved. Save pool stores this pool on this character.",
+    UNSAVED="Unsaved changes. Save pool replaces the saved pool; Load saved restores it.",
+    UNSAVED_EMPTY="Unsaved changes: the pool is empty. Save pool asks before removing the saved pool.",
+    CHANGED="Unsaved changes.",
+    PENDING="Unsaved changes: Set each edited count before Save pool.",
+    HAS_SAVED="A pool is saved on this character. Load saved restores it.",
+    MATCHES="This pool matches the saved pool.",
+    SAVED="Saved on this character.",
+    SAVED_EMPTY="Nothing to save: the pool is empty and nothing is saved.",
+    CLEARED="Saved pool removed from this character.",
+    LOADED="Loaded the pool saved on this character.",
+    NOTHING="Nothing is saved on this character. Your pool is unchanged.",
+    ASK_LOAD="Waiting for your answer: Load saved replaces this pool; Cancel keeps it.",
+    ASK_CLEAR="Waiting for your answer: remove the saved pool; Cancel keeps it.",
+    LOADING="Saved data is still loading.",
+    UNAVAILABLE="Saved data is unavailable right now; this session is kept until reload.",
+    READ_ONLY="Saved data is read-only; Save pool is refused.",
+    READ_ONLY_LOAD="Saved data is read-only: Load saved can restore it; Save pool is refused.",
+    STALE="The saved pool changed elsewhere. Save pool is refused until you Load saved or Reset.",
+    FUTURE="The saved pool is from a newer Nexus version. It is kept unchanged; Save pool and removing it are refused.",
+    UNREADABLE="The saved pool cannot be read. It is kept unchanged; Save pool and removing it are refused.",
+}
+local WHY_CHANGED = "saved data changed after this session last read it."
+local WHY_ASKED = "the pool or the saved pool changed after you asked."
+local WHY_UNREADABLE = "the saved pool cannot be read and is kept unchanged."
+local PERSIST_WHY = {
+    COUNT_PENDING="Set each edited count first.",
+    NOT_OBSERVED="saved data had not been checked yet. Try again.",
+    INVALID_SESSION="this pool cannot be stored.",
+    LOAD_INVALID="the saved pool cannot be used here.",
+    SAVED_CHANGED="the saved pool changed after this session last read it.",
+    OWNER_CHANGED=WHY_CHANGED, ROOT_CHANGED=WHY_CHANGED, RECEIPT_UNKNOWN=WHY_CHANGED,
+    STORE_OWNER_MISMATCH=WHY_CHANGED, LOAD_CHANGED=WHY_ASKED, PLAN_CHANGED=WHY_ASKED,
+    RECEIPT_NOT_DURABLE="saved data was read-only when this session read it.",
+    READ_ONLY="saved data is read-only.", LOADING="saved data is still loading.",
+    SAVED_FUTURE="the saved pool is from a newer Nexus version and is kept unchanged.",
+    SAVED_MALFORMED=WHY_UNREADABLE, SAVED_UNSUPPORTED=WHY_UNREADABLE, SAVED_OVERSIZED=WHY_UNREADABLE,
+}
+-- What a shown refusal already explains, so the status does not repeat it.
+local PERSIST_COVERS = {COUNT_PENDING="pending", SAVED_CHANGED="stale", OWNER_CHANGED="stale",
+    ROOT_CHANGED="stale", RECEIPT_UNKNOWN="stale", STORE_OWNER_MISMATCH="stale", LOAD_CHANGED="stale",
+    RECEIPT_NOT_DURABLE="mode", READ_ONLY="mode", LOADING="mode", SAVED_FUTURE="mode",
+    SAVED_MALFORMED="mode", SAVED_UNSUPPORTED="mode", SAVED_OVERSIZED="mode"}
+local function CatalogNote(n)
+    if n == 1 then
+        return "1 Echo in this pool no longer matches the catalog; its saved details and count are kept."
+    end
+    return n .. " Echoes in this pool no longer match the catalog; their saved details and counts are kept."
+end
+-- A pool row's saved facts differ from the current catalog row, or it is gone.
+local function Drifted(saved, live)
+    return not Plain(live) or rawget(live, "quality") ~= saved.quality
+        or rawget(live, "maxStack") ~= saved.maxStack or rawget(live, "groupId") ~= saved.groupId
+        or rawget(live, "locked") ~= nil or rawget(live, "sourceRole") ~= nil
+        or rawget(live, "lockIntent") ~= nil
+end
+
 function Factory.Reason(code)
     return REASONS[code] or "This choice cannot be opened. Review the pool and exact counts."
 end
@@ -71,6 +134,10 @@ function Factory.New(options)
     local catalogRows, poolRows = {}, {}
     local catalogOffset, poolOffset, revision = 0, 0, 0
     local note = ""
+    -- #151 visible persistence presentation, assigned with the persistence
+    -- state below (Refresh and the row scripts run only after New returns).
+    local persistLabel, saveButton, loadButton, RenderPersistence, Rebind
+    local changedMembers = 0
 
     local function HasPending() return next(pending) ~= nil end
     local function StatusText()
@@ -139,7 +206,18 @@ function Factory.New(options)
         local total = 0
         for _, count in pairs(chosen) do total = total + count end
         budget:SetText(#ids.." / 256 alternatives     Chosen: "..total.." / 79 ordinary copies")
+        if available then
+            -- Saved facts of the current pool against the catalog this Refresh
+            -- already read: no further catalog or Store read, at most 256 rows.
+            local changed = 0
+            for _, id in ipairs(ids) do
+                local saved = captured.rows[id]
+                if saved and Drifted(saved, rawget(catalog.rows, id)) then changed = changed + 1 end
+            end
+            changedMembers = changed
+        end
         status:SetText(available and StatusText() or Factory.Reason("CATALOG_UNAVAILABLE"))
+        if RenderPersistence then RenderPersistence() end
     end
     local function Add(id)
         if captured.rows[id] then return Say("INVALID_ALTERNATIVES") end
@@ -225,9 +303,10 @@ function Factory.New(options)
         frame:SetSize(1020,650);frame:SetPoint("CENTER");frame:SetFrameStrata("HIGH");frame:SetFrameLevel(60)
         frame:SetClampedToScreen(true);frame:EnableMouse(true)
         if type(UISpecialFrames)=="table" then table.insert(UISpecialFrames,"NexusFlexiblePlanChooser") end
-        Label(frame,"Plan alternatives — session only",900,24,22,-16)
+        Label(frame,"Plan alternatives",900,24,22,-16)
         local help=Label(frame,"Add exact Echo IDs, then Set each count. Set: shows the committed count; * marks pending input. 0 unchooses.",970,20,22,-44)
-        Label(frame,"Hide keeps this pool and choice until reload. Reset clears only this planning session.",970,20,22,-66)
+        -- #151 persistence status, distinct from the pool status at -570.
+        persistLabel=Label(frame,"",970,20,22,-66)
         Label(frame,"Catalog",430,20,22,-94);Label(frame,"Your pool / exact counts",480,20,505,-94)
         search=CreateFrame("EditBox","NexusFlexiblePlanSearch",frame,"InputBoxTemplate")
         search:SetSize(430,22);search:SetPoint("TOPLEFT",22,-120);search:SetAutoFocus(false);search:SetMaxLetters(96)
@@ -267,6 +346,7 @@ function Factory.New(options)
                 revision, note = revision+1, ""
                 SetActionLabel(row.action, pending[id] and "Set *" or "Set")
                 status:SetText(StatusText())
+                if RenderPersistence then RenderPersistence() end
             end)
             row.action=Button(row,nil,"Set",SET_MIN,function() row.count:ClearFocus();return SetCount(row.spellId,row.count:GetText()) end)
             row.action:SetPoint("LEFT",row.count,"RIGHT",4,0)
@@ -284,13 +364,24 @@ function Factory.New(options)
         if metrics and metrics.FullTextTooltip then
             metrics.FullTextTooltip(help, frame)
             metrics.FullTextTooltip(status, frame)
+            metrics.FullTextTooltip(persistLabel, frame)
         end
         local open=Button(frame,"NexusFlexiblePlanOpen","Open as new Wishlist draft",224,Open)
         open:SetPoint("BOTTOMRIGHT",-22,18)
+        -- #151 explicit local pool controls in the free left part of the action
+        -- row; Open and Reset keep their places. They call the tested callbacks.
+        saveButton=Button(frame,"NexusFlexiblePlanSave","Save pool",100,function() return M.SavePool() end)
+        saveButton:SetPoint("BOTTOMLEFT",22,18)
+        loadButton=Button(frame,"NexusFlexiblePlanLoad","Load saved",100,function() return M.LoadPool() end)
+        loadButton:SetPoint("LEFT",saveButton,"RIGHT",8,0)
+        if metrics and metrics.FitButtonWidth then
+            metrics.FitButtonWidth(saveButton,100,170);metrics.FitButtonWidth(loadButton,100,170)
+        end
         local reset=Button(frame,"NexusFlexiblePlanReset","Reset pool",100,function()
             ids,captured,chosen,pool={},{rows={}},{},nil
             pending={}
             catalogOffset,poolOffset,revision,note=0,0,revision+1,""
+            if Rebind then Rebind() end
             Refresh()
         end)
         reset:SetPoint("RIGHT",open,"LEFT",-8,0)
@@ -320,7 +411,7 @@ function Factory.New(options)
     end
     local observed, latest, observedOnce, cleanBytes, staleFlag, restored
     local cacheRevision, cacheBytes, cacheCode
-    local phase, persistCode, changedMembers = "idle", nil, 0
+    local phase, persistCode, phaseOp, phaseRevision, operation = "idle", nil, nil, nil, nil
     local loadRequest, clearRequest
 
     -- Canonical session bytes, encoded once per revision (nil = empty pool).
@@ -339,8 +430,11 @@ function Factory.New(options)
         local bytes, why = SessionBytes()
         return why ~= nil or bytes ~= cleanBytes
     end
+    -- Every outcome, including popup Accept paths that run without a button or
+    -- Refresh, re-renders the visible status at once (also while hidden).
     local function Persist(nextPhase, nextCode)
-        phase, persistCode = nextPhase, nextCode
+        phase, persistCode, phaseOp, phaseRevision = nextPhase, nextCode, operation, revision
+        if RenderPersistence then RenderPersistence() end
         return nextPhase, nextCode
     end
     local function Observe()
@@ -354,6 +448,94 @@ function Factory.New(options)
     local function Differs(a, b)
         return a ~= nil and b ~= nil and a ~= b and (a.mode ~= b.mode or a.class ~= b.class
             or a.bytes ~= b.bytes or a.ownerKey ~= b.ownerKey or a.root ~= b.root)
+    end
+    -- #151 visible status from this chooser's own metadata: no Store or catalog
+    -- read. A finished outcome is shown until the session changes; an
+    -- unverified one until the next Save or Load. It never says Saved unless a
+    -- verified Save or Clear completed.
+    local function Outcome(seen)
+        if phase ~= "unverified" and phaseRevision ~= revision then return nil end
+        if phase == "saved" then
+            if phaseOp == "clear" then return PERSIST.CLEARED, "done" end
+            return cleanBytes == nil and PERSIST.SAVED_EMPTY or PERSIST.SAVED, "done"
+        elseif phase == "loaded" then
+            return PERSIST.LOADED, "done"
+        elseif phase == "unverified" then
+            local what = phaseOp == "clear" and "this removal" or "this save"
+            if restored == true then
+                return "Not confirmed: " .. what .. " could not be verified; the earlier saved pool was restored. Your pool is kept."
+            end
+            return "Not confirmed: " .. what .. " could not be verified, so the saved pool may have changed. Load saved to check it. Your pool is kept."
+        elseif phase ~= "refused" then
+            return nil
+        end
+        if persistCode == "NOTHING_SAVED" then return PERSIST.NOTHING end
+        local verb = phaseOp == "load" and "Not loaded: " or phaseOp == "clear" and "Not removed: " or "Not saved: "
+        local why = PERSIST_WHY[persistCode]
+        if why then return verb .. why .. " Your pool is kept.", PERSIST_COVERS[persistCode] end
+        local mode = seen and seen.mode
+        why = mode == "loading" and PERSIST_WHY.LOADING or mode == "readOnly" and PERSIST_WHY.READ_ONLY
+            or "saved data is unavailable right now."
+        return verb .. why .. " Your pool is kept.", "mode"
+    end
+    local function PersistText()
+        if not persistence then return PERSIST.NONE end
+        local seen = latest or observed
+        local mode, class = seen and seen.mode, seen and seen.class
+        local stale = observed ~= nil and observed.class ~= nil
+            and (staleFlag == true or Differs(latest, observed))
+        local parts = {}
+        if loadRequest then parts[1] = PERSIST.ASK_LOAD elseif clearRequest then parts[1] = PERSIST.ASK_CLEAR end
+        local outcome, covers = Outcome(seen)
+        parts[#parts + 1] = outcome
+        local writable = mode == "durable" and not stale
+        if Dirty() then
+            if HasPending() then
+                if covers ~= "pending" then parts[#parts + 1] = PERSIST.PENDING end
+            elseif writable and class == "CURRENT" then
+                parts[#parts + 1] = #ids == 0 and PERSIST.UNSAVED_EMPTY or PERSIST.UNSAVED
+            elseif writable and class == "ABSENT" then
+                parts[#parts + 1] = PERSIST.NEW
+            else
+                parts[#parts + 1] = PERSIST.CHANGED
+            end
+        elseif not outcome then
+            if class == "CURRENT" and #ids == 0 then
+                parts[#parts + 1] = PERSIST.HAS_SAVED
+            elseif class == "CURRENT" and not stale and observed and observed.bytes == cleanBytes then
+                parts[#parts + 1] = PERSIST.MATCHES
+            elseif writable and class == "ABSENT" and #ids == 0 then
+                parts[#parts + 1] = PERSIST.EMPTY
+            end
+        end
+        if covers ~= "mode" then
+            if class == "FUTURE" then
+                parts[#parts + 1] = PERSIST.FUTURE
+            elseif class == "MALFORMED" or class == "UNSUPPORTED" or class == "OVERSIZED" then
+                parts[#parts + 1] = PERSIST.UNREADABLE
+            elseif mode == "loading" then
+                parts[#parts + 1] = PERSIST.LOADING
+            elseif mode == "readOnly" then
+                parts[#parts + 1] = class == "CURRENT" and PERSIST.READ_ONLY_LOAD or PERSIST.READ_ONLY
+            elseif mode ~= nil and mode ~= "durable" then
+                parts[#parts + 1] = PERSIST.UNAVAILABLE
+            end
+        end
+        if stale and covers ~= "stale" and (mode == "durable" or mode == "readOnly") then
+            parts[#parts + 1] = PERSIST.STALE
+        end
+        if changedMembers > 0 and #ids > 0 then parts[#parts + 1] = CatalogNote(changedMembers) end
+        return table.concat(parts, " ")
+    end
+    RenderPersistence = function()
+        if not persistence and saveButton then saveButton:Disable();loadButton:Disable() end
+        if persistLabel then persistLabel:SetText(PersistText()) end
+    end
+    -- Explicit Reset empties the session, so it may bind that empty session to
+    -- the current saved data for recovery: a read, never a write, and no dialog
+    -- is hidden. A retained session is never rebound by a newer read.
+    Rebind = function()
+        if persistence and observedOnce then observed, staleFlag = Observe(), false end
     end
     -- Detached session from a decoded saved pool, or nil. Saved ID, quality,
     -- maxStack, group and counts are kept even when stale; a current catalog
@@ -373,11 +555,7 @@ function Factory.New(options)
                 local name = rawget(live, "name")
                 if type(name) == "string" and #name <= 256 then rows[id].name = name end
             end
-            if not Plain(live) or rawget(live, "quality") ~= s.quality or rawget(live, "maxStack") ~= s.maxStack
-                or rawget(live, "groupId") ~= s.groupId or rawget(live, "locked") ~= nil
-                or rawget(live, "sourceRole") ~= nil or rawget(live, "lockIntent") ~= nil then
-                changed = changed + 1
-            end
+            if Drifted(s, live) then changed = changed + 1 end
             nextIds[i] = id
             local count = saved.chosen[id]
             if count then nextChosen[id] = count; selection[#selection+1] = {spellId=id, stacks=count} end
@@ -410,7 +588,8 @@ function Factory.New(options)
     end
     local function Apply(result, bytes)
         if type(result) ~= "table" then
-            observed = nil
+            -- Nothing is known about restoration, so an earlier answer is dropped.
+            observed, restored = nil, nil
             return Persist("unverified", "SAVE_UNVERIFIED")
         end
         restored = result.restored
@@ -430,6 +609,7 @@ function Factory.New(options)
     end
 
     function M.SavePool()
+        operation = "save"
         if not persistence then return Persist("refused", "NO_PERSISTENCE") end
         local former = clearRequest
         clearRequest = nil
@@ -448,15 +628,19 @@ function Factory.New(options)
             function request.Accept()
                 if clearRequest ~= request then return end
                 clearRequest = nil
+                operation = "clear"
                 if revision ~= request.revision or observed ~= receipt then
                     return Persist("refused", "PLAN_CHANGED")
                 end
                 local ok, result = pcall(persistence.Clear, receipt)
                 return Apply(ok and result, nil)
             end
-            function request.Cancel() if clearRequest == request then clearRequest = nil end end
+            function request.Cancel()
+                if clearRequest == request then clearRequest = nil; RenderPersistence() end
+            end
             clearRequest = request
             StaticPopup_Show(CLEAR_POPUP, nil, nil, request)
+            RenderPersistence()
             return "confirm", "CLEAR_CONFIRM"
         end
         local ok, result = pcall(persistence.Save, {ids=ids, rows=captured.rows, chosen=chosen}, observed)
@@ -464,6 +648,7 @@ function Factory.New(options)
     end
 
     function M.LoadPool()
+        operation = "load"
         if not persistence then return Persist("refused", "NO_PERSISTENCE") end
         local read = Observe()
         local former = loadRequest
@@ -477,6 +662,7 @@ function Factory.New(options)
             if loadRequest ~= request then return end
             -- Single use: retired before any validation.
             loadRequest = nil
+            operation = "load"
             if revision ~= request.revision then return Persist("refused", "LOAD_CHANGED") end
             local fresh = Observe()
             if fresh.loadable ~= true or fresh.bytes ~= request.bytes
@@ -485,9 +671,12 @@ function Factory.New(options)
             end
             return LoadFrom(fresh)
         end
-        function request.Cancel() if loadRequest == request then loadRequest = nil end end
+        function request.Cancel()
+            if loadRequest == request then loadRequest = nil; RenderPersistence() end
+        end
         loadRequest = request
         StaticPopup_Show(LOAD_POPUP, nil, nil, request)
+        RenderPersistence()
         return "confirm", "LOAD_CONFIRM"
     end
 
@@ -505,9 +694,15 @@ function Factory.New(options)
 
     function M.Show()
         EnsureFrame()
-        if persistence and not observedOnce then
-            observedOnce = true
-            if observed == nil then observed = Observe() end
+        if persistence then
+            -- Each Show reads the latest saved data to state its mode and any
+            -- staleness. Only the first binds an unobserved session; a newer read
+            -- never replaces the receipt a retained session is bound to.
+            local read = Observe()
+            if not observedOnce then
+                observedOnce = true
+                if observed == nil then observed = read end
+            end
         end
         Refresh();frame:Show()
     end

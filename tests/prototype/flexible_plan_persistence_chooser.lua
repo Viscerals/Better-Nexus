@@ -2,10 +2,12 @@
 -- Real TOC boot with synthetic format-5 data, the actual chooser Factory.New
 -- with the real FlexiblePlanStore facade and a tiny literal catalog. Rows are
 -- driven through the rendered Add/Set/Reset controls; counts are read from the
--- rendered pool rows. SavePool/LoadPool/PersistenceState are called directly:
--- visible Save/Load buttons, status presentation, editor-opened chooser
--- readback, unverified fault injection and the real editor retry/replace
--- interplay are PENDING for later slices. The popup host is the identity-aware
+-- rendered pool rows. SavePool/LoadPool/PersistenceState are called directly
+-- here; the MAIN PRESENTATION block at the end drives the visible Save pool /
+-- Load saved buttons, the persistence status line and editor-opened readback
+-- across fresh boots. Unverified fault injection, unknown/future/read-only
+-- presentation and the real editor retry/replace interplay are PENDING for the
+-- next slice. The popup host is the identity-aware
 -- synthetic host of flexible_plan_editor_handoff. Native StaticPopup pooling,
 -- return handling, timing and game behaviour are NOT_RUN.
 local F=dofile('tests/prototype/format5_support.lua')
@@ -170,5 +172,234 @@ phase=again.LoadPool()
 check(phase=='loaded' and Rendered(300002)==1 and again.PersistenceState().catalogChanged==1
     and PoolRow(300002).label:GetText():find('Q1',1,true)~=nil,'clean Load restores saved facts and counts, reporting catalog drift')
 check(opened==0 and #H.actions==actions,'reload Load opens no draft and performs no action')
+
+-- MAIN PRESENTATION (#151 visible controls/readback slice). Actual TOC boots
+-- with two literal Echoes seeded through F.Boot's before hook (so the catalog
+-- scan sees them), the real editor entry (NewWishlist, then
+-- NexusFlexiblePlanEntry) and the rendered controls only: Add/Set, the new
+-- Save pool / Load saved buttons, Reset and the identity-aware popup host
+-- above. Stored data is read from NexusDB, counts from rendered pool rows and
+-- the persistence status from the fixed line at (22,-66). The font models are
+-- the offline layout_geometry_support models, not native measurement.
+-- Unknown/future/read-only presentation, unverified fault injection and the
+-- editor Save-retry/replace interplay are queued for the next slice.
+do
+    local A,B=310001,310002
+    local function Seed(h) h.AddEcho(A,'Delta',2,5,7);h.AddEcho(B,'Epsilon',1,3,9) end
+    local T={
+        EMPTY="Not saved. Save pool stores this character's planning pool; Load saved restores it. Hide keeps this session; Reset clears only this session.",
+        NEW="Not saved. Save pool stores this pool on this character.",
+        PENDING="Unsaved changes: Set each edited count before Save pool.",
+        REFUSED_PENDING="Not saved: Set each edited count first. Your pool is kept.",
+        SAVED="Saved on this character.",
+        HAS="A pool is saved on this character. Load saved restores it.",
+        LOADED="Loaded the pool saved on this character.",
+        UNSAVED="Unsaved changes. Save pool replaces the saved pool; Load saved restores it.",
+        ASK_LOAD="Waiting for your answer: Load saved replaces this pool; Cancel keeps it.",
+        UNSAVED_EMPTY="Unsaved changes: the pool is empty. Save pool asks before removing the saved pool.",
+        ASK_CLEAR="Waiting for your answer: remove the saved pool; Cancel keeps it.",
+        CLEARED="Saved pool removed from this character.",
+        NOTHING="Nothing is saved on this character. Your pool is unchanged.",
+    }
+    local EMPTY_BUDGET='^0 / 256 alternatives%s+Chosen: 0 / 79 ordinary copies$'
+    local G=dofile('tests/prototype/layout_geometry_support.lua')
+    local function LabelAt(y)
+        local found
+        for _,r in ipairs(NexusFlexiblePlanChooser.regions) do
+            local p=r.kind=='FontString' and r.points[1]
+            if p and p[1]=='TOPLEFT' and p[2]==22 and p[3]==y then
+                assert(found==nil,'one chooser label at '..y);found=r
+            end
+        end
+        return assert(found,'chooser label at '..y..' exists')
+    end
+    local function Persisted() return LabelAt(-66):GetText() end
+    local function PoolStatus() return LabelAt(-570):GetText() end
+    local function Budget() return LabelAt(-546):GetText() end
+    local function Deep(a,b,seen)
+        if a==b then return true end
+        if type(a)~='table' or type(b)~='table' then return false end
+        seen=seen or {}
+        if seen[a]==b then return true end
+        seen[a]=b
+        for k,v in pairs(a) do if not Deep(v,b[k],seen) then return false end end
+        for k in pairs(b) do if a[k]==nil then return false end end
+        return true
+    end
+    local function Effects()
+        local name=rawget(_G,'NexusWishlistNameInput')
+        return {state=H.Clone(Nexus.WishlistEditor.DebugDraftState()),name=name and name:GetText() or nil,
+            actions=#H.actions,chat=#H.chat,sent=#H.sent,replace=Popup.shown.NEXUS_FLEXIBLE_PLAN_REPLACE}
+    end
+    local function Quiet(before,label)
+        check(Deep(before,Effects()),label..' keeps the editor draft and name, with no action, message or send')
+    end
+    -- Boot effects (setup) are separate: the baseline is taken after the entry opened.
+    local function Open(boot)
+        H=boot;InstallHost()
+        owner=Nexus.FlexiblePlanStore.New({store=Nexus.Store}).Read().ownerKey
+        Nexus.WishlistEditor.NewWishlist()
+        NexusFlexiblePlanEntry:Click()
+        return Effects()
+    end
+    local function Record(counts)
+        return F.Serialize({version=1,ids={A,B},quality={2,1},maxStack={5,3},groupId={7,9},counts=counts})
+    end
+    local function Holders()
+        local n=0
+        for _,row in pairs(NexusDB.chars or {}) do
+            if type(row)=='table' and row.flexiblePlanPoolV1~=nil then n=n+1 end
+        end
+        return n
+    end
+    local fx=Open(F.Boot(F.Database(),Seed))
+    local root=NexusFlexiblePlanChooser
+    local saveBtn,loadBtn=rawget(_G,'NexusFlexiblePlanSave'),rawget(_G,'NexusFlexiblePlanLoad')
+    local present=root~=nil and root:IsShown() and saveBtn~=nil and loadBtn~=nil
+        and saveBtn:GetParent()==root and loadBtn:GetParent()==root
+    check(present,'EXPECT visible Save pool and Load saved controls in the editor-opened chooser')
+    if not present then
+        print(string.format('flexible_plan_persistence_chooser: %d passed, %d failed',passed,failed));os.exit(1)
+    end
+    check(saveBtn:GetText()=='Save pool' and loadBtn:GetText()=='Load saved' and saveBtn:IsShown() and loadBtn:IsShown()
+        and saveBtn:IsEnabled() and loadBtn:IsEnabled(),'Save pool and Load saved are shown, labelled and enabled')
+    local function Same(a,b) return a[1]==b[1] and a[2]==b[2] and a[3]==b[3] and a[4]==b[4] end
+    local box={0,0,root:GetWidth(),root:GetHeight()}
+    local saveRect,loadRect,resetRect=G.Rect(saveBtn,root),G.Rect(loadBtn,root),G.Rect(NexusFlexiblePlanReset,root)
+    local fitted=true
+    for _,b in ipairs({saveBtn,loadBtn}) do
+        fitted=fitted and G.Length(b:GetText())*7+24<=b:GetWidth() and b:GetWidth()<=170 and b:GetHeight()==22
+    end
+    check(box[3]==1020 and box[4]==650 and Same(G.Rect(NexusFlexiblePlanOpen,root),{774,610,998,632})
+        and Same(resetRect,{666,610,766,632}) and saveRect[1]==22 and saveRect[2]==610 and saveRect[4]==632
+        and loadRect[1]==saveRect[3]+8 and loadRect[2]==610 and G.Inside(saveRect,box) and G.Inside(loadRect,box)
+        and G.Apart(loadRect,resetRect) and G.Apart(saveRect,G.Rect(LabelAt(-570),root))
+        and G.Apart(loadRect,G.Rect(LabelAt(-570),root)) and fitted,
+        'Save/Load sit in the free left of the action row, fitted to their labels; Open, Reset and the 1020x650 frame keep their places')
+    local persist=LabelAt(-66)
+    check(LabelAt(-16):GetText()=='Plan alternatives' and LabelAt(-44):GetText():find('Set: shows the committed count',1,true)~=nil
+        and Same(G.Rect(persist,root),{22,66,992,86}) and PoolStatus()=='',
+        'the title drops session-only; count help and the blank pool status stay; the persistence line keeps a 970x20 box')
+    check(Persisted()==T.EMPTY,'an untouched session says it is not saved and what Save, Load, Hide and Reset do')
+    local area,areas=nil,0
+    for _,f in ipairs(H.frames) do if f._nexusText==persist then area,areas=area or f,areas+1 end end
+    check(areas==1 and area:GetParent()==root and area:GetScript('OnEnter')~=nil,'one hover area serves the persistence line')
+    local methods=G.RegionMethods()
+    local FONT,TIP={'GetStringHeight','GetStringWidth','GetTextWidth','GetFont'},{'SetOwner','AddLine','Show','Hide'}
+    local savedFont,savedTip,savedObject={},{},rawget(_G,'NexusFontNormal')
+    for _,k in ipairs(FONT) do savedFont[k]=rawget(methods,k) end
+    for _,k in ipairs(TIP) do savedTip[k]=rawget(GameTooltip,k) end
+    local tip
+    GameTooltip.SetOwner=function(_,o) tip.owner=o end
+    GameTooltip.AddLine=function(_,t) tip.lines[#tip.lines+1]=tostring(t) end
+    GameTooltip.Show=function() tip.shows=tip.shows+1 end
+    GameTooltip.Hide=function() tip.hides=tip.hides+1 end
+    -- Hover the real area under a stated font model; the model's own measure
+    -- must agree with the expected branch before the tooltip is judged.
+    local function Hover(model,overflow)
+        G.UseFont(model)
+        tip={lines={},shows=0,hides=0}
+        local text,w,h=persist:GetText(),persist:GetWidth(),persist:GetHeight()
+        local measured=G.Rows(text,w,model.char)*model.line>h
+        area:GetScript('OnEnter')(area)
+        local owner,lines,shows=tip.owner,tip.lines,tip.shows
+        area:GetScript('OnLeave')(area)
+        local ok=measured==overflow and persist:GetText()==text and persist:GetWidth()==w and persist:GetHeight()==h
+        if overflow then return ok and owner==area and #lines==1 and lines[1]==text and shows==1 and tip.hides==1 end
+        return ok and owner==nil and #lines==0 and shows==0 and tip.hides==0
+    end
+    local quiet=Effects()
+    local fits=Hover(G.MODELS.default,false)
+    local overflows=Hover(G.MODELS.double,true)
+    for _,k in ipairs(FONT) do methods[k]=savedFont[k] end
+    for _,k in ipairs(TIP) do GameTooltip[k]=savedTip[k] end
+    _G.NexusFontNormal=savedObject
+    check(fits,'default font model: the persistence text fits its box and hover adds no tooltip')
+    check(overflows,'2.0 font model: the persistence text overflows its fixed box; hover shows all of it, leave hides it')
+    check(Persisted()==T.EMPTY and Same(G.Rect(persist,root),{22,66,992,86}),'hover keeps the persistence text and box')
+    Quiet(quiet,'hovering the persistence line')
+
+    fx=Effects()
+    check(Add(A) and Persisted()==T.NEW and Raw()==nil,'after Add the pool is not saved yet; nothing is written automatically')
+    Count(A,3);Add(B);Count(B,1)
+    check(Rendered(A)==3 and Rendered(B)==1 and Persisted()==T.NEW and PoolStatus()=='' and Raw()==nil,
+        'rendered Set commits counts; the status still says not saved')
+    PoolRow(B).count:SetText('2')
+    check(Persisted()==T.PENDING and PoolStatus()==Nexus.FlexiblePlanChooser.Reason('COUNT_PENDING'),
+        'typing a count shows unsaved pending input on the persistence line, apart from the pool status')
+    saveBtn:Click()
+    check(Persisted()==T.REFUSED_PENDING and Raw()==nil,'Save pool with pending input is refused and says why')
+    PoolRow(B).count:SetText('1')
+    check(Persisted()==T.NEW and PoolStatus()=='','restoring the committed count clears the pending state')
+    saveBtn:Click()
+    check(Persisted()==T.SAVED and Raw()~=nil and F.Serialize(Raw())==Record({3,1}) and Holders()==1,
+        'Save pool writes the exact literal record and reports Saved')
+    Quiet(fx,'Add, Set, typing and Save pool')
+    local frames=#H.frames
+    NexusFlexiblePlanHide:Click()
+    check(not root:IsShown() and Persisted()==T.SAVED,'Hide keeps the status')
+    NexusFlexiblePlanEntry:Click()
+    local reused=0
+    for _,f in ipairs(H.frames) do if f._nexusText==persist then reused=reused+1 end end
+    check(NexusFlexiblePlanChooser==root and root:IsShown() and Rendered(A)==3 and Rendered(B)==1
+        and Persisted()==T.SAVED and F.Serialize(Raw())==Record({3,1}) and #H.frames==frames and reused==1
+        and Popup.shown[LOAD]==nil and Popup.shown[CLEAR]==nil,
+        'Hide and reopen keep choices and status, reuse every control, and neither save nor load')
+    Quiet(fx,'Hide and reopen')
+
+    local text=F.Serialize(Raw())
+    fx=Open(F.Reload(Seed))
+    check(F.Serialize(Raw())==text and Persisted()==T.HAS and Budget():find(EMPTY_BUDGET)~=nil and PoolStatus()=='',
+        'after serialize and a fresh boot the editor-opened chooser starts empty and says a pool is saved')
+    NexusFlexiblePlanLoad:Click()
+    check(Rendered(A)==3 and Rendered(B)==1 and Persisted()==T.LOADED and Popup.shown[LOAD]==nil
+        and F.Serialize(Raw())==text,'Load saved restores the exact rows and counts without a question or a write')
+    Quiet(fx,'Load saved into a clean session')
+    Count(A,2)
+    check(Rendered(A)==2 and Persisted()==T.UNSAVED and F.Serialize(Raw())==text,
+        'an edited count is an unsaved change; the saved record is untouched by the session')
+    NexusFlexiblePlanLoad:Click()
+    local ask=Popup.shown[LOAD]
+    check(ask~=nil and Persisted()==T.ASK_LOAD..' '..T.UNSAVED,'Load saved over unsaved changes asks first and says so')
+    if ask then Click(ask,2) end
+    check(Popup.shown[LOAD]==nil and Rendered(A)==2 and Persisted()==T.UNSAVED,
+        'Cancel keeps the edited pool and says it is unsaved')
+    NexusFlexiblePlanLoad:Click()
+    if Popup.shown[LOAD] then Click(Popup.shown[LOAD],1) end
+    check(Rendered(A)==3 and Rendered(B)==1 and Persisted()==T.LOADED and Popup.shown[LOAD]==nil,
+        'Accept restores the saved counts and the status reads Loaded')
+    Count(A,2);NexusFlexiblePlanSave:Click()
+    check(Persisted()==T.SAVED and F.Serialize(Raw())==Record({2,1}) and Holders()==1,
+        'Save pool updates the one saved record with the edited count')
+    Quiet(fx,'edit, the Load question, Cancel, Accept and Save pool')
+
+    text=F.Serialize(Raw())
+    fx=Open(F.Reload(Seed))
+    NexusFlexiblePlanLoad:Click()
+    check(F.Serialize(Raw())==text and Rendered(A)==2 and Rendered(B)==1 and Persisted()==T.LOADED,
+        'after another fresh boot Load saved restores the updated counts')
+    NexusFlexiblePlanReset:Click()
+    check(Budget():find(EMPTY_BUDGET)~=nil and Persisted()==T.UNSAVED_EMPTY and F.Serialize(Raw())==text,
+        'Reset clears only the session; the status says the empty pool is unsaved')
+    NexusFlexiblePlanSave:Click()
+    local clear=Popup.shown[CLEAR]
+    check(clear~=nil and Persisted()==T.ASK_CLEAR..' '..T.UNSAVED_EMPTY and F.Serialize(Raw())==text,
+        'Save pool of an empty pool asks before removing the saved pool')
+    if clear then Click(clear,2) end
+    check(Popup.shown[CLEAR]==nil and F.Serialize(Raw())==text and Persisted()==T.UNSAVED_EMPTY,
+        'Cancel keeps the saved record and the status')
+    NexusFlexiblePlanSave:Click()
+    local fresh=Popup.shown[CLEAR]
+    check(fresh~=nil and fresh~=clear,'Save pool asks again with a fresh question')
+    if fresh then Click(fresh,1) end
+    check(Raw()==nil and Holders()==0 and Persisted()==T.CLEARED,'Accept removes the saved pool and says so')
+    Quiet(fx,'Reset and the remove question')
+    fx=Open(F.Reload(Seed))
+    check(Raw()==nil and Persisted()==T.EMPTY,'after a fresh boot nothing is saved')
+    NexusFlexiblePlanLoad:Click()
+    check(Raw()==nil and Persisted()==T.NOTHING and Budget():find(EMPTY_BUDGET)~=nil and Popup.shown[LOAD]==nil,
+        'Load saved after removal says nothing is saved and restores nothing')
+    Quiet(fx,'Load saved with nothing saved')
+end
 print(string.format('flexible_plan_persistence_chooser: %d passed, %d failed',passed,failed))
 if failed>0 then os.exit(1) end
