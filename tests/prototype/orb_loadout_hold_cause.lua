@@ -1,3 +1,5 @@
+-- EXPECT semantic replacement from accepted base bc5f4959, 4d: Stop remains authoritative
+-- through later loadout observations; all original hold/evidence guards stay.
 -- Diagnostics for the Orb loadout hold (see orb_loadout_hold_repro). The accepted
 -- code held an unresolved Orb action with one flag, `loadoutChanged`, that eight
 -- different scenarios set alike (four recorded cause names), and its report named neither the original slot nor
@@ -295,7 +297,7 @@ for _,mode in ipairs({'missing','raising','not a number','out of range'})do
  local r=S.Receipt()
  check(r.loadoutChanged==true and r.loadoutCause=='SLOT_DIFFERS' and r.loadoutObservedSlot==2 and r.loadoutObservedAt==nil,'4d clock '..mode..': the hold and cause are recorded, no time')
  check(Nexus.OrbRuntime.RecoveryView().loadoutSeenAt==nil and not Line3():find('set at',1,true),'4d clock '..mode..': no time is shown')
- check(M.Status().state=='PAUSED' and M.Status().pending and not M.Resume(),'4d clock '..mode..': held as before')
+ check(M.Status().state=='STOPPED' and M.Status().pending and not M.Resume(),'4d clock '..mode..': deliberate Stop and hold retained')
  -- later passes and a reload, now with a working clock: a time is never filled in afterwards
  S.Pass(H,M,A);S.Rechecks(H,M,3);M=S.Reload(H);H.perks.serverActiveSlot=2;S.Pass(H,M,A);S.Rechecks(H,M,2)
  check(Nexus.OrbRuntime.RecoveryView().loadoutSeenAt==nil and S.Receipt().loadoutObservedAt==nil and not Line3():find('set at',1,true),

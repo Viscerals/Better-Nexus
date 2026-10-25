@@ -1,7 +1,9 @@
 # Orb recovery: pick evidence and the player-confirmed Continue (035)
 
-Status: phase one, offline-tested with synthetic data only. Native game behavior is NOT TESTED.
-Phase two (an automatic continuation with a notice) is NOT built and is not authorized.
+Status: the restored-receipt Continue path is offline-tested with synthetic data only. Native game behavior is NOT TESTED.
+An approved live session now has a separate bounded recovery path with an explicit
+empty-choice response requirement; see `ORB_BOUNDED_RECOVERY.md`. It does not
+automatically continue a restored receipt or recover authorization after reload.
 The owner accepted the residual risk that is described under "What stays uncertain".
 
 ## Why
@@ -19,13 +21,32 @@ fact that is known and claims nothing that is not.
 
 ### Continue is conditional, not an exit for every unresolved record
 
-A restored record with **no retained client-observed spend** is outside Continue's class.
+A restored record with **no retained client-observed spend** is outside the
+original no-recorded-choice Continue class.
 Continue requires a retained observation of one Orb fewer *with that action's offer*.
 `spendConfirmed` is the compatibility field for that client observation; it is not a
 server acknowledgment. Missing retained history does not prove that a client never
 observed the event (a save may have failed), or that the server spent nothing. `UNOBSERVABLE`
 means the available facts cannot link the action to a result, not that Nexus knows the
 server completed or refused it.
+
+There is one additional attribution-only class. A paused or stopped action with a retained
+ambiguous choice can use this same explicit checked exit when fresh ownership
+shows its distinct chosen gain in the original loadout. An exact result or a
+whole compound delta explained by the bounded owner archive can establish this
+gain; unrelated ownership changes cannot. The ambiguity flag
+is assigned before submission and is never enough by itself. The gain establishes
+current build progress, not the operation that caused it. This class works after
+actual completion, exhausted live checks and passive reload, and also directly
+after Pause or Stop in the same session. Current owner, binding, locks, loadout and quiet
+state are revalidated at consent and inside the actual atomic write. An ordinary
+recorded choice without that proof stays ineligible.
+
+For this class the original receipt is archived unchanged as `ACK_UNCONFIRMED`,
+confidence `NONE`. Observed spend stays counted once; a current unobserved charge
+stays unknown exposure, without a refund or invented charge. The old run ends,
+with no spend, selection or automatic Resume. Failed save retains receipt and
+ordinary gating. The original 8-entry / 28,672-byte manual archive caps still apply.
 
 For a restored, idle, ineligible record the run page exposes **Why blocked...**. Opening
 it reads the same refusal explanation without invoking `ContinueBegin`, requesting a
@@ -58,7 +79,7 @@ new diagnostic field. A failed mandatory write is never retried to admit an acti
 mandatory success, at most one optional journal write is attempted. Diagnostic rejection,
 error or invalid data falls back to session-only evidence and cannot reject that original
 receipt write. This adds one bounded Store attempt on the normal successful live write
-path; its cost is measured separately. Stable reads add no writes. `unsaved`
+path; its cost is unmeasured here. Stable reads add no writes. `unsaved`
 and `durableRetained` distinguish memory observations from a verified Store write. Disk
 durability still depends on the game's normal save; a process crash is not covered.
 
@@ -70,11 +91,16 @@ write then fails, those earlier diagnostic entries are no longer claimed durable
 This deliberate diagnostic loss cannot erase raw picks or any original receipt fact.
 It never applies to a restored or foreign journal. There is no retry loop to restore it.
 
-Existing receipts, foreign same-name fields (including false), unknown archives and
-receipts without conservative archive headroom use **session-only** evidence. New receipts
-reserve4,096 bytes and400 edges for future evidence/archive envelope under the unchanged
-6,144-byte/1,200-edge limits; the full archive remains bounded by28,672 bytes and eight
-entries. Restored valid journals are kept unchanged: new diagnostics do not alter the
+Existing receipts and foreign same-name diagnostic fields (including false) use
+**session-only** evidence. Optional diagnostic-budget refusal is distinct from
+unverifiable archive history: malformed/future history refuses new action admission
+before Auto/owner acquisition and is never treated as empty. Valid full history is
+readable, but cannot reserve another exit. New operations require one complete
+6,144-byte exit slot plus every existing entry's remaining late-growth budget.
+The prospective receipt bound includes 4,096 bytes/400 edges for supported future
+receipt evidence and its archive envelope plus 512 bytes/32 edges for late facts,
+inside the unchanged 6,144-byte/1,200-edge limits. The full archive remains bounded
+by 28,672 bytes and eight entries. Restored valid journals are kept unchanged: new diagnostics do not alter the
 receipt digest or invalidate a Continue token. The archive still stores its original
 receipt exactly, including any retained journal. Diagnostics add no new settlement,
 spending, selection or archive permission.
@@ -104,7 +130,8 @@ game's caller. The facts go to the Orb owner, which saves them with the receipt 
   receipt (the same fields, the same gates, no longer waiting for the next timed pass).
 * A refused save stays in memory, is retried at the next pass and flushed at every lifecycle
   event. It changes no run state.
-* The hook's host function is untouched: return values, invocation count and errors. The roll
+* The underlying host implementation is not substituted: a secure post-hook may
+  change global function identity but preserves host return values, invocation count and errors. The roll
   trace setting changes nothing.
 
 An in-memory SavedVariables write reaches the disk at the game's own reload or logout save. A
@@ -112,10 +139,12 @@ crash before that is not covered and is not claimed.
 
 ## Part 2a: the passive transport observer (core/OrbAdapter.lua)
 
-The audited client (the owner's installed bytes; the reporter's build is not verified) delivers
-server messages through one `CHAT_MSG_ADDON` frame, keeps one handler per opcode and checks the
-prefix and the framing, not the sender or the channel. The observer listens to the same event in
-a frame of its own. It registers no opcode handler, replaces nothing, patches no client file and
+The client choice-cache and request facts use the authorized inert ProjectEbonhold
+metadata version 37 reference, with the exact source SHA-256 and symbols in
+`THIRD_PARTY.md`; installed tester/deployed version equality is unverified.
+The incoming observer listens to `CHAT_MSG_ADDON`
+in a frame of its own, classifying the prefix, framing, sender and channel.
+It registers no opcode handler, replaces no game handler, patches no client file and
 sends nothing. It reads the game's own prefix, which no other Nexus code does; it keeps only
 parsed numbers and enumerated codes, never a sender, a name or a payload.
 
@@ -125,8 +154,9 @@ parsed numbers and enumerated codes, never a sender, a name or a payload.
 * Class Q (qualifying, opcode 1220 only): exact prefix, the whisper channel, a sender equal to
   the player's own exact name (a known identity; no cross-realm or short-name alias), a tab and a
   non-empty body, no segmentation, exactly three fields, canonical integers of at most six
-  digits. This follows the strict convention of EbonAPI 2.1.1's bridge. It is a source-backed
-  expectation, not proof of the real server's sender.
+  digits. The whisper/self-name convention follows EbonAPI 2.1.1's strict bridge,
+  a distinct source reference from the v37 client cache/request facts. This is a
+  source-backed expectation, not proof of the real server's sender or channel.
 * Class A: admitted (sender and channel pass) but not qualifying, or an opcode that is followed
   by arrival only (16 offers, 18 ownership, 540 and 542 slot data, 1000 pick results). For those
   opcodes a segmented message is tracked by fragment: the game calls its handler only when every
@@ -153,10 +183,12 @@ fallback to the game's local pending flag.
 
 ## Part 2c: Continue (core/OrbRuntime.lua, ui/OrbPanel.lua)
 
-The class: a restored receipt, a spend this client observed (one Orb fewer with
+The original class: a restored receipt, a spend this client observed (one Orb fewer with
 its offer; the receipt keeps it in its compatibility field `spendConfirmed`, and
 no server reply confirms it), no usable recorded outcome (`hasChoiceEvidence` is
 false) and the original offer gone.
+The narrow observed-gain attribution class above shares this check and archive;
+it does not weaken ordinary recorded-choice refusal or restore live authority.
 
 The check (a session-only state machine, driven by the passive recovery pass):
 
@@ -184,6 +216,7 @@ again. A loading event is only a reason to start over: it is never readiness.
 ### What Continue does
 
 * keeps the spent count, the run limit and the configured maximum exactly;
+  unknown current charge exposure is retained separately rather than refunded;
 * moves the saved receipt, unchanged, into the character row key `orbRecoveryArchive` and clears
   the pending receipt in ONE store mutation, then verifies the row; a refused, unverified or
   throwing write is rolled back and the same token can be confirmed again;
@@ -201,22 +234,45 @@ not run.
 
 Entry (`v=1`): `id` (a digest of what identifies the spend: constant from the receipt's creation, so
 repeating a Continue adds nothing), `cd` (a digest of the whole saved receipt), `kind`
-`ACK_UNCONFIRMED`, `receipt` (the original, unchanged), `spent`, `limit`, `intent` (what Nexus
+`ACK_UNCONFIRMED` or `AUTO_UNCONFIRMED`, `receipt` (the original, unchanged at archive commit), `spent`, `limit`, `intent` (what Nexus
 intended), `observed` (counts of the raw pick evidence, which lives inside the receipt),
-`resolution` (`UNCONFIRMED`, confidence `NONE`), `consent` (version, policy `TWO_OBSERVED`, serial),
+`resolution` (`UNCONFIRMED`, confidence `NONE`), `consent` (version, policy `TWO_OBSERVED` for explicit or `SESSION_BOUNDED_TWO` for automatic, serial),
 `pre` and `post` (below), `late` and `lateN`.
 
-Budget review (measured in `orb_recovery_store_compat`, deidentified 034 shape with three full
-pick entries, the worst case): one entry is about 218 edges, 3 KB, depth 4. The deepest table is
+`receipt.uncertain` is the cumulative earlier unknown exposure retained by that
+run at its last receipt save; it is not this archive attempt's own amount. Outer
+`entry.uncertain`, when present on automatic or attribution-only exits, is only
+this attempt's unknown reserved exposure. `spent` is a client-observed decrement,
+not a server acknowledgment. `unconfirmedResults` and `recoveries` are session
+counters and stay unavailable after reload; they are not reconstructed as zero.
+`pre.emptyChoice` on an automatic entry is the positive transport ordinal of the
+qualifying empty-choice observation, not a boolean. Passive transport records use
+`emptyChoice` as a boolean. `observed.gain=true` on an attribution exit records
+actual distinct owned gain, never which operation caused it. `lateN` counts up to
+99, while `late` retains at most four known flat annotations, including
+`events_lost`; they never rewrite the immutable receipt or identify a server action.
+
+The `orb_recovery_store_compat` fixture covers a receipt with three full pick
+entries. One fixture shape is not a universal bound on retained unknown fields;
+admission uses fixed limits and reserves supported future late growth. The deepest table is
 row (1) > archive (2) > entry (3) > receipt (4) > picks (5) > one pick (6): exactly at the Store's
 own depth bound of 6, not past it. There is no margin: the entry cap (depth 4 below the archive)
 refuses anything deeper, so a later change that adds a level is refused, not written.
 Caps: an entry at most 1200 edges, 6144 bytes, depth 4; the archive at most 8 entries and 28672
-bytes. The real Store starts, stays writable and keeps the archive with eight entries at the caps.
+bytes. The Store data-retention fixture starts, stays writable and keeps eight padded
+entries within its shape budget. That preservation probe is not proof that altered
+fixture digests pass Runtime history validation; actual capacity branch fixtures
+use distinct entries produced by the real checked Continue path.
+Explicit legacy Continue measures those original raw entry/total caps, including
+retained unknown fields, without retroactively reserving future optional late
+annotations. An annotation that cannot fit is skipped while the receipt stays
+exact. New-operation and automatic-exit admission still reserve future growth.
 Refuse, never evict, never repair, never delete: a full archive, a malformed one, one written by a
 newer format (`v` above 1), an oversized receipt, an unverified write.
+An absent archive key is empty; a present `false` archive value is malformed,
+is preserved, and refuses Continue and new-run admission.
 
-### Logging for phase two
+### Session and archive diagnostics
 
 Session (the support report, `Nexus.SupportReport.OrbLines`): the strict-path counters (qualifying,
 admitted, rejected; not accepted by identity, sender, channel, segmentation, absent third field,
@@ -228,9 +284,11 @@ request and reply ordinals, the quiet facts (offer, board, host, flight, intent)
 epochs, the spent count and limit, the post-state and the late events after the archive (kinds
 `pending_positive`, `choice_push`, `pick_result`, `rejected`, `reply_unqualified`; at most four kept,
 counted to 99; never linked to the old receipt and never acted on). No raw SavedVariables, no
-sender, no player, no Echo id or board is logged.
+sender or player identity is added to these bounded transport annotations.
+The original receipt intentionally retains its original source/choice keys, owned
+map and bounded raw-pick board evidence; those are not transport correlation IDs.
 
-### What stays uncertain (accepted by the owner for phase one)
+### Accepted residual uncertainty for explicit Continue
 
 * the server may still apply a late result for the old action; Nexus reads it as an ordinary change
   and does not link it;
@@ -241,10 +299,54 @@ sender, no player, no Echo id or board is logged.
 * the Orb count may be a little off, because Orbs can be farmed; this is accepted;
 * the real server's sender and channel for the charge reply, and everything native, are NOT TESTED.
 
-### Not built, not authorized
+### Outside the live bounded recovery path
 
-* phase two: continuing automatically with a notice. Field logs and a coordinator decision must gate
-  it;
+* automatically continuing a restored receipt. A reload never restores the approved run;
 * a manual accepted-risk fallback for a client whose replies cannot be observed. It would be a
   separate proposal with its own scope and risk decision; 035 does not relax any strict check;
 * a slot-zero hold rule change; it needs a separate rule decision.
+
+The shared finite archive reserves two slots and 12,288 bytes from automatic
+live recovery. Explicit Continue retains its original eight-entry / 28,672-byte
+caps and may use this reserve, but can still fill them. Nothing evicts or repairs
+old records. The restored Continue view/cancel/confirm path never owns a live
+recovery check or resets its allowance.
+
+New pending receipts with acknowledged-history risk, attribution risk or unknown exposure use a versioned
+owner identity (`attributionFormat=1`, actual GUID in `attributionOwner`, legacy
+`guid` absent). Read-only inspection of exact public `a43cf27` Runtime+Adapter
+shows its owner blocker refusing settlement and no-choice Continue. That exact
+pair is source-only evidence here, not an executed downgrade fixture.
+The current owner reads this known identity without restarting spending; unknown
+or conflicting versions remain blocked. No loadout or spend fact is fabricated.
+See `ORB_BOUNDED_RECOVERY.md` for the replay scope and the historical older
+message. Archive-key retention alone covers a separate data-preservation claim.
+
+An eligible held automatic attribution receipt can use Check directly. Cancel
+returns only that explicit check to idle; it keeps the receipt. Ineligible
+Continue requests preserve the automatic owner. Completion remains visible
+across loading while its unresolved receipt continues to block ordinary actions.
+Full usage and main-panel summary text is available through their hover regions;
+this is an offline accessibility path, not native font-fit evidence.
+
+## Current baseline and restored-data qualification
+
+A successful Continue preserves the saved receipt exactly at the atomic archive
+commit and ends the old run. A later deliberate Start must disclose and acknowledge
+nonempty unconfirmed history as a current-state baseline, together with its maximum.
+It creates no server attribution and never changes old UNKNOWN/NONE entries.
+The exact acknowledged set is session-only; new entries remain relevant and reload
+returns to conservative full history. Every new operation reserves a full exit
+before admission; already-full restored pending records stay preserved/refused.
+See `ORB_BOUNDED_RECOVERY.md` for the complete approval and capacity contract.
+
+Passive restoration/read preserves untouched legacy saved bytes. Genuinely NEW
+ambiguous ownership may instead perform the existing one-time failclosed identity
+migration: original GUID information moves into attributionOwner and unknown
+fields survive. This distinction is exercised by `orb_recovery_store_compat`;
+it does not claim every restored record remains byte-identical after new evidence.
+The restored attribution check requires this load's baseline and a later fresh
+ownership observation; old lifetime selection stamps do not substitute for it.
+
+Native timing, fonts, sender/channel conventions,
+installed tester version and global observer costs remain unverified.

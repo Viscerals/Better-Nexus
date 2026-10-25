@@ -9,3 +9,17 @@ Pause and Resume occupy separate fixed buttons. Each click reads status again, t
 Close and Escape hide only this panel. An approved run continues; use Pause or Stop to change it. Reopening reuses the panel and clears its old action notice. Visible status refreshes four times per second; hidden status does no work. Showing, moving and closing the panel do not save settings or placement.
 
 `tests/prototype/orb_mini_panel.lua` exercises the real handlers and Orb runtime through synthetic WoW/services, plus fault injection for stale, malformed, missing and failed reads. It tests pending Stop, repeated and nested clicks, tooltips and a geometry model. Native font pixels, client skins, keyboard Escape, actual dragging and server effects require an in-client check; offline tests and the SIMULATED preview do not establish those effects.
+
+Recovery checking/ready/held/refused phase appears first in the compact main strip
+and mini state line, before long exposure totals. The phase is an owned scalar;
+rendering it adds no active intent/flight/read call. Optional missing uncertain or
+outcome totals display unavailable rather than measured zero. A present malformed
+historyKnown/count fact disables mini actions; a typed false historyKnown retains
+the explicit after-reload unknown-history explanation. Full text remains available
+on hover; this is not native font-fit evidence.
+
+Owed-offer Resume eligibility in compact views uses the last complete pump
+observation plus the current native latch scalar. Rendering does not refresh
+active intent, flight, ownership or catalog facades. That display observation is
+not server freshness or permission: explicit Resume reads all current guards
+again before choosing the already-approved offer.

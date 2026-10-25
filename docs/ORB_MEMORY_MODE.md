@@ -3,7 +3,7 @@
 ## Actual execution path
 
 Read-only target/source selection -> opaque expiring approval token -> explicit
-review/checkbox -> ordinary Automation OFF -> exclusive Orb owner -> durable
+represented maximum/history review -> ordinary Automation OFF -> exclusive Orb owner -> durable
 passive pending marker -> ConfirmSpend(source ID, 1) -> authoritative offer and
 one-Orb charge change -> exact target or allowed recyclable fallback ->
 SelectPerk(choice ID) -> fresh ownership/diff/charge confirmation -> next approved
@@ -39,16 +39,19 @@ A target obtained through refinement is not automatically reapproved as a source
 
 ## State and spending
 
-`IDLE`, `READY`, `WAIT_OFFER`, `WAIT_RESULT`, `PAUSED`, `STOPPED`, `COMPLETE`,
+`IDLE`, `READY`, `WAIT_WORLD`, `WAIT_OFFER`, `WAIT_RESULT`, `PAUSED`, `STOPPED`, `COMPLETE`,
 `ROLLED_COMPLETE`, `LIMIT`, `OUT_OF_ORBS`, `NO_SOURCES`, and `RECOVERY` are distinct.
 
-Confirmed consumption plus unresolved exposure counts toward the run cap. An
+Client-observed consumption plus unresolved and archived uncertain spend exposure counts toward the run cap. An
 explicit local rejection can clear unincurred reservation; an exception or unknown
 outcome cannot. Once a selection was attempted it is not automatically replayed.
 A pending operation is reconciled passively after Stop; Stop cannot undo a spend.
 
-Offer/result timers permit one read-only refresh at 10/12 seconds respectively,
-then pause if confirmation remains unavailable. Explicit Recheck is rate-limited
+Offer/result timers begin reconciliation at 10/12 seconds respectively. A live
+approved run can attempt at most two bounded recovery checks using explicit
+empty-choice response evidence; an open choice or active action is never
+replayed. A failed check pauses with its receipt retained. See
+`ORB_BOUNDED_RECOVERY.md`. Explicit Recheck is rate-limited
 to three seconds. No action is confirmed by time, pcall success, closed UI, or an
 unchanged old snapshot.
 
@@ -96,9 +99,10 @@ action. An action that ended while unobserved stays unresolved; the visible
 text says that it cannot be confirmed and that Recheck cannot settle it.
 The offer and the choice are also recorded at the moment of a manual choice
 (event-driven, through the same read-only observer), so the observation does not
-depend on the timed reads. Besides the exact matching result, the only exit from a block is the player's explicit
-Continue for an action with a spend this client observed (one Orb fewer with its
-offer) and no recorded outcome whose offer is gone
+depend on the timed reads. Besides the exact matching result, the player's explicit Continue has two narrow
+classes: an action with a spend this client observed (one Orb fewer with its
+offer) and no recorded outcome whose offer is gone, or a stopped ambiguous choice
+with its fresh distinct gain actually owned
 (`docs/ORB_RECOVERY_CONTINUE.md`); a block that has no such exit says so.
 
 After a reload or login the client shows its load-time default active slot
@@ -154,7 +158,10 @@ response: the same read-only request as Recheck. It sends no Orb and no choice
 and changes no requirement. If no newer response arrives, the status says that
 the request was made and that Recheck requests one more.
 
-A loading screen pauses a running Orb action ("Session interrupted"). When the
+A loading screen holds a running Orb action in `WAIT_WORLD`, retaining only
+its existing session approval. Once the game is readable the owner reconciles
+the current choice; it never resends a submitted selection. Stop and Pause
+are preserved, and logout/reload still ends authorization. When the
 choice that Nexus sent before it gets no reply, the game keeps its own latch for
 that choice and refuses every choice in its offer window until a /reload. If
 the game still holds this action's choice five seconds after the loading screen,
@@ -197,13 +204,12 @@ or interference from other game addons.
 New tests exercise the actual Nexus adapter/runtime and mocked game services.
 Exact-role/source/budget and fresh-evidence guards have separate controls
 (`tests/prototype/echoweaver_orb_policy.lua` and the `orbs_*` tests). An earlier
-offline comparison with an outside addon's source (3,000 offer decisions,
-3,000 result diffs, and 10,000 ordinary decisions) is retired (2026-09-24);
+offline comparison with an outside addon's source is retired (2026-09-24);
 it was never a claim of blanket parity.
 
-All tests in this build use Lua 5.4 with the included compatibility shims. They are
-not a LuaJIT, native client, original upstream inventory, or independent review
-result. No Orbs, player resources, live profiles, or game sessions were accessed.
+Offline harnesses and compatibility shims do not establish native client
+behavior or independent review acceptance. Native game behavior and actual
+resource spending remain untested here.
 
 Future native testing needs separate explicit consent, with an expendable approved
 source and a one-Orb limit first. An unresolved server operation must be handled
@@ -213,4 +219,13 @@ in the game, not by deleting the marker or retrying a spend.
 
 - **Start and persistence agree.** Orb preferences and the recovery receipt are written through the Store owner (`StoreAuthorityOwner.UpdateStateV1`). `Store.StateWriteStatus()` (read-only) states whether that write can be durable now: character identity unknown, saved data loading, database or character container missing, a newer schema, or a character row of another shape. Start is enabled only when it can be durable, and its reason names the case. An absent character row is not a refusal: the owner creates it at the explicit Orb write, and the Orb runtime then checks that the durable row holds the data (the owner also reports success for its transient fallback). Reading a view never creates or writes the row. No spend or choice is sent before its receipt is durable; if persistence fails after a spend may have been sent, the unresolved exposure stays.
 - **Idle window work.** One display refresh (every 0.25 s while the window is shown) makes one adapter read. The adapter builds availability rows only for the IDs a read is asked about (targets, owned copies, offered cards), with the same rules per row, instead of rebuilding the whole local Echo catalog on every read; nothing is kept between reads. The source list is prepared only while Advanced is open. Every action (Start, Resume, each spend and selection) reads again; the display snapshot authorizes nothing.
-- Measured offline with the review probe setup (1,000-row catalog, one idle second): before 8 reads, 8 full catalog traversals (8,000 row visits), 16 assignment lookups; after 4 reads, 0 traversals, 8 row builds, 4 assignment lookups. These are work counts, not native frame times.
+- The earlier idle-window work counts predate bounded recovery and its retained-history checks. They do not measure the current refresh path. Current aggregate work and native frame cost are unmeasured here.
+
+New runs with nonempty validated unconfirmed history require the displayed
+current-state baseline acknowledgment. It lasts only for that approval and its
+same pending observation, including after Stop; reload restores no acknowledgment
+or action authority. Old receipts remain unconfirmed. New operation admission
+requires one complete bounded exit slot and late-growth headroom. Full valid
+history is a finite capacity refusal, while malformed/future history is an
+unverifiable-history refusal; neither is empty history. See
+`ORB_BOUNDED_RECOVERY.md` for the current exact contract and native limits.

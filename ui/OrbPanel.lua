@@ -116,11 +116,11 @@ local function notify(ok,err)
     if frame then frame.notice:SetText(truthful(err) or (ok and "" or "No change."))end
     UI.Refresh()
 end
-local function primary(limit,tracked)
+local function primary(limit,tracked,historyReview)
     local s=Nexus.OrbRuntime.Status()
     if s.running then return Nexus.OrbRuntime.Pause()end
     if s.state=="PAUSED" then return Nexus.OrbRuntime.Resume()end
-    return Nexus.OrbRuntime.Start(limit,tracked)
+    return Nexus.OrbRuntime.Start(limit,tracked,historyReview)
 end
 -- The maximum box shows the draft; a refresh sets it without counting as
 -- typing (OnTextChanged ignores changes made here).
@@ -129,10 +129,18 @@ local function showLimit(value)
 end
 local MAX_TIP="Follow your confirmed Orb balance, up to 1000, until you enter another amount or start the run. This does not spend Orbs."
 local phases={IDLE="Not started",READY="Preparing next replacement",WAIT_OFFER="Waiting for the Orb offer",
+    WAIT_WORLD="Waiting for the game after loading",
     WAIT_RESULT="Waiting for result confirmation",PAUSED="Paused",STOPPED="Stopped",COMPLETE="Targets complete",
     ROLLED_COMPLETE="Rolled targets complete",LIMIT="Maximum reached",OUT_OF_ORBS="No Orbs remain",
     NO_SOURCES="No safe surplus copies remain",RECOVERY="Previous result is unresolved",
     FINISHED="Finished - limit reached"}
+local recoveryPhases={checking="Recovery: Checking",ready="Recovery ready",held="Recovery held",refused="Recovery refused"}
+local continuePhases={checking="Continue: Checking",ready="Continue ready",held="Continue held",refused="Continue refused"}
+local function phaseText(s)
+    local state=phases[s.state] or s.state
+    local recovery=(s.recoveryKind=="manual" and continuePhases or recoveryPhases)[s.recoveryPhase]
+    return recovery and (recovery.." - "..state) or state
+end
 -- At FINISHED the primary control is the same button that was Pause while the
 -- run was going and Resume while it was paused, and the limit box has just
 -- been refilled with the configured maximum. One press there would start a new
@@ -260,6 +268,15 @@ local function refresh()
     -- One display read per refresh; the source list is prepared only for Advanced.
     -- The snapshot authorizes nothing: Start, Resume and every spend read again.
     local s=Nexus.OrbRuntime.Status(advanced);frame.snapshot=s
+    frame.historyReview=s.historyReview
+    local consent="Start approves this maximum: eligible surplus copies/recycling. Ordinary Auto OFF.\nUp to 2 recovery checks within this maximum; owned Echoes decide completion."
+    local consentFull
+    if s.historyCount and s.historyCount>0 then
+        consent="Start approves this maximum + Echo baseline; "..tostring(s.historyCount).." unconfirmed; late gains may arrive.\nSurplus/recycling; Auto OFF; 2 checks within max; owned Echoes decide completion."
+        consentFull="Start approves this maximum. "..tostring(s.historyCount).." "..s.historyRisk
+            .."\nSafe surplus/recycling; ordinary Auto OFF. Up to 2 recovery checks within this maximum; owned Echoes decide completion."
+    end
+    setFull(frame.approval,consent,consentFull)
     local a=s.assignment or {};local busy=s.running or s.pending or s.state=="PAUSED" or s.state=="LIMIT"
     if a.state=="restoring" then setFull(frame.plan,"Restoring assigned Wishlist...")
     else setFull(frame.plan,"Assigned Wishlist: "..name(a.name or "none"),"Assigned Wishlist: "..name(a.name or "none",true)) end
@@ -301,9 +318,15 @@ local function refresh()
     frame.start:SetText(s.running and "Pause" or (s.state=="PAUSED" and "Resume"
         or (s.state=="FINISHED" and (confirmNewRun and "Confirm new run" or "Start new run") or "Start")))
     frame.usage:SetText("Orbs used: "..s.spent.." / "..((busy or s.limit>0)and s.limit or (shown~="" and shown or "-"))
-        ..(s.reserved>0 and ("; unresolved exposure: "..s.reserved)or ""))
+        ..(s.reserved>0 and ("; unresolved exposure: "..s.reserved)or "")
+        ..((s.uncertain or 0)>0 and ("; unknown spend exposure: "..s.uncertain) or "")
+        ..((s.unconfirmedResults or 0)>0 and ("; unconfirmed outcomes: "..s.unconfirmedResults) or "")
+        ..(s.historyKnown==false and "; earlier outcome/check totals unavailable after reload" or ""))
     local reason=(s.running or s.pending or s.state=="PAUSED")and s.reason or (s.startReason or s.reason)
-    setFull(frame.status,(phases[s.state]or s.state).."\n"..(truthful(reason) or s.error or ""))
+    setFull(frame.status,phaseText(s).."\n"..(truthful(reason) or s.error or ""))
+    if s.recoveryNotice and reason~=s.recoveryNotice then
+        setFull(frame.status,frame.status:GetText().."\n"..s.recoveryNotice)
+    end
     if confirmNewRun and s.state=="FINISHED" then
         frame.status:SetText(frame.status:GetText().."\nPress Confirm new run to start a new run of up to "
             ..tostring(frame.limit:GetText()).." Orb(s). Close this window to cancel.")
@@ -331,7 +354,7 @@ local function refresh()
         frame.cont:SetText(stage=="done" and "Review outcome..."
             or stage=="refused" and "Review check..."
             or stage=="checking" and "Check progress..." or (stage=="ready" or cv.eligible==true) and "Continue..." or "Why blocked...")
-        if cv.explanation==true or cv.eligible==true or stage=="checking" or stage=="ready" or stage=="refused" or stage=="done" then frame.cont:Show()else frame.cont:Hide()end
+        if not cv.liveRecovery and (cv.explanation==true or cv.eligible==true or stage=="checking" or stage=="ready" or stage=="refused" or stage=="done") then frame.cont:Show()else frame.cont:Hide()end
     end
     if advanced then frame.advanced:Show()else frame.advanced:Hide()end
     selected(frame.advancedToggle,advanced)
@@ -439,13 +462,15 @@ local function ensure()
         end
         -- Still the tracked amount this window showed: approve it as shown.
         -- Any other text is the player's own amount (the existing path).
-        notify(primary(n,d.tracking and d.text==nil and shown==frame.limit.shownDraft))
+        notify(primary(n,d.tracking and d.text==nil and shown==frame.limit.shownDraft,frame.historyReview))
     end)
     frame.stop=button(frame,470,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
-    frame.approval=text(frame,20,-221,580,37,"Start approves this maximum and automatic use of eligible surplus copies, including safe recycling. Ordinary Automation will turn OFF.")
+    frame.approval=text(frame,20,-221,580,37,"Start approves this maximum: eligible surplus copies/recycling. Ordinary Auto OFF.\nUp to 2 recovery checks within this maximum; owned Echoes decide completion.")
     frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,440,24)
     -- Fixed boxes; a status or refusal longer than its box is complete in a tooltip.
     if Nexus.LayoutMetrics then
+        frame.approvalHit=Nexus.LayoutMetrics.FullTextTooltip(frame.approval,frame)
+        frame.usageHit=Nexus.LayoutMetrics.FullTextTooltip(frame.usage,frame)
         frame.statusHit=Nexus.LayoutMetrics.FullTextTooltip(frame.status,frame)
         frame.noticeHit=Nexus.LayoutMetrics.FullTextTooltip(frame.notice,frame)
         frame.balanceHit=Nexus.LayoutMetrics.FullTextTooltip(frame.balance,frame)
@@ -892,7 +917,7 @@ local function contRefresh()
         and "Continue with an unconfirmed Orb outcome" or "Unresolved Orb action")
     contFrame.token=v.token
     contFrame.body:SetText(v.text or "")
-    local idle=v.stage=="idle" or v.stage=="refused"
+    local idle=v.stage=="idle" or v.stage=="refused" or v.stage=="held"
     local active=v.stage=="checking" or v.stage=="ready"
     enable(contFrame.check,v.eligible==true and idle)
     enable(contFrame.go,v.stage=="ready" and v.token~=nil)
@@ -949,6 +974,7 @@ local function ensureContinue()
     UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusOrbContinue"
 end
 function UI.ShowContinue()
+    if Nexus.OrbRuntime.ContinueView().liveRecovery then return nil end
     ensureContinue();contFrame:Show();contRefresh();return contFrame
 end
 do
@@ -971,6 +997,7 @@ function UI.AttachMainPanel(parent)
     f:SetPoint("TOPLEFT",parent,"BOTTOMLEFT",0,-2);f:SetSize(parent:GetWidth(),100);f:SetFrameLevel(parent:GetFrameLevel()+3)
     f:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8"});f:SetBackdropColor(.035,.04,.05,.95)
     f.summary=text(f,8,-6,252,52)
+    if Nexus.LayoutMetrics then f.summaryHit=Nexus.LayoutMetrics.FullTextTooltip(f.summary,f) end
     f.primary=button(f,8,-65,87,"Pause",function()
         local s=Nexus.OrbRuntime.CompactStatus()
         if s and s.running then Nexus.OrbRuntime.Pause()elseif s and s.canResume then Nexus.OrbRuntime.Resume()end
@@ -981,8 +1008,11 @@ function UI.AttachMainPanel(parent)
     f.refresh=function()
         local s=Nexus.OrbRuntime.CompactStatus()
         if not s then f:Hide();return end
-        f:Show();f.summary:SetText("Orbs: "..s.spent.." / "..s.limit.." used"..(s.reserved>0 and (" + "..s.reserved.." pending")or "")
-            .."\n"..(s.remaining~=nil and (s.remaining.." target copies remaining")or "Target data unavailable").."\n"..(phases[s.state]or s.state))
+        f:Show();f.summary:SetText(phaseText(s).."\nOrbs: "..s.spent.." / "..s.limit.." used"..(s.reserved>0 and (" + "..s.reserved.." pending")or "")
+            ..((s.uncertain or 0)>0 and (" + "..s.uncertain.." unknown spend exposure") or "")
+            ..((s.unconfirmedResults or 0)>0 and ("; unconfirmed outcomes: "..s.unconfirmedResults) or "")
+            ..(s.historyKnown==false and "; earlier outcome/check totals unavailable after reload" or "")
+            .."\n"..(s.remaining~=nil and (s.remaining.." target copies remaining")or "Target data unavailable"))
         f.primary:SetText(s.running and "Pause"or "Resume");enable(f.primary,s.running or s.canResume)
         enable(f.stop,s.running or s.pending or s.state=="PAUSED"or s.state=="LIMIT")
     end
@@ -1061,6 +1091,8 @@ local function miniView()
     if s==nil then return {kind="none"} end
     if type(s)~="table" then return {kind="malformed"} end
     local v={kind="run",spent=miniCount(s.spent),limit=miniCount(s.limit),reserved=miniCount(s.reserved),
+        uncertain=miniCount(s.uncertain),unconfirmedResults=miniCount(s.unconfirmedResults),
+        historyKnown=s.historyKnown,recoveryPhase=s.recoveryPhase,recoveryKind=s.recoveryKind,
         remaining=miniCount(s.remaining),state=type(s.state)=="string" and s.state or nil,
         reason=type(s.reason)=="string" and s.reason or nil}
     for _,key in ipairs({"running","pending","canResume"}) do
@@ -1068,6 +1100,10 @@ local function miniView()
     end
     if not (v.state and v.spent and v.limit and v.reserved) or v.running==nil or v.pending==nil
         or v.canResume==nil then v.kind="malformed" end
+    if (s.historyKnown~=nil and type(s.historyKnown)~="boolean")
+        or (s.uncertain~=nil and v.uncertain==nil) or (s.unconfirmedResults~=nil and v.unconfirmedResults==nil)
+        or (s.recoveryKind~=nil and s.recoveryKind~="manual" and s.recoveryKind~="automatic")
+        or (s.recoveryPhase~=nil and not recoveryPhases[s.recoveryPhase]) then v.kind="malformed" end
     return v
 end
 -- Pause while running; Resume only for a paused run the runtime offers to
@@ -1083,6 +1119,7 @@ local function miniStateText(v)
     if v.kind=="loading" then return "Run status loading..." end
     if v.kind~="run" then return "Run status unavailable" end
     local label=phases[v.state] or ("Unknown state: "..v.state)
+    if recoveryPhases[v.recoveryPhase] then return phaseText(v) end
     if v.running then return "Running - "..label end
     -- Paused, and Resume is not offered: an earlier submitted action (restored
     -- after a reload, already chosen, or for a changed assignment) must settle.
@@ -1109,10 +1146,30 @@ end
 local function miniPending(v)
     if v.kind=="none" then return "Pending: none" end
     if v.reserved==nil or v.pending==nil then return "Pending: unavailable" end
+    if v.uncertain==nil or v.unconfirmedResults==nil or v.historyKnown~=true
+        or v.uncertain>0 or v.unconfirmedResults>0 then
+        return (v.pending and "Pending: not settled; " or "").."Unknown spend: "..(v.uncertain~=nil and miniNumber(v.uncertain) or "unavailable").."; current exposure: "..miniNumber(v.reserved)
+            ..(v.historyKnown~=true and (v.historyKnown==false and "; earlier outcome/check totals unavailable after reload" or "; earlier outcome/check totals unavailable")
+                or "; unconfirmed outcomes: "..(v.unconfirmedResults~=nil and miniNumber(v.unconfirmedResults) or "unavailable"))
+            ..(v.pending and "; action pending" or "")
+    end
     if v.reserved>0 then
         return "Pending: "..miniNumber(v.reserved)..(v.reserved==1 and " Orb" or " Orbs").." requested, not confirmed yet"
     end
     return v.pending and "Pending: the last Orb action is not settled" or "Pending: none"
+end
+local function miniPendingLine(v)
+    local shown,full=miniText(miniPending(v))
+    if v.kind=="run" and v.reserved~=nil and v.pending~=nil
+        and (v.uncertain==nil or v.unconfirmedResults==nil or v.historyKnown~=true
+            or v.uncertain>0 or v.unconfirmedResults>0) then
+        -- Keep all three distinct counts visible inside the existing line;
+        -- its hover retains the complete pending/history explanation.
+        shown=miniText("Unknown spend: "..(v.uncertain~=nil and miniNumber(v.uncertain) or "?")
+            .."; Reserved: "..miniNumber(v.reserved).."; Outcomes: "
+            ..(v.historyKnown==true and v.unconfirmedResults~=nil and miniNumber(v.unconfirmedResults) or "?"))
+    end
+    return shown,full
 end
 -- Copies, not families: CompactStatus.remaining is the run's rolled target
 -- copies still missing at its latest check. Absent is unavailable, never 0.
@@ -1120,7 +1177,7 @@ local function miniMissing(v)
     return "Rolled target copies missing: "..(v.remaining and miniNumber(v.remaining) or "unavailable")
 end
 local function miniKey(v)
-    return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume)},"|")
+    return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume),tostring(v.recoveryPhase),tostring(v.recoveryKind)},"|")
 end
 -- A new UI size moves the panel back inside the UI. The panel is smaller
 -- than any UI this client supports (FitToScreen treats less than 640x480 as
@@ -1148,7 +1205,7 @@ local function miniRender()
     setFull(mini.state,miniText(miniStateText(v)))
     setFull(mini.reason,miniReason(v))
     setFull(mini.usage,miniText(miniUsage(v)))
-    setFull(mini.pending,miniText(miniPending(v)))
+    setFull(mini.pending,miniPendingLine(v))
     setFull(mini.missing,miniText(miniMissing(v)))
     -- An outcome belongs to the state it was shown for; a later change of that
     -- state retires it, so it never describes a newer state.

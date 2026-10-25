@@ -63,6 +63,7 @@ M.REASONS = REASONS
 -- the raw state and the runtime's own reason string.
 local RUN_STATES = {
     IDLE = "Not started", READY = "Preparing next replacement",
+    WAIT_WORLD = "Waiting for the game after loading",
     WAIT_OFFER = "Waiting for the Orb offer",
     WAIT_RESULT = "Waiting for result confirmation",
     PAUSED = "Paused", STOPPED = "Stopped",
@@ -357,7 +358,9 @@ function M.Header(view)
         wishlist = display(view.wishlist or "none", WISHLIST_BYTES),
         wishlistFull = display(view.wishlist or "none"),
         status = RUN_STATES[view.state] or tostring(view.state or "unknown"),
-        usage = "Orbs used: " .. spent .. " / " .. limit,
+        usage = "Orbs used: " .. spent .. " / " .. limit
+            .. ((tonumber(view.uncertain) or 0)>0 and ("; unknown spend exposure: "..view.uncertain) or "")
+            .. ((tonumber(view.unconfirmedResults) or 0)>0 and ("; unconfirmed outcomes: "..view.unconfirmedResults) or ""),
         increased = view.increased == true,
         pending = reserved > 0 and
             (reserved .. " unresolved operation" .. (reserved == 1 and "" or "s")
@@ -406,8 +409,10 @@ function M.Report(view, resolve, technical)
     line(out, "Assigned Wishlist at start: " .. tostring(view.wishlist or "none"))
     line(out, "Approved maximum: " .. tostring(view.limit)
         .. (header.increased and " (increased during the run)" or "")
-        .. "; confirmed usage: " .. tostring(view.spent or 0)
-        .. "; unresolved exposure: " .. tostring(view.reserved or 0))
+        .. "; observed Orb decrement: " .. tostring(view.spent or 0)
+        .. "; unresolved exposure: " .. tostring(view.reserved or 0)
+        .. "; unknown spend exposure: " .. tostring(view.uncertain or 0)
+        .. "; unconfirmed outcomes: " .. tostring(view.unconfirmedResults or 0))
     line(out, "Stopping state: " .. header.status
         .. (view.reason and ("; " .. tostring(view.reason)) or ""))
     line(out, "Operations recorded: " .. tostring(view.total or 0))
