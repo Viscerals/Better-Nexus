@@ -176,12 +176,20 @@ check(not lateIntent.Install() and controller.CanonicalEchoes()[1].spellId==ids[
 check(uploads==0,'controller preparation/refusal/install sends no upload')
 
 -- Synthetic StaticPopup boundary, original to this fixture; the shared
--- harness stays untouched. It models one supplied scalar only: after the
--- accept button, a true OnAccept return keeps that dialog shown and nil or
--- false lets the click hide it. Each dialog is tracked by its own `which`,
--- so hiding one confirmation never hides another. Cancel is modelled as
--- OnCancel then hide, and OnShow is not run. Native StaticPopup frames,
--- reuse, timing and the installed client version are not modelled (NOT_RUN).
+-- harness stays untouched. It models one supplied scalar of the accept
+-- button: a true OnAccept return keeps that dialog shown and nil or false
+-- lets the click hide it. Each dialog is tracked by its own `which`, so
+-- hiding one confirmation never hides another. It also models the optional
+-- data of StaticPopup_Hide(which,data): a hide applies only when data is nil
+-- or is the shown record's own data, and each hide is counted. A Show for
+-- the same `which` replaces its synthetic record without a hide. Native
+-- pooled-frame reuse and override timing are not modelled, so such a Show
+-- is no evidence that a former popup was explicitly retired. That needs a
+-- hide observed before any later Show (the record gone, or its hide count).
+-- Cancel is modelled as OnCancel then hide, and OnShow is not run. Native
+-- StaticPopup frames, data filtering, return handling, pooling, reuse,
+-- timing and the installed client version are NOT_RUN; no exact versioned
+-- client or FrameXML export was consulted.
 local REPLACE,CREATE='NEXUS_FLEXIBLE_PLAN_REPLACE','WISHLISTREALIZER_CREATE_WISHLIST'
 local Popup={shown={},hidden={}}
 function StaticPopup_Show(which,a,b,data)
@@ -335,6 +343,234 @@ local function Rendered()
     local rows={};for _,r in pairs(gathered) do rows[#rows+1]=r end
     table.sort(rows,function(a,b)return a.spellId<b.spellId end);return rows
 end
+
+-- PENDING SAVE: a replacement over an editor whose confirmed Save waits for
+-- the service spacing. Real TOC-loaded callbacks only: a real GameAdapter
+-- upload of a synthetic spacer starts the spacing; the visible Create
+-- unassigned and its own Save confirmation Accept leave the editor
+-- controller's real retry waiting; the chooser's real Add, Set and Open and
+-- the replacement popup's own Cancel and Accept then act on it. The consent
+-- must say that accepting cancels that pending Save. Only those disclosure
+-- EXPECTs collect failures; every setup, Cancel and Accept control is a hard
+-- check, so an unchanged consent reports through completion. Under the
+-- spacing, an upload attempt is refused before the host call. One small
+-- counter at the public GameAdapter.UploadWishlist boundary forwards each
+-- call to its unmodified implementation, so it shows that the replacement
+-- and the late callbacks attempt no upload. New and Reset restore the
+-- editor and planning session. The public harness clock (H.Advance) then
+-- ends the spacer's real window and the public function is restored. Both
+-- happen before the original paths take their baselines, so their no-upload
+-- checks run where an upload would reach the host.
+do
+    local failures={}
+    local realUpload,uploadCalls,uploadWhy=Nexus.GameAdapter.UploadWishlist,0,nil
+    Nexus.GameAdapter.UploadWishlist=function(...)
+        uploadCalls=uploadCalls+1
+        local ok,why=realUpload(...)
+        uploadWhy=why
+        return ok,why
+    end
+    local function expect(value,label)
+        print('PENDING SAVE '..(value and 'PASS ' or 'FAIL ')..label)
+        if not value then failures[#failures+1]=label end
+        checks=checks+1
+    end
+    -- The editor's own controller, read through an upvalue of its public Show.
+    local owner
+    for i=1,64 do
+        local name,value=debug.getupvalue(editor.Show,i)
+        if name==nil then break end
+        if name=='wishlistController' then owner=value;break end
+    end
+    check(type(owner)=='table' and type(owner.PendingApply)=='function' and type(owner.PendingRows)=='function',
+        'PENDING SAVE setup the real editor controller through editor.Show')
+    local A,B,C,SAVE_NAME=410002,410003,410005,'Pending save draft'
+    local SAVED={{spellId=A,quality=2,stacks=2},{spellId=B,quality=3,stacks=1}}
+    local CHOSEN={{spellId=A,quality=2,stacks=1},{spellId=C,quality=1,stacks=4}}
+    -- The literal spellId, quality and count of each row, in ID order.
+    local function Literal(echoes)
+        local out={}
+        for i,e in ipairs(type(echoes)=='table' and echoes or {}) do
+            out[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks}
+        end
+        table.sort(out,function(a,b) return a.spellId<b.spellId end)
+        return out
+    end
+    -- A pool row: its committed count first in its label, its count text and Set label.
+    local function Shows(id,committed,text,action)
+        local row=PoolRow(id)
+        return row.label:GetText():find('Set: '..committed..'  #'..id,1,true)==1
+            and row.count:GetText()==text and row.action:GetText()==action
+    end
+    local function Budget(members,copies)
+        local text=ChooserText()
+        return text:find(members..' / 256 alternatives',1,true)~=nil
+            and text:find('Chosen: '..copies..' / 79',1,true)~=nil
+    end
+    local saveButton
+    -- Everything Cancel must keep: editor rows, debug state and maps, name,
+    -- destination, the waiting Save's payload, held, saved data, traffic, actions.
+    local function snapshot()
+        local rows=Rendered()
+        local retry=owner.PendingApply()
+        return {rows=rows,state=H.Clone(editor.DebugDraftState()),name=NexusWishlistNameInput:GetText(),
+            pending=H.Clone(owner.PendingRows()),locked=H.Clone(owner.PendingLockRows()),
+            fulfilled=H.Clone(owner.FulfilledDraftTargets()),editing=owner.EditingContext(),
+            target=owner.CreateTargetContext(),destination=owner.SaveDestinationDescriptor(),
+            label=saveButton and saveButton:GetText(),applyPending=editor.IsApplyPending(),
+            retry=retry and {slot=retry.slot,name=retry.name,rows=Literal(retry.echoes)},
+            save=tostring(Popup.shown[CREATE]),db=H.Clone(NexusDB),held=H.Clone(H.locked),
+            actions=#H.actions,sends=#H.sent,
+            -- and the attempts at the public upload boundary, refused or not
+            uploads=uploadCalls}
+    end
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+    check(owner.PendingApply()==nil and not editor.IsApplyPending() and editor.DebugPendingCount()==0
+        and Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and Budget(0,0) and uploadCalls==0,
+        'PENDING SAVE setup an empty editor and planning session with no Save waiting and no upload attempt')
+    local spaced=Nexus.GameAdapter.UploadWishlist(0,'Pending save spacer',{{spellId=410004,quality=0,stacks=1}})
+    local spacedActions,spacedSends=#H.actions,#H.sent
+    -- The adapter stamps its spacing clock with this time on the spacer's
+    -- accepted upload. It refuses another upload until GetTime() is 3 s past it.
+    local spacerAt=GetTime()
+    check(spaced and uploadCalls==1 and (H.actions[spacedActions] or {})[1]=='upload',
+        'PENDING SAVE setup a real GameAdapter upload of a synthetic spacer, forwarded by the counter to the host, starts the service spacing')
+    check(Add(A) and Add(B) and Count(A,2) and Count(B,1) and Budget(2,3),
+        'PENDING SAVE setup explicit choice 410002x2 410003x1 through real Add and Set')
+    NexusFlexiblePlanOpen:Click()
+    if Popup.shown[REPLACE] then Popup.Click(Popup.shown[REPLACE],1) end
+    check(equal(Rendered(),SAVED) and not NexusFlexiblePlanChooser:IsShown() and NexusWishlistNameInput:GetText()=='',
+        'PENDING SAVE setup real exact editor draft 410002x2 410003x1')
+    NexusWishlistNameInput:SetText(SAVE_NAME)
+    for _,f in ipairs(H.frames) do
+        if f.kind=='Button' and f:GetParent()==NexusEditorFrame and f:IsVisible()
+            and f:GetText()=='Create unassigned' then saveButton=f;break end
+    end
+    check(saveButton~=nil,'PENDING SAVE setup visible Create unassigned control')
+    saveButton:Click()
+    local savePopup=Popup.shown[CREATE]
+    check(savePopup~=nil and type(savePopup.data)=='table' and savePopup.data.slot==0
+        and savePopup.data.name==SAVE_NAME and equal(Literal(savePopup.data.echoes),SAVED)
+        and Popup.shown[REPLACE]==nil,'PENDING SAVE setup the real Save confirmation names the exact draft')
+    Popup.Click(savePopup,1)
+    local retry=owner.PendingApply()
+    check(Popup.shown[CREATE]==nil and retry~=nil and editor.IsApplyPending()==true,
+        'PENDING SAVE the accepted Save confirmation waits as a real retry during the spacing')
+    check(retry.slot==0 and retry.name==SAVE_NAME and equal(Literal(retry.echoes),SAVED)
+        and retry.echoes==savePopup.data.echoes,
+        'PENDING SAVE the retry holds the accepted payload itself: slot 0, its name and literal 410002x2 410003x1')
+    check(#H.actions==spacedActions and #H.sent==spacedSends and uploadCalls==2 and uploadWhy=='spacing',
+        'PENDING SAVE the confirmed Save makes exactly one real upload attempt, refused by the spacing; no further upload, action or send happens during the spacing')
+    local retryEchoes,savedMap=retry.echoes,owner.PendingRows()
+    NexusFlexiblePlanEntry:Click()
+    check(NexusFlexiblePlanChooser:IsShown() and Shows(A,2,'2','Set') and Shows(B,1,'1','Set') and Budget(2,3),
+        'PENDING SAVE setup the reopened chooser keeps the saved choice')
+    check(Count(A,1) and Count(B,0) and Add(C) and Count(C,4),
+        'PENDING SAVE setup a different explicit choice through real Set and Add')
+    check(Shows(A,1,'1','Set') and Shows(B,0,'0','Set') and Shows(C,4,'4','Set') and Budget(3,5)
+        and Status()=='','PENDING SAVE setup committed 410002x1 410005x4, 410003 unchosen, no pending input')
+    NexusFlexiblePlanOpen:Click()
+    local request=Popup.shown[REPLACE]
+    check(request~=nil and type(request.data)=='table' and Popup.shown[CREATE]==nil
+        and (owner.PendingApply() or {}).echoes==retryEchoes,
+        'PENDING SAVE setup the real replacement consent while the confirmed Save waits')
+    local consent=StaticPopupDialogs[REPLACE].text
+    consent=type(consent)=='string' and consent:lower() or ''
+    check(consent:find('replaces the current editor draft and its destination context',1,true)~=nil,
+        'PENDING SAVE CONTROL consent names the editor draft and destination context it replaces')
+    expect(consent:find('cancels any pending save',1,true)~=nil,
+        'consent says accepting cancels any pending Save')
+    expect(consent:find('confirmed save waiting to retry is not sent',1,true)~=nil,
+        'consent says a confirmed Save waiting to retry is not sent')
+    expect(consent:find('the new draft is saved only when you save it',1,true)~=nil
+        and consent:find('nothing is saved until',1,true)==nil,
+        'consent keeps Save of the new draft a separate later action, not a claim that nothing is saved')
+    expect(consent:find('cancel keeps the current draft and any pending save',1,true)~=nil,
+        'consent says Cancel keeps the current draft and any pending Save')
+    local before=snapshot()
+    Popup.Click(request,2)
+    check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and NexusFlexiblePlanChooser:IsShown()
+        and equal(snapshot(),before),
+        'PENDING SAVE Cancel keeps editor rows, debug maps, name, destination, the waiting Save, held, data, traffic and actions')
+    check((owner.PendingApply() or {}).echoes==retryEchoes and owner.PendingRows()==savedMap
+        and editor.IsApplyPending() and equal(Rendered(),SAVED),
+        'PENDING SAVE Cancel keeps the same retry payload and the same pending map')
+    check(Shows(A,1,'1','Set') and Shows(B,0,'0','Set') and Shows(C,4,'4','Set') and Budget(3,5)
+        and Status()=='','PENDING SAVE Cancel keeps every committed chooser count and no pending input')
+    StaticPopupDialogs[REPLACE].OnAccept(request.frame,request.data)
+    check(Popup.shown[REPLACE]==nil and equal(snapshot(),before)
+        and (owner.PendingApply() or {}).echoes==retryEchoes and owner.PendingRows()==savedMap,
+        'PENDING SAVE a late Accept of the canceled consent installs nothing and keeps the waiting Save')
+    NexusFlexiblePlanOpen:Click()
+    local fresh=Popup.shown[REPLACE]
+    check(fresh~=nil and fresh~=request and (owner.PendingApply() or {}).echoes==retryEchoes,
+        'PENDING SAVE setup a fresh current consent while the confirmed Save still waits')
+    local effects={db=H.Clone(NexusDB),held=H.Clone(H.locked),actions=#H.actions,sends=#H.sent}
+    Popup.Click(fresh,1)
+    local installed=editor.DebugDraftState()
+    check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and not NexusFlexiblePlanChooser:IsShown()
+        and owner.PendingApply()==nil and not editor.IsApplyPending(),
+        'PENDING SAVE the accepted replacement cancels the real waiting Save retry')
+    check(equal(Rendered(),CHOSEN) and equal(Literal(owner.CanonicalEchoes()),CHOSEN) and owner.PendingRows()~=savedMap
+        and next(owner.PendingLockRows())==nil and next(owner.FulfilledDraftTargets())==nil
+        and installed.pending==2 and installed.pendingLock==0 and installed.fulfilled==0,
+        'PENDING SAVE it installs exactly 410002x1 410005x4 with empty locked and fulfilled maps')
+    check(owner.EditingContext()==nil and owner.CreateTargetContext()==nil and owner.CandidateContext()==nil
+        and owner.SaveResult('')==nil and owner.SentDraft()==nil and NexusWishlistNameInput:GetText()=='',
+        'PENDING SAVE safety invariant: the new draft is unnamed and holds no editing, target or candidate context, Save result or sent draft (those were nil before this Accept too; not retirement proof)')
+    -- Those contexts, the Save result and the sent draft were nil before this
+    -- Accept as well: a spacing wait records no result and sends no Create.
+    -- The invariant above is therefore a safety check, not proof that the
+    -- Save was retired. That proof comes from three places: the real retry's
+    -- nonnil-to-nil transition above, the stale Save callback and pump below,
+    -- and the upload-attempt count, which stays at the spacer's and the
+    -- confirmed Save's two attempts.
+    check(equal({db=H.Clone(NexusDB),held=H.Clone(H.locked),actions=#H.actions,sends=#H.sent},effects)
+        and uploadCalls==2,
+        'PENDING SAVE the replacement uploads, saves, assigns, shares and spends nothing; its preparations, Cancel and Accepts attempt no further upload')
+    local after=snapshot()
+    StaticPopupDialogs[CREATE].OnAccept(savePopup.frame,savePopup.data)
+    editor._PumpApplyRetry()
+    check(equal(snapshot(),after) and owner.PendingApply()==nil and not editor.IsApplyPending()
+        and equal(Rendered(),CHOSEN) and NexusWishlistNameInput:GetText()=='',
+        'PENDING SAVE the old confirmed Save callback cannot revive its retry, send anything or overwrite the installed draft')
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+    NexusFlexiblePlanSearch:SetText('')
+    check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and NexusFlexiblePlanChooser:IsShown()
+        and editor.DebugPendingCount()==0 and NexusWishlistNameInput:GetText()=='' and owner.PendingApply()==nil
+        and not editor.IsApplyPending() and Status()=='' and Budget(0,0),
+        'PENDING SAVE checks leave an empty editor, no popup or waiting Save and an empty planning session')
+    -- The spacer's real spacing window is still open here, after the retry
+    -- retired and New and Reset cleaned up. A probe with an invalid exact
+    -- target, sent to the unmodified implementation, is refused at that guard
+    -- before validation and never reaches the host.
+    local probe={{spellId=0,quality=0,stacks=1}}
+    local openOk,openWhy=realUpload(0,'Pending save probe',probe)
+    check(openOk==false and openWhy=='spacing' and GetTime()-spacerAt<3 and uploadCalls==2,
+        'PENDING SAVE after retirement and cleanup the real spacer window is still open; the old Save callback, pump and cleanup attempted no upload')
+    local advanceFrom=#H.actions
+    -- End that window through the public harness clock, using the adapter's
+    -- exact 3 s guard. Quarter-second steps are exact binary fractions, so the
+    -- clock ends exactly 3 s after the spacer. The default .05 steps round
+    -- short here and would stop just under 3 s, which the strict guard still
+    -- refuses. Without this H.Advance line the window stays open, and the
+    -- expired check below fails.
+    H.Advance(3,0.25)
+    local advanced,revived=#H.actions,false
+    for i=advanceFrom+1,advanced do
+        if H.actions[i][1]=='upload' then revived=true end
+    end
+    check(uploadCalls==2 and not revived and owner.PendingApply()==nil and not editor.IsApplyPending(),
+        'PENDING SAVE advancing revives no retry and makes no upload attempt or host upload')
+    Nexus.GameAdapter.UploadWishlist=realUpload
+    local expiredOk,expiredWhy=Nexus.GameAdapter.UploadWishlist(0,'Pending save probe',probe)
+    check(GetTime()-spacerAt>=3 and expiredOk==false and expiredWhy=='invalid exact Echo target'
+        and #H.actions==advanced,
+        'PENDING SAVE the real spacer window has expired: 3 s after the spacer the restored public upload passes its spacing guard and refuses the invalid probe before any host call')
+    print('PENDING SAVE completed real paths; failures='..#failures)
+    assert(#failures==0,'EXPECT replacement consent discloses the canceled pending Save: '..table.concat(failures,'; '))
+end
+
 local actionBaseline,sentBaseline=#H.actions,#H.sent
 local storeBaseline=H.Clone(NexusDB)
 -- C1a: real count input, Set, Open and original popup acceptance. Only new
@@ -858,13 +1094,21 @@ end
 
 -- C2: a current replacement request accepted while the chooser is hidden.
 -- Its refusal must show the chooser and state the exact reason: the editor
--- name changed after consent (EDITOR_CHANGED), or a count was typed after
--- consent without Set (COUNT_PENDING). The later editor, its unaccepted Save
--- confirmation, the committed counts and the pending input are all kept.
--- Only the new visibility EXPECTs collect failures, so every setup, no-loss
--- and positive control completes first; a refusal left hidden is reopened
--- through the real entry so those controls still run. The editor, popups and
--- planning session are restored before the original paths continue.
+-- name changed after consent (EDITOR_CHANGED), a count was typed after
+-- consent without Set (COUNT_PENDING), or a chosen Echo's synthetic catalog
+-- fact drifted, so the controller install itself refuses (CATALOG_CHANGED).
+-- The later editor, its unaccepted Save confirmation, the committed counts
+-- and the pending input are all kept. Each request is owned and single use:
+-- the refused request, replayed after its captured name is restored,
+-- installs nothing; an older request superseded by a later direct install
+-- is gone, and its late Accept or Cancel neither installs nor dismisses the
+-- later Save confirmation or a newer replacement, which installs once.
+-- Only the new visibility and single-use EXPECTs collect failures, so every
+-- setup, no-loss and positive control completes first: a refusal left
+-- hidden is reopened through the real entry, and a wrong replayed install
+-- is followed by supported real setup, so those controls still run. The
+-- editor, popups, synthetic catalog and planning session are restored
+-- before the original paths continue.
 do
     local failures={}
     local function expect(value,label)
@@ -940,7 +1184,35 @@ do
         'C2 EDITOR_CHANGED refusal keeps later editor rows, debug maps, name, destination, Save identity/data, held, db, traffic and actions')
     check(Shows(A,1,'1','Set') and Shows(B,1,'1','Set') and Shows(C,3,'3','Set') and Budget(3,5),
         'C2 EDITOR_CHANGED refusal keeps every committed count')
-    -- 2: a count is typed after consent without Set while the chooser is hidden.
+    -- Owned single use: restore the captured name explicitly, snapshot, then
+    -- replay the refused request's own original OnAccept. The refused attempt
+    -- retired it, so the replay installs, shows, dismisses and writes nothing.
+    NexusWishlistNameInput:SetText('C2 named exact draft')
+    check(NexusWishlistNameInput:GetText()=='C2 named exact draft' and Popup.shown[REPLACE]==nil
+        and Popup.shown[CREATE]==savePopup and equal(savePopup.data,saveData),
+        'C2 setup former captured name restored beside the unaccepted Save confirmation')
+    before=snapshot()
+    StaticPopupDialogs[REPLACE].OnAccept(request.frame,request.data)
+    local replayClean=equal(snapshot(),before)
+    expect(replayClean and Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==savePopup
+        and equal(savePopup.data,saveData) and NexusWishlistNameInput:GetText()=='C2 named exact draft'
+        and equal(Rendered(),{{spellId=410002,quality=2,stacks=2},{spellId=410003,quality=3,stacks=1}}),
+        'restored-name replay of the refused request installs nothing: exact rows 410002x2 410003x1, debug maps, name, destination, Save identity/data, held, db, traffic and actions are kept')
+    if not replayClean then
+        -- A known wrong install by that replay (earlier a65): the later cases
+        -- go on through supported real setup, a fresh Save confirmation from
+        -- the visible Create unassigned and the real entry, not a stub.
+        NexusWishlistNameInput:SetText('C2 later typed name');saveButton:Click()
+        savePopup=Popup.shown[CREATE];saveData=H.Clone(savePopup and savePopup.data)
+        NexusFlexiblePlanEntry:Click()
+        check(savePopup~=nil and savePopup.data~=nil,'C2 setup supported Save confirmation after a wrong replayed install')
+    end
+    -- The later typed name again, as before the replay.
+    NexusWishlistNameInput:SetText('C2 later typed name')
+    check(NexusFlexiblePlanChooser:IsShown() and Shows(A,1,'1','Set') and Shows(B,1,'1','Set')
+        and Shows(C,3,'3','Set') and Budget(3,5),'C2 replayed request leaves every committed count and no pending input')
+    -- 2: after a fresh consent a count is typed without Set while the chooser
+    -- is still shown; the chooser is then hidden before Accept.
     NexusFlexiblePlanOpen:Click();request=Popup.shown[REPLACE]
     check(request~=nil,'C2 setup fresh current replacement request for the later name')
     PoolRow(B).count:SetText('4')
@@ -959,25 +1231,123 @@ do
         'C2 COUNT_PENDING refusal keeps the complete editor, Save confirmation and effects')
     check(Shows(A,1,'1','Set') and Shows(B,1,'4','Set *') and Shows(C,3,'3','Set') and Budget(3,5),
         'C2 COUNT_PENDING refusal keeps committed counts and the typed 4 pending, uncommitted')
-    -- A valid fresh current consent, accepted while hidden, still installs.
     check(Count(B,4) and Shows(B,4,'4','Set') and Budget(3,8) and Status()=='',
         'C2 setup explicit Set commits the typed 4')
+    -- 3: hidden catalog drift reaches the controller install itself. Nothing
+    -- is pending and the captured name is unchanged, so the count and name
+    -- guards pass and intent.Install refuses; that refusal must show too.
+    -- The synthetic catalog fact is restored at once after the Accept.
+    local driftRows=assert(Nexus.GameAdapter.Catalog(),'C2 setup live synthetic catalog').rows
+    local driftQuality=driftRows[A].quality
+    check(driftQuality==2,'C2 setup synthetic catalog fact 410002 quality 2')
+    NexusFlexiblePlanOpen:Click();request=Popup.shown[REPLACE]
+    check(request~=nil and Popup.shown[CREATE]==savePopup and equal(savePopup.data,saveData),
+        'C2 setup current request for 410002x1 410003x4 410005x3 beside the unaccepted Save confirmation')
+    NexusFlexiblePlanHide:Click()
+    check(not NexusFlexiblePlanChooser:IsShown() and Popup.shown[REPLACE]==request and Status()==''
+        and NexusWishlistNameInput:GetText()=='C2 later typed name',
+        'C2 setup chooser hidden; the current request keeps its captured name and no input is pending')
+    before=snapshot()
+    driftRows[A].quality=3
+    Popup.Click(request,1)
+    visible,said=NexusFlexiblePlanChooser:IsVisible(),Status()
+    driftRows[A].quality=driftQuality
+    expect(visible,'hidden current request refused by intent.Install for catalog drift shows the chooser')
+    expect(said==Reason('CATALOG_CHANGED') and said:find('catalog details changed',1,true)~=nil,
+        'shown chooser status is exactly the CATALOG_CHANGED reason')
+    if not visible then NexusFlexiblePlanEntry:Click() end
+    check(Popup.shown[REPLACE]==nil and equal(snapshot(),before),
+        'C2 CATALOG_CHANGED refusal keeps later editor rows, debug maps, name, destination, Save identity/data, held, db, traffic and actions')
+    check(Nexus.GameAdapter.Catalog().rows[A].quality==2 and Shows(A,1,'1','Set') and Shows(B,4,'4','Set')
+        and Shows(C,3,'3','Set') and Budget(3,8),
+        'C2 CATALOG_CHANGED refusal keeps every committed count with no pending input; the synthetic fact is restored')
+    -- A valid fresh current consent, accepted while hidden, still installs.
     NexusFlexiblePlanOpen:Click();request=Popup.shown[REPLACE]
     check(request~=nil,'C2 setup fresh current consent for the committed choice')
     NexusFlexiblePlanHide:Click()
+    local replaceHidden,saveHidden=Hidden(REPLACE),Hidden(CREATE)
+    check(Popup.shown[REPLACE]==request and Popup.shown[CREATE]==savePopup and equal(savePopup.data,saveData),
+        'C2 setup the fresh consent and the unaccepted Save confirmation are both shown before Accept')
     Popup.Click(request,1)
     check(Popup.shown[REPLACE]==nil and not NexusFlexiblePlanChooser:IsShown()
         and equal(Rendered(),{{spellId=410002,quality=2,stacks=1},{spellId=410003,quality=3,stacks=4},
             {spellId=410005,quality=1,stacks=3}})
         and NexusWishlistNameInput:GetText()=='' and #H.actions==actions0 and #H.sent==sends0,
         'C2 CONTROL fresh current consent installs literal 410002x1 410003x4 410005x3 without actions')
+    check(Popup.shown[REPLACE]==nil and Hidden(REPLACE)==replaceHidden+1
+        and Popup.shown[CREATE]==nil and Hidden(CREATE)==saveHidden+1,
+        'C2 CONTROL before any cleanup Hide, the install retired the prior Save confirmation once and the accepted replacement was hidden once')
+    NexusWishlistNameInput:SetText('C2 after fresh consent')
+    before=snapshot()
+    StaticPopupDialogs[REPLACE].OnAccept(request.frame,request.data)
+    check(equal(snapshot(),before) and Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil
+        and NexusWishlistNameInput:GetText()=='C2 after fresh consent',
+        'C2 CONTROL the accepted replacement request is retired: its replayed OnAccept installs, shows and dismisses nothing')
+    -- 4: owned prompts across a supported New. A healthy Cancel dismisses
+    -- only its own prompt. Another older prompt is then superseded: New
+    -- resets the editor and a later clean current choice installs directly,
+    -- so the older prompt is gone (early retirement by New also satisfies
+    -- this). The later draft gets a real unaccepted Save confirmation and a
+    -- newer replacement; a late older Accept or Cancel installs nothing and
+    -- dismisses neither, and the newer consent still installs exactly once.
+    NexusWishlistNameInput:SetText('C2 owned older context');NexusFlexiblePlanEntry:Click()
+    NexusFlexiblePlanOpen:Click()
+    local canceled=Popup.shown[REPLACE]
+    check(canceled~=nil and NexusFlexiblePlanChooser:IsShown(),'C2 setup current prompt for the healthy Cancel control')
+    before=snapshot()
+    Popup.Click(canceled,2)
+    check(Popup.shown[REPLACE]==nil and equal(snapshot(),before) and NexusFlexiblePlanChooser:IsShown(),
+        'C2 CONTROL Cancel dismisses only its own prompt and keeps the complete editor and effects')
+    NexusFlexiblePlanOpen:Click()
+    local older=Popup.shown[REPLACE]
+    check(older~=nil and older~=canceled,'C2 setup another real older prompt for 410002x1 410003x4 410005x3')
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click()
+    check(editor.DebugPendingCount()==0 and NexusWishlistNameInput:GetText()=='' and NexusFlexiblePlanChooser:IsShown(),
+        'C2 setup supported New leaves an empty unnamed editor beneath the chooser')
+    check(Count(A,3) and Count(C,0) and Shows(A,3,'3','Set') and Shows(B,4,'4','Set') and Shows(C,0,'0','Set')
+        and Budget(3,7) and Status()=='','C2 setup later clean current choice 410002x3 410003x4 through Set')
+    NexusFlexiblePlanOpen:Click()
+    expect(Popup.shown[REPLACE]==nil,'a later clean current choice installed directly leaves the older prompt gone')
+    check(equal(Rendered(),{{spellId=410002,quality=2,stacks=3},{spellId=410003,quality=3,stacks=4}})
+        and not NexusFlexiblePlanChooser:IsShown() and NexusWishlistNameInput:GetText()=='',
+        'C2 setup later clean current choice installs literal 410002x3 410003x4 directly')
+    NexusWishlistNameInput:SetText('C2 owned later draft');saveButton:Click()
+    local laterSave=Popup.shown[CREATE]
+    local laterSaveData=H.Clone(laterSave and laterSave.data)
+    check(laterSave~=nil and laterSave.data~=nil and saveButton:IsVisible() and saveButton:GetText()=='Create unassigned',
+        'C2 setup the later draft has a real unaccepted Save confirmation from visible Create unassigned')
+    NexusFlexiblePlanEntry:Click()
+    check(Count(B,1) and Shows(A,3,'3','Set') and Shows(B,1,'1','Set') and Budget(3,4) and Status()=='',
+        'C2 setup newer explicit choice 410002x3 410003x1 through Set')
+    NexusFlexiblePlanOpen:Click()
+    local newer=Popup.shown[REPLACE]
+    check(newer~=nil and newer~=older and Popup.shown[CREATE]==laterSave and equal(laterSave.data,laterSaveData),
+        'C2 setup newer current replacement beside the later Save confirmation')
+    before=snapshot()
+    StaticPopupDialogs[REPLACE].OnAccept(older.frame,older.data)
+    StaticPopupDialogs[REPLACE].OnCancel(older.frame,older.data)
+    expect(equal(snapshot(),before) and Popup.shown[REPLACE]==newer and Popup.shown[CREATE]==laterSave
+        and equal(laterSave.data,laterSaveData) and NexusWishlistNameInput:GetText()=='C2 owned later draft'
+        and equal(Rendered(),{{spellId=410002,quality=2,stacks=3},{spellId=410003,quality=3,stacks=4}})
+        and Budget(3,4),
+        'late older Accept and Cancel keep the later draft 410002x3 410003x4, its Save confirmation and the newer replacement')
+    if Popup.shown[REPLACE]==newer then Popup.Click(newer,1) end
+    expect(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and not NexusFlexiblePlanChooser:IsShown()
+        and equal(Rendered(),{{spellId=410002,quality=2,stacks=3},{spellId=410003,quality=3,stacks=1}})
+        and NexusWishlistNameInput:GetText()=='' and #H.actions==actions0 and #H.sent==sends0,
+        'the newer current consent still installs literal 410002x3 410003x1 and retires the later Save confirmation')
+    NexusWishlistNameInput:SetText('C2 owned after newer')
+    before=snapshot()
+    StaticPopupDialogs[REPLACE].OnAccept(newer.frame,newer.data)
+    check(equal(snapshot(),before) and Popup.shown[REPLACE]==nil and NexusWishlistNameInput:GetText()=='C2 owned after newer',
+        'C2 CONTROL replaying the used newer consent installs nothing a second time')
     StaticPopup_Hide(REPLACE);StaticPopup_Hide(CREATE)
     editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
     check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and NexusFlexiblePlanChooser:IsShown()
         and editor.DebugPendingCount()==0 and NexusWishlistNameInput:GetText()=='' and Status()==''
         and Budget(0,0),'C2 checks leave an empty editor, no popup and an empty planning session')
     print('C2 completed real paths; failures='..#failures)
-    assert(#failures==0,'EXPECT C2 hidden current-popup refusal visibility: '..table.concat(failures,'; '))
+    assert(#failures==0,'EXPECT C2 hidden current-popup refusal visibility and owned single-use requests: '..table.concat(failures,'; '))
 end
 
 for i=1,100 do check(Add(ids[i]),'explicit catalog Add callback '..i) end
