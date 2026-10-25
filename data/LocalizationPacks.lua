@@ -35,8 +35,10 @@
 -- unassigned; a plan designs at most six target copies; the exact Echo and
 -- quality come first; ownership is not locked-slot placement; locked slots
 -- are not card Freeze. "Echo", "Nexus", the game terms Saved Build, Echo
--- Journal and Freeze, the game page label My Builds and the editor action
--- labels Create & assign and Create unassigned are kept in English. Every
+-- Journal and Freeze, the game page name My Builds and the editor action
+-- labels Create & assign and Create unassigned are kept in English where
+-- an explanatory text names them; the My Builds navigation button label
+-- itself (panel.button.my_builds) is translated. Every
 -- other Nexus text stays English. Data presence alone does not prove that a
 -- consumer shows these keys or that every window is covered.
 -- All wording is draft: the original three were drafted for issue #123, and

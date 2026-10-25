@@ -444,6 +444,10 @@ local function CreateToLockWidgets(f)
     f.toLockHit:SetScript("OnEnter", function(self)
         if #toLockNamesCache == 0 then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        local metrics, heading = Nexus.LayoutMetrics, self:GetParent().toLockLabel
+        if metrics and metrics.Shortened and heading and metrics.Shortened(heading) then
+            GameTooltip:AddLine(tostring(heading:GetText() or ""), 1, 1, 1, true)
+        end
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.locked_remaining"), 1, 1, 1)
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.locked_plan"), 0.9, 0.9, 0.9, true)
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.locked_acquire"), 0.9, 0.9, 0.9, true)
@@ -466,11 +470,15 @@ local function CreateToLockWidgets(f)
     end)
     f.toLockHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
     f.toLockHit:SetScript("OnMouseUp", function() if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end)
-    -- Issue #143: the heading keeps one line in its fixed layout box. While the
-    -- client shortens it, this row's own hover adds the complete heading
-    -- (LayoutMetrics.OneLineLabel); ApplyPanelLayout still owns its box.
+    -- Issue #143: the heading keeps one line in its fixed layout box
+    -- (LayoutMetrics.OneLineLabel, with no owner); ApplyPanelLayout still owns
+    -- its box. While the client shortens it, this row's own OnEnter above adds
+    -- the complete heading first, right after its single SetOwner, and its own
+    -- lines follow unchanged. The OneLineLabel owner hook is not attached: it
+    -- would run after that OnEnter and take the tooltip again with its own
+    -- SetOwner.
     if layout and type(layout.OneLineLabel) == "function" then
-        layout.OneLineLabel(f.toLockLabel, f.toLockHit, 11, "ANCHOR_RIGHT")
+        layout.OneLineLabel(f.toLockLabel, nil, 11)
     end
 end
 

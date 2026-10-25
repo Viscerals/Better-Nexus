@@ -767,13 +767,18 @@ end
 -- Issue #143 Panel consumer cohort: 21 static meanings at the 24 mapped
 -- Panel calls, through the real TOC, the real Localization copy, the real
 -- Panel widgets, their registered hovers and the existing navigation
--- callbacks. FIXTURE SUBSTITUTION, not shipped data: F.fileHooks, right after
--- each data file loads, adds the 21 reviewed English meanings and test-only
--- candidate or invalid pack entries, which the real Localization checks and
--- copies; the prior hooks are restored after each boot. It is no production
--- setter and no linguistic review. Adoption of the data owner's real 27-key
--- base and 126 drafts is a later integration check against that pin. The
--- charge GUARD uses the six real packs unchanged. Offline font models only:
+-- callbacks. The English pass boots the shipped data unsubstituted: the
+-- real 27-key English base (holding the 21 meanings) and the six real
+-- packs. FIXTURE SUBSTITUTION, not shipped data, in the candidate and
+-- fallback passes only: F.fileHooks, right after each data file loads,
+-- re-sets the 21 English texts to the same bytes and swaps the frFR entries
+-- of the 21 meanings (and its charge template) for test-only candidates, or
+-- the deDE ones for invalid or absent entries; the real Localization checks
+-- and copies them, and the prior hooks are restored after each boot. It is
+-- no production setter and no linguistic review. The real-pack GUARD boots
+-- each unchanged pack and checks its charge row and hover; it is not
+-- widget coverage of every real draft text. Technical offline checks with
+-- offline font models, not all of #143 or the UI: fluent and native review,
 -- native fit, tooltips and clicks are NOT TESTED.
 do
  local F=dofile('tests/prototype/format5_support.lua')
@@ -840,7 +845,11 @@ do
  local function Boot(language,mode)
   local db=F.Database({version=2});db.settings.uiLanguage=language
   local prior=F.fileHooks;F.fileHooks=mode and Hooks(mode) or nil
-  log={};G.model=nil -- a new harness measures with its own defaults until G.UseFont
+  -- A new harness measures with its own defaults until G.UseFont. Also drop
+  -- the synthetic NexusFontNormal an earlier G.UseFont left: it still answers
+  -- GetFont from the previous harness's font model, so without this reset the
+  -- default font model (runtime font scale 1) would not apply again.
+  log={};G.model=nil;NexusFontNormal=nil
   local ok,booted=pcall(F.Boot,db,function()
    local methods=G.RegionMethods();local set=methods.SetText
    -- MODEL, this block only (the harness has no template button text; see
@@ -879,6 +888,7 @@ do
   H=booted
   check(F.fileHooks==nil and Nexus.StartupStatus().coreReady==true and Nexus.Localization.ActiveLanguage()==(language or 'enUS'),'SETUP #143: real TOC boot ready with '..(language or 'enUS')..' active; prior fixture hooks restored')
   Nexus.Panel.Show()
+  check(Nexus.LayoutMetrics.RuntimeMetrics()==1,'SETUP #143: the fresh boot measures at runtime font scale 1 (the default font model; no synthetic font object kept from an earlier harness)')
  end
  local P={}
  local function Child(i)return NexusPanel.children[i]end
@@ -1003,7 +1013,21 @@ do
   check(switch:GetText()==T('panel.button.my_builds') and Region(P.progress):GetText()==T('panel.heading.progress')
    and Region(P.still):GetText()==T('panel.heading.still_needed') and Region(P.extra):GetText()==T('panel.heading.extra_copies')
    and lock:IsShown() and lock:GetText()==T('panel.heading.locked_targets'),tag..': My Builds, PROGRESS, STILL NEEDED, EXTRA COPIES and the lazily created LOCKED TARGETS')
-  if recovered then tips.lock[#tips.lock+1]={T('panel.heading.locked_targets'),1,1,1,true} end
+  -- #143: while LOCKED TARGETS is shortened, its row's own hover shows the
+  -- complete heading FIRST, then the 11 lines of Tips in their order.
+  if recovered then table.insert(tips.lock,1,{T('panel.heading.locked_targets'),1,1,1,true}) end
+  -- SUPPORTING PROBE, isolated from the plain-model check below (it reads
+  -- tips.lock and changes no expectation): the actual locked-target row
+  -- through the real Tooltip helper with its synthetic clearing SetOwner (no
+  -- native clearing is claimed). There a hover that takes the tooltip a
+  -- second time loses every line added before it, so this ownership and
+  -- safety-line check runs ahead of the retained ordering check.
+  do
+   local lines,owners,cycle=Tooltip(NexusPanel.toLockHit,true)
+   check(same(lines,tips.lock) and #owners==1 and owners[1][1]==NexusPanel.toLockHit
+    and owners[1][2]=='ANCHOR_RIGHT' and cycle,tag..': SUPPORTING PROBE: with a synthetic SetOwner that clears earlier lines, the actual locked-target row takes the tooltip once (ANCHOR_RIGHT), shows and hides it, and keeps all 11 locked-target lines'
+    ..(recovered and ', after the complete heading' or ', with no added heading'))
+  end
   check(same(Lines(NexusPanel.toLockHit),tips.lock),tag..': the locked-target hover keeps six copies, the exact Echo and quality, ownership versus placement, locked slots versus Freeze, the untranslated names and the editor link')
   check(same(Lines(Child(P.need)),tips.need),tag..': the Still needed hover keeps its lines, the untranslated names and the shared editor link')
   local switchLabel=switch:GetFontString()
@@ -1044,10 +1068,10 @@ do
   assert(ok,err)
   return calls
  end
- -- English: the substituted reviewed English base, the real packs.
- Boot(nil,'english')
+ -- English: the shipped reviewed English base and the real packs, no hooks.
+ Boot(nil,nil)
  for _,row in ipairs(KEYS)do
-  check(Nexus.Localization.Kind(row[1])=='text' and Nexus.Localization.Text(row[1])==row[2],'SETUP FIXTURE: the real Localization copied the substituted reviewed English '..row[1])
+  check(Nexus.Localization.Kind(row[1])=='text' and Nexus.Localization.Text(row[1])==row[2],'SETUP FIXTURE: the real Localization copied the real reviewed English '..row[1])
  end
  local misses=Nexus.Localization.Diagnostics().misses
  assert(Nexus.Panel.Render(Setup()))
@@ -1115,6 +1139,7 @@ do
  for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.small,G.MODELS.double})do
   for _,ui in ipairs({1,0.64})do
    G.UseFont(model);rawset(UIParent,'GetEffectiveScale',function()return ui end)
+   check(Nexus.LayoutMetrics.RuntimeMetrics()==model.size/12,'SETUP #143 fit, '..model.name..', UI scale '..ui..': the runtime font scale is the stated model size over 12 ('..model.size..'/12)')
    local tag='#143 fit, '..model.name..', UI scale '..ui
    assert(Nexus.Panel.Render(Setup()))
    local layout=NexusPanel._responsiveLayout
@@ -1142,8 +1167,25 @@ do
     local label=h[1]
     check(label:GetText()==CAND[h[3]] and label.wordWrap==false and label:GetWidth()==h[2].w and label:GetHeight()==layout.small
      and G.Inside(G.Rect(label,NexusPanel),panel) and Nexus.LayoutMetrics.Shortened(label),tag..': '..h[3]..' stays one line in its unchanged layout box, shortened there')
-    local lines=Lines(h[4])
-    check(same(lines[#lines],{CAND[h[3]],1,1,1,true}),tag..': the actual hover of '..h[3]..' recovers the complete text')
+    if h[4]==NexusPanel.toLockHit then
+     -- #143: the locked-target row owns its hover alone. Through the real
+     -- Tooltip helper with the plain and the synthetic clearing SetOwner (no
+     -- native clearing is claimed): one SetOwner by the actual row at
+     -- ANCHOR_RIGHT, shown and hidden again, the complete heading FIRST, then
+     -- the 11 lines of the independent Tips(CANDT).lock.
+     local body=Tips(CANDT).lock
+     local want={{CAND[h[3]],1,1,1,true}}
+     for _,line in ipairs(body)do want[#want+1]=line end
+     for _,clears in ipairs({false,true})do
+      local lines,owners,cycle=Tooltip(h[4],clears)
+      check(#body==11 and same(lines,want) and #owners==1 and owners[1][1]==h[4] and owners[1][2]=='ANCHOR_RIGHT' and cycle,
+       tag..': the actual hover of '..h[3]..' takes the tooltip once, recovers the complete heading first, then keeps all 11 locked-target lines'
+       ..(clears and ' (synthetic SetOwner that clears earlier lines)' or ''))
+     end
+    else
+     local lines=Lines(h[4])
+     check(same(lines[#lines],{CAND[h[3]],1,1,1,true}),tag..': the actual hover of '..h[3]..' recovers the complete text')
+    end
    end
    local charges=NexusPanel._chargesText
    check(charges:IsShown() and charges:GetText()==LONGROW and charges:GetWidth()==72 and charges:GetHeight()==layout.small
@@ -1220,6 +1262,7 @@ do
  for _,fit in ipairs(FITS)do
   for _,ui in ipairs({1,0.64})do
    G.UseFont(fit[1]);rawset(UIParent,'GetEffectiveScale',function()return ui end)
+   check(Nexus.LayoutMetrics.RuntimeMetrics()==fit[1].size/12,'SETUP #143 English fit, '..fit[1].name..', UI scale '..ui..': the runtime font scale is the stated model size over 12 ('..fit[1].size..'/12)')
    local tag='#143 English fit, '..fit[1].name..', UI scale '..ui
    local tips=Tips(ENT)
    assert(Nexus.Panel.Render(Setup()))
@@ -1240,6 +1283,21 @@ do
  for _,id in ipairs({'frFR','deDE','esES','plPL','ptBR','ruRU'})do
   Boot(id,nil)
   assert(Nexus.Panel.Render(Active()))
+  -- #143 GUARD with the real copied pack: the actual locked-target row
+  -- through the real Tooltip helper with its synthetic clearing SetOwner (no
+  -- native clearing is claimed), against this pack's own input entries in the
+  -- independent Tips shape with the untranslated names: one SetOwner by the
+  -- row, all 11 lines, and the complete heading first only while the actual
+  -- heading is wider than its box.
+  local entries,lock=Nexus.LocalizationPacks[id].entries,NexusPanel.toLockLabel
+  local lockBody,lockWant=Tips(function(key)return entries[key]end).lock,{}
+  if lock:IsShown() and lock:GetStringWidth()>lock:GetWidth() then lockWant[1]={entries['panel.heading.locked_targets'],1,1,1,true} end
+  for _,line in ipairs(lockBody)do lockWant[#lockWant+1]=line end
+  local lockLines,lockOwners,lockCycle=Tooltip(NexusPanel.toLockHit,true)
+  check(#lockBody==11 and lock:GetText()==entries['panel.heading.locked_targets'] and same(lockLines,lockWant) and #lockOwners==1
+   and lockOwners[1][1]==NexusPanel.toLockHit and lockOwners[1][2]=='ANCHOR_RIGHT' and lockCycle,
+   'GUARD #143 real '..id..': the actual locked-target row takes the tooltip once and keeps all 11 locked-target lines in the pack text'
+   ..(#lockWant>#lockBody and ', after the complete heading' or ', with no added heading'))
   local charges=NexusPanel._chargesText
   check(charges:IsShown() and charges:GetText()==ROWS[id] and charges:GetWidth()==72 and charges:GetHeight()==NexusPanel._responsiveLayout.small,'GUARD #143 real '..id..' pack: Panel._chargesText shows 0, unknown and 7 in its unchanged 72 px box')
   local want={{'Charges',1,1,1},{ROWS[id],1,1,1,true}}
