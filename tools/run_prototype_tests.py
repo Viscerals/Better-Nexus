@@ -311,6 +311,8 @@ NAMES += ['ux_destination_context','ux_qualified_counts','ux_record_scope_terms'
 NAMES += ['flexible_plan_persistence_codec']
 # #151 Stage A2: private Store pool seam and FlexiblePlanStore.New Read/Save/Clear through real boot/reload (EXPECT fails before the seam by design).
 NAMES += ['flexible_plan_persistence_store']
+# #151 Stage A retention: measured maximal-pool startup work against actual PumpCaps/SourceBounds, a 28,672-byte sibling, released 9049 and current peers keep the key; no pool message or action.
+NAMES += ['flexible_plan_persistence_retention']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

@@ -1,10 +1,11 @@
 -- #151 Stage A2: the private Store pool seam and FlexiblePlanStore.New
 -- Read/Save/Clear through actual F.Boot/F.Reload. Synthetic data only;
--- offline, not native SavedVariables or a client reload. Stage A acceptance
--- still owed by the next additive fixture (not claimed here): the startup
--- pump delta <= 22 for a maximal pool, a maximal pool plus a 28,672-byte
--- sibling reaching READY/durable, and the released-peer downgrade round trip
--- (orb_recovery_store_compat pattern).
+-- offline, not native SavedVariables or a client reload. The remaining Stage A
+-- retention acceptance is tests/prototype/flexible_plan_persistence_retention.lua:
+-- measured startup work of a maximal pool against the actual PumpCaps and
+-- SourceBounds (edge division alone omits row, cursor, sort and comparison
+-- work, so no fixed pump number is promised here), a maximal pool plus a
+-- 28,672-byte sibling reaching READY/durable, and the released-peer round trip.
 local F = dofile('tests/prototype/format5_support.lua')
 local checks = 0
 local function check(v, m) assert(v, m); checks = checks + 1 end
@@ -34,17 +35,33 @@ local function Session()
         [B]={spellId=B, quality=0, maxStack=1, groupId=0}}}
 end
 local function Session2() return {ids={A}, rows={[A]={spellId=A, quality=1, maxStack=5}}, chosen={[A]=4}} end
--- The serialized saved root with every character row's pool key left out.
+-- The serialized saved root with exactly the current owned row's pool key left
+-- out. The owned row is one physical table that the saved root reaches through
+-- more than one path (NexusDB.chars[owner] and the durable bundle's
+-- authorityBundle.storeData.chars[owner]), so the exclusion is by row IDENTITY,
+-- wherever that row appears. Everything else is copied and compared: other
+-- characters' rows including their pool keys, the same name nested in any
+-- table, and every other part of the bundle. Test-owned, bounded, memoized
+-- plain copy; serializable synthetic data only.
 local function Without(db)
-    local out, chars = {}, {}
-    for k, v in pairs(db) do out[k] = v end
-    for name, r in pairs(db.chars) do
-        local copy = r
-        if type(r) == 'table' then copy = {}; for k, v in pairs(r) do if k ~= KEY then copy[k] = v end end end
-        chars[name] = copy
+    local chars = rawget(db, 'chars')
+    local owned = type(chars) == 'table' and rawget(chars, F.OWNER) or nil
+    local memo, tables = {}, 0
+    local function Copy(v, depth)
+        if type(v) ~= 'table' then return v end
+        if memo[v] then return memo[v] end
+        tables = tables + 1
+        assert(tables <= 100000 and depth <= 64, 'Without: saved graph past the test copy bound')
+        assert(getmetatable(v) == nil, 'Without: plain saved data only')
+        local out = {}
+        memo[v] = out
+        local skip = owned ~= nil and rawequal(v, owned)
+        for k, x in next, v do
+            if not (skip and k == KEY) then out[k] = Copy(x, depth + 1) end
+        end
+        return out
     end
-    out.chars = chars
-    return F.Serialize(out)
+    return F.Serialize(Copy(db, 1))
 end
 -- Unrelated saved parts compared across a reboot (ledger without the
 -- registration timestamp, which normal start-up rewrites).
@@ -91,6 +108,43 @@ end
 local P = codec.New({store=N.Store})
 local row = NexusDB.chars[F.OWNER]
 local held, snap
+
+do -- 0. the byte oracle itself: exclusion by owned-row identity through every alias, negative controls
+    local bundle = rawget(NexusDB, 'authorityBundle')
+    local storeData = type(bundle) == 'table' and rawget(bundle, 'storeData') or nil
+    local bundleChars = type(storeData) == 'table' and rawget(storeData, 'chars') or nil
+    local aliased = type(bundleChars) == 'table' and rawequal(rawget(bundleChars, F.OWNER), row)
+    print('ORACLE owned row also reached as authorityBundle.storeData.chars[owner]='..tostring(aliased))
+    check(aliased, 'oracle control: the owned row is aliased through the durable bundle, the case the helper must cover')
+    local peer = 'oraclepeer@ebonhold'
+    check(rawget(NexusDB.chars, peer) == nil and rawget(row, KEY) == nil and rawget(row, 'oracleProbe151') == nil
+        and rawget(bundle, 'oracleProbe151') == nil, 'oracle control: clean start')
+    local clean = Without(NexusDB)
+    NexusDB.chars[peer] = {[KEY]=Record(), nested={[KEY]={keep='peer'}}}
+    local other, base = NexusDB.chars[peer], Without(NexusDB)
+    check(base ~= clean, 'oracle negative control: a row of another character, pool key included, is compared')
+    rawset(row, KEY, Record())
+    check(Without(NexusDB) == base, 'oracle control: the owned pool key is excluded wherever the owned row appears')
+    rawset(row, KEY, nil)
+    local function changes(label, apply, undo)
+        apply()
+        local text = Without(NexusDB)
+        undo()
+        check(text ~= base and Without(NexusDB) == base, 'oracle negative control: '..label..' is compared')
+    end
+    changes('a same-named pool field of another character', function() other[KEY].counts[1] = 3 end,
+        function() other[KEY].counts[1] = 2 end)
+    changes('a nested same-named field of another character', function() other.nested[KEY].keep = 'changed' end,
+        function() other.nested[KEY].keep = 'peer' end)
+    changes('a nested same-named field of the owned row', function() row.nestedHolder[KEY].keep = 'changed' end,
+        function() row.nestedHolder[KEY].keep = 'nested' end)
+    changes('another field of the owned row', function() rawset(row, 'oracleProbe151', 1) end,
+        function() rawset(row, 'oracleProbe151', nil) end)
+    changes('an unrelated durable bundle field', function() rawset(bundle, 'oracleProbe151', 1) end,
+        function() rawset(bundle, 'oracleProbe151', nil) end)
+    NexusDB.chars[peer] = nil
+    check(Without(NexusDB) == clean, 'oracle controls restored every value')
+end
 
 do -- 1. ABSENT -> saved, exact record, snapshot identity, receipts, no actions
     local r0 = P.Read()
@@ -362,6 +416,6 @@ do -- 8. read-only format 6: Load allowed, Save and Clear refused, everything ke
     check(F.Serialize(NexusDB) == text and rawequal(NexusDB.chars[F.OWNER][KEY], pool), 'read-only root unchanged')
 end
 
-print('REMAINING Stage A acceptance (next additive fixture): pump delta <= 22 with a maximal pool;'
-    ..' maximal pool plus 28,672-byte sibling READY/durable; released-peer downgrade round trip')
+print('REMAINING Stage A retention is measured in flexible_plan_persistence_retention (no fixed'
+    ..' pump number is claimed here); chooser UI, full CI/package and final reviews are later')
 print('PASS flexible_plan_persistence_store checks='..checks)
