@@ -207,9 +207,10 @@ local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true,
 --   "1st"      first-run target (no Saved Build in use)
 --   "Wait"     the saved assignment is being restored
 --   "None"     nothing captured
---   "P:"       state prefix: a Community Build preview is shown (d.preview)
--- One-glyph marks, for a captured state (state) and for a Wishlist minimum
--- without a shown name (Wishlist); "?" keeps the meaning above:
+--   "P"        Preview (d.preview): a Community Build preview is shown
+-- One-glyph marks, for a captured or Preview state (state) and for a
+-- Wishlist minimum without a shown name (Wishlist); "?" keeps the meaning
+-- above:
 --   "+"  state: active in the game      Wishlist: assigned
 --   "-"  state: not active in the game  Wishlist: none assigned
 --   "x"  state and Wishlist: unavailable right now
@@ -217,12 +218,17 @@ local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true,
 --   "0"  state: empty, the Saved Build holds no Echoes
 --   "1"  state: first-run target (no Saved Build in use)
 --   "!"  Wishlist: refused, the Saved Build is explicitly empty (no Echoes)
+--   "_"  state: nothing captured ("none"), in a Preview minimum only
 -- A captured state minimum is "C:" then its state record's mark, 3 glyphs
 -- ("C:+", "C:0", "C:?", ...): the capture and each state stay visible, and
--- being captured is not evidence of the current assignment. A "none"
--- destination is never captured and has no mark. No mark is a pipe or a
--- control character; each is chosen from the descriptor codes, never cut
--- from or parsed out of the worded value.
+-- being captured is not evidence of the current assignment. A Preview
+-- state minimum is its own atomic alternative, at most 3 glyphs: "P",
+-- then "C" when captured, then that mark ("P+", "P1", "PC0", "PC?", ...),
+-- so Preview, the capture and each state stay visible. A "none"
+-- destination is never captured; its only mark is "_", in that Preview
+-- minimum ("P_"). No mark is a pipe or a control character; each is
+-- chosen from the descriptor codes, never cut from or parsed out of the
+-- worded value.
 local SAVED_BUILD_STATE_COMPACT = {
     unavailable = {compact = "Unavailable", minimum = "N/A", mark = "x"},
     empty = {compact = "Empty", minimum = "Empty", mark = "0"},
@@ -424,16 +430,19 @@ function T.DestinationFields(d)
         stateCompact, stateMinimum = stateShort.compact, stateShort.minimum
     end
     -- d.preview == true (explicit only): the view shows a Community Build
-    -- preview, not this destination's plan. Presentation only: every state
-    -- alternative keeps the underlying state whole after a Preview
-    -- designation ("P:" before the minimum), so the preview stays visible at
-    -- every width and is never called assigned; the other facts are worded
-    -- as given.
+    -- preview, not this destination's plan. Presentation only: the full and
+    -- compact state keep the underlying state whole after a Preview
+    -- designation, so the preview stays visible at every width and is
+    -- never called assigned; the other facts are worded as given. The
+    -- minimum is its own atomic alternative (see the markers above), chosen
+    -- from the codes alone: "P", then "C" when captured, then the state
+    -- record's mark, or "_" for a "none" destination (never captured).
     local preview = d.preview == true
     if preview then
         state = "Preview; " .. state
         stateCompact = "Preview: " .. stateCompact
-        stateMinimum = "P:" .. stateMinimum
+        stateMinimum = (captured and "PC" or "P")
+            .. (p.kind == "none" and "_" or stateShort.mark)
     end
     local fields = {
         {key = "character", label = "Character", value = p.character or "Not known",

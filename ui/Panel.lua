@@ -106,12 +106,15 @@ local function SafeText(v) return v ~= nil and tostring(v) or "" end
 -- character and Saved Build compact values and a Wishlist minimum longer
 -- than one character (the formatter's assigned name; its refusal, unknown
 -- and unavailable markers are one character). A Wishlist compact value is
--- shown whole or replaced by its minimum, never cut. A cut falls at a
--- UTF-8 character, an escaped pipe pair "||" counting as one, keeps the
--- leading token (up to 3 characters, such as "#12") and adds "..." when
--- that still fits, else omits the "...", else the cue. Below the whole
--- floors the cells stay disjoint in the row and the client shortens them,
--- the state last; the tooltip keeps every full line.
+-- shown whole or replaced by its minimum, never cut. A name is tried
+-- whole first, with its cue and then without it; only then is it cut. A
+-- cut falls at a UTF-8 character, an escaped pipe pair "||" counting as
+-- one, keeps the leading token (up to 3 characters; a slot token, "#" and
+-- all its digits such as "#123", always whole, never "#" or "#1" of "#12")
+-- and adds "..." when that still fits, else omits the "...", else the cue.
+-- Below the whole floors (a slot token alone included) the cells stay
+-- disjoint in the row and the client shortens them, the state last; the
+-- tooltip keeps every full line.
 ------------------------------------------------------------------------
 do
     local DEST_MIN_HEIGHT, DEST_GAP, DEST_SLACK, DEST_LEAD = 17, 4, 1, 3
@@ -238,10 +241,19 @@ do
         return ladder
     end
 
-    -- A name rung shortened to fit limit (see the policy above): its text
-    -- and fitted width.
+    -- A name rung fitted to limit (see the policy above): its text and
+    -- fitted width. The whole value is tried first, with its cue and then
+    -- without it; only a value that does not fit whole is cut. A leading
+    -- slot token ("#" and its digits, then a space or the end, such as
+    -- "#12") is atomic: a cut keeps it whole and shortens only the name
+    -- after it, and a token that does not fit even alone is shown whole
+    -- (the client then shortens the cell).
     local function DestClip(cell, rung, limit, memo, fallback)
         local value, cue = rung.value, rung.cue
+        local width = DestMeasure(cell, cue .. value, memo, fallback)
+        if width <= limit then return cue .. value, width end
+        width = DestMeasure(cell, value, memo, fallback)
+        if width <= limit then return value, width end
         local ends = DestUnitEnds(value)
         local count, lead, start = #ends, #ends, 1
         for unit = 1, count do
@@ -251,7 +263,15 @@ do
             end
             start = ends[unit] + 1
         end
-        local need = math.max(1, math.min(DEST_LEAD, lead, count - 1))
+        -- A slot token has one byte per character: it is the leading token
+        -- exactly when its length is lead.
+        local slot = value:match("^#%d+")
+        local atomic = slot ~= nil and #slot == lead
+        local need = atomic and lead or math.max(1, math.min(DEST_LEAD, lead, count - 1))
+        if need >= count then
+            -- The slot token is the whole value: it is never cut.
+            return value, width
+        end
         local function Shown(units, withCue, ellipsis)
             local prefix = value:sub(1, ends[units])
             if ellipsis then prefix = (prefix:gsub(" +$", "")) .. DEST_ELLIPSIS end
@@ -276,7 +296,10 @@ do
                 units, ellipsis = bare, false
             else
                 local alone = cue ~= "" and Largest(false, false) or bare
-                if alone > bare then
+                if atomic and alone < need then
+                    -- Not even the slot token fits alone: it stays whole.
+                    units, withCue, ellipsis = need, false, false
+                elseif alone > bare then
                     units, withCue, ellipsis = alone, false, false
                 elseif bare >= 1 then
                     units, ellipsis = bare, false
