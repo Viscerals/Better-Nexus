@@ -182,7 +182,11 @@ ordinary-rolling block check, reading it can start the read-only recovery of a
 saved action.
 
 Character/run/service/loadout change pauses the run. Resume rechecks the original
-context, targets, owner, and budget. A budget increase needs a new approval token
+character/run/service context, owner and budget. A pending run continues its
+original operation, and a changed target waits until that operation settles. A
+settled paused run resumes with the ready assignment read at Resume, which can
+differ from its current binding. User interface and local readiness describes how
+such a change is shown and reviewed. A budget increase needs a new approval token
 and explicit Resume; it does not reset usage. Completed/stopped runs cannot be
 revived by an increase operation.
 
@@ -190,14 +194,155 @@ revived by an increase operation.
 
 The bounded Orb window is opened by `/nexus orbs`, a main-menu entry, or Welcome.
 It includes actual target selection, order controls, source approval/exclusion,
-all-source review, run limit, optional recycling, Start/single-step, Pause/Resume,
-Stop, Recheck, and Help. Start is never implicit. Missing Orb APIs disable only
-this feature. Local Store/ownership capability readiness is required; Community
-preparation is not a prerequisite.
+all-source review, run limit, optional recycling, Start/single-step, separate
+fixed Pause and Resume during a run, Stop, Recheck, and Help. Start is never
+implicit. Missing Orb APIs disable only this feature. Local Store/ownership
+capability readiness is required; Community preparation is not a prerequisite.
 
 The synthetic UI checks execute the real handlers and inspect structure. They do
-not reproduce native font measurement, focus, hit-testing, frame strata effects,
-or interference from other game addons.
+not reproduce native font measurement, focus, keyboard input, dragging,
+hit-testing, double-click timing, frame strata effects, server effects, resource
+spending, or interference from other game addons. Offline checks and source text
+do not establish native results.
+
+### Run controls
+
+The full Orb window, the compact strip under the main Nexus panel and the
+optional mini panel (`ORB_MINI_PANEL.md`) show the same runtime status. The
+window replaces Start with separate fixed Pause and Resume buttons while a run is
+running, paused, at its limit or has a pending operation. The strip appears once
+this session has an approved run, or while an operation is pending. It has its
+own fixed Pause and Resume beside Stop and Details. Each button keeps one
+meaning, so a repeated press of Pause never becomes Resume. A Pause or Resume
+click reads the status again and acts only if that read still offers the action.
+It then calls the existing runtime action, which makes its own final checks. The
+displayed status authorizes nothing. Resume keeps the approved maximum and the
+run's usage, and the runtime may pause or end the run again at once. These views
+offer no way to raise the maximum during a run. To raise it, stop and start a new
+run with a higher maximum. Start returns once the run is no longer active,
+including the two-step **Start new run** / **Confirm new run** after a finished
+run. Starting a run and approving its maximum stay in the full window.
+
+The earlier one-button entries remain only as hidden programmatic compatibility
+routes. They are the window's Start control while a run is running or paused
+(Pause while running, Resume while paused) and the strip's original single
+button. A player cannot see or click them. They reach the same runtime Pause and
+Resume, and so the same final checks. Their interface withholding differs from
+the fixed buttons, though. The window route applies the target review but does
+not first require a displayed Resume offer. The strip route never resumes a
+changed target. A direct runtime call is governed only by the runtime's own
+checks, which do not include the window's target review.
+
+Usage reads "Orbs used: X / Y approved" in the window, the strip and the
+history, and "X of Y approved" in the mini panel. Pending is a count of Orbs
+requested whose spend is not confirmed yet. When no Orb is pending but the last
+Orb action has not settled, the strip and the mini panel say so instead. That is
+not a pending count. Unknown spend exposure, unconfirmed outcomes and earlier
+totals unavailable after a reload are shown apart from the observed usage.
+Exposure still counts toward the run cap (see State and spending), but none of
+these is taken as a confirmed spend, a refund or a settled result. A receipt
+restored without its recorded approved maximum shows "maximum not recorded"
+(strip: "max not recorded") instead of a number. The configured fallback still
+gates it. It is not a new approval, and the wording changes no gate.
+
+### Resume target and target review
+
+While a run is paused, the window and the strip state what an explicit Resume
+would act on. They take it from the runtime's Resume-target view. For a pending
+run it is the original operation that Resume continues. For a settled run it is
+the ready assigned Wishlist that Resume would use, which may be the same target
+or a changed one. A target counts as changed in two cases. It may differ from the
+binding and context that the run holds now (those of its approval, or those a
+later explicit Resume adopted). The runtime may also have recorded a target or
+context change during the run. The Wishlist name the run started with does not
+decide this on its own. When Resume is blocked or not offered, no target is
+guessed:
+
+- An assigned Wishlist that is restoring, loading, unavailable or unassigned is
+  reported as unknown, without a name, and Resume is not offered.
+- A pending operation whose target changed must settle first. Until then the
+  window says that Resume waits for it and names no new target.
+- A paused run that no longer holds its approval or action ownership cannot
+  resume, whatever the assignment says. No target is named, and the way on is
+  Stop, then a new approval. A loading screen does not necessarily end approval.
+  A running action waits in `WAIT_WORLD` with its existing session approval (see
+  Persistence and interruption).
+- A restored receipt, an operation whose choice was already attempted, and any
+  other paused state without an offered Resume name nothing. The runtime reason
+  says what must happen.
+
+For a changed target, the window offers Resume only after **Review target** for
+the exact target it shows. It names that target and, when the names differ, the
+name it would replace. A target that changed and came back to the run's own
+Wishlist still needs that review. The window says "Target changed and is back",
+the compact views mark it "(back)" or "Target back to", and none calls it new.
+The strip and the mini panel name a changed target and point to the full window.
+They never resume it, even after it was reviewed there. **Review target** shares
+the place of **Continue...** and is not shown while that button is shown.
+
+**Review target** and **Cancel review** act only on the exact target and the
+action that the button showed at the last refresh. The click reads the status
+again. If that read shows another target, the click neither reviews nor cancels.
+It clears any review and says to check the target shown now. If the read shows no
+changed target, the click clears any review and changes nothing else. A stale
+click therefore never reviews a target that was not shown. A later deliberate
+click on the redrawn button may review the target shown then. A review is memory
+only: it writes, sends and spends nothing. It is cleared by a different target,
+by leaving the paused changed-target state or by closing the window. Resume
+stays a separate deliberate click. The review only withholds the window's Resume
+and is not a runtime gate. Resume still makes every runtime check and adopts the
+assignment it reads at that moment.
+
+### Unresolved records
+
+In the full window, an unresolved earlier result reads in layers. First comes
+what it blocks. Next comes what the player can do now, from the actual Continue
+state: **Continue...**, **Why blocked...**, **Review check...** or the open
+check. Last come the details: the runtime reason, unshortened. This layout
+applies in `RECOVERY`. It also applies to a receipt restored after a reload that
+the runtime keeps `PAUSED` (for example by the loadout hold), and to another
+pending, nonrunning record whose Continue view offers its explanation. Only the
+restored `PAUSED` record takes the label "Paused - a result restored after a
+reload is unresolved". It stays `PAUSED`, and no state, receipt, gate,
+settlement, limit, authorization or spend rule changes. A live automatic
+recovery check keeps its owned phase before the headline. No Resume target is
+guessed for such a record. A run paused in this session without such a record
+keeps its phase line, such as "Paused", with its reason.
+
+Paused, restored, already selected and settling records do not all have an
+eligible Continue. The headline says "until it settles or you continue past it"
+only where an explicit Continue is offered, meaning the record is eligible or
+its check is running or ready. Otherwise it says "until it settles". A record
+with only an explanation offers **Why blocked...**, which starts no check. An
+eligible Continue first makes its read-only check and asks the player to
+confirm. It then archives the original receipt unchanged as unconfirmed
+(`ORB_RECOVERY_CONTINUE.md`). That is not settlement, retry, refund or deletion.
+It sends no spend or choice, keeps the counted usage and exposure, and never
+happens by itself. The strip and the mini panel may show an owned recovery or
+Continue check phase first. They do not show Continue eligibility. **Details**
+and **Open Orbs** open the full window for the explanation and the action.
+
+### Compact strip
+
+The strip shows usage, a second line and a state line. An owned recovery phase
+comes first while one exists. Its complete text is available on hover. The
+second line shows one fact, in this order of priority: Orbs pending, not
+confirmed yet; the last Orb action is not settled; the target copies remaining,
+or that target data is unavailable. While a run is paused and a target is named
+or reported unknown, that fact stays first in short form, followed by the
+target. The target is either "Resume target unknown" or a name, shortened on a
+character boundary, with a short kind caption. The caption is "(same)" for the
+original operation or an unchanged Wishlist, and "(new)" or "(back)" for a
+changed one. The caption says how the target relates to the run; it is not the
+name. The hover keeps the complete target, the complete fact and the
+instruction. The state line gives that instruction, for example "Paused - review
+it in the Orb window", "Paused - Wishlist not ready" or "Paused - original must
+settle first". When it would read just "Paused", a pending unconfirmed Orb is
+restated there. A paused pending run whose Resume is not offered, and that has no
+more specific instruction, reads "Paused - result must settle". Line lengths
+follow an offline character model, not a native measurement, and are no evidence
+that the text fits natively. The mini panel's compact form is described in
+`ORB_MINI_PANEL.md`.
 
 ## Verification limits
 
