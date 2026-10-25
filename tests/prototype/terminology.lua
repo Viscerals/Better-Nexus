@@ -291,7 +291,7 @@ do
  for _=1,3 do record.Text('reason.counter_9')end
  local rd=record.Diagnostics()
  check(#rd.keys==8 and rd.keysNotKept==3 and rd.misses==11 and rd.byReason.unknown_key==11,'GUARD unkept ninth key counts every occurrence without retention')
- check(#L.Keys()==3 and Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'GUARD real three-key seam restored after boundary fixtures')
+ check(#L.Keys()==6 and Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'GUARD real six-key English seam restored after boundary fixtures')
 end
 local partial=assert(reload({['reason.save_in_progress']='Saving is still in progress; wait for its final result',['Bad Key']='Bad',['reason.blank']='  ',['reason.number']=5}))
 local pd=partial.Diagnostics().base
