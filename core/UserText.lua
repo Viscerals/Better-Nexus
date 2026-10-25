@@ -203,31 +203,45 @@ local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true,
 --   "#2 Name"  Saved Build slot 2, then its name
 --   "On"/"Off" the Saved Build is / is not active in the game
 --   "N/A"      unavailable right now
---   "Refused"  the Saved Build holds no Echoes, so any assignment is refused
+--   "Empty"    the Saved Build holds no Echoes, so any assignment is refused
 --   "1st"      first-run target (no Saved Build in use)
 --   "Wait"     the saved assignment is being restored
---   "C:"       a captured state minimum: "C:" then that state's own marker
---              ("C:On", "C:Off", "C:?", ...), so each state stays distinct;
---              being captured is not evidence of the current assignment
+--   "None"     nothing captured
+-- One-glyph marks, for a captured state (state) and for a Wishlist minimum
+-- without a shown name (Wishlist); "?" keeps the meaning above:
+--   "+"  state: active in the game      Wishlist: assigned
+--   "-"  state: not active in the game  Wishlist: none assigned
+--   "x"  state and Wishlist: unavailable right now
+--   "~"  state and Wishlist: the saved assignment is being restored
+--   "0"  state: empty, the Saved Build holds no Echoes
+--   "1"  state: first-run target (no Saved Build in use)
+--   "!"  Wishlist: refused, the Saved Build is explicitly empty (no Echoes)
+-- A captured state minimum is "C:" then its state record's mark, 3 glyphs
+-- ("C:+", "C:0", "C:?", ...): the capture and each state stay visible, and
+-- being captured is not evidence of the current assignment. A "none"
+-- destination is never captured and has no mark. No mark is a pipe or a
+-- control character; each is chosen from the descriptor codes, never cut
+-- from or parsed out of the worded value.
 local SAVED_BUILD_STATE_COMPACT = {
-    unavailable = {compact = "Unavailable", minimum = "N/A"},
-    empty = {compact = "Empty", minimum = "Empty"},
-    active = {compact = "Active", minimum = "On"},
-    inactive = {compact = "Inactive", minimum = "Off"},
-    unconfirmed = {compact = "Unconfirmed", minimum = "?"},
-    notStated = {compact = "Not known", minimum = "?"},
+    unavailable = {compact = "Unavailable", minimum = "N/A", mark = "x"},
+    empty = {compact = "Empty", minimum = "Empty", mark = "0"},
+    active = {compact = "Active", minimum = "On", mark = "+"},
+    inactive = {compact = "Inactive", minimum = "Off", mark = "-"},
+    unconfirmed = {compact = "Unconfirmed", minimum = "?", mark = "?"},
+    notStated = {compact = "Not known", minimum = "?", mark = "?"},
 }
 local DESTINATION_COMPACT = {
-    firstRun = {build = "None", compact = "First run", minimum = "1st"},
-    restoring = {build = "?", compact = "Restoring", minimum = "Wait"},
-    unknown = {build = "?", compact = "Not loaded", minimum = "?"},
-    unconfirmed = {build = "?", compact = "Unconfirmed", minimum = "?"},
+    firstRun = {build = "None", compact = "First run", minimum = "1st", mark = "1"},
+    restoring = {build = "?", compact = "Restoring", minimum = "Wait", mark = "~"},
+    unknown = {build = "?", compact = "Not loaded", minimum = "?", mark = "?"},
+    unconfirmed = {build = "?", compact = "Unconfirmed", minimum = "?", mark = "?"},
     none = {build = "?", compact = "None", minimum = "None"},
 }
--- The minimum marker of a stated Wishlist assignment state; an assigned
--- Wishlist with a name shows that name instead (see DestinationFields).
+-- The one-glyph minimum mark of a stated Wishlist assignment state; an
+-- assigned Wishlist with a name shows that name instead (see
+-- DestinationFields). Refused is "!" and not known is "?" (see above).
 local WISHLIST_MINIMUM = {
-    assigned = "Assigned", unassigned = "None", unavailable = "N/A", restoring = "Wait",
+    assigned = "+", unassigned = "-", unavailable = "x", restoring = "~",
 }
 -- A stated Wishlist assignment state in compact words.
 local function WishlistCompact(wishlist, state)
@@ -382,7 +396,7 @@ function T.DestinationFields(d)
         local words = "no valid assignment (the Saved Build holds no Echoes)"
         wishlist = p.wishlist and (p.wishlist .. " - " .. words) or Lead(words, true)
         wishlistCompact = p.wishlist and ("Refused: " .. p.wishlist) or "Refused"
-        wishlistMinimum = "Refused"
+        wishlistMinimum = "!"
     elseif stated then
         wishlist = WishlistWords(p.wishlist, d.wishlistState, true)
         wishlistCompact = WishlistCompact(p.wishlist, d.wishlistState)
@@ -401,8 +415,9 @@ function T.DestinationFields(d)
     if captured then
         state = "Captured; " .. stateWords
             .. ((noAssignment or stated) and "" or "; assignment not checked")
-        -- "C:" keeps the capture visible; the state's own marker keeps it distinct.
-        stateCompact, stateMinimum = "Captured: " .. stateShort.compact, "C:" .. stateShort.minimum
+        -- "C:" keeps the capture visible; the state record's one-glyph mark
+        -- keeps each state distinct, 3 glyphs in all (see the markers above).
+        stateCompact, stateMinimum = "Captured: " .. stateShort.compact, "C:" .. stateShort.mark
     else
         state = Lead(stateWords, true)
         stateCompact, stateMinimum = stateShort.compact, stateShort.minimum
