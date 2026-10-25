@@ -29,9 +29,52 @@ It accepts no issue: not #139, not #147 and no later gate.
 |---|---|---|
 | Release languages | `RELEASE_LANGUAGES.json`: product choices, client evidence, review and session states, and the `entryReview` declaration contract with no declaration recorded | none in this slice |
 | Keys and context | `KEY_CONTEXT.json`: six keys, byte limits, grammar, families | none in this slice |
-| Validator | `tools/l10n_catalog.py`: syntax parser, pure schema API `validate_catalog_data` and pure coverage report API `catalog_report`, on exact in-memory bytes; full validation NOT_IMPLEMENTED | read-only confined-root command line around `catalog_report` (B3b) |
-| Tests | `tools/tests/test_l10n_catalog.py`: assertions on these public documents, plus public parser, schema and report API tests | appended CLI positive and malformed-input fixtures that keep these assertions |
-| Required CI | not registered | later authorized append to `PYTHON_TESTS` in `tools/run_prototype_tests.py` |
+| Validator | `tools/l10n_catalog.py`, status `IMPLEMENTED_DRAFT_CI_REVIEW_PENDING`: syntax parser, pure schema API `validate_catalog_data`, pure coverage report API `catalog_report` on exact in-memory bytes, and the read-only confined-root command line around `catalog_report` (B3b); full validation IMPLEMENTED_DRAFT | independent review |
+| Tests | `tools/tests/test_l10n_catalog.py`: assertions on these public documents, public parser, schema and report API tests, and subprocess tests of the command line on the repository and on temporary public-only roots | independent review; host validation against the final source pin |
+| Required CI | not registered (`NOT_REGISTERED_LATER_AUTHORIZED_APPEND`) | later authorized append to `PYTHON_TESTS` in `tools/run_prototype_tests.py` |
+
+The command line is:
+
+    python tools/l10n_catalog.py [--root DIR] [--require-complete]
+
+`DIR` defaults to the repository that contains the tool, not the current
+directory. Inside the resolved root the tool reads only these files, as
+bytes:
+
+- `data/LocalizationEnglish.lua`
+- `data/LocalizationPacks.lua`
+- `docs/localization/KEY_CONTEXT.json`
+- `docs/localization/RELEASE_LANGUAGES.json`
+- `Nexus.toc`
+
+Each must resolve, through any symlink or junction, to a regular readable
+file inside the root. `Nexus.toc` is UTF-8 data. Slash and backslash
+separators are treated alike, and blank, comment and metadata lines are
+ignored. `data/LocalizationEnglish.lua`, `data/LocalizationPacks.lua` and
+`core/Localization.lua` must each appear exactly once, in that order; no other
+TOC module is opened. The four catalog inputs go unchanged to
+`catalog_report`. The tool runs no Lua, imports no code from the root, reads
+no Git state and writes no file.
+
+A valid report is one ASCII JSON record on stdout. It carries the SHA-256 of
+`Nexus.toc` beside the four input hashes of the report and keeps two parts
+apart:
+
+- `technicalCatalog`: technical dictionary validity and entry counts per
+  optional pack, `PARTIAL` while any entry is missing;
+- `externalReadiness`: `NOT_ESTABLISHED`, blocked by every remaining report
+  reason and by `external-acceptance-not-attested`.
+
+Technical validity and dictionary counts are not readiness. No trusted
+external acceptance-record contract exists, so a qualified entry declaration
+is not fluent or native truth and external acceptance stays NOT_ATTESTED.
+Exit status:
+
+- 0: a valid report, also for partial data;
+- 1: `--require-complete` while external readiness is not established, which
+  at this stage is always the case;
+- 2: an argument, root, input, TOC, syntax, schema or evidence error, written
+  as one JSON error record with a stable code on stderr.
 
 `catalog_report` first runs `validate_catalog_data` on the same four byte
 strings. Syntax and schema errors keep their codes, and an invalid catalog
@@ -85,8 +128,10 @@ empty and pending, UNASSIGNED or NOT_RUN. No declaration is recorded.
 
 Until that registration, `tools/ci_check.py` reports an unregistered
 `test_*.py` under `tools/tests` as an inventory failure (`CONTRIBUTING.md`,
-`VALIDATION.md`). Independent review: pending. Execution of the new tests:
-NOT_RUN.
+`VALIDATION.md`). Required-CI registration, independent review and the human,
+native and full-UI gates are pending. Author execution of the new tests:
+NOT_RUN; host validation is recorded separately against the final source pin,
+and this document claims no host result.
 
 ## Separate gates
 

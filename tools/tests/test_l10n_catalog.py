@@ -7,14 +7,13 @@ source. Python 3.9+, standard library only. Files are read as strict UTF-8
 bytes. No Lua is executed, imported or evaluated, and no live or private data
 is read.
 
-Later sections append public tests of tools/l10n_catalog.py on exact
-in-memory bytes: the parser, the pure schema API validate_catalog_data and
-the pure coverage report API catalog_report. That tool is not yet a full
-validator. Several parts are still pending: its read-only filesystem --root
-report command line (a separate later task that appends to this file and
-keeps these assertions), required-CI registration, independent review, and
-the human, native and UI gates. This file is not yet registered in
-tools/run_prototype_tests.py.
+Later sections append public tests of tools/l10n_catalog.py: the parser, the
+pure schema API validate_catalog_data and the pure coverage report API
+catalog_report on exact in-memory bytes, then subprocess tests of its
+read-only confined-root report command line (B3b) on this repository and on
+temporary public-only roots. The tool is an implemented draft. Still pending
+are required-CI registration, independent review, and the human, native and
+UI gates. This file is not yet registered in tools/run_prototype_tests.py.
 
 Run directly:  python tools/tests/test_l10n_catalog.py -v
 """
@@ -141,7 +140,7 @@ class ReleaseLanguagesContract(unittest.TestCase):
         self.assertEqual(d["sourcePin"], {"base": BASE, "tree": TREE})
         self.assertEqual(d["contractKind"], "declarative_metadata_only")
         self.assertEqual(d["validator"], {"path": "tools/l10n_catalog.py",
-                                          "status": "COVERAGE_API_ONLY_REPORT_CLI_PENDING"})
+                                          "status": "IMPLEMENTED_DRAFT_CI_REVIEW_PENDING"})
         self.assertEqual(d["requiredCiRegistration"], "NOT_REGISTERED_LATER_AUTHORIZED_APPEND")
         self.assertEqual(d["selectionDecision"]["issue"], 139)
         self.assertEqual(d["selectionDecision"]["status"], "resolved")
@@ -417,9 +416,9 @@ CATALOG_HEADS = {
 CATALOG_NOTICE = {
     "record": "notice",
     "tool": "tools/l10n_catalog.py",
-    "status": "COVERAGE_API_ONLY_REPORT_CLI_PENDING",
-    "fullValidation": "NOT_IMPLEMENTED",
-    "message": "coverage report API only; filesystem and report CLI are pending",
+    "status": "IMPLEMENTED_DRAFT_CI_REVIEW_PENDING",
+    "fullValidation": "IMPLEMENTED_DRAFT",
+    "message": "catalog validator and report CLI implemented; CI registration and independent review pending",
 }
 
 CATALOG_CURRENT_ENGLISH = {
@@ -806,23 +805,39 @@ class CatalogParserGrammar(unittest.TestCase):
                         parse(value)
         self.assertEqual(self.catalog.parse_english(bytearray(CATALOG_HEADS["english"] + b"{}")), {})
 
-    def test_direct_invocation_is_a_pending_notice_and_exits_nonzero(self):
+    def test_direct_invocation_runs_the_read_only_report_command_line(self):
         env = dict(os.environ)
         env.pop("PYTHONDONTWRITEBYTECODE", None)
+        names = ("data/LocalizationEnglish.lua", "data/LocalizationPacks.lua",
+                 "docs/localization/KEY_CONTEXT.json",
+                 "docs/localization/RELEASE_LANGUAGES.json", "Nexus.toc")
+        inputs = [(ROOT / name).read_bytes() for name in names]
         before = catalog_pycache_names()
         load_catalog_parser()
         runs = [subprocess.run([sys.executable, str(CATALOG_TOOL), *args], capture_output=True,
                                cwd=str(ROOT), env=env)
-                for args in ((), ("--root", str(ROOT)))]
+                for args in ((), ("--root", str(ROOT)), ("--require-complete",))]
         self.assertEqual(catalog_pycache_names(), before)
-        for run in runs:
-            self.assertEqual(run.returncode, 2, run.stderr)
-            self.assertEqual(run.stdout, b"")
-            self.assertTrue(run.stderr.isascii(), run.stderr)
-            lines = run.stderr.decode("ascii").splitlines()
-            self.assertEqual(len(lines), 1, run.stderr)
-            self.assertEqual(json.loads(lines[0]), CATALOG_NOTICE)
-        self.assertEqual(runs[0].stderr, runs[1].stderr)
+        self.assertEqual([(ROOT / name).read_bytes() for name in names], inputs)
+        expected = self.catalog.catalog_report(*inputs[:4])
+        records = []
+        for run, code in zip(runs, (0, 0, 1)):
+            self.assertEqual(run.returncode, code, run.stderr)
+            self.assertEqual(run.stderr, b"")
+            self.assertTrue(run.stdout.isascii(), run.stdout[:200])
+            lines = run.stdout.decode("ascii").splitlines()
+            self.assertEqual(len(lines), 1, run.stdout[:200])
+            record = json.loads(lines[0])
+            self.assertEqual((record["record"], record["exitCode"]), ("report", code))
+            self.assertEqual(record["notice"], CATALOG_NOTICE)
+            self.assertEqual(record["report"], expected)
+            self.assertEqual(record["toc"]["sha256"], hashlib.sha256(inputs[4]).hexdigest())
+            records.append(record)
+        self.assertEqual(runs[0].stdout, runs[1].stdout)
+        self.assertEqual(expected["completeness"]["state"], "INCOMPLETE")
+        self.assertEqual(records[2]["externalReadiness"]["state"], "NOT_ESTABLISHED")
+        self.assertEqual(records[2]["externalReadiness"]["reportCompletenessState"],
+                         expected["completeness"]["state"])
 
 
 # B2 schema API (Refs #147): public tests of validate_catalog_data and
@@ -834,7 +849,7 @@ class CatalogParserGrammar(unittest.TestCase):
 
 import copy
 
-SCHEMA_STATUS = "COVERAGE_API_ONLY_REPORT_CLI_PENDING"
+SCHEMA_STATUS = "IMPLEMENTED_DRAFT_CI_REVIEW_PENDING"
 SCHEMA_OLD_STATUS = "PARSER_ONLY_" + "FULL_VALIDATION_PENDING"
 SCHEMA_CHARGE = "readout.charge_counts"
 SCHEMA_MAX_ENTRIES = 64
@@ -1005,7 +1020,7 @@ class CatalogSchemaApi(unittest.TestCase):
             self.assertLess(set(pack["entries"]), set(result["english"]), pack_id)
         self.assertEqual(result["release"]["validator"]["status"], SCHEMA_STATUS)
         self.assertEqual((self.catalog.STATUS, self.catalog.NOTICE["fullValidation"]),
-                         (SCHEMA_STATUS, "NOT_IMPLEMENTED"))
+                         (SCHEMA_STATUS, "IMPLEMENTED_DRAFT"))
 
     def test_inputs_are_bytes_or_bytearray_only(self):
         names = ("english", "packs", "context", "release")
@@ -1545,10 +1560,10 @@ class CatalogCoverageReport(unittest.TestCase):
             "gameTermWording": "UNKNOWN until a verified client reference exists",
         })
         self.assertIn(REPORT_NOT_EVIDENCE, self.catalog.EVIDENCE_NOTICE)
-        self.assertEqual(self.catalog.NOTICE["fullValidation"], "NOT_IMPLEMENTED")
+        self.assertEqual(self.catalog.NOTICE["fullValidation"], "IMPLEMENTED_DRAFT")
         plan = " ".join(read_text("docs/localization/FULL_COVERAGE.md").split())
         for required in ("catalog_report", "CatalogEvidenceError", REPORT_NOT_EVIDENCE, "B3b",
-                         "NOT_IMPLEMENTED", "Execution of the new tests: NOT_RUN"):
+                         "IMPLEMENTED_DRAFT", "Author execution of the new tests: NOT_RUN"):
             self.assertIn(required, plan)
 
     def test_supplied_partial_data_derives_draft_and_missing_per_optional_pack(self):
@@ -1557,7 +1572,7 @@ class CatalogCoverageReport(unittest.TestCase):
         self.assertEqual((report["schema"], report["schemaVersion"], report["tool"]),
                          ("nexus.l10n.coverage_report", 1, "tools/l10n_catalog.py"))
         self.assertEqual((report["status"], report["fullValidation"]),
-                         (SCHEMA_STATUS, "NOT_IMPLEMENTED"))
+                         (SCHEMA_STATUS, "IMPLEMENTED_DRAFT"))
         self.assertEqual(report["categories"], list(REPORT_CATEGORIES))
         self.assertEqual(tuple(self.catalog.ENTRY_CATEGORIES), REPORT_CATEGORIES)
         baseline = report["englishBaseline"]
@@ -2048,6 +2063,484 @@ class CatalogCoverageReport(unittest.TestCase):
         self.assertNotIn("complete", first)
         self.assertEqual({family["state"] for family in first["families"]}, {"INCOMPLETE"})
         self.assertEqual(first["completeness"]["state"], "INCOMPLETE")
+
+
+# B3b command line (Refs #147): public subprocess tests of
+#     python tools/l10n_catalog.py [--root DIR] [--require-complete]
+# Each temporary root holds only copies of the public catalog inputs, changed
+# where a case says so, and a minimal Nexus.toc. No parser or API is mocked:
+# expected reports come from the public catalog_report on the same bytes, and
+# changed counts derive from the fixture tables above. Fill texts and
+# synthetic declarations are fixture-only data, not fluent, human or native
+# evidence. Bytecode writing stays enabled in every child process.
+
+CLI_INPUTS = ("data/LocalizationEnglish.lua", "data/LocalizationPacks.lua",
+              "docs/localization/KEY_CONTEXT.json",
+              "docs/localization/RELEASE_LANGUAGES.json", "Nexus.toc")
+CLI_TOC_ORDER = ("data/LocalizationEnglish.lua", "data/LocalizationPacks.lua",
+                 "core/Localization.lua")
+CLI_TOC_HEAD = ("## Interface: 30300", "## Title: Fixture", "# fixture comment", "")
+CLI_ERROR_CODES = {"CatalogCliError": "CLI_CODES", "CatalogSyntaxError": "CODES",
+                   "CatalogValidationError": "VALIDATION_CODES",
+                   "CatalogEvidenceError": "EVIDENCE_CODES"}
+
+
+def cli_backslash(path):
+    return path.replace("/", chr(92))
+
+
+def cli_toc(*entries, newline="\n"):
+    """A minimal Nexus.toc: two metadata lines, a comment, a blank line, then
+    the entries, each followed by newline."""
+    return "".join(line + newline for line in CLI_TOC_HEAD + entries).encode("utf-8")
+
+
+# The three required lines use Windows separators, as in Nexus.toc, between
+# unrelated modules that no fixture root contains.
+CLI_TOC = cli_toc("data/Release.lua", *[cli_backslash(path) for path in CLI_TOC_ORDER],
+                  "core/UserText.lua")
+
+
+def cli_run(*args, cwd):
+    """Run the public command line in a new process with bytecode writing
+    enabled and return the completed process."""
+    env = dict(os.environ)
+    env.pop("PYTHONDONTWRITEBYTECODE", None)
+    return subprocess.run([sys.executable, str(CATALOG_TOOL), *[str(arg) for arg in args]],
+                          capture_output=True, cwd=str(cwd), env=env)
+
+
+def cli_tree(root):
+    """Every directory and file under root, sorted by path, with file bytes."""
+    entries = []
+    for directory, names, files in os.walk(str(root)):
+        base = Path(directory)
+        entries.extend((str(base.joinpath(name).relative_to(root)), None) for name in names)
+        entries.extend((str(base.joinpath(name).relative_to(root)),
+                        base.joinpath(name).read_bytes()) for name in files)
+    return sorted(entries, key=lambda entry: entry[0])
+
+
+def cli_link_directory(test, link, target):
+    """Create link as a directory symlink to target. Where Windows refuses an
+    unprivileged symlink, create a junction instead. If both fail, the test
+    fails; the control is never skipped or passed."""
+    try:
+        os.symlink(str(target), str(link), target_is_directory=True)
+        return "symlink"
+    except OSError as error:
+        if os.name != "nt":
+            test.fail("cannot create the directory symlink for this control: %s" % error)
+    import _winapi
+    try:
+        _winapi.CreateJunction(str(target), str(link))
+    except OSError as error:
+        test.fail("cannot create a symlink or junction for this control: %s" % error)
+    return "junction"
+
+
+def cli_remove_link(link, root, kind):
+    """Remove only the directory link created directly inside the temporary
+    root, never its target and never recursively."""
+    import stat
+    link = Path(os.path.abspath(str(link)))
+    if link.parent != Path(os.path.abspath(str(root))):
+        raise AssertionError("refusing to remove a link outside the temporary root")
+    if kind == "symlink":
+        verified = os.path.islink(str(link))
+    else:
+        verified = bool(os.lstat(str(link)).st_file_attributes
+                        & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    if not verified:
+        raise AssertionError("refusing to remove a path that is not the created link")
+    if os.name == "nt":
+        os.rmdir(str(link))
+    else:
+        os.unlink(str(link))
+
+
+class CatalogCommandLine(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = load_catalog_parser()
+        cls.raw = {name: (ROOT / name).read_bytes() for name in CLI_INPUTS[:4]}
+        cls.release = load_document("RELEASE_LANGUAGES.json")
+
+    def temp_dir(self):
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        return Path(holder.name)
+
+    def make_root(self, overrides=None):
+        """A temporary public-only root holding the four catalog inputs and
+        CLI_TOC, with overrides applied; None removes a file."""
+        root = self.temp_dir()
+        files = dict(self.raw)
+        files["Nexus.toc"] = CLI_TOC
+        files.update(overrides or {})
+        for name, data in files.items():
+            if data is not None:
+                path = root.joinpath(*name.split("/"))
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+        return root
+
+    def run_cli(self, root, *args, cwd=None):
+        """Run the command line; nothing under root and no tools/__pycache__
+        entry may change."""
+        tree, cache = cli_tree(root), catalog_pycache_names()
+        run = cli_run(*args, cwd=root if cwd is None else cwd)
+        self.assertEqual(cli_tree(root), tree)
+        self.assertEqual(catalog_pycache_names(), cache)
+        return run
+
+    def expected(self, root):
+        return self.catalog.catalog_report(*[root.joinpath(*name.split("/")).read_bytes()
+                                             for name in CLI_INPUTS[:4]])
+
+    def record(self, run, exit_code):
+        """The single report record on stdout, in canonical ASCII JSON."""
+        self.assertEqual(run.returncode, exit_code, run.stderr[:500])
+        self.assertEqual(run.stderr, b"")
+        self.assertTrue(run.stdout.isascii(), run.stdout[:200])
+        record = json.loads(run.stdout.decode("ascii"))
+        self.assertEqual(run.stdout, (json.dumps(record, sort_keys=True) + "\n").encode("ascii"))
+        self.assertEqual((record["record"], record["exitCode"], record["tool"]),
+                         ("report", exit_code, "tools/l10n_catalog.py"))
+        return record
+
+    def assert_error(self, run, error_class, code, **fields):
+        """The single error record on stderr: stable class and code, exit 2,
+        nothing on stdout and no traceback."""
+        self.assertEqual(run.returncode, 2, run.stderr[:500])
+        self.assertEqual(run.stdout, b"")
+        self.assertTrue(run.stderr.isascii(), run.stderr[:500])
+        record = json.loads(run.stderr.decode("ascii"))
+        self.assertEqual(run.stderr, (json.dumps(record, sort_keys=True) + "\n").encode("ascii"))
+        self.assertEqual((record["record"], record["errorClass"], record["code"],
+                          record["exitCode"]), ("error", error_class, code, 2))
+        self.assertIn(code, getattr(self.catalog, CLI_ERROR_CODES[error_class]))
+        for name, value in fields.items():
+            self.assertEqual(record[name], value, name)
+        return record
+
+    def test_public_root_reports_partial_data_and_strict_mode_stays_nonzero(self):
+        root = self.make_root()
+        expected = self.expected(root)
+        default = self.record(self.run_cli(root, "--root", root), 0)
+        strict = self.record(self.run_cli(root, "--root", root, "--require-complete"), 1)
+        toc = (root / "Nexus.toc").read_bytes()
+        for record in (default, strict):
+            self.assertEqual(record["report"], expected)
+            self.assertEqual(record["notice"], CATALOG_NOTICE)
+            self.assertEqual((record["status"], record["fullValidation"]),
+                             (SCHEMA_STATUS, "IMPLEMENTED_DRAFT"))
+            self.assertEqual((record["toc"]["source"], record["toc"]["sha256"],
+                              record["toc"]["byteLength"]),
+                             ("Nexus.toc", hashlib.sha256(toc).hexdigest(), len(toc)))
+            self.assertEqual([row["path"] for row in record["toc"]["requiredOrder"]],
+                             list(CLI_TOC_ORDER))
+            for row, name in zip(record["report"]["inputs"], CLI_INPUTS):
+                data = self.raw[name]
+                self.assertEqual((row["source"], row["sha256"], row["byteLength"]),
+                                 (name, hashlib.sha256(data).hexdigest(), len(data)))
+            for path, value in walk(record):
+                self.assertNotIsInstance(value, (bool, float), path)
+        self.assertEqual((default["requireComplete"], strict["requireComplete"]),
+                         ("not_requested", "requested"))
+        technical = default["technicalCatalog"]
+        missing = sum(row["counts"]["missing"] for row in expected["products"])
+        self.assertEqual((technical["validity"], technical["englishKeys"],
+                          technical["missingEntries"]),
+                         ("VALID", expected["denominator"]["englishKeys"], missing))
+        self.assertEqual(technical["entryPresence"],
+                         "PARTIAL" if missing else "EVERY_CURRENT_ENGLISH_KEY_PRESENT")
+        self.assertEqual([(row["productId"], row["counts"]) for row in technical["products"]],
+                         [(row["productId"], row["counts"]) for row in expected["products"]])
+        readiness = strict["externalReadiness"]
+        self.assertEqual(readiness, default["externalReadiness"])
+        self.assertEqual((readiness["state"], readiness["externalAcceptance"]),
+                         ("NOT_ESTABLISHED", "NOT_ATTESTED"))
+        self.assertEqual((readiness["reportCompletenessState"], readiness["reportReasonCount"]),
+                         (expected["completeness"]["state"],
+                          expected["completeness"]["reasonCount"]))
+        self.assertEqual(set(readiness["blockingReasonCodes"]),
+                         report_codes(expected) | {"external-acceptance-not-attested"})
+        self.assertEqual(readiness["blockingReasonCount"],
+                         expected["completeness"]["reasonCount"] + 1)
+        text = json.dumps(strict, sort_keys=True).lower()
+        for claim in ("release_ready", "releaseready", "release-ready", "100%"):
+            self.assertNotIn(claim, text)
+
+    def test_filled_known_entries_change_derived_counts_but_not_readiness(self):
+        packs = copy.deepcopy(CATALOG_CURRENT_PACKS)
+        for pack in packs.values():
+            pack["entries"].update(REPORT_FILL)
+        filled_packs = schema_packs_source(packs)
+        declarations = [report_declaration(pack_id, key, text)
+                        for pack_id, pack in packs.items()
+                        for key, text in sorted(pack["entries"].items())]
+        release = copy.deepcopy(self.release)
+        release["entryReview"]["declarations"] = declarations
+        roots = {
+            "current": self.make_root(),
+            "filled": self.make_root({"data/LocalizationPacks.lua": filled_packs}),
+            "declared": self.make_root({"data/LocalizationPacks.lua": filled_packs,
+                                        "docs/localization/RELEASE_LANGUAGES.json":
+                                            schema_json(release)}),
+        }
+        records = {}
+        for name, root in roots.items():
+            with self.subTest(name):
+                default = self.record(self.run_cli(root, "--root", root), 0)
+                strict = self.record(self.run_cli(root, "--root", root, "--require-complete"), 1)
+                expected = self.expected(root)
+                self.assertEqual((default["report"], strict["report"]), (expected, expected))
+                readiness = strict["externalReadiness"]
+                self.assertEqual(readiness, default["externalReadiness"])
+                self.assertEqual((readiness["state"], readiness["reportCompletenessState"]),
+                                 ("NOT_ESTABLISHED", "INCOMPLETE"))
+                self.assertLessEqual(REPORT_REMAINING_REASONS
+                                     | {"external-acceptance-not-attested"},
+                                     set(readiness["blockingReasonCodes"]))
+                records[name] = default
+        english_keys = sorted(CATALOG_CURRENT_ENGLISH)
+        current = {row["productId"]: row["counts"]
+                   for row in records["current"]["technicalCatalog"]["products"]}
+        filled = records["filled"]["technicalCatalog"]
+        self.assertEqual((filled["entryPresence"], filled["missingEntries"]),
+                         ("EVERY_CURRENT_ENGLISH_KEY_PRESENT", 0))
+        for row in filled["products"]:
+            before = current[row["productId"]]
+            self.assertEqual(row["entriesPresent"], len(english_keys))
+            self.assertEqual(row["counts"]["missing"], 0)
+            self.assertEqual(row["counts"]["draft_unreviewed"],
+                             before["draft_unreviewed"] + before["missing"])
+        for row in records["declared"]["technicalCatalog"]["products"]:
+            self.assertEqual(row["counts"]["translated_and_reviewed"], len(english_keys))
+        filled_codes = set(records["filled"]["externalReadiness"]["blockingReasonCodes"])
+        self.assertNotIn("entries-missing", filled_codes)
+        self.assertIn("entries-draft-unreviewed", filled_codes)
+        declared_codes = records["declared"]["externalReadiness"]["blockingReasonCodes"]
+        self.assertEqual([code for code in declared_codes if code.startswith("entries-")], [])
+        self.assertIn("review-gate-not-established", declared_codes)
+        self.assertEqual(records["declared"]["report"]["evidence"]["qualifiedDeclarations"],
+                         len(declarations))
+
+    def test_toc_order_duplicates_and_separator_aliases(self):
+        english, packs, localization = CLI_TOC_ORDER
+        back = cli_backslash
+        accepted = (
+            ("forward slashes", cli_toc(english, packs, localization)),
+            ("mixed separators, whitespace and absent unrelated modules",
+             cli_toc("core/UserText.lua", "  " + back(english), packs + " \t",
+                     back(localization), "ui/Missing.lua")),
+            ("CRLF line ends", cli_toc(*[back(path) for path in CLI_TOC_ORDER], newline="\r\n")),
+            ("byte order mark", b"\xef\xbb\xbf" + cli_toc(english, packs, localization)),
+        )
+        for label, toc in accepted:
+            with self.subTest(label):
+                root = self.make_root({"Nexus.toc": toc})
+                record = self.record(self.run_cli(root, "--root", root), 0)
+                self.assertEqual(record["toc"]["sha256"], hashlib.sha256(toc).hexdigest())
+                self.assertEqual(record["report"], self.expected(root))
+        rejected = (
+            ("packs before English", (packs, english, localization), "toc-order", packs),
+            ("Localization before packs", (english, localization, packs), "toc-order",
+             localization),
+            ("Localization first", (localization, english, packs), "toc-order", localization),
+            ("English missing", (packs, localization), "toc-missing-entry", english),
+            ("English only in a comment", ("# " + english, packs, localization),
+             "toc-missing-entry", english),
+            ("English only in metadata", ("## X-Load: " + english, packs, localization),
+             "toc-missing-entry", english),
+            ("Localization missing", (english, packs), "toc-missing-entry", localization),
+            ("English twice", (english, english, packs, localization), "toc-duplicate-entry",
+             english),
+            ("slash and backslash aliases", (back(english), packs, localization, english),
+             "toc-duplicate-entry", english),
+            ("doubled separator alias",
+             (english, packs, localization, "data//LocalizationEnglish.lua"),
+             "toc-duplicate-entry", english),
+            ("mixed separator alias",
+             (english, back(packs), localization, "data" + chr(92) + "/LocalizationPacks.lua"),
+             "toc-duplicate-entry", packs),
+            ("Localization twice", (english, packs, localization, back(localization)),
+             "toc-duplicate-entry", localization),
+        )
+        for label, entries, code, subject in rejected:
+            with self.subTest(label):
+                root = self.make_root({"Nexus.toc": cli_toc(*entries)})
+                self.assert_error(self.run_cli(root, "--root", root), "CatalogCliError", code,
+                                  subject=subject)
+        root = self.make_root({"Nexus.toc": b"\xff" + CLI_TOC})
+        self.assert_error(self.run_cli(root, "--root", root), "CatalogCliError", "toc-not-utf8",
+                          subject="Nexus.toc")
+
+    def test_missing_malformed_and_wrong_kind_inputs_get_stable_codes(self):
+        for name in CLI_INPUTS:
+            with self.subTest(missing=name):
+                root = self.make_root({name: None})
+                self.assert_error(self.run_cli(root, "--root", root), "CatalogCliError",
+                                  "input-missing", subject=name)
+            with self.subTest(directory=name):
+                root = self.make_root({name: None})
+                root.joinpath(*name.split("/")).mkdir(parents=True)
+                self.assert_error(self.run_cli(root, "--root", root), "CatalogCliError",
+                                  "input-not-file", subject=name)
+        release = copy.deepcopy(self.release)
+        release["entryReview"]["declarations"] = [report_declaration(
+            "frFR", REPORT_SAVE, "Synthetic fixture text that is not the entry")]
+        packs = copy.deepcopy(CATALOG_CURRENT_PACKS)
+        packs["deDE"]["entries"][REPORT_LIST] = "a|b"
+        cases = (
+            ("data/LocalizationEnglish.lua", b"", "CatalogSyntaxError", "bad-bootstrap"),
+            ("data/LocalizationPacks.lua", self.raw["data/LocalizationPacks.lua"]
+             + b"return Nexus\n", "CatalogSyntaxError", "trailing-content"),
+            ("data/LocalizationPacks.lua", schema_packs_source(packs), "CatalogValidationError",
+             "invalid-text"),
+            ("docs/localization/KEY_CONTEXT.json",
+             self.raw["docs/localization/KEY_CONTEXT.json"].rstrip()[:-1],
+             "CatalogValidationError", "json-invalid"),
+            ("docs/localization/RELEASE_LANGUAGES.json", b"[]", "CatalogValidationError",
+             "json-top-level"),
+            ("docs/localization/RELEASE_LANGUAGES.json", schema_json(release),
+             "CatalogEvidenceError", "evidence-stale"),
+        )
+        for name, data, error_class, code in cases:
+            with self.subTest(name=name, code=code):
+                root = self.make_root({name: data})
+                self.assert_error(self.run_cli(root, "--root", root), error_class, code)
+
+    def test_unreadable_input_is_a_stable_error(self):
+        name = "docs/localization/RELEASE_LANGUAGES.json"
+        root = self.make_root()
+        target = root.joinpath(*name.split("/"))
+        data = target.read_bytes()
+        cache = catalog_pycache_names()
+        if os.name == "nt":
+            import msvcrt
+            with open(str(target), "rb") as handle:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, len(data))
+                try:
+                    run = cli_run("--root", root, cwd=root)
+                finally:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, len(data))
+        else:
+            target.chmod(0)
+            try:
+                if os.access(str(target), os.R_OK):
+                    self.skipTest("limitation: this account can still read a mode-000 file, so "
+                                  "the unreadable-input control is not established here")
+                run = cli_run("--root", root, cwd=root)
+            finally:
+                target.chmod(0o644)
+        self.assertEqual(catalog_pycache_names(), cache)
+        self.assert_error(run, "CatalogCliError", "input-unreadable", subject=name)
+        self.assertEqual(target.read_bytes(), data)
+
+    def test_symlink_or_junction_escape_is_refused(self):
+        data = {name: self.raw[name] for name in CLI_INPUTS[:2]}
+        root = self.make_root({name: None for name in data})
+        outside, inside = self.temp_dir(), root / "inside-data"
+        inside.mkdir()
+        for directory in (outside, inside):
+            for name, content in data.items():
+                directory.joinpath(Path(name).name).write_bytes(content)
+        link, cache = root / "data", catalog_pycache_names()
+        expected = self.catalog.catalog_report(*[self.raw[name] for name in CLI_INPUTS[:4]])
+        for target, escapes in ((outside, True), (inside, False)):
+            with self.subTest(escapes=escapes):
+                kind = cli_link_directory(self, link, target)
+                try:
+                    run = cli_run("--root", root, cwd=root)
+                finally:
+                    cli_remove_link(link, root, kind)
+                if escapes:
+                    self.assert_error(run, "CatalogCliError", "input-escape",
+                                      subject=CLI_INPUTS[0])
+                else:
+                    self.assertEqual(self.record(run, 0)["report"], expected)
+        self.assertFalse(os.path.lexists(str(link)))
+        self.assertEqual(catalog_pycache_names(), cache)
+        for directory in (outside, inside):
+            for name, content in data.items():
+                self.assertEqual(directory.joinpath(Path(name).name).read_bytes(), content)
+
+    def test_root_python_and_lua_code_stay_data_and_never_run(self):
+        markers = self.temp_dir()
+        marker = markers / "executed.marker"
+        python = ("open(%r, 'w').close()\n" % str(marker)).encode("utf-8")
+        lua = ('io.open("%s", "w"):close() os.execute("exit")' % marker.as_posix()).encode("utf-8")
+        english = b"-- " + lua + b"\n" + self.raw["data/LocalizationEnglish.lua"]
+        overrides = {"data/LocalizationEnglish.lua": english, "core/Localization.lua": lua + b"\n"}
+        for name in ("json.py", "pathlib.py", "types.py", "hashlib.py", "re.py",
+                     "sitecustomize.py", "usercustomize.py", "l10n_inventory.py",
+                     "tools/l10n_inventory.py", "tools/l10n_catalog.py", "tools/__init__.py",
+                     "__main__.py"):
+            overrides[name] = python
+        root = self.make_root(overrides)
+        record = self.record(self.run_cli(root, "--root", root), 0)
+        self.assertEqual(record["report"], self.expected(root))
+        self.assertEqual(record["report"]["inputs"][0]["sha256"],
+                         hashlib.sha256(english).hexdigest())
+        self.assertFalse(marker.exists())
+        self.assertEqual(list(markers.iterdir()), [])
+
+    def test_repeated_runs_are_identical_ascii_and_bind_no_root_path(self):
+        first, second = self.make_root(), self.make_root()
+        runs = [self.run_cli(root, "--root", root) for root in (first, second, first)]
+        runs.append(self.run_cli(first, "--root=" + str(first / "docs" / ".."), cwd=second))
+        self.assertEqual({run.stdout for run in runs}, {runs[0].stdout})
+        record = self.record(runs[0], 0)
+        text = runs[0].stdout.decode("ascii")
+        for root in (first, second):
+            self.assertNotIn(root.name, text)
+        self.assertEqual(record["report"], self.expected(first))
+        toc = (first / "Nexus.toc").read_bytes()
+        self.assertEqual(record["toc"]["sha256"], hashlib.sha256(toc).hexdigest())
+        self.assertEqual([row["sha256"] for row in record["report"]["inputs"]],
+                         [hashlib.sha256(self.raw[name]).hexdigest() for name in CLI_INPUTS[:4]])
+
+    def test_default_root_is_the_tool_repository_not_the_working_directory(self):
+        packs = copy.deepcopy(CATALOG_CURRENT_PACKS)
+        for pack in packs.values():
+            pack["entries"].update(REPORT_FILL)
+        elsewhere = self.make_root({"data/LocalizationPacks.lua": schema_packs_source(packs)})
+        before = [(ROOT / name).read_bytes() for name in CLI_INPUTS]
+        default = self.run_cli(elsewhere, cwd=elsewhere)
+        explicit = self.run_cli(elsewhere, "--root", ROOT, cwd=elsewhere)
+        relative = self.run_cli(elsewhere, "--root", ".", cwd=ROOT)
+        own = self.run_cli(elsewhere, "--root", ".", cwd=elsewhere)
+        self.assertEqual([(ROOT / name).read_bytes() for name in CLI_INPUTS], before)
+        record = self.record(default, 0)
+        self.assertEqual(default.stdout, explicit.stdout)
+        self.assertEqual(default.stdout, relative.stdout)
+        self.assertEqual(record["report"], self.catalog.catalog_report(*before[:4]))
+        self.assertEqual(record["toc"]["sha256"], hashlib.sha256(before[4]).hexdigest())
+        self.assertEqual(self.record(own, 0)["report"], self.expected(elsewhere))
+        self.assertNotEqual(self.record(own, 0)["report"], record["report"])
+
+    def test_argument_and_root_errors_are_stable_records(self):
+        root = self.make_root()
+        cases = (
+            (("--verbose",), "argument-unknown", "argument[0]"),
+            (("-h",), "argument-unknown", "argument[0]"),
+            (("--root", root, "extra"), "argument-unknown", "argument[2]"),
+            (("--root",), "argument-missing-value", "--root"),
+            (("--root=",), "argument-missing-value", "--root"),
+            (("--root", root, "--root", root), "argument-duplicate", "--root"),
+            (("--root", root, "--root=" + str(root)), "argument-duplicate", "--root"),
+            (("--require-complete", "--require-complete"), "argument-duplicate",
+             "--require-complete"),
+            (("--root", root / "absent"), "root-missing", "root"),
+            (("--root", root / "Nexus.toc"), "root-not-directory", "root"),
+        )
+        for args, code, subject in cases:
+            with self.subTest(args=[str(arg) for arg in args]):
+                self.assert_error(self.run_cli(root, *args), "CatalogCliError", code,
+                                  subject=subject)
 
 
 if __name__ == "__main__":

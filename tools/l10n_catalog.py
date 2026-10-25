@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Syntax foundation, pure schema API and pure coverage report API for the Nexus
-localization data (#147).
+"""Syntax foundation, pure schema API, pure coverage report API and read-only
+report command line for the Nexus localization data (#147).
 
-Status: COVERAGE_API_ONLY_REPORT_CLI_PENDING. parse_english and parse_packs
+Status: IMPLEMENTED_DRAFT_CI_REVIEW_PENDING. parse_english and parse_packs
 below check syntax only, and a successful parse alone does not make a catalog
 valid. validate_catalog_data, appended after them, is a pure in-memory schema
 API: from the exact bytes of the English base, the packs file, KEY_CONTEXT.json
@@ -19,10 +19,14 @@ actual English keys, English keys without a family and concrete completeness
 reasons. Invalid entry-review declarations or family metadata raise
 CatalogEvidenceError (stable .code). A structurally qualified review
 declaration is not evidence of fluent competence, contributor rights or native
-truth. TOC order, the filesystem --root command line (B3b), required-CI
-registration, independent review and the human, native and UI gates are still
-pending, so full validation is NOT_IMPLEMENTED. Neither schema validity nor a
-report claims that a catalog is reviewed, complete or displayable.
+truth. main(), appended last, is the bounded read-only confined-root command
+line (B3b) around catalog_report. It adds only root, input and Nexus.toc
+load-order checks (CatalogCliError, stable .code) and passes the exact input
+bytes to catalog_report unchanged. Full validation is an implemented draft
+(IMPLEMENTED_DRAFT): required-CI registration, independent review and the
+human, native and UI gates are still pending. No schema validity, report or
+command-line record claims that a catalog is reviewed, complete or
+displayable.
 
 Public seam:
 
@@ -96,9 +100,29 @@ Error codes (CODES):
     unknown-field        a pack field other than name and entries
     missing-field        a pack without name or without entries
 
-Run directly, this file is not a validator. It ignores its arguments, writes one
-ASCII JSON notice with status PARSER_ONLY_FULL_VALIDATION_PENDING on stderr and
-exits 2. Python 3.9+, standard library only.
+Run directly, this file is the read-only report command line:
+
+    python tools/l10n_catalog.py [--root DIR] [--require-complete]
+
+DIR defaults to the repository that contains this tool, never the current
+directory. Inside the resolved root it reads exactly
+data/LocalizationEnglish.lua, data/LocalizationPacks.lua,
+docs/localization/KEY_CONTEXT.json, docs/localization/RELEASE_LANGUAGES.json
+and Nexus.toc as bytes, each of which must resolve, through any symlink or
+junction, to a regular readable file inside the root. Nexus.toc is read as
+UTF-8 data: slash and backslash separators are treated alike, blank, comment
+and metadata lines are ignored, and data/LocalizationEnglish.lua,
+data/LocalizationPacks.lua and core/Localization.lua must each appear exactly
+once, in that order; no other TOC module is opened. The four catalog inputs
+then go unchanged to catalog_report. A valid report is one ASCII JSON record
+on stdout with the TOC hash, technical dictionary counts kept apart from
+external readiness, and exit status 0, also for partial data. With
+--require-complete the exit status is 1 while external readiness is not
+established; at this stage it never is, because no trusted external
+acceptance-record contract exists. An argument, root, input, TOC, syntax,
+schema or evidence failure writes one ASCII JSON error record with a stable
+code on stderr and exits 2. Nothing is written, imported from the root,
+executed, fetched or read from Git. Python 3.9+, standard library only.
 """
 from __future__ import annotations
 
@@ -108,7 +132,7 @@ import sys
 import types
 from collections import namedtuple
 
-STATUS = 'COVERAGE_API_ONLY_REPORT_CLI_PENDING'
+STATUS = 'IMPLEMENTED_DRAFT_CI_REVIEW_PENDING'
 CODES = (
     'not-utf8', 'value-not-utf8', 'unfinished-string', 'unfinished-comment',
     'invalid-escape', 'nested-long-bracket', 'bad-bootstrap', 'bad-assignment',
@@ -119,8 +143,8 @@ NOTICE = {
     'record': 'notice',
     'tool': 'tools/l10n_catalog.py',
     'status': STATUS,
-    'fullValidation': 'NOT_IMPLEMENTED',
-    'message': 'coverage report API only; filesystem and report CLI are pending',
+    'fullValidation': 'IMPLEMENTED_DRAFT',
+    'message': 'catalog validator and report CLI implemented; CI registration and independent review pending',
 }
 
 _INVENTORY = pathlib.Path(__file__).resolve().parent / 'l10n_inventory.py'
@@ -764,8 +788,8 @@ def validate_catalog_data(english_source: bytes, packs_source: bytes,
 # window-family and surface metadata. Any failure raises CatalogEvidenceError
 # (stable .code). Only after these checks does it derive the report. It reads
 # and writes no file, fetches no reference, renders or formats no text and
-# runs no Lua. The confined-root command line around this API is the separate
-# task B3b. main() below is unchanged.
+# runs no Lua. The confined-root command line main() below (B3b) reads the
+# exact input bytes and calls this API unchanged.
 
 import hashlib
 import re
@@ -1225,12 +1249,254 @@ def catalog_report(english_source: bytes, packs_source: bytes, key_context_json:
     }
 
 
-def main() -> int:
-    """Direct execution: write the pending notice on stderr and return exit
-    status 2. This is not the validator's command line, and any arguments are
-    ignored."""
-    sys.stderr.write(json.dumps(NOTICE, sort_keys=True) + '\n')
-    return 2
+# ---------------------------------------------------------------------------
+# B3b (Refs #147): the bounded read-only command line around catalog_report.
+# main() resolves one root, reads exactly the five fixed files of _CLI_INPUTS
+# as bytes, checks only the presence and order of the three localization
+# lines in Nexus.toc and passes the four catalog inputs, unchanged, to
+# catalog_report above. It writes one ASCII JSON record and no file, imports
+# nothing from the root, runs no Lua, fetches nothing and reads no Git state,
+# so no metadata source pin is reported as a current revision.
+
+CLI_SCHEMA = 'nexus.l10n.catalog_cli_record'
+CLI_SCHEMA_VERSION = 1
+CLI_CODES = (
+    'argument-unknown', 'argument-missing-value', 'argument-duplicate',
+    'root-missing', 'root-not-directory', 'root-unreadable',
+    'input-missing', 'input-escape', 'input-not-file', 'input-unreadable',
+    'toc-not-utf8', 'toc-missing-entry', 'toc-duplicate-entry', 'toc-order',
+)
+
+_EXIT_REPORT, _EXIT_NOT_ESTABLISHED, _EXIT_ERROR = 0, 1, 2
+_TOC_SOURCE = 'Nexus.toc'
+_CLI_INPUTS = tuple(source for _, source in _REPORT_INPUTS) + (_TOC_SOURCE,)
+_TOC_ORDER = (_ENGLISH_SOURCE, _PACKS_SOURCE, _AUTHORITY)
+_TOC_LINE_BREAK = re.compile('\r\n|\r|\n')
+_TOC_SEPARATORS = re.compile(r'[/\\]+')
+_DEFAULT_ROOT = _INVENTORY.parent.parent
+_INPUT_BINDING = ('exact bytes read once from the resolved root; no Git revision is read, '
+                  'and metadata source pins stay historical')
+_TOC_SCOPE = ('only the presence and order of these entries are checked; no other TOC module '
+              'is opened or required')
+_TECHNICAL_SCOPE = ('technical dictionary data only: syntax, schema and entry categories over '
+                    'the current English keys; not translation quality, review, full UI, '
+                    'native or external acceptance')
+_READINESS_RULE = ('external readiness is separate from technical validity: every remaining '
+                   'report reason blocks it, and no trusted external acceptance-record '
+                   'contract exists, so a qualified entry declaration is not fluent or native '
+                   'truth and nothing here attests acceptance')
+
+
+class CatalogCliError(ValueError):
+    """Raised by the command line for an argument, root, input or Nexus.toc
+    failure. It carries a stable code (one of CLI_CODES), the argument, input
+    or TOC entry concerned and, for a TOC entry, its 1-based line number. The
+    text of an unknown argument is never echoed."""
+
+    def __init__(self, code: str, subject: str = None, line: int = None):
+        detail = '' if subject is None else ' at ' + subject
+        if line is not None:
+            detail += ', line %d' % line
+        super().__init__(code + detail)
+        self.code, self.subject, self.line = code, subject, line
+
+
+_CLI_FAILURES = (CatalogCliError, CatalogSyntaxError, CatalogValidationError,
+                 CatalogEvidenceError)
+
+
+def _cli_arguments(arguments):
+    """Return (root or None, require_complete). Only --root DIR, --root=DIR
+    and --require-complete are accepted, each at most once."""
+    root, require_complete, seen, index = None, False, set(), 0
+    while index < len(arguments):
+        argument, position = arguments[index], index
+        index += 1
+        if argument == '--require-complete':
+            name, value = argument, None
+        elif argument == '--root':
+            if index >= len(arguments):
+                raise CatalogCliError('argument-missing-value', argument)
+            name, value = argument, arguments[index]
+            index += 1
+        elif argument.startswith('--root='):
+            name, value = '--root', argument[len('--root='):]
+        else:
+            raise CatalogCliError('argument-unknown', 'argument[%d]' % position)
+        if name in seen:
+            raise CatalogCliError('argument-duplicate', name)
+        seen.add(name)
+        if value is None:
+            require_complete = True
+        elif value == '':
+            raise CatalogCliError('argument-missing-value', name)
+        else:
+            root = value
+    return root, require_complete
+
+
+def _cli_root(root):
+    """Resolve the root, through any symlink or junction, to an existing
+    directory."""
+    try:
+        resolved = pathlib.Path(root).resolve(strict=True)
+    except (FileNotFoundError, NotADirectoryError):
+        raise CatalogCliError('root-missing', 'root') from None
+    except (OSError, RuntimeError, ValueError):
+        raise CatalogCliError('root-unreadable', 'root') from None
+    if not resolved.is_dir():
+        raise CatalogCliError('root-not-directory', 'root')
+    return resolved
+
+
+def _cli_read(root, source):
+    """Return the exact bytes of one fixed input. It must resolve, through any
+    symlink or junction, to a regular readable file inside the resolved
+    root."""
+    candidate = root.joinpath(*source.split('/'))
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (FileNotFoundError, NotADirectoryError):
+        raise CatalogCliError('input-missing', source) from None
+    except (OSError, RuntimeError, ValueError):
+        raise CatalogCliError('input-unreadable', source) from None
+    if root not in resolved.parents:
+        raise CatalogCliError('input-escape', source)
+    if not resolved.is_file():
+        raise CatalogCliError('input-not-file', source)
+    try:
+        return resolved.read_bytes()
+    except OSError:
+        raise CatalogCliError('input-unreadable', source) from None
+
+
+def _cli_toc(data):
+    """Check Nexus.toc as UTF-8 data: after blank, comment and metadata lines
+    are skipped and slash or backslash runs become one /, each entry of
+    _TOC_ORDER must appear exactly once and in that order. Other lines are
+    neither judged nor opened. Returns the entries with their line numbers."""
+    try:
+        text = data.decode('utf-8')
+    except UnicodeDecodeError:
+        raise CatalogCliError('toc-not-utf8', _TOC_SOURCE) from None
+    if text.startswith('\ufeff'):
+        text = text[1:]
+    lines = {path: [] for path in _TOC_ORDER}
+    for number, line in enumerate(_TOC_LINE_BREAK.split(text), 1):
+        entry = line.strip()
+        if entry and not entry.startswith('#'):
+            entry = _TOC_SEPARATORS.sub('/', entry)
+            if entry in lines:
+                lines[entry].append(number)
+    found = []
+    for path in _TOC_ORDER:
+        numbers = lines[path]
+        if not numbers:
+            raise CatalogCliError('toc-missing-entry', path)
+        if len(numbers) > 1:
+            raise CatalogCliError('toc-duplicate-entry', path, numbers[1])
+        if found and numbers[0] < found[-1]['line']:
+            raise CatalogCliError('toc-order', path, numbers[0])
+        found.append({'path': path, 'line': numbers[0]})
+    return found
+
+
+def _cli_technical(report):
+    """Technical dictionary validity and entry counts, kept apart from
+    external readiness."""
+    rows = report['products']
+    missing = sum(row['counts']['missing'] for row in rows)
+    return {
+        'validity': 'VALID',
+        'englishKeys': report['denominator']['englishKeys'],
+        'missingEntries': missing,
+        'entryPresence': 'PARTIAL' if missing else 'EVERY_CURRENT_ENGLISH_KEY_PRESENT',
+        'products': [{'productId': row['productId'], 'denominator': row['denominator'],
+                      'entriesPresent': row['entriesPresent'], 'counts': row['counts']}
+                     for row in rows],
+        'scope': _TECHNICAL_SCOPE,
+    }
+
+
+def _cli_readiness(report):
+    """External readiness, kept apart from technical validity. Every report
+    reason blocks it, and so does the absence of any trusted external
+    acceptance-record contract. Returns the blocking reasons and the summary."""
+    completeness = report['completeness']
+    blocking = list(completeness['reasons'])
+    blocking.append(_reason('external-acceptance-not-attested', 'external acceptance gate',
+                            'no trusted external acceptance-record contract exists'))
+    return blocking, {
+        'state': 'NOT_ESTABLISHED',
+        'externalAcceptance': 'NOT_ATTESTED',
+        'reportCompletenessState': completeness['state'],
+        'reportReasonCount': completeness['reasonCount'],
+        'blockingReasonCount': len(blocking),
+        'blockingReasonCodes': sorted({reason['code'] for reason in blocking}),
+        'externalAcceptanceReason': blocking[-1],
+        'rule': _READINESS_RULE,
+    }
+
+
+def _cli_error(error):
+    """One error record with the stable class and code of error."""
+    record = {'schema': CLI_SCHEMA, 'schemaVersion': CLI_SCHEMA_VERSION, 'record': 'error',
+              'tool': _TOOL_PATH, 'status': STATUS, 'errorClass': type(error).__name__,
+              'code': error.code, 'exitCode': _EXIT_ERROR}
+    for field in ('subject', 'path', 'key', 'line', 'column'):
+        value = getattr(error, field, None)
+        if value is not None:
+            record[field] = value if type(value) in (str, int) else repr(value)
+    return record
+
+
+def _cli_emit(stream, record):
+    """Write one record as one line of sorted ASCII JSON, as exact bytes."""
+    stream.buffer.write(json.dumps(record, sort_keys=True).encode('ascii') + b'\n')
+    stream.buffer.flush()
+
+
+def main(argv=None) -> int:
+    """The read-only report command line described in the module documentation:
+
+        python tools/l10n_catalog.py [--root DIR] [--require-complete]
+
+    Exactly one ASCII JSON record is written: a report on stdout or an error
+    on stderr. The return value is 0 for a valid report, also for partial
+    data; 1 with --require-complete while external readiness is not
+    established; 2 for an argument, root, input, TOC, syntax, schema or
+    evidence error."""
+    arguments = sys.argv[1:] if argv is None else list(argv)
+    try:
+        root, require_complete = _cli_arguments(arguments)
+        resolved = _cli_root(_DEFAULT_ROOT if root is None else root)
+        data = [_cli_read(resolved, source) for source in _CLI_INPUTS]
+        toc_entries = _cli_toc(data[-1])
+        report = catalog_report(*data[:-1])
+    except _CLI_FAILURES as error:
+        _cli_emit(sys.stderr, _cli_error(error))
+        return _EXIT_ERROR
+    blocking, readiness = _cli_readiness(report)
+    exit_code = _EXIT_NOT_ESTABLISHED if require_complete and blocking else _EXIT_REPORT
+    _cli_emit(sys.stdout, {
+        'schema': CLI_SCHEMA,
+        'schemaVersion': CLI_SCHEMA_VERSION,
+        'record': 'report',
+        'tool': _TOOL_PATH,
+        'status': STATUS,
+        'fullValidation': NOTICE['fullValidation'],
+        'notice': dict(NOTICE),
+        'requireComplete': 'requested' if require_complete else 'not_requested',
+        'exitCode': exit_code,
+        'inputBinding': _INPUT_BINDING,
+        'toc': {'name': 'toc', 'source': _TOC_SOURCE,
+                'sha256': hashlib.sha256(data[-1]).hexdigest(), 'byteLength': len(data[-1]),
+                'requiredOrder': toc_entries, 'scope': _TOC_SCOPE},
+        'technicalCatalog': _cli_technical(report),
+        'externalReadiness': readiness,
+        'report': report,
+    })
+    return exit_code
 
 
 if __name__ == '__main__':
