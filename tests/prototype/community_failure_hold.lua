@@ -1881,6 +1881,12 @@ for _,faulted in ipairs({false,true}) do
   local shareVisible,shareText=P.ShareAction(detail)
   if not C.setup(shareVisible,'real saved-mirror detail Share action is visible',shareText) then return end
   local selected=P.Witness(CAT.Get(mirror.id))
+  -- PR135: Copy into Editor is draft-only; the own saved mirror shares only
+  -- through its separate Share Build... action and the actual confirmation.
+  local copyShown=detail.lockBtn~=nil and detail.lockBtn:IsShown()
+   or #V.Frames(H,function(f) return f:GetParent()==detail and f:IsShown()
+    and V.Plain(f:GetText())=='Copy into Editor' end)>0
+  C.guard(not copyShown,'own saved mirror hides the draft-only Copy action')
   local commit=CAT.CommitMaintenance;local tickets={}
   CAT.CommitMaintenance=function(...)
    local ok,why,ticket=commit(...);if type(ticket)=='table' then tickets[#tickets+1]=ticket end
@@ -1890,12 +1896,18 @@ for _,faulted in ipairs({false,true}) do
   if faulted then frame._classDropBtn.SetText=function()
    faults[#faults+1]={at=H.now,stack=debug.traceback('',2)};error('DETAIL_FINISH_VIEW_HOST_FAULT',0)
   end end
+  local prior=CAT.Get(mirror.id);local priorPublished=prior and prior.publishedBuildId
+  local actionsBefore,sentBefore=#H.actions,#H.sent
   local shown,showError=pcall(function() detail.shareBtn:Click() end)
   local approval=P.slot.data
   local approved,approvalDetail=P.Approval(detail,mirror.id,selected,CAT.Get(mirror.id))
   if not C.setup(shown and #tickets==0 and approved,
    'real detail Share click shows its registered confirmation for the unchanged saved mirror',
    showError or approvalDetail) then return end
+  local unconfirmed=CAT.Get(mirror.id)
+  if not C.guard(#tickets==0 and unconfirmed and unconfirmed.publishedBuildId==priorPublished
+   and detail.shareBtn:GetText()=='Share Build...' and #H.actions==actionsBefore and #H.sent==sentBefore,
+   'open Share confirmation creates no commit ticket, publication or send before Accept',#tickets) then return end
   local clicked,err=P.Accept('NEXUS_SHARE_SAVED_BUILD')
   local retired,trail=P.Retired(detail,approval)
   C.setup(retired,'registered Share OnAccept runs once before raw Hide retires its approval',trail)
@@ -3448,7 +3460,8 @@ C.scenario('opus-final-detail-finish-'..mode,SharePopupScenario(function(P)
  local selected=P.Witness(Nexus.BuildCatalog.Get(mirror.id))
  local controller=Up(Up(CB.PublishImportedBuild,'ControllerInstance'),'EnsureCommunityController')()
  local publish=controller.PublishImportedBuild;local attempts=0;local callback;local ticket={state='pending'}
- -- Synthetic refusal boundary: the public detail handler and refresh are real;
+ -- Synthetic refusal boundary: the public detail Share Build... click, its actual
+ -- NEXUS_SHARE_SAVED_BUILD confirmation Accept and the refresh are real;
  -- the controller cannot enqueue a catalog mutation, share or transport action.
  controller.PublishImportedBuild=function(id,finish)
   attempts=attempts+1;callback=finish
@@ -3471,18 +3484,20 @@ C.scenario('opus-final-detail-finish-'..mode,SharePopupScenario(function(P)
  assert(C.setup(shown and attempts==0 and approved,
   'public detail Share click shows its registered confirmation for the unchanged saved mirror',
   showError or approvalDetail))
- local clicked,clickError=P.Accept('NEXUS_SHARE_SAVED_BUILD')
+ C.guard(attempts==0 and detail.shareBtn:GetText()=='Share Build...' and #H.actions==actions and #H.sent==sent,
+  'open Share confirmation reaches no publisher, game or transport action before Accept',attempts)
+ local accepted,acceptError=P.Accept('NEXUS_SHARE_SAVED_BUILD')
  local retired,trail=P.Retired(detail,approval)
  C.setup(retired,'registered Share OnAccept runs once before raw Hide retires its approval',trail)
  if asynchronous then
-  assert(C.setup(clicked and attempts==1 and callback and detail.shareBtn:GetText()=='Sharing...',
-   'public detail click retains the synthetic pending ticket',clickError))
+  assert(C.setup(accepted and attempts==1 and callback and detail.shareBtn:GetText()=='Sharing...',
+   'public detail click retains the synthetic pending ticket',acceptError))
   callback(false,'Synthetic asynchronous refusal',ticket)
   callback(false,'Duplicate terminal refusal',ticket)
   C.guard(calls==1 and CB.VirtualStats().lastDataError==message,
    'ticket completion and duplicate notification respect the existing view hold')
  else
-  C.setup(clicked and attempts==1,'public detail click reaches synchronous refusal without throwing',clickError)
+  C.setup(accepted and attempts==1,'public Share confirmation reaches synchronous refusal without throwing',acceptError)
   C.expect(calls==2 and (persistent and CB.VirtualStats().lastDataError==message
    and CB.VirtualStats().dataFailures==2 or not persistent and CB.VirtualStats().lastDataError==nil),
    'synchronous explicit Finish immediately attempts a contained refresh during hold',calls)
