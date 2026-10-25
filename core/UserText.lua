@@ -192,11 +192,12 @@ local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true,
 -- Compact alternatives (DestinationFields only). Display metadata: the value
 -- and tooltip stay the authoritative disclosure and grant no assignment.
 -- compact is a complete shorter value (a bare name stays whole); the state
--- cell's minimum is its shortest atomic label, for a cell too narrow for
--- compact. Both are chosen from the descriptor codes, never cut from or
--- parsed out of the worded value, and a state label is shown whole. A
--- Wishlist meaning word precedes its name, so a shortened name never reads
--- as assigned; only an assigned Wishlist shows its name alone.
+-- and Wishlist cells' minimum is their shortest atomic alternative, for a
+-- cell too narrow for compact. Both are chosen from the descriptor codes,
+-- never cut from or parsed out of the worded value, and a state label is
+-- shown whole. A Wishlist meaning word precedes its name, so a shortened name
+-- never reads as assigned; only an assigned Wishlist shows its name alone.
+-- A Wishlist minimum is that assigned name, else its meaning marker alone.
 -- Compressed markers (each disclosed in full by the tooltip):
 --   "?"        not known or not confirmed (never unassigned, first-run or active)
 --   "#2 Name"  Saved Build slot 2, then its name
@@ -205,7 +206,9 @@ local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true,
 --   "Refused"  the Saved Build holds no Echoes, so any assignment is refused
 --   "1st"      first-run target (no Saved Build in use)
 --   "Wait"     the saved assignment is being restored
---   "Capt."    shown as captured earlier; never the current state or assignment
+--   "C:"       a captured state minimum: "C:" then that state's own marker
+--              ("C:On", "C:Off", "C:?", ...), so each state stays distinct;
+--              being captured is not evidence of the current assignment
 local SAVED_BUILD_STATE_COMPACT = {
     unavailable = {compact = "Unavailable", minimum = "N/A"},
     empty = {compact = "Empty", minimum = "Empty"},
@@ -220,6 +223,11 @@ local DESTINATION_COMPACT = {
     unknown = {build = "?", compact = "Not loaded", minimum = "?"},
     unconfirmed = {build = "?", compact = "Unconfirmed", minimum = "?"},
     none = {build = "?", compact = "None", minimum = "None"},
+}
+-- The minimum marker of a stated Wishlist assignment state; an assigned
+-- Wishlist with a name shows that name instead (see DestinationFields).
+local WISHLIST_MINIMUM = {
+    assigned = "Assigned", unassigned = "None", unavailable = "N/A", restoring = "Wait",
 }
 -- A stated Wishlist assignment state in compact words.
 local function WishlistCompact(wishlist, state)
@@ -335,8 +343,9 @@ end
 -- "||"). A later fitting step shows it as it is, or shortens it only at a
 -- UTF-8 character boundary that does not split an escaped pipe pair; it
 -- never sanitizes or escapes it again, and the tooltip keeps the whole text.
--- Each record also has compact, a complete shorter value, and the state
--- record minimum, its shortest atomic label (see the compact markers above).
+-- Each record also has compact, a complete shorter value, and the state and
+-- Wishlist records have minimum, their shortest atomic alternative (see the
+-- compact markers above).
 function T.DestinationFields(d)
     d = type(d) == "table" and d or {}
     local p = DestinationParts(d)
@@ -365,26 +374,35 @@ function T.DestinationFields(d)
     end
     local noAssignment = p.kind == "savedBuild" and d.empty and true or false
     local stated = WISHLIST_STATES[d.wishlistState] == true
-    local wishlist, wishlistCompact
+    -- minimum: the refusal, stated or unknown marker alone (unknown is "?",
+    -- never unassigned); only a stated assigned Wishlist keeps its
+    -- display-safe name, which is never cut or sanitized again here.
+    local wishlist, wishlistCompact, wishlistMinimum
     if noAssignment then
         local words = "no valid assignment (the Saved Build holds no Echoes)"
         wishlist = p.wishlist and (p.wishlist .. " - " .. words) or Lead(words, true)
         wishlistCompact = p.wishlist and ("Refused: " .. p.wishlist) or "Refused"
+        wishlistMinimum = "Refused"
     elseif stated then
         wishlist = WishlistWords(p.wishlist, d.wishlistState, true)
         wishlistCompact = WishlistCompact(p.wishlist, d.wishlistState)
+        wishlistMinimum = d.wishlistState == "assigned" and p.wishlist
+            or WISHLIST_MINIMUM[d.wishlistState]
     elseif p.wishlist then
         wishlist = p.wishlist .. (captured and " (captured)" or " (assignment not known)")
         wishlistCompact = "?: " .. p.wishlist
+        wishlistMinimum = "?"
     else
         wishlist = "Not known"
         wishlistCompact = "?"
+        wishlistMinimum = "?"
     end
     local state, stateCompact, stateMinimum
     if captured then
         state = "Captured; " .. stateWords
             .. ((noAssignment or stated) and "" or "; assignment not checked")
-        stateCompact, stateMinimum = "Captured: " .. stateShort.compact, "Capt."
+        -- "C:" keeps the capture visible; the state's own marker keeps it distinct.
+        stateCompact, stateMinimum = "Captured: " .. stateShort.compact, "C:" .. stateShort.minimum
     else
         state = Lead(stateWords, true)
         stateCompact, stateMinimum = stateShort.compact, stateShort.minimum
@@ -393,7 +411,8 @@ function T.DestinationFields(d)
         {key = "character", label = "Character", value = p.character or "Not known",
             compact = p.character or "?"},
         {key = "savedBuild", label = "Saved Build", value = build, compact = buildCompact},
-        {key = "wishlist", label = "Wishlist", value = wishlist, compact = wishlistCompact},
+        {key = "wishlist", label = "Wishlist", value = wishlist, compact = wishlistCompact,
+            minimum = wishlistMinimum},
         {key = "state", label = "State", value = state, compact = stateCompact,
             minimum = stateMinimum},
     }
