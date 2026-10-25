@@ -687,8 +687,10 @@ EnsureAutomationRuntime = function()
         buildProgress=BuildProgress,buildPanelProgress=BuildPanelProgress,
         appendAudit=AppendAudit,appendAutoLockEvent=AppendAutoLockEvent,
         print=Print,recordError=RecordError,now=GetTime,
+        -- The raw status line: Panel owns its user-text presentation and
+        -- converts it once (UserText.Message is not idempotent).
         onStatus=function(value)
-            if Panel and Panel.SetStatus then Panel.SetStatus(Nexus.UserText and Nexus.UserText.Message(value) or value) end
+            if Panel and Panel.SetStatus then Panel.SetStatus(value) end
         end,
     })
     return AutomationRuntime

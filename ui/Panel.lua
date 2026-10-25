@@ -35,6 +35,7 @@ local renderState = {
     -- The committed model's status and recommendation before the user-text
     -- conversion (it is not idempotent), for a render of that same model.
     rawText=nil,
+    statusPresentation=nil, -- committed, validated localization result only
 }
 local renderStats = {
     calls=0, layouts=0, skipped=0, statusOnly=0,
@@ -227,7 +228,7 @@ local function ModelSignatures(model)
             autoOff=model.auto == false and ((type(model.cards) == "table" and #model.cards > 0)
                 or SafeText(model.recommendation) ~= "") or nil,
             -- The compact charges line follows the charge facts the model carries.
-            charges=model.charges,
+            charges=model.charges, chargeLine=model._nexusChargeLine,
             -- The inline Auto line (M.AutoNoteFor) is roll content too.
             autoNote=model.autoNote,
         }),
@@ -916,6 +917,8 @@ local function EnsureFrame()
         if not (GameTooltip and readout and type(readout.ChargesLegend) == "function") then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine("Charges", 1, 1, 1)
+        -- Recover the complete current row even when its fixed label is short.
+        GameTooltip:AddLine(frame._chargesText:GetText() or "", 1, 1, 1, true)
         for _, line in ipairs(readout.ChargesLegend()) do GameTooltip:AddLine(line, 0.85, 0.85, 0.85, true) end
         GameTooltip:Show()
     end)
@@ -978,6 +981,7 @@ local function EnsureFrame()
     recText:SetJustifyV("TOP")
     recText:SetTextColor(1, 0.82, 0)
     frame._rollRec = recText
+    frame._recommendationHover = Nexus.LayoutMetrics.FullTextTooltip(recText, rollArea)
 
     rollDivider = rollArea:CreateTexture(nil, "ARTWORK")
     rollDivider:SetSize(278, 1)
@@ -1465,11 +1469,7 @@ local function EnsureFrame()
         local st = lastModel and lastModel.status
         if st ~= nil and tostring(st) ~= "" then
             GameTooltip:AddLine(" ")
-            local displayText = Nexus and Nexus.Identity
-                and Nexus.Identity.DisplaySafeText
-            local displayStatus = displayText
-                and displayText(tostring(st), 2048, false, true)
-                or "status unavailable"
+            local displayStatus = M.StatusTooltipText()
             GameTooltip:AddLine("Status: " .. displayStatus, 0.6, 0.85, 1, true)
         end
         local notice = M._lastModel and M._lastModel.updateNotice
@@ -2191,8 +2191,7 @@ local function ApplyModel(model, signatures, roll)
         -- (Readout.ChargesLine; unknown is "?", never 0).
         local chargesText = frame._chargesText
         if chargesText then
-            local line = type(model.charges) == "table" and Nexus.Readout
-                and Nexus.Readout.ChargesLine and Nexus.Readout.ChargesLine(model.charges) or ""
+            local line = model._nexusChargeLine or ""
             chargesText:SetText(line)
             if line ~= "" then chargesText:Show() else chargesText:Hide() end
             if frame._chargesHover then
@@ -2473,17 +2472,67 @@ local function ApplyCandidate(model, signatures, roll)
     return ApplyModel(model, signatures, roll)
 end
 
+-- Panel is the one owner of the user-text presentation of a model's status
+-- and recommendation (issue #142). Render and SetStatus take RAW text (planner
+-- reasons, runtime status lines) and present it once with UserText.Message.
+-- That conversion maps raw to presented and is not idempotent: presented text,
+-- for example a translation, may hold bytes that a legacy rewrite matches
+-- (ARMED, TARGET:), so presented text is never converted again. A committed
+-- model (M._lastModel) keeps the presented text under its usual field names,
+-- as before, and an owned _nexusPanelPresentation = {version=1, raw={...},
+-- text={...}} record of the raw source of each presented field. A copy of a committed
+-- model may be rendered again: a field that still holds the bytes its own
+-- record presented is presented again from its recorded raw source; any other
+-- value is a raw input. Equality with this field's own valid record takes
+-- precedence over an identical-byte raw override. A raw caller copying a
+-- committed model removes _nexusPanelPresentation to declare raw intent.
+-- No language guess, cache, or string-content heuristic supplies provenance.
+local function Present(raw)
+    local userText = Nexus.UserText
+    if userText and type(userText.Message) == "function" then
+        return userText.Message(raw)
+    end
+    return raw
+end
+
+local function RawSource(model, field)
+    local value = model[field]
+    local record = rawget(model, "_nexusPanelPresentation")
+    if type(record) ~= "table" or getmetatable(record) ~= nil
+        or rawget(record, "version") ~= 1 then return value end
+    local raw, text = rawget(record, "raw"), rawget(record, "text")
+    if type(raw) ~= "table" or getmetatable(raw) ~= nil
+        or type(text) ~= "table" or getmetatable(text) ~= nil then return value end
+    for _, key in ipairs({"status", "recommendation"}) do
+        local input, output = rawget(raw, key), rawget(text, key)
+        if (input ~= nil and type(input) ~= "string") or type(output) ~= "string"
+            or (input == nil and output ~= "") then return value end
+    end
+    if type(value) == "string" and rawget(text, field) == value then
+        return rawget(raw, field)
+    end
+    return value
+end
+
 function M.Render(model)
     if type(model) ~= "table" then return false end
     local candidate = DefensiveCopy(model)
-    local rawText = {status=candidate.status,recommendation=candidate.recommendation}
-    if Nexus.UserText then
-        candidate.recommendation=Nexus.UserText.Message(candidate.recommendation)
-        candidate.status=Nexus.UserText.Message(candidate.status)
-    end
+    -- Read the original record: DefensiveCopy removes its metatables.
+    local raw = {status=RawSource(model, "status"),
+        recommendation=RawSource(model, "recommendation")}
+    candidate.recommendation = Present(raw.recommendation)
+    local status, localized = Present(raw.status)
+    candidate.status = status
+    candidate._nexusPanelPresentation = {version=1, raw=raw,
+        text={status=candidate.status, recommendation=candidate.recommendation}}
+    local rawText = {status=raw.status,recommendation=raw.recommendation}
     -- The inline Auto line, from this model and the last refused Auto click
     -- (memory only); recomputed on every render, so an old one never stays.
     candidate.autoNote = M.AutoNoteFor(candidate)
+    -- Format once per render; the visible output is part of the signature,
+    -- so a changed presentation with identical raw counts cannot stay stale.
+    candidate._nexusChargeLine = type(candidate.charges) == "table" and Nexus.Readout
+        and Nexus.Readout.ChargesLine and Nexus.Readout.ChargesLine(candidate.charges) or ""
     local signatures = ModelSignatures(candidate)
     -- The reservation changes the layout, so it is part of its signature.
     local roll = RollPresentation(candidate)
@@ -2526,6 +2575,7 @@ function M.Render(model)
     -- leaves the last committed state as it was.
     renderState.roll = roll.nextRoll
     renderState.rawText = rawText
+    renderState.statusPresentation = {text=candidate.status, localized=localized==true}
     renderState.committed = true
     renderStats.commits = renderStats.commits + 1
     if renderState.hadFailure then
@@ -2678,18 +2728,40 @@ function M.NoteAutoClick(before, ok, state)
     return true
 end
 
+-- `status` is a raw status line (Main's onStatus passes the runtime's own),
+-- presented here once, as Render presents it.
 function M.SetStatus(status)
     if not M._lastModel then return false end
-    local nextStatus = SafeText(Nexus.UserText and Nexus.UserText.Message(status) or status)
+    local text, localized = Present(status)
+    local nextStatus = SafeText(text)
+    -- Refresh raw provenance even when the visible bytes do not change.
+    local record = M._lastModel._nexusPanelPresentation
+    if type(record) == "table" and type(record.raw) == "table"
+        and type(record.text) == "table" then
+        record.raw.status, record.text.status = status, nextStatus
+    end
+    if renderState.rawText then renderState.rawText.status = status end
+    renderState.statusPresentation = {text=nextStatus, localized=localized==true}
     if SafeText(M._lastModel.status) == nextStatus then return false end
     M._lastModel.status = nextStatus
-    -- Keep the release render (ReleaseRollOnAutoOff) on the current line.
-    if renderState.rawText then renderState.rawText.status = status end
     if renderState.signatures then
         renderState.signatures.status = Signature(nextStatus)
     end
     renderStats.statusOnly = renderStats.statusOnly + 1
     return true
+end
+-- Actual menu status boundary. The provenance is owned by the committed
+-- render/SetStatus, not supplied by a model's metadata. Revalidate the bytes
+-- against Localization's bounds; unrelated raw status retains Identity rules.
+function M.StatusTooltipText()
+    local status = M._lastModel and M._lastModel.status
+    local presented, localization = renderState.statusPresentation, Nexus.Localization
+    if presented and presented.localized and presented.text == status
+        and type(localization) == "table" and type(localization.IsText) == "function"
+        and localization.IsText(status) == true then return status end
+    local displayText = Nexus.Identity and Nexus.Identity.DisplaySafeText
+    return displayText and displayText(tostring(status or ""), 2048, false, true)
+        or "status unavailable"
 end
 function M.RenderStats() return DefensiveCopy(renderStats) end
 

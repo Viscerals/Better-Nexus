@@ -1,6 +1,6 @@
 -- Player-facing terminology only. Stable policy/reason codes and protocol data
 -- remain unchanged; diagnostics may retain original codes for support.
--- Issue #123: three status reasons resolve their English text through the
+-- Issue #123/#142: five reasons resolve their English text through the
 -- Nexus.Localization seam (localizedReasons below); every other text here is
 -- unchanged.
 Nexus=Nexus or {}
@@ -11,7 +11,6 @@ local reasons={
     ["waiting for owned-state sync"]="Waiting for current Echo data from the server - automatic choices paused",
     ["no wishlist set - advisor only"]="No Wishlist assigned - recommendations only",
     ["no wishlist"]="Assign a Wishlist to use its targets",
-    ["waiting for three-card board"]="Waiting for the next three Echo choices",
     ["pending-pick count"]="Waiting for the remaining-choice count",
     ["Orb state active or unknown"]="Ordinary rolling paused while the Orb choice is active or cannot be confirmed",
     ["orb state not yet known"]="Ordinary rolling paused: the server's Orb state is not confirmed yet",
@@ -51,6 +50,16 @@ local localizedReasons={
     ["ROOT_MUTATION_PENDING"]="reason.save_in_progress",
     ["CURSOR_REQUIRED"]="reason.list_preparing",
     ["STORE_PENDING"]="reason.saved_data_reading",
+    -- Issue #142: the two planner wait reasons. The older "pending-pick count"
+    -- mapping above is a different reason and stays as it is.
+    ["waiting for three-card board"]="reason.wait_three_choices",
+    ["waiting for pending-pick count"]="reason.wait_pending_pick_count",
+}
+-- Without the seam, the two wait reasons keep the exact English they showed
+-- before they moved to it (issue #142).
+local legacyWaitText={
+    ["waiting for three-card board"]="Waiting for the next three Echo choices",
+    ["waiting for pending-pick count"]="waiting for pending-pick count",
 }
 local function availabilityName(id)
     local a=Nexus.GameAdapter
@@ -69,9 +78,13 @@ local function LocalizedReason(key,code)
         local text,source=localization.Text(key)
         if type(text)=="string" and text~="" then
             if source=="unavailable" then return text.." "..T.Details(code) end
-            return text
+            -- Only an actual validated base/candidate result carries this
+            -- presentation provenance. Arbitrary raw strings never do.
+            return text, (source=="base" or source=="candidate")
+                and type(localization.IsText)=="function" and localization.IsText(text)==true
         end
     end
+    if legacyWaitText[code] then return legacyWaitText[code] end -- issue #142, seam absent
     return "This action is not available yet. Check the status or diagnostics. Details: "..code
 end
 function T.Message(value)
@@ -79,7 +92,13 @@ function T.Message(value)
     if reasons[s] then return reasons[s] end
     if localizedReasons[s] then return LocalizedReason(localizedReasons[s],s) end
     local prefix,body=s:match("^(L%d+ %-%- )(.*)$")
-    if prefix then return prefix..T.Message(body) end
+    if prefix then
+        local text,localized=T.Message(body)
+        local combined=prefix..text
+        local localization=Nexus.Localization
+        return combined, localized==true and type(localization)=="table"
+            and type(localization.IsText)=="function" and localization.IsText(combined)==true
+    end
     body=s:match("^waiting: (.*)$")
     if body then return T.Message(body) end
     local id=s:match("^disabling off%-wishlist tome lever (%d+)$")
