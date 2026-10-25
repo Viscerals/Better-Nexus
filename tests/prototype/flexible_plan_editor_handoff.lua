@@ -3,7 +3,12 @@
 local H = dofile('tests/prototype/harness.lua')
 -- Record root-window paint calls at the synthetic host boundary. The real
 -- Theme helper must paint the chooser; a styled-button tree alone is not a
--- window surface over the editor beneath it.
+-- window surface over the editor beneath it. A pool row's EnableMouse is
+-- recorded too: the row owns the tooltip of its one-line label.
+-- A frame placed directly on the chooser records its EnableMouse and the
+-- region SetAllPoints anchors it to, as the client anchors it (that region's
+-- TOPLEFT and BOTTOMRIGHT), so a fixed-text hover area is found by the
+-- rendered label it covers.
 local createFrame=CreateFrame
 CreateFrame=function(kind,name,parent,template)
     local frame=createFrame(kind,name,parent,template)
@@ -12,11 +17,25 @@ CreateFrame=function(kind,name,parent,template)
         frame.SetBackdropColor=function(self,...) self.drawnFill={...} end
         frame.SetBackdropBorderColor=function(self,...) self.drawnBorder={...} end
     end
+    if type(parent)=='table' and parent.name=='NexusFlexiblePlanPool' then
+        frame.EnableMouse=function(self,enabled) self.recordedMouse=enabled end
+    end
+    if type(parent)=='table' and parent.name=='NexusFlexiblePlanChooser' then
+        frame.EnableMouse=function(self,enabled) self.recordedMouse=enabled end
+        frame.SetAllPoints=function(self,region)
+            region=region or self:GetParent()
+            self.coveredRegion=region
+            self.points={{'TOPLEFT',region,'TOPLEFT',0,0},{'BOTTOMRIGHT',region,'BOTTOMRIGHT',0,0}}
+        end
+    end
     return frame
 end
 wipe(H.db)
 local function EchoName(i) return (i==22 or i==23) and 'Exact variants' or 'Choice '..i end
 for i=1,257 do H.AddEcho(410000+i,EchoName(i),i%4,5,(i==22 or i==23) and 77 or 0) end
+-- One more exact Echo, whose name is wider than a pool row label.
+local LONG_ID=419001
+H.AddEcho(LONG_ID,'Exceptionally Long Exact Echo Name For Picker Row Tooltips',2,5,0)
 H.locked={{spellId=410022,stacks=1}}
 H.Boot()
 local checks = 0
@@ -285,6 +304,20 @@ local function ChooserText()
     local out={};for _,r in ipairs(NexusFlexiblePlanChooser.regions) do out[#out+1]=r:GetText() end
     return table.concat(out,' | ')
 end
+-- The chooser's own status line: the FontString it anchors at its status
+-- position. Its static help also says "pending", so the whole-window text
+-- above cannot tell a pending status from that help.
+local function Status()
+    local found
+    for _,r in ipairs(NexusFlexiblePlanChooser.regions) do
+        local p=r.kind=='FontString' and r.points[1]
+        if p and p[1]=='TOPLEFT' and p[2]==22 and p[3]==-570 then
+            assert(found==nil,'one chooser status region');found=r
+        end
+    end
+    return assert(found,'chooser status region exists'):GetText()
+end
+local Reason=Nexus.FlexiblePlanChooser.Reason
 local function Rendered()
     local gathered, area = {}, nil
     for _,f in ipairs(H.frames) do if f.plus and f.data and f:IsVisible() then area=f:GetParent();break end end
@@ -327,14 +360,21 @@ do
     local before=snapshot()
     check(not Count(ids[1],6),'C1a setup real max5 rejection')
     expect(PoolRow(ids[1]).count:GetText()=='6' and PoolRow(ids[1]).label:GetText():find('Set: 1',1,true)
-        and ChooserText():find('pending',1,true),'rejected6 visibly distinct from committed1')
+        and Status():find('pending',1,true),'rejected6 visibly distinct from committed1')
+    expect(Status()==Reason('STACK_LIMIT')..' '..Reason('COUNT_PENDING') and PoolRow(ids[1]).action:GetText()=='Set *',
+        'rejected6 status names the refusal and the pending input; its row shows Set *')
     local opened=NexusFlexiblePlanOpen:Click()
     expect(not opened and preserved(before) and Popup.shown[REPLACE]==nil,
         'rejected6 Open refuses rather than silently installing committed1')
+    expect(Status()==Reason('COUNT_PENDING') and PoolRow(ids[1]).action:GetText()=='Set *',
+        'rejected6 Open status says only that count input is pending')
     -- Restore the public view after the known a58 mis-install so later real
     -- paths still run; this is setup, not an EXPECT failure or product stub.
     editor.NewWishlist();NexusFlexiblePlanEntry:Click()
     check(Count(ids[1],1),'C1a explicit Set restores one after rejection')
+    local restored=PoolRow(ids[1])
+    expect(restored.action:GetText()=='Set' and Status()=='' and restored.count:GetText()=='1'
+        and restored.label:GetText():find('Set: 1',1,true),'explicit Set clears the Set * marker and the status exactly')
     before=snapshot()
     PoolRow(ids[1]).count:SetText('2')
     NexusFlexiblePlanSearch:SetText('unrelated refresh')
@@ -344,6 +384,8 @@ do
     NexusFlexiblePlanHide:Click();NexusFlexiblePlanEntry:Click()
     expect(PoolRow(ids[1]).count:GetText()=='2' and PoolRow(ids[1]).label:GetText():find('Set: 1',1,true),
         'valid unsubmitted2 survives refresh scroll rebind hide reopen as pending')
+    expect(Status()==Reason('COUNT_PENDING') and PoolRow(ids[1]).action:GetText()=='Set *',
+        'valid unsubmitted2 keeps the pending status and Set * through refresh, rebind and reopen')
     opened=NexusFlexiblePlanOpen:Click()
     expect(not opened and preserved(before),'pending valid2 Open preserves complete editor and protected effects')
     editor.NewWishlist();NexusFlexiblePlanEntry:Click()
@@ -361,7 +403,9 @@ do
     PoolRow(ids[1]).count:SetText('2')
     Popup.Click(request,1)
     expect(preserved(before) and Popup.shown[REPLACE]==nil and PoolRow(ids[1]).count:GetText()=='2'
-        and ChooserText():find('pending',1,true),'typed-after-popup accept refuses with editor and pending counts intact')
+        and Status():find('pending',1,true),'typed-after-popup accept refuses with editor and pending counts intact')
+    expect(Status()==Reason('COUNT_PENDING') and PoolRow(ids[1]).action:GetText()=='Set *',
+        'typed-after-popup refusal status says count input is pending; its row shows Set *')
     NexusFlexiblePlanEntry:Click();NexusWishlistNameInput:SetText('C1a keep exact2')
     check(Count(ids[1],1),'C1a explicit restoration for rejected popup control')
     NexusFlexiblePlanOpen:Click();request=assert(Popup.shown[REPLACE])
@@ -369,12 +413,16 @@ do
     Popup.Click(request,1)
     expect(preserved(before) and PoolRow(ids[1]).count:GetText()=='6',
         'rejected-after-popup accept refuses without implicit Set or protected effects')
+    expect(Status()==Reason('COUNT_PENDING') and PoolRow(ids[1]).action:GetText()=='Set *',
+        'rejected-after-popup refusal status says count input is pending; its row shows Set *')
     NexusFlexiblePlanEntry:Click();NexusWishlistNameInput:SetText('C1a keep exact2')
     check(Count(ids[1],1),'C1a clean count before edited-and-restored request')
     NexusFlexiblePlanOpen:Click();request=assert(Popup.shown[REPLACE]);before=snapshot()
     PoolRow(ids[1]).count:SetText('2');PoolRow(ids[1]).count:SetText('1')
     Popup.Click(request,1)
     expect(preserved(before),'editing then restoring text still invalidates older popup context')
+    expect(Status()==Reason('PLAN_CHANGED') and PoolRow(ids[1]).action:GetText()=='Set',
+        'edited-and-restored count clears its marker; the older request reports the changed choice')
     NexusFlexiblePlanEntry:Click();NexusWishlistNameInput:SetText('C1a keep exact2')
     check(Count(ids[1],1),'C1a restore one before clean accepted popup')
     NexusFlexiblePlanOpen:Click();request=assert(Popup.shown[REPLACE])
@@ -384,6 +432,288 @@ do
     editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
     print('C1a completed real paths; failures='..#failures)
     assert(#failures==0,'EXPECT C1a count consistency: '..table.concat(failures,'; '))
+end
+
+-- Pool-row text layout (docs/UI_TEXT_LAYOUT.md) on the real chooser rows and
+-- the real LayoutMetrics, measured with the offline font models of
+-- layout_geometry_support (a regression aid, not native font measurement).
+-- Setup controls must pass first; only the new EXPECTs collect failures, so
+-- the committed-count line and the Set * marker both report on an unchanged
+-- chooser. The font model, the font object it adds and the tooltip recorder
+-- are restored, and the planning session is reset, before the original paths
+-- continue.
+do
+    local G=dofile('tests/prototype/layout_geometry_support.lua')
+    local methods=G.RegionMethods()
+    local FONT={'GetStringHeight','GetStringWidth','GetTextWidth','GetFont'}
+    local savedFont,savedFontObject={},_G.NexusFontNormal
+    for _,key in ipairs(FONT) do savedFont[key]=rawget(methods,key) end
+    local savedTip={SetOwner=rawget(GameTooltip,'SetOwner'),AddLine=rawget(GameTooltip,'AddLine'),
+        shown=GameTooltip.shown}
+    local tip={lines={}}
+    GameTooltip.SetOwner=function(_,owner) tip.owner=owner end
+    GameTooltip.AddLine=function(_,text) tip.lines[#tip.lines+1]=tostring(text) end
+    local failures={}
+    local function expect(value,label)
+        print('LAYOUT '..(value and 'PASS ' or 'FAIL ')..label)
+        if not value then failures[#failures+1]=label end
+        checks=checks+1
+    end
+    -- The end caps LayoutMetrics.FitButtonWidth allows beside a button label.
+    local CAPS=24
+    local function Need(text,model) return G.Length(G.Visible(text))*model.char+CAPS end
+    local live=Nexus.GameAdapter.Catalog()
+    local facts={[ids[1]]=live and live.rows[ids[1]],[LONG_ID]=live and live.rows[LONG_ID]}
+    check(type(facts[ids[1]])=='table' and type(facts[LONG_ID])=='table'
+        and type(facts[LONG_ID].name)=='string','LAYOUT setup exact catalog rows')
+    check(Add(ids[1]) and Add(LONG_ID),'LAYOUT setup exact pool members')
+    check(Count(ids[1],1) and Count(LONG_ID,2),'LAYOUT setup explicitly committed counts')
+    check(G.Length(facts[LONG_ID].name)*G.MODELS.default.char>PoolRow(LONG_ID).label:GetWidth(),
+        'LAYOUT setup long exact name is wider than its row label in the default model')
+    -- The committed count, full ID, quality, maximum stack and exact name.
+    local function Complete(text,id,committed)
+        local row=facts[id]
+        local name=Nexus.Identity.DisplaySafeText(row.name,256,true) or ''
+        return name~='' and text:find('Set: '..committed,1,true)~=nil
+            and text:find('#'..id,1,true)~=nil and text:find('Q'..row.quality,1,true)~=nil
+            and text:find('max '..row.maxStack,1,true)~=nil and text:find(name,1,true)~=nil
+    end
+    -- The rendered line that holds the committed count lies inside the label
+    -- box, and its "Set: N" fits the label width; earlier lines take the rows
+    -- the model wraps them into.
+    local function CommittedVisible(label,model,committed)
+        local prefix,text,width='Set: '..committed,label:GetText() or '',label:GetWidth()
+        local before=0
+        for line in (text..'\n'):gmatch('(.-)\n') do
+            if line:sub(1,#prefix)==prefix then
+                return (before+1)*model.line<=label:GetHeight() and G.Length(prefix)*model.char<=width
+            end
+            before=before+math.max(1,G.Rows(line,width,model.char))
+        end
+        return false
+    end
+    local function LabelCase(row,model,id,committed,tag)
+        local label,prefix=row.label,'Set: '..committed
+        local text=label:GetText() or ''
+        expect(text:sub(1,#prefix)==prefix and not text:find('\n',1,true)
+            and label:GetHeight()==row:GetHeight() and Complete(text,id,committed),
+            tag..' label is one line at row height, '..prefix..' first, with its complete facts')
+        expect(CommittedVisible(label,model,committed),tag..' committed '..prefix..' line is visible')
+        local shortened=G.Length(G.Visible(text))*model.char>label:GetWidth()
+        tip.owner,tip.lines=nil,{}
+        local enter,leave=row:GetScript('OnEnter'),row:GetScript('OnLeave')
+        if enter then enter(row) end
+        if leave then leave(row) end
+        if shortened then
+            expect(tip.owner==row and #tip.lines==1 and tip.lines[1]==text,
+                tag..' shortened label shows its complete text in the row tooltip')
+        else
+            expect(#tip.lines==0,tag..' label that fits adds no tooltip')
+        end
+    end
+    local function RowFits(row,tag)
+        local bounds={0,0,row:GetWidth(),row:GetHeight()}
+        local parts={G.Rect(row.label,row),G.Rect(row.count,row),G.Rect(row.action,row),G.Rect(row.remove,row)}
+        local ok,shown=true,''
+        for i,a in ipairs(parts) do
+            ok=ok and G.Inside(a,bounds)
+            for j=i+1,#parts do ok=ok and G.Apart(a,parts[j]) end
+            shown=shown..G.Text(a)
+        end
+        expect(ok,tag..' label, count, '..tostring(row.action:GetText())
+            ..' and Remove are inside the row and apart '..shown)
+    end
+    expect(PoolRow(ids[1]).recordedMouse==true,'pool row tooltip owner accepts mouse input')
+    for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.double}) do
+        G.UseFont(model)
+        local tag=model.name
+        local row=PoolRow(ids[1])
+        local width=row.action:GetWidth()
+        expect(row.action:GetText()=='Set' and width>=Need('Set',model),
+            tag..' bound Set fits its label ('..width..' px)')
+        LabelCase(row,model,ids[1],'1',tag..' short exact name')
+        LabelCase(PoolRow(LONG_ID),model,LONG_ID,'2',tag..' long exact name')
+        row=PoolRow(ids[1])
+        row.count:SetText('2')
+        expect(row.action:GetText()=='Set *' and row.action:GetWidth()>=Need('Set *',model)
+            and Status()==Reason('COUNT_PENDING'),
+            tag..' typed count shows a fitting Set * ('..row.action:GetWidth()..' px) and the pending status')
+        RowFits(row,tag..' pending')
+        row=PoolRow(ids[1])
+        expect(row.action:GetText()=='Set *' and row.action:GetWidth()>=Need('Set *',model),
+            tag..' refreshed pending row keeps a fitting Set *')
+        check(row.action:Click()==true,'LAYOUT '..tag..' explicit Set commits two')
+        row=PoolRow(ids[1])
+        expect(row.action:GetText()=='Set' and row.action:GetWidth()==width and Status()==''
+            and CommittedVisible(row.label,model,'2'),
+            tag..' explicit Set clears Set *, its width and the status; committed Set: 2 is visible')
+        RowFits(row,tag..' committed')
+        check(Count(ids[1],1),'LAYOUT '..tag..' explicit Set restores one')
+    end
+    for _,key in ipairs(FONT) do methods[key]=savedFont[key] end
+    _G.NexusFontNormal=savedFontObject
+    GameTooltip.SetOwner,GameTooltip.AddLine,GameTooltip.shown=savedTip.SetOwner,savedTip.AddLine,savedTip.shown
+    NexusFlexiblePlanReset:Click()
+    check(ChooserText():find('0 / 256',1,true) and ChooserText():find('Chosen: 0 / 79',1,true),
+        'LAYOUT checks leave an empty planning session')
+    print('LAYOUT completed real paths; failures='..#failures)
+    assert(#failures==0,'EXPECT pool-row text layout: '..table.concat(failures,'; '))
+end
+
+-- Fixed multi-line chooser text (docs/UI_TEXT_LAYOUT.md): the 970x36 status
+-- box and the 970x20 count-instruction help keep their size; while either
+-- overflows, the hover area over it shows the complete text (LayoutMetrics
+-- FullTextTooltip). The real chooser, its real Set path and the real
+-- LayoutMetrics run under the offline font models of layout_geometry_support
+-- (a regression aid, not native font measurement or a native tooltip proof).
+-- Setup controls must pass first; only the new EXPECTs collect failures, so
+-- the status and help disclosure paths both report on an unchanged chooser.
+-- The font model, the font object it adds and the tooltip recorder are
+-- restored, and the planning session is reset, before the original paths
+-- continue.
+do
+    local G=dofile('tests/prototype/layout_geometry_support.lua')
+    local methods=G.RegionMethods()
+    local FONT={'GetStringHeight','GetStringWidth','GetTextWidth','GetFont'}
+    local savedFont,savedFontObject={},_G.NexusFontNormal
+    for _,key in ipairs(FONT) do savedFont[key]=rawget(methods,key) end
+    local savedTip={SetOwner=rawget(GameTooltip,'SetOwner'),AddLine=rawget(GameTooltip,'AddLine'),
+        Show=rawget(GameTooltip,'Show'),Hide=rawget(GameTooltip,'Hide'),shown=GameTooltip.shown}
+    local tip
+    local function ResetTip() tip={lines={},shows=0,hides=0} end
+    ResetTip()
+    GameTooltip.SetOwner=function(_,owner) tip.owner=owner end
+    GameTooltip.AddLine=function(_,text) tip.lines[#tip.lines+1]=tostring(text) end
+    GameTooltip.Show=function() tip.shows=tip.shows+1 end
+    GameTooltip.Hide=function() tip.hides=tip.hides+1 end
+    local failures={}
+    local function expect(value,label)
+        print('FIXED TEXT '..(value and 'PASS ' or 'FAIL ')..label)
+        if not value then failures[#failures+1]=label end
+        checks=checks+1
+    end
+    local root=NexusFlexiblePlanChooser
+    -- The FontString the chooser anchors at one fixed position.
+    local function LabelAt(x,y)
+        local found
+        for _,r in ipairs(root.regions) do
+            local p=r.kind=='FontString' and r.points[1]
+            if p and p[1]=='TOPLEFT' and p[2]==x and p[3]==y then
+                assert(found==nil,'one chooser label at '..x..','..y);found=r
+            end
+        end
+        return assert(found,'chooser label at '..x..','..y..' exists')
+    end
+    -- Hover areas over a rendered label: frames on the chooser anchored to
+    -- all points of that label. Returns the first and how many there are.
+    local function HoverOver(label)
+        local found,count=nil,0
+        for _,f in ipairs(H.frames) do
+            if f:GetParent()==root and f.coveredRegion==label then found,count=found or f,count+1 end
+        end
+        return found,count
+    end
+    local function Same(a,b) return a[1]==b[1] and a[2]==b[2] and a[3]==b[3] and a[4]==b[4] end
+    local function Effects()
+        return {state=H.Clone(editor.DebugDraftState()),rows=Rendered(),name=NexusWishlistNameInput:GetText(),
+            db=H.Clone(NexusDB),held=H.Clone(H.locked),actions=#H.actions,sends=#H.sent,
+            replace=tostring(Popup.shown[REPLACE]),save=tostring(Popup.shown[CREATE])}
+    end
+    check(root==chooser and root:IsShown() and Status()==''
+        and ChooserText():find('0 / 256',1,true) and ChooserText():find('Chosen: 0 / 79',1,true),
+        'FIXED TEXT setup the shown chooser starts from an empty planning session')
+    local status,help=LabelAt(22,-570),LabelAt(22,-44)
+    local HELP=help:GetText()
+    check(type(HELP)=='string' and HELP:find('Set: shows the committed count',1,true)
+        and Same(G.Rect(status,root),{22,570,992,606}) and Same(G.Rect(help,root),{22,44,992,64}),
+        'FIXED TEXT setup count help and status keep their fixed 970x20 and 970x36 boxes')
+    local before=Effects()
+    local statusArea,statusAreas=HoverOver(status)
+    local helpArea,helpAreas=HoverOver(help)
+    local frames=#H.frames
+    NexusFlexiblePlanHide:Click();NexusFlexiblePlanEntry:Click()
+    check(NexusFlexiblePlanChooser==root and root:IsShown() and Status()=='',
+        'FIXED TEXT setup hide/reopen shows the same chooser')
+    local statusAgain,statusAgainCount=HoverOver(status)
+    local helpAgain,helpAgainCount=HoverOver(help)
+    expect(statusAreas==1 and helpAreas==1 and statusArea~=helpArea and statusAgain==statusArea
+        and helpAgain==helpArea and statusAgainCount==1 and helpAgainCount==1 and #H.frames==frames,
+        'the chooser creates one hover area over its status and one over its help; hide/reopen reuses both')
+    -- Each area is exactly its label box, inside the chooser and apart from
+    -- the controls beside it, which keep their own places.
+    local function Clear(area,label,neighbours,tag)
+        if not area then expect(false,tag..' has a hover area to keep clear of its neighbours');return end
+        local rect=G.Rect(area,root)
+        local ok=area.recordedMouse==true and area:IsVisible() and Same(rect,G.Rect(label,root))
+            and G.Inside(rect,{0,0,root:GetWidth(),root:GetHeight()})
+        for _,n in ipairs(neighbours) do ok=ok and G.Apart(rect,G.Rect(n,root)) end
+        expect(ok,tag..' mouse-enabled hover area '..G.Text(rect)..' is its label box, apart from its neighbours')
+    end
+    Clear(statusArea,status,{LabelAt(22,-546),NexusFlexiblePlanOpen,NexusFlexiblePlanReset,
+        NexusFlexiblePlanPool,NexusFlexiblePlanCatalog},'status')
+    Clear(helpArea,help,{LabelAt(22,-16),LabelAt(22,-66),NexusFlexiblePlanHide,NexusFlexiblePlanSearch},
+        'count help')
+    -- Hover a label's real area under a font model. want is the complete text
+    -- its tooltip must show, or nil where the text fits or is empty and no
+    -- tooltip may appear; the model's own measurement must agree first.
+    local function Hover(label,model,tag,want)
+        G.UseFont(model)
+        tag=model.name..' '..tag
+        local text,width,height=label:GetText() or '',label:GetWidth(),label:GetHeight()
+        local rows=G.Rows(text,width,model.char)
+        check((want~=nil)==(rows*model.line>height) and (want==nil or want==text),
+            'FIXED TEXT setup '..tag..': '..#text..' bytes need '..rows*model.line..' of its '..height..' px')
+        local area=HoverOver(label)
+        if not area then
+            expect(false,tag..(want and ' complete text is not recoverable: no hover area' or ' has no hover area'))
+            return
+        end
+        ResetTip()
+        local enter,leave=area:GetScript('OnEnter'),area:GetScript('OnLeave')
+        if enter then enter(area) end
+        local owner,lines,shows=tip.owner,tip.lines,tip.shows
+        if leave then leave(area) end
+        if want then
+            expect(owner==area and #lines==1 and lines[1]==want and shows==1 and tip.hides==1,
+                tag..' overflow: hover shows all '..#want..' bytes and leave hides them')
+        else
+            expect(owner==nil and #lines==0 and shows==0 and tip.hides==0,
+                tag..(text=='' and ' empty text' or ' text that fits')..' adds no tooltip')
+        end
+        expect(label:GetText()==text and label:GetWidth()==width and label:GetHeight()==height,
+            tag..' hover keeps its text and fixed box')
+    end
+    local REJECTED=Reason('STACK_LIMIT')..' '..Reason('COUNT_PENDING')
+    check(Add(ids[1]) and Count(ids[1],1),'FIXED TEXT setup explicitly committed one')
+    check(not Count(ids[1],6),'FIXED TEXT setup real max5 rejection')
+    check(Status()==REJECTED and PoolRow(ids[1]).count:GetText()=='6'
+        and PoolRow(ids[1]).label:GetText():find('Set: 1',1,true),
+        'FIXED TEXT setup status holds the exact refusal reason and its pending clause')
+    for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.double}) do
+        Hover(status,model,'rejected count status',model==G.MODELS.double and REJECTED or nil)
+        Hover(help,model,'count help',model==G.MODELS.double and HELP or nil)
+    end
+    PoolRow(ids[1]).count:SetText('2')
+    check(Status()==Reason('COUNT_PENDING') and PoolRow(ids[1]).action:GetText()=='Set *',
+        'FIXED TEXT setup a typed count leaves only the pending status')
+    for _,model in ipairs({G.MODELS.default,G.MODELS.double}) do Hover(status,model,'pending status',nil) end
+    check(Count(ids[1],1) and Status()=='','FIXED TEXT setup explicit Set clears the status')
+    for _,model in ipairs({G.MODELS.default,G.MODELS.double}) do Hover(status,model,'cleared status',nil) end
+    for _,key in ipairs(FONT) do methods[key]=savedFont[key] end
+    _G.NexusFontNormal=savedFontObject
+    GameTooltip.SetOwner,GameTooltip.AddLine=savedTip.SetOwner,savedTip.AddLine
+    GameTooltip.Show,GameTooltip.Hide,GameTooltip.shown=savedTip.Show,savedTip.Hide,savedTip.shown
+    check(rawget(methods,'GetStringHeight')==savedFont.GetStringHeight and rawget(GameTooltip,'Hide')==savedTip.Hide,
+        'FIXED TEXT font model and tooltip recorder are restored')
+    expect(equal(Effects(),before),
+        'status and help hovers change no editor, Save, held, locked, data, traffic or action state')
+    check(ChooserText():find('1 / 256',1,true) and ChooserText():find('Chosen: 1 / 79',1,true),
+        'FIXED TEXT setup the session holds only its explicit choice')
+    NexusFlexiblePlanReset:Click()
+    check(ChooserText():find('0 / 256',1,true) and ChooserText():find('Chosen: 0 / 79',1,true) and Status()=='',
+        'FIXED TEXT checks leave an empty planning session')
+    print('FIXED TEXT completed real paths; failures='..#failures)
+    assert(#failures==0,'EXPECT fixed chooser text disclosure: '..table.concat(failures,'; '))
 end
 
 for i=1,100 do check(Add(ids[i]),'explicit catalog Add callback '..i) end
