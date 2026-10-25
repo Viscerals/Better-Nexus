@@ -35,6 +35,15 @@
 -- above. EXPECTs require character encounter-best eligibility, unsolicited
 -- ordinary/locked Echo disclosure, independent summary refusal and receiver
 -- page creation. Actual wire/receiver behavior is GUARD in ux_sync_dps_page.
+-- D23 linked build ID: Sync VerifiedDpsBuildId keeps a record's buildId only
+-- for a catalog build with the same verified owner and fingerprint and an
+-- ordinary saved mirror kind, and BroadcastDpsRecord serializes that result
+-- as b=relatedBuildId. EXPECT (fails on the 45036fbc prose, which does not
+-- name it): the detailed field lists of Help Sharing and docs/9020 add "and,
+-- when verified, the linked build ID"; that document names optional b and its
+-- gate; neither text names the link without "when verified", so no record is
+-- promised one. The README check, the abbreviated Welcome and tooltip lines
+-- and every GUARD are unchanged.
 -- SETUP: the fixture reached its state (a SETUP failure is not red evidence).
 -- Real TOC boots: a format-2 profile (Automatic even though its settings store
 -- "manual") and accepted format-5 profiles with Manual and Off. The fit of the
@@ -94,6 +103,15 @@ local function DpsDisclosure(text)
   and not has('each new personal dps best')
   and not has('echo list only in later answers')
   and not has('echo list only to players who ask')
+end
+-- D23: a record's build link (Sync VerifiedDpsBuildId -> b=relatedBuildId)
+-- is conditional. Every "linked build ID" in the text must be the "when
+-- verified" one, so no wording promises that each record carries a link.
+local function LinkConditional(text)
+ local s=V.Plain(text):gsub('%s+',' ')
+ local all=select(2,s:gsub('linked build ID',''))
+ local conditional=select(2,s:gsub('when verified, the linked build ID',''))
+ return all>0 and all==conditional
 end
 
 local H,CB
@@ -286,6 +304,7 @@ local function Run(tag,database,mode,line)
    "when it becomes this character's best for that encounter",
    'A personal best for another Echo set below that encounter best stays local',
    'character name, realm, class, level, ordinary Echoes, any locked Echoes, encounter, DPS, duration and time',
+   'character name, realm, class, level, ordinary Echoes, any locked Echoes, encounter, DPS, duration and time and, when verified, the linked build ID',
    'It can leave without a request, independently of its separate Record Loadout summary',
    'Refusing the summary does not refuse the separate DPS record',
    'Each of these leaves only if this client admits it','What leaves may still reach no one',
@@ -302,6 +321,7 @@ local function Run(tag,database,mode,line)
    and not help:find('the Echo list is sent only in later answers',1,true),
    'Help: no every-personal-best trigger or requester-only Echo promise remains')
   C.expect(DpsDisclosure(help),'Help: the detailed sharing page contains all automatic DPS disclosure facts')
+  C.expect(LinkConditional(help),'Help: the Sharing page names the linked build ID only when verified')
   -- The Help mode sentences are the shared words, not a second wording.
   C.guard(policy.Text('manual'):find('Nexus sends only what you start (Sync Now or Share).',1,true)~=nil
    and policy.Text('off'):find('Nexus sends nothing. Local records are kept.',1,true)~=nil,
@@ -351,12 +371,25 @@ C.scenario('O accepted format 5: Off',function()
 end)
 
 C.scenario('D23 documented automatic sends',function()
+ -- D23 linked build ID: exact anchors of the focused document's detailed
+ -- field list and its source gate. The README check is unchanged.
+ local LINK_ANCHORS={['docs/9020_SYNC_AND_NO_GUARANTEE.md']={
+  'with player name, realm, class, level, ordinary Echoes, any locked Echoes, category, DPS, duration and time and, when verified, the linked build ID.',
+  '(`WLD2`, including `e` and optional `lk`; optional `b` is `relatedBuildId` from `VerifiedDpsBuildId`:',
+  "the record's `buildId` only when `CatalogGet` finds that build with the record's verified owner and fingerprint and an `ordinary` `Identity.SavedMirrorKind`; otherwise `b` is omitted)",
+ }}
  for _,path in ipairs({'README.md','docs/9020_SYNC_AND_NO_GUARANTEE.md'}) do
   local f=io.open(path,'rb')
   C.setup(f~=nil,'D23: disclosure document is readable: '..path)
   local text=f and f:read('*a') or ''
   if f then f:close() end
   C.expect(DpsDisclosure(text),'D23: '..path..' discloses the actual automatic DPS path')
+  for _,anchor in ipairs(LINK_ANCHORS[path] or {}) do
+   C.expect(text:find(anchor,1,true)~=nil,'D23: '..path..' says "'..anchor..'"')
+  end
+  if LINK_ANCHORS[path] then
+   C.expect(LinkConditional(text),'D23: '..path..' names the linked build ID only when verified')
+  end
  end
 end)
 

@@ -52,6 +52,14 @@
 -- needles. Added GUARDs characterize existing behavior: a nonwinning exact-set
 -- best stays local; captured WLD2 includes locked evidence and alone lets a
 -- fresh peer store and open/copy the exact page. No behavior repair is claimed.
+-- D23 quality (GUARD; catalog metadata is SETUP): each representation has its
+-- own literal pin, compared exactly (an absent quality never matches 0): the
+-- raw capture, its WLD2 and the received DPS record state no quality; the
+-- stored page states the canonical 0; the copied draft states ordinary 2
+-- (catalog enrichment) and locked 0. D23Q is an independent public typed
+-- known-quality control. The earlier quality-2 draft expectation for both
+-- roles was an unsupported hypothesis; its archived failure stays as it is and
+-- is not product-behavior red evidence. No owned rarity or repair is claimed.
 -- SETUP: the fixture reached its state (a SETUP failure is not red evidence).
 -- Boundaries: synthetic Details! combat and training-dummy target as in
 -- batch_class_capture_publication; the player identity is set per boot as
@@ -254,6 +262,116 @@ local function EchoList(list)
  table.sort(out)
  return table.concat(out,',')
 end
+-- D23: one Echo list as exact rows in its own representation. The role is
+-- the container's (the ordinary or the locked list that was read); an entry's
+-- own marker (locked, sourceRole, lockIntent) is optional and may only agree
+-- with it. ID and copies are read through the aliases and the one-copy
+-- default of the DPS wire (DpsCapture WireEchoValue); aliases must agree.
+-- Quality is kept only where the entry states it (as a number), so a raw
+-- capture or wire list is compared in its own form: no quality is supplied to
+-- it and an absent quality stays nil, never 0. A missing or non-dense list,
+-- or a malformed entry, ID, count, quality or marker, is an error and never an
+-- empty list.
+local function D23Whole(v,least) return v~=nil and v>=least and v<math.huge and v==math.floor(v) end
+local function D23Rows(list,role)
+ if type(list)~='table' then return nil,role..' list is missing ('..type(list)..')' end
+ local n=0
+ for _ in pairs(list) do n=n+1 end
+ if n~=#list then return nil,role..' list is not a dense array' end
+ local rows={}
+ for i=1,n do
+  local e=list[i]
+  if type(e)~='table' then return nil,role..' entry '..i..' is not a table' end
+  local id,count=e.spellId,nil
+  if id==nil then id=e.id elseif e.id~=nil and tonumber(e.id)~=tonumber(id) then
+   return nil,role..' entry '..i..' has disagreeing IDs'
+  end
+  for _,key in ipairs({'count','stacks','stack'}) do
+   if e[key]~=nil then
+    if count~=nil and tonumber(e[key])~=tonumber(count) then return nil,role..' entry '..i..' has disagreeing copies' end
+    count=e[key]
+   end
+  end
+  id,count=tonumber(id),tonumber(count==nil and 1 or count)
+  local quality,locked=tonumber(e.quality),e.locked
+  if not D23Whole(id,1) or not D23Whole(count,1) or (e.quality~=nil and (type(e.quality)~='number' or not D23Whole(quality,0)))
+   or (locked~=nil and locked~=true and locked~=false and locked~=0 and locked~=1) then
+   return nil,role..' entry '..i..' has an invalid ID, count, quality or locked marker'
+  end
+  if role=='ordinary' and (locked==true or locked==1 or e.lockIntent or (e.sourceRole~=nil and e.sourceRole~='ordinary'))
+   or role=='locked' and (locked==false or locked==0 or (e.sourceRole~=nil and e.sourceRole~='locked')) then
+   return nil,role..' entry '..i..' is marked with the other role'
+  end
+  rows[i]={id=id,count=count,quality=quality,role=role}
+ end
+ table.sort(rows,function(a,b)
+  if a.id~=b.id then return a.id<b.id end
+  if a.count~=b.count then return a.count<b.count end
+  return (a.quality or -1)<(b.quality or -1)
+ end)
+ return rows
+end
+-- D23: the ordinary rows, then the locked rows, of one representation.
+local function D23Exact(ordinary,locked)
+ local rows,why=D23Rows(ordinary,'ordinary')
+ if not rows then return nil,why end
+ local lockedRows;lockedRows,why=D23Rows(locked,'locked')
+ if not lockedRows then return nil,why end
+ for _,r in ipairs(lockedRows) do rows[#rows+1]=r end
+ return rows
+end
+local function D23Text(rows)
+ local out={}
+ for i,r in ipairs(type(rows)=='table' and rows or {}) do out[i]=r.id..'x'..r.count..'q'..tostring(r.quality or '-')..':'..r.role end
+ return table.concat(out,',')
+end
+-- D23: does an actual ordinary and locked list hold exactly the expected rows,
+-- ID, copies, role and quality each exactly? An expected row states either no
+-- quality (nil, ABSENT) or one integer, and nil never matches an integer in
+-- either direction. Returns the verdict and a printable detail.
+local function D23Match(ordinary,locked,expected)
+ local actual,why=D23Exact(ordinary,locked)
+ if not actual then return false,why end
+ if type(expected)~='table' then return false,'no expected rows' end
+ local same=#actual==#expected
+ for i=1,same and #expected or 0 do
+  local a,b=actual[i],expected[i]
+  if a.id~=b.id or a.count~=b.count or a.role~=b.role or a.quality~=b.quality then same=false end
+ end
+ return same,D23Text(actual)..(same and '' or ' is not '..D23Text(expected))
+end
+-- D23 literal pins, one per representation, written out here and never
+-- derived from a production normalizer or from actual rows. IDs, copies and
+-- roles are the fixture's (UseEchoes(300001), H.locked 300003 x1). Quality
+-- follows each representation's source/schema policy, not owned rarity:
+-- RAW: DpsCapture snapshots (NormalizeEchoes; Adapter.LockedOwned bySpell)
+--  carry IDs and counts only; the WLD2 wire and the received DPS record keep
+--  that form, so quality is ABSENT (nil), not 0.
+-- PAGE: the stored page is canonical (LoadoutEvidence.Normalize), where an
+--  unstated quality is the canonical default 0: not a documented unknown
+--  sentinel and not proof of Common.
+-- DRAFT: the public NormalizeCandidateEvidence policy: an ordinary row takes
+--  the catalog quality first (here catalog metadata 2); a locked row takes a
+--  stated quality first, then the catalog's, then 0 (here 0, the value the
+--  stored page states; which list Copy read is not asserted).
+local function D23Row(id,count,quality,role) return {id=id,count=count,quality=quality,role=role} end
+local D23_RAW={D23Row(300001,1,nil,'ordinary'),D23Row(300003,1,nil,'locked')}
+local D23_PAGE={D23Row(300001,1,0,'ordinary'),D23Row(300003,1,0,'locked')}
+local D23_DRAFT={D23Row(300001,1,2,'ordinary'),D23Row(300003,1,0,'locked')}
+-- D23: the controls of one pin. Its own known-good rows {ordinary, locked}
+-- must be accepted and every control {label, ordinary, locked} refused; a
+-- raise counts as not holding.
+local function D23Controls(tag,pin,good,controls)
+ local ok,accepted,detail=pcall(D23Match,good[1],good[2],pin)
+ C.guard(ok and accepted==true,'D23: the '..tag..' pin accepts its own known-good rows',printable(detail))
+ for _,c in ipairs(controls) do
+  local okControl,acceptedControl,why=pcall(D23Match,c[2],c[3],pin)
+  C.guard(okControl and acceptedControl==false,'D23: the '..tag..' pin rejects '..c[1],printable(why))
+ end
+end
+-- D23: a verified owner read is the expected one only when both are present
+-- and equal; nil never passes, not even against a nil expectation.
+local function D23Owner(actual,expected) return expected~=nil and actual~=nil and actual==expected end
 -- The decoded record is the captured best by its production identity. The
 -- Echo set is established from the decoded payload itself, not from its f
 -- field (the sender copies f from the record, so f is only its claim): the
@@ -283,6 +401,66 @@ local function SameRecord(payload,record,transferId)
  if record.class~=nil and payload.k~=record.class then return false,'class differs' end
  if tostring(payload.p)..':'..tostring(payload.t)..':'..tostring(payload.d)~=transferId then return false,'transfer id differs' end
  return true
+end
+-- D23 wire fields. Sync.BroadcastDpsRecord sends r=record.realm,
+-- l=tonumber(record.level) and u=tonumber(record.duration) (the codec writes
+-- each number with tostring), and b only through VerifiedDpsBuildId: the
+-- build ID when the catalog row is the ordinary page of the record's verified
+-- owner with the record's fingerprint, otherwise nothing. The expectations are
+-- the captured row and the page ID the test itself established; pageId nil
+-- means the producer had no verified link, so b must be absent. An absent,
+-- mistyped or changed value is refused with its reason; nothing here raises.
+local function RecordWireFields(payload,record,pageId)
+ if type(payload)~='table' or type(record)~='table' then return false,'missing decoded record or captured row' end
+ local function Wire(value)
+  local n=tonumber(value)
+  if n==nil or n~=n or n==math.huge or n==-math.huge then return nil end
+  return tonumber(tostring(n))
+ end
+ local realm,level,duration=record.realm,Wire(record.level),Wire(record.duration)
+ if type(realm)~='string' or realm=='' or level==nil or duration==nil then
+  return false,'the captured row has no realm, level or duration to compare'
+ end
+ if type(payload.r)~='string' or payload.r~=realm then return false,'r is absent or not the captured realm' end
+ if type(payload.l)~='number' or Wire(payload.l)~=level then return false,'l is absent or not the captured level' end
+ if type(payload.u)~='number' or Wire(payload.u)~=duration then return false,'u is absent or not the captured duration' end
+ if pageId==nil then
+  if payload.b~=nil then return false,'b is present although the producer had no verified page link' end
+ elseif type(pageId)~='string' or pageId=='' then
+  return false,'no established verified page ID to compare'
+ elseif payload.b~=pageId then
+  return false,'b is absent or not the verified page'
+ end
+ return true
+end
+-- Controls of that oracle on copies of one real decoded record (the decoded
+-- record itself is not changed): unchanged it is accepted; one missing,
+-- changed or mistyped r, l or u, a missing, wrong or mistyped b, or any b
+-- where the producer had no verified link, is refused. Returns the controls
+-- that did not hold; a raise counts as not holding.
+local function RecordWireControls(payload,record,pageId,decoy)
+ if type(payload)~='table' then return {'no decoded record to control'} end
+ local failed={}
+ local function Control(label,key,value,accept)
+  local copy={}
+  for k,v in pairs(payload) do copy[k]=v end
+  if key then copy[key]=value end
+  local ok,accepted,why=pcall(RecordWireFields,copy,record,pageId)
+  if not ok then failed[#failed+1]=label..' raised'
+  elseif (accepted==true)~=accept then failed[#failed+1]=label..(accept and ' refused ('..printable(why)..')' or ' accepted') end
+ end
+ local other=type(decoy)=='string' and decoy~=pageId and decoy or tostring(pageId)..'-other'
+ Control('unchanged',nil,nil,true)
+ Control('missing r','r',nil,false);Control('changed r','r',tostring(payload.r)..'-other',false);Control('mistyped r','r',{},false)
+ Control('missing l','l',nil,false);Control('changed l','l',(tonumber(payload.l) or 0)+1,false);Control('mistyped l','l',tostring(payload.l),false)
+ Control('missing u','u',nil,false);Control('changed u','u',(tonumber(payload.u) or 0)+1,false);Control('mistyped u','u',tostring(payload.u),false)
+ if pageId==nil then
+  Control('unexpected b','b',other,false)
+ else
+  Control('missing b','b',nil,false);Control('wrong b','b',other,false)
+ end
+ Control('mistyped b','b',{},false)
+ return failed
 end
 local function PageRefs(traffic)
  local n=0
@@ -461,7 +639,7 @@ C.scenario('D23 unsolicited locked record, nonwinning set and WLD2-only receiver
  local ok,err=Capture(120000)
  C.setup(ok,'D23: qualifying capture completed',err)
  local row=D.GetCurrentPersonalBest('dummy')
- C.setup(type(row)=='table' and row.dps==4000 and #row.lockedEchoes==1,
+ C.setup(type(row)=='table' and row.dps==4000 and type(row.lockedEchoes)=='table' and #row.lockedEchoes==1,
   'D23: actual capture has ordinary and nonempty locked evidence')
  Until(2000,function() return AutoSummary(0)~=nil end)
  local page=AutoSummary(0)
@@ -483,8 +661,23 @@ C.scenario('D23 unsolicited locked record, nonwinning set and WLD2-only receiver
  end
  C.setup(#chunks>0,'D23: retained real WLD2 chunks for a fresh peer')
  local payloads=Complete(traffic.transfers[tostring(transferId)])
- C.guard(#payloads>0 and #payloads[1].e==1 and #payloads[1].lk==1,
+ local first=payloads[1]
+ C.guard(#payloads>0 and type(first)=='table' and type(first.e)=='table' and #first.e==1
+  and type(first.lk)=='table' and #first.lk==1,
   'D23: decoded real record carries ordinary and nonempty locked Echoes')
+ -- Wire fields of that original unsolicited record (GUARD). CommitSession
+ -- serialized it before its retained page commit, with no verified page of
+ -- this set in the fresh catalog, so b is absent (never inferred from the
+ -- page that exists later); r, l and u are the captured realm, level and
+ -- duration under Sync's normalization.
+ C.setup(type(row.realm)=='string' and tonumber(row.level)==H.playerLevel and tonumber(row.duration)~=nil,
+  'D23: the captured row carries its realm, level and duration',printable(row.realm))
+ local wireOk,wireWhy=RecordWireFields(first,row,nil)
+ print('OBSERVED','D23','wire r='..printable(first and first.r),'l='..printable(first and first.l),
+  'u='..printable(first and first.u),'b='..printable(first and first.b))
+ C.guard(wireOk,'D23: the original record carries the captured realm, level and duration and no b',wireWhy)
+ local wrong=RecordWireControls(first,row,nil,page.id)
+ C.guard(#wrong==0,'D23: the wire-field oracle refuses missing, changed or mistyped r/l/u and an unexpected b',table.concat(wrong,'; '))
 
  -- A weaker best for a different exact set is saved locally, but never
  -- handed to automatic egress or automatic page creation.
@@ -507,6 +700,69 @@ C.scenario('D23 unsolicited locked record, nonwinning set and WLD2-only receiver
  -- Only captured WLD2 crosses into a fresh runtime. No WLBI, WLRB or
  -- direct EnsureDpsBuildForEchoes call is injected into the receiver.
  local expectedOrdinary,expectedLocked=EchoList(row.echoes),EchoList(row.lockedEchoes)
+ -- D23 exact rows: the captured record's own lists are retained here, before
+ -- the fresh boot (not the payload's claims), as the producer expectation that
+ -- every decoded WLD2 payload and the received DPS record are compared with;
+ -- the literal pins (D23_RAW, D23_PAGE, D23_DRAFT) are checked independently.
+ -- Each pin first accepts its own known-good rows and refuses same-count
+ -- controls that the existing count checks accept.
+ local RAW_O,RAW_L={{spellId=300001,count=1}},{{spellId=300003,count=1}}
+ D23Controls('raw',D23_RAW,{RAW_O,RAW_L},{
+  {'a wrong ID',{{spellId=300002,count=1}},RAW_L},
+  {'wrong copies',{{spellId=300001,count=2}},RAW_L},
+  {'a stated quality 0 where the raw form states none (ABSENT vs 0)',{{spellId=300001,quality=0,count=1}},RAW_L},
+  {'a stated quality 2 in the raw locked list',RAW_O,{{spellId=300003,quality=2,count=1}}},
+  {'swapped roles',RAW_L,RAW_O},
+  {'a locked marker in the ordinary list',{{spellId=300001,count=1,locked=true}},RAW_L},
+  {'an ordinary marker in the locked list',RAW_O,{{spellId=300003,count=1,sourceRole='ordinary'}}},
+  {'a missing locked list',RAW_O,nil},
+  {'a non-dense ordinary list',{[2]={spellId=300001,count=1}},RAW_L},
+  {'an invalid count',{{spellId=300001,count=0}},RAW_L}})
+ local PAGE_O,PAGE_L={{spellId=300001,quality=0,stacks=1}},{{spellId=300003,quality=0,stacks=1,locked=true}}
+ D23Controls('canonical page',D23_PAGE,{PAGE_O,PAGE_L},{
+  {'a missing stored locked list',PAGE_O,nil},
+  {'an empty stored locked list',PAGE_O,{}},
+  {'a non-dense stored locked list',PAGE_O,{[2]={spellId=300003,quality=0,stacks=1,locked=true}}},
+  {'a second stored locked row',PAGE_O,{PAGE_L[1],{spellId=300002,quality=0,stacks=1,locked=true}}},
+  {'an absent ordinary quality (ABSENT vs 0)',{{spellId=300001,stacks=1}},PAGE_L},
+  {'an absent locked quality (ABSENT vs 0)',PAGE_O,{{spellId=300003,stacks=1,locked=true}}},
+  {'a wrong canonical ordinary quality (the catalog 2)',{{spellId=300001,quality=2,stacks=1}},PAGE_L},
+  {'a wrong canonical locked quality (the catalog 2)',PAGE_O,{{spellId=300003,quality=2,stacks=1,locked=true}}},
+  {'a wrong ID',{{spellId=300002,quality=0,stacks=1}},PAGE_L},
+  {'wrong copies',PAGE_O,{{spellId=300003,quality=0,stacks=2,locked=true}}},
+  {'swapped roles',{{spellId=300003,quality=0,stacks=1}},{{spellId=300001,quality=0,stacks=1,locked=true}}}})
+ local DRAFT_O={{spellId=300001,quality=2,stacks=1,sourceRole='ordinary'}}
+ local DRAFT_L={{spellId=300003,quality=0,stacks=1,locked=true,sourceRole='locked'}}
+ D23Controls('copied draft',D23_DRAFT,{DRAFT_O,DRAFT_L},{
+  {'a missing copied ordinary quality',{{spellId=300001,stacks=1,sourceRole='ordinary'}},DRAFT_L},
+  {'the canonical 0 instead of the copied ordinary quality 2',{{spellId=300001,quality=0,stacks=1,sourceRole='ordinary'}},DRAFT_L},
+  {'a wrong copied ordinary quality 3',{{spellId=300001,quality=3,stacks=1,sourceRole='ordinary'}},DRAFT_L},
+  {'a missing copied locked quality',DRAFT_O,{{spellId=300003,stacks=1,locked=true,sourceRole='locked'}}},
+  {'the earlier unsupported locked quality 2',DRAFT_O,{{spellId=300003,quality=2,stacks=1,locked=true,sourceRole='locked'}}},
+  {'a wrong ID',{{spellId=300002,quality=2,stacks=1,sourceRole='ordinary'}},DRAFT_L},
+  {'wrong copies',DRAFT_O,{{spellId=300003,quality=0,stacks=2,locked=true,sourceRole='locked'}}},
+  {'swapped roles',{{spellId=300003,quality=0,stacks=1,sourceRole='ordinary'}},{{spellId=300001,quality=2,stacks=1,locked=true,sourceRole='locked'}}},
+  {'an ordinary row marked locked',{{spellId=300001,quality=2,stacks=1,sourceRole='locked'}},DRAFT_L},
+  {'a locked row marked ordinary',DRAFT_O,{{spellId=300003,quality=0,stacks=1,sourceRole='ordinary'}}}})
+ local captured,whyCaptured=D23Exact(row.echoes,row.lockedEchoes)
+ print('OBSERVED','D23','captured rows='..D23Text(captured))
+ C.setup(captured~=nil and expectedOrdinary=='300001x1' and expectedLocked=='300003x1',
+  'D23: the captured record holds ordinary 300001 x1 and locked 300003 x1',printable(whyCaptured or D23Text(captured)))
+ local okCapture,whyCapture=D23Match(row.echoes,row.lockedEchoes,D23_RAW)
+ C.guard(okCapture,'D23: raw pin: the captured record states ordinary 300001 x1 and locked 300003 x1 with quality ABSENT (DpsCapture snapshots carry IDs and counts only)',whyCapture)
+ local okWire,whyWire=#payloads>0,'no complete transmission'
+ local okWireRaw,whyWireRaw=okWire,whyWire
+ for _,payload in ipairs(payloads) do
+  local same,detail=D23Match(payload.e,payload.lk,captured)
+  if not same then okWire,whyWire=false,detail end
+  same,detail=D23Match(payload.e,payload.lk,D23_RAW)
+  if not same then okWireRaw,whyWireRaw=false,detail end
+ end
+ C.guard(okWire,'D23: every decoded WLD2 carries exactly the captured ordinary and locked rows (ID, copies, role and quality, each exactly)',whyWire)
+ C.guard(okWireRaw,'D23: raw pin: every decoded WLD2 states ordinary 300001 x1 and locked 300003 x1 with quality ABSENT',whyWireRaw)
+ local senderOwner=Nexus.Identity.VerifiedOwnerKey(row)
+ C.setup(senderOwner~=nil and senderOwner==Nexus.Identity.OwnerKey(SUPPORTED.name,GetRealmName()),
+  'D23: the captured record has its sender\'s verified owner',senderOwner)
  local sourceName=Fields(chunks[1])[2]
  Boot(nil,{name='Pagereceiver'})
  NexusEditorFrame=nil
@@ -523,6 +779,46 @@ C.scenario('D23 unsolicited locked record, nonwinning set and WLD2-only receiver
  C.guard(received and received.dps==4000 and stored and EchoList(stored.echoes)==expectedOrdinary
   and EchoList(received.lockedEchoes)==expectedLocked,
   'D23: WLD2 alone stores the exact page and locked DPS evidence')
+ -- The receiver's own records: the received DPS record against the retained
+ -- capture and the raw pin (quality ABSENT), and the stored page against the
+ -- canonical pin alone: both of its lists present, dense and one exact row
+ -- each, at quality 0. The received record and the stored page each state the
+ -- sender's verified owner, present and equal (a nil owner never passes).
+ local okDps,whyDps=D23Match(received and received.echoes,received and received.lockedEchoes,captured)
+ C.guard(okDps,'D23: the received DPS record holds exactly the captured ordinary and locked rows (ID, copies, role and quality, each exactly)',whyDps)
+ local okDpsRaw,whyDpsRaw=D23Match(received and received.echoes,received and received.lockedEchoes,D23_RAW)
+ C.guard(okDpsRaw,'D23: raw pin: the received DPS record states ordinary 300001 x1 and locked 300003 x1 with quality ABSENT',whyDpsRaw)
+ local pageLocked=stored and stored.lockedEchoes
+ local okPage,whyPage=D23Match(stored and stored.echoes,pageLocked,D23_PAGE)
+ print('OBSERVED','D23','page locked list='..printable(type(pageLocked)=='table' and #pageLocked or pageLocked),'page rows='..printable(whyPage))
+ C.guard(okPage,'D23: canonical page pin: the stored page states both lists, dense, each one exact row: ordinary 300001 x1 and locked 300003 x1 at quality 0 (the canonical default; not an unknown sentinel, not owned Common)',whyPage)
+ local receivedOwner=received and Nexus.Identity.VerifiedOwnerKey(received)
+ local pageOwner=stored and Nexus.Identity.VerifiedOwnerKey(stored)
+ print('OBSERVED','D23','received verified owner='..printable(receivedOwner),'page verified owner='..printable(pageOwner))
+ C.guard(D23Owner(receivedOwner,senderOwner),'D23: the received DPS record keeps the sender\'s verified owner',printable(receivedOwner))
+ C.guard(D23Owner(pageOwner,senderOwner),'D23: the stored page states the sender\'s verified owner, present and equal to the sender',printable(pageOwner))
+ -- Controls of the owner oracle: the sender passes; a nil owner (also against
+ -- a nil sender), another owner and each real record read without its
+ -- verification (Identity.VerifiedOwnerKey on a copy) are refused.
+ local otherOwner=Nexus.Identity.OwnerKey('Pagereceiver',GetRealmName())
+ local ownerWrong={}
+ local function OwnerControl(label,actual,accept)
+  if D23Owner(actual,senderOwner)~=accept then ownerWrong[#ownerWrong+1]=label end
+ end
+ OwnerControl('the sender',senderOwner,true)
+ OwnerControl('a nil owner',nil,false)
+ OwnerControl('another owner',otherOwner,false)
+ if D23Owner(nil,nil) then ownerWrong[#ownerWrong+1]='a nil owner against a nil sender' end
+ for _,source in ipairs({{'received record',received},{'stored page',stored}}) do
+  if type(source[2])=='table' then
+   local copy={}
+   for k,v in pairs(source[2]) do copy[k]=v end
+   copy.ownerVerified=nil
+   OwnerControl('the '..source[1]..' without its verification',Nexus.Identity.VerifiedOwnerKey(copy),false)
+  end
+ end
+ C.guard(#ownerWrong==0 and otherOwner~=nil and otherOwner~=senderOwner,
+  'D23: the owner oracle accepts the sender and refuses a nil, unverified or other owner',table.concat(ownerWrong,'; '))
  if stored then
   Nexus.CommunityBuilds.ShowBuild(stored.id)
   local f=NexusCommunityBuildsFrame
@@ -538,8 +834,189 @@ C.scenario('D23 unsolicited locked record, nonwinning set and WLD2-only receiver
    and draft.pending==1 and draft.pendingLock==1,
    'D23: receiver can copy ordinary and locked roles into Editor',
    tostring(draft.pending)..'/'..tostring(draft.pendingLock))
+  -- The draft that real Copy made, read through the editor's own controller
+  -- as wishlist_editor_binding finds it (read only): its pending rows are the
+  -- ordinary role, its pending-lock rows the locked role, and it adds no
+  -- fulfilled target. Quality is the copied draft pin (D23_DRAFT) under the
+  -- public NormalizeCandidateEvidence policy: ordinary 2 is catalog
+  -- enrichment, tied below to the receiver catalog's metadata (SETUP), and
+  -- locked 0 is tied to the stored page's canonical 0. The ties are
+  -- equalities only: neither value is owned rarity, and which list Copy read
+  -- is not asserted.
+  local controller
+  for i=1,255 do
+   local n,v=debug.getupvalue(Nexus.WishlistEditor.Show,i)
+   if not n then break end
+   if n=='wishlistController' then controller=v;break end
+  end
+  local function Values(map)
+   if type(map)~='table' then return nil end
+   local out={}
+   for _,v in pairs(map) do out[#out+1]=v end
+   return out
+  end
+  local okCat,receiverCatalog=pcall(function() return A.Catalog() end)
+  local catalogRows=okCat and type(receiverCatalog)=='table' and type(receiverCatalog.rows)=='table' and receiverCatalog.rows or {}
+  local catalogOrdinary=type(catalogRows[300001])=='table' and catalogRows[300001].quality or nil
+  local catalogLocked=type(catalogRows[300003])=='table' and catalogRows[300003].quality or nil
+  C.setup(catalogOrdinary==2 and catalogLocked==2,
+   'D23: fixture metadata: the receiver catalog lists 300001 and 300003 at catalog quality 2 (H.AddEcho; metadata, not owned rarity)',
+   printable(catalogOrdinary)..'/'..printable(catalogLocked))
+  local okDraft,whyDraft=false,'editor controller not found'
+  local pendingList,lockList
+  if controller then
+   pendingList,lockList=Values(controller.PendingRows()),Values(controller.PendingLockRows())
+   okDraft,whyDraft=D23Match(pendingList,lockList,D23_DRAFT)
+  end
+  C.guard(okDraft and draft.fulfilled==0,
+   'D23: copied draft pin: exactly ordinary 300001 x1 quality 2 (catalog-enriched) and locked 300003 x1 quality 0 (canonical), each in its own role, no fulfilled target',
+   printable(whyDraft)..' fulfilled='..printable(draft.fulfilled))
+  local function Only(list) return type(list)=='table' and #list==1 and type(list[1])=='table' and list[1] or nil end
+  local draftOrdinary,draftLocked,pageLockedRow=Only(pendingList),Only(lockList),Only(pageLocked)
+  C.guard(draftOrdinary~=nil and catalogOrdinary~=nil and draftOrdinary.quality==catalogOrdinary,
+   'D23: tie: the copied ordinary quality equals the receiver catalog metadata of 300001 (catalog enrichment, not owned rarity)',
+   printable(draftOrdinary and draftOrdinary.quality)..'/'..printable(catalogOrdinary))
+  C.guard(draftLocked~=nil and pageLockedRow~=nil and pageLockedRow.quality==0 and draftLocked.quality==pageLockedRow.quality,
+   'D23: tie: the copied locked quality equals the stored page\'s canonical 0 (an equality only: not owned rarity, no claim which list Copy read)',
+   printable(draftLocked and draftLocked.quality)..'/'..printable(pageLockedRow and pageLockedRow.quality))
  end
  C.guard(#H.actions==0,'D23: receiver performs no game action',#H.actions)
+end)
+
+-- D23 positive page link (GUARD; SETUP for the fixture). A first new best
+-- creates its automatic page through the real capture and lets it commit.
+-- Once the public readers (BuildCatalog.Get and FindExactFingerprint, the
+-- Identity ordinary-mirror and verified-owner readers, the captured
+-- fingerprint and Echo set) show that page as this character's current exact
+-- page, a strictly better best on the same set begins with it (CommitSession
+-- FindMatchingBuild; EnsureDpsBuildForEchoes returns it) and Sync sends it as
+-- b. Only the WLD2 sent after the second capture is reassembled. Nothing is
+-- injected, stubbed or forced; if the page is not established the scenario
+-- reports the blocker and asserts no b.
+C.scenario('D23B a better best on the same Echo set links its verified page',function()
+ Boot(nil,SUPPORTED)
+ UseEchoes(300001)
+ local catalog,identity=Nexus.BuildCatalog,Nexus.Identity
+ local sent0=#H.sent
+ local ok,err=Capture(90000)
+ C.setup(ok,'D23B: first qualifying capture completed',err)
+ local row=D.GetCurrentPersonalBest('dummy')
+ C.setup(type(row)=='table' and row.dps==3000 and type(row.fingerprint)=='string',
+  'D23B: the first capture committed a new personal best',row and row.dps)
+ Until(2000,function() return AutoSummary(0)~=nil end)
+ local page=AutoSummary(0)
+ C.setup(page~=nil and type(page.id)=='string','D23B: the first capture created its page')
+ if not page or type(page.id)~='string' or type(row)~='table' or type(row.fingerprint)~='string' then return end
+ C.setup(Until(1200,function()
+  local t,id=Traffic(sent0,page,row)
+  return #(Complete(t.transfers[tostring(id)]))>0
+ end),'D23B: the first record transfer left before the second capture')
+ local function Verified()
+  local okRead,result=pcall(function()
+   local built=catalog.Get(page.id)
+   local exactId,exact=catalog.FindExactFingerprint(row.fingerprint)
+   return type(built)=='table' and type(exact)=='table' and exactId==page.id
+    and identity.SavedMirrorKind(built)=='ordinary' and identity.SavedMirrorKind(exact)=='ordinary'
+    and row.ownerKey~=nil and identity.VerifiedOwnerKey(built)==row.ownerKey
+    and identity.VerifiedOwnerKey(exact)==row.ownerKey
+    and (built.fingerprint==nil or built.fingerprint==row.fingerprint)
+    and EchoList(built.echoes)==EchoList(row.echoes)
+  end)
+  return okRead and result==true
+ end
+ Until(400,Verified)
+ local established=Verified()
+ C.setup(established,'D23B: the committed page is the current exact, ordinary, verified-own page of the captured Echo set',page.id)
+ if not established then
+  print('BLOCKED','D23B','no verified ordinary page of the captured set was established; no b is asserted')
+  return
+ end
+ local sent1=#H.sent
+ ok,err=Capture(120000)
+ C.setup(ok,'D23B: second qualifying capture completed',err)
+ local second=D.GetCurrentPersonalBest('dummy')
+ local better=type(second)=='table' and second.dps==4000 and second.fingerprint==row.fingerprint
+ C.setup(better,'D23B: it committed a strictly better personal best on the same exact set',second and second.dps)
+ if not better then return end
+ C.setup(type(second.realm)=='string' and tonumber(second.level)==H.playerLevel and tonumber(second.duration)~=nil,
+  'D23B: the captured row carries its realm, level and duration',printable(second.realm))
+ Until(1200,function()
+  local t,id=Traffic(sent1,page,second)
+  return #(Complete(t.transfers[tostring(id)]))>0
+ end)
+ local traffic,transferId=Traffic(sent1,page,second)
+ RecordGuards('D23B',traffic,transferId,second,page)
+ C.guard(second.buildId==page.id,'D23B: the better row links the verified page it began with',printable(second.buildId))
+ local payload=Complete(traffic.transfers[tostring(transferId)])[1]
+ local wireOk,wireWhy=RecordWireFields(payload,second,page.id)
+ print('OBSERVED','D23B','wire r='..printable(payload and payload.r),'l='..printable(payload and payload.l),
+  'u='..printable(payload and payload.u),'b='..printable(payload and payload.b),'page='..printable(page.id))
+ C.guard(wireOk,'D23B: the new WLD2 carries the captured realm, level and duration, and b is that verified page',wireWhy)
+ local wrong=RecordWireControls(payload,second,page.id)
+ C.guard(#wrong==0,'D23B: the wire-field oracle refuses missing, wrong or mistyped b, realm, level and duration',table.concat(wrong,'; '))
+end)
+
+-- D23Q public typed known-quality control (GUARD; SETUP for the fixture).
+-- The public pure WishlistModel.New().NormalizeCandidateEvidence is called
+-- directly (no wire, page or Copy) with literal typed rows, ordinary
+-- {spellId=300001,quality=2,stacks=1} and locked {spellId=300003,quality=Q,
+-- stacks=1}, the real boot catalog (Adapter.Catalog(); H.AddEcho registers
+-- both at catalog quality 2) and no locked-owned spell. A stated locked 3
+-- surviving the catalog 2 discriminates preservation from catalog fallback;
+-- a stated 2 alone cannot, and a stated 0 stays a valid stated 0. Separately:
+-- an unstated locked quality takes the catalog 2, and an ordinary row takes
+-- the catalog 2 even when it states 3 (ordinary is catalog-first; nothing
+-- here says ordinary keeps a stated quality). A stated locked -1 or 1.5 forms
+-- no draft. Typed-contract GUARDs only: no wire, native or owned-rarity
+-- claim, and no behavior repair.
+C.scenario('D23Q public typed known-quality control through NormalizeCandidateEvidence',function()
+ Boot(nil,SUPPORTED)
+ C.setup(Nexus.StartupStatus().state=='ready','D23Q: fixture: start-up ready')
+ local okModel,model=pcall(function() return Nexus.WishlistModel.New() end)
+ local normalize=okModel and type(model)=='table' and model.NormalizeCandidateEvidence or nil
+ C.setup(type(normalize)=='function','D23Q: fixture: the public WishlistModel.New() exposes NormalizeCandidateEvidence',printable(type(normalize)))
+ local okCat,catalog=pcall(function() return A.Catalog() end)
+ local rows=okCat and type(catalog)=='table' and type(catalog.rows)=='table' and catalog.rows or {}
+ local q1=type(rows[300001])=='table' and rows[300001].quality or nil
+ local q3=type(rows[300003])=='table' and rows[300003].quality or nil
+ C.setup(q1==2 and q3==2,'D23Q: fixture metadata: the boot catalog lists 300001 and 300003 at catalog quality 2 (H.AddEcho; metadata, not owned rarity)',
+  printable(q1)..'/'..printable(q3))
+ if type(normalize)~='function' or q1~=2 or q3~=2 then return end
+ local function Typed(ordinaryQuality,lockedQuality)
+  return pcall(normalize,{{spellId=300001,quality=ordinaryQuality,stacks=1}},
+   {{spellId=300003,quality=lockedQuality,stacks=1}},{catalog=catalog,lockedBySpell={}})
+ end
+ local function Rows(map)
+  if type(map)~='table' then return nil end
+  local out={}
+  for _,v in pairs(map) do out[#out+1]=v end
+  return out
+ end
+ local function Draft(label,ordinaryQuality,lockedQuality,expectOrdinary,expectLocked)
+  local ok,prepared,why=Typed(ordinaryQuality,lockedQuality)
+  local same,detail,shape=false,ok and printable(why or 'no draft') or 'raised: '..printable(prepared),false
+  if ok and type(prepared)=='table' then
+   local pending,lock=Rows(prepared.pending),Rows(prepared.pendingLock)
+   same,detail=D23Match(pending,lock,{D23Row(300001,1,expectOrdinary,'ordinary'),D23Row(300003,1,expectLocked,'locked')})
+   local o,l=type(pending)=='table' and #pending==1 and pending[1],type(lock)=='table' and #lock==1 and lock[1]
+   shape=type(o)=='table' and o.sourceRole=='ordinary' and o.locked==nil and o.stacks==1
+    and type(l)=='table' and l.sourceRole=='locked' and l.locked==true and l.stacks==1
+    and type(prepared.fulfilledTargets)=='table' and next(prepared.fulfilledTargets)==nil
+  end
+  print('OBSERVED','D23Q',label,'rows='..printable(detail),'roles, one copy, no fulfilled target='..printable(shape))
+  C.guard(same and shape,'D23Q: '..label..', each row in its own role with one copy and no fulfilled target',printable(detail))
+ end
+ Draft('a stated locked quality 3 survives the catalog 2 (discriminating)',2,3,2,3)
+ Draft('a stated locked quality 2 stays 2 (alone not discriminating: it equals the catalog 2)',2,2,2,2)
+ Draft('a stated locked quality 0 stays 0 (a valid stated 0)',2,0,2,0)
+ Draft('an unstated locked quality takes the catalog 2',2,nil,2,2)
+ Draft('an ordinary row stating 3 takes the catalog 2 (catalog-first) while the stated locked 3 stays',3,3,2,3)
+ for _,q in ipairs({-1,1.5}) do
+  local ok,prepared,why=Typed(2,q)
+  C.guard(ok and prepared==nil and why=='locked Echo evidence is invalid',
+   'D23Q: a stated locked quality '..tostring(q)..' is refused and forms no draft',ok and printable(why) or 'raised: '..printable(prepared))
+ end
+ C.guard(#H.actions==0,'D23Q: no game action',#H.actions)
 end)
 
 C.scenario('HELP the share sentence is qualified',function()
