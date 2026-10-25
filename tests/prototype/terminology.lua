@@ -491,6 +491,157 @@ check(T.Message('STORE_PENDING')=='This action is not available yet. Check the s
 check(T.Message('waiting for three-card board')=='Waiting for the next three Echo choices' and T.Message('waiting: waiting for pending-pick count')=='waiting for pending-pick count','without the seam the two wait reasons keep their existing English')
 Nexus.Localization=real
 check(T.Message('STORE_PENDING')=='Reading your saved data' and L.Diagnostics().misses==d3.misses,'real seam restored with its record untouched')
+-- Issue #123, optional packs: the preference enum, the real pack data and
+-- the resolver with real and fixture packs. Byte-exact names use escapes,
+-- so this file's encoding does not matter. A reloaded module is taken only
+-- through reloadPacks, which restores the real seam and data. Technical
+-- checks only: no linguistic acceptance and no native glyph rendering.
+do
+ local IDS={'enUS','frFR','deDE','esES','plPL','ptBR','ruRU'}
+ local NAMES={enUS='English',frFR='Fran\195\167ais',deDE='Deutsch',esES='Espa\195\177ol',plPL='Polski',
+  ptBR='Portugu\195\170s (Brasil)',ruRU='\208\160\209\131\209\129\209\129\208\186\208\184\208\185'}
+ local enum=Nexus.DefaultProfile.uiLanguages
+ check(type(enum)=='table' and enum.default=='enUS' and type(enum.ids)=='table' and #enum.ids==#IDS,'the preference enum is declared with its English default')
+ for i,id in ipairs(IDS)do check(enum.ids[i]==id,'preference enum ID '..i..' is '..id)end
+ check(Nexus.DefaultProfile.defaultSettings.uiLanguage==nil,'the preference is not a filled default, so start-up never adds it')
+ local langs=L.Languages()
+ check(#langs==#IDS,'English and the six packs are offered')
+ for i,id in ipairs(IDS)do
+  check(langs[i] and langs[i].id==id and langs[i].name==NAMES[id] and langs[i].available==true,'offered language '..id..' with its own name')
+  check(L.IsLanguage(id) and L.EffectiveLanguage(id)==id,'enum ID is an offered language: '..id)
+ end
+ check(L.ActiveLanguage()=='enUS' and select(2,L.ActiveLanguage())==true,'the English profile starts with English active, initialized once')
+ local d=L.Diagnostics()
+ check(d.packs.present and d.packs.adopted==6 and d.packs.refused==0 and #d.packs.rows==6 and d.language.active=='enUS','every real pack is adopted at load')
+ for _,row in ipairs(d.packs.rows)do check(row.accepted==3 and row.rejected==0,'real pack '..row.id..' has all three entries')end
+ local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
+ local packData=penv.Nexus and penv.Nexus.LocalizationPacks
+ check(count(penv)==1 and count(penv.Nexus)==1 and type(packData)=='table' and getmetatable(packData)==nil and count(packData)==6,'the pack data file sets one plain table of six packs and calls nothing')
+ -- The normative original pack cohort (issue #123): the three static status
+ -- messages each real optional pack translates, with their existing exact
+ -- English bytes. It is named apart from the expanded English cohort above,
+ -- whose newer issue #142 meanings have no pack entry and stay English (or an
+ -- explicit injected candidate) under any selected language.
+ local packCohort={
+  {'ROOT_MUTATION_PENDING','reason.save_in_progress','Saving is still in progress; wait for its final result'},
+  {'CURSOR_REQUIRED','reason.list_preparing','This list is still being prepared'},
+  {'STORE_PENDING','reason.saved_data_reading','Reading your saved data'},
+ }
+ local packKeys,newer,englishRow={},{},{}
+ for _,case in ipairs(cohort)do englishRow[case[2]]=case end
+ for _,case in ipairs(packCohort)do
+  local row=englishRow[case[2]];packKeys[case[2]]=true
+  check(row and row[1]==case[1] and row[3]==case[3] and data[case[2]]==case[3] and L.Kind(case[2])=='text','SETUP original pack-cohort row keeps its code, key and exact English bytes: '..case[2])
+ end
+ for _,case in ipairs(cohort)do if not packKeys[case[2]] then newer[#newer+1]=case end end
+ check(#packCohort==3 and #newer==2 and #cohort==#packCohort+#newer and newer[1][2]=='reason.wait_three_choices' and newer[2][2]=='reason.wait_pending_pick_count','SETUP the original pack cohort is three of the five static English meanings; the two newer ones are English-only')
+ for _,case in ipairs(newer)do check(L.Kind(case[2])=='text' and data[case[2]]==case[3],'SETUP newer static English meaning keeps its exact bytes: '..case[2])end
+ for i=2,#IDS do
+  local id=IDS[i];local pack=packData[id]
+  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and count(pack.entries)==3,'pack '..id..': its own name and exactly the three original pack-cohort entries')
+  local onlyOriginal=true
+  for key in pairs(pack.entries)do onlyOriginal=onlyOriginal and packKeys[key]==true end
+  check(onlyOriginal,'pack '..id..' holds only original pack-cohort keys: no newer English-only meaning or template')
+  for _,case in ipairs(packCohort)do
+   local text=pack.entries[case[2]]
+   check(type(text)=='string' and #text>=8 and isolated(text) and text~=case[2] and not text:find('[%%{}<>]') and not text:find('TODO',1,true) and not text:find('TBD',1,true),'pack '..id..' '..case[2]..': drafted text, not a key or a placeholder')
+   for _,other in ipairs(cohort)do check(text~=other[3],'pack '..id..' '..case[2]..' is not an English text')end
+   resolves(case[2],{[case[2]]=text},text,'candidate',nil,'pack '..id..' '..case[2]..' passes the text contract')
+  end
+ end
+ local realPacks=Nexus.LocalizationPacks
+ local function reloadPacks(packsData)
+  Nexus.LocalizationPacks=packsData
+  local ok=pcall(dofile,'core/Localization.lua');local module=Nexus.Localization
+  Nexus.Localization,Nexus.LocalizationPacks=real,realPacks
+  return ok and module~=real and module or nil
+ end
+ local fresh=assert(reloadPacks(realPacks),'loader with the real packs');checks=checks+1
+ check(fresh.ActiveLanguage()=='enUS' and select(2,fresh.ActiveLanguage())==false,'a new module starts with English, not yet initialized')
+ check(fresh.Text(K)==E and select(2,fresh.Text(K))=='base','before initialization Text is English')
+ local got,first=fresh.InitializeActiveLanguage('frFR')
+ check(got=='frFR' and first==true and fresh.Diagnostics().language.active=='frFR','initialization selects the saved pack')
+ local active0=fresh.Diagnostics()
+ for _,case in ipairs(cohort)do
+  local want=packData.frFR.entries[case[2]]
+  local text,source,why=fresh.Text(case[2])
+  if packKeys[case[2]] then
+   check(type(want)=='string' and text==want and source=='candidate' and why==nil,'ordinary Text uses the active pack: '..case[2])
+  else
+   check(want==nil and text==case[3] and source=='base' and why=='missing_candidate','a newer static meaning the selected frFR pack lacks falls back to its exact English: '..case[2])
+  end
+  local rtext,rsource,rwhy=fresh.Resolve(case[2])
+  check(rtext==case[3] and rsource=='base' and rwhy==nil,'Resolve stays pure: without a pack it is the English base: '..case[2])
+  check(fresh.Resolve(case[2],{[case[2]]='Fixture text'})=='Fixture text' and fresh.Text(case[2],{[case[2]]='Fixture text'})=='Fixture text','an explicit pack still decides alone: '..case[2])
+ end
+ local active1=fresh.Diagnostics()
+ check(active1.misses-active0.misses==#newer and active1.byReason.missing_candidate-active0.byReason.missing_candidate==#newer and active1.last=='missing_candidate' and #active1.keys==#active0.keys and active1.keysNotKept==active0.keysNotKept,'each newer English fallback under frFR is counted once as missing_candidate and keeps no key')
+ local charge={banish={known=true,value=2},reroll={known=false},freeze={known=true,value=0}}
+ local ct,cs,cw=fresh.Format('readout.charge_counts',charge)
+ check(fresh.Kind('readout.charge_counts')=='format' and ct=='B:2 R:? F:0' and cs=='base' and cw==nil,'with frFR selected a formatted meaning without an explicit pack uses the English template and typed known/unknown counts')
+ ct,cs,cw=fresh.Format('readout.charge_counts',charge,{['readout.charge_counts']='G:{freeze} R:{reroll} B:{banish}'})
+ check(ct=='G:0 R:? B:2' and cs=='candidate' and cw==nil,'with frFR selected only an explicit NON-SHIPPED candidate template replaces it')
+ check(fresh.Diagnostics().misses==active1.misses and charge.banish.value==2 and charge.reroll.known==false and charge.reroll.value==nil and charge.freeze.value==0,'formatting without a fallback records nothing and leaves its arguments untouched')
+ Nexus.Localization=fresh
+ local shown={}
+ for _,case in ipairs(cohort)do shown[case[1]]=T.Message(case[1])end
+ Nexus.Localization=real
+ for _,case in ipairs(packCohort)do check(shown[case[1]]==packData.frFR.entries[case[2]] and shown[case[1]]~=case[3],'UserText shows the selected frFR pack text: '..case[1])end
+ for _,case in ipairs(newer)do check(shown[case[1]]==case[3],'UserText keeps the exact English of a newer meaning under the selected frFR pack: '..case[1])end
+ local ut,us,uw=fresh.Text(K,'unsupported-pack')
+ check(ut==E and us=='base' and uw=='unsupported_pack','an explicit unsupported pack falls back to English, not to the active pack')
+ check(fresh.Text('reason.not_reviewed')==U and select(2,fresh.Text('reason.not_reviewed'))=='unavailable','an unknown key keeps the safe status with a pack active')
+ local again,second=fresh.InitializeActiveLanguage('deDE')
+ check(again=='frFR' and second==false and fresh.Text(K)==packData.frFR.entries[K],'a repeated initialization never switches mid-session')
+ realPacks.frFR.entries[K]='Changed after load';realPacks.frFR.name='Changed name'
+ check(fresh.Text(K)==packData.frFR.entries[K] and fresh.Languages()[2].name==NAMES.frFR,'packs are copied at load: a later data change changes nothing')
+ realPacks.frFR.entries[K]=packData.frFR.entries[K];realPacks.frFR.name=NAMES.frFR
+ local unsupported={n=12,nil,'','fr','frfr','FRFR','fr_FR','fr-FR','enGB','xxXX',42,true,{}}
+ for i=1,unsupported.n do
+  local m=assert(reloadPacks(realPacks))
+  local id=m.InitializeActiveLanguage(unsupported[i])
+  check(id=='enUS' and m.Text(K)==E and not m.IsLanguage(unsupported[i]) and m.EffectiveLanguage(unsupported[i])=='enUS','an unsupported preference gives English, never an alias #'..i)
+ end
+ local en=assert(reloadPacks(realPacks))
+ check(en.InitializeActiveLanguage('enUS')=='enUS' and en.Text(K)==E and select(2,en.Text(K))=='base','an explicit English preference')
+ local touched0=touched
+ local fixture={
+  frFR={name=NAMES.frFR,entries={[K]=B(0xED,0xA0,0x80),['reason.save_in_progress']='Fixture save text',['reason.not_reviewed']='Added key',['Bad Key']='Bad'}},
+  deDE=setmetatable({name=NAMES.deDE,entries={[K]='Wrapped pack'}},{}),
+  esES={name='Bad|name',entries={[K]='Misnamed pack'}},
+  plPL={name=NAMES.plPL,entries={[K]=function()return 'x' end,['reason.saved_data_reading']='Fixture read text'}},
+  ptBR={name=NAMES.ptBR,entries=trap},
+ }
+ local fm=assert(reloadPacks(fixture),'loader with fixture packs');checks=checks+1
+ local fd=fm.Diagnostics().packs
+ check(fd.present and fd.adopted==2 and fd.refused==4,'wrapped, misnamed, metatable-entry and absent packs are refused')
+ local rows=fm.Languages()
+ check(#rows==3 and rows[1].id=='enUS' and rows[2].id=='frFR' and rows[3].id=='plPL','only adopted packs are offered')
+ check(fd.rows[1].id=='frFR' and fd.rows[1].accepted==1 and fd.rows[1].rejected==3 and fd.rows[2].id=='plPL' and fd.rows[2].accepted==1 and fd.rows[2].rejected==1,'rejected entries are counted per pack')
+ check(fm.IsLanguage('deDE') and fm.EffectiveLanguage('deDE')=='enUS' and fm.EffectiveLanguage('ruRU')=='enUS','an enum ID without an adopted pack shows English')
+ check(fm.InitializeActiveLanguage('frFR')=='frFR','a partly valid pack is adopted')
+ local ft,fs,fw=fm.Text(K)
+ check(ft==E and fs=='base' and fw=='missing_candidate','a non-scalar entry falls back to English for its key')
+ check(fm.Text('reason.save_in_progress')=='Fixture save text','the valid entry beside it is shown')
+ local mt,ms,mw=fm.Text('reason.saved_data_reading')
+ check(mt=='Reading your saved data' and ms=='base' and mw=='missing_candidate','a missing entry falls back to English for its key')
+ check(not fm.Has('reason.not_reviewed') and select(2,fm.Text('reason.not_reviewed'))=='unavailable','a pack never adds a key')
+ for _,id in ipairs({'deDE','esES','ptBR','ruRU'})do
+  local m=assert(reloadPacks(fixture))
+  check(m.InitializeActiveLanguage(id)=='enUS' and m.Text(K)==E,'a refused or absent pack gives English: '..id)
+ end
+ local pm=assert(reloadPacks(fixture))
+ check(pm.InitializeActiveLanguage('plPL')=='plPL' and pm.Text(K)==E and pm.Text('reason.saved_data_reading')=='Fixture read text','a function entry is left out; its valid neighbour is shown')
+ check(touched==touched0,'pack metamethods are never invoked')
+ local none=assert(reloadPacks(nil),'loader without pack data');checks=checks+1
+ check(#none.Languages()==1 and not none.Diagnostics().packs.present and none.InitializeActiveLanguage('frFR')=='enUS' and none.Text(K)==E,'without pack data only English is offered')
+ local profileEnum=Nexus.DefaultProfile.uiLanguages
+ Nexus.DefaultProfile.uiLanguages=nil
+ local noEnum=reloadPacks(realPacks)
+ Nexus.DefaultProfile.uiLanguages=profileEnum
+ check(noEnum and #noEnum.Languages()==1 and noEnum.InitializeActiveLanguage('frFR')=='enUS','without the enum only English is offered')
+ check(Nexus.Localization==real and Nexus.LocalizationPacks==realPacks and L.ActiveLanguage()=='enUS' and L.Text(K)==E,'the real seam, data and active language are untouched by the loader checks')
+end
 check(#H.actions==before.actions and #H.sent==before.sent and H.popup==before.popup and #H.chat==before.chat,'synchronous seam calls cause no observed action, send, StaticPopup or chat')
 check(Nexus.RecomputeStats().autoEnabled==before.auto,'seam leaves the Auto selection unchanged')
 check(same(Nexus.Store.State(),state0) and same(Nexus.Store.Settings(),settings0),'GUARD synchronous seam calls preserve full detached assigned state and settings')
