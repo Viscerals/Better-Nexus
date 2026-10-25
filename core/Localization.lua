@@ -1,11 +1,13 @@
 -- Nexus: core/Localization.lua
--- Issue #123: the one Nexus-owned presentation seam for reviewed
--- player-facing text. A caller asks for a stable semantic key
--- ("reason.save_in_progress") and gets text. This file reads no game API,
--- client locale, saved data or setting, and it prints, sends, schedules or
--- saves nothing. Its state is the English base and the optional packs copied
--- at load, the session's active language (set once, see below) and the
--- fixed-size diagnostic record below.
+-- Issue #140 (parent #123), with the optional packs of issue #123: the one
+-- Nexus-owned presentation seam for reviewed player-facing text. A caller
+-- asks for a stable semantic key ("reason.save_in_progress") and gets text.
+-- This file reads no game API, client locale, saved data or setting, and it
+-- prints, sends, schedules or saves nothing. Its state is the English base
+-- and the optional packs copied at load (each pack covers only the three
+-- reviewed status messages; all other Nexus text stays English), the
+-- session's active language (set once from the ID its caller supplies, see
+-- below) and the fixed-size diagnostic record below.
 --
 -- Text/data contract, for the English base and for an injected candidate:
 --  * key: a string of 3 to MAX_KEY_BYTES bytes made of two or more
@@ -14,18 +16,27 @@
 --    meaning; it is never made from English, player or game text.
 --  * text: a Lua string of 1 to MAX_TEXT_BYTES bytes, well-formed UTF-8
 --    (the shortest-form encoding of Unicode scalar values only; see
---    WellFormedUtf8), with at least one non-space character, no control
+--    WellFormedUtf8), with at least one byte outside ASCII whitespace, no control
 --    byte (0-31, 127) and no "|" (so no colour, link or texture escape). It
 --    is shown exactly as stored: no placeholder or formatting.
+--    Whitespace here means ASCII bytes 9-13 and 32, not Unicode White_Space,
+--    grapheme or visibility classification. This is localized text, not an
+--    identifier or user-authored identity: Identity.ValidDisplayText is a
+--    different policy. Language punctuation, combining sequences, C1,
+--    zero-width/bidi scalars and noncharacters are not newly excluded here.
+--    No normalization is done. Acceptance does not prove native glyph,
+--    font, locale or visibility behavior.
 --  * entries table: used only when it is a plain table without a
 --    metatable. It is read with next/rawget, never through a metamethod,
 --    and nothing in it is called.
 --
 -- English base: data/LocalizationEnglish.lua, loaded just before this file
 -- by Nexus.toc, sets Nexus.LocalizationEnglish. Its valid entries are copied
--- once, here; a later change to that table changes nothing. A base that is
--- absent, not a plain table or larger than MAX_BASE_ENTRIES is not used at
--- all; an invalid entry is left out. Both are counted in Diagnostics().base.
+-- once, here; a later change to that table changes nothing. An absent,
+-- non-table or metatable base is not adopted: present=false, zero counts.
+-- A plain base sets present=true; above MAX_BASE_ENTRIES it adopts nothing,
+-- sets oversized=true and rejected to the whole entry count. In an admitted
+-- plain base, invalid entries are excluded and counted as rejected.
 --
 -- L.Resolve(key, pack) -> text, source, reason. It never raises and records
 -- nothing. In this order:
@@ -35,7 +46,7 @@
 --  4. pack not a plain table (a pack name, number, boolean, function, or a
 --     table with a metatable)      -> English text, "base", "unsupported_pack"
 --  5. no entry for the key         -> English text, "base", "missing_candidate"
---  6. entry outside the text contract (not a string, empty, only spaces,
+--  6. entry outside the text contract (not a string, empty, only ASCII whitespace,
 --     control byte, "|", too long, malformed or non-scalar UTF-8)
 --                                  -> English text, "base", "invalid_candidate"
 --  7. otherwise                    -> the entry, "candidate", nil
@@ -67,12 +78,14 @@
 --
 -- L.Text(key, pack) is Resolve plus the diagnostic record: each result with
 -- a reason is counted by reason, and the first MAX_DIAGNOSTIC_KEYS distinct
--- invalid or unknown keys are kept (a later one is only counted in
--- keysNotKept). The record has a fixed size, is never printed to chat, and
--- Diagnostics() returns a copy of it. CHANGED CONTRACT (issue #123): with
--- no pack, Text uses the active language's copied pack (none for English),
--- so an ordinary consumer such as core/UserText.lua shows the active
--- language. An explicit pack still decides alone, exactly as in Resolve.
+-- invalid or unknown sanitized shown keys are kept. Once full, keysNotKept
+-- counts each miss occurrence whose shown key is unkept, including repeats
+-- of the ninth key; it does not count distinct unkept identities. The record
+-- has a fixed size, is never printed to chat, and Diagnostics() returns a copy.
+-- CHANGED CONTRACT (issue #123): with no pack, Text uses the active
+-- language's copied pack (none for English), so an ordinary consumer such as
+-- core/UserText.lua shows the active language. An explicit pack still
+-- decides alone, exactly as in Resolve.
 
 Nexus = Nexus or {}
 local L = {}
@@ -92,7 +105,7 @@ L.MAX_NAME_BYTES = MAX_NAME_BYTES
 
 -- The documented safe status for a key without reviewed text: nonempty and
 -- inside the text contract. Resolve returns this local, not the field.
-local UNAVAILABLE = "This status cannot be shown right now. Check the diagnostics."
+local UNAVAILABLE = "This status cannot be shown right now."
 L.UNAVAILABLE = UNAVAILABLE
 
 local function ValidKey(key)
@@ -148,7 +161,8 @@ local function ValidText(text)
     if type(text) ~= "string" then return false end
     local length = #text
     if length < 1 or length > MAX_TEXT_BYTES then return false end
-    if not text:find("%S") then return false end
+    -- Byte-explicit ASCII whitespace, independent of pattern locale classes.
+    if not text:find("[^\9-\13\32]") then return false end
     if text:find("[%z\1-\31\127|]") then return false end
     return WellFormedUtf8(text)
 end

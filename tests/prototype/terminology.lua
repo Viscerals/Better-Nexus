@@ -35,7 +35,9 @@ local raw='tight horizon';check(T.Message(raw)=='Few selections remain' and raw=
 -- Issue #123: English status localization seam. The three status reasons
 -- resolve through Nexus.Localization with their existing English bytes; the
 -- resolver falls back to the reviewed English base and keeps a bounded local
--- record. RED before the seam: the TOC lines and Nexus.Localization are absent.
+-- record. Before the seam, absent TOC/module is a capability/setup failure,
+-- not a behavioral RED for every assertion below. New boundary cases are
+-- GUARDs on 37dd unless explicitly labelled EXPECT.
 local toc={};for line in io.lines('Nexus.toc')do toc[#toc+1]=(line:gsub('\r',''))end
 local function tocIndex(entry)
  local found
@@ -45,6 +47,19 @@ end
 local dataAt,seamAt,textAt=tocIndex('data\\LocalizationEnglish.lua'),tocIndex('core\\Localization.lua'),tocIndex('core\\UserText.lua')
 check(dataAt and seamAt and textAt and dataAt<seamAt and seamAt<textAt,'English data, then the seam, then UserText in the TOC')
 local L=assert(Nexus.Localization,'localization seam loaded');checks=checks+1
+assert(Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Seam guard target',{{spellId=200001,quality=1,stacks=2}}))
+local function same(a,b,seen)
+ if type(a)~='table' or type(b)~='table' then return a==b end
+ seen=seen or {};if seen[a] then return seen[a]==b end;seen[a]=b
+ for k,v in pairs(a)do if not same(v,b[k],seen)then return false end end
+ for k in pairs(b)do if a[k]==nil then return false end end
+ return true
+end
+local state0=H.Clone(Nexus.Store.State());local settings0=H.Clone(Nexus.Store.Settings())
+check(state0.loadoutWishlists[1] and state0.firstRunWishlist and state0.firstRunWishlist.assignmentId==state0.loadoutWishlists[1].assignmentId and state0.firstRunWishlist.key==state0.loadoutWishlists[1].key and #state0.firstRunWishlist.echoes>0,'SETUP nonempty assigned state through real adapter')
+local warning=assert(Nexus.OverwriteWarning)
+local warningShown=NexusOverwriteWarning and NexusOverwriteWarning:IsShown() or false
+local warningOpen=warning.IsOpen()
 local before={actions=#H.actions,sent=#H.sent,chat=#H.chat,popup=H.popup,auto=Nexus.RecomputeStats().autoEnabled}
 local d0=L.Diagnostics()
 check(d0.base.present and d0.base.accepted==3 and d0.base.rejected==0 and not d0.base.oversized,'English base loaded whole at boot')
@@ -75,6 +90,8 @@ check(L.Text('reason.list_preparing')=='This list is still being prepared' and n
 live['reason.list_preparing'],live['reason.added_later']='This list is still being prepared',nil
 local K,E,U='reason.list_preparing','This list is still being prepared',L.UNAVAILABLE
 check(type(U)=='string' and U:find('%S') and not U:find('|',1,true) and #U<=L.MAX_TEXT_BYTES,'documented safe status is nonempty contract text')
+-- EXPECT on 37dd: this seam has no player-visible diagnostic record.
+check(U=='This status cannot be shown right now.','EXPECT safe status does not promise an inaccessible diagnostics surface')
 local function resolves(key,pack,wantText,wantSource,wantWhy,label)
  local ok,text,source,why=pcall(L.Resolve,key,pack)
  check(ok and text==wantText and source==wantSource and why==wantWhy,label)
@@ -120,6 +137,10 @@ local malformed={
  {'E0 A0 41, bad third byte',B(0xE0,0xA0,0x41)},
  {'F0 90 41 80, bad third byte',B(0xF0,0x90,0x41,0x80)},
  {'F4 8F BF 41, bad fourth byte',B(0xF4,0x8F,0xBF,0x41)},
+ {'E1 80 C0, upper invalid third byte',B(0xE1,0x80,0xC0)},
+ {'F1 80 C0 80, upper invalid third byte',B(0xF1,0x80,0xC0,0x80)},
+ {'F1 80 80 C0, upper invalid fourth byte',B(0xF1,0x80,0x80,0xC0)},
+ {'F0 90 BF FF, upper invalid fourth byte',B(0xF0,0x90,0xBF,0xFF)},
  {'E2 82, truncated',B(0xE2,0x82)},
  {'F0 9F 98, truncated',B(0xF0,0x9F,0x98)},
  {'F4 8F BF, truncated',B(0xF4,0x8F,0xBF)},
@@ -144,6 +165,14 @@ local scalar={
  {'F4 80 80 80, U+100000',B(0xF4,0x80,0x80,0x80)},
  {'F4 8F BF BF, U+10FFFF',B(0xF4,0x8F,0xBF,0xBF)},
  {'ordinary non-ASCII text','Caf'..B(0xC3,0xA9)..' '..B(0xE2,0x80,0x94)..' '..B(0xE6,0x97,0xA5,0xE6,0x9C,0xAC)..' '..B(0xF0,0x9F,0x98,0x80)},
+ -- GUARD typed localized-text policy: exact bytes survive candidate/base.
+ -- Non-ASCII whitespace acceptance is not proof of meaningful visible text.
+ {'combining sequence','Cafe'..B(0xCC,0x81)},
+ {'language punctuation',B(0xC2,0xAB)..'Pret ?'..B(0xC2,0xBB,0xE3,0x80,0x82)},
+ {'non-ASCII whitespace only, U+00A0',B(0xC2,0xA0)},
+ {'non-ASCII whitespace only, U+3000',B(0xE3,0x80,0x80)},
+ {'zero-width scalar, U+200B',B(0xE2,0x80,0x8B)},
+ {'bidi scalar, U+202E',B(0xE2,0x80,0xAE)},
  {'ASCII text','Plain ASCII status text'},
 }
 -- Each sample alone, after ASCII (a truncation stays at the end), between
@@ -214,9 +243,42 @@ local absent=assert(reload(nil),'loader without English data');checks=checks+1
 check(#absent.Keys()==0 and not absent.Diagnostics().base.present and absent.Resolve(K)==absent.UNAVAILABLE,'without the English data every key is the safe status, without error')
 local meta=assert(reload(setmetatable({},{__index=function()return E end})))
 check(#meta.Keys()==0 and not meta.Diagnostics().base.present,'a base table with a metatable is not adopted')
-local many={};for i=1,L.MAX_BASE_ENTRIES+1 do many['reason.entry_'..i]='Entry text' end
-local big=assert(reload(many))
-check(#big.Keys()==0 and big.Diagnostics().base.oversized,'an oversized base is not adopted')
+for _,module in ipairs({absent,meta,assert(reload(7))})do
+ local facts=module.Diagnostics().base
+ check(not facts.present and facts.accepted==0 and facts.rejected==0 and not facts.oversized,'GUARD absent or non-plain base has no entry counts')
+end
+-- Separate bounded loader fixtures: inclusive key and entry limits.
+do
+ local key64='reason.'..string.rep('a',57);local key65=key64..'a'
+ check(#key64==64 and #key65==65,'SETUP exact key byte boundaries')
+ local bounded=assert(reload({[key64]='At key limit',[key65]='Beyond key limit'}))
+ local facts,listed=bounded.Diagnostics().base,bounded.Keys()
+ check(facts.present and facts.accepted==1 and facts.rejected==1 and not facts.oversized and #listed==1 and listed[1]==key64,'GUARD 64-byte key admitted; 65-byte key rejected')
+ local text,source,why=bounded.Resolve(key64)
+ check(bounded.Has(key64) and text=='At key limit' and source=='base' and why==nil,'GUARD exact key limit resolves')
+ text,source,why=bounded.Resolve(key65,{[key65]='Candidate cannot add it'})
+ check(not bounded.Has(key65) and text==U and source=='unavailable' and why=='invalid_key','GUARD candidate cannot resurrect over-limit key')
+ local many={};for i=1,64 do many['reason.entry_'..i]='Entry '..i end
+ local full=assert(reload(many));facts=full.Diagnostics().base;listed=full.Keys()
+ check(facts.present and facts.accepted==64 and facts.rejected==0 and not facts.oversized and #listed==64,'GUARD exactly 64 valid entries accepted')
+ for _,key in ipairs(listed)do
+  text,source,why=full.Resolve(key)
+  check(full.Has(key) and text==many[key] and source=='base' and why==nil,'GUARD admitted boundary entry resolves: '..key)
+ end
+ many['reason.entry_65']='Entry 65'
+ local big=assert(reload(many));facts=big.Diagnostics().base
+ check(facts.present and facts.accepted==0 and facts.rejected==65 and facts.oversized and #big.Keys()==0,'GUARD 65-entry base fails closed and counts all entries')
+ for key in pairs(many)do
+  text,source,why=big.Resolve(key,{[key]='Candidate cannot add it'})
+  check(not big.Has(key) and text==U and source=='unavailable' and why=='unknown_key','GUARD oversized base cannot be resurrected: '..key)
+ end
+ local record=assert(reload(realData))
+ for i=1,8 do record.Text('reason.counter_'..i)end
+ for _=1,3 do record.Text('reason.counter_9')end
+ local rd=record.Diagnostics()
+ check(#rd.keys==8 and rd.keysNotKept==3 and rd.misses==11 and rd.byReason.unknown_key==11,'GUARD unkept ninth key counts every occurrence without retention')
+ check(#L.Keys()==3 and Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'GUARD real three-key seam restored after boundary fixtures')
+end
 local partial=assert(reload({['reason.save_in_progress']='Saving is still in progress; wait for its final result',['Bad Key']='Bad',['reason.blank']='  ',['reason.number']=5}))
 local pd=partial.Diagnostics().base
 check(#partial.Keys()==1 and pd.accepted==1 and pd.rejected==3 and select(3,partial.Resolve(K))=='unknown_key','invalid base entries are left out and counted')
@@ -399,6 +461,10 @@ do
  check(noEnum and #noEnum.Languages()==1 and noEnum.InitializeActiveLanguage('frFR')=='enUS','without the enum only English is offered')
  check(Nexus.Localization==real and Nexus.LocalizationPacks==realPacks and L.ActiveLanguage()=='enUS' and L.Text(K)==E,'the real seam, data and active language are untouched by the loader checks')
 end
-check(#H.actions==before.actions and #H.sent==before.sent and H.popup==before.popup and #H.chat==before.chat,'seam acts, sends, asks and prints nothing')
-check(Nexus.RecomputeStats().autoEnabled==before.auto,'seam changes no Automation state')
+check(#H.actions==before.actions and #H.sent==before.sent and H.popup==before.popup and #H.chat==before.chat,'synchronous seam calls cause no observed action, send, StaticPopup or chat')
+check(Nexus.RecomputeStats().autoEnabled==before.auto,'seam leaves the Auto selection unchanged')
+check(same(Nexus.Store.State(),state0) and same(Nexus.Store.Settings(),settings0),'GUARD synchronous seam calls preserve full detached assigned state and settings')
+check(warning.IsOpen()==warningOpen and (NexusOverwriteWarning and NexusOverwriteWarning:IsShown() or false)==warningShown,'GUARD real overwrite warning open/visible state unchanged')
+-- No scheduler window or Orb/resource mutation is claimed here. Those
+-- non-effects remain source-inspection conclusions, not executed assertions.
 print('PASS terminology, state fidelity, counts and guide discoverability='..checks)
