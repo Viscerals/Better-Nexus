@@ -2235,7 +2235,7 @@ local function EnsureDetailPanel(parent)
         if data.retired or p._nexusShareApproval ~= data then
             print("|cffffc040Nexus:|r Share cancelled: the confirmation for '" .. displayTitle
                 .. "' was closed or replaced before it was accepted. Nothing was shared.")
-            M.Refresh()
+            viewDiagnostic.pump.Refresh(false, false)
             return
         end
         p._nexusShareApproval = nil

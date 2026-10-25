@@ -1807,11 +1807,12 @@ local function SharePopupScenario(body)
    end
    return table.concat(parts,'|')
   end
+  -- Exact Share label of an unpublished saved mirror; a prefix is not accepted.
   function P.ShareAction(detail)
    local button=detail and detail.shareBtn
    local text=button and button:GetText()
    return button~=nil and detail:IsShown() and button:IsShown() and button:IsEnabled()
-    and type(text)=='string' and text:sub(1,5)=='Share' or false,text
+    and text=='Share Build...' or false,text
   end
   -- Read-only: the live approval field of the real detail panel.
   function P.Approval(detail,id,selected,current)
@@ -3580,5 +3581,121 @@ C.scenario('lock-in-confirmation-'..arm,function()
 end)
 end
 end
+
+-- Retired Share delayed accept: the actual detail Share button shows the
+-- registered confirmation; the synthetic StaticPopup_Hide installed by
+-- P.Install then runs the real registered OnHide while the Library stays
+-- shown, and only afterwards is the captured registered OnAccept invoked with
+-- the original approval. This characterizes a delayed callback in the
+-- synthetic one-slot popup model only; it is not native StaticPopup evidence.
+-- The retired branch's explicit refresh meets a throwing actual label setter;
+-- the real controller publisher is wrapped by a pass-through counter. Setter,
+-- publisher and print are restored even when a check raises. Up is declared
+-- here because the earlier do-block helper is not in scope. At a baseline
+-- whose retired branch rethrows its refresh failure only the EXPECT fails.
+C.scenario('retired-share-delayed-accept-view-fault',SharePopupScenario(function(P)
+ local function Up(fn,wanted)
+  for i=1,80 do local name,value=debug.getupvalue(fn,i)
+   if not name then break end
+   if name==wanted then return value end
+  end
+  error('missing read-only controller upvalue '..wanted,0)
+ end
+ local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+ local FAULT='Retired Share delayed-accept host fault'
+ local H=F.Boot(F.Database(),function(h)P.Install();h.playerLevel=60;h.perks.serverActiveSlot=1
+  h.perks.serverBuildSlots={[1]={name='Retired Share delayed accept',verified=true,echoes=L.OrdinaryRows(3)}}end)
+ local CB,CAT=Nexus.CommunityBuilds,Nexus.BuildCatalog
+ C.setup(Nexus.StartupStatus().state=='ready','real TOC startup ready before retired Share accept')
+ CB.Show();local mirror
+ for _=1,2500 do
+  H.Advance(.01,.01)
+  if CB.DiagnosticSnapshot().projectionCurrent and not CB.VirtualStats().savedImport.pending then
+   for _,b in pairs(CB.Builds())do if b.importedSavedBuild and b.serverSlot==1 then mirror=b end end
+   if mirror and Nexus.Scheduler.Pending(Nexus.ViewRefresh.Key())==nil then break end
+  end
+ end
+ local source=mirror and CAT.Get(mirror.id)
+ assert(C.setup(source~=nil and source.publishedBuildId==nil and CB.DiagnosticSnapshot().projectionCurrent
+  and not CB.VirtualStats().savedImport.pending,
+  'actual unshared slot-1 saved mirror, projection and saved import settle'))
+ local slots=L.Copy(H.perks.serverBuildSlots)
+ CB.Select(mirror.id);local detail
+ for _,f in ipairs(H.frames)do if f.shareBtn and f.shareBtn.GetText then detail=f end end
+ local shareVisible,shareText=P.ShareAction(detail)
+ assert(C.setup(shareVisible and detail.shareBtn:GetParent()==detail,
+  'actual visible enabled detail Share button reads exactly Share Build...',shareText))
+ local selected=P.Witness(source)
+ local controller=Up(Up(CB.PublishImportedBuild,'ControllerInstance'),'EnsureCommunityController')()
+ local publish=controller.PublishImportedBuild
+ local label=NexusCommunityBuildsFrame._classDropBtn;local setter=label.SetText
+ local rawprint=print;local publishCalls,hostCalls,notices=0,0,0
+ local function Restore()
+  controller.PublishImportedBuild=publish;label.SetText=setter;print=rawprint
+ end
+ local run={pcall(function()
+  controller.PublishImportedBuild=function(...)publishCalls=publishCalls+1;return publish(...)end
+  local actions,sent=#H.actions,#H.sent
+  local shown,showError=pcall(function()detail.shareBtn:Click()end)
+  local approval=P.slot.data
+  local dialog=StaticPopupDialogs['NEXUS_SHARE_SAVED_BUILD']
+  local onAccept=type(dialog)=='table' and dialog.OnAccept or nil
+  local approved,approvalDetail=P.Approval(detail,mirror.id,selected,CAT.Get(mirror.id))
+  assert(C.setup(shown and approved and publishCalls==0 and type(onAccept)=='function'
+   and #P.events==1 and P.events[1].event=='show' and P.events[1].which=='NEXUS_SHARE_SAVED_BUILD'
+   and P.events[1].data==approval,
+   'actual Share click shows the registered confirmation bound to its original approval',
+   showError or approvalDetail))
+  StaticPopup_Hide('NEXUS_SHARE_SAVED_BUILD')
+  local hidden=P.events[2]
+  assert(C.setup(#P.events==2 and hidden.event=='hide' and hidden.which=='NEXUS_SHARE_SAVED_BUILD'
+   and hidden.data==approval and approval.retired==true and approval.used==nil
+   and detail._nexusShareApproval==nil and not P.slot:IsShown() and P.slot.data==nil
+   and P.accepts==0 and NexusCommunityBuildsFrame:IsShown() and detail:IsShown(),
+   'actual StaticPopup_Hide runs the real OnHide and retires the approval while the Library stays shown'))
+  local ledger=CB.VirtualStats()
+  assert(C.setup(P.Witness(CAT.Get(mirror.id))==selected and V.Same(H.perks.serverBuildSlots,slots)
+   and H.perks.serverActiveSlot==1 and ledger.dataFailures==0 and ledger.lastDataError==nil
+   and publishCalls==0 and #H.actions==actions and #H.sent==sent,
+   'original mirror, server slots and healthy view ledger precede the delayed callback'))
+  label.SetText=function()hostCalls=hostCalls+1;error(FAULT,0)end
+  print=function(...)
+   local parts={}
+   for i=1,select('#',...)do parts[i]=tostring((select(i,...)))end
+   if table.concat(parts,' '):find('was closed or replaced before it was accepted',1,true)then
+    notices=notices+1
+   end
+   return rawprint(...)
+  end
+  local first={pcall(onAccept,P.slot,approval)}
+  local firstCalls,firstNotices=hostCalls,notices
+  local stats=CB.VirtualStats();local failures,lastError=stats.dataFailures,stats.lastDataError
+  local second={pcall(onAccept,P.slot,approval)}
+  local duplicateFailures=CB.VirtualStats().dataFailures
+  Restore()
+  C.expect(first[1]==true,'retired Share delayed OnAccept contains its explicit refresh host fault',
+   first[2]~=nil and V.printable(first[2]) or nil)
+  C.guard(firstCalls==1 and failures==1 and lastError==FAULT,
+   'exactly one actual host fault is retained in the view ledger',failures)
+  C.guard(approval.used==true and approval.retired==true and detail._nexusShareApproval==nil
+   and P.shows==1 and P.accepts==0 and #P.events==2 and not P.slot:IsShown(),
+   'retired approval is consumed without a new confirmation or live approval')
+  local after=CAT.Get(mirror.id)
+  C.guard(publishCalls==0 and #H.actions==actions and #H.sent==sent and after~=nil
+   and after.publishedBuildId==nil and P.Witness(after)==selected
+   and V.Same(H.perks.serverBuildSlots,slots) and H.perks.serverActiveSlot==1,
+   'retired Share calls no publisher and creates no shared listing, game or network action',publishCalls)
+  C.guard(second[1]==true and hostCalls==firstCalls and notices==firstNotices
+   and duplicateFailures==failures and publishCalls==0,
+   'duplicate callback of the used approval does no extra work',
+   second[2]~=nil and V.printable(second[2]) or nil)
+  print('OBSERVED retired-share-delayed-accept',F.Serialize({firstOk=first[1]==true,
+   firstError=first[2]~=nil and V.printable(first[2]) or nil,hostCalls=hostCalls,
+   dataFailures=failures,duplicateOk=second[1]==true,publishCalls=publishCalls,notices=notices,
+   syntheticActions=#H.actions-actions,syntheticSent=#H.sent-sent,native='NOT_RUN'}))
+ end)}
+ Restore()
+ if not run[1] then error(run[2],0) end
+end))
 
 C.finish('(public failure hold and recovery; synthetic host only)')
