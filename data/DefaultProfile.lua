@@ -72,6 +72,19 @@ DefaultProfile.defaultSettings = {
     leverOptOut = {},    -- [leverId (requiredSpell)] = true
 }
 
+-- Issue #123: the Nexus-only UI language preference, settings.uiLanguage.
+-- These seven IDs are Nexus presentation-pack choices (the English base and
+-- data/LocalizationPacks.lua). They are not game client locales, GetLocale()
+-- results or aliases, and the game's own language is never read or changed.
+-- The preference is deliberately not in defaultSettings: an absent field
+-- means the default, so start-up never adds it to an existing profile, and
+-- only an explicit durable choice from the panel writes it. Any other saved
+-- value is shown as English and is kept exactly as saved.
+DefaultProfile.uiLanguages = {
+    default = "enUS",
+    ids = { "enUS", "frFR", "deDE", "esES", "plPL", "ptBR", "ruRU" },
+}
+
 DefaultProfile.defaultFlags = {
     -- true: user-confirmed from live play 2026-07-23. Runtime-demotable:
     -- a disabled-lever member observed with isGuaranteed demotes it for

@@ -452,6 +452,156 @@ function Lifecycle.New(options)
         end
     end
 
+    -- Issue #123: the Nexus-only UI language (settings.uiLanguage; enum in
+    -- data/DefaultProfile.lua). The active language is chosen once per Lua
+    -- session from the admitted Store's settings: Initialize calls
+    -- InitializeLanguage after Store admission and before the ordinary UI,
+    -- adapter and automation initialization, and repeated Initialize or
+    -- database-preparation turns never choose again. A saved change waits
+    -- for the next reload or login the player asks for: nothing here reloads
+    -- the UI, refreshes a view early, or reads or changes the game's own
+    -- language. ui/Panel.lua gets only the read-status and set-choice
+    -- callbacks below (Panel.Init); the Store's private writer stays here.
+    local languageInitialized = false
+    local languageSessionOnly = nil
+    local languageSettings = nil
+    local languageSavedSettings = nil
+    local LANGUAGE_READY = {STORE_READY=true, STORE_MUTATION_BUILD_PENDING=true,
+        STORE_MUTATION_FINAL_COMMIT_PENDING=true}
+
+    -- The Store's settings may be a validated, mutable session projection.
+    -- Use it to initialize active text, not to promise persistence.
+    local function StoreLanguage(Store)
+        if type(Store) ~= "table" or type(Store.Settings) ~= "function" then return nil end
+        local ok, settings = pcall(Store.Settings)
+        if not ok or type(settings) ~= "table" then return nil end
+        return rawget(settings, "uiLanguage"), settings
+    end
+
+    -- Retain the saved source admitted at initialization independently of
+    -- the Store's session projection. Reads never normalize or rewrite it.
+    local function SavedLanguage()
+        if languageSavedSettings then return rawget(languageSavedSettings, "uiLanguage") end
+        return nil
+    end
+
+    -- One read of the Localization seam; nil when it is absent or fails.
+    local function LocalizationValue(name, ...)
+        local localization = Nexus.Localization
+        local read = type(localization) == "table" and rawget(localization, name) or nil
+        if type(read) ~= "function" then return nil end
+        local ok, value = pcall(read, ...)
+        if ok then return value end
+        return nil
+    end
+
+    local function InitializeLanguage(Store)
+        if languageInitialized then return end
+        languageInitialized = true
+        local raw, settings = StoreLanguage(Store)
+        languageSettings = settings
+        local db = Database()
+        local saved = type(db) == "table" and rawget(db, "settings") or nil
+        if type(saved) == "table" and getmetatable(saved) == nil then
+            languageSavedSettings = saved
+        end
+        local localization = Nexus.Localization
+        local initialize = type(localization) == "table"
+            and rawget(localization, "InitializeActiveLanguage") or nil
+        if type(initialize) ~= "function" then return end
+        local ok, err = pcall(initialize, raw)
+        if not ok then RecordError("Localization.InitializeActiveLanguage", err) end
+    end
+
+    -- Why a durable language choice cannot be made right now, or nil. Reads
+    -- only. The menu rows use it, and ChooseLanguage asks again at the click:
+    -- start-up finished; the private writer belongs to the exact Store this
+    -- session was initialized with (a stub or a reloaded Store module never
+    -- lends another Store's writer); no capacity refusal kept saved data
+    -- unchanged; the saved root is not read-only; it is still the database
+    -- this session prepared, its settings table is the admitted one the Store serves,
+    -- and the bootstrap coordinator is ready on that same database.
+    local function LanguageRefusal()
+        if not initialized or type(dependencies) ~= "table" then return "startup" end
+        local Store = dependencies.Store
+        local internals = Nexus.MainInternals
+        local owner = type(internals) == "table" and internals.StoreAuthorityOwner or nil
+        if type(Store) ~= "table" or type(Store.Settings) ~= "function"
+            or type(owner) ~= "table" or owner.owner ~= Store
+            or type(owner.UpdateSettingsV1) ~= "function" then
+            return "authority"
+        end
+        if startupTiming.coreFailure ~= nil then
+            return CAPACITY_REFUSALS[startupTiming.coreFailure] and "capacity" or "startup"
+        end
+        local readOnly = internals.SavedRootReadOnlyV1
+        if type(readOnly) ~= "function" then return "authority" end
+        local okRead, class = pcall(readOnly)
+        if not okRead or class ~= nil then return "read-only" end
+        local db = Database()
+        if type(db) ~= "table" or db ~= preparedDatabase then return "drift" end
+        local settings = rawget(db, "settings")
+        if type(settings) ~= "table" or getmetatable(settings) ~= nil then return "drift" end
+        local okSettings, current = pcall(Store.Settings)
+        if not okSettings or current ~= settings or settings ~= languageSettings then return "drift" end
+        local coordinator = bootstrapCoordinator
+        if coordinator ~= nil then
+            local okState, state = pcall(coordinator.State, coordinator)
+            local okDb, bound = pcall(coordinator.Database, coordinator)
+            if not okState or not LANGUAGE_READY[state] or not okDb or bound ~= db then
+                return "authority"
+            end
+        end
+        return nil
+    end
+
+    -- The chooser's facts. Reads only; never calls the writer.
+    local function LanguageStatus()
+        local raw = SavedLanguage()
+        local active = LocalizationValue("ActiveLanguage")
+        local saved = LocalizationValue("EffectiveLanguage", raw)
+        local languages = LocalizationValue("Languages")
+        active = type(active) == "string" and active or "enUS"
+        saved = type(saved) == "string" and saved or "enUS"
+        return {active=active, saved=saved, pending=saved ~= active,
+            savedUnsupported=raw ~= nil and raw ~= saved,
+            sessionOnly=languageSessionOnly ~= nil, refusal=LanguageRefusal(),
+            languages=type(languages) == "table" and languages or {}}
+    end
+
+    -- One explicit choice from the chooser, with the authority checked again
+    -- here. The exact stored ID, or English while none is stored, is a no-op:
+    -- no write. Only {mode="durable"} from the writer is reported as saved;
+    -- anything else is reported as it is. The active language never changes
+    -- here.
+    local function ChooseLanguage(id)
+        if type(id) ~= "string" or LocalizationValue("EffectiveLanguage", id) ~= id then
+            return {state="refused", reason="invalid"}
+        end
+        local refusal = LanguageRefusal()
+        if refusal then return {state="refused", reason=refusal} end
+        local active = LocalizationValue("ActiveLanguage")
+        local raw = SavedLanguage()
+        if raw == id or (raw == nil and id == "enUS") then
+            return {state="unchanged", id=id, pending=id ~= active}
+        end
+        local owner = Nexus.MainInternals.StoreAuthorityOwner
+        local ok, result, why = pcall(owner.UpdateSettingsV1, "uiLanguage", id)
+        if not ok then
+            RecordError("StoreAuthorityOwner.UpdateSettingsV1", result)
+            return {state="refused", reason="failed"}
+        end
+        if type(result) == "table" and result.mode == "durable" then
+            if SavedLanguage() ~= id then return {state="unconfirmed", id=id} end
+            languageSessionOnly = nil
+            return {state="saved", id=id, pending=id ~= active}
+        elseif type(result) == "table" and result.mode == "session" then
+            languageSessionOnly = id
+            return {state="session", id=id}
+        end
+        return {state="refused", reason=type(why) == "string" and why or "refused"}
+    end
+
     local function Initialize(updateStarted)
         if initialized then return true end
         dependencies = BindDependencies()
@@ -487,6 +637,9 @@ function Lifecycle.New(options)
                 return false
             end
         end
+        -- Issue #123: once per Lua session, after Store admission and before
+        -- the ordinary UI, adapter and automation initialization below.
+        InitializeLanguage(Store)
         local db = Database()
         local automation = EnsureAutomation()
         if not automation then return false end
@@ -577,6 +730,9 @@ function Lifecycle.New(options)
             end,
             RefreshDisplay=function() return RefreshHud() end,
             RequestFirstDisplay=function() return RequestFirstHud() end,
+            -- Issue #123: the language chooser's two explicit callbacks.
+            LanguageStatus=function() return LanguageStatus() end,
+            ChooseLanguage=function(id) return ChooseLanguage(id) end,
         })
         initialized = true
         RegisterStutterAlertProvider()
