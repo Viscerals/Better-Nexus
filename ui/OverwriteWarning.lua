@@ -246,7 +246,10 @@ local ONBOARDING_YES = "Continue \226\128\148 Auto stays OFF" -- U+2014 em dash
 local ANSWER_W, ANSWER_GAP, ANSWER_EDGE, WINDOW_W = 110, 14, 24, 520
 
 -- Width for a button's current label: never below the original 110 px and
--- never capped, so the only copy of a label is not cut. LayoutMetrics
+-- never capped, so the only copy of a label is not cut. That no-cut claim is
+-- an offline-model result (tests/prototype/quickstart_layout_fit.lua, with
+-- the 24 px end-cap allowance of FitButtonWidth, not a measurement of the
+-- native button template); native pixel fit is NOT_RUN. LayoutMetrics
 -- (FitButtonWidth: the client's text width or its conservative model, plus
 -- the template's end caps) loads after this module and standalone tests
 -- omit it; without it the same rule runs here: the client's text width, or
