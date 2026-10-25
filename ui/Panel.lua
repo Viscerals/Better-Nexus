@@ -45,9 +45,15 @@ local renderState = {
 -- Destination world-session revision: a private monotonic count of
 -- ObserveDestinationCharacter's world invalidations (leave, logout, enter),
 -- published at each one as the view-only scalar M.destinationSessionRevision
--- (nil before the first). Views bind their observations to it, never to a
--- character name. It only grows and is never reissued, so a corrupted or
--- restored public value cannot alias a later session. Memory only;
+-- (nil before the first, while the count is still 0). Views bind their
+-- observations to the counted session, never to a character name. The
+-- writable public scalar stays for compatibility and diagnostics and cannot
+-- alone show the current session: a view holds an observation only while
+-- that scalar equals this count (read through the pure
+-- M.DestinationSessionCount) and the view's held stamp. The count only grows
+-- and is never reissued, so a restored earlier public value no longer
+-- matches it; equality cannot detect a value written equal to the current
+-- count (0 before the first publication included). Memory only;
 -- presentation only.
 local destinationSessionCounter = 0
 local renderStats = {
@@ -822,13 +828,14 @@ function M.ObserveDestinationCharacter(character, event)
     end
 end
 
--- The private destination world-session count itself, read only: the
--- session that M.destinationSessionRevision publishes. One value; it
--- captures, validates, writes, advances and reads nothing else. The
--- writable public scalar stays for compatibility and diagnostics; a view
--- holds an observation only while that scalar equals this count, so a
--- corrupted or restored public value cannot stand in for the actual
--- session. Memory only; presentation only.
+-- The raw private destination world-session count, read only: one value,
+-- 0 before the first publication (while M.destinationSessionRevision is
+-- nil), else the value last published to that scalar. It validates,
+-- captures, writes and advances nothing and reads nothing else. Views hold
+-- an observation only while the public scalar equals this count and their
+-- held stamp, so a public value that differs, such as a restored earlier
+-- one, is rejected; equality cannot detect a value written equal to it.
+-- Memory only; presentation only.
 function M.DestinationSessionCount()
     return destinationSessionCounter
 end

@@ -72,21 +72,33 @@ function Renderer.New(options)
     local displayPopup, displayCheck, displayLockBtn
     local refreshCache = {known=false}
     -- Renderer reads controller-published projections (View below), with one
-    -- narrow, authorized display-fact exception for the destination row: it
-    -- reuses the Panel's cached current-session character
-    -- (Nexus.Panel.CachedDestinationCharacter) and world-session revision
-    -- (Nexus.Panel.destinationSessionRevision). The cold refresh binds its
-    -- existing Slots and SelectedSavedBuild observation to that row widget
-    -- with the revision; M.Refresh passes Controller.DestinationPresentation
-    -- the character, and that observation only while that revision is
-    -- current. These are display facts only, never draft, target or Save
-    -- authority, and the Panel keeps owning the character and revision.
-    -- Nexus.Panel is a hard dependency of that row: EnsureFrame creates it
-    -- through Nexus.Panel.CreateDestinationRow and both refresh paths
-    -- dereference Nexus.Panel directly, so an unavailable Panel is outside
-    -- this module's contract and raises an error instead of skipping the
-    -- row. The controller
-    -- remains the sole owner of Adapter access, associations, uploads, Store
+    -- narrow, authorized display-fact exception for the destination row. It
+    -- reads three approved cached Panel view facts: the current-session
+    -- character (Nexus.Panel.CachedDestinationCharacter()), the public
+    -- world-session revision (Nexus.Panel.destinationSessionRevision) and
+    -- the private session count (Nexus.Panel.DestinationSessionCount()).
+    -- The row widget holds the cold refresh's existing Slots and
+    -- SelectedSavedBuild observation with a session stamp. The revision
+    -- counts only as a finite nonnegative whole number equal to the private
+    -- count: the cold refresh binds its new stamp to that count, and
+    -- M.Refresh keeps the observation only while the stamp equals both,
+    -- passing Controller.DestinationPresentation the character and that
+    -- observation only while it is held. A missing count accessor fails
+    -- closed (nothing is held); a rolled-back revision is rejected once the
+    -- count has advanced, even when it equals the old stamp. Restoring the
+    -- revision never reacquires cleared facts; only the next natural cold
+    -- observation can. Apart from the pure count accessor, these checks
+    -- force no read or refresh and add no extra backend or character read,
+    -- event, timer, getter work or action. These are display facts only,
+    -- never draft, target or Save authority, and the Panel keeps owning the
+    -- character, revision and count. Nexus.Panel stays a hard dependency of
+    -- that row: EnsureFrame creates it through
+    -- Nexus.Panel.CreateDestinationRow and both refresh paths dereference
+    -- Nexus.Panel directly, so an unavailable Panel is outside this module's
+    -- contract and raises an error instead of skipping the row. Only the
+    -- missing count accessor is the guarded fail-closed case. The controller
+    -- remains the sole owner of gameplay, Adapter access, associations,
+    -- uploads, Save and assignment, Store
     -- writes, preferences, retries, and mutable draft authority; the
     -- renderer owns its transient presentation caches as before, the held
     -- observation among them.
@@ -2182,9 +2194,12 @@ local function RefreshView(catalogRevision)
     -- The destination row's view observation: this refresh's one existing
     -- Slots read below and the result of its one existing SelectedSavedBuild
     -- before the editing/create overrides (nil as 0; nil itself, i.e.
-    -- unobserved, without a Slots table whose active slot is known), held
-    -- with the Panel's valid world-session revision of this moment; else
-    -- none (nil, never an earlier stale read or another session's).
+    -- unobserved, without a Slots table whose active slot is known). It is
+    -- cleared first, then held only when the Panel's public revision is a
+    -- finite nonnegative whole number equal to its private count
+    -- (DestinationSessionCount()), with the new held stamp bound to that
+    -- count; else none (nil, never an earlier stale read or another
+    -- session's), as with a missing accessor or a rolled-back revision.
     if frame._destinationRow then
         frame._destinationRow._nexusEditorSlots = nil
         frame._destinationRow._nexusEditorSelected = nil
@@ -2564,9 +2579,16 @@ end
         -- Slots and selected-role observation (nil when none) and the
         -- session's cached character; a settled update is a no-op in the
         -- helper. The held observation counts only in the world session it
-        -- was made in: a changed, missing or malformed revision (or no held
-        -- Slots table) drops it, and it stays unknown until the next cold
-        -- observation. No read or refresh is made for it here.
+        -- was made in: it is kept only while the public revision is a finite
+        -- nonnegative whole number, DestinationSessionCount() returns that
+        -- value and the held stamp equals both, with a held Slots table.
+        -- Otherwise it is dropped, as for a missing accessor, a changed,
+        -- missing or malformed revision, or a rolled-back one once the count
+        -- has advanced, even when it equals the old stamp. Restoring the
+        -- revision never reacquires it; it stays unknown until the next
+        -- natural cold observation. No read or refresh is forced, and no
+        -- extra backend or character read, event, timer, getter work or
+        -- action is added for it here.
         local destinationRow = frame and frame._destinationRow
         if destinationRow then
             local panel = Nexus.Panel
