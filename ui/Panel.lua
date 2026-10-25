@@ -498,12 +498,19 @@ function M.DestinationFacts(model)
     local assignment = type(model.assignment) == "table" and model.assignment or {}
     local slot = tonumber(pr.activeSlot) or 0
     local state = assignment.state
-    local d = {wishlist = pr.wishlistName or assignment.name}
+    -- A Community Build preview names the previewed build in
+    -- progress.wishlistName. Then only the actual assignment's name is this
+    -- destination's Wishlist (unknown without one), and the preview is said
+    -- as one (d.preview, presentation only).
+    local preview = pr.isCommunityPreview and true or false
+    local d = {wishlist = (not preview and pr.wishlistName) or assignment.name}
+    if preview then d.preview = true end
     -- The HUD always shows the logged-in character's run (J3: the destination
-    -- names its character). A client read at hover time; no service or state.
-    if type(UnitName) == "function" then
-        local ok, name = pcall(UnitName, "player")
-        if ok and type(name) == "string" and name ~= "" then d.character = name end
+    -- names its character): the name Main captured into this model
+    -- (model.character), else nil, said as not known. No client read, and no
+    -- earlier name stands in.
+    if type(model.character) == "string" and model.character ~= "" then
+        d.character = model.character
     end
     -- The adapter's own first-run facts (GameAdapter A.Wishlist: its first-run
     -- return and its unavailable first-run mirror), copied by Main into the
@@ -647,6 +654,11 @@ end
 
 local function ModelSignatures(model)
     local source = type(model.progress) == "table" and model.progress or {}
+    -- The destination descriptor, projected once for this candidate (pure,
+    -- from the model's own fields). Its signature covers everything the
+    -- destination row shows (a renamed slot, the current character, the
+    -- actual assignment, Preview); ApplyModel words this same table.
+    local destination = M.DestinationFacts(model)
     local layoutKey = "legacy"
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.RuntimeKey then
         local ok, key = pcall(Nexus.LayoutMetrics.RuntimeKey,"panel",272,0)
@@ -689,6 +701,8 @@ local function ModelSignatures(model)
             charges=model.charges,
             -- The inline Auto line (M.AutoNoteFor) is roll content too.
             autoNote=model.autoNote,
+            -- The destination row's whole descriptor, Preview included.
+            destination=destination,
         }),
         performance = Signature({
             performance=type(model.progress) == "table" and model.progress.performance or nil,
@@ -697,7 +711,23 @@ local function ModelSignatures(model)
         notice = Signature(model.updateNotice),
         status = Signature(model.status),
         auto = Signature(model.auto),
+        destination = destination,
     }
+end
+
+-- The destination row cells' effective font path, size and flags, as a
+-- layout signature part ("none" before the row exists). A same-size
+-- replacement face is not in LayoutMetrics.RuntimeKey. Reads fonts only.
+function M.DestinationRowFonts()
+    local row = frame and frame._destinationRow
+    local cells = type(row) == "table" and row.cells or nil
+    if type(cells) ~= "table" then return "none" end
+    local parts = {}
+    for index = 1, #cells do
+        local path, size, flags = cells[index]:GetFont()
+        parts[#parts + 1] = Signature(path) .. Signature(size) .. Signature(flags)
+    end
+    return table.concat(parts, "/")
 end
 
 -- Keep the roll block's space through an ordinary gap between Echo choices.
@@ -1192,6 +1222,13 @@ local function EnsureFrame()
     buildHeaderText:SetSize(244, 17)
     buildHeaderText:SetJustifyH("CENTER")
     buildHeaderText:SetTextColor(0.45, 0.84, 1)
+    -- The destination row (character, Saved Build, Wishlist, state) replaces
+    -- the single Wishlist heading, which is its first cell. It is anchored
+    -- here once, independently of its cells, in the header's own space
+    -- (x 40, clear of the menu, at the header's top); ApplyModel sizes and
+    -- fits it after every other header and layout operation.
+    frame._destinationRow = M.CreateDestinationRow(frame, buildHeaderText)
+    frame._destinationRow:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
 
     switchBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame._switchBtn = switchBtn
@@ -2597,7 +2634,8 @@ local function ApplyModel(model, signatures, roll)
     end
     LayoutFooter(showAutoControl, complete and not noBuild)
 
-    frame._buildHeaderText:SetText(name and ("|cff7fd5ff" .. ShortName(name, 29) .. "|r" .. (pr.isCommunityPreview and " |cff888888[Preview]|r" or "")) or "|cff7fd5ffNexus|r")
+    -- The heading is the destination row's first cell: it is worded and
+    -- fitted at the end of this pass (UpdateDestinationRow), not here.
     frame._switchBtn:SetText("My Builds")
 
     SetVisible(frame._rollArea, rollBlock)
@@ -2703,10 +2741,6 @@ local function ApplyModel(model, signatures, roll)
         frame._switchBtn:ClearAllPoints()
         frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -7)
         frame._switchBtn:SetSize(68, 19)
-        frame._buildHeaderText:ClearAllPoints()
-        frame._buildHeaderText:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
-        frame._buildHeaderText:SetPoint("RIGHT", frame._switchBtn, "LEFT", -5, 0)
-        frame._buildHeaderText:SetJustifyH("CENTER")
     end
 
     if noBuild then
@@ -2760,10 +2794,6 @@ local function ApplyModel(model, signatures, roll)
         frame._switchBtn:ClearAllPoints()
         frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -7)
         frame._switchBtn:SetSize(68, 19)
-        frame._buildHeaderText:ClearAllPoints()
-        frame._buildHeaderText:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
-        frame._buildHeaderText:SetPoint("RIGHT", frame._switchBtn, "LEFT", -5, 0)
-        frame._buildHeaderText:SetJustifyH("CENTER")
         SetVisible(setLabelText, false)
         SetVisible(lkPersonalLabel, showPerformance)
         SetVisible(dummyGlobalValue, true)
@@ -2929,6 +2959,17 @@ local function ApplyModel(model, signatures, roll)
         frame._nexusHudTreeStyled = true
         renderStats.themeTreeWalks = renderStats.themeTreeWalks + 1
     end
+    -- The destination row, last: after every competing header and layout
+    -- operation and the one-time theme pass, so its cells' fonts are final.
+    -- The header's space on the 272 px HUD is 151 px in every mode: from
+    -- x 40 to the 5 px gap before My Builds (TOPRIGHT -8, 68 px) at x 191.
+    -- A changed layout re-applies the first cell's text for real.
+    M.UpdateDestinationRow(frame._destinationRow,
+        signatures.destination or M.DestinationFacts(model), 151, 17, true)
+    -- The settled layout key records the fonts the cells now have, so the
+    -- next identical render is settled; it is committed only on success.
+    signatures.layout = (signatures.modelLayout or signatures.layout)
+        .. "|fonts:" .. M.DestinationRowFonts()
     return true
 end
 
@@ -2957,6 +2998,11 @@ function M.Render(model)
         .. (roll.cardRows and "cards" or "none")
     renderStats.calls = renderStats.calls + 1
     EnsureFrame()
+    -- The destination cells' effective fonts are part of the layout key. A
+    -- full pass replaces this with the fonts it leaves (ApplyModel); a failed
+    -- one commits nothing.
+    signatures.modelLayout = signatures.layout
+    signatures.layout = signatures.modelLayout .. "|fonts:" .. M.DestinationRowFonts()
 
     if Nexus.OrbPanel then Nexus.OrbPanel.AttachMainPanel(frame)end
 

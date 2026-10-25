@@ -207,6 +207,7 @@ local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true,
 --   "1st"      first-run target (no Saved Build in use)
 --   "Wait"     the saved assignment is being restored
 --   "None"     nothing captured
+--   "P:"       state prefix: a Community Build preview is shown (d.preview)
 -- One-glyph marks, for a captured state (state) and for a Wishlist minimum
 -- without a shown name (Wishlist); "?" keeps the meaning above:
 --   "+"  state: active in the game      Wishlist: assigned
@@ -422,6 +423,18 @@ function T.DestinationFields(d)
         state = Lead(stateWords, true)
         stateCompact, stateMinimum = stateShort.compact, stateShort.minimum
     end
+    -- d.preview == true (explicit only): the view shows a Community Build
+    -- preview, not this destination's plan. Presentation only: every state
+    -- alternative keeps the underlying state whole after a Preview
+    -- designation ("P:" before the minimum), so the preview stays visible at
+    -- every width and is never called assigned; the other facts are worded
+    -- as given.
+    local preview = d.preview == true
+    if preview then
+        state = "Preview; " .. state
+        stateCompact = "Preview: " .. stateCompact
+        stateMinimum = "P:" .. stateMinimum
+    end
     local fields = {
         {key = "character", label = "Character", value = p.character or "Not known",
             compact = p.character or "?"},
@@ -437,6 +450,9 @@ function T.DestinationFields(d)
     end
     if captured then
         tooltip[#tooltip + 1] = "Captured: shown as captured earlier; being captured is not evidence of the current assignment."
+    end
+    if preview then
+        tooltip[#tooltip + 1] = "Preview: a Community Build preview is shown; it is not this destination's assignment."
     end
     return fields, tooltip
 end
