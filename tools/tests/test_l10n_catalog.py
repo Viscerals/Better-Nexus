@@ -130,6 +130,202 @@ def assert_no_true(test, document):
         test.assertIsNot(value, True, path + " is true; no boolean may imply acceptance")
 
 
+# Historical fixture and actual current-source expectations (Refs #139, #143,
+# #147, #148). EXPECTED_KEYS above and CATALOG_CURRENT_ENGLISH and
+# CATALOG_CURRENT_PACKS below keep their old names for compatibility only.
+# They are historical, synthetic fixture expectations of the six-key base
+# pin: six independently literal English meanings, including the typed
+# charge template, and 18 inherited draft pack entries (three per pack) with
+# the six autonyms. They are not facts of the current 27-key catalog. The
+# helpers below build a coherent six-key historical fixture from those
+# literals and the unchanged six key-context rows, for the existing negative
+# and partial-data controls. The actual current source is checked separately
+# against the independent literals that follow. The helpers are functions,
+# called only while a test runs, after this module has defined every name
+# they use. No Lua, Git or network is used.
+
+# The 21 static ui/Panel.lua meanings of the current source, from the scoped
+# key and meaning requirements: (key, kind, exact English, producer code).
+CURRENT_PANEL_KEYS = [
+    ("panel.button.my_builds", "text", "My Builds", None),
+    ("panel.tooltip.open_my_builds", "text", "Open My Builds", None),
+    ("panel.tooltip.my_builds_destination", "text",
+     "Open the server My Builds page. Choosing a different Saved Build there changes "
+     "the active loadout.", None),
+    ("panel.button.assign_wishlist", "text", "Assign Wishlist", None),
+    ("panel.tooltip.assignment_heading", "text", "Assign Wishlist", None),
+    ("panel.tooltip.assignment_chooser", "text",
+     "Opens the Echo Journal with its Wishlist chooser for this loadout. Nothing is "
+     "assigned until you choose a Wishlist there.", None),
+    ("panel.button.create_wishlist", "text", "Create Wishlist", None),
+    ("panel.tooltip.create_wishlist_heading", "text", "Import or create a wishlist", None),
+    ("panel.tooltip.create_wishlist_source", "text",
+     "Paste a wishlist string or build one directly in Nexus.", None),
+    ("panel.tooltip.create_wishlist_draft", "text",
+     "This opens the Wishlist editor with a draft. Nothing is saved or assigned until "
+     "you press Create & assign or Create unassigned there.", None),
+    ("panel.heading.locked_targets", "text", "LOCKED TARGETS", None),
+    ("panel.tooltip.locked_remaining", "text", "Locked targets remaining", None),
+    ("panel.tooltip.locked_plan", "text",
+     "These targets are planned for your locked Echo slots (a plan designs at most six "
+     "target copies).", None),
+    ("panel.tooltip.locked_acquire", "text",
+     "Acquire the exact requested Echo and quality first.", None),
+    ("panel.tooltip.locked_placement", "text",
+     "Owned copies still need to be placed in locked Echo slots.", None),
+    ("panel.tooltip.locked_not_freeze", "text",
+     "Current locked Echo slots and card Freeze are separate.", None),
+    ("panel.tooltip.locked_acquire_list", "text", "Still need to acquire:", None),
+    ("panel.tooltip.open_wishlist_editor", "text", "Click to open Wishlist Editor", None),
+    ("panel.heading.progress", "text", "PROGRESS", None),
+    ("panel.heading.still_needed", "text", "STILL NEEDED", None),
+    ("panel.heading.extra_copies", "text", "EXTRA COPIES", None),
+]
+# The current-source oracle: the six historical rows, then the 21 panel rows.
+CURRENT_KEYS = EXPECTED_KEYS + CURRENT_PANEL_KEYS
+HISTORICAL_HUD_ADOPTED_KEYS = ["readout.charge_counts"]
+CURRENT_HUD_ADOPTED_KEYS = HISTORICAL_HUD_ADOPTED_KEYS + [row[0] for row in CURRENT_PANEL_KEYS]
+
+# KEY_CONTEXT.json keeps its immutable historical55d7350 technical observation.
+# The current data reference is ac2cdf5: English and decoded pack values
+# are unchanged; leading pack comments changed the canonical pack bytes.
+# Historical/current (SHA-256, length) tables below refer to named Git
+# blobs with LF line ends, never to raw Windows CRLF inputs. The real
+# parser/schema/report APIs still receive and hash original physical bytes.
+HISTORICAL_TECHNICAL_REFERENCE = {"head": "55d7350c0d5c60fc5bf39385f48027cd62498c71",
+                                  "tree": "9a7c51f0683a53adae1aecd833b1f13a590e2595"}
+CURRENT_TECHNICAL_REFERENCE = {"head": "ac2cdf5f4924c74f1e744990b2e0bb0405cd1c88",
+                               "tree": "458b27a74ba2c65cfb752367c8f8607594a45e79"}
+HISTORICAL_REFERENCE_INPUTS = {
+    "data/LocalizationEnglish.lua":
+        ("2325010efc6c052628d70402542dcb9805e89135b72756442841ece97fccb2fc", 3744),
+    "data/LocalizationPacks.lua":
+        ("3680a57743479df42854027ad3ad35d0df2407c0e957d993a3a4c3a57159676e", 21041),
+}
+CURRENT_REFERENCE_INPUTS = {
+    "data/LocalizationEnglish.lua":
+        ("2325010efc6c052628d70402542dcb9805e89135b72756442841ece97fccb2fc", 3744),
+    "data/LocalizationPacks.lua":
+        ("5c8d10bb711474a0374a0ad851e4f3608ede2389fb58fd01b34ad3c4cda3de95", 21168),
+}
+CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "PENDING",
+                             "m7Span": "PENDING", "fullUiCoverage": "PENDING",
+                             "fluentHumanAcceptance": "UNASSIGNED",
+                             "nativeAcceptance": "NOT_RUN"}
+
+
+def current_english_oracle():
+    """The current English table from the independent literals, in source
+    order: the six historical meanings, then the 21 panel meanings."""
+    table = {key: english for key, _, english, _ in CURRENT_KEYS}
+    if len(table) != len(CURRENT_KEYS) or len(CURRENT_PANEL_KEYS) != 21:
+        raise AssertionError("the current key oracle repeats or lacks a key")
+    if {key: table[key] for key in CATALOG_CURRENT_ENGLISH} != CATALOG_CURRENT_ENGLISH:
+        raise AssertionError("the two historical English literal tables disagree")
+    return table
+
+
+def canonical_git_lf(data):
+    """data with each CRLF pair as LF, as Git stores these text blobs. Only
+    the reference-hash check uses it; a lone CR is refused. Parser, schema and
+    report APIs always receive the unmodified physical bytes."""
+    canonical = bytes(data).replace(b"\r\n", b"\n")
+    if b"\r" in canonical:
+        raise AssertionError("a lone CR is not comparable with the canonical Git bytes")
+    return canonical
+
+
+def assert_current_reference_bytes(test, relative, physical):
+    """Compare the physical bytes of relative, as canonical Git LF bytes,
+    with the supplied reference hash and length; return the canonical bytes.
+    A physical CRLF hash is never claimed to equal the reference hash."""
+    canonical = canonical_git_lf(physical)
+    test.assertEqual((hashlib.sha256(canonical).hexdigest(), len(canonical)),
+                     CURRENT_REFERENCE_INPUTS[relative], relative)
+    return canonical
+
+
+def historical_context():
+    """A coherent six-key historical fixture projected from the actual
+    KEY_CONTEXT.json: its six original key rows, unchanged; a six-key
+    adoption; window families whose adopted keys are the six-key projection
+    (charge only on the HUD). The later 27-key technical observation is
+    removed, not relabelled. The source pin, baseline observation, separate
+    pending addition and every other pending field are kept as they are."""
+    context = load_document("KEY_CONTEXT.json")
+    six = [row[0] for row in EXPECTED_KEYS]
+    rows = {row["key"]: row for row in context["keys"]}
+    context["keys"] = [rows[key] for key in six]
+    context["currentAdoption"]["scope"] = (
+        "synthetic historical six-key test fixture: the English semantic keys adopted "
+        "through the Localization seam at the base pin; not current 27-key metadata")
+    context["currentAdoption"]["keys"] = list(six)
+    for family in context["windowFamilies"]:
+        family["adoptedKeys"] = [key for key in family["adoptedKeys"] if key in six]
+    context["packCoverage"].pop("currentTechnicalObservation", None)
+    return context
+
+
+def historical_raw(context):
+    """Exact bytes of the historical fixture: the six literal English
+    meanings and 18 inherited pack entries serialized by schema_english_source
+    and schema_packs_source, the projected context, and the actual release
+    metadata bytes."""
+    return {"english": schema_english_source(CATALOG_CURRENT_ENGLISH),
+            "packs": schema_packs_source(CATALOG_CURRENT_PACKS),
+            "context": schema_json(context),
+            "release": (ROOT / "docs/localization/RELEASE_LANGUAGES.json").read_bytes()}
+
+
+def current_raw():
+    """The unmodified physical bytes of the four actual catalog inputs."""
+    return {"english": (ROOT / "data/LocalizationEnglish.lua").read_bytes(),
+            "packs": (ROOT / "data/LocalizationPacks.lua").read_bytes(),
+            "context": (ROOT / "docs/localization/KEY_CONTEXT.json").read_bytes(),
+            "release": (ROOT / "docs/localization/RELEASE_LANGUAGES.json").read_bytes()}
+
+
+def assert_historical_fixture(catalog, raw, context):
+    """Positive setup checks of the historical fixture, through the real
+    parser and schema API, so that a broken setup fails instead of letting a
+    negative control pass: six literal keys, partial packs, the projected
+    context and the accepted fixture bytes."""
+    def require(condition, what):
+        if not condition:
+            raise AssertionError("historical six-key fixture setup: " + what)
+    six = [row[0] for row in EXPECTED_KEYS]
+    english = catalog.parse_english(raw["english"])
+    require(list(english.items()) == [(key, text) for key, _, text, _ in EXPECTED_KEYS],
+            "English is not the six literal meanings")
+    require(english == CATALOG_CURRENT_ENGLISH, "English literal tables disagree")
+    packs = catalog.parse_packs(raw["packs"])
+    require(packs == CATALOG_CURRENT_PACKS and list(packs) == PACK_IDS, "pack tables")
+    autonyms = {row[0]: row[3] for row in EXPECTED_PRODUCTS}
+    for pack_id, pack in packs.items():
+        require(pack["name"] == autonyms[pack_id], pack_id + " autonym")
+        require(sorted(pack["entries"]) == sorted(STATIC_AT_BASE), pack_id + " entries")
+        require(set(pack["entries"]) < set(english), pack_id + " is not partial")
+    require(sum(len(pack["entries"]) for pack in packs.values())
+            == len(PACK_IDS) * len(STATIC_AT_BASE), "18 inherited entries")
+    rows = [(r["key"], r["kind"], r["english"], r.get("producerCode")) for r in context["keys"]]
+    require(rows == EXPECTED_KEYS, "the six key-context rows")
+    require(context["currentAdoption"]["keys"] == six, "six-key adoption")
+    families = context["windowFamilies"]
+    require([family["name"] for family in families] == [row[0] for row in EXPECTED_FAMILIES],
+            "window families")
+    require(families[0]["adoptedKeys"] == HISTORICAL_HUD_ADOPTED_KEYS, "charge-only HUD")
+    require(all(family["adoptedKeys"] == [] for family in families[1:]), "other adoption")
+    coverage = context["packCoverage"]
+    require("currentTechnicalObservation" not in coverage, "later observation segregated")
+    baseline = coverage["baselineObservation"]
+    require((baseline["pin"], baseline["inheritedStaticDraftKeys"], baseline["missingKeys"])
+            == (BASE, STATIC_AT_BASE, MISSING_AT_BASE), "baseline observation")
+    result = catalog.validate_catalog_data(raw["english"], raw["packs"], raw["context"],
+                                           raw["release"])
+    require((result["english"], result["packs"], result["keyContext"])
+            == (CATALOG_CURRENT_ENGLISH, CATALOG_CURRENT_PACKS, context), "schema API result")
+
+
 class ReleaseLanguagesContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -278,13 +474,21 @@ class KeyContextContract(unittest.TestCase):
             "zero": "0 is a known count, not unknown",
         })
 
-    def test_exactly_six_current_keys(self):
+    def test_current_keys_are_six_historical_rows_then_21_panel_rows(self):
         rows = [(r["key"], r["kind"], r["english"], r.get("producerCode"))
                 for r in self.doc["keys"]]
-        self.assertEqual(rows, EXPECTED_KEYS)
+        self.assertEqual(rows[:len(EXPECTED_KEYS)], EXPECTED_KEYS)
+        self.assertEqual(rows[len(EXPECTED_KEYS):], CURRENT_PANEL_KEYS)
+        self.assertEqual(rows, CURRENT_KEYS)
+        self.assertEqual(list(current_english_oracle()), [row[0] for row in rows])
+        for name, _, _, _ in CURRENT_PANEL_KEYS:
+            self.assertEqual(self.keys[name]["placeholders"], [], name)
+            self.assertNotIn("resultLimitBytes", self.keys[name], name)
         adoption = self.doc["currentAdoption"]
-        self.assertEqual(adoption["keys"], [row[0] for row in EXPECTED_KEYS])
+        self.assertEqual(adoption["keys"], [row[0] for row in CURRENT_KEYS])
         self.assertEqual(adoption["allWindowSemanticCoverage"], "PENDING")
+        self.assertIn(HISTORICAL_TECHNICAL_REFERENCE["head"], adoption["scope"])
+        self.assertIn("pending", adoption["scope"])
 
     def test_placeholders_are_typed_and_exact(self):
         for name, kind, english, _ in EXPECTED_KEYS:
@@ -363,15 +567,38 @@ class KeyContextContract(unittest.TestCase):
         self.assertEqual(baseline["appliesTo"], PACK_IDS)
         self.assertEqual(baseline["inheritedStaticDraftKeys"], STATIC_AT_BASE)
         self.assertEqual(baseline["missingKeys"], MISSING_AT_BASE)
-        self.assertEqual(sorted(STATIC_AT_BASE + MISSING_AT_BASE), sorted(self.keys))
+        historical_keys = [row[0] for row in EXPECTED_KEYS]
+        self.assertEqual(sorted(STATIC_AT_BASE + MISSING_AT_BASE), sorted(historical_keys))
+        self.assertLess(set(historical_keys), set(self.keys))
         self.assertEqual(baseline["reviewState"], "draft_unreviewed")
         addition = coverage["separatePendingAddition"]
         self.assertEqual(addition["draftEntries"], len(PACK_IDS) * len(MISSING_AT_BASE))
         self.assertEqual(addition["newEnglishKeys"], 0)
         self.assertEqual(addition["reviewState"], "draft_unreviewed; per-language human review pending")
         self.assertEqual(coverage["fallbackCountsAsTranslation"], "never")
+        observation = coverage["currentTechnicalObservation"]
+        self.assertEqual(observation["reference"], HISTORICAL_TECHNICAL_REFERENCE)
+        self.assertNotEqual(observation["reference"]["head"], CURRENT_TECHNICAL_REFERENCE["head"])
+        self.assertIn("historical technical", observation["nature"])
+        self.assertIn("not final composition", observation["nature"])
+        self.assertEqual(observation["inputSha256"],
+                         {path: digest for path, (digest, _) in HISTORICAL_REFERENCE_INPUTS.items()})
+        kinds = [row[1] for row in CURRENT_KEYS]
+        self.assertEqual(observation["observedEnglishKeys"], len(CURRENT_KEYS))
+        self.assertEqual(observation["observedEnglishKinds"],
+                         {"text": kinds.count("text"), "format": kinds.count("format")})
+        self.assertEqual(observation["appliesTo"], PACK_IDS)
+        self.assertEqual(observation["observedDraftEntriesPerPack"], len(CURRENT_KEYS))
+        self.assertEqual(observation["reviewState"],
+                         "draft_unreviewed; per-language human review pending")
+        self.assertIn("not future cardinality", observation["observationScope"])
+        self.assertEqual(observation["gates"], CURRENT_OBSERVATION_GATES)
         allowed = {"$.separatePendingAddition.draftEntries",
-                   "$.separatePendingAddition.newEnglishKeys"}
+                   "$.separatePendingAddition.newEnglishKeys",
+                   "$.currentTechnicalObservation.observedEnglishKeys",
+                   "$.currentTechnicalObservation.observedEnglishKinds.text",
+                   "$.currentTechnicalObservation.observedEnglishKinds.format",
+                   "$.currentTechnicalObservation.observedDraftEntriesPerPack"}
         for path, value in walk(coverage):
             if isinstance(value, int) and not isinstance(value, bool):
                 self.assertIn(path, allowed, "hardcoded coverage count at " + path)
@@ -720,16 +947,32 @@ class CatalogParserGrammar(unittest.TestCase):
             self.assertEqual((error.line, error.column), where, source[:300])
 
     def test_current_english_file_parses_to_its_literal_table(self):
-        table = self.catalog.parse_english((ROOT / "data/LocalizationEnglish.lua").read_bytes())
+        data = (ROOT / "data/LocalizationEnglish.lua").read_bytes()
+        table = self.catalog.parse_english(data)
         self.assertIs(type(table), dict)
-        self.assertEqual(table, CATALOG_CURRENT_ENGLISH)
-        self.assertEqual(list(table), list(CATALOG_CURRENT_ENGLISH))
+        expected = current_english_oracle()
+        self.assertEqual(table, expected)
+        self.assertEqual(list(table), list(expected))
+        self.assertEqual({key: table[key] for key in CATALOG_CURRENT_ENGLISH},
+                         CATALOG_CURRENT_ENGLISH)
+        assert_current_reference_bytes(self, "data/LocalizationEnglish.lua", data)
 
     def test_current_packs_file_parses_to_its_literal_tables(self):
-        packs = self.catalog.parse_packs((ROOT / "data/LocalizationPacks.lua").read_bytes())
+        data = (ROOT / "data/LocalizationPacks.lua").read_bytes()
+        packs = self.catalog.parse_packs(data)
         self.assertIs(type(packs), dict)
-        self.assertEqual(packs, CATALOG_CURRENT_PACKS)
         self.assertEqual(list(packs), ["frFR", "deDE", "esES", "plPL", "ptBR", "ruRU"])
+        keys = {row[0] for row in CURRENT_KEYS}
+        autonyms = {row[0]: row[3] for row in EXPECTED_PRODUCTS[1:]}
+        for pack_id, pack in packs.items():
+            with self.subTest(pack_id):
+                self.assertEqual(list(pack), ["name", "entries"])
+                self.assertEqual(pack["name"], autonyms[pack_id])
+                self.assertEqual(pack["name"], CATALOG_CURRENT_PACKS[pack_id]["name"])
+                self.assertEqual(set(pack["entries"]), keys)
+                for key, text in CATALOG_CURRENT_PACKS[pack_id]["entries"].items():
+                    self.assertEqual(pack["entries"][key], text, key)
+        assert_current_reference_bytes(self, "data/LocalizationPacks.lua", data)
 
     def test_percent_braces_markup_and_code_in_strings_stay_inert_text(self):
         self.assertEqual(self.catalog.parse_english(CATALOG_INERT_SOURCE), CATALOG_INERT_TABLE)
@@ -950,14 +1193,16 @@ class CatalogSchemaApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.catalog = load_catalog_parser()
-        cls.raw = {
-            "english": (ROOT / "data/LocalizationEnglish.lua").read_bytes(),
-            "packs": (ROOT / "data/LocalizationPacks.lua").read_bytes(),
-            "context": (ROOT / "docs/localization/KEY_CONTEXT.json").read_bytes(),
-            "release": (ROOT / "docs/localization/RELEASE_LANGUAGES.json").read_bytes(),
-        }
-        cls.context = load_document("KEY_CONTEXT.json")
+        # Default inputs of every existing case: the coherent historical
+        # six-key fixture (six literal English meanings, 18 inherited pack
+        # entries, the projected six-key context) and the actual release bytes.
+        cls.context = historical_context()
         cls.release = load_document("RELEASE_LANGUAGES.json")
+        cls.raw = historical_raw(cls.context)
+        assert_historical_fixture(cls.catalog, cls.raw, cls.context)
+        # The actual 27-key source, unmodified, for the current-source check.
+        cls.current_raw = current_raw()
+        cls.current_context = load_document("KEY_CONTEXT.json")
 
     def fixture(self):
         return (copy.deepcopy(CATALOG_CURRENT_ENGLISH), copy.deepcopy(CATALOG_CURRENT_PACKS),
@@ -1029,6 +1274,27 @@ class CatalogSchemaApi(unittest.TestCase):
         for pack_id, pack in result["packs"].items():
             self.assertLess(set(pack["entries"]), set(result["english"]), pack_id)
         self.assertEqual(result["release"]["validator"]["status"], SCHEMA_STATUS)
+        current = self.catalog.validate_catalog_data(
+            *[self.current_raw[name] for name in ("english", "packs", "context", "release")])
+        self.assertIs(type(current), dict)
+        self.assertEqual(sorted(current), ["english", "keyContext", "packs", "release"])
+        oracle = current_english_oracle()
+        self.assertEqual(current["english"], oracle)
+        self.assertEqual(list(current["english"]), list(oracle))
+        self.assertEqual(current["keyContext"], self.current_context)
+        self.assertEqual([(row["key"], row["english"]) for row in current["keyContext"]["keys"]],
+                         list(oracle.items()))
+        self.assertEqual(current["release"], self.release)
+        self.assertEqual(list(current["packs"]), PACK_IDS)
+        for pack_id, pack in current["packs"].items():
+            with self.subTest(pack_id):
+                self.assertEqual(set(pack["entries"]), set(oracle))
+                self.assertEqual(pack["name"], CATALOG_CURRENT_PACKS[pack_id]["name"])
+                for key, text in CATALOG_CURRENT_PACKS[pack_id]["entries"].items():
+                    self.assertEqual(pack["entries"][key], text, key)
+        for key, text in CATALOG_CURRENT_ENGLISH.items():
+            self.assertEqual(current["english"][key], text, key)
+        self.assertEqual(current["release"]["validator"]["status"], SCHEMA_STATUS)
         self.assertEqual((self.catalog.STATUS, self.catalog.NOTICE["fullValidation"]),
                          (SCHEMA_STATUS, "IMPLEMENTED_DRAFT"))
 
@@ -1504,14 +1770,13 @@ class CatalogCoverageReport(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.catalog = load_catalog_parser()
-        cls.raw = {
-            "english": (ROOT / "data/LocalizationEnglish.lua").read_bytes(),
-            "packs": (ROOT / "data/LocalizationPacks.lua").read_bytes(),
-            "context": (ROOT / "docs/localization/KEY_CONTEXT.json").read_bytes(),
-            "release": (ROOT / "docs/localization/RELEASE_LANGUAGES.json").read_bytes(),
-        }
-        cls.context = load_document("KEY_CONTEXT.json")
+        # Every case here reports on the coherent historical six-key fixture
+        # with the actual release bytes; actual 27-key reports are checked in
+        # CatalogCurrentSource below, never through this fixture.
+        cls.context = historical_context()
         cls.release = load_document("RELEASE_LANGUAGES.json")
+        cls.raw = historical_raw(cls.context)
+        assert_historical_fixture(cls.catalog, cls.raw, cls.context)
 
     def fixture(self):
         return (copy.deepcopy(CATALOG_CURRENT_ENGLISH), copy.deepcopy(CATALOG_CURRENT_PACKS),
@@ -2227,8 +2492,15 @@ class CatalogCommandLine(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.catalog = load_catalog_parser()
-        cls.raw = {name: (ROOT / name).read_bytes() for name in CLI_INPUTS[:4]}
         cls.release = load_document("RELEASE_LANGUAGES.json")
+        # Temporary roots copy the coherent historical six-key fixture and the
+        # actual release bytes; the real repository root is the actual source.
+        context = historical_context()
+        historical = historical_raw(context)
+        assert_historical_fixture(cls.catalog, historical, context)
+        cls.raw = {name: historical[part] for name, part
+                   in zip(CLI_INPUTS[:4], ("english", "packs", "context", "release"))}
+        cls.current_raw = {name: (ROOT / name).read_bytes() for name in CLI_INPUTS[:4]}
 
     def temp_dir(self):
         holder = tempfile.TemporaryDirectory()
@@ -2620,6 +2892,7 @@ class CatalogCommandLine(unittest.TestCase):
             pack["entries"].update(REPORT_FILL)
         elsewhere = self.make_root({"data/LocalizationPacks.lua": schema_packs_source(packs)})
         before = [(ROOT / name).read_bytes() for name in CLI_INPUTS]
+        self.assertEqual(before[:4], [self.current_raw[name] for name in CLI_INPUTS[:4]])
         default = self.run_cli(elsewhere, cwd=elsewhere)
         explicit = self.run_cli(elsewhere, "--root", ROOT, cwd=elsewhere)
         relative = self.run_cli(elsewhere, "--root", ".", cwd=ROOT)
@@ -2630,8 +2903,20 @@ class CatalogCommandLine(unittest.TestCase):
         self.assertEqual(default.stdout, relative.stdout)
         self.assertEqual(record["report"], self.catalog.catalog_report(*before[:4]))
         self.assertEqual(record["toc"]["sha256"], hashlib.sha256(before[4]).hexdigest())
-        self.assertEqual(self.record(own, 0)["report"], self.expected(elsewhere))
-        self.assertNotEqual(self.record(own, 0)["report"], record["report"])
+        self.assertEqual([(row["source"], row["sha256"], row["byteLength"])
+                          for row in record["report"]["inputs"]],
+                         [(name, hashlib.sha256(data).hexdigest(), len(data))
+                          for name, data in zip(CLI_INPUTS[:4], before[:4])])
+        self.assertEqual(record["report"]["englishBaseline"]["keys"],
+                         sorted(current_english_oracle()))
+        own_record = self.record(own, 0)
+        self.assertEqual(own_record["report"], self.expected(elsewhere))
+        self.assertEqual(own_record["report"]["englishBaseline"]["keys"],
+                         sorted(CATALOG_CURRENT_ENGLISH))
+        self.assertEqual([row["sha256"] for row in own_record["report"]["inputs"]],
+                         [hashlib.sha256(elsewhere.joinpath(*name.split("/")).read_bytes())
+                          .hexdigest() for name in CLI_INPUTS[:4]])
+        self.assertNotEqual(own_record["report"], record["report"])
 
     def test_argument_and_root_errors_are_stable_records(self):
         root = self.make_root()
@@ -2652,6 +2937,258 @@ class CatalogCommandLine(unittest.TestCase):
             with self.subTest(args=[str(arg) for arg in args]):
                 self.assert_error(self.run_cli(root, *args), "CatalogCliError", code,
                                   subject=subject)
+
+
+# Actual current source (Refs #139, #143, #147, #148): public schema, report
+# and command-line tests on the unmodified physical bytes of the actual
+# 27-key catalog inputs, kept apart from the historical six-key fixture
+# above. Keys, English meanings, autonyms and the 18 inherited translations
+# are the independent literals near the top of this file; the remaining 144
+# draft pack entries (18 earlier missing-key entries plus 126 panel entries)
+# are bound by the canonical reference hash only, are not restated and claim
+# no fluent, human or native acceptance. Every count comes
+# from the real APIs. No Lua, Git or network is used, and nothing is written
+# outside a temporary directory.
+
+class CatalogCurrentSource(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = load_catalog_parser()
+        cls.raw = current_raw()
+        cls.context = load_document("KEY_CONTEXT.json")
+        cls.release = load_document("RELEASE_LANGUAGES.json")
+
+    def arguments(self, english=None, packs=None, context=None):
+        """The actual physical bytes, with any given part replaced by the
+        bytes of a synthetic in-memory table or document."""
+        parts = {"english": english, "packs": packs, "context": context}
+        renders = {"english": schema_english_source, "packs": schema_packs_source,
+                   "context": schema_json}
+        return [self.raw[name] if parts.get(name) is None else renders[name](parts[name])
+                for name in ("english", "packs", "context", "release")]
+
+    def test_actual_source_validates_and_every_pack_reports_every_english_key(self):
+        oracle = current_english_oracle()
+        keys = sorted(oracle)
+        result = self.catalog.validate_catalog_data(*self.arguments())
+        self.assertEqual(sorted(result), ["english", "keyContext", "packs", "release"])
+        self.assertEqual(result["english"], oracle)
+        self.assertEqual(result["keyContext"], self.context)
+        self.assertEqual(list(result["packs"]), PACK_IDS)
+        report = self.catalog.catalog_report(*self.arguments())
+        self.assertEqual((report["englishBaseline"]["keyCount"], report["englishBaseline"]["keys"]),
+                         (len(CURRENT_KEYS), keys))
+        self.assertEqual(report["denominator"]["englishKeys"], len(CURRENT_KEYS))
+        self.assertEqual([row["productId"] for row in report["products"]], PACK_IDS)
+        for row in report["products"]:
+            with self.subTest(row["productId"]):
+                self.assertEqual(list(row["counts"]), list(REPORT_CATEGORIES))
+                for category in REPORT_CATEGORIES:
+                    self.assertEqual(row["counts"][category], len(row["keys"][category]), category)
+                self.assertEqual((row["denominator"], row["entriesPresent"]), (len(keys), len(keys)))
+                self.assertEqual(row["reconciliation"],
+                                 {"denominator": len(keys), "inDenominatorTotal": len(keys)})
+                self.assertEqual(row["keys"]["draft_unreviewed"], keys)
+                for category in REPORT_CATEGORIES:
+                    if category != "draft_unreviewed":
+                        self.assertEqual(row["keys"][category], [], category)
+                self.assertEqual(row["declarationsApplied"], 0)
+        codes = report_codes(report)
+        self.assertNotIn("entries-missing", codes)
+        self.assertEqual([r["subject"] for r in report_reasons(report, "entries-draft-unreviewed")],
+                         PACK_IDS)
+        self.assertEqual((report["evidence"]["declarationCount"],
+                          report["evidence"]["qualifiedDeclarations"]), (0, 0))
+        self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
+
+    def test_actual_hud_adopts_22_keys_and_every_other_gate_stays_pending(self):
+        report = self.catalog.catalog_report(*self.arguments())
+        families = report["families"]
+        self.assertEqual([(f["name"], f["proposedKeyFamily"], f["issue"], f["paths"])
+                          for f in families], EXPECTED_FAMILIES)
+        hud = families[0]
+        self.assertEqual((hud["adoptedKeys"], hud["adoptedKeyCount"]),
+                         (CURRENT_HUD_ADOPTED_KEYS, len(CURRENT_HUD_ADOPTED_KEYS)))
+        for family in families:
+            with self.subTest(family["name"]):
+                self.assertEqual((family["semanticStatus"], family["coverageStatus"],
+                                  family["state"]), ("PENDING", "PENDING", "INCOMPLETE"))
+                codes = [reason["code"] for reason in family["reasons"]]
+                self.assertEqual(codes[:2], ["family-semantic-status", "family-coverage-status"])
+                self.assertEqual("family-no-adopted-key" in codes, family is not hud)
+                if family is not hud:
+                    self.assertEqual(family["adoptedKeys"], [])
+        self.assertEqual([(r["subject"], r["value"], r["keys"])
+                          for r in report_reasons(report, "family-entries-not-reviewed")],
+                         [(hud["name"], pack_id, sorted(CURRENT_HUD_ADOPTED_KEYS))
+                          for pack_id in PACK_IDS])
+        shared = sorted(row[0] for row in EXPECTED_KEYS if row[1] == "text")
+        self.assertEqual([row["key"] for row in report["unassignedKeys"]], shared)
+        denominator = report["denominator"]
+        self.assertEqual((denominator["familyAdoptedKeyReferences"],
+                          denominator["distinctFamilyAdoptedKeys"],
+                          denominator["keysOnMultipleFamilies"], denominator["keysWithoutFamily"]),
+                         (len(CURRENT_HUD_ADOPTED_KEYS), len(CURRENT_HUD_ADOPTED_KEYS), [], shared))
+        self.assertEqual(report_reasons(report, "keys-without-family")[0]["keys"], shared)
+        surfaces = report["surfaces"]
+        self.assertEqual(surfaces["currentAdoptionKeys"], [row[0] for row in CURRENT_KEYS])
+        self.assertEqual((surfaces["allWindowSemanticCoverage"], surfaces["visibleTextDenominator"]),
+                         ("PENDING", "NOT_ESTABLISHED"))
+        self.assertEqual({item["status"] for item in surfaces["otherVisibleCopy"]},
+                         {"PENDING_CLASSIFICATION"})
+        self.assertEqual(report["reviewGates"],
+                         [{"productId": row[0], "gates": REPORT_PENDING_GATES}
+                          for row in EXPECTED_PRODUCTS])
+        self.assertEqual(report["nativeFacts"]["establishedByThisReport"], "NOT_RUN")
+        self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
+        self.assertLessEqual(REPORT_REMAINING_REASONS, report_codes(report))
+        assert_no_true(self, self.context)
+        assert_no_true(self, self.release)
+
+    def test_actual_report_binds_the_exact_physical_input_bytes(self):
+        arguments = self.arguments()
+        first = self.catalog.catalog_report(*arguments)
+        self.assertEqual(self.catalog.catalog_report(*[bytearray(item) for item in arguments]),
+                         first)
+        names = ("data/LocalizationEnglish.lua", "data/LocalizationPacks.lua",
+                 "docs/localization/KEY_CONTEXT.json", "docs/localization/RELEASE_LANGUAGES.json")
+        self.assertEqual([row["source"] for row in first["inputs"]], list(names))
+        for row, name, data in zip(first["inputs"], names, arguments):
+            with self.subTest(name):
+                self.assertEqual(data, (ROOT / name).read_bytes())
+                self.assertEqual((row["sha256"], row["byteLength"]),
+                                 (hashlib.sha256(data).hexdigest(), len(data)))
+                if name in CURRENT_REFERENCE_INPUTS:
+                    canonical = assert_current_reference_bytes(self, name, data)
+                    reference = CURRENT_REFERENCE_INPUTS[name][0]
+                    self.assertEqual(row["sha256"] == reference, canonical == data)
+        self.assertNotIn("complete", first)
+        self.assertEqual({family["state"] for family in first["families"]}, {"INCOMPLETE"})
+        self.assertEqual(first["completeness"]["state"], "INCOMPLETE")
+        self.assertEqual(first["nativeFacts"]["establishedByThisReport"], "NOT_RUN")
+        lowered = json.dumps(first, sort_keys=True).lower()
+        for claim in ("release_ready", "releaseready", "release-ready", "100%"):
+            self.assertNotIn(claim, lowered)
+
+    def test_actual_data_and_27_key_context_drift_is_rejected(self):
+        english = self.catalog.parse_english(self.raw["english"])
+        packs = self.catalog.parse_packs(self.raw["packs"])
+
+        def context_with(change):
+            context = copy.deepcopy(self.context)
+            change(context)
+            return context
+        drifted = dict(english)
+        drifted["panel.heading.progress"] = "Progress"
+        removed = dict(english)
+        removed.pop("panel.heading.extra_copies")
+        orphan = copy.deepcopy(packs)
+        orphan["frFR"]["entries"]["panel.tooltip.not_in_english"] = "Orphelin"
+        cases = (
+            ("context English drift", {"context": context_with(
+                lambda c: schema_row(c, "panel.heading.progress").update({"english": "PROGRESS "}))},
+             "context-english-mismatch"),
+            ("source English drift", {"english": drifted}, "context-english-mismatch"),
+            ("context row omitted", {"context": context_with(
+                lambda c: c["keys"].remove(schema_row(c, "panel.heading.extra_copies")))},
+             "context-key-mismatch"),
+            ("English key removed", {"english": removed}, "context-key-mismatch"),
+            ("panel key declared as format", {"context": context_with(
+                lambda c: schema_row(c, "panel.button.my_builds").update({"kind": "format"}))},
+             "context-kind"),
+            ("orphan pack entry", {"packs": orphan}, "orphan-entry"),
+            ("historical six-key context on the actual data", {"context": historical_context()},
+             "context-key-mismatch"),
+            ("actual context on the historical six-key data",
+             {"english": CATALOG_CURRENT_ENGLISH, "packs": CATALOG_CURRENT_PACKS},
+             "context-key-mismatch"),
+        )
+        for label, parts, code in cases:
+            with self.subTest(label):
+                with self.assertRaises(self.catalog.CatalogValidationError) as caught:
+                    self.catalog.validate_catalog_data(*self.arguments(**parts))
+                self.assertEqual(caught.exception.code, code)
+        evidence = (
+            ("unknown HUD adopted key", lambda c: c["windowFamilies"][0]["adoptedKeys"].append(
+                "panel.tooltip.not_in_english"), "family-unknown-key"),
+            ("repeated adoption key", lambda c: c["currentAdoption"]["keys"].append(
+                "panel.heading.progress"), "adoption-key"),
+        )
+        for label, change, code in evidence:
+            with self.subTest(label):
+                with self.assertRaises(self.catalog.CatalogEvidenceError) as caught:
+                    self.catalog.catalog_report(*self.arguments(context=context_with(change)))
+                self.assertEqual(caught.exception.code, code)
+
+    def test_coherent_synthetic_key_on_actual_source_derives_every_count(self):
+        english = self.catalog.parse_english(self.raw["english"])
+        packs = self.catalog.parse_packs(self.raw["packs"])
+        context = copy.deepcopy(self.context)
+        extra = "panel.synthetic_extra"
+        report_add_static(english, context, extra, "Synthetic extra fixture text")
+        context["currentAdoption"]["keys"].append(extra)
+        context["windowFamilies"][0]["adoptedKeys"].append(extra)
+        packs["frFR"]["entries"][extra] = "Texte de fixture synthetique"
+        report = self.catalog.catalog_report(*self.arguments(english, packs, context))
+        actual = sorted(current_english_oracle())
+        keys = sorted(actual + [extra])
+        self.assertEqual(report["englishBaseline"]["keyCount"], len(CURRENT_KEYS) + 1)
+        self.assertEqual(report["denominator"]["englishKeys"], len(keys))
+        for row in report["products"]:
+            with self.subTest(row["productId"]):
+                self.assertEqual((row["denominator"], row["reconciliation"]["inDenominatorTotal"]),
+                                 (len(keys), len(keys)))
+                if row["productId"] == "frFR":
+                    draft, missing = keys, []
+                else:
+                    draft, missing = actual, [extra]
+                self.assertEqual(row["keys"]["draft_unreviewed"], draft)
+                self.assertEqual(row["keys"]["missing"], missing)
+        self.assertEqual(report["families"][0]["adoptedKeys"], CURRENT_HUD_ADOPTED_KEYS + [extra])
+        self.assertEqual(report["denominator"]["distinctFamilyAdoptedKeys"],
+                         len(CURRENT_HUD_ADOPTED_KEYS) + 1)
+        self.assertNotIn(extra, report["denominator"]["keysWithoutFamily"])
+        self.assertEqual(report["surfaces"]["currentAdoptionKeys"][-1], extra)
+        self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
+
+    def test_actual_root_command_line_reports_every_entry_without_readiness(self):
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        elsewhere = Path(holder.name)
+        before = [(ROOT / name).read_bytes() for name in CLI_INPUTS]
+        cache = catalog_pycache_names()
+        runs = [cli_run(cwd=elsewhere), cli_run("--root", ROOT, cwd=elsewhere),
+                cli_run("--root", ROOT, "--require-complete", cwd=elsewhere)]
+        self.assertEqual(catalog_pycache_names(), cache)
+        self.assertEqual([(ROOT / name).read_bytes() for name in CLI_INPUTS], before)
+        self.assertEqual(list(elsewhere.iterdir()), [])
+        self.assertEqual(runs[0].stdout, runs[1].stdout)
+        expected = self.catalog.catalog_report(*before[:4])
+        count = len(CURRENT_KEYS)
+        for index, (run, code) in enumerate(zip(runs, (0, 0, 1))):
+            with self.subTest(run=index):
+                self.assertEqual(run.returncode, code, run.stderr[:500])
+                self.assertEqual(run.stderr, b"")
+                self.assertTrue(run.stdout.isascii(), run.stdout[:200])
+                record = json.loads(run.stdout.decode("ascii"))
+                self.assertEqual(run.stdout,
+                                 (json.dumps(record, sort_keys=True) + "\n").encode("ascii"))
+                self.assertEqual((record["record"], record["exitCode"]), ("report", code))
+                self.assertEqual(record["notice"], CATALOG_NOTICE)
+                self.assertEqual(record["report"], expected)
+                self.assertEqual([row["sha256"] for row in record["report"]["inputs"]],
+                                 [hashlib.sha256(data).hexdigest() for data in before[:4]])
+                technical = record["technicalCatalog"]
+                self.assertEqual((technical["validity"], technical["englishKeys"],
+                                  technical["missingEntries"], technical["entryPresence"]),
+                                 ("VALID", count, 0, "EVERY_CURRENT_ENGLISH_KEY_PRESENT"))
+                self.assertEqual([(row["productId"], row["denominator"], row["entriesPresent"])
+                                  for row in technical["products"]],
+                                 [(pack_id, count, count) for pack_id in PACK_IDS])
+                readiness = record["externalReadiness"]
+                self.assertEqual((readiness["state"], readiness["externalAcceptance"],
+                                  readiness["reportCompletenessState"]),
+                                 ("NOT_ESTABLISHED", "NOT_ATTESTED", "INCOMPLETE"))
 
 
 if __name__ == "__main__":

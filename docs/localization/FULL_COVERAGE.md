@@ -165,7 +165,7 @@ family complete.
 
 | Window family | Issue | Status |
 |---|---|---|
-| Main panel (HUD) | #143 | PENDING (`readout.charge_counts` adopted; family incomplete) |
+| Main panel (HUD) | #143 | PENDING (`readout.charge_counts` plus the 21 `panel.*` keys of the technical slice at `55d7350`; final composition pending; family incomplete) |
 | Orb window | #143 | PENDING |
 | Echo Journal tab | #143 | PENDING |
 | Wishlist editor | #144 | PENDING |
@@ -196,7 +196,14 @@ preparation are leads at their own pins.
 
 ## Consumer migration and history
 
-Consumer migration waits for the current final M7 composition. This contract
-migrates nothing and changes no runtime, locale or English bytes. `README.md`,
-`INVENTORY.md`, `KEYS_AND_GLOSSARY.md`, `CLIENT_LOCALE_MATRIX.md` and
-`VALIDATION.md` are pinned historical evidence and stay unchanged.
+Consumer migration waits for the current final M7 composition. The
+Root-admitted technical reference `55d7350c0d5c60fc5bf39385f48027cd62498c71`
+(tree `9a7c51f0683a53adae1aecd833b1f13a590e2595`) shows 27 English keys,
+27 draft entries per optional pack and `ui/Panel.lua` bindings for the 21
+`panel.*` keys. These are observed technical bindings only: final button fit,
+the M7 span and matching final validation remain pending, and fluent human
+review (UNASSIGNED), native evidence (NOT_RUN) and full-UI coverage stay open.
+This metadata draft migrates no source and changes no runtime, locale or
+English bytes. `README.md`, `INVENTORY.md`, `KEYS_AND_GLOSSARY.md`,
+`CLIENT_LOCALE_MATRIX.md` and `VALIDATION.md` are pinned historical evidence
+and stay unchanged.

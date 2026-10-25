@@ -116,15 +116,225 @@
       "consumerSuffix": "the consumer appends ' ~' after the complete row when the counts are estimated",
       "seamAbsentFallback": "ui/Readout.lua M.ChargesLine builds the English row itself",
       "familySurface": "Main panel (HUD) roll heading via ui/Readout.lua; family coverage PENDING"
+    },
+    {
+      "key": "panel.button.my_builds",
+      "kind": "text",
+      "english": "My Builds",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "label of the button that navigates to the server My Builds page, set at creation and at render reset",
+      "consumer": "ui/Panel.lua button label; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) My Builds button (2 mapped presentation calls); family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.open_my_builds",
+      "kind": "text",
+      "english": "Open My Builds",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "hover heading of the My Builds button",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) My Builds button hover heading; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.my_builds_destination",
+      "kind": "text",
+      "english": "Open the server My Builds page. Choosing a different Saved Build there changes the active loadout.",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "complete consequence of the My Builds button: it opens the server My Builds page, where choosing a different Saved Build changes the active loadout; provider destination lines stay separate",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) My Builds button hover body; family coverage PENDING"
+    },
+    {
+      "key": "panel.button.assign_wishlist",
+      "kind": "text",
+      "english": "Assign Wishlist",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "label of the first-run button that navigates to Wishlist assignment for this loadout",
+      "consumer": "ui/Panel.lua button label; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) first-run Assign Wishlist button; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.assignment_heading",
+      "kind": "text",
+      "english": "Assign Wishlist",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "hover heading of the first-run assignment button; same English bytes as panel.button.assign_wishlist, separate tooltip meaning",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) first-run Assign Wishlist hover heading; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.assignment_chooser",
+      "kind": "text",
+      "english": "Opens the Echo Journal with its Wishlist chooser for this loadout. Nothing is assigned until you choose a Wishlist there.",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "the button opens the Echo Journal Wishlist chooser for this loadout; nothing is assigned until the player chooses a Wishlist there",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) first-run Assign Wishlist hover body; family coverage PENDING"
+    },
+    {
+      "key": "panel.button.create_wishlist",
+      "kind": "text",
+      "english": "Create Wishlist",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "label of the first-run button that opens a Wishlist editor draft",
+      "consumer": "ui/Panel.lua button label; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) first-run Create Wishlist button; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.create_wishlist_heading",
+      "kind": "text",
+      "english": "Import or create a wishlist",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "hover heading of the Create Wishlist editor navigation",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) first-run Create Wishlist hover heading; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.create_wishlist_source",
+      "kind": "text",
+      "english": "Paste a wishlist string or build one directly in Nexus.",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "complete sentence: a wishlist can be pasted as a string or built directly in Nexus",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) first-run Create Wishlist hover body; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.create_wishlist_draft",
+      "kind": "text",
+      "english": "This opens the Wishlist editor with a draft. Nothing is saved or assigned until you press Create & assign or Create unassigned there.",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "the editor opens with a draft only; nothing is saved or assigned until one of the two editor actions Create & assign or Create unassigned is pressed",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) first-run Create Wishlist hover body; family coverage PENDING"
+    },
+    {
+      "key": "panel.heading.locked_targets",
+      "kind": "text",
+      "english": "LOCKED TARGETS",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "heading of the lazily created locked-target row",
+      "consumer": "ui/Panel.lua heading label; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) locked-target row heading; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.locked_remaining",
+      "kind": "text",
+      "english": "Locked targets remaining",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "hover heading of the locked-target row",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) locked-target row hover heading; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.locked_plan",
+      "kind": "text",
+      "english": "These targets are planned for your locked Echo slots (a plan designs at most six target copies).",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "the targets are planned, not owned, for locked Echo slots, with the qualification that a plan designs at most six target copies",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) locked-target row hover body; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.locked_acquire",
+      "kind": "text",
+      "english": "Acquire the exact requested Echo and quality first.",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "the exact requested Echo in the exact requested quality must be acquired first",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) locked-target row hover body; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.locked_placement",
+      "kind": "text",
+      "english": "Owned copies still need to be placed in locked Echo slots.",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "ownership is not lock placement: owned copies still need to be placed in locked Echo slots",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) locked-target row hover body; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.locked_not_freeze",
+      "kind": "text",
+      "english": "Current locked Echo slots and card Freeze are separate.",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "current locked Echo slots are distinct from card Freeze on the board",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) locked-target row hover body; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.locked_acquire_list",
+      "kind": "text",
+      "english": "Still need to acquire:",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "label before the list of locked targets still to acquire; the listed names remain game or user data",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) locked-target row hover list label; family coverage PENDING"
+    },
+    {
+      "key": "panel.tooltip.open_wishlist_editor",
+      "kind": "text",
+      "english": "Click to open Wishlist Editor",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "click hint of the existing locked-target and still-needed row navigation to the Wishlist Editor",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) locked-target and still-needed row hover hint (2 mapped presentation calls); family coverage PENDING"
+    },
+    {
+      "key": "panel.heading.progress",
+      "kind": "text",
+      "english": "PROGRESS",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "progress section heading only; its counts are shown separately",
+      "consumer": "ui/Panel.lua heading label; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) progress section heading; family coverage PENDING"
+    },
+    {
+      "key": "panel.heading.still_needed",
+      "kind": "text",
+      "english": "STILL NEEDED",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "still-needed section heading, set at creation and at legacy render reset",
+      "consumer": "ui/Panel.lua heading label; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) still-needed section heading (2 mapped presentation calls); family coverage PENDING"
+    },
+    {
+      "key": "panel.heading.extra_copies",
+      "kind": "text",
+      "english": "EXTRA COPIES",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "extra-copies section heading only; not a delete action",
+      "consumer": "ui/Panel.lua heading label; technical binding at 55d7350, final composition pending",
+      "familySurface": "Main panel (HUD) extra-copies section heading; family coverage PENDING"
     }
   ],
   "currentAdoption": {
-    "scope": "the English semantic keys adopted through the Localization seam at the base pin",
-    "keys": ["reason.save_in_progress", "reason.list_preparing", "reason.saved_data_reading", "reason.wait_three_choices", "reason.wait_pending_pick_count", "readout.charge_counts"],
+    "scope": "the technical 27-key slice: the six English semantic keys adopted through the Localization seam at the base pin, in their original order, followed by the 21 panel keys bound in the Root-admitted technical reference 55d7350c0d5c60fc5bf39385f48027cd62498c71 (tree 9a7c51f0683a53adae1aecd833b1f13a590e2595); final composition, button-fit and M7-span review pending; not whole-#139, #143 or full-UI coverage",
+    "keys": ["reason.save_in_progress", "reason.list_preparing", "reason.saved_data_reading", "reason.wait_three_choices", "reason.wait_pending_pick_count", "readout.charge_counts", "panel.button.my_builds", "panel.tooltip.open_my_builds", "panel.tooltip.my_builds_destination", "panel.button.assign_wishlist", "panel.tooltip.assignment_heading", "panel.tooltip.assignment_chooser", "panel.button.create_wishlist", "panel.tooltip.create_wishlist_heading", "panel.tooltip.create_wishlist_source", "panel.tooltip.create_wishlist_draft", "panel.heading.locked_targets", "panel.tooltip.locked_remaining", "panel.tooltip.locked_plan", "panel.tooltip.locked_acquire", "panel.tooltip.locked_placement", "panel.tooltip.locked_not_freeze", "panel.tooltip.locked_acquire_list", "panel.tooltip.open_wishlist_editor", "panel.heading.progress", "panel.heading.still_needed", "panel.heading.extra_copies"],
     "allWindowSemanticCoverage": "PENDING"
   },
   "windowFamilies": [
-    {"name": "Main panel (HUD)", "proposedKeyFamily": "panel", "issue": 143, "paths": ["ui/Panel.lua", "ui/Readout.lua", "ui/LayoutMetrics.lua", "ui/Theme.lua", "ui/ServerStatus.lua"], "semanticStatus": "PENDING", "coverageStatus": "PENDING", "adoptedKeys": ["readout.charge_counts"]},
+    {"name": "Main panel (HUD)", "proposedKeyFamily": "panel", "issue": 143, "paths": ["ui/Panel.lua", "ui/Readout.lua", "ui/LayoutMetrics.lua", "ui/Theme.lua", "ui/ServerStatus.lua"], "semanticStatus": "PENDING", "coverageStatus": "PENDING", "adoptedKeys": ["readout.charge_counts", "panel.button.my_builds", "panel.tooltip.open_my_builds", "panel.tooltip.my_builds_destination", "panel.button.assign_wishlist", "panel.tooltip.assignment_heading", "panel.tooltip.assignment_chooser", "panel.button.create_wishlist", "panel.tooltip.create_wishlist_heading", "panel.tooltip.create_wishlist_source", "panel.tooltip.create_wishlist_draft", "panel.heading.locked_targets", "panel.tooltip.locked_remaining", "panel.tooltip.locked_plan", "panel.tooltip.locked_acquire", "panel.tooltip.locked_placement", "panel.tooltip.locked_not_freeze", "panel.tooltip.locked_acquire_list", "panel.tooltip.open_wishlist_editor", "panel.heading.progress", "panel.heading.still_needed", "panel.heading.extra_copies"]},
     {"name": "First-launch setup", "proposedKeyFamily": "setup", "issue": 145, "paths": ["ui/QuickStart.lua"], "semanticStatus": "PENDING", "coverageStatus": "PENDING", "adoptedKeys": []},
     {"name": "Help", "proposedKeyFamily": "help", "issue": 145, "paths": ["ui/Help.lua"], "semanticStatus": "PENDING", "coverageStatus": "PENDING", "adoptedKeys": []},
     {"name": "Auto overwrite consent", "proposedKeyFamily": "consent", "issue": 145, "paths": ["ui/OverwriteWarning.lua"], "semanticStatus": "PENDING", "coverageStatus": "PENDING", "adoptedKeys": []},
@@ -155,7 +365,7 @@
     {"lead": "#143 preparation", "keys": 21, "pin": "as stated in that preparation record; not restated here", "isCurrentSemanticInventory": false}
   ],
   "packCoverage": {
-    "countRule": "Translated, missing, invalid and obsolete entry counts per pack are derived later from data/LocalizationEnglish.lua and data/LocalizationPacks.lua by the separate validator; this document hardcodes no current count.",
+    "countRule": "Translated, missing, invalid and obsolete entry counts per pack are derived by tools/l10n_catalog.py from the actual data/LocalizationEnglish.lua and data/LocalizationPacks.lua bytes and this key context; this document hardcodes no universal key or entry count, and fallback English or an autonym never counts as a translation. A count observed at a named technical pin is not future cardinality or fluent acceptance.",
     "baselineObservation": {
       "pin": "5c77eec5b791f64468576e37a70b3855375b7fcb",
       "appliesTo": ["frFR", "deDE", "esES", "plPL", "ptBR", "ruRU"],
@@ -171,6 +381,20 @@
       "reviewState": "draft_unreviewed; per-language human review pending",
       "runtimeNote": "At the base pin core/Localization.lua copies a pack entry only for a static English key, and Format uses no copied pack. How a pack entry for readout.charge_counts is consumed belongs to that owner and is not asserted here."
     },
-    "fallbackCountsAsTranslation": "never"
+    "fallbackCountsAsTranslation": "never",
+    "currentTechnicalObservation": {
+      "reference": {"head": "55d7350c0d5c60fc5bf39385f48027cd62498c71", "tree": "9a7c51f0683a53adae1aecd833b1f13a590e2595"},
+      "nature": "Root-admitted historical technical 27-key data and semantic-binding reference (data 9b04 plus consumer 9ece); not final composition, button-fit, M7-span, consumer, full-UI, fluent or native acceptance",
+      "inputSha256": {"data/LocalizationEnglish.lua": "2325010efc6c052628d70402542dcb9805e89135b72756442841ece97fccb2fc", "data/LocalizationPacks.lua": "3680a57743479df42854027ad3ad35d0df2407c0e957d993a3a4c3a57159676e"},
+      "observedEnglishKeys": 27,
+      "observedEnglishKinds": {"text": 26, "format": 1},
+      "appliesTo": ["frFR", "deDE", "esES", "plPL", "ptBR", "ruRU"],
+      "observedDraftEntriesPerPack": 27,
+      "observedChange": "21 new static English meanings and 126 new draft pack entries (21 per optional pack); the six existing English entries, the six earlier entries per pack (36 in total) and the six autonyms are unchanged",
+      "reviewState": "draft_unreviewed; per-language human review pending",
+      "runtimeNote": "In core/Localization.lua at this reference, Text and Format called with an omitted or nil pack both use the copied pack of the active language, fixed once per Lua session by InitializeActiveLanguage (no copied pack while English is active); an explicit pack, including {} or an invalid candidate, decides alone; Resolve and FormatResolve stay pure supplied-pack functions. Key and text schema, byte limits, the 254-byte charge result limit and count placeholder types are unchanged. This note describes that reference, not the base pin.",
+      "observationScope": "counts observed at this named technical pin; not future cardinality, coverage or acceptance",
+      "gates": {"finalComposition": "PENDING", "finalButtonFit": "PENDING", "m7Span": "PENDING", "fullUiCoverage": "PENDING", "fluentHumanAcceptance": "UNASSIGNED", "nativeAcceptance": "NOT_RUN"}
+    }
   }
 }

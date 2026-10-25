@@ -194,7 +194,10 @@ end)
 -- to the traced check behaviour (M3 FN7/OD4), so none remains.
 local UI_FILES={'ui/Panel.lua','ui/Leaderboard.lua','ui/CommunityRenderer.lua','ui/CommunityBuilds.lua',
  'ui/Help.lua','ui/QuickStart.lua','ui/OrbPanel.lua','ui/WishlistRenderer.lua','ui/WishlistEditor.lua',
- 'ui/JournalTab.lua','ui/Readout.lua'}
+ 'ui/JournalTab.lua','ui/Readout.lua',
+ -- Issues #143/#148: the reviewed English base now holds the Panel's moved
+ -- labels and hovers, so that shipped player-facing copy stays linted.
+ 'data/LocalizationEnglish.lua'}
 local RULES={
  {phrase='Global Best',why='a shared record is the best known to this client, not a global ranking (UX-14)'},
  {phrase='"Global  ',why='the compact shared column is Best known (UX-14)'},
@@ -206,7 +209,7 @@ local RULES={
  {phrase='"My Builds"',files={['ui/CommunityRenderer.lua']=true},why='the Build Library scope is Mine; My Builds is the game\'s page (UX-15)'},
  {phrase='All Shared and My Builds',files={['ui/Help.lua']=true},why='Help names the Build Library scope Mine (UX-15)'},
  {phrase='deleting from My Builds',files={['ui/Help.lua']=true},why='Help names the Build Library scope Mine (UX-15)'},
- {phrase='Open My Builds and browse',files={['ui/Panel.lua']=true},why='Build Library is not the game\'s My Builds page (UX-15)'},
+ {phrase='Open My Builds and browse',files={['ui/Panel.lua']=true,['data/LocalizationEnglish.lua']=true},why='Build Library is not the game\'s My Builds page (UX-15)'},
  -- Final copy closure (UX-13/UX-15): the editor footer and the save notice
  -- count planned rolled copies; an unnamed or empty selector row is a Saved
  -- Build, not a Loadout.
@@ -223,7 +226,19 @@ local function Excepted(file,phrase)
  return false
 end
 -- Where "My Builds" names the game's own page it stays (one meaning, kept).
-local GAME_PAGE_LABELS={{file='ui/Panel.lua',phrase='switchBtn:SetText("My Builds")'},
+-- Issues #143/#148: the Panel's My Builds button and its hover now show
+-- reviewed keys, and a selected pack may translate that navigation label.
+-- Each Panel entry is its actual binding in ui/Panel.lua plus the exact
+-- English the real seam gives the key, stated here as an independent literal
+-- (not read from the data); the hover still names the server's own My Builds
+-- page. The other file keeps its source literal.
+local GAME_PAGE_LABELS={{file='ui/Panel.lua',phrase='switchBtn:SetText((Nexus.Localization.Text("panel.button.my_builds")))',
+  key='panel.button.my_builds',english='My Builds'},
+ {file='ui/Panel.lua',phrase='GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.open_my_builds")',
+  key='panel.tooltip.open_my_builds',english='Open My Builds'},
+ {file='ui/Panel.lua',phrase='GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.my_builds_destination")',
+  key='panel.tooltip.my_builds_destination',
+  english='Open the server My Builds page. Choosing a different Saved Build there changes the active loadout.'},
  {file='ui/JournalTab.lua',phrase='"Assign in My Builds"'}}
 
 C.scenario('R5 terminology lint: no deprecated unqualified form in the shipped UI sources',function()
@@ -259,9 +274,28 @@ C.scenario('R5 terminology lint: no deprecated unqualified form in the shipped U
  -- No blind replacement: the game's own My Builds page keeps its name.
  local missing={}
  for _,g in ipairs(GAME_PAGE_LABELS) do
-  if not (sources[g.file] or ''):find(g.phrase,1,true) then missing[#missing+1]=g.file..': '..g.phrase end
+  local kept=(sources[g.file] or ''):find(g.phrase,1,true)~=nil
+  if kept and g.key then
+   local text,source,why=Nexus.Localization.Resolve(g.key)
+   kept=Nexus.Localization.Kind(g.key)=='text' and text==g.english and source=='base' and why==nil
+  end
+  if not kept then missing[#missing+1]=g.file..': '..g.phrase..(g.key and (' = '..g.english) or '') end
  end
  C.guard(#missing==0,'R5: the game\'s own My Builds page keeps its name where it means that page',table.concat(missing,'; '))
+ -- The actual bound button in this English session, and its unchanged
+ -- destination: the real Panel's My Builds button shows exactly My Builds,
+ -- and its click still opens the game's own My Builds page through
+ -- JournalTab.OpenBuilds with no argument (a narrow spy: nothing is opened).
+ Nexus.Panel.Show()
+ local switch=NexusPanel and NexusPanel._switchBtn
+ local shown=switch and V.Plain(switch:GetText() or '') or ''
+ local journal=Nexus.JournalTab
+ local openBuilds,calls=journal and journal.OpenBuilds,{}
+ if journal then journal.OpenBuilds=function(...) calls[#calls+1]=select('#',...);return true end end
+ local clicked=switch~=nil and pcall(switch.Click,switch)
+ if journal then journal.OpenBuilds=openBuilds end
+ C.guard(Nexus.Localization.ActiveLanguage()=='enUS' and shown=='My Builds' and clicked==true and #calls==1 and calls[1]==0,
+  'R5: the actual My Builds button shows the game page name in English and still opens that page',shown..' / '..#calls..' call(s)')
 end)
 
 -- R6: the real Build Library window. The Mine scope (internal key "mine"),
