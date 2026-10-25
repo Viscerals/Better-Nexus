@@ -5,9 +5,11 @@
 -- rendered pool rows. SavePool/LoadPool/PersistenceState are called directly
 -- here; the MAIN PRESENTATION block at the end drives the visible Save pool /
 -- Load saved buttons, the persistence status line and editor-opened readback
--- across fresh boots. Unverified fault injection, unknown/future/read-only
--- presentation and the real editor retry/replace interplay are PENDING for the
--- next slice. The popup host is the identity-aware
+-- across fresh boots. Its EDITOR COEXISTENCE block drives the real editor Save
+-- retry and replacement request beside pool Save/Load. Still PENDING here:
+-- unverified fault injection; unknown, future, read-only, malformed, loading,
+-- owner and root refusal presentation in the UI; docs, the final full suite,
+-- content checks and independent UltraCode reviews. The popup host is the identity-aware
 -- synthetic host of flexible_plan_editor_handoff. Native StaticPopup pooling,
 -- return handling, timing and game behaviour are NOT_RUN.
 local F=dofile('tests/prototype/format5_support.lua')
@@ -181,8 +183,9 @@ check(opened==0 and #H.actions==actions,'reload Load opens no draft and performs
 -- above. Stored data is read from NexusDB, counts from rendered pool rows and
 -- the persistence status from the fixed line at (22,-66). The font models are
 -- the offline layout_geometry_support models, not native measurement.
--- Unknown/future/read-only presentation, unverified fault injection and the
--- editor Save-retry/replace interplay are queued for the next slice.
+-- Unknown/future/read-only presentation and unverified fault injection are
+-- queued for a later slice. The EDITOR COEXISTENCE block at the end of this
+-- block covers the editor Save-retry/replace interplay.
 do
     local A,B=310001,310002
     local function Seed(h) h.AddEcho(A,'Delta',2,5,7);h.AddEcho(B,'Epsilon',1,3,9) end
@@ -400,6 +403,327 @@ do
     check(Raw()==nil and Persisted()==T.NOTHING and Budget():find(EMPTY_BUDGET)~=nil and Popup.shown[LOAD]==nil,
         'Load saved after removal says nothing is saved and restores nothing')
     Quiet(fx,'Load saved with nothing saved')
+
+    -- EDITOR COEXISTENCE (#151 editor Save-retry/replace slice). Pool Save/Load
+    -- are separate from the editor draft and its Save authority. A fresh
+    -- synthetic boot seeds three literal Echoes (410002 q2, 410003 q3, 410005 q1,
+    -- max 5, group 0). The real editor entry, the rendered chooser controls, the
+    -- editor's visible Create unassigned and its own Save confirmation drive
+    -- every step. The editor controller is found through an upvalue of
+    -- editor.Show, as flexible_plan_editor_handoff does, and is only read.
+    -- A forwarding counter at the public GameAdapter.UploadWishlist boundary,
+    -- with the unmodified function behind it, counts every upload attempt,
+    -- refused or sent. The spacing that keeps the confirmed Save waiting
+    -- therefore cannot mask an attempt. The spacer upload is setup and is
+    -- counted alone. No claim advances the clock.
+    -- Episode 1: a real confirmed Save waits as a retry. The dirty pool's own
+    -- Load Cancel/Accept and an earlier replacement request (refused
+    -- PLAN_CHANGED, then replayed) keep the editor and its retry.
+    -- Episode 2, after the spacing ended: an open, unconfirmed Save
+    -- confirmation survives pool Load Cancel/Accept and stale Load/Clear
+    -- callbacks, then still saves.
+    -- The offline synthetic host only models callbacks. Native StaticPopup
+    -- pooling, return handling, timing, fonts and server behaviour are NOT_RUN.
+    do
+        local X2,X3,X5,REPLACE=410002,410003,410005,'NEXUS_FLEXIBLE_PLAN_REPLACE'
+        local SAVE1,SAVE2='Coexist waiting save','Coexist open save'
+        local function Seed3(h) h.AddEcho(X2,'Zeta',2,5,0);h.AddEcho(X3,'Eta',3,5,0);h.AddEcho(X5,'Theta',1,5,0) end
+        local function Need(ok,label)
+            check(ok,label)
+            if not ok then
+                print(string.format('flexible_plan_persistence_chooser: %d passed, %d failed',passed,failed));os.exit(1)
+            end
+        end
+        local function Reason(code) return Nexus.FlexiblePlanChooser.Reason(code) end
+        -- The literal spellId, quality and count of each row, in ID order.
+        local function Literal(echoes)
+            local out={}
+            for i,e in ipairs(type(echoes)=='table' and echoes or {}) do
+                out[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks}
+            end
+            table.sort(out,function(a,b) return a.spellId<b.spellId end)
+            return out
+        end
+        -- The editor's rendered rows: every visible row of its virtual list.
+        local function EditorRows()
+            local seen,area={},nil
+            for _,f in ipairs(H.frames) do if f.plus and f.data and f:IsVisible() then area=f:GetParent();break end end
+            if not area then return {} end
+            area:GetScript('OnMouseWheel')(area,1000)
+            for _=1,80 do
+                for _,f in ipairs(H.frames) do
+                    local d=f.data
+                    if f:GetParent()==area and f:IsVisible() and d and not d.ghost then
+                        seen[d.spellId]={spellId=d.spellId,quality=d.quality,stacks=d.stacks}
+                    end
+                end
+                area:GetScript('OnMouseWheel')(area,-1)
+            end
+            local rows={};for _,r in pairs(seen) do rows[#rows+1]=r end
+            return Literal(rows)
+        end
+        -- Every rendered pool row: committed count, count text and Set label.
+        local function PoolCounts()
+            local area=NexusFlexiblePlanPool
+            area:GetScript('OnMouseWheel')(area,1000)
+            local out={}
+            for _,f in ipairs(H.frames) do
+                if f:GetParent()==area and f:IsVisible() and f.spellId then
+                    out[f.spellId]={n=tonumber(f.label:GetText():match('^Set: (%d+)')),text=f.count:GetText(),set=f.action:GetText()}
+                end
+            end
+            return out
+        end
+        local function Pool(counts)
+            local out={}
+            for id,n in pairs(counts) do out[id]={n=n,text=tostring(n),set='Set'} end
+            return out
+        end
+        local function CreateButton()
+            for _,f in ipairs(H.frames) do
+                if f.kind=='Button' and f:GetParent()==NexusEditorFrame and f:IsVisible()
+                    and f:GetText()=='Create unassigned' then return f end
+            end
+        end
+        Open(F.Boot(F.Database(),Seed3))
+        local editor,ctl=Nexus.WishlistEditor,nil
+        for i=1,64 do
+            local name,value=debug.getupvalue(editor.Show,i)
+            if name==nil then break end
+            if name=='wishlistController' then ctl=value;break end
+        end
+        Need(type(ctl)=='table' and type(ctl.PendingApply)=='function' and type(ctl.PendingRows)=='function'
+            and type(ctl.PendingLockRows)=='function' and type(ctl.FulfilledDraftTargets)=='function'
+            and type(ctl.CanonicalEchoes)=='function','COEXIST setup the real editor controller through an upvalue of editor.Show')
+        local realUpload,attempts,lastWhy=Nexus.GameAdapter.UploadWishlist,0,nil
+        local function Counted(...)
+            attempts=attempts+1
+            local ok,why=realUpload(...)
+            lastWhy=why
+            return ok,why
+        end
+        Nexus.GameAdapter.UploadWishlist=Counted
+        -- PendingApply returns a fresh wrapper on every read: compare its literal fields.
+        local function Retry()
+            local r=ctl.PendingApply()
+            return r and {slot=r.slot,name=r.name,tries=r.tries,rows=Literal(r.echoes)} or nil
+        end
+        -- Everything a pool callback must keep. These are the editor rows, debug state,
+        -- full maps, name, contexts, destination and retry; the Save popup and its
+        -- hides; the complete saved root, held locks, traffic, actions and attempts.
+        local function Snap()
+            return {rows=EditorRows(),state=H.Clone(editor.DebugDraftState()),name=NexusWishlistNameInput:GetText(),
+                pending=H.Clone(ctl.PendingRows()),locked=H.Clone(ctl.PendingLockRows()),
+                fulfilled=H.Clone(ctl.FulfilledDraftTargets()),editing=ctl.EditingContext(),
+                target=ctl.CreateTargetContext(),destination=ctl.SaveDestinationDescriptor(),
+                applyPending=editor.IsApplyPending(),retry=Retry(),create=tostring(Popup.shown[CREATE]),
+                createHides=Hidden(CREATE),db=F.Serialize(NexusDB),held=H.Clone(H.locked),
+                actions=#H.actions,chat=#H.chat,sent=#H.sent,uploads=attempts}
+        end
+
+        -- Episode 1 setup: a saved pool, then a different dirty pool, before any editor Save.
+        Need(Persisted()==T.EMPTY and Raw()==nil and NexusFlexiblePlanChooser:IsShown(),
+            'COEXIST setup the editor-opened chooser starts empty with nothing saved')
+        Need(Add(X3) and Add(X5) and Count(X3,3) and Count(X5,2),'COEXIST setup a pool 410003x3 410005x2 through real Add and Set')
+        NexusFlexiblePlanSave:Click()
+        local raw=Raw() or {}
+        Need(Persisted()==T.SAVED and F.Serialize(raw.ids)==F.Serialize({X3,X5}) and F.Serialize(raw.quality)==F.Serialize({3,1})
+            and F.Serialize(raw.maxStack)==F.Serialize({5,5}) and F.Serialize(raw.counts)==F.Serialize({3,2}),
+            'COEXIST setup Save pool writes the literal saved pool 410003x3 410005x2')
+        local savedRoot=F.Serialize(Raw())
+        NexusFlexiblePlanReset:Click()
+        Need(Add(X2) and Add(X3) and Count(X2,2) and Count(X3,1) and Deep(PoolCounts(),Pool({[X2]=2,[X3]=1}))
+            and Persisted()==T.UNSAVED and F.Serialize(Raw())==savedRoot,
+            'COEXIST setup a different dirty pool 410002x2 410003x1 before the editor Save; the saved pool is unchanged')
+        local spaced=Nexus.GameAdapter.UploadWishlist(0,'Coexist spacer',{{spellId=410004,quality=0,stacks=1}})
+        local spacerActions=#H.actions
+        local spacerRow=H.actions[spacerActions] or {}
+        Need(spaced==true and attempts==1 and spacerRow[1]=='upload' and spacerRow[3]=='Coexist spacer',
+            'COEXIST setup CONTROL one real spacer upload (setup, counted alone) reaches the synthetic host and starts the spacing')
+        local DRAFT={{spellId=X2,quality=2,stacks=2},{spellId=X3,quality=3,stacks=1}}
+        NexusFlexiblePlanOpen:Click()
+        if Popup.shown[REPLACE] then Click(Popup.shown[REPLACE],1) end
+        Need(Deep(EditorRows(),DRAFT) and Deep(Literal(ctl.CanonicalEchoes()),DRAFT) and not NexusFlexiblePlanChooser:IsShown()
+            and NexusWishlistNameInput:GetText()=='' and attempts==1,
+            'COEXIST setup Open as new Wishlist draft installs the exact editor draft 410002x2 410003x1')
+        NexusWishlistNameInput:SetText(SAVE1)
+        local create=CreateButton()
+        Need(create~=nil,'COEXIST setup the visible Create unassigned control')
+        create:Click()
+        local save1=Popup.shown[CREATE]
+        Need(save1~=nil and type(save1.data)=='table' and save1.data.slot==0 and save1.data.name==SAVE1
+            and Deep(Literal(save1.data.echoes),DRAFT) and Popup.shown[REPLACE]==nil,
+            'COEXIST setup the real Save confirmation names the exact unassigned draft')
+        Click(save1,1)
+        local held=ctl.PendingApply()
+        Need(held~=nil and Popup.shown[CREATE]==nil and editor.IsApplyPending()==true and held.slot==0 and held.name==SAVE1
+            and type(held.tries)=='number' and Deep(Literal(held.echoes),DRAFT) and held.echoes==save1.data.echoes,
+            'COEXIST CONTROL its Accept leaves a real nonnil retry holding the accepted payload: slot 0, name, tries and literal rows')
+        local retryEchoes=held.echoes
+        Need(attempts==2 and lastWhy=='spacing' and #H.actions==spacerActions,
+            'COEXIST CONTROL the confirmed Save makes one real upload attempt, refused by the spacing before the host')
+        NexusFlexiblePlanEntry:Click()
+        Need(NexusFlexiblePlanChooser:IsShown() and Deep(PoolCounts(),Pool({[X2]=2,[X3]=1})) and Persisted()==T.UNSAVED,
+            'COEXIST setup the reopened chooser keeps the dirty pool')
+        Need(Count(X2,1) and Count(X3,2) and Deep(PoolCounts(),Pool({[X2]=1,[X3]=2})) and PoolStatus()=='',
+            'COEXIST setup a different committed choice 410002x1 410003x2 with no pending input')
+        NexusFlexiblePlanOpen:Click()
+        local rq=Popup.shown[REPLACE]
+        Need(rq~=nil and type(rq.data)=='table' and (ctl.PendingApply() or {}).echoes==retryEchoes,
+            'COEXIST setup an Open as new Wishlist draft replacement request is shown while the confirmed Save waits')
+        local replaceHides=Hidden(REPLACE)
+        local before,pendingMap=Snap(),ctl.PendingRows()
+        local function Kept(label)
+            local r=ctl.PendingApply()
+            check(Deep(Snap(),before) and r~=nil and r.echoes==retryEchoes and ctl.PendingRows()==pendingMap
+                and editor.IsApplyPending()==true and F.Serialize(Raw())==savedRoot,
+                label..' keeps the editor rows, maps, name, contexts, destination, the waiting retry and its payload, held, saved root, traffic and upload attempts')
+        end
+        NexusFlexiblePlanLoad:Click()
+        local ask1=Popup.shown[LOAD]
+        Need(ask1~=nil and Persisted()==T.ASK_LOAD..' '..T.UNSAVED and Popup.shown[REPLACE]==rq,
+            'COEXIST Load saved over the dirty pool asks its own question; the replacement request stays shown')
+        Kept('COEXIST asking to load')
+        Click(ask1,2)
+        check(Popup.shown[LOAD]==nil and Popup.shown[REPLACE]==rq and Hidden(REPLACE)==replaceHides
+            and Deep(PoolCounts(),Pool({[X2]=1,[X3]=2})) and PoolStatus()=='' and Persisted()==T.UNSAVED
+            and Budget():find('^2 / 256 alternatives%s+Chosen: 3 / 79 ordinary copies$')~=nil,
+            'COEXIST Load Cancel keeps the literal chooser counts, no pending input and the replacement request')
+        Kept('COEXIST Load Cancel')
+        NexusFlexiblePlanLoad:Click()
+        local ask2=Popup.shown[LOAD]
+        Need(ask2~=nil and ask2~=ask1,'COEXIST setup a fresh current Load question')
+        Click(ask2,1)
+        check(Popup.shown[LOAD]==nil and Deep(PoolCounts(),Pool({[X3]=3,[X5]=2})) and Persisted()==T.LOADED
+            and Budget():find('^2 / 256 alternatives%s+Chosen: 5 / 79 ordinary copies$')~=nil and PoolStatus()==''
+            and Popup.shown[REPLACE]==rq and Hidden(REPLACE)==replaceHides,
+            'COEXIST CONTROL the fresh Load Accept installs exactly the saved pool 410003x3 410005x2, in the chooser only')
+        Kept('COEXIST the accepted pool Load')
+        Click(rq,1)
+        check(Popup.shown[REPLACE]==nil and NexusFlexiblePlanChooser:IsShown() and PoolStatus()==Reason('PLAN_CHANGED')
+            and Deep(PoolCounts(),Pool({[X3]=3,[X5]=2})),
+            'COEXIST the earlier replacement request, accepted after the pool Load, is refused PLAN_CHANGED in the chooser')
+        Kept('COEXIST the refused replacement Accept')
+        NexusFlexiblePlanReset:Click()
+        Need(Add(X2) and Add(X3) and Count(X2,1) and Count(X3,2) and Deep(PoolCounts(),Pool({[X2]=1,[X3]=2}))
+            and PoolStatus()=='','COEXIST setup restores the replacement request choice 410002x1 410003x2 through real controls')
+        StaticPopupDialogs[REPLACE].OnAccept(rq.frame,rq.data)
+        StaticPopupDialogs[REPLACE].OnCancel(rq.frame,rq.data)
+        check(Popup.shown[REPLACE]==nil and Hidden(REPLACE)==replaceHides+1 and PoolStatus()==Reason('EDITOR_CHANGED')
+            and Deep(PoolCounts(),Pool({[X2]=1,[X3]=2})),
+            'COEXIST the replayed replacement callbacks install nothing once the choice is restored; the retired request is refused')
+        Kept('COEXIST the replayed replacement callbacks')
+        local load=StaticPopupDialogs[LOAD]
+        for _,r in ipairs({ask1,ask2}) do load.OnAccept(r.frame,r.data);load.OnCancel(r.frame,r.data) end
+        check(Popup.shown[LOAD]==nil and Deep(PoolCounts(),Pool({[X2]=1,[X3]=2})) and Persisted()==T.UNSAVED,
+            'COEXIST replayed cancelled and accepted Load requests install nothing')
+        Kept('COEXIST the replayed Load callbacks')
+        -- Cleanup through the supported editor New and chooser Reset. The
+        -- editor's own pump then retires any retry whose draft changed; it
+        -- cannot upload, because the draft token changed.
+        local cleanupUploads=attempts
+        editor.NewWishlist()
+        editor._PumpApplyRetry()
+        NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+        NexusFlexiblePlanSearch:SetText('')
+        Need(ctl.PendingApply()==nil and not editor.IsApplyPending() and editor.DebugPendingCount()==0
+            and NexusWishlistNameInput:GetText()=='' and Popup.shown[CREATE]==nil and Popup.shown[REPLACE]==nil
+            and Popup.shown[LOAD]==nil and NexusFlexiblePlanChooser:IsShown() and next(PoolCounts())==nil
+            and attempts==cleanupUploads and #H.actions==spacerActions and F.Serialize(Raw())==savedRoot,
+            'COEXIST cleanup leaves no waiting Save, popup or further upload attempt and keeps the saved pool')
+        local bad={{spellId=0,quality=0,stacks=1}}
+        local _,during=realUpload(0,'Coexist probe',bad)
+        H.Advance(3,0.25)
+        local _,ended=realUpload(0,'Coexist probe',bad)
+        Need(during=='spacing' and ended=='invalid exact Echo target' and attempts==cleanupUploads,
+            'COEXIST CONTROL the checks above ran inside the spacer window; after H.Advance(3,0.25) a malformed target reaches its validation reason, not spacing')
+        Nexus.GameAdapter.UploadWishlist=realUpload
+        check(Nexus.GameAdapter.UploadWishlist==realUpload,'COEXIST the public upload function is restored before the next baselines')
+
+        -- Episode 2: no spacing. The same forwarding counter counts attempts
+        -- again, so any attempt would reach the host and be seen.
+        Nexus.GameAdapter.UploadWishlist=Counted
+        local DRAFT2={{spellId=X2,quality=2,stacks=1},{spellId=X5,quality=1,stacks=4}}
+        Need(Add(X2) and Add(X5) and Count(X2,1) and Count(X5,4),'COEXIST setup a second choice 410002x1 410005x4 through real Add and Set')
+        NexusFlexiblePlanOpen:Click()
+        if Popup.shown[REPLACE] then Click(Popup.shown[REPLACE],1) end
+        NexusFlexiblePlanEntry:Click()
+        NexusWishlistNameInput:SetText(SAVE2)
+        create=CreateButton()
+        Need(create~=nil,'COEXIST setup the visible Create unassigned control for the second draft')
+        create:Click()
+        local save2=Popup.shown[CREATE]
+        Need(Deep(EditorRows(),DRAFT2) and NexusFlexiblePlanChooser:IsShown() and Deep(PoolCounts(),Pool({[X2]=1,[X5]=4}))
+            and save2~=nil and type(save2.data)=='table' and save2.data.slot==0 and save2.data.name==SAVE2
+            and Deep(Literal(save2.data.echoes),DRAFT2) and ctl.PendingApply()==nil and attempts==cleanupUploads,
+            'COEXIST setup an open, unconfirmed Save confirmation for the exact draft 410002x1 410005x4 beside the chooser')
+        local base=Snap()
+        local function Survives(label)
+            check(Deep(Snap(),base) and Popup.shown[CREATE]==save2 and ctl.PendingApply()==nil and F.Serialize(Raw())==savedRoot,
+                label..' keeps the open Save confirmation shown and unhidden, the editor draft, maps, name, contexts, destination, saved root, traffic and upload attempts')
+        end
+        PoolRow(X5).count:SetText('3')
+        NexusFlexiblePlanLoad:Click()
+        local l1=Popup.shown[LOAD]
+        Need(l1~=nil and Persisted()==T.ASK_LOAD..' '..T.PENDING,'COEXIST Load saved over pending count input asks its own question')
+        Survives('COEXIST asking to load')
+        Click(l1,2)
+        check(Popup.shown[LOAD]==nil and Deep(PoolCounts(),{[X2]={n=1,text='1',set='Set'},[X5]={n=4,text='3',set='Set *'}})
+            and PoolStatus()==Reason('COUNT_PENDING') and Persisted()==T.PENDING,
+            'COEXIST Load Cancel keeps the committed counts and the pending count text')
+        Survives('COEXIST Load Cancel')
+        PoolRow(X5).count:SetText('4')
+        NexusFlexiblePlanLoad:Click()
+        local l2=Popup.shown[LOAD]
+        local loadHides=Hidden(LOAD)
+        NexusFlexiblePlanLoad:Click()
+        local l3=Popup.shown[LOAD]
+        Need(l2~=nil and l3~=nil and l3~=l2 and Hidden(LOAD)==loadHides+1,'COEXIST setup a newer Load question retires only the former one')
+        for _,r in ipairs({l1,l2}) do load.OnAccept(r.frame,r.data);load.OnCancel(r.frame,r.data) end
+        check(Popup.shown[LOAD]==l3 and Hidden(LOAD)==loadHides+1 and Deep(PoolCounts(),Pool({[X2]=1,[X5]=4}))
+            and Persisted()==T.ASK_LOAD..' '..T.UNSAVED,
+            'COEXIST stale Load Accept and Cancel callbacks keep the newer Load question and install nothing')
+        Survives('COEXIST the stale Load callbacks')
+        Click(l3,1)
+        check(Popup.shown[LOAD]==nil and Deep(PoolCounts(),Pool({[X3]=3,[X5]=2})) and Persisted()==T.LOADED,
+            'COEXIST CONTROL the newer Load Accept installs exactly the saved pool while the Save confirmation waits')
+        Survives('COEXIST the accepted pool Load')
+        NexusFlexiblePlanReset:Click();NexusFlexiblePlanSave:Click()
+        local c1=Popup.shown[CLEAR]
+        Need(c1~=nil,'COEXIST setup a remove question for the empty pool')
+        Click(c1,2)
+        NexusFlexiblePlanSave:Click()
+        local c2=Popup.shown[CLEAR]
+        Need(c2~=nil and c2~=c1 and Persisted()==T.ASK_CLEAR..' '..T.UNSAVED_EMPTY,'COEXIST setup a fresh current remove question')
+        local clearDialog=StaticPopupDialogs[CLEAR]
+        clearDialog.OnAccept(c1.frame,c1.data);clearDialog.OnCancel(c1.frame,c1.data)
+        load.OnAccept(l3.frame,l3.data);load.OnCancel(l3.frame,l3.data)
+        check(Popup.shown[CLEAR]==c2 and next(PoolCounts())==nil and Persisted()==T.ASK_CLEAR..' '..T.UNSAVED_EMPTY,
+            'COEXIST a stale remove Accept/Cancel and a replayed accepted Load keep the newer remove question and the saved pool')
+        Survives('COEXIST the stale remove and Load callbacks')
+        Click(c2,2)
+        clearDialog.OnAccept(c2.frame,c2.data)
+        check(Popup.shown[CLEAR]==nil and Persisted()==T.UNSAVED_EMPTY,
+            'COEXIST the current remove Cancel and its replayed Accept remove nothing')
+        Survives('COEXIST the remove Cancel and its replay')
+        local actionsBefore=#H.actions
+        Click(save2,1)
+        local upload=H.actions[#H.actions] or {}
+        check(Popup.shown[CREATE]==nil and attempts==base.uploads+1 and lastWhy==nil and #H.actions==actionsBefore+1
+            and upload[1]=='upload' and upload[2]==0 and upload[3]==SAVE2 and Deep(Literal(upload[4]),DRAFT2)
+            and ctl.PendingApply()==nil and F.Serialize(Raw())==savedRoot,
+            'COEXIST CONTROL the surviving Save confirmation still saves: one real upload of its exact draft reaches the host; the saved pool is unchanged')
+        editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+        NexusFlexiblePlanSearch:SetText('')
+        Nexus.GameAdapter.UploadWishlist=realUpload
+        check(Nexus.GameAdapter.UploadWishlist==realUpload and ctl.PendingApply()==nil and Popup.shown[CREATE]==nil
+            and Popup.shown[LOAD]==nil and Popup.shown[CLEAR]==nil and Popup.shown[REPLACE]==nil,
+            'COEXIST cleanup restores the public upload function and leaves no popup or waiting Save')
+        -- PENDING acceptance, not covered by this block: unverified fault
+        -- injection; unknown, future, read-only, malformed, loading, owner and
+        -- root refusal presentation in the UI; docs, the final full suite,
+        -- content checks and independent UltraCode Spec/Standards reviews.
+    end
 end
 print(string.format('flexible_plan_persistence_chooser: %d passed, %d failed',passed,failed))
 if failed>0 then os.exit(1) end
