@@ -31,19 +31,16 @@
 -- promise, the Build Library's scroll route). Help's earlier needles are kept
 -- inside those phrases. The mode, default, Store, saved-byte and no-effect
 -- GUARDs are unchanged.
+-- Continuation 52 (review38 M7R38-B01/N01, kept as history): Help's step 3 no
+-- longer reads as if a new DPS best left only as its Record Loadout page, with
+-- the Echo list only for players who ask. It says that DPS record carries its
+-- Echo list (still an EXPECT below), and it scoped the requester-only Echo
+-- wording to the page; that scoping is superseded by the D2/D3 correction and
+-- is no longer expected.
 -- D2/D3 correction: supersedes the requester-only/new-personal-best wording
 -- above. EXPECTs require character encounter-best eligibility, unsolicited
 -- ordinary/locked Echo disclosure, independent summary refusal and receiver
 -- page creation. Actual wire/receiver behavior is GUARD in ux_sync_dps_page.
--- D23 linked build ID: Sync VerifiedDpsBuildId keeps a record's buildId only
--- for a catalog build with the same verified owner and fingerprint and an
--- ordinary saved mirror kind, and BroadcastDpsRecord serializes that result
--- as b=relatedBuildId. EXPECT (fails on the 45036fbc prose, which does not
--- name it): the detailed field lists of Help Sharing and docs/9020 add "and,
--- when verified, the linked build ID"; that document names optional b and its
--- gate; neither text names the link without "when verified", so no record is
--- promised one. The README check, the abbreviated Welcome and tooltip lines
--- and every GUARD are unchanged.
 -- SETUP: the fixture reached its state (a SETUP failure is not red evidence).
 -- Real TOC boots: a format-2 profile (Automatic even though its settings store
 -- "manual") and accepted format-5 profiles with Manual and Off. The fit of the
@@ -262,7 +259,16 @@ local function Run(tag,database,mode,line)
   local okRect=r[1]>=11 and r[3]<=W-12 and r[2]>=12 and r[4]<=Ht-11
   local clear,seen=true,0
   local BUTTONS={['Set up current build']=true,['Import / Create Wishlist']=true,['Browse Community builds']=true,
-   ['Open Leaderboard']=true,['Help / Getting Started']=true,['Orbs / Lost Memories']=true,['Later']=true}
+   ['Open Leaderboard']=true,['Help / Getting Started']=true,['Orbs / Lost Memories']=true,['Close']=true}
+  -- The exact "Close" caption of the dismiss control is an EXPECT. Only
+  -- after it fails may the real legacy "Later" control stand in for it in
+  -- this count and overlap check (the seen==9 SETUP is unchanged); the failed
+  -- EXPECT stays in the final failure set.
+  local exactClose=false
+  for _,c in ipairs(qs.children) do
+   if c.kind=='Button' and V.Plain(c:GetText() or '')=='Close' then exactClose=true end
+  end
+  if not C.expect(exactClose,tag..': the Welcome dismiss control reads exactly "Close"') then BUTTONS['Later']=true end
   for _,c in ipairs(qs.children) do
    local button=c.kind=='Button' and BUTTONS[V.Plain(c:GetText() or '')]
    if button or c==qs.hint or c==qs.body then
@@ -295,6 +301,7 @@ local function Run(tag,database,mode,line)
    'Your own Share actions need your click',
    'an eligible new character best for Training Dummy or Lich King may send without a click',
    'a separate automatic "Record Loadout" summary without the Echo list',
+   'That DPS record carries its Echo list',
    'ordinary and any locked Echoes and player info',
    'receivers may create a viewable, copyable page from the record alone',
    'Nexus removes the old page on this client only',

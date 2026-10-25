@@ -8,7 +8,7 @@
 -- stays hidden for the session (wanted, committed, suppressed), and neither
 -- Panel.Show nor /nexus panel brings it back.
 -- Healthy behaviour (EXPECT, fails at the baseline): with the editor closed
--- first and QuickStart dismissed last ("Later"), the wanted and committed HUD
+-- first and QuickStart dismissed last ("Close"), the wanted and committed HUD
 -- is shown again; Panel.Show and two /nexus panel toggles leave it shown; a
 -- player who had hidden the HUD keeps it hidden after the popups close, and
 -- their next /nexus panel shows it.
@@ -62,15 +62,25 @@ local function OpenEditor(tag)
  return C.setup(editor~=nil and editor:IsShown() and Facts().menuSuppressed and not Facts().shown,
   tag..': fixture: the minimap right-click opens the editor and suppresses the HUD',FactText())
 end
-local function Later(tag)
+local function CloseQuickStart(tag)
  local quick=NexusQuickStart
- local later=quick and V.Frame(H,function(x)
-  return x:GetParent()==quick and x:GetText()=='Later' and x:GetScript('OnClick')~=nil
- end)
- C.setup(later~=nil,tag..': fixture: the real Later control exists')
+ local function Control(caption)
+  return quick and V.Frame(H,function(x)
+   return x:GetParent()==quick and x:GetText()==caption and x:GetScript('OnClick')~=nil
+  end) or nil
+ end
+ -- The exact "Close" caption is healthy behaviour (EXPECT). Only after that
+ -- EXPECT fails may the real legacy "Later" control (same parent, its own
+ -- OnClick) dismiss QuickStart, so the original checks still run; the failed
+ -- EXPECT stays in the final failure set.
+ local later=Control('Close')
+ if quick and not C.expect(later~=nil,tag..': the QuickStart dismiss control reads exactly "Close"') then
+  later=Control('Later')
+ end
+ C.setup(later~=nil,tag..': fixture: the real Close control exists (legacy Later only after the failed Close EXPECT)')
  if later then later:Click() end
  H.Advance(.5)
- return C.setup(quick~=nil and not quick:IsShown(),tag..': fixture: Later dismisses QuickStart')
+ return C.setup(quick~=nil and not quick:IsShown(),tag..': fixture: that real control dismisses QuickStart')
 end
 -- Back to a shown, wanted, unsuppressed HUD: an attached window opened and
 -- closed with no QuickStart shown, as a player would recover.
@@ -90,8 +100,8 @@ C.scenario('Q1 the editor closes first, QuickStart last',function()
   'Q1: fixture: the real first-run gate shows QuickStart over the editor')
  editor:Hide()
  print('OBSERVED','Q1 after the editor closed',FactText())
- if not Later('Q1') then return end
- print('OBSERVED','Q1 after Later',FactText())
+ if not CloseQuickStart('Q1') then return end
+ print('OBSERVED','Q1 after Close',FactText())
  local x=Facts()
  C.expect(x.wanted and x.committed and x.shown and not x.menuSuppressed,
   'Q1: when the last popup closes, the wanted and committed HUD is shown again',FactText())
@@ -106,7 +116,7 @@ C.scenario('G1 reversed order: QuickStart first, the editor last',function()
  if not Reset('G1') or not OpenEditor('G1') then return end
  Nexus.QuickStart.Show()
  C.setup(NexusQuickStart:IsShown(),'G1: fixture: QuickStart is shown over the editor')
- if not Later('G1') then return end
+ if not CloseQuickStart('G1') then return end
  C.guard(editor:IsShown() and Facts().menuSuppressed and not Facts().shown,
   'G1: while the editor (another attached window) is still open, the HUD stays hidden',FactText())
  editor:Hide()
@@ -122,8 +132,8 @@ C.scenario('W1 a player who hid the HUD',function()
  if not OpenEditor('W1') then return end
  Nexus.QuickStart.Show()
  editor:Hide()
- if not Later('W1') then return end
- print('OBSERVED','W1 after Later',FactText())
+ if not CloseQuickStart('W1') then return end
+ print('OBSERVED','W1 after Close',FactText())
  C.guard(not Facts().wanted and not Facts().shown,'W1: the unwanted HUD stays hidden when the popups close',FactText())
  SlashCmdList.NEXUS('panel')
  C.expect(Facts().wanted and Facts().shown,'W1: the player\'s next /nexus panel shows the HUD',FactText())
@@ -134,8 +144,8 @@ C.scenario('G2 QuickStart alone',function()
  Nexus.QuickStart.Show()
  C.setup(NexusQuickStart:IsShown(),'G2: fixture: QuickStart is shown with no attached window')
  C.guard(Facts().shown and not Facts().menuSuppressed,'G2: QuickStart alone does not hide the HUD',FactText())
- if not Later('G2') then return end
- C.guard(Facts().wanted and Facts().shown and not Facts().menuSuppressed,'G2: and the HUD is still shown after Later',FactText())
+ if not CloseQuickStart('G2') then return end
+ C.guard(Facts().wanted and Facts().shown and not Facts().menuSuppressed,'G2: and the HUD is still shown after Close',FactText())
 end)
 
 C.guard(Facts().ready and Facts().committed,'the panel is still ready and committed',FactText())

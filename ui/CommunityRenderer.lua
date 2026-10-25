@@ -1345,6 +1345,26 @@ local function ShareStatusLine()
     return colour .. text .. "|r", state
 end
 
+-- M7: the detail line shown with Retry Share, from Sync's own record of the
+-- stopped Share (CanRetryShare's status) and the current saved Sync mode. It
+-- states the refusal and the mode as they are; showing it starts nothing.
+function M.RetryStateText(status, mode)
+    status = type(status) == "table" and status or {}
+    local policy = Nexus.SyncModePolicy
+    local reason = type(status.reason) == "string" and status.reason or nil
+    local why = tostring(status.outcome or "stopped")
+    if reason and policy and type(policy.IsModeReason) == "function" and policy.IsModeReason(reason) then
+        why = why .. ", by the saved Sync mode"
+    elseif reason and reason ~= "" and reason ~= "none" and reason ~= why then
+        why = why .. ": " .. reason:gsub("%.+$", "")
+    end
+    local now = mode == "off" and "Sync is Off now: a Retry is refused and nothing is sent; Sync mode... changes that."
+        or mode == "manual" and "Sync is Manual now: Retry Share queues it again only when you click."
+        or mode == "automatic" and "Retry Share queues it again only when you click."
+        or "The current Sync mode could not be read."
+    return "Last Share was not sent (" .. why .. "). " .. now
+end
+
 -- The result of the user's own last Share click belongs to the form. A refusal
 -- stays there through every ordinary view refresh. Only a legitimate next step
 -- replaces it: another Share click, another source or class, or reopening the
@@ -2113,18 +2133,33 @@ local function EnsureDetailPanel(parent)
         local controller = ControllerInstance()
         local ok, why, outcome
         if type(controller.RetryShare) == "function" then
-            ok, why, outcome = controller.RetryShare(selected)
+            -- The context this Retry was shown in (see the detail refresh):
+            -- a click after the player, saved data or catalog changed queues
+            -- nothing.
+            ok, why, outcome = controller.RetryShare(selected, self._nexusRetryContext)
         else
             ok, why = false, "not retryable"
         end
         outcome = type(outcome) == "table" and outcome or {}
+        local build = LoadBuild(selected)
+        local name = "'" .. tostring(build and (build.displayTitle or DisplayRemoteText(
+            build.title or "this build", 1024, false)) or "this build") .. "'"
+        local policy = Nexus.SyncModePolicy
         if ok and outcome.retryPending then
-            print("|cffffc040Nexus:|r Share retry is waiting for one bounded Sync queue slot.")
+            print("|cffffc040Nexus:|r Share retry of " .. name
+                .. " is waiting for one bounded Sync queue slot. Nothing is sent until it is admitted.")
         elseif ok then
-            print("|cff4dff80Nexus:|r Share retry queued. Peer storage confirmation is unavailable.")
+            print("|cff4dff80Nexus:|r Share retry of " .. name
+                .. " queued its summary. Queued is not sent: sending and receipt by other players are not confirmed.")
         else
-            print("|cffff6060Nexus:|r Share retry failed: "
-                .. tostring(why or "not retryable") .. ".")
+            -- The saved mode's own refusal is stated as it is (the existing
+            -- CanRetryShare/mode rules; showing it enables nothing).
+            if policy and type(policy.IsModeReason) == "function" and policy.IsModeReason(why) then
+                print("|cffffc040Nexus:|r Share retry of " .. name .. " not sent: " .. tostring(why))
+            else
+                print("|cffff6060Nexus:|r Share retry of " .. name .. " failed: "
+                    .. tostring(why or "not retryable"):gsub("%.+$", "") .. ". Nothing was queued by this click.")
+            end
             self._nexusRetryConsumed = false
             M.Refresh()
         end
@@ -2133,6 +2168,7 @@ local function EnsureDetailPanel(parent)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
         GameTooltip:AddLine("Retry this failed Share",0.9,0.9,0.9,true)
         GameTooltip:AddLine("Resends the exact saved build only after you click; no automatic terminal retry occurs.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("Your saved Sync mode still decides: with Sync Off, a Retry is refused and nothing is sent.",0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
     p.retryShareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2165,12 +2201,19 @@ local function EnsureDetailPanel(parent)
     -- that changed, or when the Library was closed; Cancel and Escape do
     -- nothing. One approval starts at most one Share; it is not a guarantee
     -- that the Share is sent exactly once, and it does not stop Sync.
+    -- M7: only the latest confirmation shown is live (p._nexusShareApproval).
+    -- Hiding it (Cancel, Escape, a newer confirmation in its place) or closing
+    -- the Library retires it, so a late Accept of a retired one shares nothing.
+    -- The identity also covers the published listing's link, which
+    -- PublishImportedBuild carries into the update.
     local function ShareIdentity(build)
         if not (IsSavedMirror(build) and IsOwnBuild(build)) then return nil end
+        local listing = build.publishedBuildId and LoadBuild(build.publishedBuildId) or nil
         local parts = {CandidatePart(build.id), CandidatePart(build.ownerKey),
             CandidatePart(build.title),
             CandidatePart(build.userDescription or build.description),
-            CandidatePart(build.publishedBuildId)}
+            CandidatePart(build.publishedBuildId),
+            CandidatePart(type(listing) == "table" and listing.link or nil)}
         for _, list in ipairs({build.echoes, build.lockedEchoes}) do
             parts[#parts + 1] = "#"
             for _, e in ipairs(type(list) == "table" and list or {}) do
@@ -2189,6 +2232,13 @@ local function EnsureDetailPanel(parent)
         local id = data.id
         if pendingUploads[id] then return end
         local displayTitle = tostring(data.title or "Saved Build")
+        if data.retired or p._nexusShareApproval ~= data then
+            print("|cffffc040Nexus:|r Share cancelled: the confirmation for '" .. displayTitle
+                .. "' was closed or replaced before it was accepted. Nothing was shared.")
+            viewDiagnostic.pump.Refresh(false, false)
+            return
+        end
+        p._nexusShareApproval = nil
         if not parent:IsShown() or ShareIdentity(LoadBuild(id)) ~= data.identity then
             print("|cffffc040Nexus:|r Share cancelled: '" .. displayTitle
                 .. "' changed, or the Build Library was closed, after the confirmation opened. Nothing was shared.")
@@ -2211,21 +2261,29 @@ local function EnsureDetailPanel(parent)
                 local saved = "Saved '" .. displayTitle .. "' locally as your shared listing"
                 local policy = Nexus.SyncModePolicy
                 local reason = type(admission) == "table" and admission.queueReason or nil
+                -- The listing's DPS-best hand-off is admitted on its own; a
+                -- refusal of the summary says nothing about it.
+                local linked = type(admission) == "table" and admission.linkedDps or nil
+                local linkedText = linked == "queued"
+                    and " A DPS record linked to this build was queued separately; queued is not sent."
+                    or linked == "unknown" and " Whether a linked DPS record was queued was not reported."
+                    or ""
                 if type(admission) ~= "table" then
                     -- A completion that reports no queue result claims none.
                     print("|cff4dff80Nexus:|r " .. saved
                         .. ". Whether Sync queued it was not reported. Sending and receipt by other players are not confirmed.")
                 elseif admission.queueAdmitted == true then
                     print("|cff4dff80Nexus:|r " .. saved
-                        .. " and queued its summary. Queued is not sent: sending and receipt by other players are not confirmed.")
+                        .. " and queued its summary. Queued is not sent: sending and receipt by other players are not confirmed."
+                        .. linkedText)
                 elseif policy and type(policy.Text) == "function"
                     and reason ~= nil and reason == policy.Text("off") then
                     print("|cffffc040Nexus:|r " .. saved
-                        .. " — not sent: your saved Sync mode is Off.")
+                        .. " — not sent: your saved Sync mode is Off." .. linkedText)
                 else
                     print("|cffffc040Nexus:|r " .. saved
-                        .. " — not queued, so nothing was sent: "
-                        .. tostring(reason or "Sync unavailable"):gsub("%.+$", "") .. ".")
+                        .. " — its summary was not queued, so nothing was sent for it: "
+                        .. tostring(reason or "Sync unavailable"):gsub("%.+$", "") .. "." .. linkedText)
                 end
             else
                 print("|cffff6060Nexus:|r Not shared: '" .. displayTitle
@@ -2275,11 +2333,19 @@ local function EnsureDetailPanel(parent)
                 self._nexusShareStrata = nil
                 self:SetFrameStrata(strata)
             end
+            -- A hidden confirmation is retired. The client runs Accept before
+            -- it hides the dialog, so this never cancels an Accept.
+            local data = self.data
+            if type(data) == "table" then
+                data.retired = true
+                if p._nexusShareApproval == data then p._nexusShareApproval = nil end
+            end
         end,
         OnAccept = function(_, data) ConfirmedShare(data) end,
         timeout=0, whileDead=true, hideOnEscape=true, preferredIndex=3,
     }
     parent:HookScript("OnHide", function()
+        p._nexusShareApproval = nil
         if type(StaticPopup_Visible) == "function"
             and StaticPopup_Visible("NEXUS_SHARE_SAVED_BUILD") then
             StaticPopup_Hide("NEXUS_SHARE_SAVED_BUILD")
@@ -2317,18 +2383,24 @@ local function EnsureDetailPanel(parent)
         -- channel, where other Nexus users may keep a valid copy.
         -- Negotiation alone does not decide the route, and the packets of
         -- one answer can take different routes.
+        -- The listing is listed with the character name, realm and class
+        -- (M7 identity disclosure).
         -- After the local commit the controller also hands the listing ID to
         -- DpsCapture.BroadcastBestForBuild, whether or not the summary was
         -- queued: in Automatic a linked character-best record may be sent.
         -- The note states these paths; it changes none of them.
         local note = (build.publishedBuildId and "This saves its current title, description and Echo list as an update of your shared listing on this client, "
             or "This saves its title, description and Echo list as your shared listing on this client, ")
-            .. "then queues a short summary for other Nexus users if your saved Sync mode and its size allow. The summary has no Echo list or description; the full listing can be sent in answers to other Nexus users' requests, and an answer on the shared Sync channel may be kept by any Nexus user who receives it. In Automatic, if your character's best Training Dummy or Lich King DPS is linked to this listing, Nexus may also send each such DPS record with its Echoes, any locked Echoes and your player info (character name, realm, class, level) without an additional request, even if the summary is not queued. "
+            .. "then queues a short summary for other Nexus users if your saved Sync mode and its size allow. "
+            .. "It is listed with your character name, realm and class. "
+            .. "The summary has no Echo list or description; the full listing can be sent in answers to other Nexus users' requests, and an answer on the shared Sync channel may be kept by any Nexus user who receives it. In Automatic, if your character's best Training Dummy or Lich King DPS is linked to this listing, Nexus may also send each such DPS record with its Echoes, any locked Echoes and your player info (character name, realm, class, level) without an additional request, even if the summary is not queued. "
             .. "A shared build cannot be recalled: players who receive it keep their copy, and Stop Sharing removes only the listing on this client. "
             .. "Nexus cannot confirm who received it."
             .. (off and " Your saved Sync mode is Off: the listing is saved on this client and not sent." or "")
-        StaticPopup_Show("NEXUS_SHARE_SAVED_BUILD", displayTitle, note,
-            {id=selected,identity=identity,title=displayTitle})
+        -- This confirmation becomes the only live approval (see ShareIdentity).
+        local approval = {id=selected,identity=identity,title=displayTitle}
+        p._nexusShareApproval = approval
+        StaticPopup_Show("NEXUS_SHARE_SAVED_BUILD", displayTitle, note, approval)
     end)
     p.shareBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
@@ -2603,8 +2675,8 @@ local function RefreshDetailPanel(buildId, listPending)
         end
     elseif IsSavedMirror(build) then
         local state = PublishedBuildId(build)
-            and "Shared listing saved on this client. Update Shared Build... sends the current title, description and Echo list after you confirm; receipt by other players is not confirmed."
-            or "Your server Saved Build. Edit its title/description, then use Share Build... to send it to other Nexus users after you confirm."
+            and "Shared listing saved on this client. Update Shared Build... saves your edits after you confirm and queues a summary only if Sync mode and size allow; receipt by other players is not confirmed."
+            or "Your server Saved Build. Edit its title/description; Share Build... shares it after you confirm, queuing a summary only if Sync mode and size allow."
         detailPanel.editState:SetText(state)
         detailPanel.editState:Show()
     elseif mine and loadoutLocked then
@@ -2633,6 +2705,15 @@ local function RefreshDetailPanel(buildId, listPending)
         else
             detailPanel.retryShareBtn:Enable()
         end
+        -- The click acts in the context drawn here (RetryShare refuses a
+        -- changed player, saved data or catalog), and the reason Retry is
+        -- offered is stated, with the current mode.
+        detailPanel.retryShareBtn._nexusRetryContext = type(controller.RetryShareContext) == "function"
+            and controller.RetryShareContext() or nil
+        local policy = Nexus.SyncModePolicy
+        local mode = policy and type(policy.Mode) == "function" and policy.Mode() or nil
+        detailPanel.editState:SetText(M.RetryStateText(retryStatus, mode))
+        detailPanel.editState:Show()
         detailPanel.lockBtn:Hide()
         detailPanel.shareBtn:Hide()
         detailPanel.retryShareBtn:Show()
@@ -2648,6 +2729,7 @@ local function RefreshDetailPanel(buildId, listPending)
         end
         detailPanel.retryShareBtn._nexusRetryGeneration = nil
         detailPanel.retryShareBtn._nexusRetryConsumed = false
+        detailPanel.retryShareBtn._nexusRetryContext = nil
     end
     if IsSavedMirror(build) then
         local pending = pendingUploads[SelectedId()] ~= nil
@@ -3346,6 +3428,19 @@ local function EnsureFrame()
         if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end
     end)
 
+    -- M7: Help for this window (its Sharing page). Like the other navigation
+    -- buttons it replaces this window, whose layer is above Help's; it opens
+    -- a page only and shares, sends or changes nothing.
+    frame._helpNav = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
+    frame._helpNav:SetSize(56,22)
+    frame._helpNav:SetPoint("LEFT",wishlistBtn,"RIGHT",4,0)
+    frame._helpNav:SetText("Help")
+    frame._helpNav:SetScript("OnClick",function()
+        CloseDropdowns()
+        frame:Hide()
+        if Nexus.Help then Nexus.Help.Show("sharing") end
+    end)
+
     -- Browse toolbar ----------------------------------------------------
     local browseLabel = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
     browseLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -64)
@@ -3768,8 +3863,12 @@ RenderSyncStatus = function(receiveCount)
                 and tonumber(sync.LastSyncNewCount())) or 0
         local remaining = type(sync.ReceiveTimeLeft) == "function"
             and tonumber(sync.ReceiveTimeLeft()) or 0
+        -- M5R-NB18: IsReceiving is the window in which answers are accepted
+        -- (a time, not evidence that anything arrives), so it is "listening
+        -- for answers"; "new" is what this client stored. Reception in
+        -- progress is the Leaderboard's "N receiving" (inbound transfers).
         syncStatusText:SetText(string.format(
-            "|cff4dff80Listening %ds (%d new); %d bundled + %d overlay; %d available; %d shown of %d results|r",
+            "|cff4dff80Listening for answers %ds (%d new); %d bundled + %d overlay; %d available; %d shown of %d results|r",
             math.ceil(math.max(0,remaining)),receiveCount,bundled,overlay,
             available,shown,results))
     else

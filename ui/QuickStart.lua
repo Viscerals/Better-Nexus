@@ -156,11 +156,61 @@ local function Finish()
     if frame then frame:Hide() end
 end
 
+-- Close fits its whole label at the current font. The fit is measured again
+-- on every presentation (first-time, deliberate and informational). Width
+-- comes from LayoutMetrics' FitButtonWidth: the client's text width or its
+-- conservative model, plus end caps. Without LayoutMetrics, the same rule
+-- runs here with that model scaled by the runtime font scale, read from
+-- NexusFontNormal as LayoutMetrics does: 7 px per visible character, 14 px
+-- at scale 2. Height holds one conservative line, 13 px per unit of font
+-- scale as LayoutMetrics' status line (26 px at scale 2). Close is never
+-- below the original 74x24. The window stays 420 px unless a wider Close
+-- needs room to keep its original 8 px gap from the 290 px hint
+-- (x 24..314). Hint, Sync, body and other buttons keep their sizes. The controls on
+-- the right (Import, Leaderboard, Orbs and Close) are anchored to the right
+-- edge, directly or through Import, so they follow a widened right edge; the
+-- centred title and subtitle stay centred. This is an
+-- offline model only; native NOT_RUN.
+local CLOSE_W, CLOSE_H, WELCOME_W, HINT_RIGHT, CLOSE_GAP, CLOSE_EDGE = 74, 24, 420, 314, 8, 24
+local function FitClose(f)
+    local close = f and f.close
+    if not close then return end
+    local scale, font = 1, _G.NexusFontNormal
+    if type(font) == "table" and type(font.GetFont) == "function" then
+        local ok, _, size = pcall(font.GetFont, font)
+        size = ok and tonumber(size) or nil
+        if size and size > 0 then scale = math.min(2, math.max(0.75, size / 12)) end
+    end
+    local metrics, width = Nexus.LayoutMetrics, nil
+    if type(metrics) == "table" and type(metrics.FitButtonWidth) == "function" then
+        local ok, value = pcall(metrics.FitButtonWidth, close, CLOSE_W)
+        value = ok and tonumber(value) or nil
+        if value and value >= CLOSE_W and value < math.huge then width = value end
+    end
+    if not width then
+        local measured
+        if type(close.GetTextWidth) == "function" then
+            local ok, value = pcall(close.GetTextWidth, close)
+            value = ok and tonumber(value) or nil
+            if value and value > 0 and value < math.huge then measured = value end
+        end
+        if not measured then
+            local text = tostring(close:GetText() or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+            measured = #(text:gsub("[\128-\191]", "")) * math.max(7, 7 * scale)
+        end
+        width = math.max(CLOSE_W, math.ceil(measured + 24))
+        close:SetWidth(width)
+    end
+    close:SetHeight(math.max(CLOSE_H, math.ceil(13 * scale)))
+    f:SetWidth(math.max(WELCOME_W, HINT_RIGHT + CLOSE_GAP + width + CLOSE_EDGE))
+end
+
 -- Normal (first-time or deliberate) presentation: the exact first-time texts.
 local function NormalTexts(f)
     f._informational = nil
     if f.title then f.title:SetText(NORMAL_TITLE) end
     if f.hint then f.hint:SetText(NORMAL_HINT) end
+    FitClose(f)
     return SyncNote(f)
 end
 
@@ -283,8 +333,9 @@ local function EnsureFrame()
     local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(74, 24)
     close:SetPoint("BOTTOMRIGHT", -24, 20)
-    close:SetText("Later")
+    close:SetText("Close")
     close:SetScript("OnClick", Finish)
+    frame.close = close
 
     local theme = Nexus.Theme
     if theme then
@@ -298,6 +349,30 @@ local function EnsureFrame()
             theme.StyleLabel(hint, "muted")
         end
     end
+
+    -- UX-18: Escape closes the Welcome exactly as Close does (Finish: the
+    -- first-time dismissal and its durable acknowledgement policy; for the
+    -- informational replay, a hide with no write). The client's Escape
+    -- handler hides each shown frame named in UISpecialFrames. The Welcome
+    -- itself is not listed, because other routes hide it without recording
+    -- a dismissal (the HUD's CloseOtherNexusWindows) and must stay that way;
+    -- this invisible child is listed instead. It is shown exactly while the
+    -- Welcome is, and its own hide finishes the Welcome only while the
+    -- Welcome is still visible (IsVisible, parent-aware). The Escape handler
+    -- hides only this child, so the Welcome is still visible and finishes. An
+    -- explicit hide of the Welcome clears its own flag first, and a hidden
+    -- ancestor (the UI hidden, a cinematic) makes it not visible, so neither
+    -- records nor closes anything; no stale entry is left to take a later
+    -- Escape. (Review36 M7R-01; offline model only, native NOT_RUN.)
+    local escape = CreateFrame("Frame", "NexusQuickStartEscape", frame)
+    escape:SetScript("OnHide", function()
+        if frame and frame:IsVisible() then Finish() end
+    end)
+    frame:HookScript("OnShow", function() escape:Show() end)
+    frame:HookScript("OnHide", function() escape:Hide() end)
+    escape:Hide()
+    UISpecialFrames = UISpecialFrames or {}
+    UISpecialFrames[#UISpecialFrames + 1] = "NexusQuickStartEscape"
 
     return frame
 end
@@ -329,8 +404,194 @@ function M.ShowSetup()
     f._informational = true
     if f.title then f.title:SetText(SETUP_TITLE) end
     if f.hint then f.hint:SetText(SETUP_HINT) end
+    FitClose(f)
     SyncNote(f):Show()
     return true
+end
+
+-- M7: Setup checklist and status (Help's Setup checklist and the ... menu).
+-- A separate read-only window, not the Welcome: every row is worded by
+-- UserText from Panel.SetupFacts, read again while it is shown (twice a
+-- second). Unknown, loading and unavailable stay apart from done; the Welcome
+-- being seen, closed or answered is not a setup fact and is never read. Its
+-- buttons only navigate through Help's routes (which say why when they cannot
+-- open); none assigns, saves, sends, turns Auto ON, starts or resumes an Orb
+-- run or spends. Close and Escape only hide it.
+local checklist
+local CHECK_W, CHECK_H, CHECK_TEXT_W = 460, 400, 412
+local CHECK_ROW_Y = { -70, -114, -158 }
+local CHECK_STATUS_Y = { -242, -276, -310 }
+-- UX-18: each text block flows below the previous one at the height its
+-- wrapped text needs (LayoutMetrics.WrapHeight: the client's measurement, or
+-- the conservative model), so a long Saved Build name, a larger font or a
+-- long reason is not cut. A block taller than CHECK_BLOCK_MAX keeps that
+-- height and shows its complete text on hover (LayoutMetrics.FullTextTooltip).
+-- The window grows to its content (never below CHECK_H) and is kept on screen
+-- (LayoutMetrics.FitToScreen). Without LayoutMetrics the fixed boxes above stay.
+local CHECK_TOP, CHECK_GAP, CHECK_BLOCK_MAX, CHECK_FOOTER = -38, 4, 120, 56
+
+local function ChecklistText(parent, y, h, template)
+    local s = parent:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
+    s:SetPoint("TOPLEFT", 24, y)
+    s:SetSize(CHECK_TEXT_W, h)
+    s:SetJustifyH("LEFT")
+    s:SetJustifyV("TOP")
+    return s
+end
+
+-- Flows the blocks top to bottom (see CHECK_BLOCK_MAX above).
+local function LayoutChecklist(f)
+    local metrics = Nexus.LayoutMetrics
+    if not (metrics and type(metrics.WrapHeight) == "function") then return end
+    local y = CHECK_TOP
+    local function place(fs, gap)
+        fs:ClearAllPoints()
+        fs:SetPoint("TOPLEFT", 24, y)
+        local height = metrics.WrapHeight(fs, CHECK_TEXT_W, 12, CHECK_BLOCK_MAX)
+        y = y - height - (gap or CHECK_GAP)
+    end
+    place(f.subtitle, 8)
+    for _, fs in ipairs(f.rows) do place(fs) end
+    place(f.summary, 10)
+    place(f.statusTitle, 2)
+    for _, fs in ipairs(f.status) do place(fs) end
+    place(f.notice)
+    local height = math.max(CHECK_H, math.ceil(-y + CHECK_FOOTER))
+    if math.abs((tonumber(f:GetHeight()) or 0) - height) > 0.5 then f:SetHeight(height) end
+    if type(metrics.FitToScreen) == "function" then metrics.FitToScreen(f) end
+end
+
+local function RefreshChecklist()
+    if not (checklist and checklist:IsShown()) then return end
+    local text, panel = Nexus.UserText, Nexus.Panel
+    local facts = {}
+    if panel and type(panel.SetupFacts) == "function" then
+        local ok, read = pcall(panel.SetupFacts)
+        facts = ok and type(read) == "table" and read or {}
+    end
+    local steps = text and text.SetupChecklist and text.SetupChecklist(facts) or { rows = {}, complete = false }
+    local marks = text and text.CHECK_MARKS or {}
+    local done = 0
+    for i, line in ipairs(checklist.rows) do
+        local row = steps.rows[i]
+        if row and row.status == "done" then done = done + 1 end
+        line:SetText(row and ((marks[row.status] or "") .. " " .. row.label .. ": " .. row.text) or "")
+    end
+    checklist.steps = steps
+    checklist.summary:SetText(steps.complete
+        and "Setup steps done now: " .. done .. " of " .. #steps.rows .. "."
+        or "Setup steps done now: " .. done .. " of " .. #steps.rows .. ". Nothing here completes a step for you.")
+    local status = text and text.StatusLines and text.StatusLines(facts) or {}
+    for i, line in ipairs(checklist.status) do line:SetText(status[i] or "") end
+    LayoutChecklist(checklist)
+end
+M.RefreshChecklist = RefreshChecklist
+
+local function EnsureChecklist()
+    if checklist then return checklist end
+    local f = CreateFrame("Frame", "NexusSetupChecklist", UIParent)
+    checklist = f
+    f:SetSize(CHECK_W, CHECK_H)
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+    f:SetFrameStrata("DIALOG")
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:SetClampedToScreen(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    f:Hide()
+    pcall(function()
+        f:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 32,
+            insets = { left = 11, right = 12, top = 12, bottom = 11 },
+        })
+    end)
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    f.title:SetPoint("TOP", 0, -16)
+    f.title:SetText("Setup checklist and status")
+    f.subtitle = ChecklistText(f, -38, 28)
+    f.subtitle:SetText("Read-only: what Nexus can read now. A step is done only when it is true now.")
+    f.rows = {}
+    for i, y in ipairs(CHECK_ROW_Y) do f.rows[i] = ChecklistText(f, y, 40) end
+    f.summary = ChecklistText(f, -202, 16)
+    f.statusTitle = ChecklistText(f, -224, 16, "GameFontNormalSmall")
+    f.statusTitle:SetText("Status")
+    f.status = {}
+    for i, y in ipairs(CHECK_STATUS_Y) do f.status[i] = ChecklistText(f, y, 32) end
+    -- Why the last button did not open its window, in this window (not only
+    -- in chat), so no reason depends on a tooltip or a disabled control.
+    f.notice = ChecklistText(f, -344, 16)
+    -- Complete text on hover for any block kept at its maximum height.
+    local metrics = Nexus.LayoutMetrics
+    if metrics and type(metrics.FullTextTooltip) == "function" then
+        f.textHits = {}
+        for _, fs in ipairs({f.rows[1], f.rows[2], f.rows[3], f.summary, f.status[1], f.status[2], f.status[3], f.notice}) do
+            f.textHits[#f.textHits + 1] = metrics.FullTextTooltip(fs, f)
+        end
+    end
+    local function button(x, w, label, fn)
+        local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        b:SetSize(w, 24)
+        b:SetPoint("BOTTOMLEFT", x, 20)
+        b:SetText(label)
+        b:SetScript("OnClick", fn)
+        return b
+    end
+    -- Help's own routes: each says why when it cannot open, and opens nothing.
+    -- The reason is also shown here.
+    local function route(open, missing)
+        local help = Nexus.Help
+        local fn = help and help[open]
+        if type(fn) ~= "function" then
+            f.notice:SetText(missing);LayoutChecklist(f);return
+        end
+        local opened, why = fn()
+        if opened then f.notice:SetText("");f:Hide();return end
+        f.notice:SetText(type(why) == "string" and why or missing)
+        LayoutChecklist(f)
+    end
+    f.assign = button(24, 130, "Assign Wishlist...", function()
+        route("OpenAssignment", "Assign Wishlist is not available. Nothing was opened or assigned.")
+    end)
+    f.editor = button(160, 120, "Wishlist Editor", function()
+        route("OpenEditor", "The Wishlist Editor is not available. Nothing was opened.")
+    end)
+    -- Help opens above this window (Help's own layer); this window stays.
+    f.help = button(286, 70, "Help", function()
+        if Nexus.Help then Nexus.Help.Show("start") end
+    end)
+    f.close = button(362, 74, "Close", function() f:Hide() end)
+    local elapsed = 0
+    f:SetScript("OnShow", function() elapsed = 0; f.notice:SetText(""); RefreshChecklist() end)
+    f:SetScript("OnUpdate", function(_, dt)
+        elapsed = elapsed + (tonumber(dt) or 0)
+        if elapsed < 0.5 then return end
+        elapsed = 0
+        RefreshChecklist()
+    end)
+    local theme = Nexus.Theme
+    if theme then
+        if theme.StyleWindow then theme.StyleWindow(f, 0.97) end
+        if theme.StyleTree then theme.StyleTree(f) end
+        if theme.StyleLabel then theme.StyleLabel(f.title, "accent") end
+    end
+    UISpecialFrames = UISpecialFrames or {}
+    UISpecialFrames[#UISpecialFrames + 1] = "NexusSetupChecklist"
+    return f
+end
+
+function M.ShowChecklist()
+    local f = EnsureChecklist()
+    f:Show()
+    RefreshChecklist()
+    return f
+end
+
+function M.HideChecklist()
+    if checklist then checklist:Hide() end
 end
 
 -- Returns true when this window needs no further attention in this session.

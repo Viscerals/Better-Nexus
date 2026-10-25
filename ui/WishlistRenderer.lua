@@ -1356,6 +1356,15 @@ local function EnsureFrame()
     wishNav:SetPoint("LEFT", boardNav, "RIGHT", 4, 0)
     wishNav:SetText("|cffffd200Wishlists|r")
     wishNav:Disable()
+    -- M7: Help for this window (its Wishlists page). The editor stays open
+    -- below Help (HIGH under Help's DIALOG); nothing is saved or discarded.
+    frame._helpNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._helpNav:SetSize(56, 22)
+    frame._helpNav:SetPoint("LEFT", wishNav, "RIGHT", 4, 0)
+    frame._helpNav:SetText("Help")
+    frame._helpNav:SetScript("OnClick", function()
+        if Nexus.Help then Nexus.Help.Show("wishlists") end
+    end)
 
     loadoutSwitchBtn = CreateFrame("Button", nil, frame)
     loadoutSwitchBtn:SetSize(230, 22)

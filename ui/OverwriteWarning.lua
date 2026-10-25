@@ -6,12 +6,17 @@ local frame, active, onboardingOutcome
 local TEXT_HEAD = "Auto can overwrite your active game Saved Build. It may replace Echoes you value, including Echoes obtained with Orbs. Nexus cannot undo that save or recover spent Orbs.\n\nAfter a finished run at level 80, changing the assignment or saving edits to its assigned Wishlist can cause replacement without a new run.\n\n"
 local TEXT_TAIL = "Choose No to keep Auto OFF. Opening this warning does not enable Auto."
 local TEXT = TEXT_HEAD .. TEXT_TAIL
+-- The first-launch warning's answers are Continue / Close (BindAnswers), so its
+-- closing choice names Close. The Auto warning and any other kind keep TEXT_TAIL.
+local ONBOARDING_TEXT = TEXT_HEAD .. "Choose Close to keep Auto OFF. Opening this warning does not enable Auto."
 
 -- The Auto warning (kind "auto") also lists what Auto may do, from the
 -- current permissions (Readout.AutomationScopeLines, read only), and what it
 -- does to tomes (Readout.TOME_PARAGRAPH), before the closing choice. The
--- first-launch warning keeps TEXT. Reading changes nothing.
+-- first-launch warning keeps TEXT_HEAD and ends with its own Close choice
+-- (ONBOARDING_TEXT), with or without Readout. Reading changes nothing.
 local function BodyText(kind)
+    if kind == "onboarding" then return ONBOARDING_TEXT end
     local readout = Nexus.Readout
     if kind ~= "auto" or not (readout and type(readout.AutomationScopeLines) == "function") then return TEXT end
     local store, internals = Nexus.Store, Nexus.MainInternals
@@ -97,8 +102,22 @@ local function Remaining()
     return math.max(0, math.ceil(5 - (now - active.startedAt)))
 end
 
+-- An explicit No, Close (X) or Escape of the first-launch warning continues
+-- to the existing informational setup (QuickStart.ShowSetup), opened after
+-- this request is revoked and hidden so that it finds no open warning. That
+-- route records no acknowledgement, grants no consent and never turns Auto
+-- ON. A missing or failing route opens nothing; there is no consent fallback.
+local function ShowInformation()
+    local quick = Nexus.QuickStart
+    if type(quick) ~= "table" or type(quick.ShowSetup) ~= "function" then return false end
+    return (pcall(quick.ShowSetup))
+end
+
 local UpdateCountdown
-local function Finish(yes, closing)
+-- explicit: true only from the No and Close (X) buttons and the Escape key
+-- handler. A raw OnHide (the frame hidden by another route) and CancelAuto
+-- pass none, so they decline only.
+local function Finish(yes, closing, explicit)
     if not active then return false end
     if not closing and Remaining() > 0 then
         UpdateCountdown()
@@ -117,6 +136,13 @@ local function Finish(yes, closing)
         -- first-time navigation after reading; this grants no Auto permission.
         if request.kind == "onboarding" and Nexus.QuickStart then Nexus.QuickStart.ShowIfFirstTime() end
         if request.accept then return request.accept() end
+    end
+    -- A declined first-launch warning continues to information only, and only
+    -- for the saved root and character it was opened for: a stale answer
+    -- opens nothing for another context. Auto answers never navigate.
+    if not yes and explicit == true and request.kind == "onboarding"
+        and request.database == NexusDB and request.ownerKey == CurrentOwner() then
+        ShowInformation()
     end
     return false
 end
@@ -181,18 +207,95 @@ local function EnsureFrame()
     frame.yes:SetPoint("BOTTOMRIGHT",-148,20); frame.no:SetPoint("BOTTOMRIGHT",-24,20)
     frame.yes:SetText("Yes"); frame.no:SetText("No")
     frame.yes:SetScript("OnClick",function() return Finish(true,false) end)
-    frame.no:SetScript("OnClick",function() return Finish(false,false) end)
+    frame.no:SetScript("OnClick",function() return Finish(false,false,true) end)
     frame.close = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     frame.close:SetSize(24,24); frame.close:SetPoint("TOPRIGHT",-14,-14); frame.close:SetText("X")
-    frame.close:SetScript("OnClick",function() return Finish(false,true) end)
+    frame.close:SetScript("OnClick",function() return Finish(false,true,true) end)
+    -- Hidden by another route: decline only, with no navigation. A raw
+    -- client UISpecialFrames close (this frame's name is listed below) is
+    -- MODELLED in offline coverage as a plain Hide of the frame, which
+    -- reaches only this OnHide; it is deliberately not an explicit answer
+    -- and opens nothing. The explicit Escape route is the OnKeyDown script
+    -- below. Offline, tests/prototype/ux_setup_replay.lua S7 (and S1) call
+    -- that registered key script directly with "ESCAPE" and press no native
+    -- key. The native client's dispatch (whether it delivers an Escape press
+    -- to this keyboard-enabled frame and how its UISpecialFrames close hides
+    -- it), the order of the two, and whether that same Escape also closes
+    -- the Welcome opened here are NOT_RUN and were not checked against a
+    -- client export: an unverified native boundary, not a proven runtime
+    -- defect.
     frame:SetScript("OnHide",function() if active then Finish(false,true) end end)
-    frame:SetScript("OnKeyDown",function(_,key) if key == "ESCAPE" then Finish(false,true) end end)
+    frame:SetScript("OnKeyDown",function(_,key) if key == "ESCAPE" then Finish(false,true,true) end end)
     UISpecialFrames[#UISpecialFrames+1] = "NexusOverwriteWarning"
     if Nexus.Theme and Nexus.Theme.StyleButton then
         Nexus.Theme.StyleButton(frame.yes); Nexus.Theme.StyleButton(frame.no)
         Nexus.Theme.StyleButton(frame.close)
     end
     return frame
+end
+
+-- Answer labels, bound again on every Show for that warning's kind. The
+-- first-launch warning names what its answers do: Continue is the existing
+-- Yes (reading, affirmation, optional checked opt-out, first-time Welcome;
+-- it grants no Auto) and Close is the existing No (disabled until the
+-- reading interval ends, then information only). The Auto warning keeps
+-- Yes / No with its explicit Auto acceptance and refusal. Labels and fit
+-- only: frame.yes and frame.no keep their callbacks. "Close (X)" elsewhere
+-- in this file is the X button.
+local ONBOARDING_YES = "Continue \226\128\148 Auto stays OFF" -- U+2014 em dash
+local ANSWER_W, ANSWER_GAP, ANSWER_EDGE, WINDOW_W = 110, 14, 24, 520
+
+-- Width for a button's current label: never below the original 110 px and
+-- never capped, so the only copy of a label is not cut. That no-cut claim is
+-- an offline-model result (tests/prototype/quickstart_layout_fit.lua, with
+-- the 24 px end-cap allowance of FitButtonWidth, not a measurement of the
+-- native button template); native pixel fit is NOT_RUN. LayoutMetrics
+-- (FitButtonWidth: the client's text width or its conservative model, plus a
+-- stated 24 px end-cap allowance) loads after this module and standalone tests
+-- omit it; without it the same rule runs here: the client's text width, or
+-- LayoutMetrics' conservative model (7 px per visible character, or 0.70 em
+-- of the 10 px font at the runtime font scale read from NexusFontNormal as
+-- LayoutMetrics does: 14 px at scale 2). An unavailable or invalid text
+-- width uses that model; an unavailable or invalid font size reads as scale 1.
+local function FitAnswer(button)
+    local metrics = Nexus.LayoutMetrics
+    if type(metrics) == "table" and type(metrics.FitButtonWidth) == "function" then
+        local ok, width = pcall(metrics.FitButtonWidth, button, ANSWER_W)
+        width = ok and tonumber(width) or nil
+        if width and width >= ANSWER_W and width < math.huge then return width end
+    end
+    local width
+    if type(button.GetTextWidth) == "function" then
+        local ok, value = pcall(button.GetTextWidth, button)
+        value = ok and tonumber(value) or nil
+        if value and value > 0 and value < math.huge then width = value end
+    end
+    if not width then
+        local text = tostring(button:GetText() or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+        local scale, font = 1, _G.NexusFontNormal
+        if type(font) == "table" and type(font.GetFont) == "function" then
+            local ok, _, size = pcall(font.GetFont, font)
+            size = ok and tonumber(size) or nil
+            if size and size > 0 then scale = math.min(2, math.max(0.75, size / 12)) end
+        end
+        width = #(text:gsub("[\128-\191]", "")) * math.max(7, 7 * scale)
+    end
+    width = math.max(ANSWER_W, math.ceil(width + 24))
+    button:SetWidth(width)
+    return width
+end
+
+-- No keeps its anchor (BOTTOMRIGHT -24/20); Yes sits 14 px left of it at its
+-- fitted width, so 110 px answers give the original row. The window stays
+-- 520 px and grows only if both answers would not otherwise fit inside it.
+local function BindAnswers(kind)
+    local onboarding = kind == "onboarding"
+    frame.yes:SetText(onboarding and ONBOARDING_YES or "Yes")
+    frame.no:SetText(onboarding and "Close" or "No")
+    local noWidth, yesWidth = FitAnswer(frame.no), FitAnswer(frame.yes)
+    frame:SetWidth(math.max(WINDOW_W, 2 * ANSWER_EDGE + noWidth + ANSWER_GAP + yesWidth))
+    frame.yes:ClearAllPoints()
+    frame.yes:SetPoint("BOTTOMRIGHT", -(ANSWER_EDGE + noWidth + ANSWER_GAP), 20)
 end
 
 local function Show(kind, owner, accept)
@@ -207,6 +310,7 @@ local function Show(kind, owner, accept)
     frame.suppress:SetChecked(false); frame.lastCountdown = nil
     frame.yes:Disable(); frame.no:Disable(); frame.suppress:Disable()
     frame.suppress:EnableMouse(false); frame.scroll:SetVerticalScroll(0)
+    BindAnswers(kind)
     frame:Show(); UpdateCountdown()
     return false
 end

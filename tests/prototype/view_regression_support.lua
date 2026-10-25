@@ -284,4 +284,11 @@ function V.TooltipLines(fn,...)
  return lines,result[1],result[2]
 end
 
+function V.Same(a,b,seen)
+ if type(a)~='table' or type(b)~='table'then return a==b end
+ seen=seen or {};if seen[a]then return seen[a]==b end;seen[a]=b
+ for k,v in pairs(a)do if not V.Same(v,b[k],seen)then return false end end
+ for k in pairs(b)do if a[k]==nil then return false end end
+ return true
+end
 return V

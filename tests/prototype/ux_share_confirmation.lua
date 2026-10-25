@@ -580,6 +580,12 @@ end)
 -- Disclosure reading (S13, S14), in lower case, one sentence at a time
 -- (split at . ; ! ? and line breaks): semantic facts and negative claims,
 -- not one copied sentence.
+-- Merge composition (M7 with current135): current135's actual wire
+-- semantics supersede continuation 51's requester-only and exact-build
+-- reading of the confirmation and tooltip. Kept from continuation 51 and M7:
+-- the Manual fixture and the listing of S7 (SETUP), the DPS-best hand-off of
+-- the confirmed Share (GUARD), the exact action label read before each
+-- confirmation (SETUP) and M7's identity statement in the confirmation.
 local function Sentences(text)
  local out={}
  for s in (V.Plain(text):lower()..'.'):gmatch('([^%.;!?\n]+)') do
@@ -674,11 +680,13 @@ end
 -- The Share confirmation of mirror `id`, opened by its own action while the
 -- Sync mode reads as `mode`, then cancelled: its text and the tooltip. The
 -- mode is replaced only for that synchronous click, before any time passes.
-local function ReadShare(tag,id,mode)
+-- `label` is the exact action label expected before the click.
+local function ReadShare(tag,id,mode,label)
  local panel=ShowBuild(id)
  local share=panel and panel.shareBtn
  C.setup(share~=nil and share:IsShown() and share:IsEnabled(),tag..': fixture: the mirror offers its Share action')
  if not (share and share:IsShown() and share:IsEnabled()) then return nil end
+ C.setup(label==nil or Label(share)==label,tag..': fixture: the action reads "'..tostring(label)..'"',Label(share))
  local policy=Nexus.SyncModePolicy
  local realMode=policy.Mode
  local before,sent,shown=Effects(id),#H.sent,shows
@@ -696,15 +704,24 @@ local function ReadShare(tag,id,mode)
 end
 
 C.scenario('S13 the Share confirmation and its tooltip say what may be sent, in Manual, Automatic and Off',function()
+ C.setup(Nexus.SyncModePolicy.Mode()=='manual','S13: fixture: the saved mode is still Manual',Nexus.SyncModePolicy.Mode())
+ local listing=(Row(m1) or {}).publishedBuildId
+ C.setup(listing~=nil,'S13: fixture: Saved Build 1 has its shared listing (S7)',printable(listing))
+ if listing~=nil then
+  C.guard(Count(dpsBests,listing)>=1,
+   'S13: the confirmed Share of Saved Build 1 handed its listing to the DPS-best hand-off (the linked record this copy describes)',
+   'listing='..printable(listing)..' calls='..Count(dpsBests,listing))
+ end
  local e1,e2=Effects(m1),Effects(m2)
  for _,id in ipairs({m2,m1}) do
   local published=(Row(id) or {}).publishedBuildId~=nil
   local case=published and 'update' or 'first Share'
   local clause=published and 'as an update' or 'as your shared listing'
+  local label=published and 'Update Shared Build...' or 'Share Build...'
   local manualTip
   for _,mode in ipairs({'manual','automatic','off'}) do
    local tag='S13 '..case..' '..mode
-   local text,tip=ReadShare(tag,id,mode)
+   local text,tip=ReadShare(tag,id,mode,label)
    if text then
     print('OBSERVED',tag,'confirmation='..text)
     Disclosure(tag,'confirmation',text)
@@ -715,6 +732,8 @@ C.scenario('S13 the Share confirmation and its tooltip say what may be sent, in 
      and Has(t,'cannot be recalled') and Has(t,'stop sharing removes only the listing on this client')
      and Has(t,'cannot confirm who received'),
      tag..': it keeps the build name, local save, possible summary, '..clause..', cannot-recall, local Stop Sharing and unconfirmed-receipt clauses',text)
+    C.guard(Has(t,'character name, realm and class'),
+     tag..': it keeps the M7 statement that the listing is listed with your character name, realm and class',text)
     if mode=='off' then
      C.guard(Has(t,'your saved sync mode is off') and Has(t,'not sent'),tag..': under Off it says the listing is saved here and not sent',text)
     else

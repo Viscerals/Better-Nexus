@@ -72,11 +72,20 @@ local function SafeText(v) return v ~= nil and tostring(v) or "" end
 -- (progress.activeSlot / activeSlotName), the run's Wishlist and the saved
 -- assignment state and note. Pure: it reads only the model it is given and
 -- calls no adapter, service or request (UserText.DestinationLines words it).
+-- M7: the facts (M.DestinationFacts) are kept apart from their wording so the
+-- setup checklist reads the same facts; the lines are unchanged.
 function M.DestinationLines(model)
     local text = Nexus.UserText
     if type(model) ~= "table" or not (text and type(text.DestinationLines) == "function") then
         return {}
     end
+    return text.DestinationLines(M.DestinationFacts(model))
+end
+
+-- The destination facts behind M.DestinationLines (the UserText d table), or
+-- nil without a model.
+function M.DestinationFacts(model)
+    if type(model) ~= "table" then return nil end
     local pr = type(model.progress) == "table" and model.progress or {}
     local assignment = type(model.assignment) == "table" and model.assignment or {}
     local slot = tonumber(pr.activeSlot) or 0
@@ -130,7 +139,74 @@ function M.DestinationLines(model)
     -- refused); a name beside it would be the first-run Wishlist, so none is
     -- presented as its assignment.
     if d.empty then d.wishlist, d.wishlistState = nil, nil end
-    return text.DestinationLines(d)
+    return d
+end
+
+-- The Orb fact of the setup status, from OrbRuntime.ReasonView: a passive
+-- projection that initializes, reads, observes, pumps and writes nothing.
+-- Returns orb, observed. orb: false (an observed owner with no approved run),
+-- a new table of validated plain scalars, or nil (unknown). observed: false
+-- when the owner was not initialized this session (an unresolved saved
+-- receipt is then not ruled out), true when it was, nil when unreadable. A
+-- field that is not a plain bounded value of its kind is left out, never
+-- converted or guessed.
+local function OrbFacts(runtime)
+    if type(runtime.ReasonView) ~= "function" then return nil end
+    local ok, view = pcall(runtime.ReasonView)
+    if not ok or type(view) ~= "table" then return nil end
+    if view.observed == false then return nil, false end
+    if view.observed ~= true then return nil end
+    if view.run == false then return false, true end
+    if view.run ~= true then return nil end
+    local orb = {}
+    local state = view.state
+    if type(state) == "string" and #state <= 32 and state:match("^[%u_]+$") then orb.state = state end
+    for _, key in ipairs({"running", "pending", "restored"}) do
+        if type(view[key]) == "boolean" then orb[key] = view[key] end
+    end
+    local reason, operation = view.reason, view.operation
+    if type(reason) == "string" and reason ~= "" and #reason <= 4096 then orb.reason = reason end
+    if type(operation) == "string" and operation ~= "" and #operation <= 512 then orb.operation = operation end
+    return orb, true
+end
+
+-- M7 (UX setup checklist and status): the current facts the checklist words
+-- (UserText.SetupChecklist / StatusLines). Read-only: start-up status, the
+-- last committed HUD model (its destination, Wishlist, Auto selection and
+-- hold), the saved Sync mode and the passive Orb reason view (OrbFacts). Each
+-- fact that cannot be read stays nil (unknown), apart from false or an empty
+-- value. It never reads whether the Welcome was seen or dismissed, and it
+-- gates, requests, sends and writes nothing; its Orb fact starts no Orb work.
+function M.SetupFacts()
+    local f = {}
+    local okReady, ready = false, nil
+    if type(Nexus.StartupStatus) == "function" then okReady, ready = pcall(Nexus.StartupStatus) end
+    if okReady and type(ready) == "table" then
+        f.startup = ready.coreReady == true and "ready" or "loading"
+    end
+    local model = type(M._lastModel) == "table" and M._lastModel or nil
+    if f.startup == "ready" and model then
+        f.destination = M.DestinationFacts(model)
+        f.destinationLines = M.DestinationLines(model)
+        if type(model.auto) == "boolean" then f.auto = model.auto end
+        f.paused = type(model.paused) == "string" and model.paused ~= "" and model.paused or nil
+        local okNote, note = pcall(M.AutoNoteFor, model)
+        f.autoNote = okNote and type(note) == "string" and note ~= "" and note or nil
+    end
+    local policy = Nexus.SyncModePolicy
+    if policy and type(policy.Mode) == "function" then
+        local okMode, mode = pcall(policy.Mode)
+        if okMode and type(mode) == "string" then f.syncMode = mode end
+        local okChoice, choice = false, nil
+        if type(policy.Choice) == "function" then okChoice, choice = pcall(policy.Choice) end
+        if okChoice and type(choice) == "table" then f.syncExplicit = choice.explicit ~= nil end
+    end
+    local runtime = Nexus.OrbRuntime
+    if f.startup == "ready" and runtime then
+        local okOrb, orb, observed = pcall(OrbFacts, runtime)
+        if okOrb then f.orb, f.orbObserved = orb, observed end
+    end
+    return f
 end
 
 -- Read-only. Opening it marks the shown target as seen, so its chat notice is
@@ -1358,6 +1434,12 @@ local function EnsureFrame()
                           and "Answer the open Auto warning first (Yes or No); Setup / Welcome opens after it."
                           or "Setup / Welcome is not available right now."))
                   end
+              end) },
+            -- Read-only: what Nexus can read now about setup and status
+            -- (QuickStart.ShowChecklist); it completes nothing for you.
+            { text = "Setup checklist and status", notCheckable = true,
+              func = MenuAction(function()
+                  if Nexus.QuickStart and Nexus.QuickStart.ShowChecklist then Nexus.QuickStart.ShowChecklist() end
               end) },
             { text = "Orbs / Lost Memories", notCheckable = true,
               func = MenuAction(function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end) },

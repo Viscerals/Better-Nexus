@@ -3,7 +3,14 @@
 Nexus helps you work toward an Echo build: plan a Wishlist, follow roll
 recommendations or let Auto act for you, refine with Orbs, share builds and
 compare recorded DPS. This is an experimental build, not a stable release.
-The same guide is in the game: `/nexus help`.
+The in-game Help (`/nexus help`) covers the same topics, but the two are not
+identical; where they differ, the game's own windows are current. In the game,
+**Setup checklist and status** (in the **...** menu, or **Setup checklist** in
+Help) shows which setup steps are true now; it only reads and opens windows.
+The Build Library, Leaderboard, Wishlist Editor, Orb window and the Journal's
+Build Progress page have a **Help** button that opens a Help page (the Build
+Library and Leaderboard close themselves first); it assigns, saves and sends
+nothing.
 
 ## Install and roll back
 
@@ -293,8 +300,26 @@ When it is blocked:
    outside verification or finished Sync. While a change applies, the list says
    **Updating results...**
 3. **Copy into Editor** creates a draft; it does not activate or spend.
-   **Share Build** sends a listing; it is separate from saving a Wishlist or a
-   Saved Build.
+   **Share Build...** on your own Saved Build asks you to confirm first. It then
+   saves its title, description and Echo list as your shared listing on this
+   client and queues a short summary for other Nexus users only if your saved
+   Sync mode (**Sync mode...** beside **Sync Now**) and the summary's size
+   allow; with Sync Off nothing is queued. The summary has no Echo list or
+   description. The full listing, with its description and Echo list, can be
+   sent in answers to other Nexus users' requests. An answer can go on the
+   shared Sync channel, where any Nexus user who receives it may keep a valid
+   copy. In Automatic, if your character's best DPS on the Training Dummy
+   (a fight of at least 30 seconds) or the Lich King (at least 20 seconds) is
+   newly eligible and linked to this listing, Nexus may also send each such
+   DPS record with its Echoes, any locked Echoes and your player info (such as
+   character name, realm, class and level) without an additional request,
+   even if the summary is not queued. A personal best for these exact Echoes
+   that is lower than your character's best for that encounter stays on this
+   client. Receiving such a DPS record alone can give a player a Record
+   Loadout page with its Echoes that they can view and copy. The Manual and
+   Off Sync modes refuse these automatic DPS sends. Queued is not sent, and
+   receipt by other players is not confirmed. A shared build cannot be
+   recalled. Sharing is separate from saving a Wishlist or a Saved Build.
 
 - **Stop Sharing** removes the listing on this client; removal on other clients
   is not confirmed. Stop Sharing, administrator removal and deleting from My
@@ -347,8 +372,8 @@ full SavedVariables or account details publicly.
 ## Commands
 
 - `/nexus help` (also `/nexus guide`, `/nexus tutorial`, and **Help / Getting
-  Started** in the **...** menu and the Welcome window): this guide, also during
-  loading.
+  Started** in the **...** menu and the Welcome window): the in-game Help, also
+  during loading.
 - `/nexus report`: support report.
 - `/nexus editor`: Wishlist Editor.
 - `/nexus orbs`: Orb window; does not spend.

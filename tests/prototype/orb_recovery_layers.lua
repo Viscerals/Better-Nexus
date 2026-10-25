@@ -8,10 +8,33 @@
 -- continuation.
 -- Categories (view_regression_support): EXPECT marks behaviour introduced
 -- with its check, GUARD marks earlier behaviour that must keep holding, and
--- SETUP marks the fixture.
--- F1 successor against 752b91fe: L1b's former Paused+reason GUARD is
--- replaced by restored-record layer EXPECTs. Its strip pending/block EXPECT
+-- SETUP marks the fixture. M6 history: its EXPECTs were added in M6 (they
+-- fail on frozen M5 299d10b5 by design); its GUARDs already held there.
+-- Rebased onto accepted M5 9deaa526: its Orb runtime, panels, history, Help
+-- Orbs page and these test helpers are byte-identical to 299d10b5, so the same
+-- categories are predicted there (not executed by the author).
+-- Category qualification (review NB-6, control C2 on 299d10b5): 5 of the 38
+-- EXPECTs executed there held (the three Layered `_nexusFullText==nil` checks,
+-- the L3 Echo name/condition and the L6 'no universal reload fix'), so they
+-- are baseline-holding; GUARDs after the C2 RAISED points did not run there.
+-- Categories and counts were kept as reviewed then; the Layered
+-- `_nexusFullText==nil` check is now a GUARD.
+-- M7 oracle-only update (Root conditions restoredPaused and oracleOnly; not
+-- executed by the author): where an explicit Continue is offered the headline
+-- also names continuing past the result (HEADLINE_CONTINUE), and a restored
+-- record that stays PAUSED reads in the same layers under its own label. L1
+-- and L3 compare the headline to the Continue state shown. L1b keeps its GUARD
+-- (the reason whole, no guessed target) in a form that holds before and after,
+-- and adds one EXPECT for the layered paused form. L4 (this session) keeps its
+-- GUARD unchanged.
+-- F1 successor against 752b91fe: L1b adds restored-record layer EXPECTs (in
+-- F1 they replaced L1b's former Paused+reason GUARD; the M7 GUARD above, which
+-- superseded that one, is kept beside them). Its strip pending/block EXPECT
 -- also fails there; navigation, hover, geometry and action gates are GUARDs.
+-- M7 + F1 composition (not executed by the author): every layered read of the
+-- paused L1b record compares its headline exactly to that record's own label
+-- (PAUSED_HEADLINE_CONTINUE), which the window now shows, not to the RECOVERY
+-- headline F1's window showed.
 -- Oracles:
 --  * the real Orb window, Continue window, strip, mini panel and history page;
 --  * the real OrbRuntime (Status, ContinueView, RunLog, BlocksOrdinary);
@@ -24,6 +47,12 @@ local G=dofile('tests/prototype/layout_geometry_support.lua')
 local C=V.Checker('orb_recovery_layers')
 local R=dofile('tests/prototype/orb_recovery_support.lua');local S=R.S
 local HEADLINE='Previous result is unresolved: no new Orb run or ordinary roll until it settles.'
+local HEADLINE_CONTINUE='Previous result is unresolved: no new Orb run or ordinary roll until it settles or you continue past it.'
+local PAUSED_HEADLINE_CONTINUE='Paused - a result restored after a reload is unresolved: no new Orb run or ordinary roll until it settles or you continue past it.'
+-- The headline for the Continue state actually offered.
+local function Headline(cv)
+ return (cv.eligible==true or cv.stage=='checking' or cv.stage=='ready') and HEADLINE_CONTINUE or HEADLINE
+end
 
 local function Lines(text) local out={};for l in (text..'\n'):gmatch('(.-)\n') do out[#out+1]=l end;return out end
 local function Fresh()
@@ -58,11 +87,11 @@ local function Reload(H)
 end
 -- The layered status: headline, the action line, then exactly the reason. The
 -- window is refreshed and the runtime read at the same moment.
-local function Layered(f,M,label)
+local function Layered(f,M,label,headline)
  Nexus.OrbPanel.Refresh()
  local s=M.Status()
  local text=f.status:GetText();local lines=Lines(text)
- C.expect(lines[1]==HEADLINE,label..': what is blocked comes first',lines[1])
+ C.expect(lines[1]==(headline or Headline(M.ContinueView())),label..': what is blocked comes first',lines[1])
  C.expect(lines[2] and lines[2]:find('^What you can do: ')~=nil,label..': what the player can do comes second',lines[2])
  C.expect(text==lines[1]..'\n'..lines[2]..'\nDetails: '..s.reason,label..': the runtime reason follows as the details, unchanged',text)
  C.guard(f.status._nexusFullText==nil,label..': nothing in the status was shortened')
@@ -82,7 +111,7 @@ C.scenario('L1 eligible restored record: layered status; Continue stays explicit
  C.setup(s.state=='RECOVERY' and s.pending and cv.eligible==true,'L1: a restored record eligible for Continue',s.state)
  local saved=H.Clone(R.Saved());local sent=#H.sent
  SlashCmdList.NEXUS('orbs');local f=assert(NexusOrbPanel);H.Advance(.5)
- local lines=Layered(f,M,'L1')
+ local lines=Layered(f,M,'L1',HEADLINE_CONTINUE)
  C.expect(lines[2]=='What you can do: Continue... below checks the game, then asks you to confirm.','L1: the action names the eligible Continue',lines[2])
  C.guard(f.cont:IsShown() and f.cont:GetText()=='Continue...','L1: the Continue button is the one named')
  C.guard(M.BlocksOrdinary(),'L1: ordinary rolling is blocked, as the headline says')
@@ -114,6 +143,17 @@ C.scenario('L1b loadout-uncertain restored record: paused, no guessed target, no
  s=M.Status();local c=M.CompactStatus()
  C.expect(s.resumeTarget and s.resumeTarget.kind=='blocked' and c.resumeTarget and c.resumeTarget.kind=='blocked',
   'L1b: Resume names nothing for a restored record, in the full and the compact read',s.resumeTarget and s.resumeTarget.kind)
+ local text=f.status:GetText()
+ C.guard(text:sub(-#s.reason)==s.reason and not text:find('Resume would use',1,true) and not text:find('Resume uses',1,true),
+  'L1b: the window shows the runtime reason whole, with no guessed Resume target',text)
+ C.expect(text==PAUSED_HEADLINE_CONTINUE..'\nWhat you can do: Continue... below checks the game, then asks you to confirm.\nDetails: '..s.reason,
+  'L1b: the restored paused record reads in layers under its own label, Continue named',text)
+ -- This record stays PAUSED, so every layered read of it in this scenario
+ -- (here, after Open Orbs and after Details) compares the headline exactly to
+ -- its own label, PAUSED_HEADLINE_CONTINUE, not to the RECOVERY headline that
+ -- Headline(cv) gives. Only the expected headline is bound; every check stays.
+ local layered=Layered
+ local Layered=function(f,M,label,headline) return layered(f,M,label,headline or PAUSED_HEADLINE_CONTINUE) end
  local lines=Layered(f,M,'L1b')
  C.expect(lines[2]=='What you can do: Continue... below checks the game, then asks you to confirm.',
   'L1b: the paused restored record names its actual explicit Continue action',lines[2])
@@ -176,7 +216,7 @@ C.scenario('L2 unobservable record: layered status keeps every earlier fact',fun
  local saved=H.Clone(R.Saved())
  Nexus.OrbPanel.Show()
  local f=NexusOrbPanel
- local lines=Layered(f,M,'L2')
+ local lines=Layered(f,M,'L2',HEADLINE)
  C.expect(lines[2]=='What you can do: follow the details; Why blocked... below explains this record.','L2: the action names the explanation shown',lines[2])
  C.guard(f.cont:IsShown() and f.cont:GetText()=='Why blocked...','L2: the explanation button is the one named')
  local text=f.status:GetText()

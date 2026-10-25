@@ -12,7 +12,10 @@
 -- Auto ON board shows its three cards and no charges.
 -- Categories (view_regression_support): EXPECT is behaviour added in M3 (it
 -- fails on the accepted predecessor ea3268a8); GUARD already holds there and
--- must keep holding; SETUP is the fixture. Real TOC boot, runtime, Panel,
+-- must keep holding; SETUP is the fixture. The exact Close caption of the
+-- Welcome's dismissal (P10, P11, WelcomeDismissal) is also an EXPECT, of the
+-- newer Close label (formerly Later), and only identifies that control. Real
+-- TOC boot, runtime, Panel,
 -- Help, QuickStart and Journal controls; synthetic host services only.
 local V=dofile('tests/prototype/view_regression_support.lua')
 local C=V.Checker('ux_automation_scope')
@@ -101,6 +104,19 @@ local function ChildButton(parent,text)
   if f.kind=='Button' and parent and f:GetParent()==parent and V.Plain(f:GetText() or '')==text then return f end
  end
  return nil
+end
+-- The Welcome's dismissal (P10, P11), found by its label only to identify
+-- it: its exact Close caption is a collected EXPECT, never a gate or skip.
+-- Only after that EXPECT failed may the real legacy Later control of an
+-- earlier cut stand in, so the original closing checks still run on a real
+-- control there; the failed Close EXPECT stays in the failure set. A Welcome
+-- with neither control is a collected SETUP failure, not a silent skip.
+local function WelcomeDismissal(where)
+ local close=ChildButton(NexusQuickStart,'Close')
+ if C.expect(close~=nil,where..': its dismissal reads exactly Close') then return close end
+ local later=ChildButton(NexusQuickStart,'Later')
+ C.setup(later~=nil,where..': fixture: it has a dismissal control (Close, or legacy Later after the failed Close EXPECT)')
+ return later
 end
 local function Offer(cards) H.Board(cards);H.Notify();H.Advance(1.2) end
 -- The HUD's card rows as shown.
@@ -280,8 +296,8 @@ C.scenario('P10 M2 N5: Setup / Welcome keeps an open first-time Welcome first-ti
  local shown=Nexus.QuickStart.ShowSetup()
  C.expect(shown and NexusQuickStart:IsShown() and Title()=='Welcome to Nexus',
   'P10: Setup / Welcome leaves the open first-time Welcome as it is',Title())
- local later=ChildButton(NexusQuickStart,'Later')
- if later then later:Click() end
+ local dismiss=WelcomeDismissal('P10: the first-time Welcome')
+ if dismiss then dismiss:Click() end
  C.expect(rawget(NexusDB,'hasSeenQuickStart')==true,'P10: closing it records the first-time acknowledgement')
  C.guard(#H.sent==sent and #H.actions==actions and not Auto(),'P10: nothing is performed, sent or enabled')
 end)
@@ -293,8 +309,8 @@ C.scenario('P11 reading Help and the replay acts, requests, sends and writes not
  Nexus.Help.Show('rolling');Nexus.Help.Hide()
  local shown=Nexus.QuickStart.ShowSetup()
  C.setup(shown,'P11: fixture: the replay opens')
- local later=ChildButton(NexusQuickStart,'Later')
- if later then later:Click() end
+ local dismiss=WelcomeDismissal('P11: the replay')
+ if dismiss then dismiss:Click() end
  C.guard(Same(Counters(),before) and Settings()==settings and rawget(NexusDB,'hasSeenQuickStart')==seen and not Auto(),
   'P11: Help and the replay leave actions, requests, sends, settings, seen state and Auto unchanged',Show(Counters()))
 end)

@@ -159,6 +159,10 @@ local function init()
         run.state="RECOVERY";run.reason="An earlier Orb action is unresolved. Nothing will restart. Nexus is checking, read-only, whether its offer is still open."
         run.recovery={kind="CHECKING",observing=false}
         run.spent=run.pending.spent or 0;run.reserved=run.pending.spendConfirmed and 0 or 1;run.limit=run.pending.limit or config.maxOrbs or 0
+        -- A receipt saved by an older version may lack its approved maximum.
+        -- The configured fallback keeps the existing gates; it is not shown as
+        -- the maximum that was approved (display only).
+        run.limitUnrecorded=run.pending.limit==nil or nil
         -- Start the read-only recovery pump now. A manual choice made before the
         -- player opens the Orb window can then still be observed.
         run.recoveryFastUntil=now()+RECOVERY_FAST_WINDOW
@@ -2239,6 +2243,10 @@ function M.RunLog(which,from,count)
         spent=live and run.spent or log.spent,reserved=live and run.reserved or log.reserved,
         truncated=log.truncated,revision=log.revision,total=#log.entries,
         entries={}}
+    -- The live run's current state, apart from the state its log recorded at
+    -- its last event (Pause, for example, records no event). Display only:
+    -- the recorded fields are not changed.
+    if live then view.liveState,view.liveReason=run.state,run.reason end
     local first=math.max(1,math.floor(tonumber(from) or 1))
     local last=count and math.min(#log.entries,first+math.max(0,math.floor(count))-1)
         or #log.entries
@@ -2286,7 +2294,7 @@ end
 function M.ConfirmLimit(token)
     init();local a=run.limitApproval
     if not a or token~=a.token or now()-a.at>60 or run.running or not run.token or (run.state~="PAUSED" and run.state~="LIMIT") then return nil,"Review the increased limit again." end
-    run.limit=a.value
+    run.limit=a.value;run.limitUnrecorded=nil
     local log=logOwned()
     if log then log.limit=a.value;log.increased=true;logTouch(log) end;run.limitApproval=nil
     if run.pending then local ok,e=savePending();if not ok then return nil,e end end
@@ -2323,6 +2331,30 @@ function M.RunnerView()
     return {initialized=config~=nil,state=run and run.state,
         running=run and run.running,pending=run and run.pending~=nil,
         lifecycleObserved=frame~=nil,epoch=frame and life.epoch or nil,phase=frame and life.phase or nil}
+end
+-- Passive reason view for the shared setup checklist and status (UX-09/LP-09).
+-- Unlike CompactStatus it never calls init(): it reads no saved, game,
+-- assignment or context state, starts no capture, transport, observer or
+-- pump, writes nothing and authorizes nothing. Each call returns a new table
+-- of plain scalars copied from this owner's run as it is held in memory.
+--   observed=false: this owner was not initialized in this session. Its run,
+--     and whether a saved receipt is unresolved, are unknown (not absent).
+--   observed=true, run=false: initialized, no run was approved and no
+--     receipt is held (the case CompactStatus answers nil for).
+--   observed=true, run=true: state, running, pending, restored; reason, the
+--     text this owner last recorded for its run (memory only: not a fresh
+--     game check or a present server cause); operation, the name the run
+--     recorded (absent for a receipt restored after a reload; never a Resume
+--     target). A field that is not a plain bounded value is left out.
+function M.ReasonView()
+    if not config or type(run)~="table" then return {observed=false} end
+    if run.limit==0 and not run.pending then return {observed=true,run=false} end
+    local p,state,reason,name=run.pending,run.state,run.reason,run.name
+    return {observed=true,run=true,
+        state=type(state)=="string" and #state<=32 and state:match("^[%u_]+$") or nil,
+        running=run.running==true,pending=p~=nil,restored=type(p)=="table" and p.restored==true,
+        reason=type(reason)=="string" and reason~="" and #reason<=4096 and reason or nil,
+        operation=type(name)=="string" and name~="" and #name<=512 and name or nil}
 end
 function M.RecoveryView()
     if not config then
@@ -2541,14 +2573,27 @@ local function resumeTargetView(a,offered)
     if run.state~="PAUSED" then return nil end
     local v={original=run.name,offered=offered==true}
     if run.pending then
+        -- A pending run whose Resume refuses before any assignment read
+        -- (restored, a selection already attempted, an unconfirmed ambiguous
+        -- spend) reads the same in the full and the compact view: a changed
+        -- target waits to settle only once the runtime marked it.
+        local p=run.pending
+        local early=p.restored or p.selectionAttempted or (p.ambiguous and not p.spendConfirmed)
         if offered then v.kind="original";v.name=run.name
-        elseif run.targetChanged or (run.binding and type(a)=="table" and not matches(run.binding,a)) then v.kind="settle"
+        elseif run.targetChanged or (not early and run.binding and type(a)=="table" and not matches(run.binding,a)) then v.kind="settle"
         else v.kind="blocked" end
         return v
     end
+    -- A paused run that no longer holds its approval (released at a loading
+    -- screen, or without its context) cannot resume whatever the assignment
+    -- says; its readiness is not the blocker.
+    if not run.token or not run.context then v.kind="blocked";v.reason="authorization";return v end
     if type(a)~="table" then v.kind="blocked";return v end
     if a.state~="ready" then v.kind="unavailable";v.assignmentState=a.state;return v end
     v.changed=run.targetChanged==true or not matches(run.binding,a)
+    -- The assignment changed during the run and is the run's own one again:
+    -- the review stays required, but it is not a different target.
+    v.returned=(run.targetChanged==true and run.binding~=nil and matches(run.binding,a)) or nil
     if not offered then v.kind="blocked";return v end
     v.kind=v.changed and "changed" or "same"
     v.name=a.name;v.slot=a.activeSlot
@@ -2607,6 +2652,8 @@ function M.Status(detail)
     r.startReason=why
     r.canResume=resumeOffered(a,resumeRead)
     r.resumeTarget=resumeTargetView(a,r.canResume)
+    -- false only when a restored receipt carried no approved maximum.
+    r.limitKnown=not run.limitUnrecorded
     -- Memory-only bookkeeping of this read; a failure in it changes nothing
     -- shown or allowed.
     pcall(observeReadiness,m and "ok" or stage,a,r.progress)
@@ -2618,7 +2665,7 @@ function M.CompactStatus()
     local offered,a=resumeOffered()
     return {state=run.state,running=run.running,pending=run.pending~=nil,spent=run.spent,reserved=run.reserved,
         limit=run.limit,remaining=remaining,reason=run.reason,
-        canResume=offered,resumeTarget=resumeTargetView(a,offered)}
+        canResume=offered,resumeTarget=resumeTargetView(a,offered),limitKnown=not run.limitUnrecorded}
 end
 -- The adapter's hook reaches the evidence sink and the immediate notification.
 if type(B.CaptureSink)=="function" then B.CaptureSink(onPickRaw,onOwnerChoice,function() return life.phase,life.epoch end) end
