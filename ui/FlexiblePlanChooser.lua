@@ -215,6 +215,9 @@ function Factory.New(options)
                 if saved and Drifted(saved, rawget(catalog.rows, id)) then changed = changed + 1 end
             end
             changedMembers = changed
+        else
+            -- No catalog to compare with: no drift is claimed until it is back.
+            changedMembers = 0
         end
         status:SetText(available and StatusText() or Factory.Reason("CATALOG_UNAVAILABLE"))
         if RenderPersistence then RenderPersistence() end
@@ -404,7 +407,8 @@ function Factory.New(options)
     -- unobserved session; an accepted Save/Clear/Load, an explicit Reset, or an
     -- explicit Save when nothing was observed (that Save then refuses) replaces
     -- it, and a Save or removal whose facade call fails or returns no result
-    -- drops it. A newer read (`latest`) reports staleness but never
+    -- keeps it and marks the session stale. A newer read (`latest`) reports
+    -- staleness but never
     -- authorizes a write. `cleanBytes` is the session's own clean baseline
     -- (initially the empty pool), distinct from the saved receipt.
     local persistence = options.persistence
@@ -545,7 +549,8 @@ function Factory.New(options)
     end
     -- Detached session from a decoded saved pool, or nil. Saved ID, quality,
     -- maxStack, group and counts are kept even when stale; a current catalog
-    -- name is bounded decoration only. The catalog is read, never changed.
+    -- name is bounded decoration only. The catalog is read, never changed; drift
+    -- is counted only against an available catalog.
     local function Prepare(saved, bytes)
         local codec = Nexus.FlexiblePlanStore
         if not (Plain(saved) and Plain(saved.ids) and Plain(saved.rows) and Plain(saved.chosen)
@@ -561,7 +566,7 @@ function Factory.New(options)
                 local name = rawget(live, "name")
                 if type(name) == "string" and #name <= 256 then rows[id].name = name end
             end
-            if Drifted(s, live) then changed = changed + 1 end
+            if current and Drifted(s, live) then changed = changed + 1 end
             nextIds[i] = id
             local count = saved.chosen[id]
             if count then nextChosen[id] = count; selection[#selection+1] = {spellId=id, stacks=count} end
@@ -594,8 +599,10 @@ function Factory.New(options)
     end
     local function Apply(result, bytes)
         if type(result) ~= "table" then
-            -- Nothing is known about restoration, so an earlier answer is dropped.
-            observed, restored = nil, nil
+            -- Nothing is known about the write or restoration: that answer is dropped
+            -- and the session is stale. The bound receipt stays (never a newer read),
+            -- so a later Save is still checked against it.
+            restored, staleFlag = nil, true
             return Persist("unverified", "SAVE_UNVERIFIED")
         end
         restored = result.restored
@@ -605,7 +612,8 @@ function Factory.New(options)
             return Persist("saved", result.unchanged and "UNCHANGED" or nil)
         elseif result.state == "unverified" then
             -- Unverified never rebinds: the receipt this session was bound to stays,
-            -- so a record read afterwards is stale and Save pool is refused until
+            -- so every later Save is checked against it: a restored earlier record
+            -- saves again; a differing record keeps Save pool refused until
             -- an explicit Load saved or Reset.
             latest = result.receipt or latest
             return Persist("unverified", result.reason or "SAVE_UNVERIFIED")

@@ -51,7 +51,7 @@ Canonical bytes are `"v1|"` followed by `id,quality,maxStack,group,count;` per r
 | `FUTURE` | Raw `version` is an exact integer above 1. Checked before any traversal. | Refused | Refused |
 | `UNSUPPORTED` | v1 with an unknown or missing field | Refused | Refused |
 | `MALFORMED` | Bad type, metatable, missing or non-1 version, alias, sparse, unequal or empty arrays, bad value, duplicate ID, a count above `maxStack`, or a total above 79 | Refused | Refused |
-| `OVERSIZED` | An array past 256 entries or index 256 | Refused | Refused |
+| `OVERSIZED` | An array past 256 entries or an index above 256 | Refused | Refused |
 
 A record past a Store copy bound is refused before decoding.
 
@@ -189,11 +189,11 @@ The chooser adds two visible controls, `NexusFlexiblePlanSave` ("Save pool") and
 
 ### Reads and dirty state
 
-- Each Show, each Load saved and each explicit Reset after the first Show reads the saved data once.
-- Save and removal read only inside the facade.
+- Each Show, each Load saved and each explicit Reset after the first Show reads the saved data once in the chooser. A Load saved over a dirty session reads once to ask and once more when its request is accepted.
+- Save and removal read only inside the facade, apart from the `NOT_OBSERVED` Save below.
 - Typing, search, scrolling, hover and redraws read and write nothing.
-- The first Show binds the session to its receipt. Later reads only report staleness; they never authorize a write.
-- A Save before any read refuses `NOT_OBSERVED` and then reads.
+- The first Show binds the session to its receipt. Other reads only report staleness and never authorize a write. Only an accepted Save, removal or Load, an explicit Reset, or the `NOT_OBSERVED` Save rebinds the session.
+- A Save before any read refuses `NOT_OBSERVED` and then reads once in the chooser.
 - The session is dirty when count input is pending, or when its canonical bytes differ from its clean baseline. The baseline is initially the empty pool, and the bytes are encoded once per revision.
 - Save is refused with `COUNT_PENDING` while input is pending.
 - Nothing loads automatically.
@@ -222,14 +222,18 @@ The chooser adds two visible controls, `NexusFlexiblePlanSave` ("Save pool") and
 
 ### Unverified and stale outcomes
 
-- An unverified outcome never rebinds the session and never shows Saved. Save stays refused as stale until Load saved or Reset.
-- The refusals `SAVED_CHANGED`, `OWNER_CHANGED` and `ROOT_CHANGED` also mark the session stale.
+- An unverified outcome never rebinds the session and never shows Saved. A Save or removal whose facade call raised or returned no result is handled the same way: the session keeps its bound receipt, drops the restoration answer and is marked stale.
+- Each later Save passes the bound receipt, never a newer read, to the facade. The facade writes only while the saved data still has that receipt's owner key, root, class and bytes.
+  - When the earlier record was restored, or nothing was written, the saved data still matches, so a retry is checked and saved normally.
+  - When the saved data differs, because this Save's own record stayed or a newer record arrived, Save is refused `SAVED_CHANGED` and the saved data is kept. Another owner key or root is refused `OWNER_CHANGED` or `ROOT_CHANGED`.
+  - Load saved or Reset binds the session to the current saved data.
+- The refusals `SAVED_CHANGED`, `OWNER_CHANGED` and `ROOT_CHANGED` also mark the session stale. A Save or removal that reports saved, a Load or a Reset clears the mark.
 - A stale session never shows a finished Saved or Loaded status.
 
 ### Catalog changes
 
 - Load keeps the saved ID, quality, maxStack, group and counts even when the catalog changed.
-- It counts the changed members: missing, a changed quality, maxStack or group, or role fields present.
+- It counts the changed members against an available catalog: missing, a changed quality, maxStack or group, or role fields present. While the catalog is unavailable nothing is counted and no drift note is shown; the pool status says the catalog is unavailable. Each redraw with the catalog counts again.
 - **Open as new Wishlist draft** still passes through `WishlistController.PrepareNewExactDraft`. That call refuses `CATALOG_CHANGED` and keeps the pool, the counts and the saved record.
 - Members never refresh silently. An explicit Remove and then Add captures the current facts, with 0 chosen.
 
@@ -288,10 +292,14 @@ The chooser fixture covers:
 - read-only format 6: a valid Load, with Save blocked;
 - future, unsupported and sparse records kept;
 - a loading owner not yet bound;
-- refusals for a foreign root and a foreign owner with the same bytes;
+- refusals for a foreign root, which the data owner reports as unavailable, and for a foreign owner with the same bytes;
 - the catalog-changed Open refusal, and the exact Remove and Add;
 - zero reads and writes for typing, search, scrolling and hover;
-- one read each for Show, Load and Reset.
+- one read each for Show, a clean Load and Reset;
+- a Save callback that raises once: the bound receipt is kept, so two later Saves refuse and keep a newer saved pool, and Reset and Load saved then rebind;
+- Load saved while the catalog callback returns nothing: the exact pool loads with no drift claimed, and the drift is counted again when the catalog returns.
+
+The Store fixture also binds a real coordinator, through `Store.Init`, to a literal clone of the saved root in the same module generation. The same facade then reads both roots durably, with the same owner key, class and bytes but different root tokens; a Save with the earlier receipt refuses `ROOT_CHANGED` and writes nothing. A forwarding fault on the nested read inside the write alone refuses `SAVED_CHANGED`.
 
 Check counts, pass results, the full suite, the package check and the independent Spec and Standards reviews belong to the PR evidence for the exact source pin; this contract records none of them.
 

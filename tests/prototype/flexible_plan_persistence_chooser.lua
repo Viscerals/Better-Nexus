@@ -9,7 +9,9 @@
 -- retry and replacement request beside pool Save/Load. Its FAILURE AND
 -- REFUSAL block covers unverified fault injection and unknown, future,
 -- read-only, malformed, loading, owner and root refusal presentation in the
--- UI. The popup host is the identity-aware synthetic host of
+-- UI. Its RAISED SAVE AND UNAVAILABLE CATALOG block covers a Save callback
+-- that raises and Load saved without a catalog. The popup host is the
+-- identity-aware synthetic host of
 -- flexible_plan_editor_handoff. Native StaticPopup pooling,
 -- return handling, timing and game behaviour are NOT_RUN.
 local F=dofile('tests/prototype/format5_support.lua')
@@ -1016,6 +1018,109 @@ do
             'READ-ONLY the loaded rows are detached; Save pool and removing the saved pool are refused')
         check(rawequal(Raw6(),held) and F.Serialize(NexusDB)==db,'READ-ONLY the whole saved root is unchanged')
         Quiet(fx,'READ-ONLY refusals')
+    end
+
+    -- RAISED SAVE AND UNAVAILABLE CATALOG (#151 review A1 and A3). Fresh
+    -- serialized boots, the real editor entry and the rendered controls. A1:
+    -- FlexiblePlanStore.New is wrapped only while the editor builds its chooser,
+    -- so that real facade's Save callback can raise once; every other read and
+    -- save forwards to it, and a separate real facade writes the newer pool.
+    -- A3: a chooser built through options.catalog on the real catalog callback
+    -- the editor passes, returning no catalog only while it is down. Font models
+    -- are offline aids; native popups, fonts and timing are NOT_RUN.
+    do
+        local MAYBE='Not confirmed: this save could not be verified, so the saved pool may have changed. Load saved to check it. Your pool is kept.'
+        local STALE='The saved pool changed elsewhere. Save pool is refused until you Load saved or Reset.'
+        local REFUSED='Not saved: the saved pool changed after this session last read it. Your pool is kept. Unsaved changes.'
+        local NOTE='1 Echo in this pool no longer matches the catalog; its saved details and count are kept.'
+        local function Literal(ids,q,m,g,c) return F.Serialize({version=1,ids=ids,quality=q,maxStack=m,groupId=g,counts=c}) end
+        -- The persistence line's hover text under the 2.0 font model, where its box overflows.
+        local function Tip()
+            local m,keep,lines,label,font=G.RegionMethods(),{},{},LabelAt(-66),rawget(_G,'NexusFontNormal')
+            for _,k in ipairs(FONT) do keep[k]=rawget(m,k) end
+            for _,k in ipairs(TIP) do keep[k]=rawget(GameTooltip,k);GameTooltip[k]=function() end end
+            GameTooltip.AddLine=function(_,t) lines[#lines+1]=tostring(t) end
+            G.UseFont(G.MODELS.double)
+            for _,f in ipairs(H.frames) do
+                if f._nexusText==label then f:GetScript('OnEnter')(f);f:GetScript('OnLeave')(f) end
+            end
+            for _,k in ipairs(FONT) do m[k]=keep[k] end
+            for _,k in ipairs(TIP) do GameTooltip[k]=keep[k] end
+            _G.NexusFontNormal=font
+            return #lines==1 and lines[1] or nil
+        end
+        local boot=F.Boot(F.Database(),Seed)
+        local realNew,fault=Nexus.FlexiblePlanStore.New,{}
+        Nexus.FlexiblePlanStore.New=function(options)
+            local real=realNew(options)
+            return {Read=real.Read,Clear=real.Clear,Save=function(...)
+                if fault.on then fault.on=false;error('synthetic raised Save',0) end
+                return real.Save(...)
+            end}
+        end
+        local fx=Open(boot)
+        Nexus.FlexiblePlanStore.New=realNew
+        local made=Add(A) and Count(A,3) and Add(B) and Count(B,1)
+        NexusFlexiblePlanSave:Click()
+        check(made and Persisted()==T.SAVED and F.Serialize(Raw())==Record({3,1}) and Nexus.FlexiblePlanStore.New==realNew,
+            'RAISED CONTROL the editor chooser saves through the wrapped real facade; the constructor is restored')
+        Count(A,2)
+        local held,whole=Raw(),F.Serialize(NexusDB)
+        fault.on=true
+        NexusFlexiblePlanSave:Click()
+        check(fault.on==false and rawequal(Raw(),held) and F.Serialize(NexusDB)==whole and Rendered(A)==2 and Rendered(B)==1
+            and Persisted()==MAYBE..' Unsaved changes. '..STALE,
+            'RAISED a Save callback that raises writes nothing; the status says Not confirmed and stale, never Saved')
+        local probe=realNew({store=Nexus.Store})
+        local newer=probe.Save({ids={B},rows={[B]={spellId=B,quality=1,maxStack=3,groupId=9}},chosen={[B]=3}},probe.Read())
+        local newerRecord,newerText=Raw(),Literal({B},{1},{3},{9},{3})
+        check(newer.state=='saved' and F.Serialize(newerRecord)==newerText,'RAISED setup the real data owner then saves a newer exact pool 310002x3')
+        local texts={}
+        for i=1,2 do NexusFlexiblePlanSave:Click();texts[i]=Persisted() end
+        check(texts[1]==REFUSED and texts[2]==REFUSED and rawequal(Raw(),newerRecord) and F.Serialize(Raw())==newerText
+            and Rendered(A)==2 and Rendered(B)==1,
+            'RAISED two later Save pool presses keep the bound receipt: both say Not saved; the newer record and this pool stay')
+        NexusFlexiblePlanReset:Click()
+        local emptied=Persisted()==T.UNSAVED_EMPTY
+        NexusFlexiblePlanLoad:Click()
+        if Popup.shown[LOAD] then Click(Popup.shown[LOAD],1) end
+        check(emptied and Rendered(B)==3 and Persisted()==T.LOADED and rawequal(Raw(),newerRecord),
+            'RAISED CONTROL an explicit Reset rebinds the empty session; Load saved installs exactly the newer pool')
+        Add(A);Count(A,1);NexusFlexiblePlanSave:Click()
+        local saved=Literal({B,A},{1,2},{3,5},{9,7},{3,1})
+        check(Persisted()==T.SAVED and F.Serialize(Raw())==saved,'RAISED CONTROL after the rebind Save pool saves 310002x3 310001x1')
+        Quiet(fx,'RAISED Save, the newer pool and the rebind')
+
+        local function Seed2(h) h.AddEcho(A,'Delta',3,4,8);h.AddEcho(B,'Epsilon',1,3,9) end
+        fx=Open(F.Reload(Seed2))
+        local ctl
+        for i=1,64 do
+            local name,value=debug.getupvalue(Nexus.WishlistEditor.Show,i)
+            if name==nil or name=='wishlistController' then ctl=value;break end
+        end
+        local down,drafts=true,0
+        local cc=Nexus.FlexiblePlanChooser.New({openDraft=function() drafts=drafts+1 end,
+            catalog=function() if not down then return ctl.CatalogProjection() end end,
+            persistence=Nexus.FlexiblePlanStore.New({store=Nexus.Store})})
+        held=Raw()
+        check(type(ctl)=='table' and cc.LoadPool()=='loaded' and cc.PersistenceState().catalogChanged==0,
+            'UNAVAILABLE the Load saved callback, before any frame and with no catalog, loads and counts no drift')
+        cc.Show();NexusFlexiblePlanLoad:Click()
+        local state=cc.PersistenceState()
+        check(Rendered(B)==3 and Rendered(A)==1 and PoolRow(A).label:GetText():find('Q2 / max 5',1,true)~=nil
+            and Budget():find('^2 / 256 alternatives%s+Chosen: 4 / 79 ordinary copies$')~=nil
+            and PoolStatus()==Nexus.FlexiblePlanChooser.Reason('CATALOG_UNAVAILABLE') and Persisted()==T.LOADED
+            and state.phase=='loaded' and state.catalogChanged==0 and rawequal(Raw(),held) and F.Serialize(Raw())==saved,
+            'UNAVAILABLE visible Load saved restores the exact saved pool and claims no drift without a catalog')
+        check(Tip()==T.LOADED,'UNAVAILABLE hovering the persistence line shows the same text, with no drift claim')
+        down=false;NexusFlexiblePlanSearch:SetText('')
+        local recount=Persisted()==T.LOADED..' '..NOTE and cc.PersistenceState().catalogChanged==1 and PoolStatus()==''
+        down=true;NexusFlexiblePlanSearch:SetText('')
+        local waits=Persisted()==T.LOADED and cc.PersistenceState().catalogChanged==0
+        down=false;NexusFlexiblePlanSearch:SetText('')
+        check(recount and waits and Persisted()==T.LOADED..' '..NOTE and rawequal(Raw(),held) and drafts==0,
+            'UNAVAILABLE CONTROL with the real catalog back a redraw recounts exactly one changed Echo; while it is down the note waits')
+        Quiet(fx,'UNAVAILABLE Load saved and the catalog recount')
     end
 end
 print(string.format('flexible_plan_persistence_chooser: %d passed, %d failed',passed,failed))

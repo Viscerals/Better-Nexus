@@ -26,7 +26,7 @@
 --               cycle, sparse/unequal/empty arrays, bad value, duplicate ID,
 --               count above maxStack or a total above 79.
 --   UNSUPPORTED v1 with an unknown or a missing field.
---   OVERSIZED   an array past 256 entries or index 256.
+--   OVERSIZED   an array past 256 entries or an index above 256.
 --   With several defects the first one found classifies; only CURRENT loads.
 --   pool = {ids = dense array, rows = id -> {spellId, quality, maxStack,
 --   groupId?} (absent group is nil, no name), chosen = id -> count > 0}.

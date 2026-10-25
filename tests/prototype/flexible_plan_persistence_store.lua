@@ -416,6 +416,70 @@ do -- 8. read-only format 6: Load allowed, Save and Clear refused, everything ke
     check(F.Serialize(NexusDB) == text and rawequal(NexusDB.chars[F.OWNER][KEY], pool), 'read-only root unchanged')
 end
 
+do -- 9. Review A2 guard proofs in one module generation. Each fault and binding is restored.
+    -- Nested read 2 (the one inside the write) alone returns other valid bytes; then the same facade
+    -- reads a literal clone of the root, bound to a real coordinator through Store.Init and pumped to
+    -- READY. Bootstrap writes to the clone are setup, outside every refusal comparison.
+    F.Boot(F.Database({version=2, mutate=function(db) db.chars = {[F.OWNER]=F.Row()} end}))
+    local Q, O9, root = Nexus.FlexiblePlanStore.New({store=Nexus.Store}), Nexus.MainInternals.StoreAuthorityOwner, NexusDB
+    local r9 = root.chars[F.OWNER]
+    check(Q.Save(Session(), Q.Read()).bytes == BYTES, 'A2 setup the booted root holds the canonical pool')
+    local stored, whole, snapshot, receipt = rawget(r9, KEY), F.Serialize(root), Nexus.Store.State(), Q.Read()
+    local real, n, nested = O9.PlanPoolReadV1, 0, nil
+    O9.PlanPoolReadV1 = function()
+        n = n + 1
+        local r = real()
+        if n == 2 and type(r.copy) == 'table' then
+            r.copy.counts[1] = 1
+            nested = select(2, Nexus.FlexiblePlanStore.Decode(r.copy))
+        end
+        return r
+    end
+    local ok, res = pcall(Q.Save, Session2(), receipt)
+    O9.PlanPoolReadV1 = real
+    check(n == 2 and nested == 'v1|310003,3,5,900,1;310001,1,5,-1,0;310002,0,1,0,0;' and O9.PlanPoolReadV1 == real,
+        'A2 CONTROL only nested read 2, inside the write, saw other valid bytes; the real read is restored')
+    check(ok and res.state == 'refused' and res.reason == 'SAVED_CHANGED',
+        'A2 a nested read that differs from the pre-read refuses: '..tostring(ok and res.reason or res))
+    check(rawequal(rawget(r9, KEY), stored) and dump(stored) == RECORD and F.Serialize(root) == whole
+        and Nexus.Store.State() == snapshot, 'A2 the nested refusal keeps the record identity and writes nothing')
+    local bound
+    for i = 1, 64 do
+        local name, value = debug.getupvalue(Nexus.Store.Init, i)
+        if name == nil or name == 'boundCoordinator' then bound = value; break end
+    end
+    local old = Q.Read()
+    check(type(bound) == 'table' and bound:Database() == root and old.mode == 'durable' and old.bytes == BYTES,
+        'A2 setup the bound real coordinator (read, not changed) serves the booted root')
+    NexusDB = assert(loadstring('return '..F.Serialize(root)))()
+    local clone, C2 = NexusDB, Nexus.MainInternals.AuthorityBootstrap.New({deferAutomaticMaintenance=true})
+    Nexus.Store.Init(C2)
+    for _ = 1, 200000 do
+        if C2:IsReady() or C2:Result().state == 'failed' then break end
+        C2:PumpAuthorityBootstrap()
+    end
+    local why = C2:Result()
+    check(C2:IsReady() and C2:Database() == clone and NexusDB == clone, 'A2 CONTROL a real coordinator bootstrapped the clone to READY: '
+        ..tostring(why.reason)..'/'..tostring(why.detail)..'/'..tostring(why.owner)..'/'..tostring(why.error))
+    local fresh, cloneRow = Q.Read(), clone.chars[F.OWNER]
+    check(fresh.mode == 'durable' and fresh.ownerKey == old.ownerKey and fresh.class == old.class
+        and fresh.bytes == old.bytes and type(fresh.root) == 'number' and fresh.root ~= old.root,
+        'A2 CONTROL both reads are durable with equal owner, class and canonical bytes and different root tokens')
+    local cloneHeld, cloneText, rootText = rawget(cloneRow, KEY), F.Serialize(clone), F.Serialize(root)
+    local stale = Q.Save(Session2(), old)
+    check(stale.state == 'refused' and stale.reason == 'ROOT_CHANGED' and rawequal(rawget(cloneRow, KEY), cloneHeld)
+        and F.Serialize(clone) == cloneText and F.Serialize(root) == rootText,
+        'A2 the earlier root receipt refuses ROOT_CHANGED and neither root is written after the rebind: '..tostring(stale.reason))
+    local good = Q.Save(Session2(), fresh)
+    check(good.state == 'saved' and good.bytes == BYTES2 and Q.Read().bytes == BYTES2 and F.Serialize(root) == rootText,
+        'A2 CONTROL a fresh read of the clone root saves there; the booted root is untouched')
+    NexusDB = root
+    Nexus.Store.Init(bound)
+    local back = Q.Read()
+    check(back.mode == 'durable' and back.root == old.root and back.bytes == BYTES and F.Serialize(root) == rootText,
+        'A2 the booted root and its real coordinator binding are restored')
+end
+
 print('REMAINING Stage A retention is measured in flexible_plan_persistence_retention (no fixed'
     ..' pump number is claimed here); chooser UI, full CI/package and final reviews are later')
 print('PASS flexible_plan_persistence_store checks='..checks)
