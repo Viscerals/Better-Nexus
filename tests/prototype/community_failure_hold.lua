@@ -3481,4 +3481,178 @@ end)
 end
 end
 
+-- Settled Share cancellation; 919b034 is the baseline of its one EXPECT.
+-- The actual own saved-mirror detail Share Build... click opens the registered
+-- NEXUS_SHARE_SAVED_BUILD confirmation; public EditBuild then commits a title
+-- change, or actual CB.Hide closes the Library, before its real OnAccept runs.
+-- Only the view-host label setter faults; publisher and catalog-commit wraps
+-- count and pass through. The closed and used arms characterize a delayed
+-- registered callback in this synthetic host, not native UI reachability.
+do
+local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
+local CANCELLED_TAIL="' changed, or the Build Library was closed, after the confirmation opened. Nothing was shared."
+local FAULT={}
+-- Private upvalue reader for the existing controller lookup (setup only).
+local function Up(fn,name)
+ if type(fn)~='function' then return nil end
+ local i=1
+ while true do
+  local key,value=debug.getupvalue(fn,i)
+  if key==nil then return nil end
+  if key==name then return value end
+  i=i+1
+ end
+end
+-- Real TOC boot, settled own saved mirror and its actual open confirmation.
+local function OpenShare(arm)
+ local H=F.Boot(F.Database(),function(h) h.playerLevel=60;h.perks.serverActiveSlot=1
+  h.perks.serverBuildSlots={[1]={name='Cancellation probe',verified=true,echoes=L.OrdinaryRows(3)}} end)
+ local CB,CAT=Nexus.CommunityBuilds,Nexus.BuildCatalog
+ if not C.setup(Nexus.StartupStatus().state=='ready',arm..': real TOC startup ready') then return nil end
+ CB.Show()
+ if not C.setup(Settle(H,CB,2500)~=nil,arm..': real saved import and publication settle') then return nil end
+ local mirror
+ for _,b in pairs(CB.Builds()) do if b.importedSavedBuild and b.serverSlot==1 then mirror=b end end
+ if not C.setup(mirror~=nil and CAT.Get(mirror.id)~=nil,arm..': actual own saved mirror is in the catalog') then return nil end
+ CB.Select(mirror.id);local detail
+ for _,f in ipairs(H.frames) do if f.shareBtn and f.shareBtn.GetText then detail=f end end
+ local frame=NexusCommunityBuildsFrame;local label=frame and frame._classDropBtn
+ if not C.setup(detail and detail:IsShown() and detail.shareBtn:IsShown() and detail.shareBtn:GetText()=='Share Build...'
+  and label~=nil and frame:IsShown(),arm..': actual own saved-mirror detail Share Build... button is visible') then return nil end
+ local resolved,controller=pcall(function()
+  return Up(Up(CB.PublishImportedBuild,'ControllerInstance'),'EnsureCommunityController')()
+ end)
+ if not C.setup(resolved and type(controller)=='table' and type(controller.PublishImportedBuild)=='function'
+  and type(CAT.CommitMaintenance)=='function',arm..': real publisher and catalog commit owners resolve',controller) then return nil end
+ local priorPopup,actions,sent=H.popup,#H.actions,#H.sent
+ local clicked,clickError=pcall(function() detail.shareBtn:Click() end)
+ local popup=H.popup;local dialog=StaticPopupDialogs['NEXUS_SHARE_SAVED_BUILD']
+ local accept=type(dialog)=='table' and dialog.OnAccept or nil
+ if not C.setup(clicked and popup~=nil and popup~=priorPopup and popup.which=='NEXUS_SHARE_SAVED_BUILD'
+  and type(popup.data)=='table' and popup.data.id==mirror.id and popup.data.used==nil
+  and popup.data.identity~=nil and popup.arg1==popup.data.title and popup.frame~=nil
+  and popup.frame.data==popup.data and type(accept)=='function',
+  arm..': actual Share click opens its registered NEXUS_SHARE_SAVED_BUILD confirmation',clickError) then return nil end
+ C.guard(detail.shareBtn:GetText()=='Share Build...' and #H.actions==actions and #H.sent==sent,
+  arm..': open confirmation sends no game or network action before Accept')
+ return {H=H,CB=CB,CAT=CAT,mirror=mirror,popup=popup,data=popup.data,accept=accept,
+  controller=controller,label=label,actions=actions,sent=sent}
+end
+-- Fault window: every wrap is restored before any check runs.
+local function Window(ctx,message,body)
+ local w={faults=0,publishes=0,commits=0,lines={},log={}}
+ local label,controller,CAT=ctx.label,ctx.controller,ctx.CAT
+ local rawprint,setter,publish,commit=print,label.SetText,controller.PublishImportedBuild,CAT.CommitMaintenance
+ print=function(...)
+  local row={};for i=1,select('#',...) do row[i]=tostring(select(i,...)) end
+  local line=table.concat(row,' ');w.lines[#w.lines+1]=line;w.log[#w.log+1]=line
+  return rawprint(...)
+ end
+ label.SetText=function()
+  w.faults=w.faults+1;w.log[#w.log+1]=FAULT;error(message,0)
+ end
+ controller.PublishImportedBuild=function(...) w.publishes=w.publishes+1;return publish(...) end
+ CAT.CommitMaintenance=function(...) w.commits=w.commits+1;return commit(...) end
+ local ok,err=pcall(body,w)
+ print=rawprint;label.SetText=setter;controller.PublishImportedBuild=publish;CAT.CommitMaintenance=commit
+ return ok,err,w
+end
+local function Outcome(w,title,stop)
+ local text="Share cancelled: '"..tostring(title)..CANCELLED_TAIL
+ local r={cancels=0,shares=0}
+ for i=1,stop do
+  local line=w.lines[i]
+  if line:find(text,1,true) then r.cancels=r.cancels+1 end
+  if line:find('locally as your shared listing',1,true) or line:find('Not shared:',1,true)
+   or line:find("' to share",1,true) then r.shares=r.shares+1 end
+ end
+ for i,entry in ipairs(w.log) do
+  if entry==FAULT then r.fault=r.fault or i
+  elseif entry:find(text,1,true) then r.cancel=r.cancel or i end
+ end
+ return r
+end
+
+C.scenario('share-cancel-changed-view-host-contained',function()
+ local ctx=OpenShare('changed');if not ctx then return end
+ local H,CB,CAT,data=ctx.H,ctx.CB,ctx.CAT,ctx.data
+ local id,identity,title=data.id,data.identity,data.title
+ local CHANGED='Cancellation probe changed'
+ local prior=CAT.Get(id);local priorPublished=prior and prior.publishedBuildId
+ if not C.setup(prior~=nil and prior.title~=CHANGED and title~=CHANGED,
+  'changed: confirmation opened on the original saved-mirror title') then return end
+ local edited,editWhy,outcome=CB.EditBuild(id,CHANGED,ctx.mirror.description or '',nil)
+ if not C.setup(edited==true and editWhy=='ROOT_MUTATION_PENDING' and type(outcome)=='table',
+  'changed: public EditBuild accepts the title change as a retained catalog mutation',editWhy) then return end
+ local current
+ for _=1,2500 do
+  current=CAT.Get(id)
+  if current and current.title==CHANGED and outcome.localSaved==true and outcome.localPending==false then break end
+  current=nil;Step(H,1)
+ end
+ if not C.setup(current~=nil and current.publishedBuildId==priorPublished and H.popup==ctx.popup
+  and H.popup.data==data and data.used==nil and data.identity==identity and data.title==title,
+  'changed: the committed title change leaves the original confirmation open and unused') then return end
+ local MESSAGE='CANCEL_VIEW_HOST_FAULT_changed'
+ local failures=CB.VirtualStats().dataFailures or 0
+ local ok,err,w=Window(ctx,MESSAGE,function(w)
+  w.accepted,w.acceptError=pcall(H.AcceptPopup)
+  local stats=CB.VirtualStats()
+  w.after={faults=w.faults,lines=#w.lines,used=data.used,failures=stats.dataFailures,lastError=stats.lastDataError}
+  w.duplicateOk,w.duplicateError=pcall(ctx.accept,ctx.popup.frame,data)
+  w.duplicateFailures=CB.VirtualStats().dataFailures
+ end)
+ if not C.setup(ok and w.after~=nil,'changed: fault window ran and restored its host, publisher and commit owners',err) then return end
+ local r=Outcome(w,title,w.after.lines)
+ C.expect(w.accepted==true,
+  'settled changed Share cancellation returns from the real registered OnAccept without leaking the view-host error',w.acceptError)
+ C.guard(w.after.faults==1 and w.after.failures==failures+1 and w.after.lastError==MESSAGE,
+  'actual changed-case view-host fault is reached once and retained in the view ledger',w.after.faults)
+ C.guard(r.cancels==1 and r.shares==0 and r.cancel~=nil and r.fault~=nil and r.cancel<r.fault,
+  'changed confirmation prints its exact cancellation once, before the refresh, and no Share outcome',r.cancels)
+ C.guard(w.after.used==true and data.used==true and data.id==id and data.identity==identity and data.title==title,
+  'changed cancellation keeps the consent data used with its original identity')
+ C.guard(w.duplicateOk==true and w.faults==1 and #w.lines==w.after.lines and w.duplicateFailures==w.after.failures,
+  'duplicate registered OnAccept with the used data returns quietly and adds no fault or message',w.duplicateError)
+ local source=CAT.Get(id)
+ C.guard(w.publishes==0 and w.commits==0 and source~=nil and source.title==CHANGED
+  and source.publishedBuildId==priorPublished and #H.actions==ctx.actions and #H.sent==ctx.sent,
+  'changed cancellation reaches no publisher, catalog commit, game or network action',w.publishes)
+end)
+
+C.scenario('share-cancel-closed-and-used-controls',function()
+ local ctx=OpenShare('closed');if not ctx then return end
+ local H,CB,CAT,data=ctx.H,ctx.CB,ctx.CAT,ctx.data
+ local id,identity,title=data.id,data.identity,data.title
+ local prior=CAT.Get(id);local priorTitle=prior and prior.title;local priorPublished=prior and prior.publishedBuildId
+ local hidden,hideError=pcall(CB.Hide)
+ local escaped=Step(H,3)
+ if not C.setup(hidden and escaped==0 and not NexusCommunityBuildsFrame:IsShown()
+  and H.popup==ctx.popup and H.popup.data==data and H.popup.frame.data==data
+  and data.used==nil and prior~=nil,
+  'closed: actual CB.Hide closes the Library while its separate Share confirmation retains the original unused data before the delayed callback',hideError) then return end
+ local failures=CB.VirtualStats().dataFailures or 0
+ local ok,err,w=Window(ctx,'CANCEL_VIEW_HOST_FAULT_closed',function(w)
+  w.accepted,w.acceptError=pcall(ctx.accept,ctx.popup.frame,data)
+  w.after={faults=w.faults,lines=#w.lines,used=data.used,failures=CB.VirtualStats().dataFailures}
+  w.duplicateOk,w.duplicateError=pcall(ctx.accept,ctx.popup.frame,data)
+  w.duplicateFailures=CB.VirtualStats().dataFailures
+ end)
+ if not C.setup(ok and w.after~=nil,'closed: fault window ran and restored its host, publisher and commit owners',err) then return end
+ local r=Outcome(w,title,w.after.lines)
+ C.guard(w.accepted==true and w.after.faults==0 and w.after.failures==failures,
+  'delayed registered OnAccept after closure returns quietly without reaching the hidden view host',w.acceptError)
+ C.guard(r.cancels==1 and r.shares==0,
+  'closed confirmation prints its exact cancellation once and no Share outcome',r.cancels)
+ C.guard(w.after.used==true and data.used==true and data.id==id and data.identity==identity and data.title==title,
+  'closed cancellation keeps the consent data used with its original identity')
+ C.guard(w.duplicateOk==true and w.faults==0 and #w.lines==w.after.lines and w.duplicateFailures==failures,
+  'used duplicate of the delayed registered OnAccept returns quietly and adds no fault or message',w.duplicateError)
+ local source=CAT.Get(id)
+ C.guard(w.publishes==0 and w.commits==0 and source~=nil and source.title==priorTitle
+  and source.publishedBuildId==priorPublished and #H.actions==ctx.actions and #H.sent==ctx.sent,
+  'closed cancellation reaches no publisher, catalog commit, game or network action',w.publishes)
+end)
+end
+
 C.finish('(public failure hold and recovery; synthetic host only)')

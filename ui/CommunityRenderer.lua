@@ -2192,7 +2192,10 @@ local function EnsureDetailPanel(parent)
         if not parent:IsShown() or ShareIdentity(LoadBuild(id)) ~= data.identity then
             print("|cffffc040Nexus:|r Share cancelled: '" .. displayTitle
                 .. "' changed, or the Build Library was closed, after the confirmation opened. Nothing was shared.")
-            M.Refresh()
+            -- The cancellation is final before display work. As the synchronous
+            -- Finish, its explicit refresh keeps a display failure in the view
+            -- ledger instead of rethrowing it through the confirmation.
+            viewDiagnostic.pump.Refresh(false, false)
             return
         end
         local operation = {id=id,done=false}
