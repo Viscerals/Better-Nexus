@@ -90,8 +90,10 @@
 -- of the ninth key; it does not count distinct unkept identities. The record
 -- has a fixed size, is never printed to chat, and Diagnostics() returns a
 -- programmatic copy; no diagnostic UI is added here. That copy also holds
--- the base load facts (base.formatted counts the admitted templates), the
--- copied pack rows and the active-language facts.
+-- the base load facts (base.formatted counts the admitted templates, which
+-- base.accepted also counts), the copied-pack facts (packs.present,
+-- adopted, refused and a row of id, accepted and rejected per adopted
+-- pack) and the active-language facts (language.active, initialized).
 -- CHANGED CONTRACT (issue #123): with no pack, Text uses the active
 -- language's copied pack (none for English), so an ordinary consumer such as
 -- core/UserText.lua shows the active language. An explicit pack still
