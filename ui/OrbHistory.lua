@@ -375,9 +375,14 @@ function M.Header(view)
             .. ((tonumber(view.uncertain) or 0)>0 and ("; unknown spend exposure: "..view.uncertain) or "")
             .. ((tonumber(view.unconfirmedResults) or 0)>0 and ("; unconfirmed outcomes: "..view.unconfirmedResults) or ""),
         increased = view.increased == true,
+        -- reserved counts the Orbs this run requested whose spend is not
+        -- confirmed yet, the report's "pending (requested, not confirmed)".
+        -- It is not a count of operations and is not called one; that the
+        -- run is unsettled is a separate statement. Observed use, unknown
+        -- spend exposure and unconfirmed outcomes keep their own fields.
         pending = reserved > 0 and
-            (reserved .. " unresolved operation" .. (reserved == 1 and "" or "s")
-                .. ": the run is not settled.") or nil,
+            ("Pending (requested, not confirmed): " .. reserved .. " Orb" .. (reserved == 1 and "" or "s")
+                .. "; the run has an unresolved operation and is not settled.") or nil,
         truncated = view.truncated == true and
             "The history reached its bound; later operations are not listed."
             or nil,
@@ -425,7 +430,7 @@ function M.Report(view, resolve, technical)
     line(out, "Approved maximum: " .. tostring(view.limit)
         .. (header.increased and " (increased during the run)" or "")
         .. "; Orbs used: " .. tostring(view.spent or 0) .. " (observed Orb decrement)"
-        .. "; pending (requested, not confirmed): " .. tostring(view.reserved or 0) .. " (unresolved exposure)"
+        .. "; pending (requested, not confirmed): " .. tostring(view.reserved or 0)
         .. "; unknown spend exposure: " .. tostring(view.uncertain or 0)
         .. "; unconfirmed outcomes: " .. tostring(view.unconfirmedResults or 0))
     line(out, "Stopping state: " .. header.recordedStatus

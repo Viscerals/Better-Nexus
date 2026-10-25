@@ -35,6 +35,27 @@
 -- (README-PROTOTYPE.md) for the same disclosure (EXPECT) and for its existing
 -- confirmation, local-save, mode and size, Off, queued-not-sent, receipt and
 -- recall words (GUARD). Short word checks; the wording may vary.
+-- D2/D3 qualification (M5 donor 45036fbc, root-adjudicated oracle): the
+-- requester-only reading above (an "only ... players who ask" clause that
+-- names the listing) and the guide's former "sent only in answers to players
+-- who ask" and "DPS record you hold for this exact build" wording are
+-- superseded and kept as history. Being asked for is not being the only
+-- recipient: an answer may go on the shared Sync channel, where other
+-- listeners may keep a valid copy. Discloses now expects, of each accepted
+-- confirmation and of the guide's Share step: no requester-only clause; the
+-- summary without Echo list or description; answers that can carry the full
+-- listing; a shared-channel answer that can be kept; and, conditional on
+-- Automatic, a linked character-best Training Dummy or Lich King DPS record
+-- that may be sent with its Echoes, locked Echoes and player info without an
+-- additional request, also when the summary is not queued. A DPS clause may
+-- say "Echoes" rather than the legacy "Echo list"; none may name a record
+-- "you hold", a personal best, a delivery or a promise. L5 also expects the
+-- guide to say that this record is newly eligible, that a lower personal
+-- best stays on this client, that receiving the record alone can give a
+-- viewable, copyable Record Loadout page, and that Manual and Off refuse
+-- these automatic sends. These are text oracles only. The real Share,
+-- synthetic capture, hand-off, admission, Echo payload, WLD2, Off and
+-- not-reported checks of L1-L4 are unchanged.
 local V=dofile('tests/prototype/view_regression_support.lua')
 local T=dofile('tests/prototype/startup_support.lua')
 local printable=V.printable
@@ -140,24 +161,80 @@ local function Share(tag,id)
  return SaidSince(mark,'locally as your shared listing'),mark,note
 end
 local function Has(text,needle) return tostring(text or ''):find(needle,1,true)~=nil end
--- Review38 B01/N01: every "only ... who ask" clause about the Echo list names
--- the listing, and every sentence naming a DPS record says it carries its Echo
--- list. Returns whether both hold, and the counts.
-local function Discloses(text)
- local s=V.Plain(text or ''):gsub('%s+',' ')
- local scoped,unscoped,dps,dpsEcho=0,0,0,0
- for part in (s..' '):gmatch('(.-[%.;])%s') do
-  local l=part:lower()
-  if l:find('echo list',1,true) and l:find('only',1,true) and l:find('ask',1,true) then
-   if l:find('listing',1,true) then scoped=scoped+1 else unscoped=unscoped+1 end
-  end
-  if l:find('dps record',1,true) then
-   dps=dps+1
-   if l:find('echo list',1,true) then dpsEcho=dpsEcho+1 end
+-- Review38 B01/N01, kept as history: every "only ... who ask" clause about the
+-- Echo list was to name the listing, and every sentence naming a DPS record was
+-- to say it carries its Echo list. D2/D3 (header) supersedes the first part and
+-- keeps the second with "Echoes" or "Echo list". Read one clause at a time, in
+-- lower case (split at . ; ! ? before a space or the end), by semantic words.
+-- Returns whether every D2/D3 fact holds, the detail, the clauses and the
+-- Automatic DPS clause.
+local function Word(text,word) return tostring(text or ''):find('%f[%a]'..word..'%f[%A]')~=nil end
+local function Parts(text)
+ local s=(V.Plain(text or ''):gsub('%s+',' '))
+ local out,start={},1
+ for i=1,#s do
+  if s:sub(i,i):find('[%.;!?]') and (i==#s or s:sub(i+1,i+1)==' ') then
+   local part=s:sub(start,i):match('^%s*(.-)%s*$'):lower()
+   if part~='' then out[#out+1]=part end
+   start=i+1
   end
  end
- return scoped>=1 and unscoped==0 and dps>=1 and dpsEcho==dps,
-  'scoped='..scoped..' unscoped='..unscoped..' dpsSentences='..dps..' withEchoList='..dpsEcho
+ local rest=s:sub(start):match('^%s*(.-)%s*$'):lower()
+ if rest~='' then out[#out+1]=rest end
+ return out
+end
+local function Discloses(text)
+ local parts,missing=Parts(text),{}
+ local only,dps,dpsNoEcho,dpsLoose,auto=0,0,0,0,nil
+ for _,l in ipairs(parts) do
+  -- A requester-only claim, about the listing, its Echo list or anything else.
+  if Word(l,'only') and not Has(l,'not only')
+   and (Has(l,'ask') or Has(l,'request') or Has(l,'answer') or Has(l,'fetch')) then only=only+1 end
+  if Has(l,'dps record') then
+   dps=dps+1
+   if not Has(l,'echo') then dpsNoEcho=dpsNoEcho+1 end
+   if Has(l,'you hold') or Has(l,'personal') or Has(l,'deliver')
+    or Word(l,'will') or Word(l,'always') or Word(l,'every') then dpsLoose=dpsLoose+1 end
+  end
+  if auto==nil and Has(l,'in automatic') and Has(l,'dps') then auto=l end
+ end
+ local function Any(label,fn)
+  for _,l in ipairs(parts) do if fn(l) then return end end
+  missing[#missing+1]=label
+ end
+ Any('the summary has no Echo list or description',function(l)
+  return Has(l,'summary') and (l:find('no echo list,? or [%a ]-description')~=nil
+   or l:find('neither [%a ]-echo list,? nor [%a ]-description')~=nil
+   or l:find('neither [%a ]-description,? nor [%a ]-echo list')~=nil)
+ end)
+ Any('answers can carry the full listing',function(l)
+  return Has(l,'answer') and (Has(l,'can be sent') or Has(l,'may be sent'))
+   and (Has(l,'full listing') or Has(l,'with its description'))
+ end)
+ Any('an answer on the shared Sync channel can be kept',function(l)
+  return Has(l,'sync channel') and (Has(l,'kept') or Has(l,'keep'))
+ end)
+ local facts={
+  {'in Automatic, if, may',function(l) return Has(l,'in automatic') and Word(l,'if') and Word(l,'may') end},
+  {'linked',function(l) return Has(l,'linked') end},
+  {"the character's best",function(l) return Has(l,"character's best") or Has(l,'character-best') end},
+  {'Training Dummy and Lich King',function(l) return Has(l,'training dummy') and Has(l,'lich king') end},
+  {'Echoes and locked Echoes',function(l) return Has(l,'echoes') and Has(l,'locked echoes') end},
+  {'player info',function(l) return Has(l,'player info') end},
+  {'without an additional request',function(l) return Has(l,'without an additional request')
+   or Has(l,'without anyone asking') or Has(l,'unasked') end},
+  {'also when the summary is not queued',function(l) return Has(l,'summary')
+   and (Has(l,'not queued') or Has(l,'not admitted') or Has(l,'refused')) end},
+ }
+ for _,fact in ipairs(facts) do
+  if not (auto and fact[2](auto)) then missing[#missing+1]='Automatic DPS: '..fact[1] end
+ end
+ if only>0 then missing[#missing+1]='no requester-only clause ('..only..' found)' end
+ if dps==0 then missing[#missing+1]='a clause naming a DPS record' end
+ if dpsNoEcho>0 then missing[#missing+1]='Echoes in each DPS record clause ('..dpsNoEcho..' without)' end
+ if dpsLoose>0 then missing[#missing+1]='no held, personal, delivered or promised DPS record ('..dpsLoose..' found)' end
+ return #missing==0,'requesterOnly='..only..' dpsClauses='..dps..' withoutEcho='..dpsNoEcho..' loose='..dpsLoose
+  ..' missing: '..(#missing>0 and table.concat(missing,'; ') or 'none'),parts,auto
 end
 
 -- Shares once, captures a synthetic best on the same Echoes, optionally
@@ -190,7 +267,7 @@ local function Trace(tag,before,after)
   if note then
    print('OBSERVED',tag,'confirmation='..note)
    local disclosed,detail=Discloses(note)
-   C.expect(disclosed,tag..': the confirmation accepted under '..P.Mode()..' says the listing\'s Echo list goes only in answers to players who ask, and that a linked DPS record carries its Echo list',
+   C.expect(disclosed,tag..': the confirmation accepted under '..P.Mode()..' makes no requester-only claim, says what the summary, answers and shared Sync channel carry, and that Automatic may send a linked character-best DPS record with its Echoes, unasked',
     detail..' | '..note)
   end
   local linked,admitted={},false
@@ -303,9 +380,22 @@ C.scenario('L5 the guide\'s Share step tells the listing reply apart from the li
  if not (from and to) then return end
  local step=guide:sub(from,to+#END-1)
  print('OBSERVED','L5 guide Share step='..step)
- local disclosed,detail=Discloses(step)
- C.expect(disclosed,'L5: the guide says the listing\'s Echo list goes only in answers to players who ask, and that a linked DPS record carries its Echo list',
+ local disclosed,detail,parts,auto=Discloses(step)
+ C.expect(disclosed,'L5: the guide makes no requester-only claim, says what the summary, answers and shared Sync channel carry, and that Automatic may send a linked character-best DPS record with its Echoes, unasked',
   detail..' | '..step)
+ -- Guide-only D2/D3 facts (the confirmation states its own subset), read by
+ -- clause with semantic words; the wording may vary.
+ local function Find(fn) for _,l in ipairs(parts) do if fn(l) then return l end end;return nil end
+ C.expect(auto~=nil and (auto:find('%f[%a]eligib')~=nil or auto:find('%f[%a]qualif')~=nil),
+  'L5: the guide says the Automatic DPS record is a newly eligible one',printable(auto))
+ C.expect(Find(function(l) return Has(l,'lower') and Has(l,'best') and Has(l,'stay') and Has(l,'on this client') end)~=nil,
+  'L5: the guide says a lower personal best for the same Echoes stays on this client',step)
+ C.expect(Find(function(l) return Has(l,'dps record') and Has(l,'alone') and Has(l,'record loadout')
+  and Has(l,'view') and Has(l,'copy') and (Word(l,'can') or Word(l,'may')) end)~=nil,
+  'L5: the guide says receiving that DPS record alone can give a viewable, copyable Record Loadout page',step)
+ C.expect(Find(function(l) return Word(l,'manual') and Word(l,'off') and Has(l,'dps')
+  and (Has(l,'refuse') or Has(l,'not') or Has(l,'never')) and not Has(l,'in automatic') end)~=nil,
+  'L5: the guide says Manual and Off refuse these automatic DPS sends',step)
  C.guard(Has(step,'confirm') and Has(step,'on this client') and Has(step,'Sync mode') and Has(step,'size')
   and Has(step,'Off nothing is queued') and Has(step,'Queued is not sent') and Has(step,'receipt by other players is not confirmed')
   and Has(step,'cannot be recalled'),

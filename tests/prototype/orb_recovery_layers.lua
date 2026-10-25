@@ -153,8 +153,29 @@ C.scenario('L1b loadout-uncertain restored record: paused, no guessed target, no
   'L1b: Continue stays the explicit way on; no Resume; ordinary rolling stays blocked')
  local mini=Nexus.OrbPanel.ShowMini()
  C.guard(mini.state:GetText()=='Paused - a pending result must settle first' and not mini.resume:IsEnabled(),'L1b: the mini panel offers no Resume',mini.state:GetText())
- C.guard(mini.pending:GetText()=='Pending: the last Orb action is not settled' and s.spent>0 and s.reserved==0,
-  'L1b: a spent unsettled action is not an unconfirmed request',mini.pending:GetText())
+ -- Root-adjudicated current-contract fixture adaptation (L1b only; not a
+ -- product RED/GREEN claim; not executed by this resolution): the composed
+ -- mini layout keeps the generic unsettled cue visible on its state line
+ -- (above, with Resume disabled), and its pending line shows the separate
+ -- unknown spend, current exposure and unknown-outcome counts of this record
+ -- restored after a reload (CompactStatus historyKnown=false). The complete
+ -- pending explanation stays reachable through the line's actual hover. The
+ -- old pending-row literal is not recovered by a product change, and no
+ -- native fit is claimed from the synthetic model.
+ local cm=M.CompactStatus() or {}
+ local unknown,exposure=tonumber(cm.uncertain),tonumber(cm.reserved)
+ local counts=unknown and exposure and ('Unknown spend: '..string.format('%d',unknown)..'; Reserved: '
+  ..string.format('%d',exposure)..'; Outcomes: ?') or nil
+ local pendingFull=unknown and exposure and ('Pending: not settled; Unknown spend: '..string.format('%d',unknown)
+  ..'; current exposure: '..string.format('%d',exposure)
+  ..'; earlier outcome/check totals unavailable after reload; action pending') or nil
+ C.guard(counts~=nil and cm.pending==true and cm.historyKnown==false and mini.pending:GetText()==counts
+  and mini.pending:GetText():find('requested',1,true)==nil and s.spent>0 and s.reserved==0,
+  'L1b: a spent unsettled action is not an unconfirmed request; the pending line shows its separate counts',mini.pending:GetText())
+ local pendingTip,pendingTipOK=V.TooltipLines(function()mini.pendingHit:GetScript('OnEnter')(mini.pendingHit)end)
+ C.guard(pendingFull~=nil and pendingTipOK and pendingTip[1]==pendingFull and mini.pending._nexusFullText==pendingFull,
+  'L1b: actual mini hover exposes the complete pending explanation beside the visible counts',pendingTip[1])
+ mini.pendingHit:GetScript('OnLeave')(mini.pendingHit)
  local complete=mini.reason._nexusFullText or mini.reason:GetText()
  C.guard(complete==s.reason,'L1b: the mini retains the complete runtime reason',complete)
  local hovered,hoverOK=V.TooltipLines(function()mini.reasonHit:GetScript('OnEnter')(mini.reasonHit)end)
@@ -231,17 +252,34 @@ C.scenario('L3 recorded Echo after a reload: the exact name stays visible',funct
  C.guard(H.Count('orb-spend')==1,'L3: only the original Orb spend reached the game')
 end)
 
+-- Root-adjudicated current-contract fixture adaptation (L4 only; not a
+-- product RED/GREEN claim; not executed by this resolution; the header's
+-- categories and receipts are unchanged): under accepted bounded loading
+-- recovery the held in-session original choice keeps its approved session,
+-- so its actual phase may be WAIT_RESULT. Only the obsolete PAUSED/raw
+-- headline assumptions follow that actual phase: L4_PHASE is the Orb
+-- window's state label and L4_CUE the strip's block cue for it. The
+-- original-specific Echo/reload instruction, the unresolved receipt, no
+-- Resume, no new host or selection action, no restored-history claim and
+-- Stop authority are kept.
+local L4_PHASE={PAUSED='Paused',WAIT_RESULT='Waiting for result confirmation'}
+local L4_CUE={PAUSED='Paused - result must settle',WAIT_RESULT='Waiting for result confirmation'}
+local function L4Window(s) return (L4_PHASE[s.state] or tostring(s.state))..'\n'..tostring(s.reason) end
 C.scenario('L4 held game choice in this session: state-specific reload advice, no cleared-history note',function()
  local H,M,A,O=LostReply()
  H.Advance(2);H.Advance(6)
  local s=M.Status()
- C.setup(s.state=='PAUSED' and s.pending and s.reason:find('/reload',1,true)~=nil and s.reason:find('Desired A',1,true)~=nil,
-  'L4: the runtime names the held choice, the Echo and /reload',s.reason)
+ C.setup(L4_PHASE[s.state]~=nil and s.pending and s.reason:find('/reload',1,true)~=nil and s.reason:find('Desired A',1,true)~=nil,
+  'L4: the runtime names the held choice, the Echo and /reload',tostring(s.state)..': '..tostring(s.reason))
  local f=Nexus.OrbPanel.Show()
  s=M.Status()
  local text=f.status:GetText()
- C.guard(text=='Paused\n'..s.reason,'L4: the window shows the runtime instruction whole, with no guessed Resume target',text)
- C.expect(s.resumeTarget and s.resumeTarget.kind=='blocked','L4: Resume names nothing while the choice is held')
+ C.guard(text==L4Window(s),'L4: the window shows the runtime instruction whole, with no guessed Resume target',text)
+ local rt=s.resumeTarget
+ C.expect(not s.canResume and not (type(rt)=='table' and rt.name~=nil)
+  and (s.state~='PAUSED' or (type(rt)=='table' and rt.kind=='blocked')),
+  'L4: Resume names nothing while the choice is held',type(rt)=='table' and tostring(rt.kind) or tostring(rt))
+ C.guard(not f.resume:IsEnabled() and not M.Resume(),'L4: no Resume is offered or accepted while the choice is held')
  local w=Nexus.OrbPanel.ShowContinue()
  C.expect(w.history:GetText()=='','L4: an action of this session gets no cleared-history note')
  C.guard(not M.ContinueView().explanation,'L4: fixture: the record is not a restored one')
@@ -250,12 +288,25 @@ C.scenario('L4 held game choice in this session: state-specific reload advice, n
  local bar=NexusPanel and NexusPanel._orbControls
  C.setup(bar and bar:IsVisible(),'L4: the actual current-session strip is visible')
  bar.refresh()
- C.expect(bar.summary:GetText():find('Last Orb action is not settled',1,true)~=nil
-  and bar.summary:GetText():find('Paused - result must settle',1,true)~=nil,
-  'L4: the same compact cue states the current unresolved action without claiming restoration',bar.summary:GetText())
+ local summary,cue=bar.summary:GetText() or '',L4_CUE[M.Status().state]
+ C.expect(summary:find('Last Orb action is not settled',1,true)~=nil
+  and cue~=nil and summary:find(cue,1,true)~=nil and summary:find('restored',1,true)==nil,
+  'L4: the same compact cue states the current unresolved action without claiming restoration',summary)
  bar.details:Click()
- C.guard(f:IsVisible() and f.status:GetText()=='Paused\n'..M.Status().reason,
+ C.guard(f:IsVisible() and f.status:GetText()==L4Window(M.Status()),
   'L4: Details keeps the current-session runtime instruction without a restored headline')
+ -- Stop authority: a deliberate Stop through the window's own button ends
+ -- the run, keeps the unresolved receipt and its ordinary-roll block, and
+ -- nothing continues afterwards.
+ C.guard(f.stop:IsEnabled() and bar.stop:IsEnabled(),'L4: Stop stays available in the window and the strip')
+ f.stop:Click()
+ local stopped,receipt=M.Status(),Nexus.Store.State().orbRefinement.pending
+ C.guard(stopped.state=='STOPPED' and not stopped.running and stopped.pending and M.BlocksOrdinary()
+  and type(receipt)=='table' and receipt.selectedKey=='410002:2',
+  'L4: a deliberate Stop ends the run and keeps the unresolved receipt and its block',tostring(stopped.state))
+ H.Advance(6)
+ local after=M.Status()
+ C.guard(after.state=='STOPPED' and not after.running and not M.Resume(),'L4: nothing continues by itself after Stop',tostring(after.state))
  C.guard(H.Count('orb-spend')==1 and H.Count('take')==1,'L4: nothing more was sent')
 end)
 

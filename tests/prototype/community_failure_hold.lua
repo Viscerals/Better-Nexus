@@ -1746,15 +1746,123 @@ C.scenario('direct-show-host-exception-held',function()
 end)
 
 
+-- Setup routing for the five detail-publication cases: detail-publish-healthy,
+-- detail-publish-view-failure and opus-final-detail-finish-{synchronous,
+-- synchronous-fault,ticket}. The current product separates draft Copy/lock
+-- from Share, so these cases click the actual detail.shareBtn, which shows the
+-- registered NEXUS_SHARE_SAVED_BUILD confirmation. Its captured approval is
+-- checked against the selected unchanged own mirror before the dialog's
+-- actual OnAccept runs once. Synthetic one-slot popup boundary after the known
+-- model in tests/prototype/ux_share_confirmation.lua: Show hides an occupied
+-- slot through its OnHide, stores which/data, shows, then calls the dialog's
+-- OnShow; Accept invokes the registered OnAccept with the captured data before
+-- the raw Hide whose OnHide retires that approval (an OnAccept that raises
+-- leaves the slot shown, as in that model). Each scenario installs it from its
+-- own F.Boot before-hook (after that harness load, before the TOC load) in an
+-- unnamed slot of that boot; the prior popup globals return when the scenario
+-- returns or raises. Setup routing only: every original predicate, hold,
+-- count and guard below stays authoritative. No native StaticPopup claim.
+local function SharePopupScenario(body)
+ return function()
+  local P={shows=0,accepts=0,events={}};local saved
+  function P.Install()
+   assert(saved==nil,'one synthetic Share popup slot per scenario boot')
+   saved={show=StaticPopup_Show,hide=StaticPopup_Hide,visible=StaticPopup_Visible}
+   local slot=CreateFrame('Frame',nil,UIParent)
+   slot:SetFrameStrata('DIALOG');slot:Hide();P.slot=slot
+   slot:SetScript('OnHide',function(self)
+    P.events[#P.events+1]={event='hide',which=self.which,data=self.data}
+    local info=self.which and StaticPopupDialogs[self.which]
+    if info and info.OnHide then info.OnHide(self) end
+    self.which,self.data,self.text=nil,nil,nil
+   end)
+   StaticPopup_Show=function(which,a,b,data)
+    local info=StaticPopupDialogs[which]
+    if type(info)~='table' then return nil end
+    if slot:IsShown() then slot:Hide() end
+    P.shows=P.shows+1
+    slot.which,slot.data=which,data
+    slot.text=string.format(info.text or '',tostring(a or ''),tostring(b or ''))
+    slot.button1,slot.button2=info.button1,info.button2
+    slot:Show()
+    P.events[#P.events+1]={event='show',which=which,data=data}
+    if info.OnShow then info.OnShow(slot,data) end
+    return slot
+   end
+   StaticPopup_Hide=function(which) if slot:IsShown() and slot.which==which then slot:Hide() end end
+   StaticPopup_Visible=function(which) return slot:IsShown() and slot.which==which and slot or nil end
+  end
+  -- Test-local read of the record fields the Share identity covers; it calls
+  -- no private renderer function.
+  function P.Witness(record)
+   if type(record)~='table' then return nil end
+   local parts={tostring(record.id),tostring(record.ownerKey),tostring(record.title),
+    tostring(record.userDescription or record.description),tostring(record.publishedBuildId)}
+   for _,key in ipairs({'echoes','lockedEchoes'}) do
+    parts[#parts+1]='#'
+    for _,e in ipairs(type(record[key])=='table' and record[key] or {}) do
+     parts[#parts+1]=tostring(e.spellId or e.id)..':'..tostring(e.quality)..':'
+      ..tostring(e.stacks or e.count or 1)..':'..tostring(e.locked==true)
+    end
+   end
+   return table.concat(parts,'|')
+  end
+  function P.ShareAction(detail)
+   local button=detail and detail.shareBtn
+   local text=button and button:GetText()
+   return button~=nil and detail:IsShown() and button:IsShown() and button:IsEnabled()
+    and type(text)=='string' and text:sub(1,5)=='Share' or false,text
+  end
+  -- Read-only: the live approval field of the real detail panel.
+  function P.Approval(detail,id,selected,current)
+   local slot=P.slot;local data=slot and slot.data
+   local ok=slot~=nil and slot:IsShown() and slot.which=='NEXUS_SHARE_SAVED_BUILD'
+    and P.shows==1 and P.accepts==0 and type(data)=='table' and data.id==id
+    and data.used==nil and data.retired==nil and detail._nexusShareApproval==data
+    and type(data.identity)=='string' and data.identity~='' and type(data.title)=='string'
+    and type(slot.text)=='string' and slot.text:find(data.title,1,true)~=nil
+    and selected~=nil and P.Witness(current)==selected
+    and Nexus.CommunityBuilds.IsOwnBuild(id) and true or false
+   return ok,'shows='..P.shows..' which='..tostring(slot and slot.which)
+    ..' approval='..tostring(type(data)=='table' and data.id)..' expected='..tostring(id)
+  end
+  function P.Accept(which)
+   local slot,info=P.slot,StaticPopupDialogs[which]
+   if not (slot and slot:IsShown() and slot.which==which and type(info)=='table'
+    and type(info.OnAccept)=='function') then return false,'no shown registered '..tostring(which) end
+   local data=slot.data
+   P.accepts=P.accepts+1
+   P.events[#P.events+1]={event='accept',which=which,data=data,
+    retired=type(data)=='table' and data.retired==true}
+   local ok,err=pcall(info.OnAccept,slot,data)
+   if ok then slot:Hide() end
+   return ok,err
+  end
+  function P.Retired(detail,approval)
+   local e,trail=P.events,{}
+   for i,v in ipairs(e) do trail[i]=v.event..':'..tostring(v.which) end
+   local ok=type(approval)=='table' and P.shows==1 and P.accepts==1 and #e==3
+    and e[1].event=='show' and e[2].event=='accept' and e[3].event=='hide'
+    and e[1].data==approval and e[2].data==approval and e[3].data==approval
+    and e[2].retired==false and approval.used==true and approval.retired==true
+    and detail._nexusShareApproval==nil and not P.slot:IsShown() and P.slot.data==nil
+   return ok,table.concat(trail,',')
+  end
+  local result={pcall(body,P)}
+  if saved then StaticPopup_Show,StaticPopup_Hide,StaticPopup_Visible=saved.show,saved.hide,saved.visible end
+  if not result[1] then error(result[2],0) end
+ end
+end
+
 for _,faulted in ipairs({false,true}) do
  local rawprint=print;local messages={}
  print=function(...)
   local row={};for i=1,select('#',...) do row[i]=tostring(select(i,...)) end
   messages[#messages+1]=table.concat(row,' ');return rawprint(...)
  end
- C.scenario(faulted and 'detail-publish-view-failure' or 'detail-publish-healthy',function()
+ C.scenario(faulted and 'detail-publish-view-failure' or 'detail-publish-healthy',SharePopupScenario(function(P)
   local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
-  local H=F.Boot(F.Database(),function(h) h.playerLevel=60;h.perks.serverActiveSlot=1
+  local H=F.Boot(F.Database(),function(h) P.Install();h.playerLevel=60;h.perks.serverActiveSlot=1
    h.perks.serverBuildSlots={[1]={name='Actual detail publication',verified=true,echoes=L.OrdinaryRows(3)}} end)
   local CB,CAT=Nexus.CommunityBuilds,Nexus.BuildCatalog
   CB.Show();local mirror
@@ -1768,9 +1876,10 @@ for _,faulted in ipairs({false,true}) do
   if not C.setup(mirror and CAT.Get(mirror.id),'actual saved mirror settles before detail publication') then return end
   H.Advance(10,.01)
   CB.Select(mirror.id);local detail
-  for _,f in ipairs(H.frames) do if f.lockBtn and f.lockBtn.GetText then detail=f end end
-  if not C.setup(detail and detail:IsShown() and detail.lockBtn:IsShown()
-   and detail.lockBtn:GetText()=='Share Build','real saved-mirror detail Share action is visible') then return end
+  for _,f in ipairs(H.frames) do if f.shareBtn and f.shareBtn.GetText then detail=f end end
+  local shareVisible,shareText=P.ShareAction(detail)
+  if not C.setup(shareVisible,'real saved-mirror detail Share action is visible',shareText) then return end
+  local selected=P.Witness(CAT.Get(mirror.id))
   local commit=CAT.CommitMaintenance;local tickets={}
   CAT.CommitMaintenance=function(...)
    local ok,why,ticket=commit(...);if type(ticket)=='table' then tickets[#tickets+1]=ticket end
@@ -1780,9 +1889,17 @@ for _,faulted in ipairs({false,true}) do
   if faulted then frame._classDropBtn.SetText=function()
    faults[#faults+1]={at=H.now,stack=debug.traceback('',2)};error('DETAIL_FINISH_VIEW_HOST_FAULT',0)
   end end
-  local clicked,err=pcall(function() detail.lockBtn:Click() end)
+  local shown,showError=pcall(function() detail.shareBtn:Click() end)
+  local approval=P.slot.data
+  local approved,approvalDetail=P.Approval(detail,mirror.id,selected,CAT.Get(mirror.id))
+  if not C.setup(shown and #tickets==0 and approved,
+   'real detail Share click shows its registered confirmation for the unchanged saved mirror',
+   showError or approvalDetail) then return end
+  local clicked,err=P.Accept('NEXUS_SHARE_SAVED_BUILD')
+  local retired,trail=P.Retired(detail,approval)
+  C.setup(retired,'registered Share OnAccept runs once before raw Hide retires its approval',trail)
   if not C.setup(clicked and #tickets==1 and tickets[1].state=='pending'
-   and detail.lockBtn:GetText()=='Sharing...','real detail click queues one asynchronous publish ticket',err) then return end
+   and detail.shareBtn:GetText()=='Sharing...','real detail click queues one asynchronous publish ticket',err) then return end
   local escaped=0
   for _=1,1200 do if tickets[1].state~='pending' then break end;escaped=escaped+Step(H,1) end
   local source=CAT.Get(mirror.id);local published=source and source.publishedBuildId and CAT.Get(source.publishedBuildId)
@@ -1799,7 +1916,7 @@ for _,faulted in ipairs({false,true}) do
   C.guard(Settle(H,CB,2000)~=nil and escaped==0 and #H.actions==0,
    'detail publication recovers without frame escape or gameplay action')
   print('OBSERVED detail-publish-faults',faulted,F.Serialize({faults=faults,wrongCatalogMessages=wrong,terminalOk=terminalOk,terminalId=terminalId,syntheticSent=#H.sent}))
- end)
+ end))
  print=rawprint
 end
 
@@ -3312,10 +3429,10 @@ C.scenario('opus-final-dirty-current-pending',function()
  C.guard(#H.actions==0 and #H.sent==0,'pending truth observation sends no game or network action')
 end)
 for _,mode in ipairs({'synchronous','synchronous-fault','ticket'})do
-C.scenario('opus-final-detail-finish-'..mode,function()
+C.scenario('opus-final-detail-finish-'..mode,SharePopupScenario(function(P)
  local asynchronous=mode=='ticket';local persistent=mode=='synchronous-fault'
  local L=dofile('tests/prototype/leaderboard_fixture_support.lua')
- local H=F.Boot(F.Database(),function(h)h.playerLevel=60;h.perks.serverActiveSlot=1
+ local H=F.Boot(F.Database(),function(h)P.Install();h.playerLevel=60;h.perks.serverActiveSlot=1
   h.perks.serverBuildSlots={[1]={name='Refused detail publication',verified=true,echoes=L.OrdinaryRows(3)}}end)
  Nexus.Sync.IsReceiving=function()return false end
  local CB=Nexus.CommunityBuilds;CB.Show()
@@ -3324,9 +3441,10 @@ C.scenario('opus-final-detail-finish-'..mode,function()
  for _,b in pairs(CB.Builds())do if b.importedSavedBuild and b.serverSlot==1 then mirror=b end end
  assert(C.setup(mirror~=nil,'real saved mirror exists for public detail action'))
  CB.Select(mirror.id);local detail
- for _,f in ipairs(H.frames)do if f.lockBtn and f.lockBtn.GetText then detail=f end end
- assert(C.setup(detail and detail:IsShown() and detail.lockBtn:GetText()=='Share Build',
-  'actual saved-mirror detail Share button is visible'))
+ for _,f in ipairs(H.frames)do if f.shareBtn and f.shareBtn.GetText then detail=f end end
+ local shareVisible,shareText=P.ShareAction(detail)
+ assert(C.setup(shareVisible,'actual saved-mirror detail Share button is visible',shareText))
+ local selected=P.Witness(Nexus.BuildCatalog.Get(mirror.id))
  local controller=Up(Up(CB.PublishImportedBuild,'ControllerInstance'),'EnsureCommunityController')()
  local publish=controller.PublishImportedBuild;local attempts=0;local callback;local ticket={state='pending'}
  -- Synthetic refusal boundary: the public detail handler and refresh are real;
@@ -3346,9 +3464,17 @@ C.scenario('opus-final-detail-finish-'..mode,function()
  assert(C.setup(not ok and err==message and calls==1 and CB.VirtualStats().lastDataError==message,
   'real host exception establishes a view hold before explicit detail click'))
  local actions,sent=#H.actions,#H.sent
- local clicked,clickError=pcall(function()detail.lockBtn:Click()end)
+ local shown,showError=pcall(function()detail.shareBtn:Click()end)
+ local approval=P.slot.data
+ local approved,approvalDetail=P.Approval(detail,mirror.id,selected,Nexus.BuildCatalog.Get(mirror.id))
+ assert(C.setup(shown and attempts==0 and approved,
+  'public detail Share click shows its registered confirmation for the unchanged saved mirror',
+  showError or approvalDetail))
+ local clicked,clickError=P.Accept('NEXUS_SHARE_SAVED_BUILD')
+ local retired,trail=P.Retired(detail,approval)
+ C.setup(retired,'registered Share OnAccept runs once before raw Hide retires its approval',trail)
  if asynchronous then
-  assert(C.setup(clicked and attempts==1 and callback and detail.lockBtn:GetText()=='Sharing...',
+  assert(C.setup(clicked and attempts==1 and callback and detail.shareBtn:GetText()=='Sharing...',
    'public detail click retains the synthetic pending ticket',clickError))
   callback(false,'Synthetic asynchronous refusal',ticket)
   callback(false,'Duplicate terminal refusal',ticket)
@@ -3364,7 +3490,7 @@ C.scenario('opus-final-detail-finish-'..mode,function()
   'synthetic refused detail route submits no game or transport action')
  controller.PublishImportedBuild=publish;label.SetText=setter
  C.guard(Settle(H,CB)~=nil,'detail refusal control recovers through actual view publication')
-end)
+end))
 end
 end
 

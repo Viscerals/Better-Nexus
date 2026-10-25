@@ -164,7 +164,17 @@ C.scenario('I4 the mini panel refuses Resume for a Wishlist that is not ready, w
  mini:Hide()
 end)
 
-C.scenario('I5 a paused run released at a loading screen names no target and says how to go on',function()
+-- Root-adjudicated current-contract fixture adaptation (I5 only; not a
+-- product RED/GREEN claim and not executed by this resolution; the file
+-- header, its M7 categories and earlier receipts are unchanged): accepted
+-- bounded recovery keeps the already approved session through a classified
+-- loading screen, so the former mandatory PAUSED/lost-token setup is
+-- superseded. The owner is held in WAIT_WORLD with its approval and maximum
+-- retained, names no reviewed target, makes no new host call, selection or
+-- action while loading and settling, and a deliberate Stop then prevents any
+-- later automatic continuation. The original saved-receipt, race,
+-- target-identity, action, spend and send guards are kept.
+C.scenario('I5 a run held at a loading screen keeps its approval, names no target and stops on Stop',function()
  Fresh()
  local f=SettledPausedRun()
  Direct(f.resume)
@@ -196,27 +206,73 @@ C.scenario('I5 a paused run released at a loading screen names no target and say
  C.setup(s.running and not s.pending,'I5: fixture: the result settled; the run is running with no unresolved operation',
   tostring(s.state)..' running='..tostring(s.running)..' pending='..tostring(s.pending))
  if not (s.running and not s.pending) then return end
- H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD')
+ -- Only actual host calls (orb-spend), selections (take), harness actions
+ -- and the run's own spend counters are compared across loading, settling
+ -- and Stop; Effects() (saved Orb row, state and sends) is compared below
+ -- only where no time passes and nothing may change it.
+ local function Held()
+  local now=M.Status()
+  return {spend=H.Count('orb-spend'),take=H.Count('take'),actions=#H.actions,
+   spent=now.spent,reserved=now.reserved,pending=now.pending}
+ end
+ local settled=Held()
+ H.Fire('PLAYER_LEAVING_WORLD')
+ s=M.Status()
+ C.guard(s.state=='WAIT_WORLD' and s.running and Same(settled,Held()),
+  'I5: loading holds the approved run in WAIT_WORLD; no new host call, selection or action',
+  tostring(s.state)..' running='..tostring(s.running)..' spend='..H.Count('orb-spend')..' take='..H.Count('take'))
+ H.Fire('PLAYER_ENTERING_WORLD')
  s=M.Status();local c=M.CompactStatus()
- C.setup(s.state=='PAUSED' and not s.pending and not s.canResume,'I5: fixture: the loading screen paused the run and released its action',s.state)
- C.expect(s.resumeTarget and s.resumeTarget.kind=='blocked' and s.resumeTarget.reason=='authorization' and s.resumeTarget.name==nil,
-  'I5: the full read names no target and says why',s.resumeTarget and tostring(s.resumeTarget.kind)..'/'..tostring(s.resumeTarget.reason))
- C.expect(c and c.resumeTarget and c.resumeTarget.kind=='blocked' and c.resumeTarget.reason=='authorization',
-  'I5: the compact read says the same',c and c.resumeTarget and tostring(c.resumeTarget.kind))
+ C.guard(s.state=='WAIT_WORLD' and s.running and not s.pending and not s.canResume and s.limit==3
+  and c and c.state=='WAIT_WORLD' and c.running and not c.canResume and c.limit==3 and Same(settled,Held()),
+  'I5: after the classified entry the run waits in WAIT_WORLD with its approval and maximum retained',
+  tostring(s.state)..' running='..tostring(s.running)..' canResume='..tostring(s.canResume)..' compact='..tostring(c and c.state))
+ -- No reviewed (changed or returned) target and no lost-approval block.
+ local function Reviewed(t)
+  return type(t)=='table' and (t.kind=='changed' or t.returned==true or (t.kind=='blocked' and t.reason=='authorization'))
+ end
+ C.expect(not Reviewed(s.resumeTarget),'I5: the full read names no reviewed target and keeps its approval',
+  s.resumeTarget and tostring(s.resumeTarget.kind)..'/'..tostring(s.resumeTarget.reason))
+ C.expect(c and not Reviewed(c.resumeTarget),'I5: the compact read says the same',c and c.resumeTarget and tostring(c.resumeTarget.kind))
  f=UI.Show();UI.Refresh()
  local text=f.status:GetText() or ''
  print('OBSERVED','I5 window='..text)
- C.expect(Has(text,'this run no longer owns the action') and Has(text,'Stop, then approve a new run'),'I5: the window says the run can no longer resume and what to do',text)
- C.expect(not Has(text,'Resume would use') and not Has(text,'Resume target unknown'),'I5: it guesses no target and blames no Wishlist',text)
+ C.expect(Has(text,'Waiting for the game after loading') and not Has(text,'this run no longer owns the action')
+  and not Has(text,'Stop, then approve a new run'),'I5: the window states the actual loading wait, not a lost approval',text)
+ C.expect(not Has(text,'Resume would use') and not Has(text,'Resume target unknown') and not Has(text,'Review target first')
+  and not f.review:IsShown(),'I5: it guesses no target, blames no Wishlist and offers no target review',text)
  local mini=UI.ShowMini()
- C.expect(mini.state:GetText()=='Paused - this run can no longer resume','I5: the mini panel says the same',mini.state:GetText())
+ local miniState=mini.state._nexusFullText or mini.state:GetText() or ''
+ C.expect(Has(miniState,'Waiting for the game after loading') and not Has(miniState,'can no longer resume')
+  and not Has(miniState,'review'),'I5: the mini panel states the same wait',miniState)
  Direct(mini.resume)
- C.expect(mini.notice:GetText()=='Not resumed: this run can no longer resume.','I5: a mini Resume is refused with that reason',mini.notice:GetText())
+ local miniNotice=mini.notice:GetText() or ''
+ C.expect(Has(miniNotice,'Not resumed:') and not Has(miniNotice,'can no longer resume'),
+  'I5: a mini Resume is refused without claiming a lost approval',miniNotice)
  local before=Effects()
  C.guard(not M.Resume(),'I5: the runtime refuses Resume (unchanged)')
  Direct(f.resume)
- C.expect(Has(f.notice:GetText(),'this run no longer owns the action'),'I5: a window Resume is refused with that reason',f.notice:GetText())
+ local notice=f.notice:GetText() or ''
+ C.expect(Has(notice,'Not resumed') and not Has(notice,'this run no longer owns the action'),
+  'I5: a window Resume is refused without claiming a lost approval',notice)
  C.guard(Same(before,Effects()) and f.stop:IsEnabled(),'I5: nothing was spent; Stop stays available')
+ -- Settling: still inside the three-second window after the entry.
+ H.Advance(1)
+ s=M.Status()
+ C.guard(s.running and s.state~='PAUSED' and s.state~='STOPPED' and Same(settled,Held()),
+  'I5: while settling the approval is kept and no new host call, selection or action is made',
+  tostring(s.state)..' spend='..H.Count('orb-spend')..' take='..H.Count('take'))
+ -- A deliberate Stop through the window's own button; then no automatic
+ -- continuation after the settling and post-entry waits have passed.
+ Direct(f.stop)
+ s=M.Status()
+ C.guard(s.state=='STOPPED' and not s.running and not s.pending and not s.canResume,
+  'I5: a deliberate Stop ends the held run',tostring(s.state))
+ H.Advance(15)
+ s=M.Status()
+ C.guard(s.state=='STOPPED' and not s.running and not M.Resume() and Same(settled,Held()),
+  'I5: after Stop nothing continues: no new host call, selection or action',
+  tostring(s.state)..' spend='..H.Count('orb-spend')..' take='..H.Count('take'))
  mini:Hide()
 end)
 

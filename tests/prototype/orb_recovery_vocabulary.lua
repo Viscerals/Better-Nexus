@@ -143,4 +143,100 @@ C.scenario('W5 history: the live state beside the recorded one; the same usage w
  C.guard(H.Count('orb-spend')==1,'W5: reading the history spent nothing more')
 end)
 
+-- F4 (root-approved Orb history presentation repair). The header's pending
+-- line counts the Orbs the run requested whose spend is not confirmed
+-- (`reserved`, which RunLog reads live as M.Status().reserved). It no longer
+-- calls that count a count of unresolved operations, and the report no longer
+-- appends "(unresolved exposure)" to it. Observed use (`spent`), unknown spend
+-- exposure (`uncertain`) and unconfirmed outcomes (`unconfirmedResults`) keep
+-- their own fields and values. EXPECT here is predicted to fail on fe7cc047
+-- (not executed by the author); GUARD already holds there and must keep
+-- holding. Oracles: the real OrbRuntime reads (Status, RunLog) of one approved
+-- run with one requested Orb, then after its offer, and the OrbHistory
+-- projection of those real views. A copy of a real view with named counts
+-- changed is SYNTHETIC and says so; it claims no runtime state.
+C.scenario('W6 history: pending is the requested, unconfirmed Orb count, apart from use, unknown exposure and outcomes',function()
+ local H,M=Fresh()
+ local history=Nexus.OrbHistory
+ local function Copy(view,fields)
+  local out={};for k,v in pairs(view) do out[k]=v end
+  for k,v in pairs(fields) do out[k]=v end
+  return out
+ end
+ local function Numbers(text) local out={};for n in tostring(text or ''):gmatch('%d+') do out[#out+1]=n end;return out end
+ -- Two reports of the same operations that differ in their usage line only.
+ local function OnlyUsageDiffers(a,b)
+  local la,lb=Lines(a),Lines(b)
+  if #la~=#lb then return false end
+  local differ=0
+  for i=1,#la do
+   if la[i]~=lb[i] then
+    if la[i]:find('Approved maximum: ',1,true)~=1 or lb[i]:find('Approved maximum: ',1,true)~=1 then return false end
+    differ=differ+1
+   end
+  end
+  return differ==1
+ end
+ H.OrbPlan({{spellId=410002,quality=2,stacks=3}})
+ C.setup(M.Start(3) and M.Status().reserved==1,'W6: an approved run with one requested Orb')
+ local spends=H.Count('orb-spend')
+ local live=M.Status()
+ local view=M.RunLog('current')
+ C.setup(view.runId~=nil,'W6: fixture: the current run has history',tostring(view.state))
+ C.guard(view.reserved==live.reserved and (tonumber(view.spent) or 0)==(tonumber(live.spent) or 0),
+  'W6: the history reads the live requested and used counts',tostring(view.reserved)..'/'..tostring(view.spent))
+ local reserved=tostring(view.reserved)
+ local header=history.Header(view)
+ local pending=header.pending
+ print('OBSERVED','W6 pending='..tostring(pending))
+ local numbers=Numbers(pending)
+ C.expect(type(pending)=='string' and Has(pending,'requested') and Has(pending,'not confirmed') and #numbers==1 and numbers[1]==reserved,
+  'W6: the pending line counts the Orbs requested whose spend is not confirmed, and no other count',pending)
+ C.expect(type(pending)=='string' and not Has(pending,reserved..' unresolved operation'),
+  'W6: that count is no longer called a count of unresolved operations',pending)
+ C.guard(type(pending)=='string' and Has(pending,'not settled'),'W6: the pending line still says that the run is not settled',pending)
+ local readable,technical=history.Report(view,nil,false),history.Report(view,nil,true)
+ local alone='; pending (requested, not confirmed): '..reserved..'; unknown spend exposure: '
+ C.expect(Has(readable,alone) and Has(technical,alone),
+  'W6: the report states the pending count alone in its field, without the older exposure words',readable)
+ C.guard(Has(readable,'Approved maximum: '..tostring(view.limit))
+  and Has(readable,'; Orbs used: '..tostring(view.spent or 0)..' (observed Orb decrement)')
+  and Has(readable,'; unknown spend exposure: '..tostring(view.uncertain or 0))
+  and Has(readable,'; unconfirmed outcomes: '..tostring(view.unconfirmedResults or 0)),
+  'W6: the report keeps the approved maximum, observed use, unknown exposure and outcome counts it read',readable)
+ -- Nothing requested unconfirmed: no pending line; use and state unchanged.
+ local settled=Copy(view,{reserved=0})
+ local zero=history.Header(settled)
+ C.guard(zero.pending==nil and zero.usage==header.usage and zero.status==header.status,
+  'W6: (synthetic copy, reserved 0) no pending line is shown; use and state are unchanged',tostring(zero.pending))
+ -- Unknown spend exposure and unconfirmed outcomes at the existing contract values.
+ local exposed=Copy(view,{uncertain=2,unconfirmedResults=2})
+ local eh,er=history.Header(exposed),history.Report(exposed,nil,false)
+ C.guard(Has(eh.usage,'; unknown spend exposure: 2') and Has(eh.usage,'; unconfirmed outcomes: 2') and eh.pending==pending,
+  'W6: (synthetic copy) unknown spend exposure and unconfirmed outcomes keep their own fields; the pending line takes neither in',eh.usage)
+ C.guard(Has(er,'; Orbs used: '..tostring(view.spent or 0)..' (observed Orb decrement)')
+  and Has(er,'; unknown spend exposure: 2; unconfirmed outcomes: 2'),
+  'W6: (synthetic copy) the report keeps them apart from observed use',er)
+ C.expect(Has(history.Report(settled,nil,false),'; pending (requested, not confirmed): 0; unknown spend exposure: ')
+  and Has(er,'; pending (requested, not confirmed): '..reserved..'; unknown spend exposure: 2; unconfirmed outcomes: 2'),
+  'W6: (synthetic copies) a zero count and a count beside other exposure each stand alone in the pending field',er)
+ -- The recorded operations do not depend on these counts.
+ H.Offer()
+ local offered=M.RunLog('current')
+ local entries=offered.entries or {}
+ C.setup(#entries>=1,'W6: fixture: the requested operation is recorded after its offer',tostring(offered.total))
+ local other=Copy(offered,{reserved=(tonumber(offered.reserved) or 0)+1,uncertain=2,unconfirmedResults=2})
+ local plain,tech=history.Report(offered,nil,false),history.Report(offered,nil,true)
+ C.guard(OnlyUsageDiffers(plain,history.Report(other,nil,false)) and OnlyUsageDiffers(tech,history.Report(other,nil,true)),
+  'W6: (synthetic copy) other counts change the usage line only; every readable and technical operation record stays the same')
+ local recorded=true
+ for _,entry in ipairs(entries) do
+  local ordinal='\n'..tostring(entry.ordinal)..'. '
+  local identity='\n    serial='..tostring(entry.serial)..' state='..tostring(entry.state)..' source='..tostring(entry.sourceKey)..' '
+  if not (Has(plain,ordinal) and Has(tech,ordinal) and Has(tech,identity)) or Has(plain,identity) then recorded=false end
+ end
+ C.guard(recorded,'W6: each recorded operation keeps its readable line; its serial, state and source are in the technical report only',tech)
+ C.guard(H.Count('orb-spend')==spends,'W6: reading and projecting the history spent nothing',H.Count('orb-spend'))
+end)
+
 C.finish('real Orb windows, strip, mini and history; synthetic services; no native recovery claim')

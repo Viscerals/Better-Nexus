@@ -86,7 +86,7 @@ end
 -- Orb reason fixtures (C6-C8): the real Orb owner and lifecycle from the
 -- existing synthetic Orb helpers (orbs_support through S.Fresh).
 local PLAN={{spellId=410002,quality=2,stacks=3}}
-local PAUSED_REASON='Paused. An accepted spend cannot be undone; the native offer remains available.'
+local PAUSED_REASON='Paused. A submitted spend may still finish; the native offer remains available.'
 local STOPPED_REASON='Stopped. A submitted operation may still finish; resolve any pending offer manually.'
 local RECOVERY_REASON='An earlier Orb action is unresolved. Nothing will restart. Nexus is checking, read-only, whether its offer is still open.'
 -- The visible line at e8e74693 for a paused run with a pending spend (the omission red).
