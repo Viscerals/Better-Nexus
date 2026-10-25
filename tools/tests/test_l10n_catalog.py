@@ -137,7 +137,7 @@ class ReleaseLanguagesContract(unittest.TestCase):
         self.assertEqual(d["sourcePin"], {"base": BASE, "tree": TREE})
         self.assertEqual(d["contractKind"], "declarative_metadata_only")
         self.assertEqual(d["validator"], {"path": "tools/l10n_catalog.py",
-                                          "status": "NOT_IMPLEMENTED_SEPARATE_TASK"})
+                                          "status": "PARSER_ONLY_FULL_VALIDATION_PENDING"})
         self.assertEqual(d["requiredCiRegistration"], "NOT_REGISTERED_LATER_AUTHORIZED_APPEND")
         self.assertEqual(d["selectionDecision"]["issue"], 139)
         self.assertEqual(d["selectionDecision"]["status"], "resolved")
@@ -389,6 +389,436 @@ class FullCoveragePlan(unittest.TestCase):
     def test_lists_every_window_family(self):
         for name, _, issue, _ in EXPECTED_FAMILIES:
             self.assertIn("| " + name + " | #" + str(issue) + " |", self.text)
+
+
+# B1 parser foundation (Refs #147): public grammar tests for the parser-only
+# tools/l10n_catalog.py. The tests use only parse_english, parse_packs and
+# CatalogSyntaxError, on exact bytes, against independent literal tables and
+# error codes. No Lua is executed, imported or evaluated. Metadata, review,
+# coverage, path and full command-line fixtures belong to later tasks.
+
+import importlib.util
+import os
+import subprocess
+import sys
+import tempfile
+
+CATALOG_TOOL = ROOT / "tools" / "l10n_catalog.py"
+CATALOG_PYCACHE = ROOT / "tools" / "__pycache__"
+CATALOG_BOOTSTRAP = b"Nexus = Nexus or {}\n"
+CATALOG_HEADS = {
+    "english": CATALOG_BOOTSTRAP + b"Nexus.LocalizationEnglish = ",
+    "packs": CATALOG_BOOTSTRAP + b"Nexus.LocalizationPacks = ",
+}
+CATALOG_NOTICE = {
+    "record": "notice",
+    "tool": "tools/l10n_catalog.py",
+    "status": "PARSER_ONLY_FULL_VALIDATION_PENDING",
+    "fullValidation": "NOT_IMPLEMENTED",
+    "message": "parser only; full catalog validation is not implemented",
+}
+
+CATALOG_CURRENT_ENGLISH = {
+    "reason.save_in_progress": "Saving is still in progress; wait for its final result",
+    "reason.list_preparing": "This list is still being prepared",
+    "reason.saved_data_reading": "Reading your saved data",
+    "reason.wait_three_choices": "Waiting for the next three Echo choices",
+    "reason.wait_pending_pick_count": "waiting for pending-pick count",
+    "readout.charge_counts": "B:{banish} R:{reroll} F:{freeze}",
+}
+CATALOG_CURRENT_PACKS = {
+    "frFR": {"name": "Français", "entries": {
+        "reason.save_in_progress":
+            "L'enregistrement est toujours en cours ; attendez son résultat final",
+        "reason.list_preparing": "Cette liste est encore en cours de préparation",
+        "reason.saved_data_reading": "Lecture de vos données enregistrées",
+    }},
+    "deDE": {"name": "Deutsch", "entries": {
+        "reason.save_in_progress":
+            "Speichern läuft noch; bitte auf das endgültige Ergebnis warten",
+        "reason.list_preparing": "Diese Liste wird noch vorbereitet",
+        "reason.saved_data_reading": "Gespeicherte Daten werden gelesen",
+    }},
+    "esES": {"name": "Español", "entries": {
+        "reason.save_in_progress": "El guardado sigue en curso; espera a su resultado final",
+        "reason.list_preparing": "Esta lista aún se está preparando",
+        "reason.saved_data_reading": "Leyendo tus datos guardados",
+    }},
+    "plPL": {"name": "Polski", "entries": {
+        "reason.save_in_progress": "Zapisywanie nadal trwa; poczekaj na ostateczny wynik",
+        "reason.list_preparing": "Ta lista jest jeszcze przygotowywana",
+        "reason.saved_data_reading": "Odczytywanie zapisanych danych",
+    }},
+    "ptBR": {"name": "Português (Brasil)", "entries": {
+        "reason.save_in_progress":
+            "O salvamento ainda está em andamento; aguarde o resultado final",
+        "reason.list_preparing": "Esta lista ainda está sendo preparada",
+        "reason.saved_data_reading": "Lendo seus dados salvos",
+    }},
+    "ruRU": {"name": "Русский", "entries": {
+        "reason.save_in_progress":
+            "Сохранение ещё выполняется; дождитесь окончательного результата",
+        "reason.list_preparing": "Этот список ещё подготавливается",
+        "reason.saved_data_reading": "Чтение сохранённых данных",
+    }},
+}
+
+# CRLF lines covering: a long comment before the bootstrap; short and long
+# comments between tokens; decimal escapes (at most three digits), named
+# escapes and unknown escapes; an escaped line break; long-bracket keys and
+# values (the line break right after the opening bracket is dropped); and [[
+# inside a level-1 long string.
+CATALOG_LEXICAL_LINES = (
+    rb"--[==[ leading long comment: Nexus = nil ]] still a comment ]==]",
+    rb'Nexus = Nexus or {} -- short comment with { and "quote',
+    rb'Nexus.LocalizationEnglish = { --[[ ["x.hidden"] = "hidden" ]]',
+    rb'    ["e.decimal"] = "\65\066\0671",',
+    rb'    ["e.named"] = "tab\tq\"\\\q",',
+    b'    ["e.wrap"] = "a\\',
+    rb'b",',
+    rb"    [ [[e.long]] ] = [[",
+    rb"first",
+    rb"second]],",
+    rb"    ['e.dash'] = '\226\128\148',",
+    rb'    ["e.level"] = [=[ has [[ and ]] inside ]=], -- ]]',
+    rb"} -- trailing comment",
+)
+CATALOG_LEXICAL_TABLE = {
+    "e.decimal": "ABC1",
+    "e.named": "tab\tq\"\\q",
+    "e.wrap": "a\nb",
+    "e.long": "first\nsecond",
+    "e.dash": "\u2014",
+    "e.level": " has [[ and ]] inside ",
+}
+
+CATALOG_INERT_SOURCE = CATALOG_HEADS["english"] + (
+    b"{\n"
+    b'    ["t.percent"] = "100% %s %d %% %1$s",\n'
+    b'    ["t.braces"] = "{banish} }}{{ {1} {name:d} {",\n'
+    b"    [\"t.code\"] = 'os.execute(\"rm -rf /\") -- not a comment',\n"
+    b'    ["t.long"] = [==[function() return Nexus end; ]] setmetatable({}, {})]==],\n'
+    b'    ["t.markup"] = "|cffff0000red|r \\124",\n'
+    b"}\n"
+)
+CATALOG_INERT_TABLE = {
+    "t.percent": "100% %s %d %% %1$s",
+    "t.braces": "{banish} }}{{ {1} {name:d} {",
+    "t.code": 'os.execute("rm -rf /") -- not a comment',
+    "t.long": "function() return Nexus end; ]] setmetatable({}, {})",
+    "t.markup": "|cffff0000red|r |",
+}
+
+# (case, parser, table after the assignment, expected result)
+CATALOG_SHAPES = (
+    ("empty English table", "english", b"{}", {}),
+    ("empty packs table", "packs", b"{ }", {}),
+    ("empty English value, trailing comma", "english", b'{ ["k.a"] = "", }', {"k.a": ""}),
+    ("bare, bracketed and escaped pack IDs, either field order", "packs",
+     b"{ -- packs\n"
+     b"    xxAA = { name = [[Pack A]], entries = { [ [==[k.a]==] ] = 'A %s {x}' } },\n"
+     b'    ["x\\121BB"] = { entries = {}, name = "", },\n'
+     b'    _z9 = { name = "Z", entries = { ["k.a"] = "1", ["k.b"] = "2", }, }\n'
+     b"}",
+     {"xxAA": {"name": "Pack A", "entries": {"k.a": "A %s {x}"}},
+      "xyBB": {"name": "", "entries": {}},
+      "_z9": {"name": "Z", "entries": {"k.a": "1", "k.b": "2"}}}),
+)
+
+# (case, parser, whole source, error code)
+CATALOG_HEADER_CASES = (
+    ("empty source", "english", b"", "bad-bootstrap"),
+    ("comment only", "english", b"-- Nexus = Nexus or {}\n", "bad-bootstrap"),
+    ("plain table bootstrap", "english",
+     b"Nexus = {}\nNexus.LocalizationEnglish = {}\n", "bad-bootstrap"),
+    ("local bootstrap", "english",
+     b"local Nexus = Nexus or {}\nNexus.LocalizationEnglish = {}\n", "bad-bootstrap"),
+    ("and instead of or", "packs",
+     b"Nexus = Nexus and {}\nNexus.LocalizationPacks = {}\n", "bad-bootstrap"),
+    ("filled bootstrap table", "packs",
+     b"Nexus = Nexus or { x = 1 }\nNexus.LocalizationPacks = {}\n", "bad-bootstrap"),
+    ("global table bootstrap", "english",
+     b"_G.Nexus = Nexus or {}\nNexus.LocalizationEnglish = {}\n", "bad-bootstrap"),
+    ("byte order mark", "english", b"\xef\xbb\xbf" + CATALOG_HEADS["english"] + b"{}\n",
+     "bad-bootstrap"),
+    ("bootstrap only", "english", CATALOG_BOOTSTRAP, "bad-assignment"),
+    ("packs assignment parsed as English", "english", CATALOG_HEADS["packs"] + b"{}\n",
+     "bad-assignment"),
+    ("English assignment parsed as packs", "packs", CATALOG_HEADS["english"] + b"{}\n",
+     "bad-assignment"),
+    ("indexed assignment", "english",
+     CATALOG_BOOTSTRAP + b'Nexus["LocalizationEnglish"] = {}\n', "bad-assignment"),
+    ("local assignment", "english",
+     CATALOG_BOOTSTRAP + b"local LocalizationEnglish = {}\n", "bad-assignment"),
+    ("fallback expression", "english",
+     CATALOG_HEADS["english"] + b"Nexus.LocalizationEnglish or {}\n", "bad-assignment"),
+    ("metatable wrapper", "english",
+     CATALOG_HEADS["english"] + b"setmetatable({}, { __index = function() end })\n",
+     "bad-assignment"),
+    ("immediately called function", "packs",
+     CATALOG_HEADS["packs"] + b"(function() return {} end)()\n", "bad-assignment"),
+    ("missing table", "packs", CATALOG_HEADS["packs"], "bad-assignment"),
+)
+
+# (case, parser, table after the assignment, error code, (line, column) or None)
+CATALOG_DUPLICATE_CASES = (
+    ("repeated English key", "english", b'{ ["k.a"] = "1", ["k.a"] = "2" }',
+     "duplicate-key", None),
+    ("escaped-equal English key", "english", b'{["k.a"] = "1", ["k\\46a"] = "2"}',
+     "duplicate-key", (2, 45)),
+    ("long-bracket English key", "english", b'{ ["k.a"] = "1", [ [==[k.a]==] ] = "2" }',
+     "duplicate-key", None),
+    ("single-quoted English key", "english", b"{ [\"k.a\"] = '1', ['k.a'] = '2' }",
+     "duplicate-key", None),
+    ("repeated pack ID", "packs",
+     b'{ frFR = { name = "F", entries = {} }, frFR = { name = "G", entries = {} } }',
+     "duplicate-pack", None),
+    ("bare and escaped bracketed pack ID", "packs",
+     b'{ frFR = { name = "F", entries = {} }, ["fr\\70R"] = { name = "G", entries = {} } }',
+     "duplicate-pack", None),
+    ("repeated name field", "packs", b'{ frFR = { name = "F", name = "G", entries = {} } }',
+     "duplicate-field", None),
+    ("repeated entries field", "packs",
+     b'{ frFR = { entries = {}, name = "F", entries = {} } }', "duplicate-field", None),
+    ("escaped-equal entry key", "packs",
+     b'{ frFR = { name = "F", entries = { ["r.x"] = "1", ["r.\\120"] = "2" } } }',
+     "duplicate-key", None),
+)
+
+# (case, parser, table after the assignment, error code)
+CATALOG_MALFORMED_CASES = (
+    ("nested table value", "english", b'{ ["k.a"] = { "x" } }', "unexpected-token"),
+    ("number value", "english", b'{ ["k.a"] = 1 }', "unexpected-token"),
+    ("boolean value", "english", b'{ ["k.a"] = true }', "unexpected-token"),
+    ("nil value", "english", b'{ ["k.a"] = nil }', "unexpected-token"),
+    ("concatenation", "english", b'{ ["k.a"] = "a" .. "b" }', "unexpected-token"),
+    ("parenthesized value", "english", b'{ ["k.a"] = ("a") }', "unexpected-token"),
+    ("call value", "english", b'{ ["k.a"] = tostring("a") }', "unexpected-token"),
+    ("string call value", "english", b'{ ["k.a"] = f"a" }', "unexpected-token"),
+    ("function value", "english", b'{ ["k.a"] = function() return "a" end }',
+     "unexpected-token"),
+    ("numeric computed key", "english", b'{ [1] = "a" }', "unexpected-token"),
+    ("variable computed key", "english", b'{ [k] = "a" }', "unexpected-token"),
+    ("concatenated computed key", "english", b'{ ["k" .. ".a"] = "a" }', "unexpected-token"),
+    ("bare English key", "english", b'{ k = "a" }', "unexpected-token"),
+    ("positional value", "english", b'{ "a" }', "unexpected-token"),
+    ("missing separator", "english", b'{ ["k.a"] = "a" ["k.b"] = "b" }', "unexpected-token"),
+    ("leading comma", "english", b"{ , }", "unexpected-token"),
+    ("double comma", "english", b'{ ["k.a"] = "a",, }', "unexpected-token"),
+    ("semicolon separator", "english", b'{ ["k.a"] = "a"; }', "unexpected-token"),
+    ("comparison", "english", b'{ ["k.a"] == "a" }', "unexpected-token"),
+    ("non-ASCII outside a string", "english", '{ ["k.a"] = "a", \u00e9 }'.encode("utf-8"),
+     "unexpected-token"),
+    ("unclosed table", "english", b'{ ["k.a"] = "a",', "unexpected-end"),
+    ("missing value", "english", b'{ ["k.a"] =', "unexpected-end"),
+    ("missing name", "packs", b"{ frFR = { entries = {} } }", "missing-field"),
+    ("missing entries", "packs", b'{ frFR = { name = "F" } }', "missing-field"),
+    ("empty pack", "packs", b"{ frFR = {} }", "missing-field"),
+    ("unknown field", "packs", b'{ frFR = { name = "F", entries = {}, rights = "x" } }',
+     "unknown-field"),
+    ("reserved word field", "packs",
+     b'{ frFR = { name = "F", entries = {}, function = "x" } }', "unexpected-token"),
+    ("bracketed field key", "packs", b'{ frFR = { ["name"] = "F", entries = {} } }',
+     "unexpected-token"),
+    ("name not a string", "packs", b"{ frFR = { name = 1, entries = {} } }", "unexpected-token"),
+    ("name expression", "packs", b'{ frFR = { name = "F" .. "x", entries = {} } }',
+     "unexpected-token"),
+    ("entries not a table", "packs", b'{ frFR = { name = "F", entries = "x" } }',
+     "unexpected-token"),
+    ("bare entry key", "packs", b'{ frFR = { name = "F", entries = { k = "x" } } }',
+     "unexpected-token"),
+    ("nested entry value", "packs",
+     b'{ frFR = { name = "F", entries = { ["k.a"] = { "x" } } } }', "unexpected-token"),
+    ("pack not a table", "packs", b'{ frFR = "F" }', "unexpected-token"),
+    ("positional pack", "packs", b'{ { name = "F", entries = {} } }', "unexpected-token"),
+    ("reserved word pack ID", "packs", b'{ nil = { name = "F", entries = {} } }',
+     "unexpected-token"),
+    ("numeric pack ID", "packs", b'{ [1] = { name = "F", entries = {} } }', "unexpected-token"),
+    ("metatable pack", "packs",
+     b'{ frFR = setmetatable({ name = "F", entries = {} }, {}) }', "unexpected-token"),
+    ("function pack", "packs", b"{ frFR = function() end }", "unexpected-token"),
+    ("unclosed pack", "packs", b'{ frFR = { name = "F", entries = {}', "unexpected-end"),
+)
+
+# (case, parser, whole source, error code, (line, column) or None)
+CATALOG_LEXICAL_ERROR_CASES = (
+    ("source not UTF-8", "english",
+     CATALOG_HEADS["english"] + b'{ ["k.a"] = "caf\xe9" }', "not-utf8", None),
+    ("overlong UTF-8 in source", "english",
+     CATALOG_HEADS["english"] + b'{ ["k.a"] = "\xc0\xaf" }', "not-utf8", None),
+    ("encoded surrogate in source", "english",
+     CATALOG_HEADS["english"] + b'{ ["k.a"] = "\xed\xa0\x80" }', "not-utf8", None),
+    ("value escape not UTF-8", "english",
+     CATALOG_HEADS["english"] + b'{["k.a"] = "\\200"}', "value-not-utf8", (2, 40)),
+    ("value escapes encode a surrogate", "english",
+     CATALOG_HEADS["english"] + b'{["k.a"] = "\\237\\160\\128"}', "value-not-utf8", (2, 40)),
+    ("key escape not UTF-8", "english",
+     CATALOG_HEADS["english"] + b'{["\\255"] = "a"}', "value-not-utf8", (2, 31)),
+    ("pack ID escape not UTF-8", "packs",
+     CATALOG_HEADS["packs"] + b'{["\\192"] = { name = "F", entries = {} }}',
+     "value-not-utf8", (2, 29)),
+    ("unfinished string", "english",
+     CATALOG_HEADS["english"] + b'{["k.a"] = "open\n}', "unfinished-string", (2, 40)),
+    ("unfinished long string", "english",
+     CATALOG_HEADS["english"] + b'{["k.a"] = [==[ open ]] }', "unfinished-string", (2, 40)),
+    ("unfinished long comment", "english",
+     CATALOG_HEADS["english"] + b"{ --[[ open\n}", "unfinished-comment", (2, 31)),
+    ("decimal escape above 255", "english",
+     CATALOG_HEADS["english"] + b'{["k.a"] = "\\256"}', "invalid-escape", (2, 40)),
+    ("[[ inside a level-0 long string", "english",
+     CATALOG_HEADS["english"] + b'{["k.a"] = [[a [[ b]]}', "nested-long-bracket", (2, 40)),
+    ("[[ inside a level-0 long comment", "english",
+     b"--[[ a [[ b ]]\n" + CATALOG_HEADS["english"] + b"{}", "nested-long-bracket", (1, 1)),
+)
+
+
+def load_catalog_parser():
+    """Load tools/l10n_catalog.py from its trusted file path. Bytecode caching
+    is off while it loads, so no tools/__pycache__ entry is written."""
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec = importlib.util.spec_from_file_location("l10n_catalog_under_test", CATALOG_TOOL)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
+    return module
+
+
+def catalog_pycache_names():
+    """Return the entries of tools/__pycache__, sorted; empty when it is absent."""
+    if not CATALOG_PYCACHE.is_dir():
+        return []
+    return sorted(entry.name for entry in CATALOG_PYCACHE.iterdir())
+
+
+class CatalogParserGrammar(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = load_catalog_parser()
+
+    def parser(self, which):
+        return getattr(self.catalog, "parse_" + which)
+
+    def assert_rejected(self, parse, source, code, where=None):
+        with self.assertRaises(self.catalog.CatalogSyntaxError) as caught:
+            parse(source)
+        error = caught.exception
+        self.assertEqual(error.code, code, source[:300])
+        self.assertIn(error.code, self.catalog.CODES)
+        if where is not None:
+            self.assertEqual((error.line, error.column), where, source[:300])
+
+    def test_current_english_file_parses_to_its_literal_table(self):
+        table = self.catalog.parse_english((ROOT / "data/LocalizationEnglish.lua").read_bytes())
+        self.assertIs(type(table), dict)
+        self.assertEqual(table, CATALOG_CURRENT_ENGLISH)
+        self.assertEqual(list(table), list(CATALOG_CURRENT_ENGLISH))
+
+    def test_current_packs_file_parses_to_its_literal_tables(self):
+        packs = self.catalog.parse_packs((ROOT / "data/LocalizationPacks.lua").read_bytes())
+        self.assertIs(type(packs), dict)
+        self.assertEqual(packs, CATALOG_CURRENT_PACKS)
+        self.assertEqual(list(packs), ["frFR", "deDE", "esES", "plPL", "ptBR", "ruRU"])
+
+    def test_percent_braces_markup_and_code_in_strings_stay_inert_text(self):
+        self.assertEqual(self.catalog.parse_english(CATALOG_INERT_SOURCE), CATALOG_INERT_TABLE)
+
+    def test_comments_long_strings_and_lua_5_1_escapes_decode_exactly(self):
+        source = b"\r\n".join(CATALOG_LEXICAL_LINES) + b"\r\n"
+        self.assertEqual(self.catalog.parse_english(source), CATALOG_LEXICAL_TABLE)
+
+    def test_pack_ids_fields_commas_and_empty_tables_are_syntax_only(self):
+        for label, which, body, expected in CATALOG_SHAPES:
+            with self.subTest(label):
+                self.assertEqual(self.parser(which)(CATALOG_HEADS[which] + body), expected)
+
+    def test_wrong_bootstrap_or_assignment_is_rejected(self):
+        for label, which, source, code in CATALOG_HEADER_CASES:
+            with self.subTest(label):
+                self.assert_rejected(self.parser(which), source, code)
+
+    def test_duplicates_are_found_after_decoding_before_storing(self):
+        for label, which, body, code, where in CATALOG_DUPLICATE_CASES:
+            with self.subTest(label):
+                self.assert_rejected(self.parser(which), CATALOG_HEADS[which] + body, code, where)
+
+    def test_malformed_nested_expression_function_and_computed_input_is_rejected(self):
+        for label, which, body, code in CATALOG_MALFORMED_CASES:
+            with self.subTest(label):
+                self.assert_rejected(self.parser(which), CATALOG_HEADS[which] + body, code)
+
+    def test_utf8_and_lexical_errors_have_stable_codes(self):
+        for label, which, source, code, where in CATALOG_LEXICAL_ERROR_CASES:
+            with self.subTest(label):
+                self.assert_rejected(self.parser(which), source, code, where)
+
+    def test_executable_prefix_suffix_and_code_are_rejected_and_never_run(self):
+        english, packs = self.catalog.parse_english, self.catalog.parse_packs
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "executed.marker"
+            touch = ('io.open("%s", "w"):close()' % marker.as_posix()).encode("utf-8")
+            valid = CATALOG_HEADS["english"] + b'{ ["k.a"] = "a" }\n'
+            valid_packs = CATALOG_HEADS["packs"] + b'{ frFR = { name = "F", entries = {} } }\n'
+            cases = (
+                ("code before the bootstrap", english, touch + b"\n" + valid, "bad-bootstrap"),
+                ("code after the table", english, valid + touch + b"\n", "trailing-content"),
+                ("os.execute after the table", english, valid + b'os.execute("x")\n',
+                 "trailing-content"),
+                ("return after the table", english, valid + b"return Nexus\n", "trailing-content"),
+                ("lone terminal semicolon", english, valid.rstrip(b"\n") + b";\n",
+                 "trailing-content"),
+                ("semicolon then code", english, valid.rstrip(b"\n") + b"; " + touch,
+                 "trailing-content"),
+                ("second assignment", english, valid + b"Nexus.LocalizationEnglish = {}\n",
+                 "trailing-content"),
+                ("metatable after packs", packs,
+                 valid_packs + b"setmetatable(Nexus.LocalizationPacks, {})\n", "trailing-content"),
+                ("code before packs", packs, touch + b"\n" + valid_packs, "bad-bootstrap"),
+                ("code as a value", english,
+                 CATALOG_HEADS["english"] + b'{ ["k.a"] = ' + touch + b" }\n", "unexpected-token"),
+                ("function value with code", english,
+                 CATALOG_HEADS["english"] + b'{ ["k.a"] = (function() ' + touch
+                 + b' return "a" end)() }\n', "unexpected-token"),
+                ("code as an entry key", packs,
+                 CATALOG_HEADS["packs"] + b'{ frFR = { name = "F", entries = { [' + touch
+                 + b'] = "a" } } }\n', "unexpected-token"),
+            )
+            for label, parse, source, code in cases:
+                with self.subTest(label):
+                    self.assert_rejected(parse, source, code)
+            inert = CATALOG_HEADS["english"] + b'{ ["k.a"] = [==[' + touch + b"]==] }\n"
+            self.assertEqual(english(inert), {"k.a": touch.decode("utf-8")})
+            self.assertFalse(marker.exists())
+
+    def test_public_functions_take_bytes_not_paths_or_text(self):
+        path = ROOT / "data/LocalizationEnglish.lua"
+        text = CATALOG_HEADS["english"].decode("ascii") + "{}"
+        for parse in (self.catalog.parse_english, self.catalog.parse_packs):
+            for value in (str(path), path, text, None):
+                with self.subTest(parse=parse.__name__, value=type(value).__name__):
+                    with self.assertRaises(TypeError):
+                        parse(value)
+        self.assertEqual(self.catalog.parse_english(bytearray(CATALOG_HEADS["english"] + b"{}")), {})
+
+    def test_direct_invocation_is_a_pending_notice_and_exits_nonzero(self):
+        env = dict(os.environ)
+        env.pop("PYTHONDONTWRITEBYTECODE", None)
+        before = catalog_pycache_names()
+        load_catalog_parser()
+        runs = [subprocess.run([sys.executable, str(CATALOG_TOOL), *args], capture_output=True,
+                               cwd=str(ROOT), env=env)
+                for args in ((), ("--root", str(ROOT)))]
+        self.assertEqual(catalog_pycache_names(), before)
+        for run in runs:
+            self.assertEqual(run.returncode, 2, run.stderr)
+            self.assertEqual(run.stdout, b"")
+            self.assertTrue(run.stderr.isascii(), run.stderr)
+            lines = run.stderr.decode("ascii").splitlines()
+            self.assertEqual(len(lines), 1, run.stderr)
+            self.assertEqual(json.loads(lines[0]), CATALOG_NOTICE)
+        self.assertEqual(runs[0].stderr, runs[1].stderr)
 
 
 if __name__ == "__main__":
