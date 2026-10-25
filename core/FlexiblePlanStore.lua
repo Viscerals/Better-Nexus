@@ -1,9 +1,9 @@
 -- Nexus: core/FlexiblePlanStore.lua
--- #151 Stage A1: pure codec for the local manual-choice pool record v1
--- (docs/flexible-plans/LOCAL_PERSISTENCE_CONTRACT.md section 2). No frames,
+-- #151: pure codec for the local manual-choice pool record v1
+-- (docs/flexible-plans/LOCAL_PERSISTENCE_CONTRACT.md, "Record v1"). No frames,
 -- Store, SavedVariables, catalog or game reads, draft normalizers, assignment
 -- or actions in Encode/Decode. New({store}) at the end of this file is the
--- frame-free persistence owner (Stage A2); it reads through the Store's pure
+-- frame-free persistence owner; it reads through the Store's pure
 -- PlanPoolReadV1 seam and writes only through the counted UpdateStateV1.
 --
 -- Encode(ids, rows, chosen) -> record, bytes | nil, nil (clear) | nil, code
@@ -39,7 +39,7 @@ Nexus = Nexus or {}
 local Codec = {}
 Nexus.FlexiblePlanStore = Codec
 
--- Application admission bounds (contract section 2), not native limits.
+-- Application admission bounds (contract, "Record v1"), not native limits.
 local MAX_ALTERNATIVES, MAX_ORDINARY, MAX_ID = 256, 79, 2147483647
 local MAX_QUALITY, MAX_NAME_BYTES = 255, 256
 local ARRAYS = {"ids", "quality", "maxStack", "groupId", "counts"}
@@ -229,7 +229,8 @@ function Codec.Decode(record)
 end
 
 -- ===================================================================
--- New({store}) -> facade | nil, "INVALID_STORE" (contract sections 5-6).
+-- New({store}) -> facade | nil, "INVALID_STORE" (contract, "Persistence
+-- facade (`Nexus.FlexiblePlanStore`)").
 -- Frame-free owner of the one per-character pool. Every call re-resolves
 -- Nexus.MainInternals.StoreAuthorityOwner and requires its `owner` to be
 -- exactly `store`: a stub or reloaded Store module refuses

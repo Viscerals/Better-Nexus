@@ -2847,11 +2847,13 @@ function Store.State()
     return snapshot
 end
 
--- #151 Stage A2: the private local-pool seam (docs/flexible-plans/
--- LOCAL_PERSISTENCE_CONTRACT.md sections 4 and 6). Internals only: the public
--- Store facade inventory is unchanged, no mutation entry is added (the pool
--- owner writes through the counted UpdateStateV1) and no file-level local is
--- spent (Lua 5.1 ceiling), so everything lives in this block.
+-- #151: the private local-pool seam (docs/flexible-plans/
+-- LOCAL_PERSISTENCE_CONTRACT.md, "Data owner"). Internals only: the public
+-- Store facade inventory is unchanged and no mutation entry is added (the pool
+-- owner writes through the counted UpdateStateV1). Its constants and helpers
+-- are locals of this do-block, so it adds no file-level local that stays
+-- active after the block; while the block is in scope those locals still
+-- count toward the compiler's limit of 200 active locals (Lua 5.1 and LuaJIT).
 --   PLAN_POOL_KEY        the one reserved character-row key. Store.State and
 --                        the UpdateStateV1 snapshot compare skip exactly this
 --                        top-level key; the same name nested anywhere else,

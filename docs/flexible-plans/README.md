@@ -1,8 +1,9 @@
 # Flexible planning pool: #47 player-choice slice
 
 **Status: the player-choice chooser and exact Wishlist-draft handoff (first
-milestone) and a later local Save/Load of one planning pool per character
-(#151) are implemented for offline review. Full #47 remains incomplete and
+milestone, published with PR #136) and a later local Save/Load of one
+planning pool per character (#151) are implemented, with offline evidence
+only. Full #47 remains incomplete and
 open. These documents claim no merge, release or native validation; native UI
 validation is NOT_RUN.**
 
@@ -19,8 +20,11 @@ The [player-choice slice](PLAYER_CHOICE_SLICE.md) is the first-milestone
 contract. The [local persistence contract](LOCAL_PERSISTENCE_CONTRACT.md)
 describes the separate #151 Save/Load extension. In summary:
 
-- The Wishlist Editor's **Plan alternatives** button opens a session-only
-  chooser over an ordinary planning pool of at most 256 alternatives.
+- The Wishlist Editor's **Plan alternatives** button opens a chooser over an
+  ordinary planning pool of at most 256 alternatives. The pool and its counts
+  are session work: they are kept only for this session unless the player
+  explicitly saves them with **Save pool**, and later edits stay unsaved until
+  the next Save pool.
 - Membership, catalog filtering, scrolling and reopening select nothing. The
   player explicitly sets each count. A choice holds at most 79 ordinary copies
   and no count above the captured catalog stack bound.
@@ -180,7 +184,8 @@ reload or login.
 
 All of these fixtures use a synthetic catalog and host. This document records
 no test result. Final full-suite and package checks and independent Spec and
-Standards review are separate gates, and they are pending.
+Standards review are separate gates; their results belong to the PR evidence
+for the exact source pin.
 
 No exact versioned native client/export reference was available. Native UI,
 client loading, pixels, scaling, input, mouse wheel and popups remain NOT_RUN

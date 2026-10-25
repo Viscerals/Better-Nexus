@@ -396,12 +396,15 @@ function Factory.New(options)
         end
         frame:Hide()
     end
-    -- #151 binding slice (LOCAL_PERSISTENCE_CONTRACT section 7). The optional
-    -- persistence facade is read on first Show and on explicit Save/Load only,
+    -- #151 persistence binding (docs/flexible-plans/LOCAL_PERSISTENCE_CONTRACT.md,
+    -- "Chooser (`ui/FlexiblePlanChooser.lua`)"). The optional persistence facade
+    -- reads saved data only on Show and on explicit Save, Load saved and Reset,
     -- never in Refresh, typing or scrolling. `observed` is the receipt the facade
-    -- issued for the saved data this session is bound to. Only an accepted
-    -- Save/Clear/Load replaces it, or an explicit Save when nothing was observed
-    -- (that Save then refuses). A newer read (`latest`) reports staleness but never
+    -- issued for the saved data this session is bound to. The first Show binds an
+    -- unobserved session; an accepted Save/Clear/Load, an explicit Reset, or an
+    -- explicit Save when nothing was observed (that Save then refuses) replaces
+    -- it, and a Save or removal whose facade call fails or returns no result
+    -- drops it. A newer read (`latest`) reports staleness but never
     -- authorizes a write. `cleanBytes` is the session's own clean baseline
     -- (initially the empty pool), distinct from the saved receipt.
     local persistence = options.persistence
@@ -686,7 +689,7 @@ function Factory.New(options)
         return "confirm", "LOAD_CONFIRM"
     end
 
-    -- Fresh scalar metadata for a later visible status; never reads the Store.
+    -- Fresh scalar persistence metadata; never reads the Store.
     function M.PersistenceState()
         local seen = latest or observed
         return {available=persistence ~= nil, phase=phase, code=persistCode, dirty=Dirty(),

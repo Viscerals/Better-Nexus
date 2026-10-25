@@ -1,6 +1,7 @@
--- #151 Stage A1: the pure local-pool codec, loaded through the actual TOC.
+-- #151: the pure local-pool codec, loaded through the actual TOC.
 -- Synthetic public data only: no Store, UI, private/native input, live I/O
--- or game action. Persistence operations (New/Read/Save) are a later slice.
+-- or game action. The facade operations (New/Read/Save/Clear) are covered by
+-- the other flexible_plan_persistence_* fixtures.
 local H = dofile('tests/prototype/harness.lua')
 H.Boot()
 local checks = 0
@@ -310,6 +311,6 @@ check(tables == 6 and edges == 1286 and charged == 13586 and depth == 2,
     'independent count matches contract hypothesis: 6 tables, 1,286 edges, 13,586 bytes, arrays one level down')
 check(recordHeap <= 65536, 'held maximal record plus bytes stays within 64 KB')
 check(sessionHeap <= 131072, 'held decoded maximal session (256 row tables) stays within the proposed 128 KB')
-check(residue <= 16384, '200 repeated maximal decodes leave no residual heap growth')
+check(residue <= 16384, '200 repeated maximal decodes leave a bounded heap residue within 16 KB')
 check(metaCalls == 0, 'no caller metamethod was invoked')
 print('PASS flexible_plan_persistence_codec checks='..checks)

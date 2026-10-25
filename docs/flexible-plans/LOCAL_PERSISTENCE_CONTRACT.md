@@ -1,6 +1,6 @@
 # Local pool persistence contract (#151)
 
-Status: final implementation contract for the [#151](https://github.com/Viscerals/Better-Nexus/issues/151) next-release extension, described against source `7b350492bbfdec7d08c0ab399f05b08d460a2df4`. It extends the published PR #136 session-only chooser (`b7b4ff5`), which remains the historical first milestone of [#47](https://github.com/Viscerals/Better-Nexus/issues/47) ([player-choice slice](PLAYER_CHOICE_SLICE.md)). Nothing here is merged, released or natively validated; native checks are NOT_RUN. The final full suite, the package check and the independent Spec and Standards reviews are pending and are recorded outside the addon. #47 stays open.
+Status: implementation contract for the [#151](https://github.com/Viscerals/Better-Nexus/issues/151) next-release extension. It extends the session-only chooser published with PR #136 (`b7b4ff5`), which remains the historical first milestone of [#47](https://github.com/Viscerals/Better-Nexus/issues/47) ([player-choice slice](PLAYER_CHOICE_SLICE.md)). This contract states behavior, the saved format, measured bounds and native limits. Merge and release state, check counts, pass results and review outcomes belong to the PR evidence for the exact source pin, not here. Native behavior is NOT_RUN (see Limits). This extension alone does not complete #47.
 
 ## Scope
 
@@ -79,7 +79,7 @@ Refused records are kept exactly as found. The chooser offers no removal for the
 
 Saved input is untrusted, so the copy has these bounds:
 
-- 16 tables, at a depth of at most 2 below the record;
+- 16 tables, at most two levels: the record and one level of child tables (a table inside a child table is refused as `MALFORMED`);
 - 16 root entries and 257 entries per child;
 - 3,871 entries visited in total;
 - keys: strings of at most 32 bytes, or integers;
@@ -235,13 +235,13 @@ The chooser adds two visible controls, `NexusFlexiblePlanSave` ("Save pool") and
 
 ## Measured bounds
 
-These are offline measurements on a specific pinned LuaJIT at source `7b35049`. They are not native, storage or server contracts. All figures are for a maximal record of 256 rows.
+These are offline synthetic measurements on one pinned LuaJIT runtime. They can differ with the runtime and the source revision; the revision and runtime of each measurement belong to the PR evidence. They are not native, storage or server contracts. All figures are for a maximal record of 256 rows.
 
 **Graph:**
 
 - 6 tables and 1,286 edges.
 - 13,586 charged bytes and 9,988 canonical bytes.
-- Depth 2 below the record.
+- Two levels: the record and its five arrays.
 - The row gains the 18-byte key and one edge.
 
 **Store read and Save of a valid maximal record:**
@@ -279,7 +279,7 @@ These are offline measurements on a specific pinned LuaJIT at source `7b35049`. 
 - Retention uses the real `F.Serialize` and an `F.Boot` module reboot. A module reboot is not a native client reload or login.
 - Retention of the unknown key by an older build is tested for released build 9049 and the current build. Intermediate builds were not run.
 
-**Results at `7b35049`:** the chooser fixture passed 174 checks, covering:
+The chooser fixture covers:
 
 - coexistence with the real editor's retry, replacement request and unconfirmed Save;
 - every visible button, and the reboot and Clear controls;
@@ -293,9 +293,7 @@ These are offline measurements on a specific pinned LuaJIT at source `7b35049`. 
 - zero reads and writes for typing, search, scrolling and hover;
 - one read each for Show, Load and Reset.
 
-The player-choice fixture (71 checks) and the handoff fixture (863 checks) passed unchanged.
-
-**Pending:** the final full suite, the package check, and the independent Spec and Standards reviews.
+Check counts, pass results, the full suite, the package check and the independent Spec and Standards reviews belong to the PR evidence for the exact source pin; this contract records none of them.
 
 ## Limits
 

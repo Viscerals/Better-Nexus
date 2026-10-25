@@ -1,4 +1,4 @@
--- #151 binding slice: chooser persistence callbacks over the real Store facade.
+-- #151: chooser persistence callbacks over the real Store facade.
 -- Real TOC boot with synthetic format-5 data, the actual chooser Factory.New
 -- with the real FlexiblePlanStore facade and a tiny literal catalog. Rows are
 -- driven through the rendered Add/Set/Reset controls; counts are read from the
@@ -9,9 +9,8 @@
 -- retry and replacement request beside pool Save/Load. Its FAILURE AND
 -- REFUSAL block covers unverified fault injection and unknown, future,
 -- read-only, malformed, loading, owner and root refusal presentation in the
--- UI. Still PENDING here: docs, the final full suite,
--- content checks and independent UltraCode reviews. The popup host is the identity-aware
--- synthetic host of flexible_plan_editor_handoff. Native StaticPopup pooling,
+-- UI. The popup host is the identity-aware synthetic host of
+-- flexible_plan_editor_handoff. Native StaticPopup pooling,
 -- return handling, timing and game behaviour are NOT_RUN.
 local F=dofile('tests/prototype/format5_support.lua')
 local passed,failed=0,0
@@ -176,10 +175,10 @@ check(phase=='loaded' and Rendered(300002)==1 and again.PersistenceState().catal
     and PoolRow(300002).label:GetText():find('Q1',1,true)~=nil,'clean Load restores saved facts and counts, reporting catalog drift')
 check(opened==0 and #H.actions==actions,'reload Load opens no draft and performs no action')
 
--- MAIN PRESENTATION (#151 visible controls/readback slice). Actual TOC boots
+-- MAIN PRESENTATION (#151 visible controls and readback). Actual TOC boots
 -- with two literal Echoes seeded through F.Boot's before hook (so the catalog
 -- scan sees them), the real editor entry (NewWishlist, then
--- NexusFlexiblePlanEntry) and the rendered controls only: Add/Set, the new
+-- NexusFlexiblePlanEntry) and the rendered controls only: Add/Set, the
 -- Save pool / Load saved buttons, Reset and the identity-aware popup host
 -- above. Stored data is read from NexusDB, counts from rendered pool rows and
 -- the persistence status from the fixed line at (22,-66). The font models are
@@ -407,7 +406,7 @@ do
         'Load saved after removal says nothing is saved and restores nothing')
     Quiet(fx,'Load saved with nothing saved')
 
-    -- EDITOR COEXISTENCE (#151 editor Save-retry/replace slice). Pool Save/Load
+    -- EDITOR COEXISTENCE (#151 editor Save retry and replacement). Pool Save/Load
     -- are separate from the editor draft and its Save authority. A fresh
     -- synthetic boot seeds three literal Echoes (410002 q2, 410003 q3, 410005 q1,
     -- max 5, group 0). The real editor entry, the rendered chooser controls, the
@@ -722,12 +721,11 @@ do
         check(Nexus.GameAdapter.UploadWishlist==realUpload and ctl.PendingApply()==nil and Popup.shown[CREATE]==nil
             and Popup.shown[LOAD]==nil and Popup.shown[CLEAR]==nil and Popup.shown[REPLACE]==nil,
             'COEXIST cleanup restores the public upload function and leaves no popup or waiting Save')
-        -- PENDING acceptance, not covered by this block: docs, the final full
-        -- suite, content checks and independent UltraCode Spec/Standards
-        -- reviews. Fault injection and refusal presentation follow below.
+        -- The FAILURE AND REFUSAL block below covers fault injection and
+        -- refusal presentation.
     end
 
-    -- FAILURE AND REFUSAL (#151 failure/refusal presentation slice). Fresh
+    -- FAILURE AND REFUSAL (#151 failure and refusal presentation). Fresh
     -- serialized F.Boot data, the real editor entry, the rendered controls and
     -- the identity-aware popup host above. Faults and the read counter wrap only
     -- the real owner seam StoreAuthorityOwner.PlanPoolReadV1, as

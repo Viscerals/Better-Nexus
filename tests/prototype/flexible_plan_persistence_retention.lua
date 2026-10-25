@@ -1,5 +1,6 @@
--- #151 Stage A retention acceptance (docs/flexible-plans/LOCAL_PERSISTENCE_CONTRACT.md
--- sections 3 and 8). Synthetic data and host only; offline. F.Boot/F.Reload is an
+-- #151 retention acceptance (docs/flexible-plans/LOCAL_PERSISTENCE_CONTRACT.md,
+-- "Measured bounds" and "Validation"). Synthetic data and host only; offline.
+-- F.Boot/F.Reload is an
 -- offline module reload with round-tripped literal data, not a client reload and not
 -- native SavedVariables bytes. Instruction counts are Lua VM counts (count hook, JIT
 -- off) of the actual coordinator pumps on a synthetic host, not native time.
