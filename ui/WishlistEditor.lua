@@ -883,6 +883,13 @@ StaticPopupDialogs["NEXUS_FLEXIBLE_PLAN_REPLACE"] = {
     -- value, so this adapter returns nothing, like the other Nexus
     -- confirmations: the dialog closes after an accept that installed the
     -- choice and after one that refused (the chooser then says why).
+    -- Its data is one owned, single-use request. An install attempt (installed
+    -- or refused) or its own Cancel retires it. A newer request hides only the
+    -- popup whose data is the older request. A late or replayed old Accept or
+    -- Cancel therefore cannot install, dismiss a newer replacement or touch
+    -- another dialog such as Save. This rests on request identity alone. The
+    -- client behaviour above and its popup pooling, reuse and timing come from
+    -- FrameXML and an offline host model only (native NOT_RUN).
     OnAccept = function(_, request) if request then request.Install() end end,
     OnCancel = function(_, request) if request then request.Cancel() end end,
     timeout = 0, whileDead = true, hideOnEscape = true,
@@ -897,8 +904,12 @@ function M.OpenFlexiblePlanChooser()
                 local name = renderer.NameText()
                 local intent, why = wishlistController.PrepareNewExactDraft(draft, alternatives)
                 if not intent then return refuse(why) end
-                local request = {}
+                local request, former = {}, flexiblePlanRequest
                 flexiblePlanRequest = request
+                -- This request supersedes an older one, whether it asks again or
+                -- installs directly. The older popup is retired by its own request
+                -- identity, so no newer replacement or other dialog is dismissed.
+                if former then StaticPopup_Hide("NEXUS_FLEXIBLE_PLAN_REPLACE", former) end
                 -- The replacement popup can be accepted while the chooser is hidden:
                 -- a current request's refusal shows the chooser (pool, choice and
                 -- pending input kept) and then states the same reason in it.
@@ -908,12 +919,15 @@ function M.OpenFlexiblePlanChooser()
                 end
                 local function Install()
                     if flexiblePlanRequest ~= request then return refuse("EDITOR_CHANGED") end
+                    -- Single use: the attempt retires the request before any check. A
+                    -- refused request therefore cannot install when the former name,
+                    -- count or context is restored and its old callback is replayed.
+                    flexiblePlanRequest = nil
                     local current, countReason = planCurrent()
                     if not current then return RevealRefusal(countReason or "PLAN_CHANGED") end
                     if renderer.NameText() ~= name then return RevealRefusal("EDITOR_CHANGED") end
                     local ok, reason = intent.Install()
                     if not ok then return RevealRefusal(reason) end
-                    flexiblePlanRequest = nil
                     RolePicker.Hide()
                     SyncFulfilledDraftTargets()
                     renderer.Prepare({attach=true, style=true, close=true})
