@@ -517,10 +517,32 @@ do
  local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
  local packData=penv.Nexus and penv.Nexus.LocalizationPacks
  check(count(penv)==1 and count(penv.Nexus)==1 and type(packData)=='table' and getmetatable(packData)==nil and count(packData)==6,'the pack data file sets one plain table of six packs and calls nothing')
+ -- The normative original pack cohort (issue #123): the three static status
+ -- messages each real optional pack translates, with their existing exact
+ -- English bytes. It is named apart from the expanded English cohort above,
+ -- whose newer issue #142 meanings have no pack entry and stay English (or an
+ -- explicit injected candidate) under any selected language.
+ local packCohort={
+  {'ROOT_MUTATION_PENDING','reason.save_in_progress','Saving is still in progress; wait for its final result'},
+  {'CURSOR_REQUIRED','reason.list_preparing','This list is still being prepared'},
+  {'STORE_PENDING','reason.saved_data_reading','Reading your saved data'},
+ }
+ local packKeys,newer,englishRow={},{},{}
+ for _,case in ipairs(cohort)do englishRow[case[2]]=case end
+ for _,case in ipairs(packCohort)do
+  local row=englishRow[case[2]];packKeys[case[2]]=true
+  check(row and row[1]==case[1] and row[3]==case[3] and data[case[2]]==case[3] and L.Kind(case[2])=='text','SETUP original pack-cohort row keeps its code, key and exact English bytes: '..case[2])
+ end
+ for _,case in ipairs(cohort)do if not packKeys[case[2]] then newer[#newer+1]=case end end
+ check(#packCohort==3 and #newer==2 and #cohort==#packCohort+#newer and newer[1][2]=='reason.wait_three_choices' and newer[2][2]=='reason.wait_pending_pick_count','SETUP the original pack cohort is three of the five static English meanings; the two newer ones are English-only')
+ for _,case in ipairs(newer)do check(L.Kind(case[2])=='text' and data[case[2]]==case[3],'SETUP newer static English meaning keeps its exact bytes: '..case[2])end
  for i=2,#IDS do
   local id=IDS[i];local pack=packData[id]
-  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and count(pack.entries)==3,'pack '..id..': its own name and exactly the three cohort entries')
-  for _,case in ipairs(cohort)do
+  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and count(pack.entries)==3,'pack '..id..': its own name and exactly the three original pack-cohort entries')
+  local onlyOriginal=true
+  for key in pairs(pack.entries)do onlyOriginal=onlyOriginal and packKeys[key]==true end
+  check(onlyOriginal,'pack '..id..' holds only original pack-cohort keys: no newer English-only meaning or template')
+  for _,case in ipairs(packCohort)do
    local text=pack.entries[case[2]]
    check(type(text)=='string' and #text>=8 and isolated(text) and text~=case[2] and not text:find('[%%{}<>]') and not text:find('TODO',1,true) and not text:find('TBD',1,true),'pack '..id..' '..case[2]..': drafted text, not a key or a placeholder')
    for _,other in ipairs(cohort)do check(text~=other[3],'pack '..id..' '..case[2]..' is not an English text')end
@@ -539,14 +561,33 @@ do
  check(fresh.Text(K)==E and select(2,fresh.Text(K))=='base','before initialization Text is English')
  local got,first=fresh.InitializeActiveLanguage('frFR')
  check(got=='frFR' and first==true and fresh.Diagnostics().language.active=='frFR','initialization selects the saved pack')
+ local active0=fresh.Diagnostics()
  for _,case in ipairs(cohort)do
   local want=packData.frFR.entries[case[2]]
   local text,source,why=fresh.Text(case[2])
-  check(text==want and source=='candidate' and why==nil,'ordinary Text uses the active pack: '..case[2])
+  if packKeys[case[2]] then
+   check(type(want)=='string' and text==want and source=='candidate' and why==nil,'ordinary Text uses the active pack: '..case[2])
+  else
+   check(want==nil and text==case[3] and source=='base' and why=='missing_candidate','a newer static meaning the selected frFR pack lacks falls back to its exact English: '..case[2])
+  end
   local rtext,rsource,rwhy=fresh.Resolve(case[2])
   check(rtext==case[3] and rsource=='base' and rwhy==nil,'Resolve stays pure: without a pack it is the English base: '..case[2])
   check(fresh.Resolve(case[2],{[case[2]]='Fixture text'})=='Fixture text' and fresh.Text(case[2],{[case[2]]='Fixture text'})=='Fixture text','an explicit pack still decides alone: '..case[2])
  end
+ local active1=fresh.Diagnostics()
+ check(active1.misses-active0.misses==#newer and active1.byReason.missing_candidate-active0.byReason.missing_candidate==#newer and active1.last=='missing_candidate' and #active1.keys==#active0.keys and active1.keysNotKept==active0.keysNotKept,'each newer English fallback under frFR is counted once as missing_candidate and keeps no key')
+ local charge={banish={known=true,value=2},reroll={known=false},freeze={known=true,value=0}}
+ local ct,cs,cw=fresh.Format('readout.charge_counts',charge)
+ check(fresh.Kind('readout.charge_counts')=='format' and ct=='B:2 R:? F:0' and cs=='base' and cw==nil,'with frFR selected a formatted meaning without an explicit pack uses the English template and typed known/unknown counts')
+ ct,cs,cw=fresh.Format('readout.charge_counts',charge,{['readout.charge_counts']='G:{freeze} R:{reroll} B:{banish}'})
+ check(ct=='G:0 R:? B:2' and cs=='candidate' and cw==nil,'with frFR selected only an explicit NON-SHIPPED candidate template replaces it')
+ check(fresh.Diagnostics().misses==active1.misses and charge.banish.value==2 and charge.reroll.known==false and charge.reroll.value==nil and charge.freeze.value==0,'formatting without a fallback records nothing and leaves its arguments untouched')
+ Nexus.Localization=fresh
+ local shown={}
+ for _,case in ipairs(cohort)do shown[case[1]]=T.Message(case[1])end
+ Nexus.Localization=real
+ for _,case in ipairs(packCohort)do check(shown[case[1]]==packData.frFR.entries[case[2]] and shown[case[1]]~=case[3],'UserText shows the selected frFR pack text: '..case[1])end
+ for _,case in ipairs(newer)do check(shown[case[1]]==case[3],'UserText keeps the exact English of a newer meaning under the selected frFR pack: '..case[1])end
  local ut,us,uw=fresh.Text(K,'unsupported-pack')
  check(ut==E and us=='base' and uw=='unsupported_pack','an explicit unsupported pack falls back to English, not to the active pack')
  check(fresh.Text('reason.not_reviewed')==U and select(2,fresh.Text('reason.not_reviewed'))=='unavailable','an unknown key keeps the safe status with a pack active')

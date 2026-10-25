@@ -262,4 +262,81 @@ C.scenario('E owner/context gate: a withheld compact Resume names nothing',funct
  C.expect(again.canResume and again.resumeTarget and again.resumeTarget.kind=='same','E: the restored context offers it again, unchanged')
 end)
 
+-- F: the changed-target Review race at 4f38ff95. The window renders target
+-- B; the real writer assigns C before the next 0.25 s refresh; the player
+-- clicks the button that still shows B. A click may act only on the exact
+-- target (key) and the action that button showed. EXPECT is the race
+-- behaviour 4f38ff95 lacks (predicted there, not executed by the author);
+-- SETUP and GUARD hold there too. Closing the window clears any review (A),
+-- so the Cancel race starts from the same state with or without the fix.
+C.scenario('F stale Review/Cancel: a click acts only on the target the window showed',function()
+ Fresh()
+ local f=SettledPausedRun()
+ C.setup(A.SetFirstLoadoutWishlistIdentity('Shown target B',{{spellId=410004,quality=3,stacks=2}}),'F: the real writer assigns B')
+ UI.Refresh()
+ local s=M.Status();local targetB=s.resumeTarget or {}
+ C.setup(s.canResume and targetB.kind=='changed' and targetB.name=='Shown target B' and targetB.key~=nil,
+  'F: the runtime offers the changed-target Resume for B',targetB.kind)
+ local statusB=f.status:GetText()
+ C.setup(statusB:find("New target: Resume would use 'Shown target B'",1,true)~=nil and f.review:IsShown()
+  and f.review:GetText()=='Review target' and not f.resume:IsEnabled(),'F: the window displayed B with Review target and Resume withheld',statusB)
+
+ -- C replaces B before the next refresh: no UI.Refresh and no H.Advance
+ -- until the click.
+ C.setup(A.SetFirstLoadoutWishlistIdentity('Unseen target C',{{spellId=410002,quality=2,stacks=2}}),'F: the real writer assigns C')
+ s=M.Status();local targetC=s.resumeTarget or {}
+ C.setup(targetC.kind=='changed' and targetC.name=='Unseen target C' and targetC.key~=nil and targetC.key~=targetB.key,
+  'F: C is a changed target with another key',targetC.kind)
+ C.setup(s.canResume and M.CompactStatus().canResume,'F: the runtime still legitimately offers the changed-target Resume')
+ C.setup(f.status:GetText()==statusB and f.review:GetText()=='Review target' and not f.resume:IsEnabled(),
+  'F: the window still displays B: nothing refreshed it',f.status:GetText())
+ local before=Effects()
+ f.review:Click()
+ local text,notice=f.status:GetText(),f.notice:GetText()
+ C.expect(not f.resume:IsEnabled() and f.review:GetText()=='Review target',
+  'F: a stale Review click reviews no unseen C: Resume stays withheld',f.review:GetText())
+ C.expect(text:find("New target: Resume would use 'Unseen target C'",1,true)~=nil and not text:find('Reviewed:',1,true),
+  'F: the refreshed window shows C, not reviewed',text)
+ C.expect(notice:find('target changed after it was shown',1,true)~=nil and notice:find('review it again',1,true)~=nil,
+  'F: the notice says the target changed and needs another review',notice)
+ C.guard(Same(before,Effects()),'F: the stale Review click adopted, selected, wrote and spent nothing')
+
+ -- A passive refresh, then one deliberate Review of the C now shown.
+ UI.Refresh()
+ local now=M.Status().resumeTarget or {}
+ C.setup(now.key~=nil and now.key==targetC.key,'F: C is still the target the runtime names')
+ f.review:Click()
+ C.expect(f.resume:IsEnabled() and f.review:GetText()=='Cancel review'
+  and f.status:GetText():find("Reviewed: Resume would use 'Unseen target C'",1,true)~=nil,
+  'F: a deliberate Review of the shown C reviews exactly C',f.status:GetText())
+ C.guard(Same(before,Effects()),'F: the deliberate review spends nothing')
+ f.review:Click()
+ C.expect(not f.resume:IsEnabled() and f.review:GetText()=='Review target'
+  and f.notice:GetText():find('Review cancelled',1,true)~=nil,'F: Cancel review of the shown C withholds Resume again',f.notice:GetText())
+ C.guard(Same(before,Effects()),'F: Cancel review spends nothing')
+
+ -- The same race on Cancel review. Closing the window clears any review;
+ -- C is then reviewed deliberately and D replaces it before the next refresh.
+ f:Hide();UI.Show();f.review:Click()
+ C.setup(f.resume:IsEnabled() and f.review:GetText()=='Cancel review','F: C is reviewed and Cancel review is displayed')
+ C.setup(A.SetFirstLoadoutWishlistIdentity('Third target D',{{spellId=410004,quality=3,stacks=1}}),'F: the real writer assigns D')
+ s=M.Status();local targetD=s.resumeTarget or {}
+ C.setup(targetD.kind=='changed' and targetD.name=='Third target D' and targetD.key~=nil
+  and targetD.key~=targetC.key and targetD.key~=targetB.key,'F: D is a changed target with a third key',targetD.kind)
+ C.setup(s.canResume,'F: the runtime still offers the changed-target Resume')
+ C.setup(f.review:GetText()=='Cancel review' and f.resume:IsEnabled()
+  and f.status:GetText():find("Reviewed: Resume would use 'Unseen target C'",1,true)~=nil,
+  'F: the window still displays the review of C: nothing refreshed it',f.status:GetText())
+ before=Effects()
+ f.review:Click()
+ text,notice=f.status:GetText(),f.notice:GetText()
+ C.expect(not f.resume:IsEnabled() and f.review:GetText()=='Review target',
+  'F: a stale Cancel review click reviews no unseen D: Resume stays withheld',f.review:GetText())
+ C.expect(text:find("New target: Resume would use 'Third target D'",1,true)~=nil and not text:find('Reviewed:',1,true),
+  'F: the refreshed window shows D, not reviewed',text)
+ C.expect(notice:find('target changed after it was shown',1,true)~=nil and notice:find('review it again',1,true)~=nil,
+  'F: the notice says the target changed and needs another review',notice)
+ C.guard(Same(before,Effects()),'F: the stale Cancel click adopted, selected, wrote and spent nothing')
+end)
+
 C.finish('real OrbRuntime and Orb window/strip/mini handlers; synthetic services; no native or spending claim')

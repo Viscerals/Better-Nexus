@@ -2,10 +2,18 @@
 
 This first cohort moves two existing wait meanings and the compact charge row
 through the reviewed English seam. Panel owns conversion of its raw status and
-recommendation. It does not complete every dynamic window, ship seven language
-packs, or establish native font fit or fluent-speaker acceptance. The selected
-language set is enUS, frFR, deDE, esES, plPL, ptBR and ruRU; only the English base
-and explicitly injected synthetic candidates are exercised here.
+recommendation. It does not complete every dynamic window, add or extend any translated pack, or
+establish native font fit or fluent-speaker acceptance. The selected language set
+is enUS, frFR, deDE, esES, plPL, ptBR and ruRU. Besides the English base, the
+combined source also ships the six existing optional packs of issue #123
+(`data/LocalizationPacks.lua`); each holds only the original three static status
+messages (`reason.save_in_progress`, `reason.list_preparing`,
+`reason.saved_data_reading`). This cohort's meanings have no pack entry: under
+any selected pack its two wait meanings show their exact English, and the charge
+row uses the English template unless a caller passes an explicit candidate. Only
+the English base, including under a selected real pack, and explicitly injected
+synthetic candidates are exercised for them here. This is not a full UI
+translation or native-font acceptance.
 
 ## Classification and ownership
 

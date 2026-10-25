@@ -11,9 +11,13 @@
 -- GetLocale() results or aliases; the game's own language is never read or
 -- changed.
 --
--- Each pack holds only the first cohort: the three status reasons of
--- data/LocalizationEnglish.lua (saving still in progress, a list still being
--- prepared, saved data being read). Every other Nexus text stays English.
+-- Each pack holds only the original three static status messages of issue
+-- #123, the keys reason.save_in_progress, reason.list_preparing and
+-- reason.saved_data_reading of data/LocalizationEnglish.lua (saving still in
+-- progress, a list still being prepared, saved data being read). The later
+-- English keys (issue #142's two wait reasons and charge-row template, which
+-- that file calls its "first cohort") have no entry here; they and every
+-- other Nexus text stay English.
 -- The wording was drafted for this slice and has had a technical review
 -- only; no competent human reviewer of each language has accepted it.
 
