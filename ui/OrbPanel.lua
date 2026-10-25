@@ -509,8 +509,9 @@ local function refresh()
     end
     -- Review target shares Continue's place and is never shown with it.
     -- The button acts only on the exact target it was drawn for and the
-    -- action shown here: a click after the target changed underneath it
-    -- reviews nothing (see the handler).
+    -- action it showed (drawnKey, shownKey, shownAction): a click after the
+    -- target or its review changed underneath it reviews and cancels nothing
+    -- (see the handler).
     if changedTarget(target) and target.key~=nil and not frame.cont:IsShown() then
         frame.review.drawnKey=target.key
         frame.review:SetText(held and "Review target" or "Cancel review");frame.review:Show();frame.review:Enable()
@@ -674,12 +675,16 @@ local function ensure()
         local drawn=frame.review.drawnKey
         if not (changedTarget(t) and t.key~=nil) then
             review.key=nil;frame.notice:SetText("No changed target to review. Nothing was changed.")
-        elseif drawn==nil or shownKey==nil or drawn~=t.key or t.key~=shownKey then
-            -- The fresh target is not the one this button was drawn and
-            -- shown for: neither review nor cancel it unseen. Withholding
-            -- stays; the new target needs its own deliberate review.
+        elseif drawn==nil or shownKey==nil or drawn~=t.key or shownKey~=t.key then
+            -- The fresh target is not the one this button was drawn and shown
+            -- for: neither review nor cancel it unseen. Withholding stays.
             review.key=nil
             frame.notice:SetText("The target changed after it was shown; nothing was reviewed. Check the target shown now, then review it again. Nothing was spent.")
+        elseif not ((shownAction=="review" and reviewHeld(t)) or (shownAction=="cancel" and review.key==t.key)) then
+            -- The action shown no longer matches the fresh review state: a
+            -- stale Cancel review never becomes a review, nor the reverse.
+            -- The review is left as it is.
+            frame.notice:SetText("The review changed after it was shown; nothing was reviewed or cancelled. Check the target shown now. Nothing was spent.")
         elseif shownAction=="review" then
             review.key=t.key
             frame.notice:SetText("Reviewed: Resume would use "..quotedName(t).." with the same maximum. Nothing was spent.")

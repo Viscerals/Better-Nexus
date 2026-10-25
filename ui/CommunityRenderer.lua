@@ -2383,6 +2383,8 @@ local function EnsureDetailPanel(parent)
         -- channel, where other Nexus users may keep a valid copy.
         -- Negotiation alone does not decide the route, and the packets of
         -- one answer can take different routes.
+        -- The listing is listed with the character name, realm and class
+        -- (M7 identity disclosure).
         -- After the local commit the controller also hands the listing ID to
         -- DpsCapture.BroadcastBestForBuild, whether or not the summary was
         -- queued: in Automatic a linked character-best record may be sent.
