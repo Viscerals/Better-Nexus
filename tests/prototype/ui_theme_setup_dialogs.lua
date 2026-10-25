@@ -45,7 +45,16 @@ local function child(root,kind,text)
 end
 local welcomeTitle=assert(child(welcome,'FontString','Welcome to Nexus'))
 local displayTitle=assert(child(display,'FontString','On-Screen Wishlist'))
-local later=assert(child(welcome,'Button','Later'))
+-- The exact "Close" caption of the Welcome dismiss control is a collected
+-- EXPECT. Only after it misses may the real legacy "Later" control carry the
+-- original theme checks; the miss fails this test after them (end of file).
+local later=child(welcome,'Button','Close')
+local closeCaptionMissing=later==nil
+if closeCaptionMissing then
+    print('FAIL EXPECT the Welcome dismiss control reads exactly "Close"; the legacy "Later" control carries the original checks')
+    later=child(welcome,'Button','Later')
+end
+later=assert(later)
 local lock=assert(child(display,'Button','Lock Position')
     or child(display,'Button','Unlock to Move'))
 local reset=assert(child(display,'Button','Reset Position'))
@@ -104,4 +113,7 @@ check(#H.frames==count,'reopen/repaint allocates no additional frames')
 close:Click()
 check(not display:IsShown(),'the themed close button preserves dismissal')
 check(#H.actions==0,'dialog inspection performs no game action')
+if closeCaptionMissing then
+    error('ui_theme_setup_dialogs: EXPECT the Welcome dismiss control reads exactly "Close" (the legacy "Later" control carried '..checks..' original checks)',0)
+end
 print('PASS '..checks..' setup-dialog theme checks; native pixels NOT_RUN')

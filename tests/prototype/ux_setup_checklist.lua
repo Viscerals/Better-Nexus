@@ -299,7 +299,7 @@ local function Quiet(before)
   and not Nexus.OrbRuntime.Status().running
 end
 
-C.scenario('K7 Escape closes the first-time Welcome as Later does; an ordinary hide still records nothing',function()
+C.scenario('K7 Escape closes the first-time Welcome as Close does; an ordinary hide still records nothing',function()
  Boot(2)
  C.setup(Seen()==nil,'K7: fixture: the Welcome has not been acknowledged',tostring(Seen()))
  Nexus.QuickStart.ShowIfFirstTime()
@@ -325,7 +325,7 @@ C.scenario('K7 Escape closes the first-time Welcome as Later does; an ordinary h
  C.expect(not w:IsShown(),'K7: after Escape the Welcome is not offered again this session',tostring(settled))
  local durable=Nexus.QuickStart.CanRecordSeen()
  C.expect((durable and Seen()==true and settled==true) or (not durable and Seen()==nil),
-  'K7: the acknowledgement follows Later\'s policy (recorded only when it can be saved)',
+  'K7: the acknowledgement follows Close\'s policy (recorded only when it can be saved)',
   'durable='..tostring(durable)..' seen='..tostring(Seen())..' settled='..tostring(settled))
  C.guard(Quiet(before),'K7: closing the Welcome assigns, acts, sends, turns Auto ON and starts nothing',Describe(Effects()))
 end)
@@ -410,7 +410,7 @@ C.scenario('K9 a passive ancestor hide neither closes nor acknowledges the first
  local closed=Escape()
  local durable=Nexus.QuickStart.CanRecordSeen()
  C.expect(closed.NexusQuickStartEscape==true and not w:IsShown() and ((durable and Seen()==true) or (not durable and Seen()==nil)),
-  'K9: an explicit Escape afterwards still closes it with Later\'s acknowledgement policy',
+  'K9: an explicit Escape afterwards still closes it with Close\'s acknowledgement policy',
   'closed='..tostring(closed.NexusQuickStartEscape)..' durable='..tostring(durable)..' seen='..tostring(Seen()))
  C.guard(Quiet(before),'K9: nothing assigns, acts, sends, turns Auto ON or starts',Describe(Effects()))
 end)
