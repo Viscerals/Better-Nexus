@@ -88,6 +88,15 @@ for _,path in ipairs({'ui/Panel.lua','ui/OrbPanel.lua','ui/SupportReport.lua','u
  local f=assert(io.open(path,'rb'));sources[#sources+1]=f:read('*a');f:close()
 end
 local all=table.concat(sources,'\n')
+-- Issues #143/#148: EXTRA COPIES moved from a ui/Panel.lua literal to the
+-- stable reviewed key panel.heading.extra_copies. Its evidence is the actual
+-- consumer call that binds that key to the same widget (shedLabel, the
+-- extra-copies heading) plus the exact English the real seam gives the key
+-- in this English session. A data string alone, or a key no consumer binds,
+-- never counts; every other label below stays a source literal.
+local KEYED={['EXTRA COPIES']={key='panel.heading.extra_copies',
+ bind='shedLabel:SetText((Nexus.Localization.Text("panel.heading.extra_copies")))'}}
+local panelFile=assert(io.open('ui/Panel.lua','rb'));local panelSource=panelFile:read('*a');panelFile:close()
 for _,label in ipairs({'Wishlist Editor','Create & assign','Create unassigned','Import','Save changes','Save & assign','Assign Wishlist','Unassign Wishlist',
  'Confirm locked targets & edit','Build Library','All Shared','Require both DPS records','Updating results...','Copy into Editor',
  'Share Build','Stop Sharing','Sync Now','Training Dummy','Lich King','Both records','Open Orbs...','Orbs / Lost Memories',
@@ -96,7 +105,17 @@ for _,label in ipairs({'Wishlist Editor','Create & assign','Create unassigned','
  'Needed','Target already met','Not on Wishlist','Auto ON','Auto OFF','Automation settings'}) do
  -- A string literal or a colour-coded span in the source, not any substring.
  local esc=label:gsub('%p','%%%0')
- check(all:find('"'..esc) or all:find(esc..'"') or all:find('|c%x%x%x%x%x%x%x%x'..esc) or all:find(esc..'|r'),'real label: '..label)
+ if KEYED[label] then
+  -- Keyed (see KEYED): its actual Panel binding and exact English, not a literal.
+  local keyed=KEYED[label]
+  local text,source,why=Nexus.Localization.Text(keyed.key)
+  local english,base,reason=Nexus.Localization.Resolve(keyed.key)
+  check(Nexus.Localization.ActiveLanguage()=='enUS' and Nexus.Localization.Kind(keyed.key)=='text'
+   and text==label and source=='base' and why==nil and english==label and base=='base' and reason==nil
+   and panelSource:find(keyed.bind,1,true)~=nil,'real label: '..label..' (key '..keyed.key..' bound by ui/Panel.lua, exact English)')
+ else
+  check(all:find('"'..esc) or all:find(esc..'"') or all:find('|c%x%x%x%x%x%x%x%x'..esc) or all:find(esc..'|r'),'real label: '..label)
+ end
 end
 
 -- Quoted status lines exist as shown (colour codes aside).

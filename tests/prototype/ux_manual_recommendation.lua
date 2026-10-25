@@ -191,7 +191,28 @@ C.scenario('R5 compact charges: only supplied facts; unknown is not zero; no ser
  local unk=Fresh({banish=5,reroll=5,freeze=5,trustworthy=false,arrived=false})
  Nexus.Localization=seam
  local back=Fresh(H.Clone(supplied))
+ -- Issue #143 boundary, made explicit. The Panel now shows its reviewed
+ -- labels through Nexus.Localization.Text, a TOC-loaded core module it
+ -- requires (the chosen direct route has no fallback of its own). The charge
+ -- row keeps Readout's own optional formatter, which is what this no-seam
+ -- case characterizes. So the case is split: Readout.ChargesLine runs with
+ -- no Localization module at all, and the actual Panel renders with the real
+ -- seam's Text and IsText but no Format. Both take the real Readout fallback
+ -- (it needs a Format function); nothing is stubbed or normalized.
+ local bareInput=H.Clone(supplied)
  Nexus.Localization=nil
+ local bare=Nexus.Readout.ChargesLine(bareInput)
+ local bareEstimate=Nexus.Readout.ChargesLine({banish=2,reroll=nil,freeze=0,trustworthy=false,arrived=true})
+ local bareUnknown=Nexus.Readout.ChargesLine({banish=5,reroll=5,freeze=5,trustworthy=false,arrived=false})
+ local bareModule=Nexus.Localization
+ Nexus.Localization=seam
+ local noFormat={}
+ for key,value in pairs(seam or {}) do noFormat[key]=value end
+ noFormat.Format=nil
+ C.setup(bareModule==nil and type(seam)=='table' and type(seam.Format)=='function' and noFormat.Format==nil
+  and noFormat.Text==seam.Text and noFormat.IsText==seam.IsText,
+  'R5: fixture: Readout ran with no Localization module; the Panel seam keeps the real Text and IsText and lacks only Format')
+ Nexus.Localization=noFormat
  local absent=Fresh(H.Clone(supplied))
  Nexus.Localization=seam
  C.expect(v1.charges=='G:0 R:1 B:2' and m1.charges.banish==2 and m1.charges.reroll==1 and m1.charges.freeze==0,
@@ -202,7 +223,10 @@ C.scenario('R5 compact charges: only supplied facts; unknown is not zero; no ser
  C.expect(est.charges=='G:0 R:? B:2 ~' and unk.charges=='G:? R:? B:?',
   'R5: INJECTION: unknown stays ? and the code-owned ~ follows the whole row',tostring(est.charges)..' | '..tostring(unk.charges))
  C.guard(back.charges=='B:2 R:1 F:0' and absent.charges=='B:2 R:1 F:0',
-  'R5: the shipped English row, with or without the seam, is unchanged',tostring(back.charges)..' | '..tostring(absent.charges))
+  'R5: the shipped English row on the actual Panel is unchanged with the real seam and with the real Text but no formatter',tostring(back.charges)..' | '..tostring(absent.charges))
+ C.guard(bare=='B:2 R:1 F:0' and bareEstimate=='B:2 R:? F:0 ~' and bareUnknown=='B:? R:? F:?' and V.Same(bareInput,supplied),
+  'R5: with no Localization module the real Readout fallback keeps the English row: unknown is ?, ~ follows the whole row, the caller facts are untouched',
+  tostring(bare)..' | '..tostring(bareEstimate)..' | '..tostring(bareUnknown))
 end)
 
 
