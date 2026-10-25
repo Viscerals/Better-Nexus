@@ -5,8 +5,17 @@
 -- a warning that waits for its answer; the warning keeps its reading delay
 -- and its explicit Yes; Auto keeps its own warning. A first-time Welcome
 -- dismissal that cannot be saved (read-only or failed start-up) says so.
+-- UX01 (adopted: "Fresh profile: No -> Welcome shown, Auto OFF, no
+-- overwriteWarnings write"): an explicit No, Close (X) or Escape of the
+-- first-launch warning opens the Welcome at once as the same information-only
+-- setup (no acknowledgement, no consent, Auto stays OFF). A Hide from another
+-- route, an early No, CancelAuto, every Auto warning answer and an answer
+-- given after the saved root or the character changed decline only and open
+-- nothing; closing the informational Welcome reopens nothing. Button labels
+-- and the rest of UX01 are outside this fixture.
 -- EXPECT: behaviour added in M2 (fails on the accepted M1 cut, which has no
--- replay entry). GUARD: existing warning/Welcome/seen-state behaviour that
+-- replay entry) or by UX01 (fails where an explicit No, Close or Escape
+-- opens no Welcome). GUARD: existing warning/Welcome/seen-state behaviour that
 -- must keep holding (pinned also by overwrite_warning_*, quickstart_* tests).
 -- SETUP: fixture state. Real TOC boot, real warning, Welcome, Panel menu and
 -- Help controls; synthetic saved data and host services only.
@@ -67,8 +76,18 @@ local function Quiet(tag,before)
  C.guard(#H.actions==before.actions and #H.sent==before.sent and Auto()==before.auto,
   tag..': no game action, no send, Auto unchanged','actions='..#H.actions..' sent='..#H.sent..' auto='..tostring(Auto()))
 end
+local function Informational() return Shown() and Title():find('information only',1,true)~=nil end
+-- Presses a Welcome button only while the Welcome is shown; false otherwise,
+-- so a cut that opens no Welcome reports its expectation instead of raising
+-- or recording a first-time dismissal.
+local function Press(text)
+ local b=WelcomeButton(text)
+ if not (b and Shown()) then return false end
+ b:Click()
+ return true
+end
 
-C.scenario('S1 No after reading: Welcome not resumed; Setup / Welcome replays it as information only',function()
+C.scenario('S1 No after reading: the informational Welcome opens at once; Setup / Welcome replays it',function()
  H=Fresh()
  local w=Warning()
  C.setup(w and w:IsShown(),'S1: fixture: the first-launch warning is shown')
@@ -77,10 +96,13 @@ C.scenario('S1 No after reading: Welcome not resumed; Setup / Welcome replays it
  local shown,why=Replay()
  C.expect(shown==false and why=='warning-open' and not Shown(),
   'S1: Setup / Welcome waits for the open warning instead of opening over it',tostring(shown)..'/'..tostring(why))
- -- The reading delay is intact: no choice before it, an early Yes does nothing.
+ -- The reading delay is intact: no choice before it, an early Yes or No does nothing.
  C.guard(not w.yes:IsEnabled() and not w.no:IsEnabled(),'S1: no choice before the reading delay')
  w.yes:GetScript('OnClick')(w.yes)
  C.guard(w:IsShown() and Nexus.OverwriteWarning.EnsureOnboarding()=='pending','S1: an early Yes accepts nothing')
+ w.no:GetScript('OnClick')(w.no)
+ C.guard(w:IsShown() and Nexus.OverwriteWarning.EnsureOnboarding()=='pending' and not Shown(),
+  'S1: an early No handler declines nothing and opens no Welcome')
  H.Advance(5.01)
  C.setup(w.yes:IsEnabled() and w.no:IsEnabled(),'S1: fixture: choices enabled after reading')
  C.guard(#H.actions==before.actions and not Auto(),'S1: reading the warning takes no action and enables nothing')
@@ -89,8 +111,24 @@ C.scenario('S1 No after reading: Welcome not resumed; Setup / Welcome replays it
  w.no:Click()
  C.guard(Nexus.OverwriteWarning.EnsureOnboarding()=='declined' and not w:IsShown(),'S1: No declines the warning')
  C.guard(NexusDB.overwriteWarnings==nil and Seen()==nil and Saved()==savedBefore,'S1: No saves no suppression and no seen state')
- C.guard(not Shown(),'S1: No does not resume the first-time Welcome (existing contract)')
- C.guard(Nexus.QuickStart.Show()==false and not Shown(),'S1: the consent-bound Show still requires the warning to be accepted')
+ C.expect(Informational() and Hint():find('never turns Auto ON',1,true)~=nil,
+  'S1: No opens the Welcome at once, as information only that never turns Auto ON',Title()..' | '..Hint())
+ C.guard(not Auto() and Nexus.OverwriteWarning.EnsureOnboarding()=='declined' and not w:IsShown(),
+  'S1: the Welcome after No changes neither Auto nor the warning answer')
+ C.guard(Nexus.QuickStart.Show()==false,'S1: the consent-bound Show still requires the warning to be accepted')
+ C.expect(Informational(),'S1: the refused Show leaves the informational Welcome as it is',Title())
+ local closed=Press('Later')
+ C.expect(closed and not Shown() and not w:IsShown() and Seen()==nil and Saved()==savedBefore
+  and Nexus.OverwriteWarning.EnsureOnboarding()=='declined',
+  'S1: closing it records nothing, writes nothing and reopens nothing')
+ -- The answered warning is one-shot: its repeated callbacks open nothing.
+ w.no:GetScript('OnClick')(w.no)
+ w.close:GetScript('OnClick')(w.close)
+ w:GetScript('OnKeyDown')(w,'ESCAPE')
+ w:GetScript('OnHide')(w)
+ C.guard(not Shown() and not w:IsShown() and Seen()==nil and Saved()==savedBefore
+  and Nexus.OverwriteWarning.EnsureOnboarding()=='declined',
+  'S1: repeated No, Close, Escape and Hide callbacks of the answered warning open nothing')
  shown,why=Replay()
  print('OBSERVED','S1 replay',tostring(shown),tostring(why),'title='..Title())
  C.expect(shown==true and Shown(),'S1: after No, Setup / Welcome opens the setup window',why)
@@ -107,23 +145,44 @@ C.scenario('S1 No after reading: Welcome not resumed; Setup / Welcome replays it
    'S1: an entry button of the replay opens its view and records nothing')
   if NexusHelpWindow then NexusHelpWindow:Hide() end
  end
- -- Auto keeps its own warning after No and the replay.
+ -- Auto keeps its own warning after No and the replay, and no Auto answer
+ -- opens the closed Welcome, whichever way it is given.
  SlashCmdList.NEXUS('auto')
  w=Warning()
  C.guard(w:IsShown() and not Auto(),'S1: Auto still asks its own warning; nothing is enabled by asking')
  w.no:Click()
  C.guard(not Auto(),'S1: declining it keeps Auto OFF')
+ C.guard(not w:IsShown() and not Shown(),'S1: Auto No opens no Welcome')
+ local owner,accepted,savedAuto={},0,Saved()
+ local function accept() accepted=accepted+1;return true end
+ for _,way in ipairs({'Close','Escape','CancelAuto'}) do
+  local asked=Nexus.OverwriteWarning.RequestAuto(owner,accept)
+  C.setup(asked==false and w:IsShown() and Nexus.OverwriteWarning.IsOpen()==true,'S1: fixture: the Auto warning is open for '..way)
+  if way=='Close' then w.close:Click()
+  elseif way=='Escape' then w:GetScript('OnKeyDown')(w,'ESCAPE')
+  else C.guard(Nexus.OverwriteWarning.CancelAuto(owner)==true,'S1: CancelAuto cancels its own Auto request') end
+  C.guard(not w:IsShown() and not Shown() and accepted==0 and not Auto() and Saved()==savedAuto
+   and Nexus.OverwriteWarning.EnsureOnboarding()=='declined',
+   'S1: Auto '..way..' declines, accepts nothing, saves nothing and opens no Welcome')
+ end
  Quiet('S1',before)
 end)
 
-C.scenario('S2 Close (X) during the delay, then the Panel menu replay',function()
+C.scenario('S2 Close (X) during the delay opens the informational Welcome; the Panel menu replays it',function()
  H=Fresh()
  local w=Warning()
  C.setup(w and w:IsShown(),'S2: fixture: the warning is shown')
- local before=Counters()
+ local before,savedClose=Counters(),Saved()
  w.close:Click()
- C.guard(Nexus.OverwriteWarning.EnsureOnboarding()=='declined' and NexusDB.overwriteWarnings==nil and not Shown(),
-  'S2: closing declines, saves nothing and resumes no Welcome')
+ C.guard(Nexus.OverwriteWarning.EnsureOnboarding()=='declined' and NexusDB.overwriteWarnings==nil
+  and Seen()==nil and Saved()==savedClose and not w:IsShown(),'S2: closing declines and saves nothing')
+ C.expect(Informational(),'S2: Close opens the informational Welcome at once',Title())
+ C.guard(Nexus.QuickStart.Show()==false and not Auto(),'S2: the consent-bound Show is still refused')
+ local closed=Press('Later')
+ C.expect(closed and not Shown() and not w:IsShown() and Seen()==nil and Saved()==savedClose,
+  'S2: closing it records nothing and it stays closed')
+ w.close:GetScript('OnClick')(w.close)
+ C.guard(not Shown() and not w:IsShown() and Saved()==savedClose,'S2: a second Close of the answered warning opens nothing')
  -- The ... menu's real items (EasyMenu observed, not executed by the client).
  local items
  local realMenu=EasyMenu
@@ -238,4 +297,105 @@ C.scenario('S6 failed start-up: the Welcome is usable, nothing is claimed saved'
  Quiet('S6',before)
 end)
 
-C.finish('(informational setup replay after No/Close; no consent, no saved write, no Auto change)')
+C.scenario('S7 Escape on the first-launch warning opens the informational Welcome; other keys answer nothing',function()
+ H=Fresh()
+ local w=Warning()
+ local key=w and w:GetScript('OnKeyDown')
+ C.setup(w and w:IsShown() and type(key)=='function','S7: fixture: the warning is shown with its key handler')
+ if type(key)~='function' then return end
+ local before,savedBefore=Counters(),Saved()
+ key(w,'ENTER')
+ C.guard(w:IsShown() and Nexus.OverwriteWarning.EnsureOnboarding()=='pending' and not Shown(),
+  'S7: another key answers nothing and opens nothing')
+ key(w,'ESCAPE')
+ C.guard(Nexus.OverwriteWarning.EnsureOnboarding()=='declined' and not w:IsShown()
+  and NexusDB.overwriteWarnings==nil and Seen()==nil and Saved()==savedBefore,'S7: Escape declines and saves nothing')
+ C.expect(Informational(),'S7: Escape opens the informational Welcome at once',Title())
+ local closed=Press('Later')
+ C.expect(closed and not Shown() and Seen()==nil and Saved()==savedBefore,'S7: closing it records nothing and it stays closed')
+ C.guard(Nexus.QuickStart.ShowIfFirstTime()==true and not Shown() and not w:IsShown(),
+  'S7: the first-time check after the decline opens neither window')
+ Quiet('S7',before)
+end)
+
+C.scenario('S8 a Hide from another route only declines the warning; the manual replay still opens',function()
+ H=Fresh()
+ local w=Warning()
+ C.setup(w and w:IsShown(),'S8: fixture: the first-launch warning is shown')
+ if not w then return end
+ H.Advance(5.01)
+ C.setup(w.no:IsEnabled(),'S8: fixture: choices enabled after reading')
+ local before,savedBefore=Counters(),Saved()
+ w:Hide()
+ C.guard(Nexus.OverwriteWarning.EnsureOnboarding()=='declined' and not w:IsShown()
+  and NexusDB.overwriteWarnings==nil and Seen()==nil and Saved()==savedBefore,'S8: the Hide declines and saves nothing')
+ C.guard(not Shown(),'S8: the Hide opens no Welcome')
+ w.no:GetScript('OnClick')(w.no)
+ w:GetScript('OnHide')(w)
+ C.guard(not Shown() and not w:IsShown(),'S8: later No or Hide callbacks of the hidden warning open nothing')
+ local shown=Replay()
+ C.guard(shown==true and Informational(),'S8: Setup / Welcome still replays the informational setup',Title())
+ Press('Later')
+ C.guard(not Shown() and Seen()==nil and Saved()==savedBefore,'S8: closing the replay writes nothing')
+ Quiet('S8',before)
+end)
+
+C.scenario('S9 a No given after the saved root changed opens nothing and writes nothing',function()
+ H=Fresh()
+ local w=Warning()
+ C.setup(w and w:IsShown(),'S9: fixture: the first-launch warning is shown')
+ if not w then return end
+ H.Advance(5.01)
+ C.setup(w.no:IsEnabled(),'S9: fixture: choices enabled after reading')
+ local before,root=Counters(),NexusDB
+ local other=F.Database({mutate=function(db) db.overwriteWarnings=nil end})
+ local rootBefore,otherBefore=F.Serialize(root),F.Serialize(other)
+ NexusDB=other
+ w.no:Click()
+ local answer,hidden,welcome=Nexus.OverwriteWarning.EnsureOnboarding(),not w:IsShown(),Shown()
+ local rootAfter,otherAfter=F.Serialize(root),F.Serialize(other)
+ NexusDB=root
+ C.guard(answer=='declined' and hidden,'S9: the stale No declines the warning')
+ C.guard(not welcome,'S9: it opens no Welcome for the replacement saved root')
+ C.guard(rootAfter==rootBefore and otherAfter==otherBefore,'S9: it writes neither saved root')
+ Quiet('S9',before)
+end)
+
+C.scenario('S10 answers given after the character changed open nothing, accept nothing and save nothing',function()
+ H=Fresh()
+ local w=Warning()
+ C.setup(w and w:IsShown(),'S10: fixture: the first-launch warning is shown')
+ if not w then return end
+ local store,realName=Nexus.Store,UnitName
+ local function Owner()
+  local ok,key=pcall(function() return store.CurrentOwnerKey() end)
+  return ok and key or nil
+ end
+ local function Other() return 'SyntheticOther','Ebonhold' end
+ local before,savedBefore,ownerBefore=Counters(),Saved(),Owner()
+ UnitName=Other
+ local ownerAfter=Owner()
+ UnitName=realName
+ if not C.setup(ownerBefore~=nil and ownerAfter~=ownerBefore,'S10: fixture: the harness UnitName seam changes the current owner key',
+  tostring(ownerBefore)..' -> '..tostring(ownerAfter)) then return end
+ UnitName=Other
+ w.close:Click()
+ local answer,hidden,welcome,saved=Nexus.OverwriteWarning.EnsureOnboarding(),not w:IsShown(),Shown(),Saved()
+ UnitName=realName
+ C.guard(answer=='declined' and hidden and saved==savedBefore,'S10: a Close given after the character changed declines and saves nothing')
+ C.guard(not welcome,'S10: it opens no Welcome for the other character')
+ local owner,accepted={},0
+ local asked=Nexus.OverwriteWarning.RequestAuto(owner,function() accepted=accepted+1;return true end)
+ C.setup(asked==false and w:IsShown() and w.yes:IsEnabled(),'S10: fixture: the Auto warning is open')
+ local savedAuto=Saved()
+ w.suppress:SetChecked(true)
+ UnitName=Other
+ w.yes:Click()
+ local autoHidden,autoWelcome,autoSaved=not w:IsShown(),Shown(),Saved()
+ UnitName=realName
+ C.guard(accepted==0 and autoHidden and not autoWelcome and autoSaved==savedAuto and not Auto(),
+  'S10: a stale Auto Yes with its opt-out ticked accepts nothing, saves nothing and opens no Welcome')
+ Quiet('S10',before)
+end)
+
+C.finish('(informational setup after an explicit No/Close/Escape and on replay; no consent, no saved write, no Auto change)')
