@@ -313,6 +313,8 @@ NAMES += ['flexible_plan_persistence_codec']
 NAMES += ['flexible_plan_persistence_store']
 # #151 Stage A retention: measured maximal-pool startup work against actual PumpCaps/SourceBounds, a 28,672-byte sibling, released 9049 and current peers keep the key; no pool message or action.
 NAMES += ['flexible_plan_persistence_retention']
+# #151 binding slice: chooser SavePool/LoadPool/PersistenceState and owned Load/Clear consent over the real facade (EXPECT fails at 4c92d3f by design; visible controls follow).
+NAMES += ['flexible_plan_persistence_chooser']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

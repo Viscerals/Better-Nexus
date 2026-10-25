@@ -35,6 +35,30 @@ local REASONS = {
     PLAN_CHANGED="The pool or choice changed. Open the draft again to review your choice.",
     COUNT_PENDING="Count input is pending. Use Set for each edited count before opening a draft.",
 }
+-- #151 explicit local pool consent. Each dialog's data is one owned single-use
+-- request. OnAccept returns nil, like NEXUS_FLEXIBLE_PLAN_REPLACE. A late or
+-- replayed request does nothing and asks no popup to hide. Native pooling,
+-- return handling and timing are NOT_RUN.
+local LOAD_POPUP, CLEAR_POPUP = "NEXUS_FLEXIBLE_PLAN_LOAD", "NEXUS_FLEXIBLE_PLAN_CLEAR"
+local function PopupAccept(_, request)
+    if type(request) == "table" and type(request.Accept) == "function" then request.Accept() end
+end
+local function PopupCancel(_, request)
+    if type(request) == "table" and type(request.Cancel) == "function" then request.Cancel() end
+end
+if type(StaticPopupDialogs) == "table" then
+    StaticPopupDialogs[LOAD_POPUP] = {
+        text = "Load the pool saved on this character?\nThis replaces the current pool, its counts and any pending count input. Cancel keeps them.",
+        button1 = "Load saved", button2 = "Cancel", OnAccept = PopupAccept, OnCancel = PopupCancel,
+        timeout = 0, whileDead = true, hideOnEscape = true,
+    }
+    StaticPopupDialogs[CLEAR_POPUP] = {
+        text = "Remove the pool saved on this character?\nThe current planning session is unchanged. Cancel keeps the saved pool.",
+        button1 = "Remove saved", button2 = "Cancel", OnAccept = PopupAccept, OnCancel = PopupCancel,
+        timeout = 0, whileDead = true, hideOnEscape = true,
+    }
+end
+
 function Factory.Reason(code)
     return REASONS[code] or "This choice cannot be opened. Review the pool and exact counts."
 end
@@ -281,7 +305,212 @@ function Factory.New(options)
         end
         frame:Hide()
     end
-    function M.Show() EnsureFrame();Refresh();frame:Show() end
+    -- #151 binding slice (LOCAL_PERSISTENCE_CONTRACT section 7). The optional
+    -- persistence facade is read on first Show and on explicit Save/Load only,
+    -- never in Refresh, typing or scrolling. `observed` is the receipt the facade
+    -- issued for the saved data this session is bound to. Only an accepted
+    -- Save/Clear/Load replaces it, or an explicit Save when nothing was observed
+    -- (that Save then refuses). A newer read (`latest`) reports staleness but never
+    -- authorizes a write. `cleanBytes` is the session's own clean baseline
+    -- (initially the empty pool), distinct from the saved receipt.
+    local persistence = options.persistence
+    if not (type(persistence) == "table" and type(persistence.Read) == "function"
+        and type(persistence.Save) == "function" and type(persistence.Clear) == "function") then
+        persistence = nil
+    end
+    local observed, latest, observedOnce, cleanBytes, staleFlag, restored
+    local cacheRevision, cacheBytes, cacheCode
+    local phase, persistCode, changedMembers = "idle", nil, 0
+    local loadRequest, clearRequest
+
+    -- Canonical session bytes, encoded once per revision (nil = empty pool).
+    local function SessionBytes()
+        if cacheRevision ~= revision then
+            local codec = Nexus.FlexiblePlanStore
+            if not (codec and type(codec.Encode) == "function") then return nil, "CODEC_UNAVAILABLE" end
+            local record, second = codec.Encode(ids, captured.rows, chosen)
+            cacheRevision = revision
+            if record then cacheBytes, cacheCode = second, nil else cacheBytes, cacheCode = nil, second end
+        end
+        return cacheBytes, cacheCode
+    end
+    local function Dirty()
+        if HasPending() then return true end
+        local bytes, why = SessionBytes()
+        return why ~= nil or bytes ~= cleanBytes
+    end
+    local function Persist(nextPhase, nextCode)
+        phase, persistCode = nextPhase, nextCode
+        return nextPhase, nextCode
+    end
+    local function Observe()
+        local ok, read = pcall(persistence.Read)
+        latest = ok and type(read) == "table" and read or {mode="unavailable", reason="READ_FAILED"}
+        return latest
+    end
+    local function Retire(which, request)
+        if request and type(StaticPopup_Hide) == "function" then StaticPopup_Hide(which, request) end
+    end
+    local function Differs(a, b)
+        return a ~= nil and b ~= nil and a ~= b and (a.mode ~= b.mode or a.class ~= b.class
+            or a.bytes ~= b.bytes or a.ownerKey ~= b.ownerKey or a.root ~= b.root)
+    end
+    -- Detached session from a decoded saved pool, or nil. Saved ID, quality,
+    -- maxStack, group and counts are kept even when stale; a current catalog
+    -- name is bounded decoration only. The catalog is read, never changed.
+    local function Prepare(saved, bytes)
+        local codec = Nexus.FlexiblePlanStore
+        if not (Plain(saved) and Plain(saved.ids) and Plain(saved.rows) and Plain(saved.chosen)
+            and codec and type(codec.Encode) == "function") then return nil end
+        local catalog = options.catalog()
+        local current = Plain(catalog) and Plain(catalog.rows) and catalog.rows or nil
+        local nextIds, rows, nextChosen, selection, changed = {}, {}, {}, {}, 0
+        for i, id in ipairs(saved.ids) do
+            local s, live = saved.rows[id], current and rawget(current, id)
+            if not Plain(s) then return nil end
+            rows[id] = {spellId=id, quality=s.quality, maxStack=s.maxStack, groupId=s.groupId}
+            if Plain(live) then
+                local name = rawget(live, "name")
+                if type(name) == "string" and #name <= 256 then rows[id].name = name end
+            end
+            if not Plain(live) or rawget(live, "quality") ~= s.quality or rawget(live, "maxStack") ~= s.maxStack
+                or rawget(live, "groupId") ~= s.groupId or rawget(live, "locked") ~= nil
+                or rawget(live, "sourceRole") ~= nil or rawget(live, "lockIntent") ~= nil then
+                changed = changed + 1
+            end
+            nextIds[i] = id
+            local count = saved.chosen[id]
+            if count then nextChosen[id] = count; selection[#selection+1] = {spellId=id, stacks=count} end
+        end
+        local model = #nextIds > 0 and Nexus.FlexiblePlanModel.New({alternativeSpellIds=nextIds, catalog={rows=rows}})
+        if not model or (#selection > 0 and not model.Choose(selection)) then return nil end
+        local detached = {rows={}}
+        for _, row in ipairs(model.Alternatives()) do detached.rows[row.spellId] = row end
+        local record, encoded = codec.Encode(nextIds, detached.rows, nextChosen)
+        if not record or encoded ~= bytes then return nil end
+        return {ids=nextIds, captured=detached, chosen=nextChosen, pool=model, changed=changed}
+    end
+    -- One complete assignment after Prepare succeeded; nothing partial before it.
+    local function Install(p, read)
+        ids, captured, chosen, pool, pending = p.ids, p.captured, p.chosen, p.pool, {}
+        catalogOffset, poolOffset, revision, note = 0, 0, revision + 1, ""
+        observed, latest, cleanBytes, staleFlag, restored = read, read, read.bytes, false, nil
+        cacheRevision, cacheBytes, cacheCode, changedMembers = revision, read.bytes, nil, p.changed
+        Refresh()
+        return Persist("loaded", nil)
+    end
+    local function LoadFrom(read)
+        if read.loadable ~= true then
+            return Persist("refused", read.class == "ABSENT" and "NOTHING_SAVED"
+                or read.class and "SAVED_" .. read.class or read.reason or "UNAVAILABLE")
+        end
+        local p = Prepare(read.pool, read.bytes)
+        if not p then return Persist("refused", "LOAD_INVALID") end
+        return Install(p, read)
+    end
+    local function Apply(result, bytes)
+        if type(result) ~= "table" then
+            observed = nil
+            return Persist("unverified", "SAVE_UNVERIFIED")
+        end
+        restored = result.restored
+        if result.state == "saved" then
+            observed, latest = result.receipt or observed, result.receipt or latest
+            cleanBytes, staleFlag = bytes, false
+            return Persist("saved", result.unchanged and "UNCHANGED" or nil)
+        elseif result.state == "unverified" then
+            observed, latest = result.receipt, result.receipt or latest
+            return Persist("unverified", result.reason or "SAVE_UNVERIFIED")
+        end
+        local reason = result.reason or "SAVE_REFUSED"
+        if reason == "SAVED_CHANGED" or reason == "OWNER_CHANGED" or reason == "ROOT_CHANGED" then
+            staleFlag = true
+        end
+        return Persist("refused", reason)
+    end
+
+    function M.SavePool()
+        if not persistence then return Persist("refused", "NO_PERSISTENCE") end
+        local former = clearRequest
+        clearRequest = nil
+        Retire(CLEAR_POPUP, former)
+        if HasPending() then return Persist("refused", "COUNT_PENDING") end
+        if not observed or observed.class == nil then
+            observed = Observe()
+            return Persist("refused", "NOT_OBSERVED")
+        end
+        local bytes, why = SessionBytes()
+        if why then return Persist("refused", "INVALID_SESSION") end
+        if bytes == nil and observed.class == "CURRENT" then
+            local receipt = observed
+            local request = {chooser=M, revision=revision, bytes=receipt.bytes,
+                ownerKey=receipt.ownerKey, root=receipt.root}
+            function request.Accept()
+                if clearRequest ~= request then return end
+                clearRequest = nil
+                if revision ~= request.revision or observed ~= receipt then
+                    return Persist("refused", "PLAN_CHANGED")
+                end
+                local ok, result = pcall(persistence.Clear, receipt)
+                return Apply(ok and result, nil)
+            end
+            function request.Cancel() if clearRequest == request then clearRequest = nil end end
+            clearRequest = request
+            StaticPopup_Show(CLEAR_POPUP, nil, nil, request)
+            return "confirm", "CLEAR_CONFIRM"
+        end
+        local ok, result = pcall(persistence.Save, {ids=ids, rows=captured.rows, chosen=chosen}, observed)
+        return Apply(ok and result, bytes)
+    end
+
+    function M.LoadPool()
+        if not persistence then return Persist("refused", "NO_PERSISTENCE") end
+        local read = Observe()
+        local former = loadRequest
+        loadRequest = nil
+        Retire(LOAD_POPUP, former)
+        if read.loadable ~= true or not Dirty() then return LoadFrom(read) end
+        if not Prepare(read.pool, read.bytes) then return Persist("refused", "LOAD_INVALID") end
+        local request = {chooser=M, revision=revision, bytes=read.bytes,
+            ownerKey=read.ownerKey, root=read.root}
+        function request.Accept()
+            if loadRequest ~= request then return end
+            -- Single use: retired before any validation.
+            loadRequest = nil
+            if revision ~= request.revision then return Persist("refused", "LOAD_CHANGED") end
+            local fresh = Observe()
+            if fresh.loadable ~= true or fresh.bytes ~= request.bytes
+                or fresh.ownerKey ~= request.ownerKey or fresh.root ~= request.root then
+                return Persist("refused", "LOAD_CHANGED")
+            end
+            return LoadFrom(fresh)
+        end
+        function request.Cancel() if loadRequest == request then loadRequest = nil end end
+        loadRequest = request
+        StaticPopup_Show(LOAD_POPUP, nil, nil, request)
+        return "confirm", "LOAD_CONFIRM"
+    end
+
+    -- Fresh scalar metadata for a later visible status; never reads the Store.
+    function M.PersistenceState()
+        local seen = latest or observed
+        return {available=persistence ~= nil, phase=phase, code=persistCode, dirty=Dirty(),
+            pending=HasPending(), stale=staleFlag == true or Differs(latest, observed),
+            mode=seen and seen.mode or nil, class=seen and seen.class or nil,
+            saved=seen ~= nil and seen.class == "CURRENT", loadable=seen ~= nil and seen.loadable == true,
+            saveable=seen ~= nil and seen.saveable == true, restored=restored,
+            catalogChanged=changedMembers,
+            confirming=loadRequest and "load" or clearRequest and "clear" or nil}
+    end
+
+    function M.Show()
+        EnsureFrame()
+        if persistence and not observedOnce then
+            observedOnce = true
+            if observed == nil then observed = Observe() end
+        end
+        Refresh();frame:Show()
+    end
     function M.Hide() if frame then frame:Hide() end end
     return M
 end
