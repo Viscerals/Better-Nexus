@@ -27,8 +27,9 @@
 --    identifier or user-authored identity: Identity.ValidDisplayText is a
 --    different policy. Language punctuation, combining sequences, C1,
 --    zero-width/bidi scalars and noncharacters are not newly excluded here.
---    No normalization is done. Acceptance does not prove native glyph,
---    font, locale or visibility behavior.
+--    No normalization is done; Unicode scalars retain their exact bytes.
+--    Acceptance does not prove native glyph, font, locale or visibility
+--    behavior.
 --  * entries table: used only when it is a plain table without a
 --    metatable. It is read with next/rawget, never through a metamethod,
 --    and nothing in it is called.
@@ -36,12 +37,13 @@
 -- English base: data/LocalizationEnglish.lua, loaded just before this file
 -- by Nexus.toc, sets Nexus.LocalizationEnglish. Its valid entries are copied
 -- once, here; a later change to that table changes nothing. An absent,
--- non-table or metatable base is not adopted: present=false, zero counts.
--- A plain base sets present=true; above MAX_BASE_ENTRIES it adopts nothing,
--- sets oversized=true and rejected to the whole entry count. In an admitted
--- plain base, invalid entries are excluded and counted as rejected. A key
--- with a code-owned schema is admitted only as a valid template (counted in
--- both accepted and formatted), never as static text.
+-- non-table or metatable base is not adopted: present=false, zero counts
+-- (no entry count is invented). A plain base sets present=true; above
+-- MAX_BASE_ENTRIES it adopts nothing, sets oversized=true and rejected to
+-- the whole entry count. In an admitted plain base, invalid entries are
+-- excluded and each is counted once as rejected. A key with a code-owned
+-- schema is admitted only as a valid template (counted in both accepted
+-- and formatted), never as static text.
 --
 -- L.Resolve(key, pack) -> text, source, reason. It never raises and records
 -- nothing. In this order:
