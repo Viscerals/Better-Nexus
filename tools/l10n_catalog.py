@@ -2,7 +2,7 @@
 """Syntax foundation, pure schema API, pure coverage report API and read-only
 report command line for the Nexus localization data (#147).
 
-Status: IMPLEMENTED_DRAFT_CI_REVIEW_PENDING. parse_english and parse_packs
+Status: IMPLEMENTED_DRAFT_REVIEW_PENDING. parse_english and parse_packs
 below check syntax only, and a successful parse alone does not make a catalog
 valid. validate_catalog_data, appended after them, is a pure in-memory schema
 API: from the exact bytes of the English base, the packs file, KEY_CONTEXT.json
@@ -23,8 +23,12 @@ truth. main(), appended last, is the bounded read-only confined-root command
 line (B3b) around catalog_report. It adds only root, input and Nexus.toc
 load-order checks (CatalogCliError, stable .code) and passes the exact input
 bytes to catalog_report unchanged. Full validation is an implemented draft
-(IMPLEMENTED_DRAFT): required-CI registration, independent review and the
-human, native and UI gates are still pending. No schema validity, report or
+(IMPLEMENTED_DRAFT). Required-CI registration is implemented in source:
+tools/tests/test_l10n_catalog.py is registered in PYTHON_TESTS of
+tools/run_prototype_tests.py, and tools/ci_check.py runs it as its own
+process. Independent review and the human, native and UI gates are still
+pending. Author execution of the registered tests is NOT_RUN, and host and
+hosted-CI receipts are recorded separately. No schema validity, report or
 command-line record claims that a catalog is reviewed, complete or
 displayable.
 
@@ -132,7 +136,7 @@ import sys
 import types
 from collections import namedtuple
 
-STATUS = 'IMPLEMENTED_DRAFT_CI_REVIEW_PENDING'
+STATUS = 'IMPLEMENTED_DRAFT_REVIEW_PENDING'
 CODES = (
     'not-utf8', 'value-not-utf8', 'unfinished-string', 'unfinished-comment',
     'invalid-escape', 'nested-long-bracket', 'bad-bootstrap', 'bad-assignment',
@@ -144,7 +148,7 @@ NOTICE = {
     'tool': 'tools/l10n_catalog.py',
     'status': STATUS,
     'fullValidation': 'IMPLEMENTED_DRAFT',
-    'message': 'catalog validator and report CLI implemented; CI registration and independent review pending',
+    'message': 'catalog validator and report CLI implemented and registered in required CI; independent review pending',
 }
 
 _INVENTORY = pathlib.Path(__file__).resolve().parent / 'l10n_inventory.py'

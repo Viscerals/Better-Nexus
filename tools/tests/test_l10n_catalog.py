@@ -11,9 +11,11 @@ Later sections append public tests of tools/l10n_catalog.py: the parser, the
 pure schema API validate_catalog_data and the pure coverage report API
 catalog_report on exact in-memory bytes, then subprocess tests of its
 read-only confined-root report command line (B3b) on this repository and on
-temporary public-only roots. The tool is an implemented draft. Still pending
-are required-CI registration, independent review, and the human, native and
-UI gates. This file is not yet registered in tools/run_prototype_tests.py.
+temporary public-only roots. The tool is an implemented draft. This file is
+registered in PYTHON_TESTS of tools/run_prototype_tests.py, and
+tools/ci_check.py runs it as its own process. Still pending are independent
+review, and the human, native and UI gates. Author execution: NOT_RUN; host
+results are recorded separately.
 
 Run directly:  python tools/tests/test_l10n_catalog.py -v
 """
@@ -140,8 +142,8 @@ class ReleaseLanguagesContract(unittest.TestCase):
         self.assertEqual(d["sourcePin"], {"base": BASE, "tree": TREE})
         self.assertEqual(d["contractKind"], "declarative_metadata_only")
         self.assertEqual(d["validator"], {"path": "tools/l10n_catalog.py",
-                                          "status": "IMPLEMENTED_DRAFT_CI_REVIEW_PENDING"})
-        self.assertEqual(d["requiredCiRegistration"], "NOT_REGISTERED_LATER_AUTHORIZED_APPEND")
+                                          "status": "IMPLEMENTED_DRAFT_REVIEW_PENDING"})
+        self.assertEqual(d["requiredCiRegistration"], "REGISTERED_IN_PYTHON_TESTS")
         self.assertEqual(d["selectionDecision"]["issue"], 139)
         self.assertEqual(d["selectionDecision"]["status"], "resolved")
 
@@ -416,9 +418,9 @@ CATALOG_HEADS = {
 CATALOG_NOTICE = {
     "record": "notice",
     "tool": "tools/l10n_catalog.py",
-    "status": "IMPLEMENTED_DRAFT_CI_REVIEW_PENDING",
+    "status": "IMPLEMENTED_DRAFT_REVIEW_PENDING",
     "fullValidation": "IMPLEMENTED_DRAFT",
-    "message": "catalog validator and report CLI implemented; CI registration and independent review pending",
+    "message": "catalog validator and report CLI implemented and registered in required CI; independent review pending",
 }
 
 CATALOG_CURRENT_ENGLISH = {
@@ -849,7 +851,7 @@ class CatalogParserGrammar(unittest.TestCase):
 
 import copy
 
-SCHEMA_STATUS = "IMPLEMENTED_DRAFT_CI_REVIEW_PENDING"
+SCHEMA_STATUS = "IMPLEMENTED_DRAFT_REVIEW_PENDING"
 SCHEMA_OLD_STATUS = "PARSER_ONLY_" + "FULL_VALIDATION_PENDING"
 SCHEMA_CHARGE = "readout.charge_counts"
 SCHEMA_MAX_ENTRIES = 64

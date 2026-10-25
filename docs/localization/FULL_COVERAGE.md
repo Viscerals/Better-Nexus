@@ -29,9 +29,9 @@ It accepts no issue: not #139, not #147 and no later gate.
 |---|---|---|
 | Release languages | `RELEASE_LANGUAGES.json`: product choices, client evidence, review and session states, and the `entryReview` declaration contract with no declaration recorded | none in this slice |
 | Keys and context | `KEY_CONTEXT.json`: six keys, byte limits, grammar, families | none in this slice |
-| Validator | `tools/l10n_catalog.py`, status `IMPLEMENTED_DRAFT_CI_REVIEW_PENDING`: syntax parser, pure schema API `validate_catalog_data`, pure coverage report API `catalog_report` on exact in-memory bytes, and the read-only confined-root command line around `catalog_report` (B3b); full validation IMPLEMENTED_DRAFT | independent review |
+| Validator | `tools/l10n_catalog.py`, status `IMPLEMENTED_DRAFT_REVIEW_PENDING`: syntax parser, pure schema API `validate_catalog_data`, pure coverage report API `catalog_report` on exact in-memory bytes, and the read-only confined-root command line around `catalog_report` (B3b); full validation IMPLEMENTED_DRAFT | independent review |
 | Tests | `tools/tests/test_l10n_catalog.py`: assertions on these public documents, public parser, schema and report API tests, and subprocess tests of the command line on the repository and on temporary public-only roots | independent review; host validation against the final source pin |
-| Required CI | not registered (`NOT_REGISTERED_LATER_AUTHORIZED_APPEND`) | later authorized append to `PYTHON_TESTS` in `tools/run_prototype_tests.py` |
+| Required CI | registered in source (`REGISTERED_IN_PYTHON_TESTS`): `tools/tests/test_l10n_catalog.py` is the second entry of `PYTHON_TESTS` in `tools/run_prototype_tests.py`, run by `tools/ci_check.py` as its own process | independent review; host and hosted-CI validation against the final source pin |
 
 The command line is:
 
@@ -126,12 +126,14 @@ or native truth. Root, fluent human and native acceptance stay separate.
 `technicalAuthorReview`, `fluentHumanAcceptance` and `nativeAcceptance` stay
 empty and pending, UNASSIGNED or NOT_RUN. No declaration is recorded.
 
-Until that registration, `tools/ci_check.py` reports an unregistered
-`test_*.py` under `tools/tests` as an inventory failure (`CONTRIBUTING.md`,
-`VALIDATION.md`). Required-CI registration, independent review and the human,
+With that registration, `tools/ci_check.py` checks the file in its Python
+inventory and, in a complete run, starts it as its own process after the Lua
+suite; an unregistered `test_*.py` under `tools/tests` would still be an
+inventory failure (`CONTRIBUTING.md`, `VALIDATION.md`). Required-CI
+registration is implemented in source; independent review and the human,
 native and full-UI gates are pending. Author execution of the new tests:
-NOT_RUN; host validation is recorded separately against the final source pin,
-and this document claims no host result.
+NOT_RUN; host validation and hosted-CI receipts are recorded separately
+against the final source pin, and this document claims no host result.
 
 ## Separate gates
 
