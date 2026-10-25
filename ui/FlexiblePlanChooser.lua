@@ -146,6 +146,15 @@ function Factory.New(options)
             local copies = member == id and count or chosen[member]
             if copies and copies > 0 then selection[#selection+1]={spellId=member,stacks=copies} end
         end
+        -- Choose admits at most 79 selection rows and refuses more as an
+        -- invalid selection. Every row holds at least one copy, so more rows
+        -- exceed the 79 ordinary copies: say that, after this row's maximum
+        -- stack, which Choose checks before the copy budget for fewer rows.
+        if #selection > 79 then
+            local value = captured.rows[id]
+            if value and count > value.maxStack then return Say("STACK_LIMIT") end
+            return Say("ORDINARY_LIMIT")
+        end
         if #selection > 0 then
             local result, why = pool.Choose(selection)
             if not result then return Say(why) end

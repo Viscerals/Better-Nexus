@@ -716,6 +716,146 @@ do
     assert(#failures==0,'EXPECT fixed chooser text disclosure: '..table.concat(failures,'; '))
 end
 
+-- C1b: the 79-copy budget at the chooser boundary for distinct choices.
+-- Choose admits at most 79 selection rows, so an 80th distinct one-copy
+-- choice is refused; it must be named as over the 79 ordinary copies, not
+-- as an inexact count. Real catalog Add, count input, Set, Open and
+-- replacement popup over a real named exact79 editor draft that holds an
+-- active save confirmation. Setup controls must pass first; only the new
+-- EXPECTs collect failures, so every refusal and recovery path runs on an
+-- unchanged chooser. The save confirmation is canceled and the editor and
+-- planning session are reset before the original paths continue.
+do
+    local failures={}
+    local function expect(value,label)
+        print('C1b '..(value and 'PASS ' or 'FAIL ')..label)
+        if not value then failures[#failures+1]=label end
+        checks=checks+1
+    end
+    -- Independent literal expectations: members 410101..410180 of the
+    -- synthetic catalog, quality i%4, one copy each.
+    local EIGHTIETH=410180
+    local function Rows(first,last)
+        local rows={}
+        for i=first,last do rows[#rows+1]={spellId=410000+i,quality=i%4,stacks=1} end
+        return rows
+    end
+    local function View(first,last,pendingText)
+        local view={}
+        for i=101,180 do
+            local set=(i>=first and i<=last) and '1' or '0'
+            view[410000+i]={set=set,count=set,action='Set'}
+        end
+        if pendingText then view[EIGHTIETH]={set='0',count=pendingText,action='Set *'} end
+        return view
+    end
+    -- Every pool row as rendered, read in one real scroll over the pool: its
+    -- committed "Set: N", its count input and its Set or Set * label.
+    local function PoolView()
+        local area,view=NexusFlexiblePlanPool,{}
+        area:GetScript('OnMouseWheel')(area,1000)
+        for _=1,80 do
+            for _,f in ipairs(H.frames) do
+                if f:GetParent()==area and f:IsVisible() and f.spellId then
+                    view[f.spellId]={set=f.label:GetText():match('^Set: (%d+)  #'),
+                        count=f.count:GetText(),action=f.action:GetText()}
+                end
+            end
+            area:GetScript('OnMouseWheel')(area,-1)
+        end
+        return view
+    end
+    local function snapshot()
+        local save=Popup.shown[CREATE]
+        return {state=H.Clone(editor.DebugDraftState()),rows=Rendered(),name=NexusWishlistNameInput:GetText(),
+            db=H.Clone(NexusDB),held=H.Clone(H.locked),actions=#H.actions,sends=#H.sent,
+            save=tostring(save),saveData=H.Clone(save and save.data)}
+    end
+    local function preserved(before) return equal(snapshot(),before) end
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+    local actions0,sends0,db0=#H.actions,#H.sent,H.Clone(NexusDB)
+    for i=101,180 do check(Add(ids[i]),'C1b setup exact pool member '..i) end
+    check(ChooserText():find('80 / 256',1,true) and ChooserText():find('Chosen: 0 / 79',1,true),
+        'C1b setup a real 80-member pool chooses nothing')
+    for i=101,179 do check(Count(ids[i],1),'C1b setup explicit one-copy choice '..i) end
+    check(ChooserText():find('Chosen: 79 / 79',1,true) and Status()=='' and equal(PoolView(),View(101,179)),
+        'C1b setup 79 distinct one-copy choices are committed')
+    -- 79 distinct one-copy choices are valid: the real Open asks before it
+    -- replaces a named editor, and the accepted popup installs exactly them.
+    NexusWishlistNameInput:SetText('C1b replaced by exact79')
+    check(NexusFlexiblePlanOpen:Click()==true and Popup.shown[REPLACE]~=nil,
+        'C1b setup 79 distinct one-copy choices open a replacement request')
+    Popup.Click(Popup.shown[REPLACE],1)
+    check(Popup.shown[REPLACE]==nil and editor.DebugPendingCount()==79 and equal(Rendered(),Rows(101,179))
+        and NexusWishlistNameInput:GetText()=='' and not NexusFlexiblePlanChooser:IsShown(),
+        'C1b control the accepted popup installs literal exact79 from 79 distinct one-copy choices')
+    editor.Refresh()
+    -- A real named nonempty draft with an active save confirmation.
+    NexusWishlistNameInput:SetText('C1b keep exact79')
+    local applyButton
+    for _,f in ipairs(H.frames) do
+        if f.kind=='Button' and f:GetParent()==NexusEditorFrame and f:IsVisible()
+            and f:GetText()=='Create unassigned' then applyButton=f;break end
+    end
+    check(applyButton~=nil,'C1b setup existing Create unassigned control')
+    applyButton:Click()
+    local savePopup=Popup.shown[CREATE]
+    check(savePopup~=nil and savePopup.data~=nil and Popup.shown[REPLACE]==nil,
+        'C1b setup the named exact79 draft holds an active save confirmation')
+    NexusFlexiblePlanEntry:Click()
+    check(NexusFlexiblePlanChooser:IsShown() and ChooserText():find('80 / 256',1,true)
+        and ChooserText():find('Chosen: 79 / 79',1,true) and Status()=='',
+        'C1b setup reopen keeps the 80-member pool and its 79 committed choices')
+    check(NexusFlexiblePlanOpen:Click()==true and Popup.shown[CREATE]==savePopup,
+        'C1b setup the committed 79 open a current replacement request beside the save confirmation')
+    local request=assert(Popup.shown[REPLACE],'C1b setup production replacement request exists')
+    local before=snapshot()
+    check(not Count(ids[180],1),'C1b setup the 80th distinct one-copy Set refuses')
+    expect(Status()==Reason('ORDINARY_LIMIT')..' '..Reason('COUNT_PENDING')
+        and Status():find('at most 79 ordinary Echo copies',1,true)~=nil,
+        '80th distinct one-copy refusal names the 79-copy budget and the pending input: '..tostring(Status()))
+    expect(equal(PoolView(),View(101,179,'1')) and ChooserText():find('Chosen: 79 / 79',1,true)~=nil,
+        'refused 80th keeps the exact 79 committed choices; its 1 stays pending and uncommitted')
+    expect(preserved(before) and Popup.shown[REPLACE]==request and Popup.shown[CREATE]==savePopup,
+        'refused 80th preserves the named exact79 editor, save confirmation, held, data, traffic and actions')
+    check(not Count(ids[180],6),'C1b setup the 80th over-stack Set refuses')
+    expect(Status()==Reason('STACK_LIMIT')..' '..Reason('COUNT_PENDING'),
+        'an 80th count above its maximum stack names that bound first, as Choose does: '..tostring(Status()))
+    expect(equal(PoolView(),View(101,179,'6')) and preserved(before) and Popup.shown[REPLACE]==request,
+        'refused over-stack 80th keeps the 79 choices, its pending 6 and the complete editor')
+    check(not NexusFlexiblePlanOpen:Click() and Status()==Reason('COUNT_PENDING')
+        and Popup.shown[REPLACE]==request and preserved(before),
+        'C1b control Open with the refused 80th pending refuses and installs nothing')
+    Popup.Click(request,1)
+    check(Popup.shown[REPLACE]==nil and Status()==Reason('COUNT_PENDING') and preserved(before),
+        'C1b control the older request accepted after the refused 80th refuses and installs nothing')
+    Popup.Click(savePopup,2)
+    check(Popup.shown[CREATE]==nil and #H.actions==actions0 and #H.sent==sends0,
+        'C1b setup the player cancels the save confirmation; nothing is sent')
+    -- Positive explicit recovery: 0 clears the refused input; unchoosing one
+    -- peer makes room for the 80th, and the real popup installs that choice.
+    check(Count(ids[180],0),'C1b explicit zero clears the refused 80th input')
+    expect(Status()=='' and equal(PoolView(),View(101,179)) and ChooserText():find('Chosen: 79 / 79',1,true)~=nil,
+        'explicit clear recovers: no status, Set restored and the 79 choices unchanged')
+    check(Count(ids[101],0) and Count(ids[180],1),'C1b explicit correction unchooses one peer, then Sets the 80th')
+    expect(Status()=='' and equal(PoolView(),View(102,180)) and ChooserText():find('Chosen: 79 / 79',1,true)~=nil,
+        'explicit correction commits the 80th in place of the unchosen peer')
+    check(NexusFlexiblePlanOpen:Click()==true,'C1b setup the corrected choice opens a replacement request')
+    Popup.Click(assert(Popup.shown[REPLACE],'C1b setup corrected replacement request exists'),1)
+    expect(Popup.shown[REPLACE]==nil and editor.DebugPendingCount()==79 and equal(Rendered(),Rows(102,180))
+        and NexusWishlistNameInput:GetText()=='' and not NexusFlexiblePlanChooser:IsShown(),
+        'the accepted corrected request installs literal exact79 with the 80th, without trimming or substitution')
+    check(#H.actions==actions0 and #H.sent==sends0 and equal(NexusDB,db0),
+        'C1b refusal, recovery and install send, act and persist nothing')
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+    check(ChooserText():find('0 / 256',1,true) and ChooserText():find('Chosen: 0 / 79',1,true)
+        and Status()=='' and editor.DebugPendingCount()==0 and NexusWishlistNameInput:GetText()==''
+        and Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil,
+        'C1b checks leave a fresh editor and an empty planning session')
+    print('C1b completed real paths; failures='..#failures)
+    assert(#failures==0,'EXPECT C1b 79-copy budget guidance: '..table.concat(failures,'; '))
+end
+
 for i=1,100 do check(Add(ids[i]),'explicit catalog Add callback '..i) end
 check(editor.DebugPendingCount()==0,'100 pool members choose no editor rows')
 check(ChooserText():find('100 / 256',1,true) and ChooserText():find('Chosen: 0 / 79',1,true),
