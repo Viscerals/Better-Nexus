@@ -1814,9 +1814,11 @@ end
 
 -- The title and detail hover areas follow their rows: shown and taking the
 -- mouse only while an objective is observed. Without one, each area is
--- hidden and takes no mouse input; a complete-text tooltip it opened itself
--- is closed (unless the tooltip has since passed to another owner) and its
--- hover state is cleared, so no earlier objective's text stays reachable.
+-- hidden and takes no mouse input, and its hover state is cleared, so no
+-- earlier objective's text stays reachable. A complete-text tooltip it
+-- opened itself is closed only while the tooltip reports this area as its
+-- current owner. Another owner, no reported owner or an owner read that
+-- fails does not show that the tooltip is still this area's: it stays open.
 -- Geometry stays with PlaceCallboardBox and PlaceCallboardManual.
 local function SetCallboardHit(hit, active)
     if not hit then return end
@@ -1826,12 +1828,12 @@ local function SetCallboardHit(hit, active)
         return
     end
     if (hit._nexusFullTip or hit._nexusOneLineTip) and GameTooltip then
-        local owner
-        if type(GameTooltip.GetOwner) == "function" then
-            local ok, value = pcall(GameTooltip.GetOwner, GameTooltip)
-            if ok then owner = value end
-        end
-        if owner == nil or owner == hit then GameTooltip:Hide() end
+        -- Positive identity only: a missing, failing or nil owner read, or
+        -- another owner, leaves owned false. rawequal runs no metamethod.
+        local ok, owned = pcall(function()
+            return rawequal(GameTooltip:GetOwner(), hit)
+        end)
+        if ok and owned == true then GameTooltip:Hide() end
     end
     hit._nexusFullTip, hit._nexusOneLineTip = nil, nil
     hit:EnableMouse(false)

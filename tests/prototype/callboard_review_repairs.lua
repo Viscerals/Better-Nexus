@@ -325,4 +325,109 @@ do
  Nexus.CallboardStatus.GetSummary=realSummary
 end
 
+-- Disappearing-row tooltip ownership (offline, synthetic): an objective row
+-- that vanishes while its own complete-text hover is open closes that
+-- tooltip only while the tooltip still reports the row as its owner. Once
+-- the tooltip has passed to another owner, a readable other owner, an owner
+-- the tooltip does not report and an owner read that raises all leave that
+-- other owner's tooltip open, and the vanished row keeps no hover state
+-- either way. Literal snapshots at the public GetSummary boundary drive the
+-- real Panel.Show/Refresh render and the real row hover scripts open the
+-- tooltips. GameTooltip SetOwner and GetOwner are recorded here; its Hide
+-- calls are counted by the counter installed at the top of this file.
+-- Native tooltip ownership transfer is not run here.
+do
+ local titleHit,lineHit=panel._callboardTitleHit,panel._callboardLineHit
+ check(titleHit and lineHit,'fixture: the callboard title and detail rows still have hover areas')
+ local foreign=CreateFrame('Frame',nil,UIParent)
+ local tipOwner,ownerMode
+ local ownerReads=0
+ local priorSetOwner,priorGetOwner=rawget(GameTooltip,'SetOwner'),rawget(GameTooltip,'GetOwner')
+ GameTooltip.SetOwner=function(self,owner,...)
+  tipOwner=owner
+  if priorSetOwner then return priorSetOwner(self,owner,...) end
+ end
+ GameTooltip.GetOwner=function()
+  ownerReads=ownerReads+1
+  if ownerMode=='raise' then error('synthetic unreadable tooltip owner') end
+  if ownerMode=='unreported' then return nil end
+  return tipOwner
+ end
+ function GameTooltip:AddLine(text,...)
+  tipLines[#tipLines+1]=tostring(text)
+  return priorAddLine(self,text,...)
+ end
+ Nexus.CallboardStatus.GetSummary=function() return snapshot end
+ -- Render an objective, open one row hover with its real OnEnter, optionally
+ -- pass the open tooltip to the other owner, then render the objective away
+ -- while owner reads follow the given mode. Returns the Hide calls and the
+ -- owner reads of that vanishing render.
+ local function VanishWhileHovered(hitArea,snap,transfer,mode)
+  ownerMode=nil
+  snapshot=snap
+  RenderDetail()
+  check(hitArea:IsShown() and hitArea:IsMouseEnabled()==true,
+   'fixture: the observed row hover area is shown and takes the mouse')
+  hitArea:GetScript('OnEnter')(hitArea)
+  check(GameTooltip:IsShown() and tipOwner==hitArea,'fixture: the row opened its own complete-text hover')
+  if transfer then
+   GameTooltip:SetOwner(foreign,'ANCHOR_RIGHT')
+   GameTooltip:Show()
+   check(GameTooltip:IsShown() and tipOwner==foreign,'fixture: the open tooltip passed to another owner')
+  end
+  local hides,reads=tooltipHidden,ownerReads
+  ownerMode=mode
+  snapshot={observed=false,lines={},rewards={}}
+  Nexus.Panel.Show()
+  Nexus.Panel.Refresh()
+  H.Advance(0.25)
+  ownerMode=nil
+  check(panel:IsShown() and not hitArea:IsShown() and hitArea:IsMouseEnabled()==false,
+   'fixture: the vanished row hover area is hidden and takes no mouse input')
+  return tooltipHidden-hides,ownerReads-reads
+ end
+ -- The real scripts of a vanished area reach no earlier hover: OnLeave hides
+ -- nothing and OnEnter opens nothing.
+ local function NoStaleHover(hitArea)
+  local hides,owner=tooltipHidden,tipOwner
+  tipLines={}
+  hitArea:GetScript('OnLeave')(hitArea)
+  hitArea:GetScript('OnEnter')(hitArea)
+  return tooltipHidden==hides and tipOwner==owner and #tipLines==0
+ end
+ local hides,reads=VanishWhileHovered(lineHit,{observed=true,title='Callboard Owner Watch',
+  lines={'Ring the north bell','Ring the south bell'},rewards={}},false,nil)
+ check(hides==1 and not GameTooltip:IsShown(),
+  'a vanishing detail row still closes its own complete-text tooltip, once')
+ check(NoStaleHover(lineHit),'the detail row that closed its own tooltip keeps no hover state or lines')
+ hides=VanishWhileHovered(titleHit,{observed=true,title='Callboard Owner '..string.rep('Q',60),
+  lines={'Hold the bridge'},rewards={}},false,nil)
+ check(hides==1 and not GameTooltip:IsShown(),
+  'a vanishing shortened title still closes its own complete-text tooltip, once')
+ check(NoStaleHover(titleHit),'the title that closed its own tooltip keeps no hover state')
+ hides=VanishWhileHovered(lineHit,{observed=true,title='Callboard Owner Watch',
+  lines={'Light the east beacon','Light the west beacon'},rewards={}},true,nil)
+ check(hides==0 and GameTooltip:IsShown() and GameTooltip:GetOwner()==foreign,
+  'a vanishing detail row leaves open a tooltip now held by another readable owner')
+ check(NoStaleHover(lineHit) and GameTooltip:IsShown(),
+  'the vanished detail row keeps no hover state that could close the tooltip of another owner')
+ hides,reads=VanishWhileHovered(lineHit,{observed=true,title='Callboard Owner Watch',
+  lines={'Seal the crypt','Report to the Warden'},rewards={}},true,'raise')
+ check(reads>=1,'fixture: the vanishing render made an owner read that raised')
+ check(hides==0 and GameTooltip:IsShown() and GameTooltip:GetOwner()==foreign,
+  'a vanishing detail row does not hide the tooltip of another owner when the owner read raises')
+ check(NoStaleHover(lineHit) and GameTooltip:IsShown(),
+  'after a raising owner read the vanished detail row keeps no hover state or lines')
+ hides,reads=VanishWhileHovered(titleHit,{observed=true,title='Callboard Bridge '..string.rep('Q',60),
+  lines={'Hold the bridge'},rewards={}},true,'unreported')
+ check(reads>=1,'fixture: the vanishing render made an owner read that reported no owner')
+ check(hides==0 and GameTooltip:IsShown() and GameTooltip:GetOwner()==foreign,
+  'a vanishing shortened title does not hide the tooltip of another owner when no owner is reported')
+ check(NoStaleHover(titleHit) and GameTooltip:IsShown(),
+  'after an unreported owner the vanished title keeps no hover state')
+ GameTooltip.AddLine=priorAddLine
+ GameTooltip.SetOwner,GameTooltip.GetOwner=priorSetOwner,priorGetOwner
+ Nexus.CallboardStatus.GetSummary=realSummary
+end
+
 print('PASS callboard_review_repairs '..checks)
