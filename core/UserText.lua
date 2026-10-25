@@ -169,6 +169,78 @@ function T.SavedBuildLabel(slot, name, maxChars)
     return shown and ("Saved Build '" .. shown .. "'") or nil
 end
 
+-- Shared wording of the destination descriptor documented below, used by
+-- both DestinationLines and DestinationFields so that they cannot disagree.
+-- Pure: these only word the facts they are given.
+local SAVED_BUILD_STATE_WORDS = {
+    unavailable = "not available right now",
+    empty = "empty: it holds no Echoes, so assigning to it is refused",
+    active = "active in the game",
+    inactive = "not active in the game",
+    unconfirmed = "not confirmed as the active Saved Build",
+}
+-- The other destinations: their Saved Build cell and destination words.
+local DESTINATION_WORDS = {
+    firstRun = {build = "none in use", state = "first-run target (no Saved Build in use)"},
+    restoring = {build = "not known yet", state = "not known yet (the saved assignment is being restored)"},
+    unknown = {build = "not loaded yet", state = "Saved Build data is not loaded yet"},
+    unconfirmed = {build = "not confirmed right now", state = "not confirmed right now"},
+    none = {build = "none captured", state = "none captured"},
+}
+local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true, restoring = true}
+
+-- A fixed phrase with its first letter raised when asked (ASCII words only,
+-- never a name).
+local function Lead(text, capital)
+    return capital and (text:sub(1, 1):upper() .. text:sub(2)) or text
+end
+
+-- The descriptor's facts as codes and display-safe names. The Saved Build
+-- state keeps one order: unavailable, empty, active, not active,
+-- unconfirmed, else not stated.
+local function DestinationParts(d)
+    local p = {character = T.SafeName(d.character)}
+    if d.kind == "savedBuild" then
+        p.kind = "savedBuild"
+        p.label = T.SavedBuildLabel(d.slot, d.name)
+        if d.unavailable then
+            p.state = "unavailable"
+        elseif d.empty then
+            p.state = "empty"
+        elseif d.active == true then
+            p.state = "active"
+        elseif d.active == false then
+            p.state = "inactive"
+        elseif d.unconfirmed then
+            p.state = "unconfirmed"
+        end
+    elseif d.kind == "firstRun" or d.kind == "unconfirmed" then
+        p.kind = d.kind
+    elseif d.kind == "unknown" then
+        p.kind = d.reason == "restoring" and "restoring" or "unknown"
+    else
+        p.kind = "none"
+    end
+    p.wishlist = T.SafeName(d.wishlist)
+    return p
+end
+
+-- The Wishlist words for one assignment state, or the name alone when no
+-- known state is given (nil when there is neither).
+local function WishlistWords(wishlist, state, capital)
+    if state == "assigned" then
+        return wishlist and (wishlist .. " (assigned)") or Lead("assigned", capital)
+    elseif state == "unassigned" then
+        return Lead("none assigned", capital)
+    elseif state == "unavailable" then
+        return wishlist and (wishlist .. " - unavailable right now")
+            or Lead("unavailable right now", capital)
+    elseif state == "restoring" then
+        return Lead("restoring the saved assignment", capital)
+    end
+    return wishlist
+end
+
 -- The captured destination of a view, confirmation or result, as lines.
 -- d.kind: "savedBuild", "firstRun", "unknown" (Saved Build data not loaded;
 -- d.reason "restoring": the saved assignment is being restored),
@@ -182,51 +254,95 @@ end
 -- d.wishlistState ("assigned", "unassigned", "unavailable", "restoring" or
 -- nil when unknown). The destination is always the one the caller captured;
 -- this function never looks up a currently active slot.
+-- d.captured is read only by DestinationFields (below), never here.
 function T.DestinationLines(d)
     d = type(d) == "table" and d or {}
     local lines = {}
-    local character = T.SafeName(d.character)
-    if character then lines[#lines + 1] = "Character: " .. character end
-    if d.kind == "savedBuild" then
-        local label = T.SavedBuildLabel(d.slot, d.name) or "the selected Saved Build"
-        local state
-        if d.unavailable then
-            state = "not available right now"
-        elseif d.empty then
-            state = "empty: it holds no Echoes, so assigning to it is refused"
-        elseif d.active == true then
-            state = "active in the game"
-        elseif d.active == false then
-            state = "not active in the game"
-        elseif d.unconfirmed then
-            state = "not confirmed as the active Saved Build"
-        end
-        lines[#lines + 1] = "Destination: " .. label .. (state and (" - " .. state) or "")
-    elseif d.kind == "firstRun" then
-        lines[#lines + 1] = "Destination: first-run target (no Saved Build in use)"
-    elseif d.kind == "unknown" then
-        lines[#lines + 1] = d.reason == "restoring"
-            and "Destination: not known yet (the saved assignment is being restored)"
-            or "Destination: Saved Build data is not loaded yet"
-    elseif d.kind == "unconfirmed" then
-        lines[#lines + 1] = "Destination: not confirmed right now"
+    local p = DestinationParts(d)
+    if p.character then lines[#lines + 1] = "Character: " .. p.character end
+    if p.kind == "savedBuild" then
+        local state = SAVED_BUILD_STATE_WORDS[p.state]
+        lines[#lines + 1] = "Destination: " .. (p.label or "the selected Saved Build")
+            .. (state and (" - " .. state) or "")
     else
-        lines[#lines + 1] = "Destination: none captured"
+        lines[#lines + 1] = "Destination: " .. DESTINATION_WORDS[p.kind].state
     end
-    local wishlist = T.SafeName(d.wishlist)
-    local state = d.wishlistState
-    if state == "assigned" then
-        lines[#lines + 1] = "Wishlist: " .. (wishlist and (wishlist .. " (assigned)") or "assigned")
-    elseif state == "unassigned" then
-        lines[#lines + 1] = "Wishlist: none assigned"
-    elseif state == "unavailable" then
-        lines[#lines + 1] = "Wishlist: " .. (wishlist and (wishlist .. " - ") or "") .. "unavailable right now"
-    elseif state == "restoring" then
-        lines[#lines + 1] = "Wishlist: restoring the saved assignment"
-    elseif wishlist then
-        lines[#lines + 1] = "Wishlist: " .. wishlist
-    end
+    local wishlist = WishlistWords(p.wishlist, d.wishlistState)
+    if wishlist then lines[#lines + 1] = "Wishlist: " .. wishlist end
     return lines
+end
+
+-- The same descriptor as four cells for a one-line strip, always in this
+-- order: character, savedBuild, wishlist, state. Each record is
+-- {key, label, value}; the second result is the complete tooltip, one
+-- labeled line per cell (and a note when captured). Every cell has a value:
+-- an unknown is "not known", never unassigned, first-run or active, and a
+-- Wishlist name alone is never called assigned. An empty Saved Build has no
+-- valid assignment, whatever Wishlist state is passed.
+-- d.captured == true (explicit only; never inferred, for example from a
+-- missing active slot): the caller shows a destination it captured earlier,
+-- with d.wishlist the captured Wishlist name when it has one. That states
+-- only that it was captured, not that it is assigned now: unless
+-- d.wishlistState states the assignment, the state says it is not checked.
+-- Value contract: each value is the complete display-safe text (whole
+-- SafeName output, in which a literal pipe is already the escaped pair
+-- "||"). A later fitting step shows it as it is, or shortens it only at a
+-- UTF-8 character boundary that does not split an escaped pipe pair; it
+-- never sanitizes or escapes it again, and the tooltip keeps the whole text.
+function T.DestinationFields(d)
+    d = type(d) == "table" and d or {}
+    local p = DestinationParts(d)
+    local captured = d.captured == true and p.kind ~= "none"
+    local build, stateWords
+    if p.kind == "savedBuild" then
+        local name, slot = T.SafeName(d.name), Whole(d.slot)
+        if slot and slot < 1 then slot = nil end
+        if name and slot then
+            build = name .. " (slot " .. slot .. ")"
+        elseif slot then
+            build = "Slot " .. slot
+        else
+            build = name or Lead("the selected Saved Build", true)
+        end
+        stateWords = SAVED_BUILD_STATE_WORDS[p.state] or "active state not known"
+    else
+        build = Lead(DESTINATION_WORDS[p.kind].build, true)
+        stateWords = DESTINATION_WORDS[p.kind].state
+    end
+    local noAssignment = p.state == "empty"
+    local stated = WISHLIST_STATES[d.wishlistState] == true
+    local wishlist
+    if noAssignment then
+        local words = "no valid assignment (the Saved Build holds no Echoes)"
+        wishlist = p.wishlist and (p.wishlist .. " - " .. words) or Lead(words, true)
+    elseif stated then
+        wishlist = WishlistWords(p.wishlist, d.wishlistState, true)
+    elseif p.wishlist then
+        wishlist = p.wishlist .. (captured and " (captured)" or " (assignment not known)")
+    else
+        wishlist = "Not known"
+    end
+    local state
+    if captured then
+        state = "Captured; " .. stateWords
+            .. ((noAssignment or stated) and "" or "; assignment not checked")
+    else
+        state = Lead(stateWords, true)
+    end
+    local fields = {
+        {key = "character", label = "Character", value = p.character or "Not known"},
+        {key = "savedBuild", label = "Saved Build", value = build},
+        {key = "wishlist", label = "Wishlist", value = wishlist},
+        {key = "state", label = "State", value = state},
+    }
+    local tooltip = {}
+    for index = 1, #fields do
+        tooltip[index] = fields[index].label .. ": " .. fields[index].value
+    end
+    if captured then
+        tooltip[#tooltip + 1] = "Captured: shown as captured earlier; being captured is not evidence of the current assignment."
+    end
+    return fields, tooltip
 end
 
 -- M7: the setup checklist, worded from current facts only (Panel.SetupFacts).

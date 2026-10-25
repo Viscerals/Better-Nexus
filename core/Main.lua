@@ -502,6 +502,14 @@ local function BuildHudDisplayModel(base)
 
     local capture = Nexus.DpsCapture
     local player = UnitName and UnitName("player") or nil
+    -- Display only: the name this same read returned, kept when it is a
+    -- nonempty string other than the client's Unknown placeholder. It grants
+    -- no identity, owner or Store authority; no other game read is made.
+    if type(player) == "string" and player ~= "" and player ~= "Unknown"
+        and not (type(UNKNOWNOBJECT) == "string"
+            and player == UNKNOWNOBJECT) then
+        input.character = player
+    end
     local progress = type(baseSnapshot.progress) == "table"
         and baseSnapshot.progress or {}
     local echoes = type(progress.dpsEchoes) == "table" and progress.dpsEchoes or nil
