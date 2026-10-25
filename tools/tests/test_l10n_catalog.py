@@ -7,10 +7,14 @@ source. Python 3.9+, standard library only. Files are read as strict UTF-8
 bytes. No Lua is executed, imported or evaluated, and no live or private data
 is read.
 
-This is not the catalog validator. A read-only validator and CLI
-(tools/l10n_catalog.py) with positive and malformed-input fixtures is a
-separate later task that appends to this file and keeps these assertions.
-This file is not yet registered in tools/run_prototype_tests.py.
+Later sections append public tests of tools/l10n_catalog.py on exact
+in-memory bytes: the parser, the pure schema API validate_catalog_data and
+the pure coverage report API catalog_report. That tool is not yet a full
+validator. Several parts are still pending: its read-only filesystem --root
+report command line (a separate later task that appends to this file and
+keeps these assertions), required-CI registration, independent review, and
+the human, native and UI gates. This file is not yet registered in
+tools/run_prototype_tests.py.
 
 Run directly:  python tools/tests/test_l10n_catalog.py -v
 """
@@ -137,7 +141,7 @@ class ReleaseLanguagesContract(unittest.TestCase):
         self.assertEqual(d["sourcePin"], {"base": BASE, "tree": TREE})
         self.assertEqual(d["contractKind"], "declarative_metadata_only")
         self.assertEqual(d["validator"], {"path": "tools/l10n_catalog.py",
-                                          "status": "SCHEMA_API_ONLY_REPORT_CLI_PENDING"})
+                                          "status": "COVERAGE_API_ONLY_REPORT_CLI_PENDING"})
         self.assertEqual(d["requiredCiRegistration"], "NOT_REGISTERED_LATER_AUTHORIZED_APPEND")
         self.assertEqual(d["selectionDecision"]["issue"], 139)
         self.assertEqual(d["selectionDecision"]["status"], "resolved")
@@ -413,9 +417,9 @@ CATALOG_HEADS = {
 CATALOG_NOTICE = {
     "record": "notice",
     "tool": "tools/l10n_catalog.py",
-    "status": "SCHEMA_API_ONLY_REPORT_CLI_PENDING",
+    "status": "COVERAGE_API_ONLY_REPORT_CLI_PENDING",
     "fullValidation": "NOT_IMPLEMENTED",
-    "message": "syntax and schema API only; coverage validation and report CLI are pending",
+    "message": "coverage report API only; filesystem and report CLI are pending",
 }
 
 CATALOG_CURRENT_ENGLISH = {
@@ -830,7 +834,7 @@ class CatalogParserGrammar(unittest.TestCase):
 
 import copy
 
-SCHEMA_STATUS = "SCHEMA_API_ONLY_REPORT_CLI_PENDING"
+SCHEMA_STATUS = "COVERAGE_API_ONLY_REPORT_CLI_PENDING"
 SCHEMA_OLD_STATUS = "PARSER_ONLY_" + "FULL_VALIDATION_PENDING"
 SCHEMA_CHARGE = "readout.charge_counts"
 SCHEMA_MAX_ENTRIES = 64
@@ -1389,6 +1393,661 @@ class CatalogSchemaApi(unittest.TestCase):
         self.assertEqual(result["release"], release)
         self.assertEqual(product(result["release"], "frFR")["review"],
                          product(self.release, "frFR")["review"])
+
+
+
+# B3a coverage report API (Refs #147): public tests of catalog_report and
+# CatalogEvidenceError. Each case builds exact bytes in memory from the
+# literal tables above and calls the public API. Expected counts come from
+# those tables or from the fixture being built, never from the implementation.
+# Reviewer names and evidence URLs here are synthetic, fixture-only values:
+# they name no person, record no review and claim no fluent, human or native
+# acceptance. No file is written, no Lua is executed and main() is not
+# invoked here; the filesystem command line belongs to B3b.
+
+import hashlib
+
+REPORT_CATEGORIES = (
+    "translated_and_reviewed", "reviewed_legitimately_identical",
+    "deliberate_english_placeholder", "draft_unreviewed", "missing", "invalid", "obsolete",
+)
+REPORT_IN_DENOMINATOR = REPORT_CATEGORIES[:6]
+REPORT_FIXTURE_REVIEWER = "Synthetic Fixture Reviewer A (fixture-only, not a person)"
+REPORT_OTHER_REVIEWER = "Synthetic Fixture Reviewer B (fixture-only, not a person)"
+REPORT_FIXTURE_REFERENCE = "https://example.invalid/fixture-only/review-evidence"
+REPORT_NOT_EVIDENCE = "not evidence of fluent competence, contributor rights or native truth"
+REPORT_SAVE = "reason.save_in_progress"
+REPORT_LIST = "reason.list_preparing"
+REPORT_FILL = {
+    "reason.wait_three_choices": "Synthetic fixture wait text",
+    "reason.wait_pending_pick_count": "Synthetic fixture pick-count text",
+    "readout.charge_counts": "Synthetic fixture {freeze} {reroll} {banish}",
+}
+REPORT_PENDING_GATES = {
+    "technicalAuthorReview": {"status": "pending", "recordCount": 0},
+    "fluentHumanAcceptance": {"status": "pending", "recordCount": 0,
+                              "responsibility": "UNASSIGNED"},
+    "nativeAcceptance": {"status": "NOT_RUN", "recordCount": 0},
+}
+REPORT_REMAINING_REASONS = {
+    "review-gate-not-established", "family-semantic-status", "family-coverage-status",
+    "family-no-adopted-key", "keys-without-family", "adoption-semantic-coverage",
+    "other-visible-copy", "visible-text-denominator", "terminology-status",
+    "native-fact-not-established",
+}
+
+
+def report_sha(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def report_declaration(product_id, key, text, decision="translated", **changes):
+    """A synthetic, fixture-only entry-review declaration for text."""
+    record = {"productId": product_id, "key": key, "translatedTextSha256": report_sha(text),
+              "reviewer": REPORT_FIXTURE_REVIEWER, "decision": decision,
+              "evidenceReference": REPORT_FIXTURE_REFERENCE, "status": "declared"}
+    record.update(changes)
+    return record
+
+
+def report_without(record, field):
+    record = dict(record)
+    record.pop(field)
+    return record
+
+
+def report_add_static(english, context, key, text):
+    english[key] = text
+    context["keys"].append({"key": key, "kind": "text", "english": text, "placeholders": [],
+                            "meaning": "synthetic fixture text for " + key})
+
+
+def report_codes(report):
+    return {reason["code"] for reason in report["completeness"]["reasons"]}
+
+
+def report_reasons(report, code, subject=None):
+    return [reason for reason in report["completeness"]["reasons"]
+            if reason["code"] == code and (subject is None or reason["subject"] == subject)]
+
+
+def report_product(report, product_id):
+    return next(row for row in report["products"] if row["productId"] == product_id)
+
+
+class CatalogCoverageReport(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = load_catalog_parser()
+        cls.raw = {
+            "english": (ROOT / "data/LocalizationEnglish.lua").read_bytes(),
+            "packs": (ROOT / "data/LocalizationPacks.lua").read_bytes(),
+            "context": (ROOT / "docs/localization/KEY_CONTEXT.json").read_bytes(),
+            "release": (ROOT / "docs/localization/RELEASE_LANGUAGES.json").read_bytes(),
+        }
+        cls.context = load_document("KEY_CONTEXT.json")
+        cls.release = load_document("RELEASE_LANGUAGES.json")
+
+    def fixture(self):
+        return (copy.deepcopy(CATALOG_CURRENT_ENGLISH), copy.deepcopy(CATALOG_CURRENT_PACKS),
+                copy.deepcopy(self.context), copy.deepcopy(self.release))
+
+    def inputs(self, english=None, packs=None, context=None, release=None):
+        parts = []
+        for name, value, render in (("english", english, schema_english_source),
+                                    ("packs", packs, schema_packs_source),
+                                    ("context", context, schema_json),
+                                    ("release", release, schema_json)):
+            if value is None:
+                value = self.raw[name]
+            elif not isinstance(value, (bytes, bytearray)):
+                value = render(value)
+            parts.append(value)
+        return parts
+
+    def report(self, **parts):
+        return self.catalog.catalog_report(*self.inputs(**parts))
+
+    def declared(self, records, release=None):
+        release = copy.deepcopy(self.release if release is None else release)
+        release["entryReview"]["declarations"] = copy.deepcopy(records)
+        return release
+
+    def assert_evidence(self, code, **parts):
+        with self.assertRaises(self.catalog.CatalogEvidenceError) as caught:
+            self.report(**parts)
+        self.assertEqual(caught.exception.code, code)
+        self.assertIn(code, self.catalog.EVIDENCE_CODES)
+
+    def assert_reconciled(self, row, english_keys):
+        self.assertEqual(list(row["counts"]), list(REPORT_CATEGORIES))
+        self.assertEqual(list(row["keys"]), list(REPORT_CATEGORIES))
+        for category in REPORT_CATEGORIES:
+            self.assertEqual(row["counts"][category], len(row["keys"][category]), category)
+            self.assertEqual(row["keys"][category], sorted(row["keys"][category]), category)
+        listed = [key for category in REPORT_IN_DENOMINATOR for key in row["keys"][category]]
+        self.assertEqual(len(listed), len(set(listed)))
+        self.assertEqual(sorted(listed), sorted(english_keys))
+        self.assertEqual(row["denominator"], len(english_keys))
+        self.assertEqual(row["reconciliation"], {"denominator": len(english_keys),
+                                                 "inDenominatorTotal": len(english_keys)})
+        self.assertEqual((row["counts"]["invalid"], row["counts"]["obsolete"]), (0, 0))
+
+    def test_current_release_records_no_declaration_and_states_the_limit(self):
+        contract = self.release["entryReview"]
+        self.assertEqual(contract["contract"], "nexus.l10n.entry_review_declaration")
+        self.assertEqual(contract["contractVersion"], 1)
+        self.assertEqual(contract["declarations"], [])
+        self.assertIn(REPORT_NOT_EVIDENCE, contract["notEvidenceOf"])
+        self.assertEqual(self.release["terminology"], {
+            "status": "pending",
+            "reference": "docs/localization/KEYS_AND_GLOSSARY.md (historical proposal, unchanged)",
+            "gameTermWording": "UNKNOWN until a verified client reference exists",
+        })
+        self.assertIn(REPORT_NOT_EVIDENCE, self.catalog.EVIDENCE_NOTICE)
+        self.assertEqual(self.catalog.NOTICE["fullValidation"], "NOT_IMPLEMENTED")
+        plan = " ".join(read_text("docs/localization/FULL_COVERAGE.md").split())
+        for required in ("catalog_report", "CatalogEvidenceError", REPORT_NOT_EVIDENCE, "B3b",
+                         "NOT_IMPLEMENTED", "Execution of the new tests: NOT_RUN"):
+            self.assertIn(required, plan)
+
+    def test_supplied_partial_data_derives_draft_and_missing_per_optional_pack(self):
+        report = self.report()
+        english_keys = sorted(CATALOG_CURRENT_ENGLISH)
+        self.assertEqual((report["schema"], report["schemaVersion"], report["tool"]),
+                         ("nexus.l10n.coverage_report", 1, "tools/l10n_catalog.py"))
+        self.assertEqual((report["status"], report["fullValidation"]),
+                         (SCHEMA_STATUS, "NOT_IMPLEMENTED"))
+        self.assertEqual(report["categories"], list(REPORT_CATEGORIES))
+        self.assertEqual(tuple(self.catalog.ENTRY_CATEGORIES), REPORT_CATEGORIES)
+        baseline = report["englishBaseline"]
+        self.assertEqual((baseline["productId"], baseline["kind"], baseline["keyCount"]),
+                         ("enUS", "english_baseline", len(english_keys)))
+        self.assertEqual(baseline["keys"], english_keys)
+        self.assertEqual([row["productId"] for row in report["products"]], PACK_IDS)
+        autonyms = {row[0]: row[3] for row in EXPECTED_PRODUCTS}
+        for row in report["products"]:
+            pack_id = row["productId"]
+            with self.subTest(pack_id):
+                self.assert_reconciled(row, english_keys)
+                self.assertEqual((row["kind"], row["autonym"]),
+                                 ("optional_ui_pack", autonyms[pack_id]))
+                self.assertEqual(row["keys"]["draft_unreviewed"], sorted(STATIC_AT_BASE))
+                self.assertEqual(row["keys"]["missing"], sorted(MISSING_AT_BASE))
+                for category in REPORT_CATEGORIES:
+                    if category not in ("draft_unreviewed", "missing"):
+                        self.assertEqual(row["keys"][category], [], category)
+                self.assertEqual(row["entriesPresent"],
+                                 len(CATALOG_CURRENT_PACKS[pack_id]["entries"]))
+                self.assertEqual(row["declarationsApplied"], 0)
+                self.assertEqual(report_reasons(report, "entries-missing", pack_id)[0]["keys"],
+                                 sorted(MISSING_AT_BASE))
+                self.assertEqual(
+                    report_reasons(report, "entries-draft-unreviewed", pack_id)[0]["keys"],
+                    sorted(STATIC_AT_BASE))
+        self.assertEqual((report["evidence"]["declarationCount"],
+                          report["evidence"]["qualifiedDeclarations"]), (0, 0))
+        self.assertEqual(report["pseudoAndTestData"]["shippedProductIds"], [])
+        self.assertEqual(report["reviewGates"],
+                         [{"productId": row[0], "gates": REPORT_PENDING_GATES}
+                          for row in EXPECTED_PRODUCTS])
+        self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
+        self.assertEqual(report["completeness"]["reasonCount"],
+                         len(report["completeness"]["reasons"]))
+        self.assertLessEqual(REPORT_REMAINING_REASONS, report_codes(report))
+
+    def test_every_family_shared_unassigned_keys_and_no_family_denominator(self):
+        report = self.report()
+        families = report["families"]
+        self.assertEqual([(f["name"], f["proposedKeyFamily"], f["issue"], f["paths"])
+                          for f in families], EXPECTED_FAMILIES)
+        declared = {f["name"]: f["adoptedKeys"] for f in self.context["windowFamilies"]}
+        self.assertEqual(declared["Main panel (HUD)"], [SCHEMA_CHARGE])
+        for family in families:
+            with self.subTest(family["name"]):
+                adopted = declared[family["name"]]
+                self.assertEqual(family["adoptedKeys"], adopted)
+                self.assertEqual(family["adoptedKeyCount"], len(adopted))
+                self.assertEqual((family["semanticStatus"], family["coverageStatus"]),
+                                 ("PENDING", "PENDING"))
+                self.assertEqual(family["state"], "INCOMPLETE")
+                codes = [reason["code"] for reason in family["reasons"]]
+                self.assertEqual(codes[:2], ["family-semantic-status", "family-coverage-status"])
+                self.assertEqual("family-no-adopted-key" in codes, not adopted)
+                self.assertEqual([row["productId"] for row in family["products"]], PACK_IDS)
+                for row in family["products"]:
+                    self.assertEqual(sum(row["counts"].values()), len(adopted))
+                    self.assertEqual(row["keys"]["missing"],
+                                     [key for key in sorted(adopted) if key in MISSING_AT_BASE])
+        self.assertEqual([(r["subject"], r["value"], r["keys"])
+                          for r in report_reasons(report, "family-entries-not-reviewed")],
+                         [("Main panel (HUD)", pack_id, [SCHEMA_CHARGE]) for pack_id in PACK_IDS])
+        unassigned = sorted(set(CATALOG_CURRENT_ENGLISH) - {SCHEMA_CHARGE})
+        self.assertEqual([row["key"] for row in report["unassignedKeys"]], unassigned)
+        for row in report["unassignedKeys"]:
+            expected = "missing" if row["key"] in MISSING_AT_BASE else "draft_unreviewed"
+            self.assertEqual(row["products"], [{"productId": pack_id, "category": expected}
+                                               for pack_id in PACK_IDS])
+        self.assertEqual(report_reasons(report, "keys-without-family")[0]["keys"], unassigned)
+        references = [key for keys in declared.values() for key in keys]
+        denominator = report["denominator"]
+        self.assertEqual(denominator["englishKeys"], len(CATALOG_CURRENT_ENGLISH))
+        self.assertEqual(denominator["familyAdoptedKeyReferences"], len(references))
+        self.assertEqual(denominator["distinctFamilyAdoptedKeys"], len(set(references)))
+        self.assertEqual(denominator["keysOnMultipleFamilies"], [])
+        self.assertEqual(denominator["keysWithoutFamily"], unassigned)
+        surfaces = report["surfaces"]
+        self.assertEqual(surfaces["currentAdoptionKeys"], self.context["currentAdoption"]["keys"])
+        self.assertEqual(surfaces["allWindowSemanticCoverage"], "PENDING")
+        self.assertEqual(surfaces["visibleTextDenominator"], "NOT_ESTABLISHED")
+        other = self.context["otherVisibleCopy"]
+        self.assertEqual([item["status"] for item in surfaces["otherVisibleCopy"]],
+                         ["PENDING_CLASSIFICATION"] * len(other))
+        self.assertEqual(len(report_reasons(report, "other-visible-copy")), len(other))
+        self.assertEqual(report_reasons(report, "visible-text-denominator")[0]["value"],
+                         "NOT_ESTABLISHED")
+        native = report["nativeFacts"]
+        self.assertEqual(native["establishedByThisReport"], "NOT_RUN")
+        self.assertEqual((native["declared"]["fontFace"], native["declared"]["glyphCoverage"],
+                          native["declared"]["nativeLayout"]), ("UNKNOWN", "UNKNOWN", "NOT_RUN"))
+        self.assertEqual(report_reasons(report, "native-fact-not-established",
+                                        "release.clientEvidence.fontFace")[0]["value"], "UNKNOWN")
+
+    def test_shared_key_on_two_families_counts_once_in_the_denominator(self):
+        english, packs, context, release = self.fixture()
+        shared = "reason.synthetic_shared"
+        report_add_static(english, context, shared, "Synthetic shared fixture text")
+        families = {family["name"]: family for family in context["windowFamilies"]}
+        families["Main panel (HUD)"]["adoptedKeys"].append(shared)
+        families["Help"]["adoptedKeys"].append(shared)
+        report = self.report(english=english, packs=packs, context=context, release=release)
+        english_keys = sorted(english)
+        self.assertEqual(len(english_keys), len(CATALOG_CURRENT_ENGLISH) + 1)
+        references = [key for family in context["windowFamilies"] for key in family["adoptedKeys"]]
+        denominator = report["denominator"]
+        self.assertEqual(denominator["englishKeys"], len(english_keys))
+        self.assertEqual(denominator["keysOnMultipleFamilies"], [shared])
+        self.assertEqual(denominator["familyAdoptedKeyReferences"], len(references))
+        self.assertEqual(denominator["distinctFamilyAdoptedKeys"], len(set(references)))
+        self.assertLess(len(set(references)), len(references))
+        self.assertEqual(denominator["keysWithoutFamily"],
+                         sorted(set(CATALOG_CURRENT_ENGLISH) - {SCHEMA_CHARGE}))
+        self.assertEqual(len(report["families"]), len(EXPECTED_FAMILIES))
+        rows = {family["name"]: family for family in report["families"]}
+        self.assertEqual(rows["Help"]["adoptedKeys"], [shared])
+        self.assertEqual(rows["Main panel (HUD)"]["adoptedKeys"], [SCHEMA_CHARGE, shared])
+        for product in rows["Help"]["products"]:
+            self.assertEqual(product["keys"]["missing"], [shared])
+        for row in report["products"]:
+            self.assert_reconciled(row, english_keys)
+            self.assertEqual(row["keys"]["missing"], sorted(MISSING_AT_BASE + [shared]))
+
+    def test_coherent_added_static_key_updates_every_denominator(self):
+        english, packs, context, release = self.fixture()
+        extra = "reason.synthetic_extra"
+        report_add_static(english, context, extra, "Synthetic extra fixture text")
+        packs["frFR"]["entries"][extra] = "Texte de fixture synthetique"
+        report = self.report(english=english, packs=packs, context=context, release=release)
+        english_keys = sorted(english)
+        self.assertEqual(report["englishBaseline"]["keyCount"], len(CATALOG_CURRENT_ENGLISH) + 1)
+        self.assertEqual(report["denominator"]["englishKeys"], len(english_keys))
+        for row in report["products"]:
+            with self.subTest(row["productId"]):
+                self.assert_reconciled(row, english_keys)
+                if row["productId"] == "frFR":
+                    draft, missing = STATIC_AT_BASE + [extra], MISSING_AT_BASE
+                else:
+                    draft, missing = STATIC_AT_BASE, MISSING_AT_BASE + [extra]
+                self.assertEqual(row["keys"]["draft_unreviewed"], sorted(draft))
+                self.assertEqual(row["keys"]["missing"], sorted(missing))
+        self.assertIn(extra, report["denominator"]["keysWithoutFamily"])
+        self.assertIn(extra, [row["key"] for row in report["unassignedKeys"]])
+
+    def test_no_declared_family_leaves_every_key_without_family(self):
+        context = copy.deepcopy(self.context)
+        context["windowFamilies"] = []
+        report = self.report(context=context)
+        self.assertEqual(report["families"], [])
+        self.assertEqual(report["denominator"]["englishKeys"], len(CATALOG_CURRENT_ENGLISH))
+        self.assertEqual(report["denominator"]["keysWithoutFamily"],
+                         sorted(CATALOG_CURRENT_ENGLISH))
+        self.assertEqual(len(report_reasons(report, "no-window-family")), 1)
+        self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
+
+    def test_filling_missing_known_entries_still_leaves_concrete_reasons(self):
+        english, packs, context, release = self.fixture()
+        for pack in packs.values():
+            pack["entries"].update(REPORT_FILL)
+        report = self.report(packs=packs)
+        english_keys = sorted(CATALOG_CURRENT_ENGLISH)
+        for row in report["products"]:
+            self.assert_reconciled(row, english_keys)
+            self.assertEqual(row["keys"]["draft_unreviewed"], english_keys)
+            self.assertEqual(row["counts"]["missing"], 0)
+            self.assertEqual(row["entriesPresent"], len(english_keys))
+        codes = report_codes(report)
+        self.assertNotIn("entries-missing", codes)
+        self.assertEqual([r["subject"] for r in report_reasons(report, "entries-draft-unreviewed")],
+                         PACK_IDS)
+        self.assertLessEqual(REPORT_REMAINING_REASONS, codes)
+        self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
+        records = [report_declaration(pack_id, key, text) for pack_id, pack in packs.items()
+                   for key, text in sorted(pack["entries"].items())]
+        reviewed = self.report(packs=packs, release=self.declared(records))
+        for row in reviewed["products"]:
+            self.assert_reconciled(row, english_keys)
+            self.assertEqual(row["keys"]["translated_and_reviewed"], english_keys)
+            self.assertEqual(row["declarationsApplied"], len(english_keys))
+        codes = report_codes(reviewed)
+        self.assertEqual([code for code in codes if code.startswith("entries-")], [])
+        self.assertNotIn("family-entries-not-reviewed", codes)
+        self.assertLessEqual(REPORT_REMAINING_REASONS, codes)
+        self.assertEqual(reviewed["completeness"]["state"], "INCOMPLETE")
+        self.assertEqual(len(report_reasons(reviewed, "review-gate-not-established")),
+                         len(EXPECTED_PRODUCTS) * len(REPORT_PENDING_GATES))
+        self.assertEqual(reviewed["reviewGates"], report["reviewGates"])
+        self.assertEqual(reviewed["evidence"]["qualifiedDeclarations"], len(records))
+
+    def test_english_identical_entry_is_a_placeholder_not_a_translation(self):
+        english, packs, context, release = self.fixture()
+        packs["frFR"]["entries"][REPORT_LIST] = CATALOG_CURRENT_ENGLISH[REPORT_LIST]
+        packs["deDE"]["entries"][SCHEMA_CHARGE] = CATALOG_CURRENT_ENGLISH[SCHEMA_CHARGE]
+        report = self.report(packs=packs)
+        french, german = report_product(report, "frFR"), report_product(report, "deDE")
+        self.assertEqual(french["keys"]["deliberate_english_placeholder"], [REPORT_LIST])
+        self.assertEqual(french["keys"]["draft_unreviewed"],
+                         sorted(set(STATIC_AT_BASE) - {REPORT_LIST}))
+        self.assertEqual(german["keys"]["deliberate_english_placeholder"], [SCHEMA_CHARGE])
+        self.assertEqual(german["keys"]["missing"], sorted(set(MISSING_AT_BASE) - {SCHEMA_CHARGE}))
+        for row in (french, german):
+            self.assert_reconciled(row, sorted(CATALOG_CURRENT_ENGLISH))
+            self.assertEqual(row["keys"]["translated_and_reviewed"]
+                             + row["keys"]["reviewed_legitimately_identical"], [])
+        self.assertEqual(report_reasons(report, "entries-deliberate-english-placeholder",
+                                        "frFR")[0]["keys"], [REPORT_LIST])
+
+    def test_qualified_synthetic_declarations_classify_without_acceptance(self):
+        english, packs, context, release = self.fixture()
+        same = CATALOG_CURRENT_ENGLISH[REPORT_LIST]
+        packs["frFR"]["entries"][REPORT_LIST] = same
+        save = packs["frFR"]["entries"][REPORT_SAVE]
+        release = self.declared([report_declaration("frFR", REPORT_SAVE, save),
+                                 report_declaration("frFR", REPORT_LIST, same,
+                                                    "legitimately_identical")])
+        report = self.report(packs=packs, release=release)
+        french = report_product(report, "frFR")
+        self.assert_reconciled(french, sorted(CATALOG_CURRENT_ENGLISH))
+        self.assertEqual(french["keys"]["translated_and_reviewed"], [REPORT_SAVE])
+        self.assertEqual(french["keys"]["reviewed_legitimately_identical"], [REPORT_LIST])
+        self.assertEqual(french["keys"]["draft_unreviewed"], ["reason.saved_data_reading"])
+        self.assertEqual(french["keys"]["missing"], sorted(MISSING_AT_BASE))
+        self.assertEqual(french["declarationsApplied"], 2)
+        for row in report["products"]:
+            if row["productId"] != "frFR":
+                self.assertEqual(row["keys"]["draft_unreviewed"], sorted(STATIC_AT_BASE))
+        evidence = report["evidence"]
+        self.assertEqual((evidence["declarationCount"], evidence["qualifiedDeclarations"]), (2, 2))
+        self.assertIn(REPORT_NOT_EVIDENCE, evidence["notEvidenceOf"])
+        self.assertEqual(report["reviewGates"][1], {"productId": "frFR",
+                                                    "gates": REPORT_PENDING_GATES})
+        self.assertEqual(len(report_reasons(report, "review-gate-not-established",
+                                            "frFR.fluentHumanAcceptance")), 1)
+        self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
+        self.assertEqual(self.release["entryReview"]["declarations"], [])
+
+    def test_invalid_declarations_are_rejected(self):
+        fr_save = CATALOG_CURRENT_PACKS["frFR"]["entries"][REPORT_SAVE]
+        de_save = CATALOG_CURRENT_PACKS["deDE"]["entries"][REPORT_SAVE]
+        good = lambda **changes: report_declaration("frFR", REPORT_SAVE, fr_save, **changes)
+        cases = (
+            ("hash of other text", [good(translatedTextSha256=report_sha("other text"))],
+             "evidence-stale"),
+            ("hash of the German entry", [good(translatedTextSha256=report_sha(de_save))],
+             "evidence-stale"),
+            ("hash of the English text", [good(translatedTextSha256=report_sha(
+                CATALOG_CURRENT_ENGLISH[REPORT_SAVE]))], "evidence-stale"),
+            ("French text declared for German", [good(productId="deDE")], "evidence-stale"),
+            ("hash bound to another key", [good(key=REPORT_LIST)], "evidence-stale"),
+            ("upper-case hash", [good(translatedTextSha256=report_sha(fr_save).upper())],
+             "evidence-hash-format"),
+            ("short hash", [good(translatedTextSha256=report_sha(fr_save)[:63])],
+             "evidence-hash-format"),
+            ("hash null", [good(translatedTextSha256=None)], "evidence-type"),
+            ("unknown product", [good(productId="itIT")], "evidence-unknown-product"),
+            ("English baseline product", [good(productId="enUS")], "evidence-unknown-product"),
+            ("unknown key", [good(key="reason.not_in_english")], "evidence-unknown-key"),
+            ("declaration for a missing entry", [report_declaration(
+                "frFR", "reason.wait_three_choices", "Synthetic fixture wait text")],
+             "evidence-no-entry"),
+            ("duplicate declaration", [good(), good()], "evidence-duplicate"),
+            ("conflicting reviewer", [good(), good(reviewer=REPORT_OTHER_REVIEWER)],
+             "evidence-conflict"),
+            ("conflicting reference",
+             [good(), good(evidenceReference=REPORT_FIXTURE_REFERENCE + "/second")],
+             "evidence-conflict"),
+            ("identical decision on differing text", [good(decision="legitimately_identical")],
+             "evidence-decision-mismatch"),
+            ("unknown decision", [good(decision="approved")], "evidence-decision"),
+            ("decision boolean", [good(decision=True)], "evidence-type"),
+            ("reviewed boolean field added", [dict(good(), reviewed=True)], "evidence-field"),
+            ("boolean shortcut only", [{"productId": "frFR", "key": REPORT_SAVE, "reviewed": True}],
+             "evidence-field"),
+            ("generic accepted status", [good(status="accepted")], "evidence-status"),
+            ("generic pending status", [good(status="pending")], "evidence-status"),
+            ("status boolean", [good(status=True)], "evidence-type"),
+            ("missing reviewer", [report_without(good(), "reviewer")], "evidence-field"),
+            ("unassigned reviewer", [good(reviewer="UNASSIGNED")], "evidence-reviewer"),
+            ("pending reviewer", [good(reviewer="pending")], "evidence-reviewer"),
+            ("empty reviewer", [good(reviewer="")], "evidence-reviewer"),
+            ("blank reviewer", [good(reviewer="   ")], "evidence-reviewer"),
+            ("reviewer null", [good(reviewer=None)], "evidence-type"),
+            ("missing reference", [report_without(good(), "evidenceReference")], "evidence-field"),
+            ("http reference", [good(evidenceReference="http://example.invalid/review")],
+             "evidence-reference"),
+            ("file reference", [good(evidenceReference="file:///C:/review.txt")],
+             "evidence-reference"),
+            ("chat reference", [good(evidenceReference="reviewed in chat")], "evidence-reference"),
+            ("reference with a space", [good(evidenceReference="https://example.invalid/a b")],
+             "evidence-reference"),
+            ("empty reference", [good(evidenceReference="")], "evidence-reference"),
+            ("declaration not an object", ["frFR " + REPORT_SAVE], "evidence-structure"),
+        )
+        for label, records, code in cases:
+            with self.subTest(label):
+                self.assert_evidence(code, release=self.declared(records))
+        packs = copy.deepcopy(CATALOG_CURRENT_PACKS)
+        same = CATALOG_CURRENT_ENGLISH[REPORT_LIST]
+        packs["frFR"]["entries"][REPORT_LIST] = same
+        self.assert_evidence("evidence-decision-mismatch", packs=packs, release=self.declared(
+            [report_declaration("frFR", REPORT_LIST, same)]))
+        packs = copy.deepcopy(CATALOG_CURRENT_PACKS)
+        packs["frFR"]["entries"][REPORT_SAVE] = "Texte de fixture modifie apres la declaration"
+        self.assert_evidence("evidence-stale", packs=packs, release=self.declared([good()]))
+        contract_cases = (
+            ("no contract", lambda r: r.pop("entryReview")),
+            ("contract not an object", lambda r: r.update({"entryReview": []})),
+            ("other contract name",
+             lambda r: r["entryReview"].update({"contract": "nexus.l10n.other"})),
+            ("boolean contract version",
+             lambda r: r["entryReview"].update({"contractVersion": True})),
+            ("contract version 2", lambda r: r["entryReview"].update({"contractVersion": 2})),
+            ("declarations object", lambda r: r["entryReview"].update({"declarations": {}})),
+            ("declarations missing", lambda r: r["entryReview"].pop("declarations")),
+        )
+        for label, change in contract_cases:
+            with self.subTest(label):
+                release = copy.deepcopy(self.release)
+                change(release)
+                self.assert_evidence("evidence-contract", release=release)
+
+    def test_product_review_states_and_booleans_grant_no_entry_review(self):
+        release = copy.deepcopy(self.release)
+        product = schema_product(release, "frFR")
+        product["review"]["technicalAuthorReview"] = {
+            "status": "accepted",
+            "records": [{"reviewer": REPORT_FIXTURE_REVIEWER, "reviewed": True}]}
+        product["review"]["fluentHumanAcceptance"] = {
+            "responsibility": REPORT_FIXTURE_REVIEWER, "status": "accepted", "records": []}
+        product["wordingState"] = "reviewed"
+        release["reviewed"] = True
+        report = self.report(release=release)
+        french = report_product(report, "frFR")
+        self.assertEqual(french["keys"]["draft_unreviewed"], sorted(STATIC_AT_BASE))
+        self.assertEqual(french["keys"]["translated_and_reviewed"], [])
+        self.assertEqual(french["keys"]["reviewed_legitimately_identical"], [])
+        technical = report_reasons(report, "review-gate-not-established",
+                                   "frFR.technicalAuthorReview")
+        self.assertEqual(len(technical), 1)
+        self.assertIn("status=accepted", technical[0]["value"])
+        self.assertEqual(len(report_reasons(report, "review-gate-not-established",
+                                            "frFR.fluentHumanAcceptance")), 1)
+        self.assertEqual(report_reasons(report, "entries-draft-unreviewed", "frFR")[0]["keys"],
+                         sorted(STATIC_AT_BASE))
+        self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
+
+    def test_invalid_family_surface_and_gate_metadata_is_rejected(self):
+        context_cases = (
+            ("unknown adopted key", lambda c: c["windowFamilies"][1]["adoptedKeys"].append(
+                "reason.not_in_english"), "family-unknown-key"),
+            ("adopted key repeated in a family",
+             lambda c: c["windowFamilies"][0]["adoptedKeys"].append(SCHEMA_CHARGE),
+             "family-duplicate-key"),
+            ("issue as boolean", lambda c: c["windowFamilies"][2].update({"issue": True}),
+             "family-structure"),
+            ("issue as text", lambda c: c["windowFamilies"][2].update({"issue": "145"}),
+             "family-structure"),
+            ("family name missing", lambda c: c["windowFamilies"][3].pop("name"),
+             "family-structure"),
+            ("blank family name", lambda c: c["windowFamilies"][3].update({"name": "  "}),
+             "family-structure"),
+            ("semantic status missing", lambda c: c["windowFamilies"][5].pop("semanticStatus"),
+             "family-structure"),
+            ("coverage status boolean",
+             lambda c: c["windowFamilies"][6].update({"coverageStatus": False}),
+             "family-structure"),
+            ("paths as text", lambda c: c["windowFamilies"][7].update({"paths": "ui/Help.lua"}),
+             "family-structure"),
+            ("repeated family", lambda c: c["windowFamilies"].append(
+                copy.deepcopy(c["windowFamilies"][4])), "family-duplicate"),
+            ("unknown current adoption key", lambda c: c["currentAdoption"]["keys"].append(
+                "reason.not_in_english"), "adoption-key"),
+            ("repeated current adoption key",
+             lambda c: c["currentAdoption"]["keys"].append(SCHEMA_CHARGE), "adoption-key"),
+            ("semantic coverage boolean", lambda c: c["currentAdoption"].update(
+                {"allWindowSemanticCoverage": True}), "metadata-structure"),
+            ("denominator as a number", lambda c: c.update({"visibleTextDenominator": 6}),
+             "metadata-structure"),
+            ("other copy without status", lambda c: c["otherVisibleCopy"][0].pop("status"),
+             "metadata-structure"),
+        )
+        for label, change, code in context_cases:
+            with self.subTest(label):
+                context = copy.deepcopy(self.context)
+                change(context)
+                self.assert_evidence(code, context=context)
+        release_cases = (
+            ("pseudo data listed as shipped", lambda r: r["pseudoAndTestData"].update(
+                {"shippedProductIds": ["xxPS"]}), "evidence-pseudo-product"),
+            ("pseudo list missing", lambda r: r["pseudoAndTestData"].pop("shippedProductIds"),
+             "metadata-structure"),
+            ("font face boolean", lambda r: r["clientEvidence"].update({"fontFace": False}),
+             "metadata-structure"),
+            ("terminology status missing", lambda r: r["terminology"].pop("status"),
+             "metadata-structure"),
+            ("native gate not an object", lambda r: schema_product(r, "ruRU")["review"].update(
+                {"nativeAcceptance": "NOT_RUN"}), "evidence-gate-structure"),
+            ("gate records not a list", lambda r: schema_product(r, "enUS")["review"][
+                "technicalAuthorReview"].update({"records": {}}), "evidence-gate-structure"),
+            ("responsibility missing", lambda r: schema_product(r, "plPL")["review"][
+                "fluentHumanAcceptance"].pop("responsibility"), "evidence-gate-structure"),
+        )
+        for label, change, code in release_cases:
+            with self.subTest(label):
+                release = copy.deepcopy(self.release)
+                change(release)
+                self.assert_evidence(code, release=release)
+        context = copy.deepcopy(self.context)
+        context["windowFamilies"][0]["adoptedKeys"] = SCHEMA_CHARGE
+        with self.assertRaises(self.catalog.CatalogValidationError) as caught:
+            self.report(context=context)
+        self.assertEqual(caught.exception.code, "context-structure")
+
+    def test_invalid_catalog_inputs_raise_existing_errors_and_get_no_report(self):
+        twice = b'frFR = { name = "F", entries = {} }'
+        syntax = (({"english": b""}, "bad-bootstrap"),
+                  ({"packs": CATALOG_HEADS["packs"] + b"{ " + twice + b", " + twice + b" }"},
+                   "duplicate-pack"))
+        for parts, code in syntax:
+            with self.subTest(code):
+                with self.assertRaises(self.catalog.CatalogSyntaxError) as caught:
+                    self.report(**parts)
+                self.assertEqual(caught.exception.code, code)
+        cases = (
+            ("orphan entry", lambda e, p, c, r: p["frFR"]["entries"].update(
+                {"reason.not_in_english": "Orphan"}), "orphan-entry"),
+            ("pseudo pack", lambda e, p, c, r: p.update(
+                {"xxPS": {"name": "Pseudo", "entries": {}}}), "pack-unknown"),
+            ("previous validator status",
+             lambda e, p, c, r: r["validator"].update({"status": SCHEMA_OLD_STATUS}),
+             "release-validator"),
+            ("context English drift", lambda e, p, c, r: schema_row(c, REPORT_LIST).update(
+                {"english": "Drifted"}), "context-english-mismatch"),
+            ("entry with pipe", lambda e, p, c, r: p["deDE"]["entries"].update(
+                {REPORT_LIST: "a|b"}), "invalid-text"),
+        )
+        for label, change, code in cases:
+            with self.subTest(label):
+                english, packs, context, release = self.fixture()
+                change(english, packs, context, release)
+                with self.assertRaises(self.catalog.CatalogValidationError) as caught:
+                    self.report(english=english, packs=packs, context=context, release=release)
+                self.assertEqual(caught.exception.code, code)
+                self.assertNotIsInstance(caught.exception, self.catalog.CatalogEvidenceError)
+        for value in (self.raw["english"].decode("utf-8"), ROOT / "data/LocalizationEnglish.lua",
+                      None):
+            with self.subTest(value=type(value).__name__):
+                with self.assertRaises(TypeError):
+                    self.catalog.catalog_report(value, self.raw["packs"], self.raw["context"],
+                                                self.raw["release"])
+
+    def test_report_is_deterministic_and_binds_the_exact_input_bytes(self):
+        arguments = self.inputs()
+        first = self.catalog.catalog_report(*arguments)
+        second = self.catalog.catalog_report(*[bytearray(item) for item in arguments])
+        self.assertEqual(first, second)
+        dumps = {json.dumps(self.catalog.catalog_report(*arguments), sort_keys=True)
+                 for _ in range(3)}
+        dumps.add(json.dumps(second, sort_keys=True))
+        self.assertEqual(len(dumps), 1)
+        text = dumps.pop()
+        self.assertTrue(text.isascii())
+        self.assertEqual(json.loads(text), first)
+        self.assertEqual([row["name"] for row in first["inputs"]],
+                         ["english", "packs", "keyContext", "release"])
+        self.assertEqual([row["source"] for row in first["inputs"]],
+                         ["data/LocalizationEnglish.lua", "data/LocalizationPacks.lua",
+                          "docs/localization/KEY_CONTEXT.json",
+                          "docs/localization/RELEASE_LANGUAGES.json"])
+        for row, data in zip(first["inputs"], arguments):
+            self.assertEqual(row["sha256"], hashlib.sha256(data).hexdigest())
+            self.assertEqual(row["byteLength"], len(data))
+        changed = list(arguments)
+        changed[2] = arguments[2] + b"\n"
+        third = self.catalog.catalog_report(*changed)
+        self.assertEqual(third["inputs"][2]["sha256"], hashlib.sha256(changed[2]).hexdigest())
+        self.assertNotEqual(third["inputs"][2]["sha256"], first["inputs"][2]["sha256"])
+        self.assertEqual(third["inputs"][:2] + third["inputs"][3:],
+                         first["inputs"][:2] + first["inputs"][3:])
+        self.assertEqual({k: v for k, v in third.items() if k != "inputs"},
+                         {k: v for k, v in first.items() if k != "inputs"})
+        for path, value in walk(first):
+            self.assertNotIsInstance(value, (bool, float), path)
+        lowered = text.lower()
+        for claim in ("release_ready", "releaseready", "release-ready", "percent", "100%"):
+            self.assertNotIn(claim, lowered)
+        self.assertNotIn("complete", first)
+        self.assertEqual({family["state"] for family in first["families"]}, {"INCOMPLETE"})
+        self.assertEqual(first["completeness"]["state"], "INCOMPLETE")
 
 
 if __name__ == "__main__":

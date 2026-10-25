@@ -25,16 +25,68 @@ It accepts no issue: not #139, not #147 and no later gate.
 
 ## This contract and the validator
 
-| Part | This four-file contract | Separate next task |
+| Part | This contract | Separate next task |
 |---|---|---|
-| Release languages | `RELEASE_LANGUAGES.json`: product choices, client evidence, review and session states | read-only `tools/l10n_catalog.py` checks catalog inputs against it |
-| Keys and context | `KEY_CONTEXT.json`: six keys, byte limits, grammar, families | derived per-pack translated, missing, invalid and obsolete report |
-| Tests | `tools/tests/test_l10n_catalog.py`: assertions on these public documents | appended CLI positive and malformed-input fixtures that keep these assertions |
+| Release languages | `RELEASE_LANGUAGES.json`: product choices, client evidence, review and session states, and the `entryReview` declaration contract with no declaration recorded | none in this slice |
+| Keys and context | `KEY_CONTEXT.json`: six keys, byte limits, grammar, families | none in this slice |
+| Validator | `tools/l10n_catalog.py`: syntax parser, pure schema API `validate_catalog_data` and pure coverage report API `catalog_report`, on exact in-memory bytes; full validation NOT_IMPLEMENTED | read-only confined-root command line around `catalog_report` (B3b) |
+| Tests | `tools/tests/test_l10n_catalog.py`: assertions on these public documents, plus public parser, schema and report API tests | appended CLI positive and malformed-input fixtures that keep these assertions |
 | Required CI | not registered | later authorized append to `PYTHON_TESTS` in `tools/run_prototype_tests.py` |
+
+`catalog_report` first runs `validate_catalog_data` on the same four byte
+strings. Syntax and schema errors keep their codes, and an invalid catalog
+gets no counts. For each optional pack, it then classifies the entry for every
+current English key as exactly one of these categories:
+
+- `translated_and_reviewed`
+- `reviewed_legitimately_identical`
+- `deliberate_english_placeholder`
+- `draft_unreviewed`
+- `missing`
+- `invalid`
+- `obsolete`
+
+`invalid` and `obsolete` are zero in any report, because such input is
+rejected first. An entry equal to English without a qualified declaration is a
+`deliberate_english_placeholder`. This is a technical category; it claims
+nothing about intent. Fallback English and autonyms never count as translated
+entries.
+
+Every count derives from the inputs, and the report carries the SHA-256 hash
+of each of the four inputs. All window families stay in the report, including
+those without an adopted key. English keys without a family are listed
+separately. The denominator is the distinct English key set, never a sum of
+family rows.
+
+Completeness reasons come from:
+
+- the actual entries;
+- the pending family, surface and denominator metadata;
+- the pending review and native gates;
+- the client facts that data inspection cannot establish.
+
+There is no complete, release-ready or global coverage state.
+
+An entry-review declaration in `entryReview.declarations` binds one optional
+product ID, one English key and the SHA-256 of the exact UTF-8 entry text to:
+
+- an explicitly named reviewer;
+- a `translated` or `legitimately_identical` decision, which must match the
+  actual equality with English;
+- an `https://` evidence reference, which the tool never fetches;
+- status `declared`.
+
+Malformed, duplicate, conflicting, stale or contradicting declarations raise
+`CatalogEvidenceError`, and so does invalid family metadata. A structurally
+qualified declaration is not evidence of fluent competence, contributor rights
+or native truth. Root, fluent human and native acceptance stay separate.
+`technicalAuthorReview`, `fluentHumanAcceptance` and `nativeAcceptance` stay
+empty and pending, UNASSIGNED or NOT_RUN. No declaration is recorded.
 
 Until that registration, `tools/ci_check.py` reports an unregistered
 `test_*.py` under `tools/tests` as an inventory failure (`CONTRIBUTING.md`,
-`VALIDATION.md`). Execution of the new test: NOT_RUN.
+`VALIDATION.md`). Independent review: pending. Execution of the new tests:
+NOT_RUN.
 
 ## Separate gates
 

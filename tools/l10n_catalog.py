@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
-"""Syntax foundation and pure schema API for the Nexus localization data (#147).
+"""Syntax foundation, pure schema API and pure coverage report API for the Nexus
+localization data (#147).
 
-Status: SCHEMA_API_ONLY_REPORT_CLI_PENDING. parse_english and parse_packs below
-check syntax only, and a successful parse alone does not make a catalog valid.
-validate_catalog_data, appended after them, is a pure in-memory schema API:
-from the exact bytes of the English base, the packs file, KEY_CONTEXT.json and
-RELEASE_LANGUAGES.json it checks keys, text, the charge template grammar, pack
-IDs, autonyms and entries, the key-context rows and the release product
+Status: COVERAGE_API_ONLY_REPORT_CLI_PENDING. parse_english and parse_packs
+below check syntax only, and a successful parse alone does not make a catalog
+valid. validate_catalog_data, appended after them, is a pure in-memory schema
+API: from the exact bytes of the English base, the packs file, KEY_CONTEXT.json
+and RELEASE_LANGUAGES.json it checks keys, text, the charge template grammar,
+pack IDs, autonyms and entries, the key-context rows and the release product
 metadata against the runtime contract of core/Localization.lua, and raises
 CatalogValidationError (stable .code) on a semantic failure. Missing translated
-entries are valid partial data. Pack coverage counts, review and native
-evidence, TOC order, aggregated reports and the --root command line are still
-pending, so full validation is NOT_IMPLEMENTED. Schema validity does not claim
-that a catalog is reviewed, complete or displayable.
+entries are valid partial data. catalog_report, appended after that, is a pure
+in-memory coverage and evidence report API. It first calls
+validate_catalog_data on the same four byte strings, unchanged, so an invalid
+catalog gets no counts. It then derives a deterministic report dict with input
+SHA-256 hashes, per-product and per-window-family entry categories over the
+actual English keys, English keys without a family and concrete completeness
+reasons. Invalid entry-review declarations or family metadata raise
+CatalogEvidenceError (stable .code). A structurally qualified review
+declaration is not evidence of fluent competence, contributor rights or native
+truth. TOC order, the filesystem --root command line (B3b), required-CI
+registration, independent review and the human, native and UI gates are still
+pending, so full validation is NOT_IMPLEMENTED. Neither schema validity nor a
+report claims that a catalog is reviewed, complete or displayable.
 
 Public seam:
 
@@ -98,7 +108,7 @@ import sys
 import types
 from collections import namedtuple
 
-STATUS = 'SCHEMA_API_ONLY_REPORT_CLI_PENDING'
+STATUS = 'COVERAGE_API_ONLY_REPORT_CLI_PENDING'
 CODES = (
     'not-utf8', 'value-not-utf8', 'unfinished-string', 'unfinished-comment',
     'invalid-escape', 'nested-long-bracket', 'bad-bootstrap', 'bad-assignment',
@@ -110,7 +120,7 @@ NOTICE = {
     'tool': 'tools/l10n_catalog.py',
     'status': STATUS,
     'fullValidation': 'NOT_IMPLEMENTED',
-    'message': 'syntax and schema API only; coverage validation and report CLI are pending',
+    'message': 'coverage report API only; filesystem and report CLI are pending',
 }
 
 _INVENTORY = pathlib.Path(__file__).resolve().parent / 'l10n_inventory.py'
@@ -742,6 +752,477 @@ def validate_catalog_data(english_source: bytes, packs_source: bytes,
     products = _check_release(release)
     _check_packs(packs, english, products)
     return {'english': english, 'packs': packs, 'keyContext': key_context, 'release': release}
+
+
+# ---------------------------------------------------------------------------
+# B3a (Refs #147): the pure coverage and evidence report API. catalog_report()
+# first calls validate_catalog_data above, unchanged, on the same four byte
+# strings. Its TypeError, CatalogSyntaxError and CatalogValidationError
+# propagate unchanged, and an invalid catalog never acquires coverage counts.
+# It then checks the entry-review declaration contract (entryReview in
+# RELEASE_LANGUAGES.json), the shapes of the product review gates and the
+# window-family and surface metadata. Any failure raises CatalogEvidenceError
+# (stable .code). Only after these checks does it derive the report. It reads
+# and writes no file, fetches no reference, renders or formats no text and
+# runs no Lua. The confined-root command line around this API is the separate
+# task B3b. main() below is unchanged.
+
+import hashlib
+import re
+
+REPORT_SCHEMA = 'nexus.l10n.coverage_report'
+REPORT_SCHEMA_VERSION = 1
+# The seven entry categories in report order. In a report the first six
+# partition the English keys of each optional pack, and obsolete lists pack
+# entries outside them. invalid and obsolete are always empty in a report,
+# because validate_catalog_data rejects such input before any report exists.
+ENTRY_CATEGORIES = (
+    'translated_and_reviewed', 'reviewed_legitimately_identical',
+    'deliberate_english_placeholder', 'draft_unreviewed', 'missing', 'invalid', 'obsolete',
+)
+EVIDENCE_CODES = (
+    'evidence-contract', 'evidence-structure', 'evidence-field', 'evidence-type',
+    'evidence-status', 'evidence-unknown-product', 'evidence-unknown-key',
+    'evidence-hash-format', 'evidence-reviewer', 'evidence-reference', 'evidence-decision',
+    'evidence-no-entry', 'evidence-stale', 'evidence-decision-mismatch', 'evidence-duplicate',
+    'evidence-conflict', 'evidence-gate-structure', 'evidence-pseudo-product',
+    'family-structure', 'family-duplicate', 'family-unknown-key', 'family-duplicate-key',
+    'adoption-key', 'metadata-structure',
+)
+EVIDENCE_NOTICE = (
+    'A structurally qualified entry-review declaration is not evidence of fluent competence, '
+    'contributor rights or native truth. Root, fluent human and native acceptance remain '
+    'separate gates; this report grants none of them.')
+
+_ENTRY_CONTRACT = 'nexus.l10n.entry_review_declaration'
+_DECLARATION_FIELDS = ('productId', 'key', 'translatedTextSha256', 'reviewer', 'decision',
+                       'evidenceReference', 'status')
+_DECLARED = 'declared'
+_DECISIONS = types.MappingProxyType({'translated': 'translated_and_reviewed',
+                                     'legitimately_identical': 'reviewed_legitimately_identical'})
+_IN_DENOMINATOR = ENTRY_CATEGORIES[:6]
+_NOT_REVIEWED = ENTRY_CATEGORIES[2:]
+_SHA256_HEX = re.compile('[0-9a-f]{64}')
+_HTTPS_REFERENCE = re.compile(
+    'https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:[/?#][!-~]*)?')
+_MAX_REVIEWER_CHARS = 128
+_MAX_REFERENCE_CHARS = 512
+_NOT_A_REVIEWER = frozenset(('unassigned', 'pending', 'unknown', 'none', 'not_run', 'tbd',
+                             'n/a', 'null', 'anonymous', 'reviewer'))
+_REPORT_INPUTS = (('english', _ENGLISH_SOURCE), ('packs', _PACKS_SOURCE),
+                  ('keyContext', 'docs/localization/KEY_CONTEXT.json'),
+                  ('release', 'docs/localization/RELEASE_LANGUAGES.json'))
+_GATES = (('technicalAuthorReview', ()), ('fluentHumanAcceptance', ('responsibility',)),
+          ('nativeAcceptance', ()))
+_NATIVE_FACTS = ('clientManifest', 'clientBuild', 'clientHash', 'runtimeLocale', 'fontFace',
+                 'glyphCoverage', 'nativeLayout')
+
+
+class CatalogEvidenceError(ValueError):
+    """Raised by catalog_report, after the catalog itself is valid, for invalid
+    entry-review declarations, review-gate shapes, window-family or surface
+    metadata. It carries a stable code (one of EVIDENCE_CODES) and, when
+    known, the path in the input and the key or ID concerned."""
+
+    def __init__(self, code: str, path: str = None, key=None):
+        detail = '' if path is None else ' at ' + path
+        if key is not None:
+            detail += ' (%r)' % (key,)
+        super().__init__(code + detail)
+        self.code, self.path, self.key = code, path, key
+
+
+def _evidence(condition, code, path, key=None):
+    if not condition:
+        raise CatalogEvidenceError(code, path, key)
+
+
+def _nonblank(value):
+    return type(value) is str and value.strip() != ''
+
+
+def _text_sha256(text):
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def _valid_reviewer(name):
+    """An explicitly assigned name: 1 to 128 characters without leading or
+    trailing whitespace, C0 or C1 controls or DEL, and not a placeholder such
+    as UNASSIGNED or pending. The name is recorded, never verified or trusted."""
+    if not 1 <= len(name) <= _MAX_REVIEWER_CHARS or name != name.strip():
+        return False
+    if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in name):
+        return False
+    return name.casefold() not in _NOT_A_REVIEWER
+
+
+def _valid_reference(reference):
+    """An https:// URL of printable ASCII, at most 512 characters. Only its
+    form is checked; it is never fetched or resolved."""
+    return (len(reference) <= _MAX_REFERENCE_CHARS
+            and _HTTPS_REFERENCE.fullmatch(reference) is not None)
+
+
+def _check_gates(product, path):
+    """The shapes of the three declared review gates of one product. No
+    acceptance-record contract exists, so no value establishes a gate here."""
+    review = product.get('review')
+    _evidence(type(review) is dict, 'evidence-gate-structure', path + '.review')
+    gates = {}
+    for gate, extra in _GATES:
+        record = review.get(gate)
+        where = '%s.review.%s' % (path, gate)
+        _evidence(type(record) is dict and type(record.get('status')) is str
+                  and type(record.get('records')) is list, 'evidence-gate-structure', where)
+        row = {'status': record['status'], 'recordCount': len(record['records'])}
+        for field in extra:
+            _evidence(type(record.get(field)) is str, 'evidence-gate-structure',
+                      where + '.' + field)
+            row[field] = record[field]
+        gates[gate] = row
+    return gates
+
+
+def _check_metadata(context, release, english):
+    """The surface, terminology, client and pseudo-data metadata the report
+    uses. Values are reported as declared; none is judged complete."""
+    adoption, seen = context['currentAdoption'], set()
+    for key in adoption['keys']:
+        _evidence(key in english and key not in seen, 'adoption-key',
+                  'keyContext.currentAdoption.keys', key)
+        seen.add(key)
+    coverage = adoption.get('allWindowSemanticCoverage')
+    _evidence(_nonblank(coverage), 'metadata-structure',
+              'keyContext.currentAdoption.allWindowSemanticCoverage')
+    denominator = context.get('visibleTextDenominator')
+    _evidence(_nonblank(denominator), 'metadata-structure', 'keyContext.visibleTextDenominator')
+    other = context.get('otherVisibleCopy')
+    _evidence(type(other) is list, 'metadata-structure', 'keyContext.otherVisibleCopy')
+    copy_rows = []
+    for index, item in enumerate(other):
+        _evidence(type(item) is dict and _nonblank(item.get('source'))
+                  and _nonblank(item.get('status')), 'metadata-structure',
+                  'keyContext.otherVisibleCopy[%d]' % index)
+        copy_rows.append({'source': item['source'], 'status': item['status']})
+    terminology = release.get('terminology')
+    _evidence(type(terminology) is dict and _nonblank(terminology.get('status')),
+              'metadata-structure', 'release.terminology')
+    client = release.get('clientEvidence')
+    _evidence(type(client) is dict and _is_str_list(client.get('evidencedClientAliases')),
+              'metadata-structure', 'release.clientEvidence')
+    native = {}
+    for field in _NATIVE_FACTS:
+        _evidence(_nonblank(client.get(field)), 'metadata-structure',
+                  'release.clientEvidence.' + field)
+        native[field] = client[field]
+    pseudo = release.get('pseudoAndTestData')
+    _evidence(type(pseudo) is dict and _is_str_list(pseudo.get('shippedProductIds')),
+              'metadata-structure', 'release.pseudoAndTestData')
+    shipped = pseudo['shippedProductIds']
+    _evidence(not shipped, 'evidence-pseudo-product',
+              'release.pseudoAndTestData.shippedProductIds', shipped[0] if shipped else None)
+    return {'adoptionKeys': list(adoption['keys']), 'allWindowSemanticCoverage': coverage,
+            'visibleTextDenominator': denominator, 'otherVisibleCopy': copy_rows,
+            'terminology': terminology['status'], 'native': native,
+            'aliases': list(client['evidencedClientAliases']), 'pseudo': list(shipped)}
+
+
+def _check_families(context, english):
+    """Each window family needs a text name, key family and statuses, an
+    integer issue, a list of paths and a unique name. Its adopted keys must be
+    distinct English keys. Every family is kept, also one without an adopted
+    key."""
+    names, families = set(), []
+    for index, family in enumerate(context['windowFamilies']):
+        path = 'keyContext.windowFamilies[%d]' % index
+        for field in ('name', 'proposedKeyFamily', 'semanticStatus', 'coverageStatus'):
+            _evidence(_nonblank(family.get(field)), 'family-structure', path + '.' + field)
+        _evidence(type(family.get('issue')) is int, 'family-structure', path + '.issue')
+        _evidence(_is_str_list(family.get('paths')), 'family-structure', path + '.paths')
+        name = family['name']
+        _evidence(name not in names, 'family-duplicate', path + '.name', name)
+        names.add(name)
+        seen = set()
+        for key in family['adoptedKeys']:
+            _evidence(key in english, 'family-unknown-key', path + '.adoptedKeys', key)
+            _evidence(key not in seen, 'family-duplicate-key', path + '.adoptedKeys', key)
+            seen.add(key)
+        families.append(family)
+    return families
+
+
+def _check_declarations(release, english, packs, optional_ids):
+    """Check the entry-review declarations of release.entryReview. Each must
+    be a complete, coherent record for a present entry of an optional pack;
+    any defect raises CatalogEvidenceError. Returns
+    {(product ID, key): decision} and the number of declarations."""
+    where = 'release.entryReview'
+    contract = release.get('entryReview')
+    _evidence(type(contract) is dict, 'evidence-contract', where)
+    _evidence(contract.get('contract') == _ENTRY_CONTRACT, 'evidence-contract',
+              where + '.contract')
+    _evidence(_is_int(contract.get('contractVersion'), 1), 'evidence-contract',
+              where + '.contractVersion')
+    records = contract.get('declarations')
+    _evidence(type(records) is list, 'evidence-contract', where + '.declarations')
+    found = {}
+    for index, record in enumerate(records):
+        path = '%s.declarations[%d]' % (where, index)
+        _evidence(type(record) is dict, 'evidence-structure', path)
+        _evidence(set(record) == set(_DECLARATION_FIELDS), 'evidence-field', path)
+        for field in _DECLARATION_FIELDS:
+            _evidence(type(record[field]) is str, 'evidence-type', path + '.' + field)
+        product_id, key = record['productId'], record['key']
+        digest, decision = record['translatedTextSha256'], record['decision']
+        _evidence(record['status'] == _DECLARED, 'evidence-status', path + '.status', key)
+        _evidence(product_id in optional_ids, 'evidence-unknown-product', path + '.productId',
+                  product_id)
+        _evidence(key in english, 'evidence-unknown-key', path + '.key', key)
+        _evidence(_SHA256_HEX.fullmatch(digest) is not None, 'evidence-hash-format',
+                  path + '.translatedTextSha256', key)
+        _evidence(_valid_reviewer(record['reviewer']), 'evidence-reviewer', path + '.reviewer',
+                  key)
+        _evidence(_valid_reference(record['evidenceReference']), 'evidence-reference',
+                  path + '.evidenceReference', key)
+        _evidence(decision in _DECISIONS, 'evidence-decision', path + '.decision', key)
+        entries = packs[product_id]['entries']
+        _evidence(key in entries, 'evidence-no-entry', path + '.key', key)
+        _evidence(digest == _text_sha256(entries[key]), 'evidence-stale',
+                  path + '.translatedTextSha256', key)
+        identical = entries[key] == english[key]
+        _evidence(identical == (decision == 'legitimately_identical'),
+                  'evidence-decision-mismatch', path + '.decision', key)
+        previous = found.get((product_id, key))
+        if previous is not None:
+            _evidence(previous != record, 'evidence-duplicate', path, key)
+            raise CatalogEvidenceError('evidence-conflict', path, key)
+        found[(product_id, key)] = record
+    return {pair: record['decision'] for pair, record in found.items()}, len(records)
+
+
+def _classify(ordered, english, entries, decisions, product_id):
+    """One category list per ENTRY_CATEGORIES name for one optional pack."""
+    keys = {category: [] for category in ENTRY_CATEGORIES}
+    for key in ordered:
+        if key not in entries:
+            category = 'missing'
+        elif (product_id, key) in decisions:
+            category = _DECISIONS[decisions[(product_id, key)]]
+        elif entries[key] == english[key]:
+            category = 'deliberate_english_placeholder'
+        else:
+            category = 'draft_unreviewed'
+        keys[category].append(key)
+    keys['obsolete'] = sorted(key for key in entries if key not in english)
+    return keys
+
+
+def _counts(keys):
+    return {category: len(keys[category]) for category in ENTRY_CATEGORIES}
+
+
+def _reason(code, subject, value, keys=()):
+    return {'code': code, 'subject': subject, 'value': value, 'keys': list(keys)}
+
+
+def _state(reasons):
+    return 'INCOMPLETE' if reasons else 'UNDETERMINED'
+
+
+def _describe(row):
+    return '; '.join('%s=%s' % (name, row[name]) for name in sorted(row))
+
+
+def catalog_report(english_source: bytes, packs_source: bytes, key_context_json: bytes,
+                   release_json: bytes) -> dict:
+    """Return a deterministic coverage and evidence report dict for the exact
+    bytes of data/LocalizationEnglish.lua, data/LocalizationPacks.lua,
+    docs/localization/KEY_CONTEXT.json and docs/localization/RELEASE_LANGUAGES.json.
+
+    validate_catalog_data runs first on the same four arguments, unchanged.
+    Its TypeError, CatalogSyntaxError and CatalogValidationError propagate,
+    and no partial report or count is produced. After that, invalid
+    entry-review declarations, review-gate shapes, window-family or surface
+    metadata raise CatalogEvidenceError (one of EVIDENCE_CODES).
+
+    For each optional_ui_pack product, in release order, every English key
+    (sorted) is exactly one of ENTRY_CATEGORIES:
+    - absent: missing;
+    - present with a qualified declaration: translated_and_reviewed or
+      reviewed_legitimately_identical, by its decision;
+    - present and equal to the English text: deliberate_english_placeholder
+      (a technical category that claims nothing about intent);
+    - otherwise: draft_unreviewed.
+    Fallback English and the autonym never count as an entry. The English
+    baseline is reported as the baseline and denominator, never as a pack.
+    Every count and list derives from the inputs.
+
+    Window families keep their declared order, including families without an
+    adopted key. A key shown by several families is listed in each and
+    counted once in the denominator. English keys without a family get their
+    own rows.
+
+    completeness.reasons lists the concrete remaining reasons. There is no
+    complete or release state and no override. A structurally qualified
+    declaration is not evidence of fluent competence, contributor rights or
+    native truth, and data inspection establishes no native client fact.
+    Nothing is read, written, fetched, rendered or executed."""
+    validated = validate_catalog_data(english_source, packs_source, key_context_json,
+                                      release_json)
+    english, packs = validated['english'], validated['packs']
+    context, release = validated['keyContext'], validated['release']
+    products = release['products']
+    baseline_id = next(item['productId'] for item in products if item['kind'] == _BASELINE)
+    optional = [item for item in products if item['kind'] == _OPTIONAL]
+    optional_ids = [item['productId'] for item in optional]
+    gates = [(item['productId'], _check_gates(item, 'release.products[%d]' % index))
+             for index, item in enumerate(products)]
+    metadata = _check_metadata(context, release, english)
+    families = _check_families(context, english)
+    decisions, declaration_count = _check_declarations(release, english, packs,
+                                                       frozenset(optional_ids))
+    ordered = sorted(english)
+    sources = (english_source, packs_source, key_context_json, release_json)
+    inputs = [{'name': name, 'source': source, 'sha256': hashlib.sha256(bytes(data)).hexdigest(),
+               'byteLength': len(data)} for (name, source), data in zip(_REPORT_INPUTS, sources)]
+    reasons, lists, rows = [], {}, []
+    for item in optional:
+        product_id = item['productId']
+        entries = packs[product_id]['entries']
+        keys = _classify(ordered, english, entries, decisions, product_id)
+        counts = _counts(keys)
+        lists[product_id] = keys
+        rows.append({
+            'productId': product_id, 'kind': _OPTIONAL, 'autonym': item['autonym'],
+            'denominator': len(ordered), 'entriesPresent': len(entries),
+            'declarationsApplied': sum(1 for pair in decisions if pair[0] == product_id),
+            'counts': counts, 'keys': keys,
+            'reconciliation': {'denominator': len(ordered), 'inDenominatorTotal':
+                               sum(counts[category] for category in _IN_DENOMINATOR)},
+        })
+        for category in _NOT_REVIEWED:
+            if keys[category]:
+                reasons.append(_reason('entries-' + category.replace('_', '-'), product_id,
+                                       category, keys[category]))
+    gate_rows = []
+    for product_id, product_gates in gates:
+        gate_rows.append({'productId': product_id, 'gates': product_gates})
+        for gate, _ in _GATES:
+            reasons.append(_reason('review-gate-not-established', product_id + '.' + gate,
+                                   _describe(product_gates[gate])))
+    family_rows, references = [], {}
+    for family in families:
+        name, adopted = family['name'], family['adoptedKeys']
+        chosen = frozenset(adopted)
+        for key in adopted:
+            references[key] = references.get(key, 0) + 1
+        family_reasons = [_reason('family-semantic-status', name, family['semanticStatus']),
+                          _reason('family-coverage-status', name, family['coverageStatus'])]
+        if not adopted:
+            family_reasons.append(_reason('family-no-adopted-key', name, 'adoptedKeys=0'))
+        per_product = []
+        for product_id in optional_ids:
+            keys = {category: [key for key in lists[product_id][category] if key in chosen]
+                    for category in ENTRY_CATEGORIES}
+            per_product.append({'productId': product_id, 'counts': _counts(keys), 'keys': keys})
+            pending = sorted(key for category in _NOT_REVIEWED for key in keys[category])
+            if pending:
+                family_reasons.append(_reason('family-entries-not-reviewed', name, product_id,
+                                              pending))
+        family_rows.append({
+            'name': name, 'proposedKeyFamily': family['proposedKeyFamily'],
+            'issue': family['issue'], 'paths': list(family['paths']),
+            'semanticStatus': family['semanticStatus'],
+            'coverageStatus': family['coverageStatus'],
+            'adoptedKeys': list(adopted), 'adoptedKeyCount': len(adopted),
+            'products': per_product, 'state': _state(family_reasons), 'reasons': family_reasons,
+        })
+        reasons.extend(_reason(row['code'], row['subject'], row['value'], row['keys'])
+                       for row in family_reasons)
+    unassigned = [key for key in ordered if key not in references]
+    if not families:
+        reasons.append(_reason('no-window-family', 'keyContext.windowFamilies',
+                               'windowFamilies=0'))
+    if unassigned:
+        reasons.append(_reason('keys-without-family', 'keyContext.windowFamilies', 'adoptedKeys',
+                               unassigned))
+    category_of = {product_id: {key: category for category in ENTRY_CATEGORIES
+                                for key in lists[product_id][category]}
+                   for product_id in optional_ids}
+    unassigned_rows = [{'key': key, 'products': [
+        {'productId': product_id, 'category': category_of[product_id][key]}
+        for product_id in optional_ids]} for key in unassigned]
+    reasons.append(_reason('adoption-semantic-coverage',
+                           'keyContext.currentAdoption.allWindowSemanticCoverage',
+                           metadata['allWindowSemanticCoverage']))
+    for row in metadata['otherVisibleCopy']:
+        reasons.append(_reason('other-visible-copy', row['source'], row['status']))
+    reasons.append(_reason('visible-text-denominator', 'keyContext.visibleTextDenominator',
+                           metadata['visibleTextDenominator']))
+    reasons.append(_reason('terminology-status', 'release.terminology.status',
+                           metadata['terminology']))
+    for field in _NATIVE_FACTS:
+        reasons.append(_reason('native-fact-not-established', 'release.clientEvidence.' + field,
+                               metadata['native'][field]))
+    return {
+        'schema': REPORT_SCHEMA,
+        'schemaVersion': REPORT_SCHEMA_VERSION,
+        'tool': _TOOL_PATH,
+        'status': STATUS,
+        'fullValidation': NOTICE['fullValidation'],
+        'inputs': inputs,
+        'categories': list(ENTRY_CATEGORIES),
+        'englishBaseline': {
+            'productId': baseline_id, 'kind': _BASELINE, 'source': _ENGLISH_SOURCE,
+            'keyCount': len(ordered), 'keys': list(ordered),
+            'role': 'explicit baseline and denominator; not an optional translated pack',
+        },
+        'denominator': {
+            'englishKeys': len(ordered),
+            'basis': 'distinct semantic keys of the English base',
+            'familyAdoptedKeyReferences': sum(references.values()),
+            'distinctFamilyAdoptedKeys': len(references),
+            'keysOnMultipleFamilies': sorted(key for key, n in references.items() if n > 1),
+            'keysWithoutFamily': list(unassigned),
+            'rule': 'family rows are presentation rows; their sums are never a denominator',
+        },
+        'products': rows,
+        'reviewGates': gate_rows,
+        'families': family_rows,
+        'unassignedKeys': unassigned_rows,
+        'surfaces': {
+            'currentAdoptionKeys': metadata['adoptionKeys'],
+            'currentAdoptionBasis': 'declared metadata; consumer adoption is not verified here',
+            'allWindowSemanticCoverage': metadata['allWindowSemanticCoverage'],
+            'visibleTextDenominator': metadata['visibleTextDenominator'],
+            'otherVisibleCopy': metadata['otherVisibleCopy'],
+        },
+        'nativeFacts': {
+            'declared': metadata['native'],
+            'evidencedClientAliases': metadata['aliases'],
+            'establishedByThisReport': 'NOT_RUN',
+            'rule': 'data inspection establishes no client locale, font, glyph or layout fact',
+        },
+        'pseudoAndTestData': {
+            'shippedProductIds': metadata['pseudo'],
+            'countedInProductRows': len(metadata['pseudo']),
+            'rule': 'pseudo-locale and test fixture data are never shipped products',
+        },
+        'evidence': {
+            'contract': _ENTRY_CONTRACT,
+            'declarationCount': declaration_count,
+            'qualifiedDeclarations': len(decisions),
+            'notEvidenceOf': EVIDENCE_NOTICE,
+            'productReviewGates': 'reported in reviewGates; never granted by a declaration',
+        },
+        'completeness': {
+            'state': _state(reasons),
+            'reasonCount': len(reasons),
+            'reasons': reasons,
+            'rule': ('state is INCOMPLETE while any reason remains; this report defines no '
+                     'complete or release state and accepts no override'),
+        },
+    }
 
 
 def main() -> int:
