@@ -142,13 +142,41 @@ function M.DestinationFacts(model)
     return d
 end
 
+-- The Orb fact of the setup status, from OrbRuntime.ReasonView: a passive
+-- projection that initializes, reads, observes, pumps and writes nothing.
+-- Returns orb, observed. orb: false (an observed owner with no approved run),
+-- a new table of validated plain scalars, or nil (unknown). observed: false
+-- when the owner was not initialized this session (an unresolved saved
+-- receipt is then not ruled out), true when it was, nil when unreadable. A
+-- field that is not a plain bounded value of its kind is left out, never
+-- converted or guessed.
+local function OrbFacts(runtime)
+    if type(runtime.ReasonView) ~= "function" then return nil end
+    local ok, view = pcall(runtime.ReasonView)
+    if not ok or type(view) ~= "table" then return nil end
+    if view.observed == false then return nil, false end
+    if view.observed ~= true then return nil end
+    if view.run == false then return false, true end
+    if view.run ~= true then return nil end
+    local orb = {}
+    local state = view.state
+    if type(state) == "string" and #state <= 32 and state:match("^[%u_]+$") then orb.state = state end
+    for _, key in ipairs({"running", "pending", "restored"}) do
+        if type(view[key]) == "boolean" then orb[key] = view[key] end
+    end
+    local reason, operation = view.reason, view.operation
+    if type(reason) == "string" and reason ~= "" and #reason <= 4096 then orb.reason = reason end
+    if type(operation) == "string" and operation ~= "" and #operation <= 512 then orb.operation = operation end
+    return orb, true
+end
+
 -- M7 (UX setup checklist and status): the current facts the checklist words
 -- (UserText.SetupChecklist / StatusLines). Read-only: start-up status, the
 -- last committed HUD model (its destination, Wishlist, Auto selection and
--- hold), the saved Sync mode and the compact Orb read. Each fact that cannot
--- be read stays nil (unknown), apart from false or an empty value. It never
--- reads whether the Welcome was seen or dismissed, and it gates, requests,
--- sends and writes nothing.
+-- hold), the saved Sync mode and the passive Orb reason view (OrbFacts). Each
+-- fact that cannot be read stays nil (unknown), apart from false or an empty
+-- value. It never reads whether the Welcome was seen or dismissed, and it
+-- gates, requests, sends and writes nothing; its Orb fact starts no Orb work.
 function M.SetupFacts()
     local f = {}
     local okReady, ready = false, nil
@@ -174,12 +202,9 @@ function M.SetupFacts()
         if okChoice and type(choice) == "table" then f.syncExplicit = choice.explicit ~= nil end
     end
     local runtime = Nexus.OrbRuntime
-    if f.startup == "ready" and runtime and type(runtime.CompactStatus) == "function" then
-        local okOrb, s = pcall(runtime.CompactStatus)
-        if okOrb and s == nil then f.orb = false
-        elseif okOrb and type(s) == "table" and type(s.state) == "string" then
-            f.orb = {state = s.state, running = s.running == true, pending = s.pending == true}
-        end
+    if f.startup == "ready" and runtime then
+        local okOrb, orb, observed = pcall(OrbFacts, runtime)
+        if okOrb then f.orb, f.orbObserved = orb, observed end
     end
     return f
 end

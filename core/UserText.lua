@@ -309,8 +309,46 @@ local SYNC_MODE_LINES = {
     manual = "Sync: Manual. Nexus sends only what you start (Sync Now or Share).",
     off = "Sync: Off. Nexus sends nothing; local records are kept.",
 }
-local ORB_STATE_WORDS = {PAUSED = "paused", RECOVERY = "an earlier Orb result is unresolved",
-    LIMIT = "maximum reached", FINISHED = "finished", STOPPED = "stopped"}
+-- The Orb line. orb: false (an observed owner with no approved run), nil
+-- (unknown; observed false: the owner was not read this session, so an
+-- unresolved earlier action is not ruled out) or the plain facts of
+-- Panel.SetupFacts. The reason is the text the Orb owner last recorded for its
+-- run, said as that and never as a fresh check; the operation is the run's
+-- recorded name, never a Resume target. Open Orbs reviews the current state.
+local ORB_STATE_WORDS = {PAUSED = "run paused", STOPPED = "run stopped",
+    LIMIT = "run stopped at its approved maximum", FINISHED = "run finished",
+    COMPLETE = "run ended: its selected targets were met",
+    ROLLED_COMPLETE = "run ended: its rolled targets were met",
+    OUT_OF_ORBS = "run ended: no Orbs were left", NO_SOURCES = "run ended: no safe source copies were left"}
+local ORB_UNRESOLVED = "an earlier Orb action is unresolved"
+local ORB_REASON_CHARS, ORB_NAME_CHARS = 280, 60
+local function OrbLine(orb, observed)
+    if orb == false then return "Orbs (optional): no Orb run approved this session." end
+    if type(orb) ~= "table" then
+        if observed == false then
+            return "Orbs (optional): not known. Orb status has not been read this session, so an unresolved earlier Orb action is not ruled out. Open Orbs to check."
+        end
+        return "Orbs (optional): status not known right now."
+    end
+    local state = type(orb.state) == "string" and orb.state:match("^[%u_]+$") or nil
+    local head
+    if orb.running == true then head = "run running"
+    elseif orb.restored == true or state == "RECOVERY" then head = ORB_UNRESOLVED
+    elseif state and ORB_STATE_WORDS[state] then head = ORB_STATE_WORDS[state]
+    elseif state then head = "run in state " .. state
+    else head = "run state not known" end
+    local line = "Orbs (optional): " .. head
+        .. ((orb.pending == true and head ~= ORB_UNRESOLVED) and "; a result is pending." or ".")
+    local operation = orb.pending == true and type(orb.operation) == "string"
+        and T.SafeName(orb.operation, ORB_NAME_CHARS) or nil
+    if operation then line = line .. " Original operation (as recorded): '" .. operation .. "'." end
+    local reason = type(orb.reason) == "string" and T.SafeName(Utf8Cut(orb.reason, ORB_REASON_CHARS)) or nil
+    if reason then
+        if not reason:find("[%.!?]$") then reason = reason .. "." end
+        line = line .. " Last reason Nexus recorded: " .. reason
+    end
+    return line .. " Open Orbs to review it now and see the actions available there."
+end
 function T.StatusLines(f)
     f = type(f) == "table" and f or {}
     local lines = {}
@@ -328,15 +366,7 @@ function T.StatusLines(f)
     else
         lines[#lines + 1] = "Sync: mode not known right now."
     end
-    if f.orb == false then
-        lines[#lines + 1] = "Orbs (optional): no Orb run approved this session."
-    elseif type(f.orb) == "table" then
-        local words = f.orb.running and "running" or ORB_STATE_WORDS[f.orb.state]
-            or ("in state " .. tostring(f.orb.state) .. " (see Open Orbs)")
-        lines[#lines + 1] = "Orbs (optional): run " .. words .. (f.orb.pending and "; a result is pending." or ".")
-    else
-        lines[#lines + 1] = "Orbs (optional): status not known right now."
-    end
+    lines[#lines + 1] = OrbLine(f.orb, f.orbObserved)
     return lines
 end
 
