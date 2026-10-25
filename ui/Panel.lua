@@ -67,6 +67,414 @@ StaticPopupDialogs["NEXUS_UPDATE_RELEASES"] = {
 
 local function SafeText(v) return v ~= nil and tostring(v) or "" end
 
+------------------------------------------------------------------------
+-- Destination row: a reusable one-line strip of four disjoint cells, in
+-- UserText.DestinationFields order (character, Saved Build, Wishlist,
+-- state). It words only the descriptor its caller already captured,
+-- through that pure formatter, and changes only its own row and cells: it
+-- reads no game, Store or assignment state, resolves nothing and schedules
+-- nothing. The caller anchors the row (never to one of its cells) and owns
+-- its width and height. The do block keeps these locals out of the main
+-- chunk's scope and out of EnsureFrame.
+--
+-- M.CreateDestinationRow(parent[, firstText]) -> row
+--   row: a new Frame, child of parent, not anchored.
+--   row.cells: the four FontStrings, created once. cells[1] is firstText
+--   when given (it keeps its font); the others are row children in the
+--   LayoutMetrics normal font.
+--   row.hits: one LayoutMetrics.FullTextTooltip hover area per cell,
+--   created once and hidden until the first successful update; then each
+--   shows all DestinationFields tooltip lines, stored by the update in
+--   every cell's _nexusFullText.
+-- M.UpdateDestinationRow(row, descriptor, width, height[, forceFirstText])
+--   -> refit
+--   Sizes the row to width x height (height at least 17 px: one line, no
+--   wrapping) and fits the cells in it, left to right. refit is false for
+--   a settled update (same formatter output, width, height,
+--   LayoutMetrics.RuntimeKey and per-cell GetFont): it calls no cell
+--   setter and measures nothing, except that forceFirstText re-applies the
+--   shown first text with a real cells[1]:SetText. Widget errors are not
+--   caught. The view cache (row._nexusDestinationView) is cleared before
+--   the first widget call and committed only after every cell operation
+--   succeeded, so a failed update is redone in full by the next one.
+--
+-- Fit: each text is measured in its own cell (GetStringWidth). A cell
+-- tries "Label: value", "Label: compact", a short cue with compact (C:,
+-- B:, W:; a state alternative is its own cue), then the cue with minimum
+-- (Wishlist, state); the widest cell steps down first. A state shows one
+-- whole alternative and is never cut. Only names are shortened: the
+-- character and Saved Build compact values and a Wishlist minimum longer
+-- than one character (the formatter's assigned name; its refusal, unknown
+-- and unavailable markers are one character). A Wishlist compact value is
+-- shown whole or replaced by its minimum, never cut. A cut falls at a
+-- UTF-8 character, an escaped pipe pair "||" counting as one, keeps the
+-- leading token (up to 3 characters, such as "#12") and adds "..." when
+-- that still fits, else omits the "...", else the cue. Below the whole
+-- floors the cells stay disjoint in the row and the client shortens them,
+-- the state last; the tooltip keeps every full line.
+------------------------------------------------------------------------
+do
+    local DEST_MIN_HEIGHT, DEST_GAP, DEST_SLACK, DEST_LEAD = 17, 4, 1, 3
+    local DEST_ELLIPSIS = "..."
+    local DEST_CUES = {character = "C:", savedBuild = "B:", wishlist = "W:", state = ""}
+    -- The value a cell may shorten (names only, see above).
+    local DEST_CLIP = {character = "compact", savedBuild = "compact", wishlist = "minimum"}
+
+    local function DestLayout()
+        local layout = Nexus.LayoutMetrics
+        if type(layout) ~= "table" or type(layout.FontObject) ~= "function"
+            or type(layout.OneLineLabel) ~= "function"
+            or type(layout.FullTextTooltip) ~= "function"
+            or type(layout.RuntimeKey) ~= "function"
+            or type(layout.RuntimeMetrics) ~= "function"
+            or type(layout.ConservativeText) ~= "function" then
+            error("Nexus destination row: Nexus.LayoutMetrics is not loaded", 3)
+        end
+        return layout
+    end
+
+    local function DestFields(descriptor)
+        local userText = Nexus.UserText
+        local formatter = type(userText) == "table" and userText.DestinationFields
+        if type(formatter) ~= "function" then
+            error("Nexus destination row: Nexus.UserText.DestinationFields is not loaded", 3)
+        end
+        local fields, tooltip = formatter(descriptor)
+        if type(fields) ~= "table" or #fields ~= 4 or type(tooltip) ~= "table" then
+            error("Nexus destination row: DestinationFields did not return four cells", 3)
+        end
+        return fields, tooltip
+    end
+
+    local function DestRowParts(row)
+        local cells = type(row) == "table" and row.cells
+        local hits = type(row) == "table" and row.hits
+        if type(cells) ~= "table" or type(hits) ~= "table" or #cells ~= 4 or #hits ~= 4 then
+            error("Nexus.Panel.UpdateDestinationRow: not a row from CreateDestinationRow", 3)
+        end
+        return cells, hits
+    end
+
+    -- Bytes of the display character at index: one UTF-8 character, an
+    -- escaped pipe pair "||", or a lone pipe with the character after it, so
+    -- that a cut never splits a character or an escape.
+    local function DestStep(text, index)
+        local byte = text:byte(index)
+        if byte == 124 then
+            local following = text:byte(index + 1)
+            if following == nil then return 1 end
+            if following == 124 then return 2 end
+            return 1 + DestStep(text, index + 1)
+        end
+        if byte < 0xC0 then return 1 end
+        if byte < 0xE0 then return 2 end
+        if byte < 0xF0 then return 3 end
+        return 4
+    end
+
+    -- The last byte of each display character of text.
+    local function DestUnitEnds(text)
+        local ends, index, length = {}, 1, #text
+        while index <= length do
+            index = math.min(length, index + DestStep(text, index) - 1) + 1
+            ends[#ends + 1] = index - 1
+        end
+        return ends
+    end
+
+    -- The fitted width of text in this cell's own font, measured once per
+    -- update; while the client reports no width, the LayoutMetrics
+    -- conservative character width stands in.
+    local function DestMeasure(cell, text, memo, fallback)
+        local width = memo[text]
+        if width then return width end
+        cell:SetText(text)
+        local measured = tonumber(cell:GetStringWidth())
+        if not measured or measured ~= measured or measured <= 0 or measured >= math.huge then
+            measured = #DestUnitEnds(text) * fallback
+        end
+        width = math.ceil(measured) + DEST_SLACK
+        memo[text] = width
+        return width
+    end
+
+    -- A cell's alternatives, each strictly narrower than the one before.
+    local function DestLadder(cell, field, memo, fallback)
+        local key = field.key
+        local label = SafeText(field.label)
+        local full = label ~= "" and (label .. ": ") or ""
+        local cue = DEST_CUES[key] or (label ~= "" and (label:sub(1, 1) .. ":") or "")
+        local value = SafeText(field.value)
+        local compact = field.compact ~= nil and SafeText(field.compact) or value
+        local wanted = {
+            {text = full .. value},
+            {text = full .. compact},
+            {text = cue .. compact, cue = cue, value = compact, clip = DEST_CLIP[key] == "compact"},
+        }
+        if field.minimum ~= nil then
+            local minimum = SafeText(field.minimum)
+            wanted[4] = {text = cue .. minimum, cue = cue, value = minimum,
+                clip = DEST_CLIP[key] == "minimum"}
+        end
+        local ladder, kept = {}, {}
+        for index = 1, #wanted do
+            local rung = wanted[index]
+            local same = kept[rung.text]
+            if same ~= nil then
+                if same and rung.clip then
+                    same.clip, same.cue, same.value = true, rung.cue, rung.value
+                end
+            else
+                rung.width = DestMeasure(cell, rung.text, memo, fallback)
+                local last = ladder[#ladder]
+                if not last or rung.width < last.width then
+                    ladder[#ladder + 1] = rung
+                    kept[rung.text] = rung
+                else
+                    kept[rung.text] = false
+                end
+            end
+        end
+        return ladder
+    end
+
+    -- A name rung shortened to fit limit (see the policy above): its text
+    -- and fitted width.
+    local function DestClip(cell, rung, limit, memo, fallback)
+        local value, cue = rung.value, rung.cue
+        local ends = DestUnitEnds(value)
+        local count, lead, start = #ends, #ends, 1
+        for unit = 1, count do
+            if ends[unit] == start and value:byte(start) == 32 then
+                lead = unit - 1
+                break
+            end
+            start = ends[unit] + 1
+        end
+        local need = math.max(1, math.min(DEST_LEAD, lead, count - 1))
+        local function Shown(units, withCue, ellipsis)
+            local prefix = value:sub(1, ends[units])
+            if ellipsis then prefix = (prefix:gsub(" +$", "")) .. DEST_ELLIPSIS end
+            return (withCue and cue or "") .. prefix
+        end
+        local function Largest(withCue, ellipsis)
+            local low, high, best = 1, count - 1, 0
+            while low <= high do
+                local middle = math.floor((low + high) / 2)
+                if DestMeasure(cell, Shown(middle, withCue, ellipsis), memo, fallback) <= limit then
+                    best, low = middle, middle + 1
+                else
+                    high = middle - 1
+                end
+            end
+            return best
+        end
+        local units, withCue, ellipsis = Largest(true, true), true, true
+        if units < need then
+            local bare = Largest(true, false)
+            if bare >= need then
+                units, ellipsis = bare, false
+            else
+                local alone = cue ~= "" and Largest(false, false) or bare
+                if alone > bare then
+                    units, withCue, ellipsis = alone, false, false
+                elseif bare >= 1 then
+                    units, ellipsis = bare, false
+                else
+                    units, withCue, ellipsis = 1, false, false
+                end
+            end
+        end
+        local text = Shown(units, withCue, ellipsis)
+        return text, DestMeasure(cell, text, memo, fallback)
+    end
+
+    -- Cell texts, widths and left offsets for a row width.
+    local function DestFit(layout, cells, fields, width)
+        local gap = math.max(0, math.min(DEST_GAP, math.floor((width - 4) / 3)))
+        local budget = width - 3 * gap
+        local fallback = (layout.ConservativeText((layout.RuntimeMetrics())))
+        local ladders, level, memos, total = {}, {}, {}, 0
+        for index = 1, 4 do
+            memos[index] = {}
+            ladders[index] = DestLadder(cells[index], fields[index], memos[index], fallback)
+            level[index] = 1
+            total = total + ladders[index][1].width
+        end
+        -- Step the widest cell that has a narrower alternative down first
+        -- (on a tie, the later cell).
+        while total > budget do
+            local pick, widest = nil, -1
+            for index = 1, 4 do
+                local rung = ladders[index][level[index]]
+                if level[index] < #ladders[index] and rung.width >= widest then
+                    pick, widest = index, rung.width
+                end
+            end
+            if not pick then break end
+            local ladder = ladders[pick]
+            total = total - ladder[level[pick]].width + ladder[level[pick] + 1].width
+            level[pick] = level[pick] + 1
+        end
+        local texts, widths = {}, {}
+        for index = 1, 4 do
+            local rung = ladders[index][level[index]]
+            texts[index], widths[index] = rung.text, rung.width
+        end
+        -- Still too wide: the whole cells keep their width and the names
+        -- share the rest, the shortest first, each shortened only when it
+        -- exceeds its share.
+        if total > budget then
+            local remaining, open = budget, {}
+            for index = 1, 4 do
+                local rung = ladders[index][level[index]]
+                if rung.clip and #DestUnitEnds(rung.value) >= 2 then
+                    open[#open + 1] = index
+                else
+                    remaining = remaining - rung.width
+                end
+            end
+            table.sort(open, function(a, b)
+                if widths[a] ~= widths[b] then return widths[a] < widths[b] end
+                return a < b
+            end)
+            for position = 1, #open do
+                local index = open[position]
+                local share = math.floor(remaining / (#open - position + 1))
+                if widths[index] > share then
+                    texts[index], widths[index] = DestClip(cells[index],
+                        ladders[index][level[index]], share, memos[index], fallback)
+                end
+                remaining = remaining - widths[index]
+            end
+        end
+        -- Below the floors: narrow the boxes (character first, state last)
+        -- so that the cells stay disjoint inside the row.
+        local used = 0
+        for index = 1, 4 do used = used + widths[index] end
+        for index = 1, 4 do
+            if used <= budget then break end
+            local cut = math.min(used - budget, widths[index] - 1)
+            widths[index], used = widths[index] - cut, used - cut
+        end
+        local offsets, x = {}, 0
+        for index = 1, 4 do
+            offsets[index] = x
+            x = x + widths[index] + gap
+        end
+        return texts, widths, offsets
+    end
+
+    local function DestPart(parts, value)
+        if value == nil then
+            parts[#parts + 1] = "~"
+        else
+            value = tostring(value)
+            parts[#parts + 1] = #value .. ":" .. value
+        end
+    end
+
+    -- Everything the row shows or discloses, from the formatter's output.
+    local function DestSemanticKey(fields, tooltip)
+        local parts = {}
+        for index = 1, #fields do
+            local field = fields[index]
+            DestPart(parts, field.key)
+            DestPart(parts, field.label)
+            DestPart(parts, field.value)
+            DestPart(parts, field.compact)
+            DestPart(parts, field.minimum)
+        end
+        DestPart(parts, #tooltip)
+        for index = 1, #tooltip do DestPart(parts, tooltip[index]) end
+        return table.concat(parts, "/")
+    end
+
+    -- The row geometry and effective fonts: LayoutMetrics.RuntimeKey (point
+    -- size, UI scale and revision) and each cell's own font path, size and
+    -- flags, which tell apart faces of the same size.
+    local function DestGeometryKey(layout, cells, width, height)
+        local parts = {}
+        DestPart(parts, layout.RuntimeKey("NexusDestinationRow", width, height))
+        for index = 1, #cells do
+            local path, size, flags = cells[index]:GetFont()
+            DestPart(parts, path)
+            DestPart(parts, size)
+            DestPart(parts, flags)
+        end
+        return table.concat(parts, "/")
+    end
+
+    function M.CreateDestinationRow(parent, firstText)
+        if firstText ~= nil and (type(firstText) ~= "table"
+            or type(firstText.SetText) ~= "function") then
+            error("Nexus.Panel.CreateDestinationRow: firstText must be a FontString", 2)
+        end
+        local layout = DestLayout()
+        local row = CreateFrame("Frame", nil, parent)
+        local cells, hits = {}, {}
+        for index = 1, 4 do
+            local cell = index == 1 and firstText or nil
+            if not cell then
+                cell = row:CreateFontString(nil, "OVERLAY")
+                cell:SetFontObject(layout.FontObject("normal"))
+                cell:SetJustifyH("LEFT")
+            end
+            local hit = layout.FullTextTooltip(cell, row)
+            hit:Hide()
+            cells[index], hits[index] = cell, hit
+        end
+        row.cells, row.hits = cells, hits
+        return row
+    end
+
+    function M.UpdateDestinationRow(row, descriptor, width, height, forceFirstText)
+        local cells, hits = DestRowParts(row)
+        width = tonumber(width)
+        if not width or width ~= width or width == math.huge or width == -math.huge then
+            error("Nexus.Panel.UpdateDestinationRow: width must be a finite number", 2)
+        end
+        width = math.max(4, math.floor(width))
+        height = tonumber(height)
+        if not height or height ~= height or height == math.huge then
+            height = DEST_MIN_HEIGHT
+        end
+        height = math.max(DEST_MIN_HEIGHT, math.floor(height))
+        local layout = DestLayout()
+        local fields, tooltip = DestFields(descriptor)
+        local semantic = DestSemanticKey(fields, tooltip)
+        local geometry = DestGeometryKey(layout, cells, width, height)
+        local view = row._nexusDestinationView
+        if view and view.semantic == semantic and view.geometry == geometry then
+            if forceFirstText then
+                row._nexusDestinationView = nil
+                cells[1]:SetText(view.texts[1])
+                row._nexusDestinationView = view
+            end
+            return false
+        end
+        row._nexusDestinationView = nil
+        local texts, widths, offsets = DestFit(layout, cells, fields, width)
+        local full = table.concat(tooltip, "\n")
+        row:SetWidth(width)
+        row:SetHeight(height)
+        for index = 1, 4 do
+            local cell = cells[index]
+            cell:SetText(texts[index])
+            cell:ClearAllPoints()
+            cell:SetPoint("LEFT", row, "LEFT", offsets[index], 0)
+            cell:SetWidth(widths[index])
+            cell:SetJustifyH("LEFT")
+            layout.OneLineLabel(cell, nil, height)
+            cell._nexusFullText = full
+        end
+        for index = 1, 4 do hits[index]:Show() end
+        row._nexusDestinationView = {semantic = semantic, geometry = geometry,
+            texts = texts, widths = widths, offsets = offsets}
+        return true
+    end
+end
+
 -- M4 (UX-04): the destination this panel's run belongs to, as lines, from the
 -- facts the shown model already carries: the verified active Saved Build
 -- (progress.activeSlot / activeSlotName), the run's Wishlist and the saved
