@@ -206,7 +206,17 @@ local function EnsureFrame()
     frame.close = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     frame.close:SetSize(24,24); frame.close:SetPoint("TOPRIGHT",-14,-14); frame.close:SetText("X")
     frame.close:SetScript("OnClick",function() return Finish(false,true,true) end)
-    -- Hidden by another route (including a client UISpecialFrames close): decline only.
+    -- Hidden by another route: decline only, with no navigation. A raw
+    -- client UISpecialFrames close (this frame's name is listed below) hides
+    -- the frame and so reaches only this OnHide; it is deliberately not an
+    -- explicit answer and opens nothing. The explicit Escape route is the
+    -- OnKeyDown script below. Offline, tests/prototype/ux_setup_replay.lua
+    -- S7 (and S1) call that registered key script directly with "ESCAPE" and
+    -- press no native key. Whether the native client delivers an Escape press
+    -- to this keyboard-enabled frame, how that relates to the UISpecialFrames
+    -- close and in which order, and whether that same Escape also closes the
+    -- Welcome opened here are NOT_RUN: an unverified native boundary, not a
+    -- proven defect, and not checked against a client export.
     frame:SetScript("OnHide",function() if active then Finish(false,true) end end)
     frame:SetScript("OnKeyDown",function(_,key) if key == "ESCAPE" then Finish(false,true,true) end end)
     UISpecialFrames[#UISpecialFrames+1] = "NexusOverwriteWarning"
