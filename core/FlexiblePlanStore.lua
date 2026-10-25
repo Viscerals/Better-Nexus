@@ -2,7 +2,9 @@
 -- #151 Stage A1: pure codec for the local manual-choice pool record v1
 -- (docs/flexible-plans/LOCAL_PERSISTENCE_CONTRACT.md section 2). No frames,
 -- Store, SavedVariables, catalog or game reads, draft normalizers, assignment
--- or actions. New({store}) persistence operations belong to a later slice.
+-- or actions in Encode/Decode. New({store}) at the end of this file is the
+-- frame-free persistence owner (Stage A2); it reads through the Store's pure
+-- PlanPoolReadV1 seam and writes only through the counted UpdateStateV1.
 --
 -- Encode(ids, rows, chosen) -> record, bytes | nil, nil (clear) | nil, code
 --   ids     plain dense array of 1..256 distinct integer IDs, insertion order.
@@ -224,4 +226,213 @@ function Codec.Decode(record)
     end
     return {ids=outIds, rows=rows, chosen=chosen},
         CanonicalBytes(outIds, outQuality, outMax, outGroup, outCounts, n), "CURRENT"
+end
+
+-- ===================================================================
+-- New({store}) -> facade | nil, "INVALID_STORE" (contract sections 5-6).
+-- Frame-free owner of the one per-character pool. Every call re-resolves
+-- Nexus.MainInternals.StoreAuthorityOwner and requires its `owner` to be
+-- exactly `store`: a stub or reloaded Store module refuses
+-- STORE_OWNER_MISMATCH; nothing falls back to Store.State or a transient row.
+--   Read() -> receipt {mode, reason, class, detail, ownerKey, root, pool,
+--     bytes, visited, carried, rowPresent, loadable, saveable}. class is nil
+--     while loading/unavailable. Fresh tables on every call.
+--   Save(session, receipt) -> {state, reason, detail, bytes, unchanged,
+--     restored, receipt}. "saved" only after a durable read-back of the exact
+--     bytes, owner key and root; "refused" wrote nothing; "unverified" says
+--     whether the prior record identity was restored and read back. The
+--     receipt must be one THIS facade issued (Read or an earlier Save); its
+--     owner key, root token, class and bytes must all still hold, so equal
+--     bytes of another character, root or generation never authorize.
+--   Clear(receipt) = Save of an empty session (removes the key).
+-- Never calls the adapter, controllers, Sync, Orb, registration or the
+-- coordinator mutation machine; never assigns, uploads, shares or spends.
+-- ===================================================================
+local POOL_KEY = "flexiblePlanPoolV1"
+local MODE_REFUSAL = {readOnly="READ_ONLY", loading="LOADING", unavailable="UNAVAILABLE"}
+
+local function OwnerFor(store)
+    local internals = type(Nexus) == "table" and rawget(Nexus, "MainInternals") or nil
+    local owner = type(internals) == "table" and rawget(internals, "StoreAuthorityOwner") or nil
+    if type(owner) ~= "table" or not rawequal(rawget(owner, "owner"), store) then
+        return nil, "STORE_OWNER_MISMATCH"
+    end
+    if rawget(owner, "PLAN_POOL_KEY") ~= POOL_KEY
+        or type(rawget(owner, "PlanPoolReadV1")) ~= "function"
+        or type(rawget(owner, "IsDurableStateRowV1")) ~= "function"
+        or type(rawget(owner, "UpdateStateV1")) ~= "function" then
+        return nil, "STORE_SEAM_UNAVAILABLE"
+    end
+    return owner
+end
+
+local function ReadPool(owner)
+    local raw = owner.PlanPoolReadV1()
+    if type(raw) ~= "table" then error("pool seam returned no read", 0) end
+    local read = {mode=raw.mode, reason=raw.reason, ownerKey=raw.ownerKey,
+        root=raw.root, visited=raw.visited or 0, carried=raw.carried == true,
+        rowPresent=raw.rowPresent == true}
+    if read.mode ~= "durable" and read.mode ~= "readOnly" then return read end
+    if raw.refusal ~= nil then
+        read.class, read.detail = raw.refusal, raw.detail
+    elseif not raw.present then
+        read.class, read.detail = "ABSENT", "NO_RECORD"
+    elseif raw.copy == nil then
+        read.class, read.detail = "MALFORMED", "COPY"
+    else
+        local pool, second, third = Codec.Decode(raw.copy)
+        if pool ~= nil then
+            read.class, read.pool, read.bytes = third, pool, second
+        else
+            read.class, read.detail = second, third
+        end
+    end
+    return read
+end
+
+local function Matches(read, want)
+    return read.mode == "durable" and read.ownerKey == want.ownerKey
+        and read.root == want.root and read.class == want.class
+        and read.bytes == want.bytes
+end
+
+local function Result(state, reason, detail, extra)
+    local out = {state=state, reason=reason, detail=detail}
+    if extra then for key, value in next, extra do out[key] = value end end
+    return out
+end
+
+function Codec.New(options)
+    local store = Plain(options) and rawget(options, "store") or nil
+    if type(store) ~= "table" then return nil, "INVALID_STORE" end
+    -- Private facts per issued receipt; weak keys, never read from the
+    -- (caller-mutable) receipt fields.
+    local issued = setmetatable({}, {__mode="k"})
+    local facade = {}
+    local function Issue(owner, read)
+        read.loadable = read.class == "CURRENT"
+            and (read.mode == "durable" or read.mode == "readOnly")
+        read.saveable = read.mode == "durable"
+            and (read.class == "ABSENT" or read.class == "CURRENT")
+        issued[read] = {owner=owner, mode=read.mode, ownerKey=read.ownerKey,
+            root=read.root, class=read.class, bytes=read.bytes}
+        return read
+    end
+
+    function facade.Read()
+        local owner, why = OwnerFor(store)
+        if not owner then
+            return {mode="unavailable", reason=why, visited=0, loadable=false, saveable=false}
+        end
+        local ok, read = pcall(ReadPool, owner)
+        if not ok then
+            return {mode="unavailable", reason="READ_FAILED", visited=0,
+                loadable=false, saveable=false}
+        end
+        return Issue(owner, read)
+    end
+
+    function facade.Save(session, observed)
+        local owner, why = OwnerFor(store)
+        if not owner then return Result("refused", why) end
+        local facts = type(observed) == "table" and issued[observed] or nil
+        if facts == nil then return Result("refused", "RECEIPT_UNKNOWN") end
+        if not rawequal(facts.owner, owner) then return Result("refused", "STORE_OWNER_MISMATCH") end
+        if not Plain(session) then return Result("refused", "INVALID_SESSION", "INVALID_INPUT") end
+        -- Exact shapes before any write: fresh tables, nil,nil only when empty.
+        local record, newBytes = Codec.Encode(rawget(session, "ids"),
+            rawget(session, "rows"), rawget(session, "chosen"))
+        if record == nil and newBytes ~= nil then
+            return Result("refused", "INVALID_SESSION", newBytes)
+        end
+        local okPre, pre = pcall(ReadPool, owner)
+        if not okPre then return Result("refused", "READ_FAILED") end
+        if pre.mode ~= "durable" then
+            return Result("refused", MODE_REFUSAL[pre.mode] or "UNAVAILABLE", pre.reason)
+        end
+        if pre.class ~= "ABSENT" and pre.class ~= "CURRENT" then
+            return Result("refused", "SAVED_" .. tostring(pre.class), pre.detail)
+        end
+        if facts.mode ~= "durable" then return Result("refused", "RECEIPT_NOT_DURABLE") end
+        if pre.ownerKey ~= facts.ownerKey then return Result("refused", "OWNER_CHANGED") end
+        if pre.root ~= facts.root then return Result("refused", "ROOT_CHANGED") end
+        if pre.class ~= facts.class or pre.bytes ~= facts.bytes then
+            return Result("refused", "SAVED_CHANGED")
+        end
+        local want = {ownerKey=pre.ownerKey, root=pre.root,
+            class=record ~= nil and "CURRENT" or "ABSENT", bytes=newBytes}
+        if want.class == pre.class and want.bytes == pre.bytes then
+            return Result("saved", nil, nil, {unchanged=true, bytes=newBytes,
+                receipt=Issue(owner, pre)})
+        end
+        local outcome = {}
+        -- Runs inside the counted UpdateStateV1. Its true result is never
+        -- trusted: the row must be the live durable row and the stored facts
+        -- must still be the pre-read facts before the one rawset.
+        local function Mutator(row)
+            if not rawequal(OwnerFor(store), owner) then
+                outcome.refusal = "STORE_OWNER_MISMATCH"; return
+            end
+            if owner.IsDurableStateRowV1(row) ~= true then
+                outcome.refusal = "NOT_DURABLE"; return
+            end
+            local okNested, nested = pcall(ReadPool, owner)
+            if not okNested or not Matches(nested, pre) or not nested.rowPresent
+                or nested.carried then
+                outcome.refusal = okNested and "SAVED_CHANGED" or "READ_FAILED"; return
+            end
+            local old = rawget(row, POOL_KEY)
+            if (old == nil) ~= (pre.class == "ABSENT") then
+                outcome.refusal = "SAVED_CHANGED"; return
+            end
+            rawset(row, POOL_KEY, record)
+            outcome.written, outcome.row, outcome.old = true, row, old
+            local okVerify, verify = pcall(ReadPool, owner)
+            if okVerify and Matches(verify, want) and verify.rowPresent then
+                outcome.verified = true; return
+            end
+            -- Immediate semantic rollback inside the same owner mutator.
+            outcome.detail = okVerify and "VERIFY_MISMATCH" or "VERIFY_ERROR"
+            if rawequal(rawget(row, POOL_KEY), record) then
+                rawset(row, POOL_KEY, old)
+                outcome.restored = rawequal(rawget(row, POOL_KEY), old)
+            end
+        end
+        local okUpdate = pcall(owner.UpdateStateV1, Mutator)
+        if not outcome.written then
+            return Result("refused", outcome.refusal
+                or (okUpdate and "WRITE_FAILED" or "WRITE_ERROR"), outcome.detail)
+        end
+        if okUpdate and outcome.verified then
+            local okPost, post = pcall(ReadPool, owner)
+            if okPost and rawequal(OwnerFor(store), owner) and Matches(post, want) then
+                return Result("saved", nil, nil, {bytes=newBytes, receipt=Issue(owner, post)})
+            end
+            outcome.detail = okPost and "POST_READ_MISMATCH" or "POST_READ_ERROR"
+        elseif not okUpdate then
+            outcome.detail = outcome.detail or "UPDATE_ERROR"
+        end
+        -- Rollback restores the prior record only while the live value is
+        -- still this Save's record: a newer operation's record is never
+        -- overwritten, and nothing is written through a replaced owner.
+        local restored = outcome.restored == true
+        if not restored and rawequal(OwnerFor(store), owner) then
+            pcall(owner.UpdateStateV1, function(row)
+                if rawequal(row, outcome.row) and owner.IsDurableStateRowV1(row) == true
+                    and rawequal(rawget(row, POOL_KEY), record) then
+                    rawset(row, POOL_KEY, outcome.old)
+                    restored = rawequal(rawget(row, POOL_KEY), outcome.old)
+                end
+            end)
+        end
+        local okAfter, after = pcall(ReadPool, owner)
+        return Result("unverified", "SAVE_UNVERIFIED", outcome.detail, {
+            restored=restored and okAfter and Matches(after, pre) or false,
+            receipt=okAfter and Issue(owner, after) or nil})
+    end
+
+    function facade.Clear(observed)
+        return facade.Save({ids={}, rows={}, chosen={}}, observed)
+    end
+    return facade
 end

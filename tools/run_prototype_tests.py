@@ -309,6 +309,8 @@ NAMES += ['ux_save_retry_intent','ux_assignment_consent_routes']
 NAMES += ['ux_destination_context','ux_qualified_counts','ux_record_scope_terms']
 # #151 Stage A1: pure local-pool codec (EXPECT fails on docs-only 15dace7 by design; Store/UI slices follow).
 NAMES += ['flexible_plan_persistence_codec']
+# #151 Stage A2: private Store pool seam and FlexiblePlanStore.New Read/Save/Clear through real boot/reload (EXPECT fails before the seam by design).
+NAMES += ['flexible_plan_persistence_store']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45
