@@ -74,6 +74,7 @@ ui\SupportReport.lua
 ui\LayoutMetrics.lua
 ui\Readout.lua
 ui\ServerStatus.lua
+ui\CallboardStatus.lua
 ui\LoadingStatus.lua
 ui\Panel.lua
 ui\JournalTab.lua
