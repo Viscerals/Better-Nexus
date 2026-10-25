@@ -283,7 +283,7 @@ local function EnsureFrame()
     local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(74, 24)
     close:SetPoint("BOTTOMRIGHT", -24, 20)
-    close:SetText("Later")
+    close:SetText("Close")
     close:SetScript("OnClick", Finish)
 
     local theme = Nexus.Theme
@@ -299,7 +299,7 @@ local function EnsureFrame()
         end
     end
 
-    -- UX-18: Escape closes the Welcome exactly as Later does (Finish: the
+    -- UX-18: Escape closes the Welcome exactly as Close does (Finish: the
     -- first-time dismissal and its durable acknowledgement policy; for the
     -- informational replay, a hide with no write). The client's Escape
     -- handler hides each shown frame named in UISpecialFrames. The Welcome
