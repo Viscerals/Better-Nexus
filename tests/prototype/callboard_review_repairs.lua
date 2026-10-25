@@ -14,8 +14,19 @@ H.Boot()
 if _G.NexusQuickStart and _G.NexusQuickStart:IsShown() then _G.NexusQuickStart:Hide() end
 
 local objective={title='Callboard Quest',questId=77,objectiveText='Bring the tome'}
+-- Synthetic difficulty rewards come with each later objective update, so the
+-- covered replacement below replaces reward access too. The first objective
+-- carries none: the other-objective tooltip check below needs it empty.
+local firstObjective=objective
+local laterRewards={normalSoulAshes=1200,normalMoney=45000}
 ProjectEbonhold.ObjectivesService={
- GetActiveObjective=function() return objective end,
+ GetActiveObjective=function()
+  if objective==firstObjective then return objective end
+  local active={}
+  for k,v in pairs(objective) do active[k]=v end
+  for k,v in pairs(laterRewards) do active[k]=v end
+  return active
+ end,
 }
 
 local function Track(frame,alpha,mouse)

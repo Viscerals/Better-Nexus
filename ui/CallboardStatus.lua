@@ -320,53 +320,93 @@ local function TrackerFrame()
     return (ok and type(f) == "table") and f or _G.ProjectEbonholdQuestTracker
 end
 
+-- Stock state Nexus changed, one record per exact object and property:
+-- { frame, prop = "alpha" or "mouse", original }. A record goes only once a
+-- getter confirms the original again, so a restore that raised or changed
+-- nothing is retried by a later publish, with or without a replacement.
+-- Alpha and mouse are separate records. The bound only stops new holds (the
+-- stock state then stays as it is); no record is dropped to make room.
 local heldStock = {}
+local MAX_HELD_STOCK = 32
 
-local function StockAlpha(frame)
-    if not frame or type(frame.GetAlpha) ~= "function" then return nil end
-    local ok, value = pcall(frame.GetAlpha, frame)
-    if ok and type(value) == "number" then return value end
+local STOCK_PROPS = {
+    alpha = { get = "GetAlpha", set = "SetAlpha", kind = "number", suppressed = 0 },
+    mouse = { get = "IsMouseEnabled", set = "EnableMouse", kind = "boolean",
+        suppressed = false },
+}
+
+local function IndexStock(frame, key)
+    return frame[key]
+end
+
+local function StockMethod(frame, name)
+    local ok, method = pcall(IndexStock, frame, name)
+    if ok and type(method) == "function" then return method end
     return nil
 end
 
-local function StockMouse(frame)
-    if not frame or type(frame.IsMouseEnabled) ~= "function" then return nil end
-    local ok, value = pcall(frame.IsMouseEnabled, frame)
-    if ok and type(value) == "boolean" then return value end
-    return nil
+-- The current value, or nil when the getter is missing, raises or answers
+-- something that is not a usable value of that property. Nothing is guessed
+-- in its place.
+local function ReadStock(frame, prop)
+    local spec = STOCK_PROPS[prop]
+    local getter = StockMethod(frame, spec.get)
+    if not getter then return nil end
+    local ok, value = pcall(getter, frame)
+    if not ok or type(value) ~= spec.kind or value ~= value then return nil end
+    return value
 end
 
-local function HoldFrame(frame, mouseFrame)
-    if not frame then return end
-    for i = 1, #heldStock do
-        if heldStock[i].frame == frame then return end
-    end
-    heldStock[#heldStock + 1] = {
-        frame = frame,
-        alpha = StockAlpha(frame),
-        mouseFrame = mouseFrame,
-        mouse = StockMouse(mouseFrame),
-    }
-    if type(frame.SetAlpha) == "function" then
-        pcall(frame.SetAlpha, frame, 0)
-    end
-    if mouseFrame and type(mouseFrame.EnableMouse) == "function" then
-        pcall(mouseFrame.EnableMouse, mouseFrame, false)
-    end
-end
-
-local function RestoreHeldStock()
+local function FindHeldStock(frame, prop)
     for i = 1, #heldStock do
         local item = heldStock[i]
-        if item.frame and item.alpha and type(item.frame.SetAlpha) == "function" then
-            pcall(item.frame.SetAlpha, item.frame, item.alpha)
-        end
-        if item.mouseFrame and item.mouse ~= nil
-            and type(item.mouseFrame.EnableMouse) == "function" then
-            pcall(item.mouseFrame.EnableMouse, item.mouseFrame, item.mouse)
-        end
+        if item.frame == frame and item.prop == prop then return item end
     end
-    heldStock = {}
+    return nil
+end
+
+-- Takes one property only from a usable original that is not already the
+-- suppressed value (a game-owned alpha 0 or mouse off stays the game's), and
+-- only through a supported setter. The original is kept whenever the readback
+-- no longer shows it: a setter can change the value and then raise. A
+-- readback still at the original means nothing changed and nothing is owned.
+local function HoldStock(frame, prop)
+    if FindHeldStock(frame, prop) or #heldStock >= MAX_HELD_STOCK then return end
+    local spec = STOCK_PROPS[prop]
+    local original = ReadStock(frame, prop)
+    if original == nil or original == spec.suppressed then return end
+    local setter = StockMethod(frame, spec.set)
+    if not setter then return end
+    pcall(setter, frame, spec.suppressed)
+    if ReadStock(frame, prop) ~= original then
+        heldStock[#heldStock + 1] = { frame = frame, prop = prop, original = original }
+    end
+end
+
+-- True once a getter confirms the exact original. A property that already
+-- reads as its original is not written again.
+local function RestoreStock(item)
+    if ReadStock(item.frame, item.prop) == item.original then return true end
+    local setter = StockMethod(item.frame, STOCK_PROPS[item.prop].set)
+    if setter then pcall(setter, item.frame, item.original) end
+    return ReadStock(item.frame, item.prop) == item.original
+end
+
+-- Gives back every held property this pass does not justify, each on its
+-- own; a record that no getter confirms yet stays for the next pass.
+local function ReleaseStock(justified)
+    local kept = {}
+    for i = 1, #heldStock do
+        local item = heldStock[i]
+        local props = justified[item.frame]
+        local released = false
+        if not (props and props[item.prop]) then
+            local ok, restored = pcall(RestoreStock, item)
+            released = ok and restored == true
+        end
+        if not released then kept[#kept + 1] = item end
+    end
+    heldStock = kept
 end
 
 -- True when EbonholdQuestTracker / WatchFrame has no other tracked quest or
@@ -457,25 +497,93 @@ local function ReplacementCovered(summary)
     return true
 end
 
-local function PublishStock(summary)
-    if not ReplacementCovered(summary) then
-        RestoreHeldStock()
-        return
+-- Usable replacement reward rows: at least one row the Nexus tooltip can
+-- state. Without one that tooltip says the rewards are not available.
+local function RewardsUsable(summary)
+    local rows = type(summary) == "table" and summary.rewards or nil
+    if type(rows) ~= "table" then return false end
+    for i = 1, #rows do
+        local row = rows[i]
+        if type(row) == "table" and ((tonumber(row.ash) or 0) > 0
+            or (tonumber(row.copper) or 0) > 0 or (tonumber(row.xp) or 0) > 0) then
+            return true
+        end
     end
+    return false
+end
+
+-- Marks a frame and every parent above it. Bounded; a parent that cannot be
+-- read ends the walk.
+local function MarkWithAncestors(set, frame)
+    local depth = 0
+    while type(frame) == "table" and not set[frame] and depth < 16 do
+        set[frame] = true
+        depth = depth + 1
+        local getParent = StockMethod(frame, "GetParent")
+        local ok, parent = false, nil
+        if getParent then ok, parent = pcall(getParent, frame) end
+        frame = ok and parent or nil
+    end
+end
+
+-- The exact object/property pairs this pass justifies, in order, and the
+-- same pairs by object. Nothing is justified unless the matching Nexus row
+-- is covered. Without usable reward rows the Nexus tooltip cannot replace
+-- the stock rewards, so the reward bag, the objective root that holds it
+-- and every parent above either keep their alpha and mouse: a bag at alpha 1
+-- is not usable inside a parent at alpha 0. A progress-only tracker outside
+-- that chain may still be replaced. The tracker roles need that no other
+-- quest or achievement is tracked.
+local function JustifiedStock(summary)
+    local order, justified, kept = {}, {}, {}
+    local okCovered, covered = pcall(ReplacementCovered, summary)
+    if not okCovered or covered ~= true then return order, justified end
     local otf = ObjectiveTrackerRoot()
-    if otf then HoldFrame(otf, otf) end
     local bag = ObjectiveBagFrame()
-    if bag and bag ~= otf then HoldFrame(bag, bag) end
-    local okOnly, onlyCallboard = pcall(TrackerOnlyHasCallboard, summary)
-    if not okOnly then onlyCallboard = false end
-    local tracker = TrackerFrame()
-    if onlyCallboard and tracker then
-        local collapse = type(tracker.collapse) == "table" and tracker.collapse or nil
-        HoldFrame(tracker, collapse)
+    if not RewardsUsable(summary) then
+        MarkWithAncestors(kept, bag)
+        MarkWithAncestors(kept, otf)
     end
-    local wf = _G.WatchFrame
-    if onlyCallboard and wf and wf ~= tracker and wf ~= otf then
-        HoldFrame(wf, nil)
+    local function Want(frame, prop)
+        if type(frame) ~= "table" or kept[frame] then return end
+        local props = justified[frame]
+        if not props then
+            props = {}
+            justified[frame] = props
+        end
+        if not props[prop] then
+            props[prop] = true
+            order[#order + 1] = { frame = frame, prop = prop }
+        end
+    end
+    local function Role(frame, mouseFrame)
+        if type(frame) ~= "table" or kept[frame] then return end
+        Want(frame, "alpha")
+        Want(mouseFrame, "mouse")
+    end
+    Role(otf, otf)
+    Role(bag, bag)
+    local okOnly, onlyCallboard = pcall(TrackerOnlyHasCallboard, summary)
+    if okOnly and onlyCallboard == true then
+        local tracker = TrackerFrame()
+        if type(tracker) == "table" then
+            local okCollapse, collapse = pcall(IndexStock, tracker, "collapse")
+            Role(tracker, okCollapse and collapse or nil)
+        end
+        Role(_G.WatchFrame, nil)
+    end
+    return order, justified
+end
+
+-- Each pass gives back first what is no longer justified (an old object
+-- before its successor is taken) and then holds what is. A shared object
+-- stays held while any of its roles still justifies the property.
+local function PublishStock(summary)
+    local okJustified, order, justified = pcall(JustifiedStock, summary)
+    if not okJustified then order, justified = {}, {} end
+    ReleaseStock(justified)
+    for i = 1, #order do
+        pcall(HoldStock, order[i].frame, order[i].prop)
     end
 end
 
