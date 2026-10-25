@@ -5,8 +5,9 @@ implemented: no key table, loader, locale or preference exists. L10N-02 and
 L10N-04 decide the runtime form.
 
 This is a localization reference. It is not the domain glossary: root
-`CONTEXT.md` remains the place for domain terms (`docs/agents/domain.md`), and
-this document creates none.
+`CONTEXT.md` remains the place for domain terms (`docs/agents/domain.md`). It
+is absent at this source pin; the copy-usage notes below defer to it when
+present and create no domain definitions.
 
 ## Keys
 
@@ -39,8 +40,10 @@ this document creates none.
 4. **Whole sentences.** One key per complete sentence or label. Fragments
    joined at run time, such as `"  +" .. n .. " more"` (`ui/Panel.lua:381`),
    become one template.
-5. **English base.** The English text of a key is the current source text,
-   verbatim. Adopting keys must not change English output (L10N-02 acceptance).
+5. **English base.** Adopting keys must preserve the full rendered English
+   verbatim, including code-owned padding, markup, line breaks and interpolated
+   values (L10N-02 acceptance). A logical template alone need not contain all
+   those bytes; the template and its calling code must preserve them together.
 
 Illustrative mapping (not implemented):
 
@@ -60,6 +63,12 @@ Illustrative mapping (not implemented):
 The first seven rows are window-family keys and the last three are
 shared-group keys. The reason key names the meaning, not the code (rule 3); the
 mapping table pairs `ROOT_MUTATION_PENDING` with `reason.save_in_progress`.
+
+`panel.tooltip.more_count` shows the logical template `+{count} more`.
+`ui/Panel.lua:381` currently renders two leading spaces with
+`"  +" .. (#toLockNamesCache - 25) .. " more"`. Adoption must retain those two
+spaces, whether in the template or in code around it; the logical template
+alone is not byte-identical to the current output.
 
 ## Context recorded per key
 
@@ -101,23 +110,35 @@ mapping table pairs `ROOT_MUTATION_PENDING` with `reason.save_in_progress`.
 
 ## Not translated
 
-- Everything listed under [Exclusions](INVENTORY.md#exclusions): codes,
-  identifiers, patterns, slash command words, protocol tokens, settings values,
-  English-name matching, user-authored data, game data and diagnostics.
+- The invariant uses under [Exclusions](INVENTORY.md#exclusions): codes,
+  identifiers, matching operands and patterns, slash command words, protocol
+  tokens, settings values and English-name matching. User-authored data is
+  never translated; localized game names need verified client data.
+- Visible returns and replacement text in `T.Message` are not excluded just
+  because the function also contains matching patterns. English producers and
+  every consumer that parses or rewrites their output must be addressed
+  together before localization; until then matching inputs keep their exact
+  English spelling (item 4 of [Manual follow-up](INVENTORY.md#manual-follow-up-before-l10n-02)).
+- Diagnostics and support exports follow the per-surface proposal in
+  [Exclusions](INVENTORY.md#exclusions): preserve payload bytes and their
+  decoder contracts, and decide visible wrappers separately. Shared visible
+  and payload text needs separation before translating its visible use; the
+  support UI labels remain in scope. This is not a file-wide exclusion.
 - Product and component names: Nexus, EchoWeaver (`ui/Help.lua:138`), Project
   Ebonhold, Nexus Support Reports (`companion/NexusSupport/NexusSupport.toc:2`).
 
 ## English reference terms
 
-Use these terms consistently in English copy and in translator context. A
+These are notes on existing English copy usage for translator context,
+subordinate to root `CONTEXT.md` when present. A
 translated form of a game term (Echo, Orb, Saved Build, Take, Freeze, Banish,
 Reroll) should follow the client's own wording. That wording is UNKNOWN until
 a verified client reference exists.
 
 | Term | Meaning in Nexus copy | Source |
 |---|---|---|
-| Echo | the game's Echo; an Echo family counts once whatever its copies | `core/UserText.lua:236-242` |
-| Wishlist | a plan of target Echo copies assigned to a Saved Build | `core/UserText.lua:9-10`, `ui/Help.lua:27` |
+| Echo | the game's Echo; the specific count unit determines whether copies or families are counted. The `families` unit counts each family once regardless of copies | `core/UserText.lua:236-242`, `ui/Help.lua:26` |
+| Wishlist | a desired plan of target Echo copies; it may be unassigned, a first-run target or assigned to a Saved Build, and does not prove ownership | `ui/Help.lua:22-29`, `core/UserText.lua:173-230` |
 | Saved Build | the game's saved build slot, labelled `Saved Build '<name>' (slot N)` | `core/UserText.lua:161-170` |
 | My Builds | the game's page that lists your Saved Builds | `core/UserText.lua:331-332` |
 | Build Library | the Nexus window of shared builds | `core/UserText.lua:333-335`, `ui/Help.lua:69` |
@@ -130,7 +151,7 @@ a verified client reference exists.
 | Orb, Orb mode | refining rolled Echoes with Orbs (Lost Memories) | `ui/Help.lua:82` |
 | Take, Freeze, Banish, Reroll | the game's board actions | `core/UserText.lua:19-27` |
 | guaranteed offer | an offer the server marked guaranteed; no future offer is assumed | `core/UserText.lua:39-43` |
-| Echo-availability control | the player-facing name for a Tome lever | `core/UserText.lua:44`, `core/UserText.lua:52` |
+| tome(s); Echo availability controls; Echo-availability control # | existing copy variants: Help uses tomes; the reason table maps `Tome levers` to `Echo availability controls`; a control name uses the catalog's tome name plus `(control #N)`, or falls back to `Echo-availability control #N` | `ui/Help.lua:43-45`, `core/UserText.lua:44`, `core/UserText.lua:47-52`, `core/UserText.lua:99` |
 | Echo Journal, Nexus Progress | the game's journal and Nexus's tab in it | `ui/JournalTab.lua:2-3` |
 | Menu and status | the `...` button on the Nexus panel | `core/UserText.lua:328`, `core/UserText.lua:343` |
 | unavailable | a value that is not known; never shown as 0 | `core/UserText.lua:340` |
