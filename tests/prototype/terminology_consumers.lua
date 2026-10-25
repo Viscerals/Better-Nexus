@@ -840,10 +840,38 @@ do
  local function Boot(language,mode)
   local db=F.Database({version=2});db.settings.uiLanguage=language
   local prior=F.fileHooks;F.fileHooks=mode and Hooks(mode) or nil
-  log={}
+  log={};G.model=nil -- a new harness measures with its own defaults until G.UseFont
   local ok,booted=pcall(F.Boot,db,function()
    local methods=G.RegionMethods();local set=methods.SetText
-   methods.SetText=function(self,text,...)log[#log+1]={self,text};return set(self,text,...)end
+   -- MODEL, this block only (the harness has no template button text; see
+   -- wishlist_menu_label_layout): a Button draws its text with one FontString
+   -- of its own (GetFontString), made here on first use and anchored at the
+   -- button's centre; Button:SetText sets that FontString's text. Until its
+   -- owner sizes it, the FontString is as wide as its text in the active font
+   -- model (else the harness default) and one model line tall, however small
+   -- the button is, and it wraps unless SetWordWrap(false). Not modelled:
+   -- per-state font objects, the pushed text offset, SetFormattedText, drawn
+   -- clipping or ellipsis, and native font measurement.
+   methods.GetFontString=function(self)
+    if self.kind~='Button' then return nil end
+    local label=rawget(self,'_fixtureLabel')
+    if not label then
+     label=self:CreateFontString()
+     label.width,label.height,label.text=nil,nil,self.text
+     label.GetWidth=function(fs)return fs.width or fs:GetStringWidth()end
+     label.GetHeight=function(fs)return fs.height or (G.model and G.model.line or 14)end
+     label:SetPoint('CENTER',self,'CENTER',0,0)
+     rawset(self,'_fixtureLabel',label)
+    end
+    return label
+   end
+   methods.SetText=function(self,text,...)
+    log[#log+1]={self,text}
+    local result=set(self,text,...)
+    local label=rawget(self,'_fixtureLabel')
+    if label then label.text=self.text end
+    return result
+   end
    methods.SetWordWrap=function(self,value)self.wordWrap=value end
   end)
   F.fileHooks=prior
@@ -900,13 +928,76 @@ do
     {BULLET..'Echo 2',0.9,0.9,0.9},{' '},editor},
   }
  end
- local function Verify(T,tag,recovered)
+ -- The three mapped buttons through their actual FontStrings and hovers
+ -- (offline font models only; native fit, tooltips and clicks are NOT
+ -- TESTED). A label holds its button text and keeps one line (SetWordWrap(false),
+ -- at most the button height and at least one model line or that height)
+ -- inside its resolved button box less the 6 px end caps on each side that
+ -- the Wishlist editor's candidate buttons keep (115 px buttons, 103 px
+ -- labels). Whether the client shortens it is the model text width against
+ -- that label width; each case states it as a literal.
+ local BUTTONS={assign='panel.button.assign_wishlist',create='panel.button.create_wishlist',switch='panel.button.my_builds'}
+ local CAP=6
+ local function Bounded(button,text,shortened,tag)
+  local label=button:GetFontString()
+  local line=G.model and G.model.line or 14
+  local box=G.Rect(button,NexusPanel)
+  check(label and label:GetText()==text and button:GetText()==text and label.wordWrap==false
+   and label:GetHeight()<=button:GetHeight() and label:GetHeight()>=math.min(line,button:GetHeight())
+   and G.Inside(G.Rect(label,NexusPanel),{box[1]+CAP,box[2],box[3]-CAP,box[4]})
+   and (label:GetStringWidth()>label:GetWidth())==shortened,
+   tag..': its actual FontString is one line inside the '..button:GetWidth()..'x'..button:GetHeight()
+    ..' button less the end caps, '..(shortened and 'shortened there by the client' or 'whole'))
+ end
+ -- A button's actual registered hover as the tooltip receives it. clears: a
+ -- synthetic SetOwner that drops every line added before it (an adversarial
+ -- control; no native clearing or routing is claimed).
+ local function Tooltip(button,clears)
+  local lines,owners={},{}
+  local add,own=rawget(GameTooltip,'AddLine'),rawget(GameTooltip,'SetOwner')
+  rawset(GameTooltip,'AddLine',function(_,text,r,g,b,wrap)lines[#lines+1]={text,r,g,b,wrap}end)
+  rawset(GameTooltip,'SetOwner',function(_,owner,anchor)
+   owners[#owners+1]={owner,anchor}
+   if clears then for i=#lines,1,-1 do lines[i]=nil end end
+  end)
+  GameTooltip:Hide()
+  local ok,err=pcall(button:GetScript('OnEnter'),button)
+  local shown=GameTooltip:IsShown()
+  rawset(GameTooltip,'AddLine',add);rawset(GameTooltip,'SetOwner',own)
+  assert(ok,err)
+  local leave=button:GetScript('OnLeave');if leave then leave(button)end
+  return lines,owners,shown==true and not GameTooltip:IsShown()
+ end
+ -- A mapped button's own hover with the plain and the clearing tooltip:
+ -- exactly the wanted lines, the tooltip taken once, by the button itself at
+ -- its existing ANCHOR_TOP, shown, and hidden again by its own leave.
+ local function Hover(button,want,tag)
+  for _,clears in ipairs({false,true})do
+   local lines,owners,cycle=Tooltip(button,clears)
+   check(same(lines,want) and #owners==1 and owners[1][1]==button and owners[1][2]=='ANCHOR_TOP' and cycle,
+    tag..(clears and ' (synthetic SetOwner that clears earlier lines)' or ''))
+  end
+ end
+ -- The complete label first, then every original line in its order, colour and wrap.
+ local function WithLabel(T,tips,which)
+  local out={{T(BUTTONS[which]),1,1,1,true}}
+  for _,line in ipairs(tips[which])do out[#out+1]=line end
+  return out
+ end
+ local function Verify(T,tag,recovered,bounded)
   local tips=Tips(T)
   assert(Nexus.Panel.Render(Setup()))
   local assign,create=Child(P.assign),Child(P.create)
   check(assign:IsShown() and create:IsShown() and assign:GetText()==T('panel.button.assign_wishlist')
    and create:GetText()==T('panel.button.create_wishlist'),tag..': the actual setup buttons show Assign Wishlist and Create Wishlist')
-  check(same(Lines(assign),tips.assign) and same(Lines(create),tips.create),tag..': the setup hovers keep their exact ordered lines, colours and wrap (nothing assigned until a choice; a draft, both save actions named)')
+  for _,which in ipairs({'assign','create'})do
+   local button=which=='assign' and assign or create
+   local label=button:GetFontString()
+   check(label and label:GetText()==T(BUTTONS[which]),'SETUP MODEL '..tag..': the '..BUTTONS[which]..' text is also the text of the button FontString')
+   if bounded then Bounded(button,T(BUTTONS[which]),recovered,tag..': '..BUTTONS[which]) end
+   Hover(button,recovered and WithLabel(T,tips,which) or tips[which],tag..': the actual '..BUTTONS[which]..' hover keeps its exact ordered lines, colours and wrap (nothing assigned until a choice; a draft, both save actions named)'
+    ..(recovered and (which=='assign' and ', after the complete long label (a long label with a short body)' or ', after the complete label') or ', with no added line'))
+  end
   assert(Nexus.Panel.Render(Active()))
   local switch,lock=NexusPanel._switchBtn,NexusPanel.toLockLabel
   check(switch:GetText()==T('panel.button.my_builds') and Region(P.progress):GetText()==T('panel.heading.progress')
@@ -915,7 +1006,11 @@ do
   if recovered then tips.lock[#tips.lock+1]={T('panel.heading.locked_targets'),1,1,1,true} end
   check(same(Lines(NexusPanel.toLockHit),tips.lock),tag..': the locked-target hover keeps six copies, the exact Echo and quality, ownership versus placement, locked slots versus Freeze, the untranslated names and the editor link')
   check(same(Lines(Child(P.need)),tips.need),tag..': the Still needed hover keeps its lines, the untranslated names and the shared editor link')
-  check(same(Lines(switch),tips.switch),tag..': the My Builds hover keeps its consequence, then the destination lines with the player and Wishlist names unchanged')
+  local switchLabel=switch:GetFontString()
+  check(switchLabel and switchLabel:GetText()==T('panel.button.my_builds'),'SETUP MODEL '..tag..': the My Builds text is also the text of the button FontString')
+  if bounded then Bounded(switch,T('panel.button.my_builds'),recovered,tag..': panel.button.my_builds') end
+  Hover(switch,recovered and WithLabel(T,tips,'switch') or tips.switch,tag..': the My Builds hover keeps its consequence, then the destination lines with the player and Wishlist names unchanged'
+   ..(recovered and ', after the complete label' or ', with no added line'))
   for _,w in ipairs({{switch,'panel.button.my_builds',2},{Region(P.still),'panel.heading.still_needed',2},
    {Region(P.progress),'panel.heading.progress',1},{Region(P.extra),'panel.heading.extra_copies',1},
    {lock,'panel.heading.locked_targets',1},{assign,'panel.button.assign_wishlist',1},{create,'panel.button.create_wishlist',1}})do
@@ -971,6 +1066,24 @@ do
   end
  end
  check(P.assign and P.create and P.progress and P.still and P.extra and P.need,'SETUP #143: the real setup buttons, headings and Still needed hover were found')
+ -- CONTROL on a synthetic button of this test, not a Panel widget: the real
+ -- OneLineLabel owner hook runs after a button's own hover and takes the
+ -- tooltip again. With the clearing SetOwner only the complete label is
+ -- left, so the control tells a hover that keeps its body from one whose
+ -- body a later SetOwner replaces.
+ do
+  local probe=CreateFrame('Button',nil,UIParent)
+  probe:SetSize(68,19);probe:SetText(CAND['panel.button.my_builds'])
+  probe:SetScript('OnEnter',function(self)GameTooltip:SetOwner(self,'ANCHOR_TOP');GameTooltip:AddLine('Probe body',1,1,1);GameTooltip:Show()end)
+  probe:SetScript('OnLeave',function()GameTooltip:Hide()end)
+  local label=probe:GetFontString();label:SetWidth(56)
+  Nexus.LayoutMetrics.OneLineLabel(label,probe,19,'ANCHOR_TOP')
+  local full={CAND['panel.button.my_builds'],1,1,1,true}
+  local plain,owners=Tooltip(probe,false)
+  local cleared=Tooltip(probe,true)
+  check(#owners==2 and same(plain,{{'Probe body',1,1,1},full}) and same(cleared,{full}),'CONTROL #143: the clearing SetOwner exposes an owner hook that replaces a button hover body with its label')
+  probe:Hide()
+ end
  local effects=Effects()
  Verify(ENT,'#143 English',false)
  check(NexusPanel._chargesText:GetText()=='B:0 R:? F:7','GUARD #143 English: the charge row shows 0, unknown and 7')
@@ -991,7 +1104,7 @@ do
  effects=Effects();misses=LZ.Diagnostics().misses
  local message,fed=Nexus.UserText.Message,{}
  Nexus.UserText.Message=function(value,...)fed[#fed+1]=value;return message(value,...)end
- Verify(CANDT,'#143 candidate',true)
+ Verify(CANDT,'#143 candidate',true,true)
  for _,h in ipairs({{'_progressLabelHit',P.progress,'panel.heading.progress'},{'_needLabelHit',P.still,'panel.heading.still_needed'},
   {'_shedLabelHit',P.extra,'panel.heading.extra_copies'}})do
   local hit,label=NexusPanel[h[1]],Region(h[2])
@@ -1009,11 +1122,19 @@ do
    check(NexusPanel:GetWidth()==272 and layout.boxes.setupAssign.w==146 and assign:GetWidth()==146 and assign:GetHeight()==layout.boxes.setupAssign.h
     and create:GetWidth()==146 and create:GetHeight()==layout.boxes.setupCreate.h and assign:GetText()==CAND['panel.button.assign_wishlist']
     and create:GetText()==CAND['panel.button.create_wishlist'],tag..': the setup buttons keep their fixed boxes and the selected text')
+   local tips=Tips(CANDT)
+   for _,which in ipairs({'assign','create'})do
+    local button=which=='assign' and assign or create
+    Bounded(button,CAND[BUTTONS[which]],true,tag..': '..BUTTONS[which])
+    Hover(button,WithLabel(CANDT,tips,which),tag..': the actual '..BUTTONS[which]..' hover recovers the complete label, then every original line')
+   end
    assert(Nexus.Panel.Render(Active()))
    layout=NexusPanel._responsiveLayout
    local box,panel=layout.boxes,{0,0,NexusPanel:GetWidth(),NexusPanel:GetHeight()}
    local switch=NexusPanel._switchBtn
    check(NexusPanel:GetWidth()==272 and switch:GetWidth()==68 and switch:GetHeight()==19 and switch:GetText()==CAND['panel.button.my_builds'],tag..': My Builds keeps its 68x19 box and the selected text')
+   Bounded(switch,CAND['panel.button.my_builds'],true,tag..': panel.button.my_builds')
+   Hover(switch,WithLabel(CANDT,tips,'switch'),tag..': the actual My Builds hover recovers the complete label, then its consequence and destination lines')
    for _,h in ipairs({{Region(P.progress),box.progressHeader,'panel.heading.progress',NexusPanel._progressLabelHit},
     {Region(P.still),box.needed,'panel.heading.still_needed',NexusPanel._needLabelHit},
     {Region(P.extra),box.shed,'panel.heading.extra_copies',NexusPanel._shedLabelHit},
@@ -1033,6 +1154,10 @@ do
  end
  rawset(UIParent,'GetEffectiveScale',uiScale)
  local frames=#H.frames
+ local warm={}
+ for _,button in ipairs({NexusPanel._switchBtn,Child(P.assign),Child(P.create)})do
+  warm[#warm+1]={button,button:GetFontString(),#button.regions,#button.children,button:GetScript('OnEnter'),button:GetScript('OnLeave')}
+ end
  for i=1,3 do
   local model=Active();model.progress.owned=3+i;model.progress.missing={'Echo 1 (Rare:x2)','Echo '..(10+i)}
   local pristine=H.Clone(model)
@@ -1043,6 +1168,14 @@ do
  Lines(NexusPanel._switchBtn);Lines(NexusPanel.toLockHit);Lines(NexusPanel._chargesHover)
  check(#H.frames==frames and NexusPanel._switchBtn:GetText()==CAND['panel.button.my_builds'] and Region(P.still):GetText()==CAND['panel.heading.still_needed']
   and NexusPanel.toLockLabel:GetText()==CAND['panel.heading.locked_targets'],'#143 candidate: changed models, copied re-renders, hovers and reopen reuse warm widgets and keep the selected text')
+ local reused=true
+ for _,w in ipairs(warm)do
+  reused=reused and w[2]~=nil and w[1]:GetFontString()==w[2] and #w[1].regions==w[3] and #w[1].children==w[4]
+   and w[1]:GetScript('OnEnter')==w[5] and w[1]:GetScript('OnLeave')==w[6]
+ end
+ check(reused,'#143 candidate: repeated layouts, hovers and reopen keep each mapped button with its one FontString, the same regions and children and its own registered OnEnter and OnLeave; no label, frame or hook is added')
+ Bounded(NexusPanel._switchBtn,CAND['panel.button.my_builds'],true,'#143 candidate after reuse: panel.button.my_builds')
+ Hover(NexusPanel._switchBtn,WithLabel(CANDT,Tips(CANDT),'switch'),'#143 candidate after reuse: the actual My Builds hover gives the complete label once, then its own lines')
  for _,w in ipairs({{NexusPanel._switchBtn,'panel.button.my_builds'},{Region(P.progress),'panel.heading.progress'},
   {Region(P.still),'panel.heading.still_needed'},{Region(P.extra),'panel.heading.extra_copies'},{NexusPanel.toLockLabel,'panel.heading.locked_targets'},
   {Child(P.assign),'panel.button.assign_wishlist'},{Child(P.create),'panel.button.create_wishlist'}})do
@@ -1069,13 +1202,38 @@ do
   check(text==row[2] and source=='base' and reason=='missing_candidate','SETUP FIXTURE: a missing or refused deDE entry falls back to reviewed English: '..row[1])
  end
  local diagnostics=LZ.Diagnostics()
- Verify(ENT,'#143 fallback',false)
+ Verify(ENT,'#143 fallback',false,true)
  for _,h in ipairs({'_progressLabelHit','_needLabelHit','_shedLabelHit'})do
   check(same(Lines(NexusPanel[h]),{}),'#143 fallback: a reviewed English heading that fits adds no hover line ('..h..')')
  end
  local after=LZ.Diagnostics()
  check(after.byReason.unknown_key==diagnostics.byReason.unknown_key and after.byReason.invalid_key==diagnostics.byReason.invalid_key
   and after.byReason.missing_candidate>diagnostics.byReason.missing_candidate,'#143 fallback: only missing-candidate fallbacks, never a raw key, blank or unavailable status')
+ -- Fitting-English control at every font model and both UI scales, with
+ -- literal expectations from the visible characters at each model width
+ -- against the 56 px and 134 px label bounds: My Builds (9) and the setup
+ -- labels (15) fit the default face and 0.75; with the 16 px face only My
+ -- Builds is shortened; at 2.0 all three are. A label that fits adds no
+ -- hover line; a shortened one adds only its complete label, first.
+ local FITS={{G.MODELS.default,true,true},{G.MODELS.px16,false,true},{G.MODELS.small,true,true},{G.MODELS.double,false,false}}
+ local scaled=rawget(UIParent,'GetEffectiveScale')
+ for _,fit in ipairs(FITS)do
+  for _,ui in ipairs({1,0.64})do
+   G.UseFont(fit[1]);rawset(UIParent,'GetEffectiveScale',function()return ui end)
+   local tag='#143 English fit, '..fit[1].name..', UI scale '..ui
+   local tips=Tips(ENT)
+   assert(Nexus.Panel.Render(Setup()))
+   for _,which in ipairs({'assign','create'})do
+    local button=which=='assign' and Child(P.assign) or Child(P.create)
+    Bounded(button,EN[BUTTONS[which]],not fit[3],tag..': '..BUTTONS[which])
+    Hover(button,fit[3] and tips[which] or WithLabel(ENT,tips,which),tag..': the actual '..BUTTONS[which]..' hover'..(fit[3] and ' adds no line' or ' adds only the complete label, first'))
+   end
+   assert(Nexus.Panel.Render(Active()))
+   Bounded(NexusPanel._switchBtn,EN['panel.button.my_builds'],not fit[2],tag..': panel.button.my_builds')
+   Hover(NexusPanel._switchBtn,fit[2] and tips.switch or WithLabel(ENT,tips,'switch'),tag..': the actual My Builds hover'..(fit[2] and ' adds no line' or ' adds only the complete label, first'))
+  end
+ end
+ rawset(UIParent,'GetEffectiveScale',scaled)
  -- GUARD: the real charge rows of the six real packs, unchanged (no fixture).
  local ROWS={frFR='Ban:0 Rel:? Gel:7',deDE='Verb:0 Neu:? Einfr:7',esES='Dest:0 Rel:? Cong:7',plPL='Wygn:0 Przel:? Zamr:7',
   ptBR='Banir:0 Rolar:? Cong:7',ruRU='\208\152\208\183\208\179:0 \208\159\208\181\209\128:? \208\151\208\176\208\188:7'}
