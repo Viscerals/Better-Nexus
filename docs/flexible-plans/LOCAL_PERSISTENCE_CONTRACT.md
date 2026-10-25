@@ -163,7 +163,7 @@ It loads in the TOC after `core\FlexiblePlanModel.lua`. It is frame-free and con
 - Calls `PlanPoolReadV1` and decodes the copy.
 - Returns `{mode, ownerKey, root, class, pool, bytes}`.
 
-**`Save(session, baselineBytes)`** runs this transaction:
+**`Save(session, observed)`** runs this transaction. `observed` is the prior Read receipt (bytes, owner key and root token), so identical saved bytes on a different character or database do not authorize a write. An unrelated or missing receipt refuses; no public consumer exists yet. The comparison below uses `observed.bytes` as `baselineBytes`:
 1. Pre-read. Require all of:
    - `mode == "durable"`;
    - the class is ABSENT or CURRENT;
