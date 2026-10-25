@@ -57,8 +57,9 @@ end
 check(Nexus.Readout.QueueLines({entries={{name='Echo',wanted=true}}},1)[1]:find('(predicted)',1,true),'queue remains a prediction')
 -- Issue #123: the three status reasons through the localization seam in the
 -- normal panel/readout consumers: exact English bytes, repeated
--- normalization, untouched raw inputs and no side effect. RED before the
--- seam: Nexus.Localization is absent.
+-- normalization and untouched raw inputs. An absent pre-seam module is a
+-- setup fact, not a behavioral RED for the guards below. Non-effect checks
+-- cover these synchronous calls; no deferred or Orb/resource claim is made.
 local L=assert(Nexus.Localization,'localization seam loaded before its consumers');checks=checks+1
 local function same(a,b,seen)
  if type(a)~='table' or type(b)~='table' then return a==b end
@@ -67,6 +68,16 @@ local function same(a,b,seen)
  for k in pairs(b)do if a[k]==nil then return false end end
  return true
 end
+local state0=H.Clone(Nexus.Store.State())
+check(state0.loadoutWishlists[1] and state0.firstRunWishlist and state0.firstRunWishlist.assignmentId==state0.loadoutWishlists[1].assignmentId and state0.firstRunWishlist.key==state0.loadoutWishlists[1].key and #state0.firstRunWishlist.echoes>0,'SETUP real nonempty adapter-assigned state before localization calls')
+-- Positive control on the real non-StaticPopup consent owner and frame.
+-- The harness user opted out at boot; lift only that synthetic saved opt-out
+-- so a pending request can remain open during the synchronous calls below.
+local warning=assert(Nexus.OverwriteWarning);local warningOwner={};local accepted=0
+local savedAutoWarning=NexusDB.overwriteWarnings.auto
+NexusDB.overwriteWarnings.auto=nil
+check(not warning.RequestAuto(warningOwner,function()accepted=accepted+1 end) and warning.IsOpen() and NexusOverwriteWarning:IsShown(),'SETUP actual overwrite warning is open and visible')
+check(not warning.CancelAuto({}) and warning.IsOpen() and NexusOverwriteWarning:IsShown(),'SETUP another owner cannot close the pending warning')
 local settings0=H.Clone(Nexus.Store.Settings())
 local before={actions=#H.actions,sent=#H.sent,chat=#H.chat,popup=H.popup,auto=Nexus.RecomputeStats().autoEnabled,misses=L.Diagnostics().misses}
 for _,case in ipairs({
@@ -84,8 +95,17 @@ for _,case in ipairs({
  check(texts():find(english,1,true) and not texts():find(code,1,true),'actual panel fontstring shows the English, not the code: '..code)
  local again=H.Clone(Nexus.Panel._lastModel);assert(Nexus.Panel.Render(again))
  check(Nexus.Panel._lastModel.status==english and Nexus.Panel._lastModel.recommendation==english,'rendering converted text again is stable: '..code)
- Nexus.Panel.SetStatus(code);check(Nexus.Panel._lastModel.status==english,'status-only update: '..code)
- Nexus.Panel.SetStatus(Nexus.UserText.Message(code));check(Nexus.Panel._lastModel.status==english,'onStatus double conversion is stable: '..code)
+ -- Arrange a distinct legitimate status through Render, never SetStatus.
+ local distinct=H.Clone(Nexus.Panel._lastModel)
+ distinct.status=code=='ROOT_MUTATION_PENDING' and 'STORE_PENDING' or 'ROOT_MUTATION_PENDING'
+ local prior=code=='ROOT_MUTATION_PENDING' and 'Reading your saved data' or 'Saving is still in progress; wait for its final result'
+ assert(Nexus.Panel.Render(distinct))
+ check(Nexus.Panel._lastModel.status==prior and prior~=english,'SETUP Render stores a distinct status before SetStatus: '..code)
+ check(Nexus.Panel.SetStatus(code)==true and Nexus.Panel._lastModel.status==english,'GUARD raw SetStatus updates to exact English: '..code)
+ check(Nexus.Panel.SetStatus(code)==false and Nexus.Panel._lastModel.status==english,'GUARD repeated SetStatus reports no update: '..code)
+ assert(Nexus.Panel.Render(distinct))
+ check(Nexus.Panel._lastModel.status==prior and prior~=english,'SETUP independent Render before onStatus double conversion: '..code)
+ check(Nexus.Panel.SetStatus(Nexus.UserText.Message(code))==true and Nexus.Panel._lastModel.status==english,'GUARD onStatus double conversion updates exact English: '..code)
  check(Nexus.Readout.Status({text=code})==english and Nexus.Readout.Status({text=code,level=12})=='Lv 12 - '..english,'Readout status line: '..code)
  check(Nexus.Readout.AutoHoldText(code)==english and Nexus.Readout.AutoHoldNote(code):find('Paused: '..english,1,true),'Readout Auto hold line: '..code)
 end
@@ -94,8 +114,13 @@ local plain=H.Clone(Nexus.Panel._lastModel);plain.status='CURSOR_REQUIRED';plain
 assert(Nexus.Panel.Render(plain))
 check(texts():find('This list is still being prepared',1,true) and not texts():find('Fixture list text',1,true),'the panel never selects an injected candidate')
 check(L.Diagnostics().misses==before.misses,'the normal consumer path records no fallback')
-check(#H.actions==before.actions and #H.sent==before.sent and H.popup==before.popup and #H.chat==before.chat,'no game action, Sync send, consent popup or chat line')
+check(#H.actions==before.actions and #H.sent==before.sent and H.popup==before.popup and #H.chat==before.chat,'synchronous consumers cause no observed game action, Sync send, StaticPopup or chat')
 check(Nexus.RecomputeStats().autoEnabled==before.auto and same(Nexus.Store.Settings(),settings0),'Automation selection and settings unchanged')
+check(same(Nexus.Store.State(),state0),'GUARD full detached state preserves assigned Wishlists and related identities')
+check(warning.IsOpen() and NexusOverwriteWarning:IsShown() and accepted==0,'GUARD actual pending consent remains open/visible and unaccepted')
+check(not warning.CancelAuto({}) and warning.IsOpen() and NexusOverwriteWarning:IsShown(),'GUARD pending consent still belongs to original owner')
+check(warning.CancelAuto(warningOwner) and not warning.IsOpen() and not NexusOverwriteWarning:IsShown() and accepted==0,'GUARD original owner can cancel the unchanged warning')
+NexusDB.overwriteWarnings.auto=savedAutoWarning
 Nexus.WishlistEditor.Show();check(texts():find('Build Library',1,true),'T01 actual Wishlist navigation')
 Nexus.CommunityBuilds.Show();check(texts():find('Build Library',1,true),'T01 actual library navigation/title')
 -- Real projection Detail and its normal renderer, with fixture read dependencies.
