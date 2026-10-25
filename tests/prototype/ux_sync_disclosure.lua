@@ -31,6 +31,10 @@
 -- promise, the Build Library's scroll route). Help's earlier needles are kept
 -- inside those phrases. The mode, default, Store, saved-byte and no-effect
 -- GUARDs are unchanged.
+-- D2/D3 correction: supersedes the requester-only/new-personal-best wording
+-- above. EXPECTs require character encounter-best eligibility, unsolicited
+-- ordinary/locked Echo disclosure, independent summary refusal and receiver
+-- page creation. Actual wire/receiver behavior is GUARD in ux_sync_dps_page.
 -- SETUP: the fixture reached its state (a SETUP failure is not red evidence).
 -- Real TOC boots: a format-2 profile (Automatic even though its settings store
 -- "manual") and accepted format-5 profiles with Manual and Off. The fit of the
@@ -44,10 +48,10 @@ local C=V.Checker('ux_sync_disclosure')
 
 -- The vocabulary contract: Automatic is named here; Off and Manual are
 -- core/SyncModePolicy.lua's own text.
-local AUTOMATIC="Sync is Automatic: Nexus may send without a click (login requests, answers to other users, your new DPS bests with your character name)."
+local AUTOMATIC="Sync is Automatic: may send without a click (login requests, answers to other users, eligible character-best DPS with Echoes and player info)."
 local SYNC_NOW='Asks other Nexus users for shared builds and DPS records.'
 local WORDS='Sent means it left this client, not that anyone stored it. Received means it arrived here; stored means this client kept it.'
-local DPS_PAGE='With Automatic, a new personal DPS best (with its Echo list) and its Record Loadout build page may be sent, each only if this client admits it: the page as a summary first, its Echo list only in later answers to players who ask. Sending is not delivery.'
+local DPS_PAGE="With Automatic, an eligible new character best for Training Dummy or Lich King may send a DPS record with Echoes, any locked Echoes and player info without a request. The Record Loadout summary is separate; even if it is refused, the DPS record may let receivers create that page. Each send needs this client's admission. Sending is not delivery."
 -- The former categorical line (2e34bce8, c34fa248): no longer in either tooltip.
 local CATEGORICAL_DPS_PAGE='With Automatic, a new personal DPS best also shares its Record Loadout build page: a summary first, the Echo list only to players who ask.'
 -- The Store facade as the preimage exports it (the architecture text counts
@@ -75,6 +79,22 @@ local function Has(lines,text)
  return false
 end
 local function Joined(lines) local t={};for i,l in ipairs(lines) do t[i]=V.Plain(l) end;return table.concat(t,' | ') end
+-- Facts, independently of sentence equality/parity: these predicates reject
+-- the donor's every-personal-best and requester-only Echo descriptions.
+local function DpsDisclosure(text)
+ local s=V.Plain(text):lower():gsub('%s+',' ')
+ local function has(v) return s:find(v,1,true)~=nil end
+ return (has('character best') or has('character-best') or has("character's best"))
+  and has('training dummy') and has('lich king') and has('may')
+  and has('echoes') and has('locked echoes')
+  and (has('player info') or has('character info') or (has('realm') and has('class') and has('level')))
+  and (has('without a request') or has('does not need a request'))
+  and has('summary') and has('separate') and has('refus')
+  and has('receiv') and has('creat') and has('page')
+  and not has('each new personal dps best')
+  and not has('echo list only in later answers')
+  and not has('echo list only to players who ask')
+end
 
 local H,CB
 -- Everything an opened view could start: sends, queue admissions, refusals,
@@ -178,6 +198,8 @@ local function Run(tag,database,mode,line)
   tag..': the Build Library Sync Now tooltip gives the mode and the sent / received / stored words',Joined(libTip))
  C.expect(#lbTip>0 and Joined(lbTip)==Joined(libTip),tag..': the Leaderboard Sync Now tooltip uses exactly the same words',Joined(lbTip))
  C.expect(Has(libTip,DPS_PAGE),tag..': the tooltip discloses the automatic Record Loadout page as a possible send that this client admits, not a delivery',Joined(libTip))
+ C.expect(DpsDisclosure(Joined(libTip)) and DpsDisclosure(Joined(lbTip)),
+  tag..': both tooltips disclose eligible character-best records, unsolicited locked Echoes and independent receiver pages')
  C.expect(not Has(libTip,CATEGORICAL_DPS_PAGE) and not Has(lbTip,CATEGORICAL_DPS_PAGE),
   tag..': neither tooltip keeps the categorical "also shares its Record Loadout build page" line',Joined(libTip)..' || '..Joined(lbTip))
 
@@ -253,12 +275,19 @@ local function Run(tag,database,mode,line)
   for _,needle in ipairs({'What Sync sends','your saved Sync mode decides','click Sync mode... beside Sync Now',
    'Apply saves only your choice for this account and sends nothing by itself','your own choice replaces that',
    'Your own Share actions need your click',
-   'a new personal DPS best is also shared without a click when this client admits it for sending',
-   'first a summary without the Echo list','the Echo list is sent only in later answers to players who ask for it',
+   'an eligible new character best for Training Dummy or Lich King may send without a click',
+   'a separate automatic "Record Loadout" summary without the Echo list',
+   'ordinary and any locked Echoes and player info',
+   'receivers may create a viewable, copyable page from the record alone',
    'Nexus removes the old page on this client only',
    'Sync is Automatic: Nexus may send without a click.','asks other Nexus users for shared builds and DPS records',
    'answers their requests with the shared builds and records this client holds',
-   'when this client admits it for sending, it shares each new personal DPS best with your character name, realm, class, level and Echo list',
+   'Training Dummy result lasting at least 30 seconds','Lich King result lasting at least 20 seconds',
+   "when it becomes this character's best for that encounter",
+   'A personal best for another Echo set below that encounter best stays local',
+   'character name, realm, class, level, ordinary Echoes, any locked Echoes, encounter, DPS, duration and time',
+   'It can leave without a request, independently of its separate Record Loadout summary',
+   'Refusing the summary does not refuse the separate DPS record',
    'Each of these leaves only if this client admits it','What leaves may still reach no one',
    'Sending is not delivery: Nexus cannot confirm that anyone receives or keeps what it sent.',
    'If the Build Library is taller than your screen','its content scrolls: use the bar at its right edge',
@@ -269,6 +298,10 @@ local function Run(tag,database,mode,line)
    'asks you to confirm first','A shared build cannot be recalled'}) do
    C.expect(help:find(needle,1,true)~=nil,'Help: the Sharing page says "'..needle..'"')
   end
+  C.expect(not help:find('shares each new personal DPS best',1,true)
+   and not help:find('the Echo list is sent only in later answers',1,true),
+   'Help: no every-personal-best trigger or requester-only Echo promise remains')
+  C.expect(DpsDisclosure(help),'Help: the detailed sharing page contains all automatic DPS disclosure facts')
   -- The Help mode sentences are the shared words, not a second wording.
   C.guard(policy.Text('manual'):find('Nexus sends only what you start (Sync Now or Share).',1,true)~=nil
    and policy.Text('off'):find('Nexus sends nothing. Local records are kept.',1,true)~=nil,
@@ -315,6 +348,16 @@ C.scenario('O accepted format 5: Off',function()
  C.setup(Nexus.SyncModePolicy.Text('off')=="Sync is Off: your saved Sync mode is Off, so Nexus sends nothing. Local records are kept.",
   'O: fixture: the Off words are SyncModePolicy\'s',Nexus.SyncModePolicy.Text('off'))
  C.guard(NexusDB.settings.syncMode=='off' and NexusDB.settingsVersion==5,'O: the saved Off choice and marker are unchanged')
+end)
+
+C.scenario('D23 documented automatic sends',function()
+ for _,path in ipairs({'README.md','docs/9020_SYNC_AND_NO_GUARANTEE.md'}) do
+  local f=io.open(path,'rb')
+  C.setup(f~=nil,'D23: disclosure document is readable: '..path)
+  local text=f and f:read('*a') or ''
+  if f then f:close() end
+  C.expect(DpsDisclosure(text),'D23: '..path..' discloses the actual automatic DPS path')
+ end
 end)
 
 C.finish('(one Sync vocabulary on the Welcome, Help, Build Library and Leaderboard; the mode is shown, never set; viewing has no effect)')

@@ -1211,10 +1211,10 @@ local function EnsureFrame()
         GameTooltip:AddLine("Asks other Nexus users for shared builds and DPS records.",0.8,0.8,0.8,true)
         local policy=Nexus.SyncModePolicy
         local mode=policy and type(policy.Mode)=="function" and policy.Mode() or nil
-        local modeText=mode=="automatic" and "Sync is Automatic: Nexus may send without a click (login requests, answers to other users, your new DPS bests with your character name)."
+        local modeText=mode=="automatic" and "Sync is Automatic: may send without a click (login requests, answers to other users, eligible character-best DPS with Echoes and player info)."
             or mode and type(policy.Text)=="function" and policy.Text(mode) or nil
         if modeText then GameTooltip:AddLine(modeText,1,0.82,0,true) end
-        GameTooltip:AddLine("With Automatic, a new personal DPS best (with its Echo list) and its Record Loadout build page may be sent, each only if this client admits it: the page as a summary first, its Echo list only in later answers to players who ask. Sending is not delivery.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("With Automatic, an eligible new character best for Training Dummy or Lich King may send a DPS record with Echoes, any locked Echoes and player info without a request. The Record Loadout summary is separate; even if it is refused, the DPS record may let receivers create that page. Each send needs this client's admission. Sending is not delivery.",0.7,0.7,0.7,true)
         GameTooltip:AddLine("Sent means it left this client, not that anyone stored it. Received means it arrived here; stored means this client kept it.",0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)

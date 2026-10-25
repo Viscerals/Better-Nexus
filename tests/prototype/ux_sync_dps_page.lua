@@ -48,6 +48,10 @@
 -- admission (size, checks, a full send queue; Manual/Off), and neither
 -- delivery nor reception is promised. GUARD: no removal or recall on other
 -- clients is claimed.
+-- D2/D3: new disclosure EXPECTs replace obsolete personal-best/requester-only
+-- needles. Added GUARDs characterize existing behavior: a nonwinning exact-set
+-- best stays local; captured WLD2 includes locked evidence and alone lets a
+-- fresh peer store and open/copy the exact page. No behavior repair is claimed.
 -- SETUP: the fixture reached its state (a SETUP failure is not red evidence).
 -- Boundaries: synthetic Details! combat and training-dummy target as in
 -- batch_class_capture_publication; the player identity is set per boot as
@@ -372,6 +376,7 @@ local function Run(tag,mode,configure,viaChoice,expectChoice,identity,boundary)
    tag..': no summary or full record of the generated page leaves the client',
    (traffic.counts['page-WLBI'] or 0)..'/'..(traffic.counts['page-WLRB'] or 0))
   C.guard(PageRefs(traffic)==0,tag..': no other packet names the generated page',PageRefs(traffic))
+  C.guard((traffic.counts['record-WLD2'] or 0)>0,tag..': the eligible DPS record leaves independently of page summary admission')
   RecordGuards(tag,traffic,transferId,row,page)
   C.guard((S.Stats().modeRefused or 0)==refused0,tag..': it is a size refusal, not a mode refusal',(S.Stats().modeRefused or 0)-refused0)
  elseif mode=='automatic' then
@@ -389,6 +394,7 @@ local function Run(tag,mode,configure,viaChoice,expectChoice,identity,boundary)
    C.guard(Escaped(wire)<=LINE_BUDGET,tag..': it fits one line within the Sync budget',Escaped(wire))
   end
   C.guard(Codes(sent0,'WLRB')==0,tag..': its full record with the Echo list (WLRB) is not sent unasked',Codes(sent0,'WLRB'))
+  C.guard((traffic.counts['record-WLD2'] or 0)>0,tag..': the eligible DPS record leaves independently of page summary admission')
   RecordGuards(tag,traffic,transferId,row,page)
  else
   C.guard(page.queued==false and P.IsModeReason(page.why),tag..': '..mode..' refuses the page summary at admission with the policy\'s reason',
@@ -446,22 +452,113 @@ C.scenario('OL Off from accepted format-5 settings',function() Run('OL','off',Le
 C.scenario('BH size boundary: the 15-character harness name',function() Run('BH','automatic',nil,false,nil,nil,true) end)
 C.scenario('BD size boundary: a supported 12-character Death Knight',function() Run('BD','automatic',nil,false,nil,DEATH_KNIGHT,true) end)
 
+C.scenario('D23 unsolicited locked record, nonwinning set and WLD2-only receiver',function()
+ Boot(nil,SUPPORTED)
+ UseEchoes(300001)
+ H.locked={{spellId=300003,quality=2,stacks=1}}
+ H.Notify();A.Poll()
+ local sent0=#H.sent
+ local ok,err=Capture(120000)
+ C.setup(ok,'D23: qualifying capture completed',err)
+ local row=D.GetCurrentPersonalBest('dummy')
+ C.setup(type(row)=='table' and row.dps==4000 and #row.lockedEchoes==1,
+  'D23: actual capture has ordinary and nonempty locked evidence')
+ Until(2000,function() return AutoSummary(0)~=nil end)
+ local page=AutoSummary(0)
+ C.setup(page~=nil,'D23: actual capture created its page')
+ if not page or not row then return end
+ Until(1200,function()
+  local t,id=Traffic(sent0,page,row)
+  return #(Complete(t.transfers[tostring(id)]))>0
+ end)
+ local traffic,transferId=Traffic(sent0,page,row)
+ RecordGuards('D23',traffic,transferId,row,page)
+ local chunks={}
+ for i=sent0+1,#H.sent do
+  local f=Fields(H.sent[i].text)
+  if f[1]=='WLD2' and f[3]==transferId then
+   C.guard(#f==5,'D23: captured record has no requester/request context')
+   chunks[#chunks+1]=H.sent[i].text
+  end
+ end
+ C.setup(#chunks>0,'D23: retained real WLD2 chunks for a fresh peer')
+ local payloads=Complete(traffic.transfers[tostring(transferId)])
+ C.guard(#payloads>0 and #payloads[1].e==1 and #payloads[1].lk==1,
+  'D23: decoded real record carries ordinary and nonempty locked Echoes')
+
+ -- A weaker best for a different exact set is saved locally, but never
+ -- handed to automatic egress or automatic page creation.
+ local calls={}
+ local real=S.BroadcastDpsRecord
+ S.BroadcastDpsRecord=function(record,...) calls[#calls+1]=record;return real(record,...) end
+ UseEchoes(300002)
+ local mark=#summaries
+ ok,err=Capture(90000)
+ local weaker=D.GetCurrentPersonalBest('dummy')
+ local winner=D.GetCharacterBest('dummy')
+ C.setup(ok and weaker and weaker.dps==3000 and weaker.fingerprint~=row.fingerprint,
+  'D23: another exact set committed its own weaker personal best',err)
+ C.guard(winner and winner.dps==4000 and winner.fingerprint==row.fingerprint,
+  'D23: the encounter character best stays the stronger set')
+ C.guard(#calls==0 and AutoSummary(mark)==nil,
+  'D23: a nonwinning personal best starts neither automatic DPS transfer nor page summary',#calls)
+ S.BroadcastDpsRecord=real
+
+ -- Only captured WLD2 crosses into a fresh runtime. No WLBI, WLRB or
+ -- direct EnsureDpsBuildForEchoes call is injected into the receiver.
+ local expectedOrdinary,expectedLocked=EchoList(row.echoes),EchoList(row.lockedEchoes)
+ local sourceName=Fields(chunks[1])[2]
+ Boot(nil,{name='Pagereceiver'})
+ NexusEditorFrame=nil
+ C.setup(Nexus.BuildCatalog.Get(page.id)==nil,'D23: receiver begins with no sender page')
+ for _,text in ipairs(chunks) do
+  H.Fire('CHAT_MSG_CHANNEL',text,sourceName,nil,'1. '..S.ChannelName(),nil,nil,nil,nil,S.ChannelName())
+ end
+ Until(2400,function()
+  local r=D.GetCharacterBest('dummy',sourceName)
+  return r and r.buildId and Nexus.BuildCatalog.Get(r.buildId)~=nil
+ end)
+ local received=D.GetCharacterBest('dummy',sourceName)
+ local stored=received and Nexus.BuildCatalog.Get(received.buildId)
+ C.guard(received and received.dps==4000 and stored and EchoList(stored.echoes)==expectedOrdinary
+  and EchoList(received.lockedEchoes)==expectedLocked,
+  'D23: WLD2 alone stores the exact page and locked DPS evidence')
+ if stored then
+  Nexus.CommunityBuilds.ShowBuild(stored.id)
+  local f=NexusCommunityBuildsFrame
+  Until(2000,function() return f and f._detailPanel and f._detailPanel._nexusShownId==stored.id end)
+  local detail=f and f._detailPanel
+  C.guard(f and f:IsShown() and detail and detail._nexusShownId==stored.id,
+   'D23: receiver opens the stored Record Loadout page')
+  C.setup(detail and detail.lockBtn and V.Plain(detail.lockBtn:GetText())=='Copy into Editor',
+   'D23: receiver exposes the real Copy into Editor action')
+  if detail and detail.lockBtn then detail.lockBtn:Click() end
+  local draft=Nexus.WishlistEditor.DebugDraftState()
+  C.guard(NexusEditorFrame and NexusEditorFrame:IsShown()
+   and draft.pending==1 and draft.pendingLock==1,
+   'D23: receiver can copy ordinary and locked roles into Editor',
+   tostring(draft.pending)..'/'..tostring(draft.pendingLock))
+ end
+ C.guard(#H.actions==0,'D23: receiver performs no game action',#H.actions)
+end)
+
 C.scenario('HELP the share sentence is qualified',function()
  Boot()
  Nexus.Help.Show('sharing')
  local help=V.Plain(NexusHelpWindow and NexusHelpWindow.body:GetText() or ''):gsub('%s+',' ')
  C.expect(help:find('Sharing a build always needs your click',1,true)==nil,'HELP: the false categorical claim is gone')
  C.expect(help:find('Your own Share actions need your click',1,true)~=nil
-  and help:find('a new personal DPS best is also shared without a click',1,true)~=nil
+  and help:find('an eligible new character best for Training Dummy or Lich King may send without a click',1,true)~=nil
   and help:find('Record Loadout',1,true)~=nil,'HELP: it says own Shares need a click and Automatic shares a DPS best page without one')
  C.expect(help:find('removes the old page on this client only',1,true)~=nil,'HELP: the superseded page removal is local only')
  -- M5 queue item 3: a possible send, then the local admission that decides
  -- it, and no promise of delivery or reception (the categorical form is gone).
  C.expect(help:find('also shared without a click, as an automatic',1,true)==nil
-  and help:find('also shared without a click when this client admits it for sending',1,true)~=nil
-  and help:find('when this client admits it for sending, it shares each new personal DPS best',1,true)~=nil,
+  and help:find('ordinary and any locked Echoes and player info',1,true)~=nil
+  and help:find('Each of these leaves only if this client admits it',1,true)~=nil
+  and help:find('Refusing the summary does not refuse the separate DPS record',1,true)~=nil,
   'HELP: the automatic new-best share is a possible send that local admission decides, in both places')
- C.expect(help:find('A page whose summary does not fit one chat line is not sent',1,true)~=nil
+ C.expect(help:find('An oversized summary is refused separately; it does not stop an otherwise admitted DPS record',1,true)~=nil
   and help:find('a record or summary that is too large, fails its checks or finds the send queue full stays here',1,true)~=nil,
   'HELP: the local refusals (too large, failed checks, a full send queue) are stated')
  C.expect(help:find('Sending is not delivery',1,true)~=nil and help:find('What leaves may still reach no one',1,true)~=nil,

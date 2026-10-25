@@ -544,4 +544,43 @@ C.scenario('T2 Manual grant: same-choice no-op keeps it; Off ends a queued reque
  C.guard(#A.H.actions==0,'T2: no game action',#A.H.actions)
 end)
 
+-- D2/D3 characterization of existing pending-login behavior. These are
+-- GUARDs on f1b0a726: Apply itself sends nothing, while the ordinary scheduler
+-- can later start a login request retained under Manual or Off.
+for _,bootMode in ipairs({'manual','off'}) do
+ C.scenario('D23 '..bootMode..' boot -> Automatic retains pending login',function()
+  local A=Pair.Boot({'Modewaiter','Quietpeer'},{0,0},function(i,db)
+   db.settingsVersion=5;db.accountCharacters={};db.settings.syncMode=i==1 and bootMode or 'off'
+  end)
+  local e=A.e
+  C.setup(e.Nexus.SyncModePolicy.Mode()==bootMode,'D23 '..bootMode..': fresh boot uses saved mode')
+  local sent=#A.H.sent
+  Pair.Advance(40)
+  C.guard(#A.H.sent==sent,'D23 '..bootMode..': no click and no outgoing login request under saved mode')
+  e.Nexus.CommunityBuilds.Show()
+  local f=e.NexusCommunityBuildsFrame
+  C.setup(f and f._modeBtn,'D23 '..bootMode..': real mode button exists')
+  local admitted=Stats(A).admittedPackets or 0
+  if f and f._modeBtn then f._modeBtn:Click() end
+  local d=e.NexusSyncModeDialog
+  C.setup(d and d:IsShown(),'D23 '..bootMode..': real draft opens')
+  if d and d.cancel then d.cancel:Click() end
+  C.guard(#A.H.sent==sent and (Stats(A).admittedPackets or 0)==admitted
+   and e.Nexus.SyncModePolicy.Mode()==bootMode and e.NexusDB.settings.nexusSyncModeChoice==nil,
+   'D23 '..bootMode..': opening and dismissing the draft changes and sends nothing')
+  local ok,result=Apply(A,'automatic')
+  C.guard(ok==true and result=='saved' and #A.H.sent==sent
+   and (Stats(A).admittedPackets or 0)==admitted,
+   'D23 '..bootMode..': Apply Automatic only saves the choice; no immediate send or queue admission',result)
+  Pair.Advance(40)
+  local requests=0
+  for i=sent+1,#A.H.sent do
+   local fields=Fields(A.H.sent[i].text)
+   if fields[1]=='WLRQ' and e.Nexus.Identity.SamePlayer(fields[2],A.name) then requests=requests+1 end
+  end
+  C.guard(requests>0,'D23 '..bootMode..': ordinary scheduler later emits the retained login request',requests)
+  C.guard(#A.H.actions==0,'D23 '..bootMode..': no game action',#A.H.actions)
+ end)
+end
+
 C.finish('(applied choices change later sending only through the existing admission and final-submit paths)')
