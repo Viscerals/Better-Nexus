@@ -877,7 +877,14 @@ function M.DebugDraftState()
 end
 
 StaticPopupDialogs["NEXUS_FLEXIBLE_PLAN_REPLACE"] = {
-    text = "Open your exact choice as a new Wishlist draft?\nThis replaces the current editor draft and its destination context. Nothing is saved until you save the new draft.",
+    -- Accepting installs through the controller's single-use intent; its new
+    -- draft cancels the current Save confirmation and any confirmed Save waiting
+    -- to retry (WishlistController CancelApply). The consent says so, and that
+    -- Cancel keeps both.
+    text = "Open your exact choice as a new Wishlist draft?\nThis replaces the current editor draft and its"
+        .. " destination context. It also cancels any pending Save: an open Save confirmation or a"
+        .. " confirmed Save waiting to retry is not sent. The new draft is saved only when you save it."
+        .. " Cancel keeps the current draft and any pending Save.",
     button1 = "Open new draft", button2 = "Cancel",
     -- OnAccept returns nothing, like the other Nexus confirmations. Its data
     -- is one owned, single-use request. An install attempt (installed or

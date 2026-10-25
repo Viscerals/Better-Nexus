@@ -335,6 +335,180 @@ local function Rendered()
     local rows={};for _,r in pairs(gathered) do rows[#rows+1]=r end
     table.sort(rows,function(a,b)return a.spellId<b.spellId end);return rows
 end
+
+-- PENDING SAVE: a replacement over an editor whose confirmed Save waits for
+-- the service spacing. Real TOC-loaded callbacks only: a real GameAdapter
+-- upload of a synthetic spacer starts the spacing; the visible Create
+-- unassigned and its own Save confirmation Accept leave the editor
+-- controller's real retry waiting; the chooser's real Add, Set and Open and
+-- the replacement popup's own Cancel and Accept then act on it. The consent
+-- must say that accepting cancels that pending Save. Only those disclosure
+-- EXPECTs collect failures; every setup, Cancel and Accept control is a hard
+-- check, so an unchanged consent reports through completion. New and Reset
+-- restore the editor and planning session before the original paths take
+-- their baselines; the adapter's spacing stays, and no later path uploads.
+do
+    local failures={}
+    local function expect(value,label)
+        print('PENDING SAVE '..(value and 'PASS ' or 'FAIL ')..label)
+        if not value then failures[#failures+1]=label end
+        checks=checks+1
+    end
+    -- The editor's own controller, read through an upvalue of its public Show.
+    local owner
+    for i=1,64 do
+        local name,value=debug.getupvalue(editor.Show,i)
+        if name==nil then break end
+        if name=='wishlistController' then owner=value;break end
+    end
+    check(type(owner)=='table' and type(owner.PendingApply)=='function' and type(owner.PendingRows)=='function',
+        'PENDING SAVE setup the real editor controller through editor.Show')
+    local A,B,C,SAVE_NAME=410002,410003,410005,'Pending save draft'
+    local SAVED={{spellId=A,quality=2,stacks=2},{spellId=B,quality=3,stacks=1}}
+    local CHOSEN={{spellId=A,quality=2,stacks=1},{spellId=C,quality=1,stacks=4}}
+    -- The literal spellId, quality and count of each row, in ID order.
+    local function Literal(echoes)
+        local out={}
+        for i,e in ipairs(type(echoes)=='table' and echoes or {}) do
+            out[i]={spellId=e.spellId,quality=e.quality,stacks=e.stacks}
+        end
+        table.sort(out,function(a,b) return a.spellId<b.spellId end)
+        return out
+    end
+    -- A pool row: its committed count first in its label, its count text and Set label.
+    local function Shows(id,committed,text,action)
+        local row=PoolRow(id)
+        return row.label:GetText():find('Set: '..committed..'  #'..id,1,true)==1
+            and row.count:GetText()==text and row.action:GetText()==action
+    end
+    local function Budget(members,copies)
+        local text=ChooserText()
+        return text:find(members..' / 256 alternatives',1,true)~=nil
+            and text:find('Chosen: '..copies..' / 79',1,true)~=nil
+    end
+    local saveButton
+    -- Everything Cancel must keep: editor rows, debug state and maps, name,
+    -- destination, the waiting Save's payload, held, saved data, traffic, actions.
+    local function snapshot()
+        local rows=Rendered()
+        local retry=owner.PendingApply()
+        return {rows=rows,state=H.Clone(editor.DebugDraftState()),name=NexusWishlistNameInput:GetText(),
+            pending=H.Clone(owner.PendingRows()),locked=H.Clone(owner.PendingLockRows()),
+            fulfilled=H.Clone(owner.FulfilledDraftTargets()),editing=owner.EditingContext(),
+            target=owner.CreateTargetContext(),destination=owner.SaveDestinationDescriptor(),
+            label=saveButton and saveButton:GetText(),applyPending=editor.IsApplyPending(),
+            retry=retry and {slot=retry.slot,name=retry.name,rows=Literal(retry.echoes)},
+            save=tostring(Popup.shown[CREATE]),db=H.Clone(NexusDB),held=H.Clone(H.locked),
+            actions=#H.actions,sends=#H.sent}
+    end
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+    check(owner.PendingApply()==nil and not editor.IsApplyPending() and editor.DebugPendingCount()==0
+        and Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and Budget(0,0),
+        'PENDING SAVE setup an empty editor and planning session with no Save waiting')
+    local spaced=Nexus.GameAdapter.UploadWishlist(0,'Pending save spacer',{{spellId=410004,quality=0,stacks=1}})
+    local spacedActions,spacedSends=#H.actions,#H.sent
+    check(spaced,'PENDING SAVE setup a real GameAdapter upload of a synthetic spacer starts the service spacing')
+    check(Add(A) and Add(B) and Count(A,2) and Count(B,1) and Budget(2,3),
+        'PENDING SAVE setup explicit choice 410002x2 410003x1 through real Add and Set')
+    NexusFlexiblePlanOpen:Click()
+    if Popup.shown[REPLACE] then Popup.Click(Popup.shown[REPLACE],1) end
+    check(equal(Rendered(),SAVED) and not NexusFlexiblePlanChooser:IsShown() and NexusWishlistNameInput:GetText()=='',
+        'PENDING SAVE setup real exact editor draft 410002x2 410003x1')
+    NexusWishlistNameInput:SetText(SAVE_NAME)
+    for _,f in ipairs(H.frames) do
+        if f.kind=='Button' and f:GetParent()==NexusEditorFrame and f:IsVisible()
+            and f:GetText()=='Create unassigned' then saveButton=f;break end
+    end
+    check(saveButton~=nil,'PENDING SAVE setup visible Create unassigned control')
+    saveButton:Click()
+    local savePopup=Popup.shown[CREATE]
+    check(savePopup~=nil and type(savePopup.data)=='table' and savePopup.data.slot==0
+        and savePopup.data.name==SAVE_NAME and equal(Literal(savePopup.data.echoes),SAVED)
+        and Popup.shown[REPLACE]==nil,'PENDING SAVE setup the real Save confirmation names the exact draft')
+    Popup.Click(savePopup,1)
+    local retry=owner.PendingApply()
+    check(Popup.shown[CREATE]==nil and retry~=nil and editor.IsApplyPending()==true,
+        'PENDING SAVE the accepted Save confirmation waits as a real retry during the spacing')
+    check(retry.slot==0 and retry.name==SAVE_NAME and equal(Literal(retry.echoes),SAVED)
+        and retry.echoes==savePopup.data.echoes,
+        'PENDING SAVE the retry holds the accepted payload itself: slot 0, its name and literal 410002x2 410003x1')
+    check(#H.actions==spacedActions and #H.sent==spacedSends,
+        'PENDING SAVE no further upload, action or send happens during the spacing')
+    local retryEchoes,savedMap=retry.echoes,owner.PendingRows()
+    NexusFlexiblePlanEntry:Click()
+    check(NexusFlexiblePlanChooser:IsShown() and Shows(A,2,'2','Set') and Shows(B,1,'1','Set') and Budget(2,3),
+        'PENDING SAVE setup the reopened chooser keeps the saved choice')
+    check(Count(A,1) and Count(B,0) and Add(C) and Count(C,4),
+        'PENDING SAVE setup a different explicit choice through real Set and Add')
+    check(Shows(A,1,'1','Set') and Shows(B,0,'0','Set') and Shows(C,4,'4','Set') and Budget(3,5)
+        and Status()=='','PENDING SAVE setup committed 410002x1 410005x4, 410003 unchosen, no pending input')
+    NexusFlexiblePlanOpen:Click()
+    local request=Popup.shown[REPLACE]
+    check(request~=nil and type(request.data)=='table' and Popup.shown[CREATE]==nil
+        and (owner.PendingApply() or {}).echoes==retryEchoes,
+        'PENDING SAVE setup the real replacement consent while the confirmed Save waits')
+    local consent=StaticPopupDialogs[REPLACE].text
+    consent=type(consent)=='string' and consent:lower() or ''
+    check(consent:find('replaces the current editor draft and its destination context',1,true)~=nil,
+        'PENDING SAVE CONTROL consent names the editor draft and destination context it replaces')
+    expect(consent:find('cancels any pending save',1,true)~=nil,
+        'consent says accepting cancels any pending Save')
+    expect(consent:find('confirmed save waiting to retry is not sent',1,true)~=nil,
+        'consent says a confirmed Save waiting to retry is not sent')
+    expect(consent:find('the new draft is saved only when you save it',1,true)~=nil
+        and consent:find('nothing is saved until',1,true)==nil,
+        'consent keeps Save of the new draft a separate later action, not a claim that nothing is saved')
+    expect(consent:find('cancel keeps the current draft and any pending save',1,true)~=nil,
+        'consent says Cancel keeps the current draft and any pending Save')
+    local before=snapshot()
+    Popup.Click(request,2)
+    check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and NexusFlexiblePlanChooser:IsShown()
+        and equal(snapshot(),before),
+        'PENDING SAVE Cancel keeps editor rows, debug maps, name, destination, the waiting Save, held, data, traffic and actions')
+    check((owner.PendingApply() or {}).echoes==retryEchoes and owner.PendingRows()==savedMap
+        and editor.IsApplyPending() and equal(Rendered(),SAVED),
+        'PENDING SAVE Cancel keeps the same retry payload and the same pending map')
+    check(Shows(A,1,'1','Set') and Shows(B,0,'0','Set') and Shows(C,4,'4','Set') and Budget(3,5)
+        and Status()=='','PENDING SAVE Cancel keeps every committed chooser count and no pending input')
+    StaticPopupDialogs[REPLACE].OnAccept(request.frame,request.data)
+    check(Popup.shown[REPLACE]==nil and equal(snapshot(),before)
+        and (owner.PendingApply() or {}).echoes==retryEchoes and owner.PendingRows()==savedMap,
+        'PENDING SAVE a late Accept of the canceled consent installs nothing and keeps the waiting Save')
+    NexusFlexiblePlanOpen:Click()
+    local fresh=Popup.shown[REPLACE]
+    check(fresh~=nil and fresh~=request and (owner.PendingApply() or {}).echoes==retryEchoes,
+        'PENDING SAVE setup a fresh current consent while the confirmed Save still waits')
+    local effects={db=H.Clone(NexusDB),held=H.Clone(H.locked),actions=#H.actions,sends=#H.sent}
+    Popup.Click(fresh,1)
+    local installed=editor.DebugDraftState()
+    check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and not NexusFlexiblePlanChooser:IsShown()
+        and owner.PendingApply()==nil and not editor.IsApplyPending(),
+        'PENDING SAVE the accepted replacement cancels the real waiting Save retry')
+    check(equal(Rendered(),CHOSEN) and equal(Literal(owner.CanonicalEchoes()),CHOSEN) and owner.PendingRows()~=savedMap
+        and next(owner.PendingLockRows())==nil and next(owner.FulfilledDraftTargets())==nil
+        and installed.pending==2 and installed.pendingLock==0 and installed.fulfilled==0,
+        'PENDING SAVE it installs exactly 410002x1 410005x4 with empty locked and fulfilled maps')
+    check(owner.EditingContext()==nil and owner.CreateTargetContext()==nil and owner.CandidateContext()==nil
+        and owner.SaveResult('')==nil and owner.SentDraft()==nil and NexusWishlistNameInput:GetText()=='',
+        'PENDING SAVE the new draft has a fresh unnamed context and no earlier Save identity')
+    check(equal({db=H.Clone(NexusDB),held=H.Clone(H.locked),actions=#H.actions,sends=#H.sent},effects),
+        'PENDING SAVE the replacement uploads, saves, assigns, shares and spends nothing')
+    local after=snapshot()
+    StaticPopupDialogs[CREATE].OnAccept(savePopup.frame,savePopup.data)
+    editor._PumpApplyRetry()
+    check(equal(snapshot(),after) and owner.PendingApply()==nil and not editor.IsApplyPending()
+        and equal(Rendered(),CHOSEN) and NexusWishlistNameInput:GetText()=='',
+        'PENDING SAVE the old confirmed Save callback cannot revive its retry, send anything or overwrite the installed draft')
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+    NexusFlexiblePlanSearch:SetText('')
+    check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and NexusFlexiblePlanChooser:IsShown()
+        and editor.DebugPendingCount()==0 and NexusWishlistNameInput:GetText()=='' and owner.PendingApply()==nil
+        and not editor.IsApplyPending() and Status()=='' and Budget(0,0),
+        'PENDING SAVE checks leave an empty editor, no popup or waiting Save and an empty planning session')
+    print('PENDING SAVE completed real paths; failures='..#failures)
+    assert(#failures==0,'EXPECT replacement consent discloses the canceled pending Save: '..table.concat(failures,'; '))
+end
+
 local actionBaseline,sentBaseline=#H.actions,#H.sent
 local storeBaseline=H.Clone(NexusDB)
 -- C1a: real count input, Set, Open and original popup acceptance. Only new
