@@ -34,7 +34,7 @@ Baseline: `test.9020-b49afd2`. All evidence below is synthetic and offline
 
 ### What Sync sends, and the Share confirmation (UX M5)
 
-This section is a source trace of the current files and is shown to players in the same words. It is not native verification.
+This section traces the current source. The UI summarizes these paths; Help gives the detailed disclosure. It is not native verification.
 
 **Sync mode and the player's choice (14d, LP-12).**
 
@@ -54,7 +54,7 @@ This section is a source trace of the current files and is shown to players in t
 - **What Apply does not do.** It calls no RequestSync, Share, probe, Init, Reset or pump.
   - Later traffic follows the new mode through the existing queue-admission and final-submit `SyncModePolicy.Allows` checks and the existing convergence stop.
   - Already submitted messages cannot be recalled.
-  - Automatic resumes only through its ordinary scheduler.
+  - Automatic resumes only through its ordinary scheduler, including a pending login request retained while the mode was Manual or Off. Apply itself starts no actor.
 - **Where the mode is stated.** The Build Library status (sized to its rows by `LayoutMetrics.Community`), both Sync Now tooltips, the Welcome and Help.
 
 **What each mode can send without a click:**
@@ -63,8 +63,8 @@ This section is a source trace of the current files and is shown to players in t
 |---|---|---|
 | Automatic | The login Sync request for shared builds and DPS records | `core/SyncSession.lua` `UpdateAutoSync` |
 | Automatic | Answers to other users' requests, with the shared builds and records this client holds | `core/Sync.lua` `permitResponse` → `SyncModePolicy.Allows` |
-| Automatic | Each new personal DPS best, with player name, realm, class, level, Echo list, locked Echoes, category, DPS, duration and time | `core/DpsCapture.lua` new-best branch → `Sync.BroadcastDpsRecord` |
-| Automatic | That best's automatic "<Class> Record Loadout" build page: a build summary with **no Echo list** (title, owner, class). Its Echo list goes only in later answers to players who ask. | `core/DpsCapture.lua` new-best branch → `CommunityBuilds.EnsureDpsBuildForEchoes` → controller `SaveBuild` (commit) → `BroadcastIfPossible` → `Sync.BroadcastBuildSummary` (a "bulk" queue entry with no operation kind) → queue admission (`SyncModePolicy.Allows`). Manual always refuses it. Its queue entry carries only the build ID, the bulk class and its times: no requester, no Sync Now grant and no Share operation (`core/Sync.lua` `BroadcastBuildSummary`). A Share grant for the same build admits only follow-up answers to players who request it (`ShareFollowUp` needs a requester). Off refuses it. |
+| Automatic | An eligible result that becomes this character's best for Training Dummy (at least 30 seconds) or Lich King (at least 20 seconds), with player name, realm, class, level, ordinary Echoes, any locked Echoes, category, DPS, duration and time. A per-loadout personal best below the character encounter best stays local. | `core/DpsCapture.lua` `MinimumDuration`, `BetterRow`, character-best gate → `Sync.BroadcastDpsRecord` (`WLD2`, including `e` and optional `lk`) |
+| Automatic | That character best's separate automatic "<Class> Record Loadout" summary has **no Echo list** (title, owner, class). Its full build response may be sent on request, but the independent DPS record already carries ordinary and any locked Echoes without a request. A receiver can create the exact viewable/copyable page from `WLD2` alone. Refusal of the summary does not refuse the separate DPS transfer. | `core/DpsCapture.lua` new-best branch → `CommunityBuilds.EnsureDpsBuildForEchoes` → controller `SaveBuild` (commit) → `BroadcastIfPossible` → `Sync.BroadcastBuildSummary` (a "bulk" queue entry with no operation kind) → queue admission (`SyncModePolicy.Allows`). Manual always refuses it. Its queue entry carries only the build ID, the bulk class and its times: no requester, no Sync Now grant and no Share operation (`core/Sync.lua` `BroadcastBuildSummary`). A Share grant for the same build admits only follow-up answers to players who request it (`ShareFollowUp` needs a requester). Off refuses it. |
 | Manual | Nothing without a click. Only what the player starts: Sync Now and its grant, an explicit Share and its follow-ups, the diagnostic probe whisper | `core/SyncModePolicy.lua` `Allows` |
 | Off | Nothing | `core/SyncModePolicy.lua`, `sync_saved_mode_off` |
 

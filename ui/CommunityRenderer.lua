@@ -15,7 +15,7 @@ local OWNER_NOT_ESTABLISHED = "|cff999999Owner identity not established.|r"
 -- use. Off and Manual are core/SyncModePolicy.lua's own text. Automatic names
 -- what that mode may send without a click (traced in
 -- docs/9020_SYNC_AND_NO_GUARANTEE.md). Reading the mode writes nothing.
-local SYNC_AUTOMATIC_TEXT = "Sync is Automatic: Nexus may send without a click (login requests, answers to other users, your new DPS bests with your character name)."
+local SYNC_AUTOMATIC_TEXT = "Sync is Automatic: may send without a click (login requests, answers to other users, eligible character-best DPS with Echoes and player info)."
 local function SyncModeLine()
     local policy = Nexus and Nexus.SyncModePolicy
     if not (policy and type(policy.Mode) == "function") then return nil end
@@ -35,7 +35,7 @@ local SyncModeDialog = {
     MODES = {"automatic", "manual", "off"},
     LABEL = {automatic="Automatic", manual="Manual", off="Off"},
     HELP = {
-        automatic="May send without a click: login requests, answers to other users, new DPS bests with their Record Loadout pages.",
+        automatic="May send without a click: login requests, answers and newly eligible character-best DPS on Training Dummy or Lich King (Echoes, any locked Echoes, player info).",
         manual="Sends only what you start: Sync Now, and a Share with the answers to players who fetch it.",
         off="Sends nothing. Nexus still receives, and local records are kept.",
     },
@@ -59,6 +59,14 @@ function SyncModeDialog.Describe(status)
     end
     local label = SyncModeDialog.LABEL[status.effective] or "Automatic"
     if status.explicit then return "Current: " .. label .. ", your saved choice." end
+    if status.storedChoiceState == "recognized" then
+        return "Current: " .. label .. ". Saved choice "
+            .. (SyncModeDialog.LABEL[status.storedChoice] or "unknown") .. " not applied."
+    elseif status.storedChoiceState == "invalid" then
+        return "Current: " .. label .. ". Saved choice invalid; not applied."
+    elseif status.storedChoiceState ~= "absent" then
+        return "Current: " .. label .. ". Saved choice unknown."
+    end
     if status.inheritedSource == "legacy" then
         return "Current: " .. label .. ", from accepted saved settings of another Nexus version (no choice of yours saved)."
     end
@@ -2353,17 +2361,30 @@ local function EnsureDetailPanel(parent)
         local off = policy and type(policy.Mode) == "function"
             and policy.Mode() == "off"
         -- What Share does, in order: the local save, then a summary queued
-        -- only if the saved mode and its size admit it; the listing's Echo
-        -- list and description go only in answers to players who ask for it.
-        -- The DPS-best hand-off after it (core/CommunityController.lua) may
-        -- also queue a linked DPS record under the same saved mode. That
-        -- record carries its Echo list and is not an answer to a request, so
-        -- the note says both (review38 B01/N01).
+        -- only if the saved mode and its size admit it. The summary carries
+        -- no Echo list or description; the full listing can be sent in
+        -- answers. core/SyncWire.lua Route picks the route of each answer
+        -- packet: an addon whisper is possible only to a requester whose
+        -- negotiated handshake is still current, and only while the saved
+        -- mode permits handshakes and the packet is eligible and small
+        -- enough for it; otherwise the packet may go on the shared Sync
+        -- channel, where other Nexus users may keep a valid copy.
+        -- Negotiation alone does not decide the route, and the packets of
+        -- one answer can take different routes.
+        -- After the local commit the controller also hands the listing ID to
+        -- DpsCapture.BroadcastBestForBuild, whether or not the summary was
+        -- queued: in Automatic a linked character-best record may be sent.
+        -- The note states these paths; it changes none of them.
+        -- M7 (review38 B01/N01) is kept as history: its sentence that the
+        -- listing is listed with the character name, realm and class stays.
+        -- Its requester-only scoping of the listing's Echo list and its
+        -- "DPS record you hold for this exact build" sentence are superseded
+        -- by the D2/D3 paths stated above.
         local note = (build.publishedBuildId and "This saves its current title, description and Echo list as an update of your shared listing on this client, "
             or "This saves its title, description and Echo list as your shared listing on this client, ")
-            .. "then queues a short summary for other Nexus users if your saved Sync mode and its size allow; the listing's Echo list and description are sent only in answers to players who ask for it. "
+            .. "then queues a short summary for other Nexus users if your saved Sync mode and its size allow. The summary has no Echo list or description; the full listing can be sent in answers to other Nexus users' requests, and an answer on the shared Sync channel may be kept by any Nexus user who receives it. "
             .. "It is listed with your character name, realm and class. "
-            .. "A DPS record you hold for this exact build may also be queued separately if your saved Sync mode allows it, and that record includes its Echo list. "
+            .. "In Automatic, if your character's best Training Dummy or Lich King DPS is linked to this listing, Nexus may also send each such DPS record with its Echoes, any locked Echoes and your player info (character name, realm, class, level) without an additional request, even if the summary is not queued. "
             .. "A shared build cannot be recalled: players who receive it keep their copy, and Stop Sharing removes only the listing on this client. "
             .. "Nexus cannot confirm who received it."
             .. (off and " Your saved Sync mode is Off: the listing is saved on this client and not sent." or "")
@@ -2375,7 +2396,7 @@ local function EnsureDetailPanel(parent)
     p.shareBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self,"ANCHOR_TOP")
         GameTooltip:AddLine("Share this Saved Build",0.9,0.9,0.9,true)
-        GameTooltip:AddLine("Asks you to confirm, then saves it as your shared listing and queues a summary for other Nexus users if your Sync mode and its size allow; the listing's Echo list is sent only in answers to players who ask. A DPS record you hold for this exact build, with its Echo list, may also be queued separately if your Sync mode allows it. A shared build cannot be recalled.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("Asks you to confirm first, then saves its title, description and Echo list as your shared listing on this client and queues a summary for other Nexus users if your Sync mode and its size allow; the summary has no Echo list or description. The full listing (title, description and Echo list) can be sent in answers, and an answer on the shared Sync channel may be kept by any Nexus user who receives it. In Automatic, if your character's best Training Dummy or Lich King DPS is linked to this listing, Nexus may also send each such DPS record with its Echoes, any locked Echoes and player info without an additional request, even if the summary is not queued. A shared build cannot be recalled.",0.7,0.7,0.7,true)
         GameTooltip:AddLine("Not Copy into Editor, and not saving or activating a server Saved Build.",0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
@@ -3620,7 +3641,7 @@ local function EnsureFrame()
         GameTooltip:AddLine("Asks other Nexus users for shared builds and DPS records.",0.8,0.8,0.8,true)
         local modeText = M.SyncModeLine()
         if modeText then GameTooltip:AddLine(modeText,1,0.82,0,true) end
-        GameTooltip:AddLine("With Automatic, a new personal DPS best (with its Echo list) and its Record Loadout build page may be sent, each only if this client admits it: the page as a summary first, its Echo list only in later answers to players who ask. Sending is not delivery.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("With Automatic, an eligible new character best for Training Dummy or Lich King may send a DPS record with Echoes, any locked Echoes and player info without a request. The Record Loadout summary is separate; even if it is refused, the DPS record may let receivers create that page. Each send needs this client's admission. Sending is not delivery.",0.7,0.7,0.7,true)
         GameTooltip:AddLine("Sent means it left this client, not that anyone stored it. Received means it arrived here; stored means this client kept it.",0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)

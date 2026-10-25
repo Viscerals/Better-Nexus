@@ -29,7 +29,7 @@ local SETUP_HINT = "Information only: this guide saves nothing and never turns A
 -- The current Sync mode in the Build Library's and Leaderboard's words. Off
 -- and Manual are core/SyncModePolicy.lua's text. Reading the mode writes
 -- nothing; this window neither offers nor changes a mode.
-local SYNC_AUTOMATIC_TEXT = "Sync is Automatic: Nexus may send without a click (login requests, answers to other users, your new DPS bests with your character name)."
+local SYNC_AUTOMATIC_TEXT = "Sync is Automatic: may send without a click (login requests, answers to other users, eligible character-best DPS with Echoes and player info)."
 
 local function SyncNote(f)
     if not (f and f.sync) then return f end

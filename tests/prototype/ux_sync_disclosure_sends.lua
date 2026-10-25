@@ -20,7 +20,7 @@ local V=dofile('tests/prototype/view_regression_support.lua')
 local printable=V.printable
 local C=V.Checker('ux_sync_disclosure_sends')
 
-local AUTOMATIC="Sync is Automatic: Nexus may send without a click (login requests, answers to other users, your new DPS bests with your character name)."
+local AUTOMATIC="Sync is Automatic: may send without a click (login requests, answers to other users, eligible character-best DPS with Echoes and player info)."
 
 -- Every line one peer's tooltip receives while `button`'s OnEnter runs.
 local function Tip(peer,button)

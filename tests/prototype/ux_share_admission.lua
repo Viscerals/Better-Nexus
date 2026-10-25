@@ -43,6 +43,43 @@
 -- summary is not produced by this sender and is only counted (zero); the
 -- popup is the harness model, not native StaticPopup layout. Not native
 -- evidence.
+-- M5 C1 (Saved-source retry consent; after S6, in Automatic): the real S4
+-- (dropped at final submit) and S5 (refused at admission under Off)
+-- listings come from Saved Builds (sourceSavedBuildId), and Sync's own
+-- record of each confirmed Share is terminal with the listing's exact id,
+-- kind and version, so every other Retry Share condition holds (SETUP).
+-- EXPECT (fails on 5c8ad321 by design once that state is reached: there the
+-- listing offers Retry Share, and RetryShare resends it without the Saved
+-- Build's confirmation): the ordinary Build Library detail offers no Retry
+-- Share; the real CanRetryShare and RetryShare refuse with one reason that
+-- names a Saved Build, a Share action and confirmation, and promises no
+-- available source and no send; RetryShare reaches no BroadcastBuildSummary
+-- call and no transport admission (measured before any time passes, so
+-- Automatic background work is never counted as retry traffic), and none
+-- follows.
+-- C1 reason follow-up, EXPECT (fails on 68006d08 by design once that state
+-- is reached: there the reason says another attempt uses that Saved Build's
+-- own Share action, which presupposes an available, equivalent route). Read
+-- clause by clause, not as one copied sentence, the reason states the
+-- restriction itself (Retry Share is not offered for a listing made from a
+-- Saved Build); its Share-action guidance is only the generic rule that a
+-- Saved Build's Share action is separate and asks for its own confirmation,
+-- said of any Saved Build (indefinite or conditional), never of one
+-- presupposed Saved Build; and it promises no available or matching Saved
+-- Build, no equivalent retry and no exclusive or update route: import
+-- cleanup can remove the mirror while the listing stays, the mirror's Share
+-- sends the mirror's current title, description and Echoes, and EditBuild
+-- can also share the listing.
+-- GUARD: Stop Sharing stays; the exact own Saved Build offers its existing
+-- Update Shared Build... confirmation; Cancel of that open confirmation
+-- shares and sends nothing (counted from after it opened, so Cancel only;
+-- opening and cancelling, counted from before the click, stay exercised in
+-- ux_share_confirmation); one fresh Accept makes exactly one explicit Share
+-- (not a queue-full retry), admitted once; that approval, or the S4 one,
+-- accepted again starts nothing. BroadcastBuildSummary calls are counted by
+-- a pass-through wrapper (the real function, with its own arguments and
+-- results). The generic Share-form retry stays covered, unchanged, by
+-- share_pending_status and sync_saved_mode_share_retry.
 local Pair=dofile('tests/prototype/sync_pair_support.lua')
 local V=dofile('tests/prototype/view_regression_support.lua')
 local printable=V.printable
@@ -561,9 +598,11 @@ C.scenario('S3 explicit-choice Manual: an oversize summary is a final, visible r
  C.guard(exact==1 and other==0,'S3: the DPS-best hand-off is one call with the listing ID only',exact..'/'..other)
 end)
 
+local r4,r5
 C.scenario('S4 explicit-choice Manual, then Off before submission: the final-submit check drops the queued summary',function()
  local r=Share(PA,M[4],TITLES[4],'S4',function() A.H.combat=true end)
  if not r then A.H.combat=false;return end
+ r4=r
  local adm=r.admission
  C.expect(adm~=nil and adm.queued==true and adm.m.queueClass=='share' and adm.m.operationKind=='share',
   'S4: the confirmed Share is admitted under Manual while combat holds the wire',AdmissionText(adm))
@@ -596,6 +635,7 @@ C.scenario('S5 explicit-choice Off: the Share is saved locally, refused at admis
  C.setup(policy.Mode()=='off' and (policy.Choice() or {}).explicit=='off','S5: fixture: the explicit choice is Off')
  local r=Share(PA,M[5],TITLES[5],'S5')
  if not r then return end
+ r5=r
  C.guard(r.note:find('Your saved Sync mode is Off',1,true)~=nil,'S5: the confirmation says the listing is saved and not sent under Off',r.note)
  C.guard(LocallySaved(r),'S5: the listing and the mirror\'s publication were saved locally',printable(r.id))
  C.guard(r.line~=nil and r.line:find('not sent: your saved Sync mode is Off.',1,true)~=nil and r.line:find('queued its summary',1,true)==nil,
@@ -635,6 +675,215 @@ C.scenario('S6 Sync unavailable: the line states it after the local save',functi
  local exact,other=DpsHandoffs(PA,r.dps,r.id)
  C.guard(exact==1 and other==0,'S6: the DPS-best hand-off is one call with the listing ID only',exact..'/'..other)
  C.guard(#A.H.actions==0,'S6: no game action in this runtime',#A.H.actions)
+end)
+
+C.scenario('C1 Automatic: a failed Share of a Saved Build listing is not retried without that Saved Build\'s confirmation',function()
+ local policy=A.e.Nexus.SyncModePolicy
+ C.setup(policy.Mode()=='automatic','C1: fixture: the explicit choice Automatic of S6 still applies',policy.Mode())
+ local S,catalog=A.e.Nexus.Sync,A.e.Nexus.BuildCatalog
+ local realSummary=S.BroadcastBuildSummary
+ C.setup(type(realSummary)=='function','C1: fixture: Sync offers BroadcastBuildSummary')
+ if type(realSummary)~='function' then return end
+ -- Pass-through observation: the real function runs with its own arguments
+ -- and returns its own results.
+ local calls={}
+ S.BroadcastBuildSummary=function(record,options,...)
+  calls[#calls+1]={id=type(record)=='table' and record.id or nil,
+   explicit=type(options)=='table' and options.explicit==true,
+   retryOnFull=type(options)=='table' and options.retryOnFull==true}
+  return realSummary(record,options,...)
+ end
+ local function CallsSince(mark,id)
+  local n=0
+  for i=mark+1,#calls do if id==nil or calls[i].id==id then n=n+1 end end
+  return n
+ end
+ local function AnyAdmissions(seq)
+  local n=0
+  for _,a in ipairs(PA.admissions) do if a.n>seq then n=n+1 end end
+  return n
+ end
+ local function ShareAdmissions(seq,id)
+  local n=0
+  for _,a in ipairs(PA.admissions) do
+   if a.n>seq and a.m.buildId==id and a.m.queueClass=='share' then n=n+1 end
+  end
+  return n
+ end
+ local function Label(button) return button and V.Plain(button:GetText()) or '' end
+ -- M5 C1 reason follow-up: the refusal reason is read in lower case one
+ -- clause at a time (split at . ; ! ? and line breaks), as semantic facts
+ -- and refused presuppositions, not as one copied sentence.
+ local function Clauses(text)
+  local out={}
+  for s in (V.Plain(text):lower()..'.'):gmatch('([^%.;!?\n]+)') do
+   s=s:gsub('^%s+',''):gsub('%s+$','')
+   if s~='' then out[#out+1]=s end
+  end
+  return out
+ end
+ local function Clause(text,match)
+  for _,s in ipairs(Clauses(text)) do if match(s) then return s end end
+  return nil
+ end
+ local function Has(s,needle) return s:find(needle,1,true)~=nil end
+ local function Word(s,word) return s:find('%f[%a]'..word..'%f[%A]')~=nil end
+ -- A definite reference to one Saved Build presupposes that it is still
+ -- there and matches the failed listing; neither holds in general.
+ local function Definite(s)
+  for _,needle in ipairs({'that saved build','this saved build','the saved build',
+   'its saved build','your saved build'}) do
+   if Has(s,needle) then return needle end
+  end
+  return nil
+ end
+ -- What the reason must not presuppose: a present or matching Saved Build,
+ -- an equivalent retry, or an exclusive or update route.
+ local function Presupposition(text)
+  local t=V.Plain(text):lower()
+  local found=Definite(t)
+  if found then return found end
+  for _,needle in ipairs({'another attempt','instead','identical','equivalent','match','update'}) do
+   if Has(t,needle) then return needle end
+  end
+  for _,word in ipairs({'use','uses','same','only'}) do
+   if Word(t,word) then return word end
+  end
+  return nil
+ end
+ local cases={{r=r4,slot=4,outcome='dropped',tag='C1 S4'},{r=r5,slot=5,outcome='rejected',tag='C1 S5'}}
+ local function Refused(case)
+  local id=case.r and case.r.id
+  local listing=id and catalog.Get(id) or nil
+  local status=id and S.GetShareStatus(id) or nil
+  local version=type(listing)=='table'
+   and tostring(tonumber(listing.lastModified) or tonumber(listing.postedAt) or 0) or nil
+  print('OBSERVED',case.tag,'listing='..printable(id),'sourceSavedBuildId='..printable(listing and listing.sourceSavedBuildId),
+   'record',StatusText(status),'kind='..printable(status and status.kind),'id='..printable(status and status.id),
+   'version='..printable(status and status.version)..' / '..printable(version))
+  local own=type(listing)=='table' and listing.importedSavedBuild~=true and listing.sourceSavedBuildId~=nil
+   and listing.sourceSavedBuildId==M[case.slot] and CB(PA).IsOwnBuild(id)==true
+  C.setup(own,case.tag..': fixture: the listing is your own ordinary listing with the sourceSavedBuildId of Saved Build '..case.slot,printable(id))
+  local terminal=type(status)=='table' and status.kind=='share' and status.id==id and status.terminal==true
+   and status.outcome==case.outcome and status.version==version
+   and tostring(status.reason or ''):find('too large',1,true)==nil
+  C.setup(terminal,case.tag..': fixture: Sync\'s own record of that confirmed Share is terminal ('..case.outcome
+   ..') with the listing\'s exact id, kind and version, so every other Retry Share condition holds',StatusText(status))
+  if not (own and terminal) then return end
+  local panel=ShowBuild(PA,id)
+  C.setup(panel~=nil,case.tag..': fixture: the ordinary Build Library detail shows the listing')
+  if panel then
+   print('OBSERVED',case.tag,'detail retry shown='..printable(panel.retryShareBtn:IsShown()),
+    'left='..Label(panel.lockBtn)..' shown='..printable(panel.lockBtn:IsShown()),
+    'right='..Label(panel.deleteBtn)..' shown='..printable(panel.deleteBtn:IsShown()))
+   C.expect(not panel.retryShareBtn:IsShown() and panel.lockBtn:IsShown() and Label(panel.lockBtn)=='Copy into Editor',
+    case.tag..': the ordinary detail offers no Retry Share, which would resend it without the Saved Build\'s confirmation; the draft-only Copy into Editor stays in that place',
+    'retry shown='..printable(panel.retryShareBtn:IsShown()))
+   C.guard(panel.deleteBtn:IsShown() and Label(panel.deleteBtn)=='Stop Sharing' and not panel.shareBtn:IsShown(),
+    case.tag..': Stop Sharing stays, and the listing itself offers no Share action',Label(panel.deleteBtn))
+  end
+  -- The baseline is taken here, before any time passes, so Automatic
+  -- background work in later steps is never counted as retry traffic.
+  case.id,case.seq,case.sent,case.mark=id,PA.seq,#A.H.sent,#calls
+  local ok,why=CB(PA).CanRetryShare(id)
+  local retried,retryWhy,outcome=CB(PA).RetryShare(id)
+  local after=S.GetShareStatus(id)
+  print('OBSERVED',case.tag,'CanRetryShare='..printable(ok)..' '..printable(why),
+   'RetryShare='..printable(retried)..' '..printable(retryWhy),'summary calls +'..CallsSince(case.mark),
+   'admissions +'..AnyAdmissions(case.seq),'record',StatusText(after))
+  local text=type(why)=='string' and why or ''
+  C.expect(ok==false and text:find('Saved Build',1,true)~=nil and text:find('Share action',1,true)~=nil
+   and text:find('confirm',1,true)~=nil and text:find('available',1,true)==nil
+   and text:find('sent',1,true)==nil and text:find('will',1,true)==nil,
+   case.tag..': the real CanRetryShare refuses it; its reason names a Saved Build, a Share action and confirmation, and promises no available source and no send',
+   printable(why))
+  -- M5 C1 reason follow-up (EXPECT): what the reason says, clause by clause.
+  local restriction=Clause(text,function(s)
+   return Has(s,'retry share') and (Word(s,'not') or Word(s,'never') or Has(s,"n't"))
+    and Has(s,'offered') and Has(s,'listing') and Has(s,'saved build')
+  end)
+  C.expect(ok==false and restriction~=nil,
+   case.tag..': the reason states the restriction itself: Retry Share is not offered for a listing made from a Saved Build',
+   printable(why))
+  local guidance=Clause(text,function(s) return Has(s,'share action') and Has(s,'confirm') end)
+  C.expect(guidance~=nil
+   and (Word(guidance,'separate') or Word(guidance,'separately') or Has(guidance,'own confirm'))
+   and (Word(guidance,'a saved build') or Word(guidance,'any saved build') or Word(guidance,'if') or Word(guidance,'when'))
+   and Definite(guidance)==nil,
+   case.tag..': its Share-action guidance is only the generic rule: a Saved Build\'s Share action is separate and asks for its own confirmation, said of any Saved Build (indefinite or conditional), never of one presupposed Saved Build',
+   printable(guidance or why))
+  local promise=Presupposition(text)
+  C.expect(promise==nil,
+   case.tag..': it presupposes no available or matching Saved Build, no equivalent retry and no exclusive or update route (no "that Saved Build", "another attempt", "uses", "instead", "only" or "update")',
+   printable(promise)..' in '..printable(why))
+  C.expect(retried==false and retryWhy==why and outcome==nil and CallsSince(case.mark)==0
+   and AnyAdmissions(case.seq)==0 and #A.H.sent==case.sent and type(after)=='table'
+   and after.generation==status.generation and after.terminal==true and after.outcome==case.outcome,
+   case.tag..': the real RetryShare refuses it the same way before any new summary call: no BroadcastBuildSummary call, no transport admission, nothing sent, Sync\'s record of the failed Share unchanged',
+   CallsSince(case.mark)..' call(s), '..AnyAdmissions(case.seq)..' admission(s)')
+ end
+ for _,case in ipairs(cases) do Refused(case) end
+ Advance(20)
+ for _,case in ipairs(cases) do
+  if case.id then
+   local sums=Summaries(PA,case.id,case.sent)
+   C.expect(#sums==0 and ShareAdmissions(case.seq,case.id)==0 and CallsSince(case.mark,case.id)==0,
+    case.tag..': and no retry of it follows: no Share admission, hand-off or summary of the listing',#sums..' summary(ies)')
+  end
+ end
+ -- That exact own Saved Build still exists here and keeps its own confirmed
+ -- Share action (a fixture fact, not a route the refusal reason promises).
+ local id=cases[1].id
+ local listing=id and catalog.Get(id) or nil
+ local mirrorId=type(listing)=='table' and listing.sourceSavedBuildId or nil
+ C.setup(mirrorId~=nil and mirrorId==M[4],'C1: fixture: the S4 listing names its own Saved Build',printable(mirrorId))
+ if not (mirrorId~=nil and mirrorId==M[4]) then S.BroadcastBuildSummary=realSummary;return end
+ local panel=ShowBuild(PA,mirrorId)
+ C.guard(panel~=nil and panel.shareBtn:IsShown() and panel.shareBtn:IsEnabled()
+  and Label(panel.shareBtn)=='Update Shared Build...' and not panel.retryShareBtn:IsShown(),
+  'C1: that exact own Saved Build offers its existing Update Shared Build... action, which asks to confirm',Label(panel and panel.shareBtn))
+ local popup=Confirm(PA,mirrorId,'C1 cancel')
+ if popup then
+  local note=V.Plain(tostring(popup.arg2 or ''))
+  C.guard(note:find('as an update',1,true)~=nil and note:find('cannot be recalled',1,true)~=nil,
+   'C1: its confirmation says this sends an update of the listing and cannot be recalled',note)
+  -- Cancel only: this baseline is taken after Confirm has already opened
+  -- the confirmation, so nothing sent on opening is counted here. Opening
+  -- and cancelling, counted from before the click, stay exercised in
+  -- ux_share_confirmation.
+  local seq,sent,mark,stamp=PA.seq,#A.H.sent,#calls,listing.lastModified
+  A.e.StaticPopup_Hide(DIALOG)
+  C.guard(A.H.popup==nil and CallsSince(mark)==0 and AnyAdmissions(seq)==0 and #A.H.sent==sent,
+   'C1: Cancel of its open confirmation shares and sends nothing (counted from after it opened, so Cancel only)',CallsSince(mark)..' call(s)')
+  Advance(5)
+  local now=catalog.Get(id)
+  C.guard(CallsSince(mark)==0 and ShareAdmissions(seq,id)==0 and type(now)=='table' and now.lastModified==stamp,
+   'C1: and no Share of the listing follows after time passes',CallsSince(mark)..' call(s)')
+ end
+ local mark,seq=#calls,PA.seq
+ local u=Share(PA,mirrorId,TITLES[4],'C1 update')
+ if u then
+  local call=calls[mark+1]
+  print('OBSERVED','C1 update','summary calls +'..CallsSince(mark),'share admissions +'..ShareAdmissions(seq,id))
+  C.guard(u.id==id and CallsSince(mark)==1 and call~=nil and call.id==id and call.explicit==true and call.retryOnFull~=true,
+   'C1: one fresh Accept of that confirmation makes exactly one explicit Share of the same listing, not a queue-full retry',
+   CallsSince(mark)..' call(s)')
+  C.guard(u.admission~=nil and u.admission.queued==true and u.admission.m.queueClass=='share'
+   and ShareAdmissions(seq,id)==1 and u.line~=nil and u.line:find('queued its summary',1,true)~=nil
+   and u.line:find('not confirmed',1,true)~=nil,
+   'C1: in Automatic it is admitted once as the explicit Share operation; the line claims no sending or receipt',AdmissionText(u.admission))
+  local m2,s2=#calls,PA.seq
+  local stamp=(catalog.Get(id) or {}).lastModified
+  local accept=A.e.StaticPopupDialogs[DIALOG].OnAccept
+  accept(u.popup.frame,u.popup.data)
+  if r4 and r4.popup then accept(r4.popup.frame,r4.popup.data) end
+  Advance(5)
+  local now=catalog.Get(id)
+  C.guard(CallsSince(m2)==0 and ShareAdmissions(s2,id)==0 and type(now)=='table' and now.lastModified==stamp,
+   'C1: that approval, or the earlier S4 approval, accepted again starts no further Share',CallsSince(m2)..' call(s)')
+ end
+ C.guard(#A.H.actions==0,'C1: no game action in this runtime',#A.H.actions)
+ S.BroadcastBuildSummary=realSummary
 end)
 
 C.scenario('L1 accepted legacy Manual (format 5, no explicit choice): admitted, answered, then expired',function()

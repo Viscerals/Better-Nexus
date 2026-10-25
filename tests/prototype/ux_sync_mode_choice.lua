@@ -562,5 +562,219 @@ C.scenario('H Apply in real MUTATION_BUILD and MUTATION_FINAL; the owned mutatio
   'H: the marker, the dormant syncMode and the registration row survive the round trip')
 end)
 
+
+-- M2 stored choice observation: policy and the real mode-button/dialog are the
+-- agreed seams. Fresh read-only boots and healthy-open/root-replacement cases
+-- are labelled separately. Every effect window below advances no scheduler time.
+local function M2Current(d,tag,state,label)
+ local text=V.Plain(d.current:GetText())
+ local lower=text:lower()
+ C.expect(text:find('Current: Automatic',1,true)~=nil,tag..': effective Automatic is stated',text)
+ if state=='recognized' then
+  -- Check the saved-choice clause independently: the effective Automatic
+  -- prefix must not stand in for a missing saved Automatic label.
+  local savedClause=lower:match('saved choice%s+(.+)') or ''
+  C.expect(V.Names(savedClause,label) and savedClause:find('not applied',1,true)~=nil
+   and not lower:find('no choice saved',1,true),tag..': saved recognized label is present but not applied',text)
+ elseif state=='invalid' then
+  C.expect(lower:find('invalid',1,true)~=nil and not lower:find('no choice saved',1,true),
+   tag..': present invalid data is not claimed absent',text)
+ elseif state=='unknown' then
+  C.expect((lower:find('unknown',1,true) or lower:find('unavailable',1,true))
+   and not lower:find('no choice saved',1,true),tag..': uninspectable choice is unknown, not absent',text)
+ else
+  C.expect(lower:find('no choice saved',1,true)~=nil,tag..': confirmed absence is stated',text)
+ end
+ C.guard(d.current:GetWidth()==412 and d.current:GetHeight()==34,tag..': current text keeps its 412x34 box')
+ local G=dofile('tests/prototype/layout_geometry_support.lua')
+ for _,model in ipairs({G.MODELS.default,G.MODELS.px16}) do
+  local rows=G.Rows(text,412,model.char)
+  C.expect(rows*model.line<=34,tag..': current text fits '..model.name..' model',rows..' rows')
+ end
+ local metrics=Nexus.LayoutMetrics
+ local _,line=metrics.ConservativeText(1)
+ C.expect(metrics.TextRows(text,412,1)*line<=34,tag..': current text fits conservative model')
+end
+
+C.scenario('I M2 fresh read-only boots: recognized stored choices remain visible but unapplied',function()
+ local labels={automatic='Automatic',manual='Manual',off='Off'}
+ for _,class in ipairs({'future','unverified','malformed'}) do
+  for _,mode in ipairs({'automatic','manual','off'}) do
+   local db=F.Database({version=class=='future' and 9 or 5,mutate=function(root)
+    root.settings[KEY]=mode
+    if class=='unverified' then root.settings.syncMode='banana'
+    elseif class=='malformed' then root.settingsVersion='5' end
+   end})
+   Boot(db)
+   local tag='I fresh '..class..' '..mode
+   C.setup(Nexus.MainInternals.SavedFormatClassV1()==class,tag..': real fresh boot reaches expected read-only class')
+   local graph=F.Serialize(db)
+   local session=Nexus.Store.Settings()
+   local sessionGraph=F.Serialize(session)
+   local before=Effects()
+   local st=Status()
+   C.expect(st and st.storedChoiceState=='recognized' and st.storedChoicePresent==true
+    and st.storedChoice==mode,tag..': the raw recognized stored choice is observed without honoring it')
+   C.guard(st and st.effective=='automatic' and st.explicit==nil and not st.writable
+    and P.Mode()=='automatic',tag..': effective policy and write refusal stay unchanged')
+   CB.Show()
+   local lib=NexusCommunityBuildsFrame
+   if lib and lib:IsShown() and lib._modeBtn then
+    lib._modeBtn:Click()
+    local d=Dialog()
+    C.setup(d and d:IsShown(),tag..': real mode button opens the dialog')
+    if d and d:IsShown() then M2Current(d,tag,'recognized',labels[mode]);d.cancel:Click() end
+   else
+    print('OBSERVED',tag,'fresh read-only boot cannot open Library; UI assertions use distinct synthetic replacements below')
+   end
+   local ok,reason=Apply('off',st and st.token)
+   local r1,r2,r3=Nexus.MainInternals.StoreAuthorityOwner.UpdateSettingsV1(KEY,'off')
+   C.guard(ok==false and reason=='saved-format' and r1==nil and r2=='unavailable' and r3=='saved-format',
+    tag..': both policy and Store owner refuse a write')
+   C.guard(F.Serialize(db)==graph and Nexus.Store.Settings()==session and F.Serialize(session)==sessionGraph,
+    tag..': saved graph, unknown fields, marker and session remain unchanged')
+   C.guard(NoEffect(before,Effects(),false) and #calls==before.writes+1,tag..': observation/refusal sends, admits, grants and invokes no actor')
+  end
+ end
+end)
+
+C.scenario('J M2 real dialog after healthy-open then synthetic root replacement; not a fresh read-only boot',function()
+ Boot(F.Database({version=2}))
+ local d=Open('J healthy initial')
+ if not d then return end
+ d.cancel:Click()
+ local healthy=NexusDB
+ local healthyGraph=F.Serialize(healthy)
+ local healthySession=Nexus.Store.Settings()
+ local healthySessionGraph=F.Serialize(healthySession)
+ local poison={index=0,text=0}
+ local function Poison(t)
+  return setmetatable(t,{__index=function() poison.index=poison.index+1;return nil end,
+   __tostring=function() poison.text=poison.text+1;return 'POISON MUST NOT BE DISPLAYED' end})
+ end
+ local cases={
+  {'recognized Automatic',function(r) r.settings[KEY]='automatic' end,'recognized','automatic','Automatic'},
+  {'recognized Manual',function(r) r.settings[KEY]='manual' end,'recognized','manual','Manual'},
+  {'recognized Off',function(r) r.settings[KEY]='off' end,'recognized','off','Off'},
+  {'absent',function() end,'absent'},
+  {'false',function(r) r.settings[KEY]=false end,'invalid'},
+  {'true',function(r) r.settings[KEY]=true end,'invalid'},
+  {'number',function(r) r.settings[KEY]=17 end,'invalid'},
+  {'string',function(r) r.settings[KEY]='unknown-secret-value' end,'invalid'},
+  {'table value',function(r) r.settings[KEY]=Poison({private='not-for-display'}) end,'invalid'},
+  {'missing settings',function(r) r.settings=nil end,'unknown'},
+  {'false settings',function(r) r.settings=false end,'unknown'},
+  {'string settings',function(r) r.settings='unknown-secret-value' end,'unknown'},
+  {'metatable settings',function(r) r.settings=Poison({[KEY]='manual'}) end,'unknown'},
+  {'metatable root',function(r) Poison(r);r.settings[KEY]='manual' end,'unknown'},
+ }
+ for _,case in ipairs(cases) do
+  local replacement=F.Database({version=9})
+  case[2](replacement)
+  NexusDB=replacement
+  local tag='J synthetic '..case[1]
+  local graph=F.Serialize(replacement)
+  -- Acquire the real read-only session before measuring observation effects.
+  local session=Nexus.Store.Settings()
+  local sessionGraph=F.Serialize(session)
+  local pi,pt=poison.index,poison.text
+  local before=Effects()
+  local st=Status()
+  C.expect(st and st.storedChoiceState==case[3] and st.storedChoice==case[4],
+   tag..': safe raw status distinguishes recognized, absent, invalid and unknown')
+  C.expect(st and ((case[3]=='unknown' and st.storedChoicePresent==nil)
+   or (case[3]=='absent' and st.storedChoicePresent==false)
+   or ((case[3]=='invalid' or case[3]=='recognized') and st.storedChoicePresent==true)),
+   tag..': presence is three-valued (false only for inspected absence)')
+  local lib=NexusCommunityBuildsFrame
+  C.setup(lib and lib._modeBtn,tag..': healthy-open Library retains the actual mode button')
+  lib._modeBtn:Click()
+  d=Dialog()
+  C.setup(d and d:IsShown() and d._draft,tag..': mode button reaches the real dialog without advancing time')
+  if not (d and d:IsShown() and d._draft) then return end
+  M2Current(d,tag,case[3],case[5])
+  C.guard(not d.apply:IsEnabled() and V.Plain(d.result:GetText()):find('cannot be changed here',1,true),
+   tag..': independent write refusal remains visible')
+  local off=Option(d,'off');C.setup(off~=nil,tag..': real Off option exists');off:Click()
+  C.guard(P.Mode()=='automatic' and st and st.explicit==nil and not st.writable,
+   tag..': selecting a draft does not change effective or explicit policy')
+  local ok,why=Apply('off',d._draft.token)
+  C.guard(ok==false and why=='saved-format',tag..': attempted Apply is refused')
+  d.cancel:Click()
+  C.guard(not d:IsShown() and d._draft==nil,tag..': Cancel discards the draft')
+  C.expect(poison.index==pi and poison.text==pt,tag..': production observation, token and dialog invoke no __index/__tostring')
+  C.guard(F.Serialize(replacement)==graph and F.Serialize(healthy)==healthyGraph
+   and Nexus.Store.Settings()==session and F.Serialize(session)==sessionGraph
+   and F.Serialize(healthySession)==healthySessionGraph,tag..': both durable roots and both session tables stay unchanged')
+  C.guard(NoEffect(before,Effects(),true),tag..': no actor, traffic, admission, grant or Store write')
+  C.guard(not d.current:GetText():find('unknown-secret-value',1,true)
+   and not d.current:GetText():find('POISON',1,true),tag..': arbitrary data is not rendered')
+  -- A second, genuinely enabled draft starts on the healthy bound root.
+  -- Replace its root before the real Apply click: the production callback
+  -- must refuse stale data (unlike clicking a disabled read-only control).
+  NexusDB=healthy
+  lib._modeBtn:Click()
+  d=Dialog()
+  C.setup(d and d:IsShown() and d.apply:IsEnabled(),tag..': healthy bound root creates an enabled draft')
+  Option(d,'off'):Click()
+  NexusDB=replacement
+  local failedBefore=Effects()
+  d.apply:Click()
+  C.guard(d._draft==nil and not d.apply:IsEnabled()
+   and V.Plain(d.result:GetText()):find('changed after this window opened',1,true),
+   tag..': actual enabled Apply callback refuses the replaced root as stale')
+  C.guard(NoEffect(failedBefore,Effects(),true) and F.Serialize(replacement)==graph
+   and F.Serialize(healthy)==healthyGraph and F.Serialize(session)==sessionGraph
+   and F.Serialize(healthySession)==healthySessionGraph,
+   tag..': failed dialog Apply changes neither root/session nor traffic/actors')
+  C.expect(poison.index==pi and poison.text==pt,tag..': failed dialog Apply also invokes no poison method')
+  d.cancel:Click()
+ end
+ NexusDB=healthy
+ C.guard(Status().writable==true and Status().token.db==tostring(healthy)
+  and Status().token.settings==tostring(healthySession),
+  'J restored: normal writable-root identity token remains unchanged')
+end)
+
+C.scenario('K M2 accepted false value and unavailable databases are not absent choices',function()
+ Boot(F.Database({version=2,mutate=function(db) db.settings[KEY]=false end}))
+ local st=Status()
+ C.expect(st and st.storedChoiceState=='invalid' and st.storedChoicePresent==true
+  and st.storedInvalid==true and st.explicit==nil and st.writable==true,
+  'K accepted false: false is present-invalid while normal choice remains writable')
+ local d=Open('K accepted false')
+ if not d then return end
+ -- Establish the Library first: its ordinary lazy UI initialization is not
+ -- attributed to the observation/Cancel effect window below.
+ local graph=F.Serialize(NexusDB)
+ local before=Effects()
+ M2Current(d,'K accepted false','invalid')
+ d.cancel:Click()
+ C.guard(F.Serialize(NexusDB)==graph and NoEffect(before,Effects(),true),
+  'K accepted false: description/Cancel writes no settings or session and invokes no actor')
+ local healthy=NexusDB
+ for _,case in ipairs({{'nil'}, {'false',false}, {'string','not-a-database'}}) do
+  NexusDB=case[2]
+  local root=NexusDB
+  local session=Nexus.Store.Settings()
+  local sessionGraph=F.Serialize(session)
+  local e0=Effects()
+  st=Status()
+  C.expect(st and st.storedChoiceState=='unknown' and st.storedChoicePresent==nil
+   and st.storedChoice==nil,'K unavailable '..case[1]..': unreadable root has unknown choice')
+  C.guard(st and st.explicit==nil and st.effective=='automatic' and not st.writable
+   and st.reason=='database','K unavailable '..case[1]..': unchanged database write refusal and effective default')
+  NexusCommunityBuildsFrame._modeBtn:Click()
+  d=Dialog()
+  C.setup(d and d:IsShown() and d._draft,'K unavailable '..case[1]..': healthy-open synthetic root replacement reaches dialog')
+  M2Current(d,'K unavailable '..case[1],'unknown')
+  local ok,why=Apply('off',d._draft.token)
+  d.cancel:Click()
+  C.guard(ok==false and why=='database' and NexusDB==root and F.Serialize(session)==sessionGraph
+   and NoEffect(e0,Effects(),true),'K unavailable '..case[1]..': refused Apply and Cancel leave root/session/effects unchanged')
+ end
+ NexusDB=healthy
+end)
+
 C.guard(#H.actions==0,'no game action',#H.actions)
 C.finish('(a draft-only choice; Apply alone writes through the Store owner; refusals are visible and leave storage unchanged)')
