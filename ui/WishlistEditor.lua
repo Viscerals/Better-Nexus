@@ -899,13 +899,20 @@ function M.OpenFlexiblePlanChooser()
                 if not intent then return refuse(why) end
                 local request = {}
                 flexiblePlanRequest = request
+                -- The replacement popup can be accepted while the chooser is hidden:
+                -- a current request's refusal shows the chooser (pool, choice and
+                -- pending input kept) and then states the same reason in it.
+                local function RevealRefusal(code)
+                    flexiblePlanChooser.Show()
+                    return refuse(code)
+                end
                 local function Install()
                     if flexiblePlanRequest ~= request then return refuse("EDITOR_CHANGED") end
                     local current, countReason = planCurrent()
-                    if not current then return refuse(countReason or "PLAN_CHANGED") end
-                    if renderer.NameText() ~= name then return refuse("EDITOR_CHANGED") end
+                    if not current then return RevealRefusal(countReason or "PLAN_CHANGED") end
+                    if renderer.NameText() ~= name then return RevealRefusal("EDITOR_CHANGED") end
                     local ok, reason = intent.Install()
-                    if not ok then return refuse(reason) end
+                    if not ok then return RevealRefusal(reason) end
                     flexiblePlanRequest = nil
                     RolePicker.Hide()
                     SyncFulfilledDraftTargets()
