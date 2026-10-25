@@ -309,7 +309,7 @@ function T.DestinationFields(d)
         build = Lead(DESTINATION_WORDS[p.kind].build, true)
         stateWords = DESTINATION_WORDS[p.kind].state
     end
-    local noAssignment = p.state == "empty"
+    local noAssignment = p.kind == "savedBuild" and d.empty and true or false
     local stated = WISHLIST_STATES[d.wishlistState] == true
     local wishlist
     if noAssignment then
