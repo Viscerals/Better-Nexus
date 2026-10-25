@@ -2,6 +2,8 @@
 """Run only the prototype-specific checks. Never represents the upstream full suite.
 Python 3.9+. Native LuaJIT is preferred if installed; the local Lua 5.4 fallback
 is explicitly labelled and requires liblua5.4. No network or game access.
+Python unittest files are registered in PYTHON_TESTS, apart from NAMES. tools/ci_check.py
+runs them; this runner never passes one to a Lua runtime and never counts one.
 """
 from __future__ import annotations
 import argparse, ctypes.util, hashlib, json, os, pathlib, shutil, subprocess, sys, time
@@ -314,6 +316,15 @@ DEFAULT_TIMEOUT_SECONDS=45
 # main() refuses a name here that is not in NAMES, so a misspelt name cannot silently get 45 s.
 TEST_TIMEOUT_SECONDS={'catalog_root_capacity':120,'sync_admission_traffic_acceptance':120}
 
+# Python unittest files, as POSIX paths from the repository root. They are registered here, apart
+# from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
+# tools/ci_check.py checks this list against every tools/tests/test_*.py file and runs each entry
+# as its own process with the current Python interpreter. This runner never passes one to a Lua
+# runtime and never counts one with NAMES.
+PYTHON_TESTS=['tools/tests/test_l10n_inventory.py']
+# Wall-clock limit for one Python test process, read by tools/ci_check.py.
+PYTHON_TEST_TIMEOUT_SECONDS=DEFAULT_TIMEOUT_SECONDS
+
 def timeout_for(name:str)->int:
     return TEST_TIMEOUT_SECONDS.get(name,DEFAULT_TIMEOUT_SECONDS)
 
@@ -354,8 +365,11 @@ def main() -> int:
             p=ROOT/line.replace('\\','/');runtime_files.append({'path':str(p.relative_to(ROOT)).replace('\\','/'),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
     report={'schema':'nexus-prototype-tests/1','runtime':runtime,'selected_tests':names,'complete_inventory':NAMES,'source_runtime_files':runtime_files,
             'scope':'Prototype-specific synthetic offline tests, not the original 245-runner suite or native WoW validation',
+            'registered_python_tests':list(PYTHON_TESTS),
+            'python_tests_scope':'Registered Python unittest files; tools/ci_check.py runs them as separate processes. Not run or counted by this runner.',
             'results':results,'passed':sum(r['status']=='PASS' for r in results),
             'failed':sum(r['status'] in ('FAIL','TIMEOUT') for r in results),'not_run':sum(r['status']=='NOT_RUN' for r in results)}
+    print('Python tests (run by tools/ci_check.py, not by this runner):',', '.join(PYTHON_TESTS) or 'none')
     out=ns.output.resolve();out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(report,indent=2),encoding='utf-8')
     print('REPORT',out);return 1 if report['failed'] or report['not_run'] else 0
 if __name__=='__main__': raise SystemExit(main())
