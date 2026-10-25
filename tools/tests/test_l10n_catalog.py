@@ -2345,11 +2345,18 @@ class CatalogCoverageReport(unittest.TestCase):
 # B3b command line (Refs #147): public subprocess tests of
 #     python tools/l10n_catalog.py [--root DIR] [--require-complete]
 # Each temporary root holds only copies of the public catalog inputs, changed
-# where a case says so, and a minimal Nexus.toc. No parser or API is mocked:
-# expected reports come from the public catalog_report on the same bytes, and
-# changed counts derive from the fixture tables above. Fill texts and
-# synthetic declarations are fixture-only data, not fluent, human or native
-# evidence. Bytecode writing stays enabled in every child process.
+# where a case says so, and a minimal Nexus.toc. Root files are input data:
+# nothing in a root is imported or run. The command-line children of cli_run
+# run the tool as a script with bytecode writing enabled, and no parser or API
+# is mocked there. The isolated -I -B children of cli_fault_run, used only by
+# test_unreadable_input_is_a_stable_error, write no bytecode. They load the
+# tool from its file and call its real main(). Only pathlib.Path.read_bytes is
+# replaced, and the replacement raises OSError(EACCES) only for a path whose
+# final component is the given file name; every other path is read by the
+# real method (see CLI_FAULT_DRIVER). Expected reports come from the public
+# catalog_report on the same bytes, and changed counts derive from the
+# fixture tables above. Fill texts and synthetic declarations are
+# fixture-only data, not fluent, human or native evidence.
 
 CLI_INPUTS = ("data/LocalizationEnglish.lua", "data/LocalizationPacks.lua",
               "docs/localization/KEY_CONTEXT.json",
@@ -2818,6 +2825,7 @@ class CatalogCommandLine(unittest.TestCase):
                 # reused instead; it proves the read-error handling of the
                 # command line, not that the OS enforces file permissions.
                 run = fault
+                print("LIMITATION: mode-000 file readable by this account; real OS denial not established; injected-fault error handling reused", file=sys.stderr)
         self.assertEqual(catalog_pycache_names(), cache)
         self.assert_error(run, "CatalogCliError", "input-unreadable", subject=name)
         self.assertEqual(target.read_bytes(), data)
