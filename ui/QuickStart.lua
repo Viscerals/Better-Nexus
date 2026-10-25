@@ -156,11 +156,58 @@ local function Finish()
     if frame then frame:Hide() end
 end
 
+-- Close fits its whole label at the current font. The fit is measured again
+-- on every presentation (first-time, deliberate and informational). Width
+-- comes from LayoutMetrics' FitButtonWidth: the client's text width or its
+-- conservative model, plus end caps. Without LayoutMetrics, the same rule
+-- runs here with that model scaled by the runtime font scale, read from
+-- NexusFontNormal as LayoutMetrics does: 7 px per visible character, 14 px
+-- at scale 2. Height holds one conservative line, 13 px per unit of font
+-- scale as LayoutMetrics' status line (26 px at scale 2). Close is never
+-- below the original 74x24. The window stays 420 px unless a wider Close
+-- needs room to keep its original 8 px gap from the 290 px hint
+-- (x 24..314). Hint, Sync, body and buttons keep their boxes. This is an
+-- offline model only; native NOT_RUN.
+local CLOSE_W, CLOSE_H, WELCOME_W, HINT_RIGHT, CLOSE_GAP, CLOSE_EDGE = 74, 24, 420, 314, 8, 24
+local function FitClose(f)
+    local close = f and f.close
+    if not close then return end
+    local scale, font = 1, _G.NexusFontNormal
+    if type(font) == "table" and type(font.GetFont) == "function" then
+        local ok, _, size = pcall(font.GetFont, font)
+        size = ok and tonumber(size) or nil
+        if size and size > 0 then scale = math.min(2, math.max(0.75, size / 12)) end
+    end
+    local metrics, width = Nexus.LayoutMetrics, nil
+    if type(metrics) == "table" and type(metrics.FitButtonWidth) == "function" then
+        local ok, value = pcall(metrics.FitButtonWidth, close, CLOSE_W)
+        value = ok and tonumber(value) or nil
+        if value and value >= CLOSE_W and value < math.huge then width = value end
+    end
+    if not width then
+        local measured
+        if type(close.GetTextWidth) == "function" then
+            local ok, value = pcall(close.GetTextWidth, close)
+            value = ok and tonumber(value) or nil
+            if value and value > 0 and value < math.huge then measured = value end
+        end
+        if not measured then
+            local text = tostring(close:GetText() or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+            measured = #(text:gsub("[\128-\191]", "")) * math.max(7, 7 * scale)
+        end
+        width = math.max(CLOSE_W, math.ceil(measured + 24))
+        close:SetWidth(width)
+    end
+    close:SetHeight(math.max(CLOSE_H, math.ceil(13 * scale)))
+    f:SetWidth(math.max(WELCOME_W, HINT_RIGHT + CLOSE_GAP + width + CLOSE_EDGE))
+end
+
 -- Normal (first-time or deliberate) presentation: the exact first-time texts.
 local function NormalTexts(f)
     f._informational = nil
     if f.title then f.title:SetText(NORMAL_TITLE) end
     if f.hint then f.hint:SetText(NORMAL_HINT) end
+    FitClose(f)
     return SyncNote(f)
 end
 
@@ -285,6 +332,7 @@ local function EnsureFrame()
     close:SetPoint("BOTTOMRIGHT", -24, 20)
     close:SetText("Close")
     close:SetScript("OnClick", Finish)
+    frame.close = close
 
     local theme = Nexus.Theme
     if theme then
@@ -353,6 +401,7 @@ function M.ShowSetup()
     f._informational = true
     if f.title then f.title:SetText(SETUP_TITLE) end
     if f.hint then f.hint:SetText(SETUP_HINT) end
+    FitClose(f)
     SyncNote(f):Show()
     return true
 end

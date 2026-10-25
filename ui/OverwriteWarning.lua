@@ -249,7 +249,11 @@ local ANSWER_W, ANSWER_GAP, ANSWER_EDGE, WINDOW_W = 110, 14, 24, 520
 -- never capped, so the only copy of a label is not cut. LayoutMetrics
 -- (FitButtonWidth: the client's text width or its conservative model, plus
 -- the template's end caps) loads after this module and standalone tests
--- omit it; without it the same rule runs here at 7 px per visible character.
+-- omit it; without it the same rule runs here: the client's text width, or
+-- LayoutMetrics' conservative model (7 px per visible character, or 0.70 em
+-- of the 10 px font at the runtime font scale read from NexusFontNormal as
+-- LayoutMetrics does: 14 px at scale 2). An unavailable or invalid text
+-- width uses that model; an unavailable or invalid font size reads as scale 1.
 local function FitAnswer(button)
     local metrics = Nexus.LayoutMetrics
     if type(metrics) == "table" and type(metrics.FitButtonWidth) == "function" then
@@ -265,7 +269,13 @@ local function FitAnswer(button)
     end
     if not width then
         local text = tostring(button:GetText() or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-        width = #(text:gsub("[\128-\191]", "")) * 7
+        local scale, font = 1, _G.NexusFontNormal
+        if type(font) == "table" and type(font.GetFont) == "function" then
+            local ok, _, size = pcall(font.GetFont, font)
+            size = ok and tonumber(size) or nil
+            if size and size > 0 then scale = math.min(2, math.max(0.75, size / 12)) end
+        end
+        width = #(text:gsub("[\128-\191]", "")) * math.max(7, 7 * scale)
     end
     width = math.max(ANSWER_W, math.ceil(width + 24))
     button:SetWidth(width)
