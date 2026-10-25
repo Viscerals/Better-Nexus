@@ -424,7 +424,11 @@ function T.DestinationFields(d)
             .. ((noAssignment or stated) and "" or "; assignment not checked")
         -- "C:" keeps the capture visible; the state record's one-glyph mark
         -- keeps each state distinct, 3 glyphs in all (see the markers above).
-        stateCompact, stateMinimum = "Captured: " .. stateShort.compact, "C:" .. stateShort.mark
+        -- A captured first-run plan keeps its whole "first-run target" label
+        -- (T.Terms.firstRun) in compact; its minimum stays "C:1".
+        stateCompact = p.kind == "firstRun" and "Captured: first-run target"
+            or ("Captured: " .. stateShort.compact)
+        stateMinimum = "C:" .. stateShort.mark
     else
         state = Lead(stateWords, true)
         stateCompact, stateMinimum = stateShort.compact, stateShort.minimum
