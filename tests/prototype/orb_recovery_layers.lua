@@ -337,7 +337,7 @@ C.scenario('L5 one usage form on the window, strip, mini panel and history',func
  -- (EXPECT: before this repair the history said nothing here, on M5 too.)
  C.expect(view.reserved==live.reserved and view.spent==live.spent,'L5: the current history carries the run usage and exposure',
   tostring(view.spent)..'/'..tostring(view.reserved)..' vs '..tostring(live.spent)..'/'..tostring(live.reserved))
- C.expect(log.warning:GetText()=='1 unresolved operation: the run is not settled.','L5: the history states the unresolved operation',log.warning:GetText())
+ C.expect(log.warning:GetText()=='Pending (requested, not confirmed): 1 Orb; the run has an unresolved operation and is not settled.','L5: the history states the unresolved operation',log.warning:GetText())
  C.expect(Nexus.OrbHistory.Header({runId=1,spent=14,limit=15,reserved=0,state='FINISHED'}).usage=='Orbs used: 14 / 15 approved','L5: the history projection')
  C.guard(H.Count('orb-spend')==1,'L5: reading every surface spent nothing more')
  -- Settled: the result arrives while the run is paused (as orb_finished_run_log
@@ -356,7 +356,7 @@ C.scenario('L5 one usage form on the window, strip, mini panel and history',func
  local realRunLog=M.RunLog
  M.RunLog=function(...) local v=realRunLog(...);if v.runId then v.reserved=1 end;return v end
  log:GetScript('OnUpdate')(log,1)
- C.expect(log.warning:GetText()=='1 unresolved operation: the run is not settled.','L5: an open history follows exposure at the same revision',log.warning:GetText())
+ C.expect(log.warning:GetText()=='Pending (requested, not confirmed): 1 Orb; the run has an unresolved operation and is not settled.','L5: an open history follows exposure at the same revision',log.warning:GetText())
  M.RunLog=realRunLog
  log:GetScript('OnUpdate')(log,1)
  C.guard(log.warning:GetText()=='','L5: and shows it settled again',log.warning:GetText())

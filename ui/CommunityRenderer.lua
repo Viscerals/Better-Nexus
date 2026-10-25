@@ -2287,7 +2287,16 @@ local function EnsureDetailPanel(parent)
                     .. "' — " .. tostring(value):gsub("%.+$", "")
                     .. ". Nothing was saved or sent.")
             end
-            M.Refresh()
+            -- The outcome above is final before any display work. A ticket
+            -- completion runs inside catalog completion: it honors an existing
+            -- view hold and keeps display failure in the view ledger. The
+            -- synchronous result keeps its immediate explicit refresh, whose
+            -- failure the same owner retains and records instead of rethrowing.
+            if operation.ticket ~= nil then
+                M.RefreshFromController()
+            else
+                viewDiagnostic.pump.Refresh(false, false)
+            end
         end
         local ok, value, ticket, admission = PublishImportedBuild(id, Finish)
         if ok == nil and value == "ROOT_MUTATION_PENDING" and type(ticket) == "table" then
