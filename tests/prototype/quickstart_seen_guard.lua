@@ -8,11 +8,23 @@ local F=dofile('tests/prototype/format5_support.lua')
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local function Window() return NexusQuickStart end
 local function Shown() local w=Window();return w~=nil and w:IsShown() end
-local function Button(text)
- local w=Window();if not w then return nil end
+-- The exact "Close" caption of the Welcome dismiss control is a collected
+-- EXPECT. Only after an exact lookup for it misses may the real legacy
+-- "Later" control stand in, so every original check still runs; the
+-- collected misses fail this test after those checks (end of file).
+local closeCaptionMisses={}
+local function Find(w,text)
  for _,c in ipairs(w.children or {})do
   if c.kind=='Button' and c:GetText()==text then return c end
  end
+end
+local function Button(text)
+ local w=Window();if not w then return nil end
+ local found=Find(w,text)
+ if found or text~='Close' then return found end
+ closeCaptionMisses[#closeCaptionMisses+1]=checks
+ print('FAIL EXPECT the Welcome dismiss control reads exactly "Close" (lookup after check '..checks..'; the legacy "Later" control carries the original checks)')
+ return Find(w,'Later')
 end
 local function Flag()
  if type(NexusDB)~='table' then return nil end
@@ -200,4 +212,8 @@ end
 check(settledAfter~=nil and settledAfter<=10,
  'retry: a read-only session stops retrying within its bound: '..tostring(settledAfter))
 check(Flag()==nil,'retry: and it still writes nothing')
+-- The collected exact-caption EXPECT fails only after every original check ran.
+if #closeCaptionMisses>0 then
+ error('quickstart_seen_guard: EXPECT the Welcome dismiss control reads exactly "Close": '..#closeCaptionMisses..' lookup(s) missed it (first after check '..closeCaptionMisses[1]..'); original checks='..checks,0)
+end
 print('PASS quickstart_seen_guard: no database is created or repaired by the window or its buttons; the acknowledgement is saved only through a durable owner; local saves are unaffected checks='..checks)

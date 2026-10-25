@@ -6,7 +6,8 @@ H.Boot()
 local f=NexusOverwriteWarning
 assert(f and f:IsShown(),'first startup shows new warning')
 assert(not NexusQuickStart or not NexusQuickStart:IsShown(),'welcome waits for reading')
--- Permanent real-control characterization: every check below is collected
+-- Permanent real-control characterization: the original assert checks stay
+-- immediate and unchanged; every new C.* check below is collected
 -- (V.Checker) and reported before the final verdict. Captions and footers are
 -- exact literals. Welcome buttons are found by their existing caption only.
 local V=dofile('tests/prototype/view_regression_support.lua')

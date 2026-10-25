@@ -64,13 +64,23 @@ local function OpenEditor(tag)
 end
 local function CloseQuickStart(tag)
  local quick=NexusQuickStart
- local later=quick and V.Frame(H,function(x)
-  return x:GetParent()==quick and x:GetText()=='Close' and x:GetScript('OnClick')~=nil
- end)
- C.setup(later~=nil,tag..': fixture: the real Close control exists')
+ local function Control(caption)
+  return quick and V.Frame(H,function(x)
+   return x:GetParent()==quick and x:GetText()==caption and x:GetScript('OnClick')~=nil
+  end) or nil
+ end
+ -- The exact "Close" caption is healthy behaviour (EXPECT). Only after that
+ -- EXPECT fails may the real legacy "Later" control (same parent, its own
+ -- OnClick) dismiss QuickStart, so the original checks still run; the failed
+ -- EXPECT stays in the final failure set.
+ local later=Control('Close')
+ if quick and not C.expect(later~=nil,tag..': the QuickStart dismiss control reads exactly "Close"') then
+  later=Control('Later')
+ end
+ C.setup(later~=nil,tag..': fixture: the real Close control exists (legacy Later only after the failed Close EXPECT)')
  if later then later:Click() end
  H.Advance(.5)
- return C.setup(quick~=nil and not quick:IsShown(),tag..': fixture: Close dismisses QuickStart')
+ return C.setup(quick~=nil and not quick:IsShown(),tag..': fixture: that real control dismisses QuickStart')
 end
 -- Back to a shown, wanted, unsuppressed HUD: an attached window opened and
 -- closed with no QuickStart shown, as a player would recover.
