@@ -1166,6 +1166,15 @@ function UI.AttachMainPanel(parent)
         elseif #v>STRIP_CHARS then cut=v:sub(1,STRIP_CHARS-3):gsub("[\192-\255][\128-\191]*$","").."..." end
         return (cut:gsub("|","||")),(v:gsub("|","||"))
     end
+    -- A paused target line: the second line's fact first, then the target
+    -- name, cut on a character boundary so the short kind caption after it
+    -- stays on the line; stripLine still bounds and escapes the whole line.
+    local function targetLine(fact,n,tag)
+        local room=math.max(4,STRIP_CHARS-#fact-#tag-3)
+        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then n=Nexus.LayoutMetrics.Truncate(n,room)
+        elseif #n>room then n=n:sub(1,room-3):gsub("[\192-\255][\128-\191]*$","").."..." end
+        return fact.."; "..n.." "..tag
+    end
     f.refresh=function()
         local s=Nexus.OrbRuntime.CompactStatus()
         if not s then f:Hide();return end
@@ -1182,10 +1191,22 @@ function UI.AttachMainPanel(parent)
         -- Details reads the exact explanation and action in the full window.
         if s.state=="PAUSED" and s.pending and not s.canResume and not instruction then third="Paused - result must settle" end
         local shown,full=stripLine(second)
-        -- While paused, the target takes the second line; a pending Orb then
-        -- stays on the third.
+        -- While paused, the target shares the second line: that line's fact in
+        -- short first, then the bounded name and a short kind caption. The
+        -- tooltip keeps the complete target and fact lines; a pending Orb then
+        -- also stays on the third.
         if what then
-            shown,full=stripLine(what)
+            local t=s.resumeTarget
+            local fact=s.reserved>0 and (s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending")
+                or (s.pending and "last Orb not settled")
+                or (s.remaining~=nil and (s.remaining..(s.remaining==1 and " copy left" or " copies left")) or "? copies left")
+            local line=fact.."; "..what
+            if t.kind~="unavailable" then
+                line=targetLine(fact,t.name~=nil and ("'"..tostring(t.name):gsub("%c"," ").."'") or "an unnamed Wishlist",
+                    t.kind=="changed" and (t.returned and "(back)" or "(new)") or "(same)")
+            end
+            local _,whatFull=stripLine(what)
+            shown,full=stripLine(line),whatFull.."\n"..full
             if s.reserved>0 and third=="Paused" then third="Paused - "..s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending" end
         end
         setFull(f.summary,usage.."\n"..shown.."\n"..third,usage.."\n"..full.."\n"..third)
@@ -1312,14 +1333,8 @@ local function miniReason(v)
         local _,detail=miniText(MINI_UNREAD[v.kind]..(v.error~=nil and (" "..tostring(v.error)) or ""))
         return MINI_UNREAD_TEXT,MINI_UNREAD_TEXT.." "..detail
     end
-    -- Paused: the line names what Resume would act on; the run's reason stays
-    -- complete in the tooltip.
-    local what=v.state=="PAUSED" and compactTarget(v.target) or nil
-    if what then
-        local shown,full=miniText(what)
-        local _,reason=miniText(truthful(v.reason))
-        return shown,reason~="" and (full..". "..reason) or full
-    end
+    -- The run's current reason, as the runtime reports it (absent shows
+    -- nothing). A paused run's Resume target is named on the missing line.
     return miniText(truthful(v.reason))
 end
 local function miniUsage(v)
@@ -1336,12 +1351,40 @@ local function miniPending(v)
     if v.reserved>0 then
         return "Pending: "..miniNumber(v.reserved)..(v.reserved==1 and " Orb" or " Orbs").." requested, not confirmed yet"
     end
-    return v.pending and "Pending: the last Orb action is not settled" or "Pending: none"
+    return v.pending and "Last Orb result is not settled" or "Pending: none"
 end
 -- Copies, not families: CompactStatus.remaining is the run's rolled target
 -- copies still missing at its latest check. Absent is unavailable, never 0.
 local function miniMissing(v)
     return "Rolled target copies missing: "..(v.remaining and miniNumber(v.remaining) or "unavailable")
+end
+-- The missing line. While paused, when compactTarget names what Resume would
+-- act on, the line shows the rolled copies count first ("?" is unavailable,
+-- never 0), then the target's name in quotes, "(unnamed)" for a nameless
+-- Wishlist or "target ?" while the target is unknown. It is kept to 30
+-- columns (the 332 px line at the offline doubled-font model's 11 px per
+-- character, not a native measurement): a longer name is cut on a character
+-- boundary inside its quotes. The hover keeps the complete count, the
+-- complete target with its kind and the line's meaning.
+local function miniMissingLine(v)
+    local shown,full=miniText(miniMissing(v))
+    local what=v.kind=="run" and v.state=="PAUSED" and compactTarget(v.target) or nil
+    if not what then return shown,full end
+    local _,target=miniText(what)
+    local t,tail=v.target,"target ?"
+    shown="Rolled missing: "..(v.remaining and miniNumber(v.remaining) or "?").."; "
+    if t.kind~="unavailable" then
+        tail="(unnamed)"
+        if t.name~=nil then
+            local name=(tostring(t.name):gsub("%c"," "))
+            local room=math.max(4,math.floor(MINI_TEXT_W/11)-#shown-2)
+            if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then name=Nexus.LayoutMetrics.Truncate(name,room)
+            elseif #name>room then name=name:sub(1,room-3):gsub("[\192-\255][\128-\191]*$","").."..." end
+            tail="'"..name:gsub("|","||").."'"
+        end
+    end
+    shown=shown..tail
+    return shown,full..". "..target
 end
 local function miniKey(v)
     return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume),
@@ -1374,7 +1417,7 @@ local function miniRender()
     setFull(mini.reason,miniReason(v))
     setFull(mini.usage,miniText(miniUsage(v)))
     setFull(mini.pending,miniText(miniPending(v)))
-    setFull(mini.missing,miniText(miniMissing(v)))
+    setFull(mini.missing,miniMissingLine(v))
     -- An outcome belongs to the state it was shown for; a later change of that
     -- state retires it, so it never describes a newer state.
     local key=miniKey(v)

@@ -363,8 +363,8 @@ function M.Header(view)
         usage = "Orbs used: " .. spent .. " / " .. limit .. " approved",
         increased = view.increased == true,
         pending = reserved > 0 and
-            (reserved .. " unresolved operation" .. (reserved == 1 and "" or "s")
-                .. ": the run is not settled.") or nil,
+            ("Pending (requested, not confirmed): " .. reserved .. " Orb" .. (reserved == 1 and "" or "s")
+                .. "; the run has an unresolved operation and is not settled.") or nil,
         truncated = view.truncated == true and
             "The history reached its bound; later operations are not listed."
             or nil,
