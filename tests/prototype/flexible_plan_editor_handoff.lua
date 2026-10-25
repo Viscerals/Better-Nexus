@@ -718,13 +718,21 @@ end
 
 -- C2: a current replacement request accepted while the chooser is hidden.
 -- Its refusal must show the chooser and state the exact reason: the editor
--- name changed after consent (EDITOR_CHANGED), or a count was typed after
--- consent without Set (COUNT_PENDING). The later editor, its unaccepted Save
--- confirmation, the committed counts and the pending input are all kept.
--- Only the new visibility EXPECTs collect failures, so every setup, no-loss
--- and positive control completes first; a refusal left hidden is reopened
--- through the real entry so those controls still run. The editor, popups and
--- planning session are restored before the original paths continue.
+-- name changed after consent (EDITOR_CHANGED), a count was typed after
+-- consent without Set (COUNT_PENDING), or a chosen Echo's synthetic catalog
+-- fact drifted, so the controller install itself refuses (CATALOG_CHANGED).
+-- The later editor, its unaccepted Save confirmation, the committed counts
+-- and the pending input are all kept. Each request is owned and single use:
+-- the refused request, replayed after its captured name is restored,
+-- installs nothing; an older request superseded by a later direct install
+-- is gone, and its late Accept or Cancel neither installs nor dismisses the
+-- later Save confirmation or a newer replacement, which installs once.
+-- Only the new visibility and single-use EXPECTs collect failures, so every
+-- setup, no-loss and positive control completes first: a refusal left
+-- hidden is reopened through the real entry, and a wrong replayed install
+-- is followed by supported real setup, so those controls still run. The
+-- editor, popups, synthetic catalog and planning session are restored
+-- before the original paths continue.
 do
     local failures={}
     local function expect(value,label)
@@ -800,7 +808,35 @@ do
         'C2 EDITOR_CHANGED refusal keeps later editor rows, debug maps, name, destination, Save identity/data, held, db, traffic and actions')
     check(Shows(A,1,'1','Set') and Shows(B,1,'1','Set') and Shows(C,3,'3','Set') and Budget(3,5),
         'C2 EDITOR_CHANGED refusal keeps every committed count')
-    -- 2: a count is typed after consent without Set while the chooser is hidden.
+    -- Owned single use: restore the captured name explicitly, snapshot, then
+    -- replay the refused request's own original OnAccept. The refused attempt
+    -- retired it, so the replay installs, shows, dismisses and writes nothing.
+    NexusWishlistNameInput:SetText('C2 named exact draft')
+    check(NexusWishlistNameInput:GetText()=='C2 named exact draft' and Popup.shown[REPLACE]==nil
+        and Popup.shown[CREATE]==savePopup and equal(savePopup.data,saveData),
+        'C2 setup former captured name restored beside the unaccepted Save confirmation')
+    before=snapshot()
+    StaticPopupDialogs[REPLACE].OnAccept(request.frame,request.data)
+    local replayClean=equal(snapshot(),before)
+    expect(replayClean and Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==savePopup
+        and equal(savePopup.data,saveData) and NexusWishlistNameInput:GetText()=='C2 named exact draft'
+        and equal(Rendered(),{{spellId=410002,quality=2,stacks=2},{spellId=410003,quality=3,stacks=1}}),
+        'restored-name replay of the refused request installs nothing: exact rows 410002x2 410003x1, debug maps, name, destination, Save identity/data, held, db, traffic and actions are kept')
+    if not replayClean then
+        -- A known wrong install by that replay (earlier a65): the later cases
+        -- go on through supported real setup, a fresh Save confirmation from
+        -- the visible Create unassigned and the real entry, not a stub.
+        NexusWishlistNameInput:SetText('C2 later typed name');saveButton:Click()
+        savePopup=Popup.shown[CREATE];saveData=H.Clone(savePopup and savePopup.data)
+        NexusFlexiblePlanEntry:Click()
+        check(savePopup~=nil and savePopup.data~=nil,'C2 setup supported Save confirmation after a wrong replayed install')
+    end
+    -- The later typed name again, as before the replay.
+    NexusWishlistNameInput:SetText('C2 later typed name')
+    check(NexusFlexiblePlanChooser:IsShown() and Shows(A,1,'1','Set') and Shows(B,1,'1','Set')
+        and Shows(C,3,'3','Set') and Budget(3,5),'C2 replayed request leaves every committed count and no pending input')
+    -- 2: after a fresh consent a count is typed without Set while the chooser
+    -- is still shown; the chooser is then hidden before Accept.
     NexusFlexiblePlanOpen:Click();request=Popup.shown[REPLACE]
     check(request~=nil,'C2 setup fresh current replacement request for the later name')
     PoolRow(B).count:SetText('4')
@@ -819,25 +855,123 @@ do
         'C2 COUNT_PENDING refusal keeps the complete editor, Save confirmation and effects')
     check(Shows(A,1,'1','Set') and Shows(B,1,'4','Set *') and Shows(C,3,'3','Set') and Budget(3,5),
         'C2 COUNT_PENDING refusal keeps committed counts and the typed 4 pending, uncommitted')
-    -- A valid fresh current consent, accepted while hidden, still installs.
     check(Count(B,4) and Shows(B,4,'4','Set') and Budget(3,8) and Status()=='',
         'C2 setup explicit Set commits the typed 4')
+    -- 3: hidden catalog drift reaches the controller install itself. Nothing
+    -- is pending and the captured name is unchanged, so the count and name
+    -- guards pass and intent.Install refuses; that refusal must show too.
+    -- The synthetic catalog fact is restored at once after the Accept.
+    local driftRows=assert(Nexus.GameAdapter.Catalog(),'C2 setup live synthetic catalog').rows
+    local driftQuality=driftRows[A].quality
+    check(driftQuality==2,'C2 setup synthetic catalog fact 410002 quality 2')
+    NexusFlexiblePlanOpen:Click();request=Popup.shown[REPLACE]
+    check(request~=nil and Popup.shown[CREATE]==savePopup and equal(savePopup.data,saveData),
+        'C2 setup current request for 410002x1 410003x4 410005x3 beside the unaccepted Save confirmation')
+    NexusFlexiblePlanHide:Click()
+    check(not NexusFlexiblePlanChooser:IsShown() and Popup.shown[REPLACE]==request and Status()==''
+        and NexusWishlistNameInput:GetText()=='C2 later typed name',
+        'C2 setup chooser hidden; the current request keeps its captured name and no input is pending')
+    before=snapshot()
+    driftRows[A].quality=3
+    Popup.Click(request,1)
+    visible,said=NexusFlexiblePlanChooser:IsVisible(),Status()
+    driftRows[A].quality=driftQuality
+    expect(visible,'hidden current request refused by intent.Install for catalog drift shows the chooser')
+    expect(said==Reason('CATALOG_CHANGED') and said:find('catalog details changed',1,true)~=nil,
+        'shown chooser status is exactly the CATALOG_CHANGED reason')
+    if not visible then NexusFlexiblePlanEntry:Click() end
+    check(Popup.shown[REPLACE]==nil and equal(snapshot(),before),
+        'C2 CATALOG_CHANGED refusal keeps later editor rows, debug maps, name, destination, Save identity/data, held, db, traffic and actions')
+    check(Nexus.GameAdapter.Catalog().rows[A].quality==2 and Shows(A,1,'1','Set') and Shows(B,4,'4','Set')
+        and Shows(C,3,'3','Set') and Budget(3,8),
+        'C2 CATALOG_CHANGED refusal keeps every committed count with no pending input; the synthetic fact is restored')
+    -- A valid fresh current consent, accepted while hidden, still installs.
     NexusFlexiblePlanOpen:Click();request=Popup.shown[REPLACE]
     check(request~=nil,'C2 setup fresh current consent for the committed choice')
     NexusFlexiblePlanHide:Click()
+    local replaceHidden,saveHidden=Hidden(REPLACE),Hidden(CREATE)
+    check(Popup.shown[REPLACE]==request and Popup.shown[CREATE]==savePopup and equal(savePopup.data,saveData),
+        'C2 setup the fresh consent and the unaccepted Save confirmation are both shown before Accept')
     Popup.Click(request,1)
     check(Popup.shown[REPLACE]==nil and not NexusFlexiblePlanChooser:IsShown()
         and equal(Rendered(),{{spellId=410002,quality=2,stacks=1},{spellId=410003,quality=3,stacks=4},
             {spellId=410005,quality=1,stacks=3}})
         and NexusWishlistNameInput:GetText()=='' and #H.actions==actions0 and #H.sent==sends0,
         'C2 CONTROL fresh current consent installs literal 410002x1 410003x4 410005x3 without actions')
+    check(Popup.shown[REPLACE]==nil and Hidden(REPLACE)==replaceHidden+1
+        and Popup.shown[CREATE]==nil and Hidden(CREATE)==saveHidden+1,
+        'C2 CONTROL before any cleanup Hide, the install retired the prior Save confirmation once and the accepted replacement was hidden once')
+    NexusWishlistNameInput:SetText('C2 after fresh consent')
+    before=snapshot()
+    StaticPopupDialogs[REPLACE].OnAccept(request.frame,request.data)
+    check(equal(snapshot(),before) and Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil
+        and NexusWishlistNameInput:GetText()=='C2 after fresh consent',
+        'C2 CONTROL the accepted replacement request is retired: its replayed OnAccept installs, shows and dismisses nothing')
+    -- 4: owned prompts across a supported New. A healthy Cancel dismisses
+    -- only its own prompt. Another older prompt is then superseded: New
+    -- resets the editor and a later clean current choice installs directly,
+    -- so the older prompt is gone (early retirement by New also satisfies
+    -- this). The later draft gets a real unaccepted Save confirmation and a
+    -- newer replacement; a late older Accept or Cancel installs nothing and
+    -- dismisses neither, and the newer consent still installs exactly once.
+    NexusWishlistNameInput:SetText('C2 owned older context');NexusFlexiblePlanEntry:Click()
+    NexusFlexiblePlanOpen:Click()
+    local canceled=Popup.shown[REPLACE]
+    check(canceled~=nil and NexusFlexiblePlanChooser:IsShown(),'C2 setup current prompt for the healthy Cancel control')
+    before=snapshot()
+    Popup.Click(canceled,2)
+    check(Popup.shown[REPLACE]==nil and equal(snapshot(),before) and NexusFlexiblePlanChooser:IsShown(),
+        'C2 CONTROL Cancel dismisses only its own prompt and keeps the complete editor and effects')
+    NexusFlexiblePlanOpen:Click()
+    local older=Popup.shown[REPLACE]
+    check(older~=nil and older~=canceled,'C2 setup another real older prompt for 410002x1 410003x4 410005x3')
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click()
+    check(editor.DebugPendingCount()==0 and NexusWishlistNameInput:GetText()=='' and NexusFlexiblePlanChooser:IsShown(),
+        'C2 setup supported New leaves an empty unnamed editor beneath the chooser')
+    check(Count(A,3) and Count(C,0) and Shows(A,3,'3','Set') and Shows(B,4,'4','Set') and Shows(C,0,'0','Set')
+        and Budget(3,7) and Status()=='','C2 setup later clean current choice 410002x3 410003x4 through Set')
+    NexusFlexiblePlanOpen:Click()
+    expect(Popup.shown[REPLACE]==nil,'a later clean current choice installed directly leaves the older prompt gone')
+    check(equal(Rendered(),{{spellId=410002,quality=2,stacks=3},{spellId=410003,quality=3,stacks=4}})
+        and not NexusFlexiblePlanChooser:IsShown() and NexusWishlistNameInput:GetText()=='',
+        'C2 setup later clean current choice installs literal 410002x3 410003x4 directly')
+    NexusWishlistNameInput:SetText('C2 owned later draft');saveButton:Click()
+    local laterSave=Popup.shown[CREATE]
+    local laterSaveData=H.Clone(laterSave and laterSave.data)
+    check(laterSave~=nil and laterSave.data~=nil and saveButton:IsVisible() and saveButton:GetText()=='Create unassigned',
+        'C2 setup the later draft has a real unaccepted Save confirmation from visible Create unassigned')
+    NexusFlexiblePlanEntry:Click()
+    check(Count(B,1) and Shows(A,3,'3','Set') and Shows(B,1,'1','Set') and Budget(3,4) and Status()=='',
+        'C2 setup newer explicit choice 410002x3 410003x1 through Set')
+    NexusFlexiblePlanOpen:Click()
+    local newer=Popup.shown[REPLACE]
+    check(newer~=nil and newer~=older and Popup.shown[CREATE]==laterSave and equal(laterSave.data,laterSaveData),
+        'C2 setup newer current replacement beside the later Save confirmation')
+    before=snapshot()
+    StaticPopupDialogs[REPLACE].OnAccept(older.frame,older.data)
+    StaticPopupDialogs[REPLACE].OnCancel(older.frame,older.data)
+    expect(equal(snapshot(),before) and Popup.shown[REPLACE]==newer and Popup.shown[CREATE]==laterSave
+        and equal(laterSave.data,laterSaveData) and NexusWishlistNameInput:GetText()=='C2 owned later draft'
+        and equal(Rendered(),{{spellId=410002,quality=2,stacks=3},{spellId=410003,quality=3,stacks=4}})
+        and Budget(3,4),
+        'late older Accept and Cancel keep the later draft 410002x3 410003x4, its Save confirmation and the newer replacement')
+    if Popup.shown[REPLACE]==newer then Popup.Click(newer,1) end
+    expect(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and not NexusFlexiblePlanChooser:IsShown()
+        and equal(Rendered(),{{spellId=410002,quality=2,stacks=3},{spellId=410003,quality=3,stacks=1}})
+        and NexusWishlistNameInput:GetText()=='' and #H.actions==actions0 and #H.sent==sends0,
+        'the newer current consent still installs literal 410002x3 410003x1 and retires the later Save confirmation')
+    NexusWishlistNameInput:SetText('C2 owned after newer')
+    before=snapshot()
+    StaticPopupDialogs[REPLACE].OnAccept(newer.frame,newer.data)
+    check(equal(snapshot(),before) and Popup.shown[REPLACE]==nil and NexusWishlistNameInput:GetText()=='C2 owned after newer',
+        'C2 CONTROL replaying the used newer consent installs nothing a second time')
     StaticPopup_Hide(REPLACE);StaticPopup_Hide(CREATE)
     editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
     check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and NexusFlexiblePlanChooser:IsShown()
         and editor.DebugPendingCount()==0 and NexusWishlistNameInput:GetText()=='' and Status()==''
         and Budget(0,0),'C2 checks leave an empty editor, no popup and an empty planning session')
     print('C2 completed real paths; failures='..#failures)
-    assert(#failures==0,'EXPECT C2 hidden current-popup refusal visibility: '..table.concat(failures,'; '))
+    assert(#failures==0,'EXPECT C2 hidden current-popup refusal visibility and owned single-use requests: '..table.concat(failures,'; '))
 end
 
 for i=1,100 do check(Add(ids[i]),'explicit catalog Add callback '..i) end

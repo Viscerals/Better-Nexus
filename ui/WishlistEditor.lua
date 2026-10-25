@@ -879,17 +879,17 @@ end
 StaticPopupDialogs["NEXUS_FLEXIBLE_PLAN_REPLACE"] = {
     text = "Open your exact choice as a new Wishlist draft?\nThis replaces the current editor draft and its destination context. Nothing is saved until you save the new draft.",
     button1 = "Open new draft", button2 = "Cancel",
-    -- The client keeps a StaticPopup shown when its OnAccept returns a true
-    -- value, so this adapter returns nothing, like the other Nexus
-    -- confirmations: the dialog closes after an accept that installed the
-    -- choice and after one that refused (the chooser then says why).
-    -- Its data is one owned, single-use request. An install attempt (installed
-    -- or refused) or its own Cancel retires it. A newer request hides only the
-    -- popup whose data is the older request. A late or replayed old Accept or
-    -- Cancel therefore cannot install, dismiss a newer replacement or touch
-    -- another dialog such as Save. This rests on request identity alone. The
-    -- client behaviour above and its popup pooling, reuse and timing come from
-    -- FrameXML and an offline host model only (native NOT_RUN).
+    -- OnAccept returns nothing, like the other Nexus confirmations. Its data
+    -- is one owned, single-use request. An install attempt (installed or
+    -- refused) or its own Cancel retires it; a newer request passes the older
+    -- one as StaticPopup_Hide data, so only that popup is asked to hide. A
+    -- late or replayed old Accept or Cancel is rejected by request identity
+    -- alone: it installs nothing and asks no popup to hide, so a newer
+    -- replacement and other dialogs such as Save are kept. Popup lifetime
+    -- is modelled only by the offline synthetic host of the handoff fixture:
+    -- a true OnAccept return keeps a dialog shown; nil or false lets the
+    -- click hide it. No versioned client or FrameXML export backs that model,
+    -- so native return handling, pooling, reuse and timing are NOT_RUN.
     OnAccept = function(_, request) if request then request.Install() end end,
     OnCancel = function(_, request) if request then request.Cancel() end end,
     timeout = 0, whileDead = true, hideOnEscape = true,
