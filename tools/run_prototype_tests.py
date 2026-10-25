@@ -307,6 +307,14 @@ NAMES += ['ux_save_intents','ux_auto_assignment_consent','ux_automation_scope']
 NAMES += ['ux_save_retry_intent','ux_assignment_consent_routes']
 # UX M4: captured destination presentation, one qualified count vocabulary, record scope/detail and terminology lint (EXPECT fails on accepted M3 ab3cb307 by design).
 NAMES += ['ux_destination_context','ux_qualified_counts','ux_record_scope_terms']
+# #151: pure local-pool codec (EXPECT fails on docs-only 15dace7 by design).
+NAMES += ['flexible_plan_persistence_codec']
+# #151: private Store pool seam and FlexiblePlanStore.New Read/Save/Clear through real boot/reload (EXPECT fails before the seam by design).
+NAMES += ['flexible_plan_persistence_store']
+# #151 retention: measured maximal-pool startup work against actual PumpCaps/SourceBounds, a 28,672-byte sibling, released 9049 and current peers keep the key; no pool message or action.
+NAMES += ['flexible_plan_persistence_retention']
+# #151: chooser SavePool/LoadPool/PersistenceState, owned Load/Clear consent and the visible Save pool/Load saved controls over the real facade (EXPECT fails at 4c92d3f by design).
+NAMES += ['flexible_plan_persistence_chooser']
 
 # Wall-clock limit for one test process. It is a runner limit only: no test, timer or budget reads it.
 DEFAULT_TIMEOUT_SECONDS=45

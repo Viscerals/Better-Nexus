@@ -2755,7 +2755,8 @@ function StoreAuthorityOwner.UpdateStateV1(mutator)
     local cached = (stateSnapshotOwner == ownerKey and stateSnapshotDb == db
         and stateSnapshotSource == state) and stateSnapshot or nil
     local results = {mutator(state)}
-    if cached == nil or not SameAsSnapshot(cached, state) then
+    -- #151: the reserved top-level pool key is compared by its own owner only.
+    if cached == nil or not StoreAuthorityOwner.SameSnapshotV1(cached, state) then
         InvalidateStateSnapshot()
     end
     return true, unpack(results)
@@ -2827,9 +2828,209 @@ function Store.State()
         and stateSnapshotSource == source then
         return stateSnapshot
     end
-    local snapshot = EnsureStateShape(DeepCopy(source))
+    -- #151: the reserved top-level flexiblePlanPoolV1 key is left out of the
+    -- snapshot; its owner reads it through PlanPoolReadV1's bounded copy.
+    -- Every other key, and that name at any nested level, is copied exactly
+    -- as before (DeepCopy itself is unchanged).
+    local snapshot = source
+    if type(source) == "table" then
+        local poolKey = StoreAuthorityOwner.PLAN_POOL_KEY
+        snapshot = {}
+        for key, value in pairs(source) do
+            if key ~= poolKey then snapshot[key] = DeepCopy(value) end
+        end
+    end
+    snapshot = EnsureStateShape(snapshot)
     stateSnapshot, stateSnapshotOwner = snapshot, ownerKey
     stateSnapshotDb, stateSnapshotRevision = db, stateRevision
     stateSnapshotSource = source
     return snapshot
+end
+
+-- #151: the private local-pool seam (docs/flexible-plans/
+-- LOCAL_PERSISTENCE_CONTRACT.md, "Data owner"). Internals only: the public
+-- Store facade inventory is unchanged and no mutation entry is added (the pool
+-- owner writes through the counted UpdateStateV1). Its constants and helpers
+-- are locals of this do-block, so it adds no file-level local that stays
+-- active after the block; while the block is in scope those locals still
+-- count toward the compiler's limit of 200 active locals (Lua 5.1 and LuaJIT).
+--   PLAN_POOL_KEY        the one reserved character-row key. Store.State and
+--                        the UpdateStateV1 snapshot compare skip exactly this
+--                        top-level key; the same name nested anywhere else,
+--                        and every other key, is copied and compared as before.
+--   PlanPoolReadV1()     pure: creates, shapes and invalidates nothing. Raw
+--                        owner/root/row lookup plus a bounded detached copy of
+--                        the field only; the rest of the row is never walked.
+--                        Returns {mode, reason, ownerKey, root, rowPresent,
+--                        carried, present, copy, refusal, detail, visited}
+--                        (+format, savedFormat for a read-only root).
+--   IsDurableStateRowV1  true only for the live canonical row of a writable,
+--                        serving root (never the transient fallback).
+--   SameSnapshotV1       the UpdateStateV1 change test.
+do
+    local KEY = "flexiblePlanPoolV1"
+    -- Copy bounds: 16 tables two levels deep, 16 root and 257 child entries,
+    -- 16 + 15 * 257 = 3,871 visits, keys strings <= 32 bytes or integers,
+    -- values numbers, booleans or strings <= 64 bytes. Shape violations are
+    -- MALFORMED, size bounds OVERSIZED; both stop at the first offending entry.
+    local BOUND = {TABLES=16, DEPTH=2, ROOT=16, CHILD=257, VISITS=3871,
+        KEY_BYTES=32, VALUE_BYTES=64}
+    local SERVING = {[SS.READY]=true, [SS.MUTATION_BUILD]=true,
+        [SS.MUTATION_FINAL]=true}
+    local FAILED = {[SS.INVALID]="lifecycle", [SS.FUTURE_SCHEMA]="migration-marker",
+        [SS.DISPOSITION_FAILED]="lifecycle", [SS.DISPOSITION_REAUTH]="lifecycle"}
+    -- Root token: a Store-private serial per saved-root identity. Weak keys,
+    -- so it neither keeps a database alive nor exposes a reference to it.
+    local roots = setmetatable({}, {__mode="k"})
+    local serial = 0
+    StoreAuthorityOwner.PLAN_POOL_KEY = KEY
+
+    local function RootToken(db)
+        local token = roots[db]
+        if token == nil then
+            serial = serial + 1
+            token = serial
+            roots[db] = token
+        end
+        return token
+    end
+
+    -- nil: no bound coordinator (pre-init). false: its state is unreadable.
+    local function Lifecycle()
+        local C = boundCoordinator
+        if type(C) ~= "table" or type(C.State) ~= "function" then return nil end
+        local ok, state = pcall(C.State, C)
+        if not ok then return false end
+        return state, C
+    end
+
+    -- next/rawget only; no metamethod runs. FUTURE is decided from the raw
+    -- version before any traversal.
+    local function BoundedCopy(value)
+        if type(value) ~= "table" then return nil, "MALFORMED", "TYPE", 0 end
+        if getmetatable(value) ~= nil then return nil, "MALFORMED", "METATABLE", 0 end
+        local version = rawget(value, "version")
+        if ExactInteger(version) and version > 1 then return nil, "FUTURE", "VERSION", 0 end
+        local work = {tables=0, visited=0, seen={}}
+        local function Fail(class, detail)
+            work.class, work.detail = class, detail
+            return nil
+        end
+        local function Copy(source, depth)
+            work.seen[source] = true
+            work.tables = work.tables + 1
+            if work.tables > BOUND.TABLES then return Fail("OVERSIZED", "TABLES") end
+            local limit = depth == 1 and BOUND.ROOT or BOUND.CHILD
+            local out, entries, key, item = {}, 0, nil, nil
+            repeat
+                key, item = next(source, key)
+                if key ~= nil then
+                    entries, work.visited = entries + 1, work.visited + 1
+                    if entries > limit then return Fail("OVERSIZED", "ENTRIES") end
+                    if work.visited > BOUND.VISITS then return Fail("OVERSIZED", "VISITS") end
+                    if type(key) == "string" then
+                        if #key > BOUND.KEY_BYTES then return Fail("OVERSIZED", "KEY_BYTES") end
+                    elseif not ExactInteger(key) then
+                        return Fail("MALFORMED", "KEY_TYPE")
+                    end
+                    local kind = type(item)
+                    if kind == "table" then
+                        if work.seen[item] then return Fail("MALFORMED", "ALIAS") end
+                        if getmetatable(item) ~= nil then return Fail("MALFORMED", "METATABLE") end
+                        if depth >= BOUND.DEPTH then return Fail("MALFORMED", "DEPTH") end
+                        local child = Copy(item, depth + 1)
+                        if child == nil then return nil end
+                        out[key] = child
+                    elseif kind == "string" then
+                        if #item > BOUND.VALUE_BYTES then return Fail("OVERSIZED", "VALUE_BYTES") end
+                        out[key] = item
+                    elseif kind == "number" or kind == "boolean" then
+                        out[key] = item
+                    else
+                        return Fail("MALFORMED", "VALUE_TYPE")
+                    end
+                end
+            until key == nil
+            return out
+        end
+        local copy = Copy(value, 1)
+        if copy == nil then return nil, work.class, work.detail, work.visited end
+        return copy, nil, nil, work.visited
+    end
+
+    function StoreAuthorityOwner.PlanPoolReadV1()
+        local out = {visited=0, present=false, rowPresent=false, carried=false}
+        local function Mode(mode, reason)
+            out.mode, out.reason = mode, reason
+            return out
+        end
+        local ownerKey = CurrentIdentity()
+        if not ownerKey then return Mode("loading", "identity") end
+        out.ownerKey = ownerKey
+        local db = NexusDB
+        if not PlainTable(db) then return Mode("unavailable", "database") end
+        out.root = RootToken(db)
+        local state, C = Lifecycle()
+        if state == false then return Mode("unavailable", "lifecycle") end
+        if state == nil then return Mode("loading", "lifecycle") end
+        if FAILED[state] then return Mode("unavailable", FAILED[state]) end
+        if not SERVING[state] then return Mode("loading", "lifecycle") end
+        if C.database ~= db then return Mode("unavailable", "database") end
+        local chars = rawget(db, "chars")
+        if not PlainTable(chars) then return Mode("unavailable", "container") end
+        local row = rawget(chars, ownerKey)
+        if row ~= nil and not PlainTable(row) then return Mode("unavailable", "row") end
+        out.rowPresent = row ~= nil
+        local readOnly = ReadOnlyRoot.Class(db)
+        if readOnly then
+            out.format, out.savedFormat = readOnly, select(2, SavedFormat.Classify(db))
+            Mode("readOnly", "saved-format")
+        else
+            local status = Store.StateWriteStatus()
+            if status.mode ~= "durable" then
+                return Mode(status.mode or "unavailable", status.reason)
+            end
+            Mode("durable", nil)
+            -- Known formats 3-5: until the first write copies it, the owned
+            -- plain-name row is read (only), exactly as Store.State shows it.
+            if row == nil and status.carriedFrom ~= nil then
+                local _, from = SavedFormat.OwnedNameRow(db, ownerKey)
+                if PlainTable(from) then row, out.carried = from, true end
+            end
+        end
+        local value
+        if row ~= nil then value = rawget(row, KEY) end
+        out.present = value ~= nil
+        if value ~= nil then
+            out.copy, out.refusal, out.detail, out.visited = BoundedCopy(value)
+        end
+        return out
+    end
+
+    function StoreAuthorityOwner.IsDurableStateRowV1(row)
+        if not PlainTable(row) then return false end
+        local ownerKey, db = CurrentIdentity(), NexusDB
+        if not ownerKey or not PlainTable(db) or ReadOnlyRoot.Class(db) then return false end
+        local state, C = Lifecycle()
+        if not state or not SERVING[state] or C.database ~= db then return false end
+        local chars = rawget(db, "chars")
+        return PlainTable(chars) and rawequal(rawget(chars, ownerKey), row) or false
+    end
+
+    -- SameAsSnapshot with exactly the reserved top-level key skipped; nested
+    -- levels go through SameAsSnapshot unchanged.
+    function StoreAuthorityOwner.SameSnapshotV1(cached, row)
+        if cached == row then return true end
+        if type(cached) ~= "table" or type(row) ~= "table" then return false end
+        local seen = {[cached]={[row]=true}}
+        for key, value in pairs(cached) do
+            if key ~= KEY and not SameAsSnapshot(value, row[key], seen) then
+                return false
+            end
+        end
+        for key in pairs(row) do
+            if key ~= KEY and cached[key] == nil then return false end
+        end
+        return true
+    end
 end
