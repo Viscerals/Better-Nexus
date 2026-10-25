@@ -2164,11 +2164,18 @@ local function RefreshView(catalogRevision)
     end
 
     -- The destination row's view observation: this refresh's one existing
-    -- Slots read below, else none (nil, never an earlier stale read).
-    if frame._destinationRow then frame._destinationRow._nexusEditorSlots = nil end
+    -- Slots read below and the result of its one existing SelectedSavedBuild
+    -- before the editing/create overrides (nil as 0; nil itself, i.e.
+    -- unobserved, without a Slots table whose active slot is known), held
+    -- with the Panel's valid world-session revision of this moment; else
+    -- none (nil, never an earlier stale read or another session's).
+    if frame._destinationRow then
+        frame._destinationRow._nexusEditorSlots = nil
+        frame._destinationRow._nexusEditorSelected = nil
+        frame._destinationRow._nexusEditorSession = nil
+    end
     if loadoutSwitchBtn and not pendingLoadoutOpen then
         local slots = View and View.Slots and View.Slots()
-        if frame._destinationRow then frame._destinationRow._nexusEditorSlots = slots end
         local active = slots and tonumber(slots.activeSlot)
         -- The Saved Build of the Wishlist being edited, else the one a new
         -- Wishlist is created for; the selected one only with neither (never a
@@ -2176,6 +2183,20 @@ local function RefreshView(catalogRevision)
         -- "(active)" state below). An edited Wishlist that no Saved Build has
         -- selects none.
         local selected = View.SelectedSavedBuild(slots)
+        -- Held as the observed current role only: never captured draft,
+        -- target or Save authority.
+        if frame._destinationRow then
+            local destinationRow, panel = frame._destinationRow, Nexus.Panel
+            local session = panel and panel.destinationSessionRevision
+            if type(session) == "number" and session >= 0
+                and session < math.huge and session == math.floor(session) then
+                destinationRow._nexusEditorSlots = slots
+                destinationRow._nexusEditorSelected =
+                    (type(slots) == "table" and slots.activeKnown ~= false)
+                    and (selected or 0) or nil
+                destinationRow._nexusEditorSession = session
+            end
+        end
         if editingContext then
             selected = tonumber(editingContext.loadoutSlot)
         elseif createTargetContext then
@@ -2522,15 +2543,29 @@ end
         RefreshTheme()
         -- Row-only update, warm or cold, after the one-time theme pass so it
         -- measures final fonts. Pure: the captured descriptor from the held
-        -- Slots observation (nil when none) and the session's cached
-        -- character; a settled update is a no-op in the helper.
+        -- Slots and selected-role observation (nil when none) and the
+        -- session's cached character; a settled update is a no-op in the
+        -- helper. The held observation counts only in the world session it
+        -- was made in: a changed, missing or malformed revision (or no held
+        -- Slots table) drops it, and it stays unknown until the next cold
+        -- observation. No read or refresh is made for it here.
         local destinationRow = frame and frame._destinationRow
         if destinationRow then
             local panel = Nexus.Panel
+            local session = panel.destinationSessionRevision
+            if not (type(session) == "number" and session >= 0
+                and session < math.huge and session == math.floor(session)
+                and destinationRow._nexusEditorSession == session
+                and type(destinationRow._nexusEditorSlots) == "table") then
+                destinationRow._nexusEditorSlots = nil
+                destinationRow._nexusEditorSelected = nil
+                destinationRow._nexusEditorSession = nil
+            end
             panel.UpdateDestinationRow(destinationRow,
                 Controller.DestinationPresentation(
                     destinationRow._nexusEditorSlots,
-                    panel.CachedDestinationCharacter()),
+                    panel.CachedDestinationCharacter(),
+                    destinationRow._nexusEditorSelected),
                 900, 18)
         end
         return result

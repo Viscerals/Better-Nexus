@@ -706,15 +706,228 @@ C.scenario('the HUD destination row fits an empty long-named Saved Build 123 at 
  local who=t[1]:gsub('^Character:%s*',''):gsub('^C:%s*',''):gsub('%.%.%.$','')
  C.expect(who~='' and CHARACTER:sub(1,#who)==who
   and ((t[2]:find('#123',1,true) and not t[2]:find('#123%d')) or t[2]:find('slot 123)',1,true))
-  and (t[3]:find('!$') or t[3]:find('Refused',1,true) or t[3]:find('No valid assignment',1,true) or t[3]:find('W-F',1,true))
+  and (t[3]:find('!$') or t[3]:find('Refused',1,true) or t[3]:find('No valid assignment',1,true))
   and V.Names(t[4],'Empty'),
-  'R-HUD: it shows the leading character, the whole #123, the whole Wishlist refusal marker (or W-Free) and the whole Empty state',all)
+  'R-HUD: it shows the leading character, the whole #123, the whole Wishlist refusal marker and the whole Empty state',all)
  local hit=type(row.hits)=='table' and row.hits[2] or nil
  local enter=hit and hit:GetScript('OnEnter')
  local tip=enter and V.Plain(table.concat(V.TooltipLines(function() enter(hit) end),' / ')) or ''
  C.expect(tip:find('Character: '..CHARACTER,1,true) and tip:find('slot 123)',1,true)
   and tip:find(string.rep('wide ',11)..'wide',1,true) and tip:find('holds no Echoes',1,true),
   'R-HUD: hovering the Saved Build cell then discloses the whole destination',tip)
+end)
+
+-- C (Preview classification): a Community Build preview's title
+-- (progress.wishlistName while progress.isCommunityPreview) names the
+-- previewed build, never destination or assignment authority. With no
+-- active slot and the assignment unassigned or missing, the actual shown HUD
+-- row and its hover disclosure read the same with and without that title:
+-- Preview over the underlying "none captured", never unconfirmed. An
+-- unavailable Preview and an ordinary (non-Preview) title keep their
+-- classification. Show runs before the injected Renders and nothing
+-- advances before a row is read, so no refresh replaces the injected model.
+-- Nothing is written to the panel; each hover is left again.
+C.scenario('C: a Preview title alone is not destination authority',function()
+ Boot({slots={},active=0})
+ local P=Nexus.Panel
+ if not C.setup(type(P)=='table' and type(P.Show)=='function' and type(P.Render)=='function'
+  and type(P.DestinationFacts)=='function','C: Panel has Show, Render and DestinationFacts') then return end
+ local TITLE,STATE_LINE='CommunityOnlyTitle','State: Preview; None captured'
+ local function Model(state,title,preview)
+  local m={character=CHARACTER,progress={owned=0,total=0,missing={},shed={},unknownTomes={},toLock={},
+   isCommunityPreview=preview},assignment={},cards={},auto=false,level=40}
+  if state then m.assignment.state=state end
+  if title then m.progress.wishlistName=title end
+  return m
+ end
+ -- The whole underlying-none Preview alternatives of the state cell
+ -- (minimum, compact, full), bare or after the cell's label.
+ local function NonePreview(text)
+  for _,alt in ipairs({'P_','Preview: None','Preview; None captured'}) do
+   if text==alt or text=='S:'..alt or text=='State: '..alt then return true end
+  end
+  return false
+ end
+ -- The Wishlist disclosure segments, and whether one names the title.
+ local function Wishlists(tip)
+  local n,titled=0,false
+  for seg in tip:gmatch('Wishlist:[^\n]*') do n=n+1;titled=titled or seg:find(TITLE,1,true)~=nil end
+  return n,titled
+ end
+ -- The shown row for model m: its facts, its four cell texts and every line
+ -- its hit areas disclose on hover (OnEnter, then OnLeave).
+ local function Shown(m,label)
+  local facts=P.DestinationFacts(m) or {}
+  P.Render(m)
+  local row=NexusPanel and NexusPanel._destinationRow
+  local cells=type(row)=='table' and row.cells
+  if not C.setup(type(cells)=='table' and #cells==4,'C: shown HUD row has four cells ('..label..')') then return nil end
+  local texts,visible={},true
+  for i=1,4 do visible=visible and cells[i]:IsVisible();texts[i]=V.Plain(cells[i]:GetText()) end
+  C.setup(visible,'C: HUD row cells are shown ('..label..')')
+  local lines,ran,healthy={},0,true
+  for _,hit in pairs(type(row.hits)=='table' and row.hits or {}) do
+   local enter=type(hit)=='table' and type(hit.GetScript)=='function' and hit:GetScript('OnEnter')
+   if type(enter)=='function' then
+    local got,ok=V.TooltipLines(enter,hit)
+    ran,healthy=ran+1,healthy and ok
+    for _,line in ipairs(got) do lines[#lines+1]=V.Plain(line) end
+    local leave=hit:GetScript('OnLeave')
+    if type(leave)=='function' then pcall(leave,hit) end
+   end
+  end
+  C.setup(ran>0 and healthy,'C: HUD row hits disclose on hover ('..label..')',ran)
+  return {facts=facts,cells=texts,tip=table.concat(lines,'\n')}
+ end
+ P.Show()
+ for _,state in ipairs({'unassigned',false}) do
+  local label=state and ('assignment '..state) or 'assignment state missing'
+  -- The titled model renders first, after a different model, so its row is
+  -- laid out afresh rather than kept from the untitled one.
+  local titled=Shown(Model(state or nil,TITLE,true),label..', titled')
+  local plain=Shown(Model(state or nil,nil,true),label..', untitled')
+  if not (titled and plain) then return end
+  C.guard(plain.facts.kind=='none','C: untitled Preview is kind none ('..label..')',plain.facts.kind)
+  C.expect(titled.facts.kind=='none','C: a Preview title alone keeps kind none ('..label..')',titled.facts.kind)
+  C.guard(plain.facts.wishlist==nil and titled.facts.wishlist==nil,
+   'C: a Preview title is no Wishlist fact ('..label..')',titled.facts.wishlist)
+  C.guard(NonePreview(plain.cells[4]),'C: untitled Preview shows none under Preview ('..label..')',plain.cells[4])
+  C.expect(NonePreview(titled.cells[4]),
+   'C: titled Preview shows none under Preview, not unconfirmed ('..label..')',titled.cells[4])
+  local same,named=true,false
+  for i=1,4 do
+   same=same and titled.cells[i]==plain.cells[i]
+   named=named or titled.cells[i]:find(TITLE,1,true)~=nil
+  end
+  C.expect(same,'C: shown row is the same with and without the Preview title ('..label..')',
+   table.concat(titled.cells,' / ')..' vs '..table.concat(plain.cells,' / '))
+  C.guard(not named,'C: no shown cell names the Preview title ('..label..')',table.concat(titled.cells,' / '))
+  -- The disclosure, checked apart from the shown text.
+  C.guard(plain.tip:find(STATE_LINE,1,true)~=nil,'C: untitled Preview discloses '..STATE_LINE..' ('..label..')',plain.tip)
+  C.expect(titled.tip:find(STATE_LINE,1,true)~=nil,'C: titled Preview discloses '..STATE_LINE..' ('..label..')',titled.tip)
+  local n,bad=Wishlists(titled.tip)
+  C.guard(n>0 and not bad,'C: titled Preview discloses a Wishlist that is not the Preview title ('..label..')',titled.tip)
+  C.expect(titled.tip==plain.tip,'C: disclosure is the same with and without the Preview title ('..label..')',titled.tip)
+ end
+ -- Unchanged branches (facts only): an unavailable Preview stays
+ -- unconfirmed; an ordinary (non-Preview) title stays unconfirmed and is
+ -- that plan's Wishlist; an ordinary untitled plan stays none.
+ for _,case in ipairs({
+  {state='unavailable',title=TITLE,preview=true,kind='unconfirmed',label='unavailable titled Preview'},
+  {state='unavailable',preview=true,kind='unconfirmed',label='unavailable untitled Preview'},
+  {state='unassigned',title='OrdinaryTitle',kind='unconfirmed',wishlist='OrdinaryTitle',label='ordinary title, unassigned'},
+  {title='OrdinaryTitle',kind='unconfirmed',wishlist='OrdinaryTitle',label='ordinary title, state missing'},
+  {state='unassigned',kind='none',label='ordinary untitled plan, unassigned'},
+ }) do
+  local facts=P.DestinationFacts(Model(case.state,case.title,case.preview)) or {}
+  C.guard(facts.kind==case.kind and facts.wishlist==case.wishlist,'C: '..case.label..' keeps kind '..case.kind,
+   tostring(facts.kind)..' / '..tostring(facts.wishlist))
+ end
+end)
+-- B2 (destination fit priority; fixture only): the reopened first-run plan
+-- keeps its captured first-run target in the real 900 px destination row at
+-- the largest supported font scale. The real A02 lifecycle runs for a short
+-- and a long plan name. In the double model the compact whole state fits
+-- (188+67+133+287, plus 12 for 3 gaps, = 687 <= 900). A long name needs only
+-- the plan name shortened, never the early minimum (C:1). EXPECT: row
+-- behaviour (a missing row fails one expectation and returns). GUARD: the
+-- row keeps its 900 px width. SETUP: fixture state. Font methods, model and
+-- font object are restored before returning. Offline font model; native
+-- NOT_RUN.
+C.scenario('B2 first-run row keeps its captured first-run target at font scale 2',function()
+ local KEYS={'GetStringHeight','GetStringWidth','GetTextWidth','GetFont'}
+ local savedObject,savedModel=rawget(_G,'NexusFontNormal'),G.model
+ -- The plan name as shown: whole, or its start cut with an ellipsis.
+ local function NameShown(text,name)
+  if text:find(name,1,true) then return true end
+  local head=name:match('^%S+') or name
+  local at=text:find(head,1,true)
+  if not at then return false end
+  local shown=text:sub(at):gsub('%.%.%.$',''):gsub('\226\128\166$',''):gsub('%s+$','')
+  return #shown>=#head and name:sub(1,#shown)==shown
+ end
+ -- Every line the row's own visible hover areas write (OnEnter, then OnLeave).
+ local function Hover(row)
+  local hits,lines,errs=row.hits,{},{}
+  local list=type(hits)=='table' and (hits.kind and {hits} or hits) or {}
+  for _,hit in pairs(list) do
+   local enter=type(hit)=='table' and hit.kind and hit:IsVisible() and hit:GetScript('OnEnter')
+   if enter then
+    local got,ok,err=V.TooltipLines(function()
+     enter(hit)
+     local leave=hit:GetScript('OnLeave')
+     if leave then leave(hit) end
+    end)
+    if not ok then errs[#errs+1]=V.printable(err) end
+    for _,line in ipairs(got) do lines[#lines+1]=line end
+   end
+  end
+  return V.Plain(table.concat(lines,'\n')),table.concat(errs,'; ')
+ end
+ local function Case(name,font)
+  local tag='B2 '..name
+  Boot({active=0,slots={[107]={name='W-Free',verified=false,echoes=EF}}})
+  SlashCmdList.NEXUS('editor')
+  NewPlan(name,201174)
+  local asked=Asked()
+  C.setup(asked~=nil,tag..': fixture: Create asks for confirmation')
+  if not asked then return end
+  H.AcceptPopup()
+  local n,last=Uploads()
+  local first=Stored('first')
+  local saved=n==1 and last~=nil and type(first)=='table' and first.name==name
+  C.setup(saved,tag..': fixture: the first-run plan is saved under its exact name',Facts())
+  if not saved then return end
+  MirrorAt(108,last)
+  Close()
+  SlashCmdList.NEXUS('editor')
+  local ctx=Ctx()
+  local opened=ctx.name==name and ctx.destination=='first' and NexusEditorFrame~=nil and NexusEditorFrame:IsVisible()
+  C.setup(opened,tag..': fixture: the first-run plan is open again under its exact name',tostring(ctx.name)..'/'..tostring(ctx.destination))
+  if not opened then return end
+  local refresh=Nexus.WishlistEditor and Nexus.WishlistEditor.Refresh
+  C.setup(type(refresh)=='function',tag..': fixture: the editor refreshes through its public Refresh')
+  if type(refresh)~='function' then return end
+  font.methods=G.RegionMethods()
+  for _,k in ipairs(KEYS) do font.saved[k]=rawget(font.methods,k) end
+  G.UseFont(G.MODELS.double)
+  refresh()
+  local row=NexusEditorFrame._destinationRow
+  local present=type(row)=='table' and type(row.cells)=='table' and type(row.GetWidth)=='function'
+   and type(row.IsVisible)=='function' and row:IsVisible()
+  C.expect(present,tag..': the editor shows its destination row')
+  if not present then return end
+  C.guard(row:GetWidth()==900,tag..': the destination row keeps its 900 px width',row:GetWidth())
+  local texts,bad=RowCells(row)
+  local shown=table.concat(texts,' / ')
+  local detail=shown..' | '..table.concat(bad,'; ')
+  print('OBSERVED',tag..' double row='..detail)
+  C.expect(#bad==0,tag..': the four cells are shown, fit and stay apart at font scale 2',detail)
+  local cue=texts[4]
+  C.expect(shown:find('first-run target',1,true) and cue:find('first-run target',1,true)
+   and (cue:find('^Captured') or cue:find('^C:')),
+   tag..': the row keeps the captured first-run target (Captured or C: cue), not C:1',detail)
+  C.expect((texts[1]:find('^Character:') or texts[1]:find('^C:')) and texts[1]:find(CHARACTER,1,true)
+   and (texts[2]:find('^Saved Build') or texts[2]:find('^B:')) and texts[2]:find('None',1,true)
+   and (texts[3]:find('^Wishlist') or texts[3]:find('^W:')) and NameShown(texts[3],name),
+   tag..': the cells keep their categories, the character, no Saved Build and the plan name',detail)
+  local hover,errs=Hover(row)
+  print('OBSERVED',tag..' hover='..hover)
+  C.expect(hover:find(name,1,true)~=nil and V.Names(hover,name),
+   tag..': the hover names the full plan exactly',hover..' '..errs)
+  C.expect(hover:find('first-run target',1,true)~=nil,
+   tag..': the hover names the captured first-run target',hover..' '..errs)
+ end
+ for _,name in ipairs({'Starter','Starter With A Longer Plan Name'}) do
+  local font={saved={}}
+  _G.NexusFontNormal=nil
+  local ok,err=pcall(Case,name,font)
+  local closed,closeErr=pcall(Close)
+  if font.methods then for _,k in ipairs(KEYS) do font.methods[k]=font.saved[k] end end
+  G.model,_G.NexusFontNormal=savedModel,savedObject
+  if not ok then error(err,0) end
+  if not closed then error(closeErr,0) end
+ end
 end)
 
 C.finish('(confirmations name the captured destination; first-run labelled; no guessed destination)')

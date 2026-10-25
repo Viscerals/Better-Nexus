@@ -42,6 +42,14 @@ local renderState = {
     destinationWorld=nil,
     destinationCharacter=nil,
 }
+-- Destination world-session revision: a private monotonic count of
+-- ObserveDestinationCharacter's world invalidations (leave, logout, enter),
+-- published at each one as the view-only scalar M.destinationSessionRevision
+-- (nil before the first). Views bind their observations to it, never to a
+-- character name. It only grows and is never reissued, so a corrupted or
+-- restored public value cannot alias a later session. Memory only;
+-- presentation only.
+local destinationSessionCounter = 0
 local renderStats = {
     calls=0, layouts=0, skipped=0, statusOnly=0,
     performancePasses=0, noticePasses=0, themeTreeWalks=0,
@@ -319,7 +327,28 @@ do
     end
 
     -- Cell texts, widths and left offsets for a row width. Each cell first
-    -- steps down its own ladder, the widest first. A row still too wide then
+    -- steps down its own ladder, the widest first. When the narrowest whole
+    -- alternatives short of the minima (a minimum is the Wishlist or state
+    -- cue with minimum) fit together, no cell takes its minimum, so a whole
+    -- compact state such as a captured "first-run target" is not replaced
+    -- by its minimum ("C:1") while it fits beside the other cells' compact
+    -- alternatives; otherwise each ladder runs to its minimum, still the
+    -- widest first. When that discards a name into its minimum (the
+    -- Wishlist "W:?" of a "?: name" compact) and a name cut lets those
+    -- whole alternatives fit together, the cut is shown instead: every
+    -- other cell takes its whole alternative short of the minima again
+    -- (labels yield before a name is cut, and no cell keeps a minimum) and
+    -- the cut takes the room they leave, so a long plan name is shortened,
+    -- not lost, beside a whole captured state. A name cut needs a minimum
+    -- that is a name rung (DEST_CLIP) whose text, with the same cue,
+    -- begins the cue-with-compact text within the value's leading token
+    -- (up to its first space). It keeps that token whole, the space and at
+    -- least DEST_LEAD more characters, cut at a display character
+    -- (DestUnitEnds) with "...", so it shows all the minimum shows plus a
+    -- name prefix; the tooltip keeps the whole name. It is the only cut of
+    -- a Wishlist compact value (the policy above otherwise shows it whole
+    -- or as its minimum); a refusal or other marker that does not begin its
+    -- compact is never cut. A row still too wide then
     -- reserves every floor before a name is shortened: a cell that is not
     -- cut (a state, a one-glyph marker such as the refusal "!") keeps its
     -- whole alternative, and a name keeps at least what DestClip shows at no
@@ -329,8 +358,8 @@ do
     -- no further than needed: the colon of a cue before a one-glyph
     -- punctuation marker ("W:!" becomes "W!"), the gaps, then each box's
     -- slack. The names then share the rest. Every text stays a whole
-    -- formatter alternative or a DestClip cut of a name; nothing is parsed
-    -- out of a state, slot token or marker.
+    -- formatter alternative, a DestClip cut of a name or a name cut;
+    -- nothing is parsed out of a state, slot token or marker.
     local function DestFit(layout, cells, fields, width)
         local gap = math.max(0, math.min(DEST_GAP, math.floor((width - 4) / 3)))
         local budget = width - 3 * gap
@@ -343,12 +372,32 @@ do
             total = total + ladders[index][1].width
         end
         -- Step the widest cell that has a narrower alternative down first
-        -- (on a tie, the later cell).
+        -- (on a tie, the later cell), each no further than its stop: while
+        -- the narrowest whole alternatives of all four cells fit together,
+        -- that alternative (the rung before a minimum); otherwise its
+        -- narrowest. A minimum is a cue rung after another cue rung:
+        -- DestLadder gives a cue only to the cue-with-compact and
+        -- cue-with-minimum alternatives and keeps one rung where they are
+        -- the same text.
+        local stops, wholeWidth = {}, 0
+        for index = 1, 4 do
+            local ladder = ladders[index]
+            local stop = #ladder
+            if stop > 1 and ladder[stop - 1].cue ~= nil then stop = stop - 1 end
+            stops[index], wholeWidth = stop, wholeWidth + ladder[stop].width
+        end
+        -- whole: those stops short of the minima, kept for a name cut.
+        local whole = {}
+        if wholeWidth > budget then
+            for index = 1, 4 do
+                whole[index], stops[index] = stops[index], #ladders[index]
+            end
+        end
         while total > budget do
             local pick, widest = nil, -1
             for index = 1, 4 do
                 local rung = ladders[index][level[index]]
-                if level[index] < #ladders[index] and rung.width >= widest then
+                if level[index] < stops[index] and rung.width >= widest then
                     pick, widest = index, rung.width
                 end
             end
@@ -361,6 +410,73 @@ do
         for index = 1, 4 do
             local rung = ladders[index][level[index]]
             texts[index], widths[index] = rung.text, rung.width
+        end
+        -- A name discarded into its minimum (see above): when its name cut
+        -- at its floor fits beside every other cell's stop short of the
+        -- minima, each cell takes that stop again and each cut takes the
+        -- room the others leave, keeping the floors of the cuts after it:
+        -- its largest cut that fits, never below its floor.
+        if wholeWidth > budget then
+            local cuts, cutting, cutNeed = {}, false, 0
+            local function NameCut(cut, units)
+                return cut.cue .. (cut.value:sub(1, cut.ends[units]):gsub(" +$", ""))
+                    .. DEST_ELLIPSIS
+            end
+            for index = 1, 4 do
+                local ladder = ladders[index]
+                local rung, least = ladder[whole[index]], ladder[#ladder]
+                if level[index] == #ladder and whole[index] < #ladder and least.clip
+                    and not rung.clip and rung.cue == least.cue
+                    and rung.text:sub(1, #least.text) == least.text then
+                    local value = rung.value
+                    local ends = DestUnitEnds(value)
+                    local lead, start = nil, 1
+                    for unit = 1, #ends do
+                        if ends[unit] == start and value:byte(start) == 32 then
+                            lead = unit - 1
+                            break
+                        end
+                        start = ends[unit] + 1
+                    end
+                    local units = lead and lead + 1 + DEST_LEAD
+                    if units and lead >= 1 and units < #ends
+                        and #least.value <= ends[lead] then
+                        local cut = {cue = rung.cue, value = value, ends = ends, units = units}
+                        cut.floor = DestMeasure(cells[index], NameCut(cut, units),
+                            memos[index], fallback)
+                        if cut.floor < rung.width then cuts[index], cutting = cut, true end
+                    end
+                end
+                cutNeed = cutNeed + (cuts[index] and cuts[index].floor or rung.width)
+            end
+            if cutting and cutNeed <= budget then
+                local room = budget - cutNeed
+                total = 0
+                for index = 1, 4 do
+                    local cut = cuts[index]
+                    if cut then
+                        room = room + cut.floor
+                        local low, high, best = cut.units + 1, #cut.ends - 1, cut.units
+                        while low <= high do
+                            local middle = math.floor((low + high) / 2)
+                            if DestMeasure(cells[index], NameCut(cut, middle), memos[index],
+                                fallback) <= room then
+                                best, low = middle, middle + 1
+                            else
+                                high = middle - 1
+                            end
+                        end
+                        texts[index] = NameCut(cut, best)
+                        widths[index] = DestMeasure(cells[index], texts[index],
+                            memos[index], fallback)
+                        room = room - widths[index]
+                    else
+                        local rung = ladders[index][whole[index]]
+                        texts[index], widths[index] = rung.text, rung.width
+                    end
+                    total = total + widths[index]
+                end
+            end
         end
         -- Still too wide: every cell is at its narrowest alternative. Each
         -- floor is reserved before a name is shortened (see above).
@@ -639,9 +755,11 @@ function M.DestinationFacts(model)
         -- without the verified field. Which Saved Build, and whether it is
         -- active, is not in this model, so neither is claimed (review B1).
         d.kind, d.unconfirmed = "savedBuild", true
-    elseif state == "unavailable" or pr.wishlistName then
+    elseif state == "unavailable" or (not preview and pr.wishlistName) then
         -- The model does not say whether this plan is the first-run target
-        -- or a Saved Build's: neither is claimed.
+        -- or a Saved Build's: neither is claimed. A Community Build
+        -- preview's title names the previewed build, never this
+        -- destination's plan, so it alone claims nothing.
         d.kind = "unconfirmed"
     else
         d.kind = "none"
@@ -662,6 +780,21 @@ end
 -- later capture; "capture" stores that capture (nil included) only inside an
 -- entered world. Memory only: no read, no model, Store or assignment change.
 function M.ObserveDestinationCharacter(character, event)
+    if event == "PLAYER_LEAVING_WORLD" or event == "PLAYER_LOGOUT"
+        or event == "PLAYER_ENTERING_WORLD" then
+        -- Each existing world invalidation starts a new view session
+        -- revision: the private count is first moved past any larger valid
+        -- public value, so that value is never reissued, then advanced and
+        -- published. No other read; a capture leaves it unchanged.
+        local published = M.destinationSessionRevision
+        if type(published) == "number" and published > destinationSessionCounter
+            and published < 4503599627370496
+            and published == math.floor(published) then
+            destinationSessionCounter = published
+        end
+        destinationSessionCounter = destinationSessionCounter + 1
+        M.destinationSessionRevision = destinationSessionCounter
+    end
     if event == "PLAYER_LEAVING_WORLD" then
         renderState.destinationWorld, renderState.destinationCharacter = "leaving", nil
     elseif event == "PLAYER_LOGOUT" then

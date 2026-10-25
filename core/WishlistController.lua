@@ -651,14 +651,20 @@ function Controller.New(options)
     function M.CreateTargetContext() return CopyRecord(state.createTargetContext) end
     -- A passive destination descriptor (the UserText DestinationFields d
     -- table) for the editor's destination strip. It reads only the captured
-    -- contexts and the display-only origin, plus the two facts its caller
-    -- passes: the Slots observation the renderer already made and the
-    -- character the HUD already cached for this world session. It calls no
-    -- getter, adapter, Store or service and changes nothing; Save still uses
+    -- contexts and the display-only origin, plus the three facts its caller
+    -- passes: the Slots observation the renderer already made, the
+    -- character the HUD already cached for this world session, and
+    -- observedSelected, the scalar the renderer's own one
+    -- SelectedSavedBuild(slots) call gave for those same slots, before any
+    -- editor override (an observed nil is passed as 0). A nil
+    -- observedSelected was not observed: it is never "no target". A
+    -- selected Saved Build is the current role only, never a capture, this
+    -- draft's destination or a target to adopt. It calls no getter,
+    -- adapter, Store or service and changes nothing; Save still uses
     -- SaveDestination/TryApply, never this. A captured Saved Build is never
     -- retargeted to the active one, a captured Wishlist name is never called
     -- assigned, and a missing row or unknown stays unknown.
-    function M.DestinationPresentation(slots, character)
+    function M.DestinationPresentation(slots, character, observedSelected)
         local d = {}
         if type(character) == "string" and character ~= "" then
             d.character = character
@@ -685,10 +691,42 @@ function Controller.New(options)
         else
             local origin = state.destinationOrigin
             d.origin = origin or "none"
-            if origin == "firstRun" then
-                d.kind, d.captured = "firstRun", true
-            elseif origin == "unknown" then
-                d.kind, d.reason = "unknown", "notLoaded"
+            if origin == "firstRun" or origin == "unknown" then
+                -- That begin captured nothing, so its origin is only a hint:
+                -- the state is what the supplied facts show now, by the
+                -- Journal's rule. No populated Saved Build selected is the
+                -- first-run target, not captured; a selected populated one
+                -- is no destination and is never adopted; missing,
+                -- unobserved, invalid or conflicting facts stay unknown.
+                local kind, reason = "unknown", "notLoaded"
+                local selected = observedSelected
+                if type(slots) == "table" and slots.activeKnown ~= false
+                    and type(selected) == "number" and selected >= 0
+                    and selected < math.huge
+                    and selected == math.floor(selected) then
+                    local maxSlots = tonumber(slots.maxSlots) or 5
+                    local native = tonumber(slots.activeSlot)
+                    -- A native active Saved Build is the selected one
+                    -- (SelectedSavedBuild); a scalar that differs proves
+                    -- nothing, so a missing row stays unknown.
+                    local agrees = not (native and native >= 1
+                        and native <= maxSlots and native == math.floor(native)
+                        and selected ~= native)
+                    local rows = slots.bySlot
+                    local row = agrees and selected >= 1 and selected <= maxSlots
+                        and type(rows) == "table" and rows[selected] or nil
+                    local echoes = type(row) == "table" and row.echoes or nil
+                    if agrees and selected == 0 then
+                        kind, reason = "firstRun", nil
+                    elseif type(echoes) == "table" then
+                        if #echoes > 0 then
+                            kind, reason = "none", "noDestination"
+                        else
+                            kind, reason = "firstRun", nil
+                        end
+                    end
+                end
+                d.kind, d.reason = kind, reason
             elseif origin == "copy" then
                 d.kind, d.reason = "none", "unboundPlan"
             else
