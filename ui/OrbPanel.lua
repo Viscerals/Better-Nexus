@@ -1472,17 +1472,31 @@ local function miniMissing(v)
     return "Rolled target copies missing: "..(v.remaining and miniNumber(v.remaining) or "unavailable")
 end
 -- The missing line. While paused, when compactTarget names what Resume would
--- act on, the line also shows that after its count. The count keeps its kind
--- (rolled copies; "?" is unavailable, never 0) and stays first, so a line
--- that is too long is cut on a character boundary only inside the target.
--- The hover keeps the complete count, the complete target and the line's
--- meaning.
+-- act on, the line shows the rolled copies count first ("?" is unavailable,
+-- never 0), then the target's name in quotes, "(unnamed)" for a nameless
+-- Wishlist or "target ?" while the target is unknown. It is kept to 30
+-- columns (the 332 px line at the offline doubled-font model's 11 px per
+-- character, not a native measurement): a longer name is cut on a character
+-- boundary inside its quotes. The hover keeps the complete count, the
+-- complete target with its kind and the line's meaning.
 local function miniMissingLine(v)
     local shown,full=miniText(miniMissing(v))
     local what=v.kind=="run" and v.state=="PAUSED" and compactTarget(v.target) or nil
     if not what then return shown,full end
     local _,target=miniText(what)
-    shown=miniText("Rolled copies missing: "..(v.remaining and miniNumber(v.remaining) or "?").."; "..what)
+    local t,tail=v.target,"target ?"
+    shown="Rolled missing: "..(v.remaining and miniNumber(v.remaining) or "?").."; "
+    if t.kind~="unavailable" then
+        tail="(unnamed)"
+        if t.name~=nil then
+            local name=(tostring(t.name):gsub("%c"," "))
+            local room=math.max(4,math.floor(MINI_TEXT_W/11)-#shown-2)
+            if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then name=Nexus.LayoutMetrics.Truncate(name,room)
+            elseif #name>room then name=name:sub(1,room-3):gsub("[\192-\255][\128-\191]*$","").."..." end
+            tail="'"..name:gsub("|","||").."'"
+        end
+    end
+    shown=shown..tail
     return shown,full..". "..target
 end
 local function miniKey(v)
