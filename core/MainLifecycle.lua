@@ -453,6 +453,9 @@ function Lifecycle.New(options)
     end
 
     local function Initialize(updateStarted)
+        if Nexus.OrbRuntime and type(Nexus.OrbRuntime.ObserveLifecycle) == "function" then
+            pcall(Nexus.OrbRuntime.ObserveLifecycle)
+        end
         if initialized then return true end
         dependencies = BindDependencies()
         if not dependencies then return false end
@@ -1009,6 +1012,11 @@ function Lifecycle.New(options)
                            arg5, arg6, arg7, arg8, arg9)
         if event == "ADDON_LOADED" then
             if arg1 == "Nexus" then
+                -- Before the login enter. A frame created inside that enter
+                -- does not receive it.
+                if Nexus.OrbRuntime and type(Nexus.OrbRuntime.ObserveLifecycle) == "function" then
+                    pcall(Nexus.OrbRuntime.ObserveLifecycle)
+                end
                 local storeReady = false
                 if Nexus.Store and Nexus.Store.Init then
                     local okStore, storeResult =
@@ -1043,6 +1051,13 @@ function Lifecycle.New(options)
                 RegisterStutterAlertProvider()
             end
         elseif event == "PLAYER_ENTERING_WORLD" then
+            -- Created during this dispatch: the new frame is not in the
+            -- current event snapshot, so record the enter once here.
+            local noteEnter = false
+            if Nexus.OrbRuntime and type(Nexus.OrbRuntime.ObserveLifecycle) == "function" then
+                local okCreated, created = pcall(Nexus.OrbRuntime.ObserveLifecycle)
+                noteEnter = okCreated and created == true
+            end
             -- Bootstrap advances bounded work per scheduler turn, so
             -- world entry can arrive while authority is still pending. The
             -- request is recorded and completed on the turn the coordinator
@@ -1070,6 +1085,10 @@ function Lifecycle.New(options)
                     startupTiming.maxUpdateMs=math.max(
                         startupTiming.maxUpdateMs,finished-started)
                 end
+            end
+            if noteEnter and Nexus.OrbRuntime
+                and type(Nexus.OrbRuntime.NoteWorldEnter) == "function" then
+                pcall(Nexus.OrbRuntime.NoteWorldEnter)
             end
         elseif event == "PLAYER_LEVEL_UP" then
             if initialized then dependencies.Adapter.OnEvent(event) end

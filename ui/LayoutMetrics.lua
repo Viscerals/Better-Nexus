@@ -416,10 +416,12 @@ function M.Panel(spec)
         cursor = cursor + height + gap
     end
     if spec.callboard then
-        -- Label + reward pouch row + one objective line + bottom divider.
-        -- Sits with the difficulty / Soul Ash HUD, including the no-wishlist
-        -- setup view.
-        local callboardH = small + 34 + math.max(2, math.floor(gap / 3))
+        -- Label plus two one-line rows. Each row is at least one 17px line,
+        -- including the conservative face at font scale 1.
+        local _, lineH = M.ConservativeText(scale)
+        if lineH < 17 then lineH = 17 end
+        layout.callboardLine = lineH
+        local callboardH = small + 4 + (lineH * 2) + math.max(2, math.floor(gap / 3))
         Add(layout,"callboard",12,cursor,width-24,callboardH)
         cursor = cursor + callboardH + gap
     end

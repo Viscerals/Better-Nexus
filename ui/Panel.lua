@@ -632,6 +632,17 @@ end
 
 local function ApplyWantedVisibility()
     if not frame then return false end
+    if not frame._nexusCallboardCoverage then
+        frame._nexusCallboardCoverage = true
+        local function publish()
+            local status = Nexus.CallboardStatus
+            if status and type(status.PublishCoverage) == "function" then
+                status.PublishCoverage()
+            end
+        end
+        frame:HookScript("OnShow", publish)
+        frame:HookScript("OnHide", publish)
+    end
     if panelWantedVisible and not menuSuppressed
         and renderState.committed and not renderState.applying then
         frame:Show()
@@ -1759,12 +1770,22 @@ local function EnsureCallboardWidgets()
     title:SetWordWrap(false)
     title:SetTextColor(1, 0.82, 0)
     frame._callboardTitle = title
+    local titleHit = CreateFrame("Frame", nil, frame)
+    titleHit:EnableMouse(true)
+    frame._callboardTitleHit = titleHit
     local line = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     line:SetJustifyH("LEFT")
     line:SetJustifyV("TOP")
     line:SetWordWrap(false)
     line:SetTextColor(0.85, 0.85, 0.85)
     frame._callboardLine = line
+    local lineHit = CreateFrame("Frame", nil, frame)
+    lineHit:EnableMouse(true)
+    frame._callboardLineHit = lineHit
+    if Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
+        Nexus.LayoutMetrics.OneLineLabel(title, titleHit, 17)
+        Nexus.LayoutMetrics.OneLineLabel(line, lineHit, 17)
+    end
     local divider = frame:CreateTexture(nil, "ARTWORK")
     divider:SetHeight(1)
     pcall(function() divider:SetTexture(0.3, 0.3, 0.3, 0.65) end)
@@ -1804,16 +1825,35 @@ local function FillCallboard(summary)
 end
 
 -- Manual fallback when LayoutMetrics is unavailable (negative Y from TOPLEFT).
+local function CallboardLineHeight(layout)
+    local lineH = layout and tonumber(layout.callboardLine) or nil
+    if not lineH and Nexus.LayoutMetrics and Nexus.LayoutMetrics.ConservativeText then
+        local _, measured = Nexus.LayoutMetrics.ConservativeText(layout and layout.scale or 1)
+        lineH = measured
+    end
+    if not lineH or lineH < 17 then lineH = 17 end
+    return lineH
+end
+
 local function PlaceCallboardManual(top)
     if not frame or not frame._callboardLabel then return end
+    local lineH = CallboardLineHeight(nil)
     SetPoint(frame._callboardLabel, "TOPLEFT", frame, "TOPLEFT", 12, top)
     SetPoint(frame._callboardIcon, "TOPLEFT", frame, "TOPLEFT", 12, top - 14)
     SetPoint(frame._callboardTitle, "TOPLEFT", frame, "TOPLEFT", 38, top - 14)
-    frame._callboardTitle:SetSize(220, 14)
-    SetPoint(frame._callboardLine, "TOPLEFT", frame, "TOPLEFT", 38, top - 28)
-    frame._callboardLine:SetSize(220, 14)
+    frame._callboardTitle:SetSize(220, lineH)
+    if frame._callboardTitleHit then
+        SetPoint(frame._callboardTitleHit, "TOPLEFT", frame, "TOPLEFT", 38, top - 14)
+        frame._callboardTitleHit:SetSize(220, lineH)
+    end
+    SetPoint(frame._callboardLine, "TOPLEFT", frame, "TOPLEFT", 38, top - (14 + lineH))
+    frame._callboardLine:SetSize(220, lineH)
+    if frame._callboardLineHit then
+        SetPoint(frame._callboardLineHit, "TOPLEFT", frame, "TOPLEFT", 38, top - (14 + lineH))
+        frame._callboardLineHit:SetSize(220, lineH)
+    end
     if frame._callboardDivider then
-        SetPoint(frame._callboardDivider, "TOPLEFT", frame, "TOPLEFT", 11, top - 45)
+        SetPoint(frame._callboardDivider, "TOPLEFT", frame, "TOPLEFT", 11, top - (14 + lineH + lineH + 3))
         frame._callboardDivider:SetSize(250, 1)
     end
 end
@@ -1829,10 +1869,17 @@ local function PlaceCallboardBox(box, layout)
     end
     place(frame._callboardLabel, box.x, box.y, box.w, small)
     place(frame._callboardIcon, box.x, box.y + small + 2, 22, 22)
-    place(frame._callboardTitle, box.x + 26, box.y + small + 2,
-        math.max(1, box.w - 26), 14)
-    place(frame._callboardLine, box.x + 26, box.y + small + 16,
-        math.max(1, box.w - 26), 14)
+    local lineH = CallboardLineHeight(layout)
+    local titleY = box.y + small + 2
+    place(frame._callboardTitle, box.x + 26, titleY,
+        math.max(1, box.w - 26), lineH)
+    place(frame._callboardTitleHit, box.x + 26, titleY,
+        math.max(1, box.w - 26), lineH)
+    local lineY = titleY + lineH
+    place(frame._callboardLine, box.x + 26, lineY,
+        math.max(1, box.w - 26), lineH)
+    place(frame._callboardLineHit, box.x + 26, lineY,
+        math.max(1, box.w - 26), lineH)
     if frame._callboardDivider then
         place(frame._callboardDivider, box.x - 1, box.y + box.h - 1, box.w + 2, 1)
     end

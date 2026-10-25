@@ -1,10 +1,15 @@
 local H=dofile('tests/prototype/orbs_support.lua')
 local M=H.M
 local before=M.BoundaryDiagnostics()
-assert(before.lifecycleObserved==false,'no Orb owner lifecycle is invented before its frame starts')
+assert(before.lifecycleObserved==true,'lifecycle initialization installs the orb observer before the first spend')
+assert(type(before.epoch)=='number','the installed observer has a real epoch')
 H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD')
 local summary=Nexus.SupportReport.Summary()
-assert(summary:find('current_epoch=unknown',1,true),'unstarted owner observer is not a global world epoch zero')
+assert(summary:find('current_epoch='..tostring(before.epoch+2),1,true),
+ 'a later zone is counted by the observer installed at startup')
+assert(not summary:find('current_epoch=unknown',1,true),
+ 'an installed observer is not reported as an unknown epoch')
+H.Advance(3.1)
 H.OrbPlan();H.Approve(1,false);H.Offer();H.Result(410002,2)
 local d=M.BoundaryDiagnostics()
 assert(d.receiptPresent==false and d.snapshot~=nil,'fixture: completed fake operation retains comparisons')

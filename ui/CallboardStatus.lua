@@ -2,9 +2,10 @@
 -- Read-only mirror of the accepted Callboard objective and its difficulty
 -- rewards. Sources: EbonAPI.Ebonhold.Objectives and EbonholdQuestTracker (the
 -- PE tracker shown in fstack). Never falls back to generic WatchFrame/quest-
--- watch entries (that grabbed unrelated quests like "One More Door"), never
--- calls SelectQuestLogEntry, and never hides the stock tracker until both the
--- objective and rewards are mirrored.
+-- watch entries (that grabbed unrelated quests like "One More Door") and
+-- never calls SelectQuestLogEntry. Stock trackers stay until the Nexus row
+-- for the same objective is visible, and only the state Nexus changed is
+-- restored. Passive reward reads do not drive foreign enter/leave handlers.
 
 Nexus = Nexus or {}
 local M = {}
@@ -15,19 +16,13 @@ local elapsed = 0
 local cachedSummary = { observed = false }
 local cachedSignature = ""
 local remembered
-local stockPouch
 local scrapedRewards
 local scrapedForTitle
-local probedForTitle
-local pouchProbeBusy = false
 local showingOwnTooltip = false
-local trackerHiddenByNexus = false
-local otfHiddenByNexus = false
-local bagHiddenByNexus = false
-local watchFrameHiddenByNexus = false
 local hookedObjectivesUI = false
 local hookedQuestTracker = false
 local fastPollRemaining = 0
+local refreshQueued = false
 
 local REWARD_ROWS = {
     { label = "Normal", ash = "normalSoulAshes", xp = "normalXp",
@@ -99,7 +94,7 @@ local function ObjectiveBagFrame()
         if root and type(root.rewardBagFrame) == "table" then
             return root.rewardBagFrame
         end
-        return stockPouch
+        return nil
     end)
     if not ok or type(bag) ~= "table" then return nil end
     return bag
@@ -180,53 +175,68 @@ local function ReadCurrentObjectives()
 end
 
 local function QuestLogMatch(objective)
-    local title = QuestTitle(objective)
-    local questId = tonumber(objective and (objective.questId or objective.id)) or 0
-    if (not title or title == "") and questId <= 0 then return nil end
-    if type(GetNumQuestLogEntries) ~= "function" or type(GetQuestLogTitle) ~= "function" then
-        return nil
-    end
-    local want = title and NormalizeTitle(title) or nil
-    local count = GetNumQuestLogEntries() or 0
-    for i = 1, count do
-        -- 3.3.5 + Ebonhold: title, level, tag, suggestedGroup, isHeader, isCollapsed, isComplete, isDaily, questID
-        local logTitle, _, _, _, isHeader, _, isComplete, _, logQuestId = GetQuestLogTitle(i)
-        if not isHeader then
-            if (questId > 0 and tonumber(logQuestId) == questId)
-                or (want and logTitle and NormalizeTitle(logTitle) == want) then
-                return {
+    local ok, match = pcall(function()
+        local title = QuestTitle(objective)
+        local questId = tonumber(objective and (objective.questId or objective.id)) or 0
+        if (not title or title == "") and questId <= 0 then return nil end
+        if type(GetNumQuestLogEntries) ~= "function" or type(GetQuestLogTitle) ~= "function" then
+            return nil
+        end
+        local want = title and NormalizeTitle(title) or nil
+        local count = GetNumQuestLogEntries() or 0
+        local idOnly = nil
+        for i = 1, count do
+            -- 3.3.5 + Ebonhold: title, level, tag, suggestedGroup, isHeader, isCollapsed, isComplete, isDaily, questID
+            local logTitle, _, _, _, isHeader, _, isComplete, _, logQuestId = GetQuestLogTitle(i)
+            if not isHeader then
+                local row = {
                     title = Strip(logTitle or title or ""),
                     index = i,
                     questId = tonumber(logQuestId) or questId,
                     isComplete = tonumber(isComplete) or 0,
                 }
+                -- A stored id can name a different log row than the objective
+                -- title. Progress from that row is not this objective's.
+                if want and want ~= "" and logTitle and NormalizeTitle(logTitle) == want then
+                    return row
+                end
+                if not idOnly and questId > 0 and tonumber(logQuestId) == questId then
+                    idOnly = row
+                end
             end
         end
-    end
-    return nil
+        if want and want ~= "" then return nil end
+        return idOnly
+    end)
+    if not ok then return nil end
+    return match
 end
 
 local function QuestLogLinesForIndex(index, isComplete)
-    if not index then return nil end
-    if isComplete and isComplete > 0 then
-        return { "|cff66d966Ready for turn-in|r" }
-    elseif isComplete and isComplete < 0 then
-        return { "|cffff4d4dFailed|r" }
-    end
-    if type(GetNumQuestLeaderBoards) ~= "function"
-        or type(GetQuestLogLeaderBoard) ~= "function" then
-        return nil
-    end
-    local boards = GetNumQuestLeaderBoards(index) or 0
-    if boards <= 0 then return nil end
-    local lines = {}
-    for i = 1, boards do
-        local text = Strip(GetQuestLogLeaderBoard(i, index))
-        if text ~= "" then
-            lines[#lines + 1] = text:gsub("^%-+%s*", "")
+    local ok, lines = pcall(function()
+        if not index then return nil end
+        if isComplete and isComplete > 0 then
+            return { "|cff66d966Ready for turn-in|r" }
+        elseif isComplete and isComplete < 0 then
+            return { "|cffff4d4dFailed|r" }
         end
-    end
-    return #lines > 0 and lines or nil
+        if type(GetNumQuestLeaderBoards) ~= "function"
+            or type(GetQuestLogLeaderBoard) ~= "function" then
+            return nil
+        end
+        local boards = GetNumQuestLeaderBoards(index) or 0
+        if boards <= 0 then return nil end
+        local found = {}
+        for i = 1, boards do
+            local text = Strip(GetQuestLogLeaderBoard(i, index))
+            if text ~= "" then
+                found[#found + 1] = text:gsub("^%-+%s*", "")
+            end
+        end
+        return #found > 0 and found or nil
+    end)
+    if not ok then return nil end
+    return lines
 end
 
 local function CollectFontStrings(frame, out, seen, depth)
@@ -310,38 +320,53 @@ local function TrackerFrame()
     return (ok and type(f) == "table") and f or _G.ProjectEbonholdQuestTracker
 end
 
-local function RestoreTrackerAlpha()
-    local tracker = TrackerFrame()
-    if trackerHiddenByNexus and tracker and type(tracker.SetAlpha) == "function" then
-        pcall(tracker.SetAlpha, tracker, 1)
-        if type(tracker.collapse) == "table" and type(tracker.collapse.EnableMouse) == "function" then
-            pcall(tracker.collapse.EnableMouse, tracker.collapse, true)
+local heldStock = {}
+
+local function StockAlpha(frame)
+    if not frame or type(frame.GetAlpha) ~= "function" then return nil end
+    local ok, value = pcall(frame.GetAlpha, frame)
+    if ok and type(value) == "number" then return value end
+    return nil
+end
+
+local function StockMouse(frame)
+    if not frame or type(frame.IsMouseEnabled) ~= "function" then return nil end
+    local ok, value = pcall(frame.IsMouseEnabled, frame)
+    if ok and type(value) == "boolean" then return value end
+    return nil
+end
+
+local function HoldFrame(frame, mouseFrame)
+    if not frame then return end
+    for i = 1, #heldStock do
+        if heldStock[i].frame == frame then return end
+    end
+    heldStock[#heldStock + 1] = {
+        frame = frame,
+        alpha = StockAlpha(frame),
+        mouseFrame = mouseFrame,
+        mouse = StockMouse(mouseFrame),
+    }
+    if type(frame.SetAlpha) == "function" then
+        pcall(frame.SetAlpha, frame, 0)
+    end
+    if mouseFrame and type(mouseFrame.EnableMouse) == "function" then
+        pcall(mouseFrame.EnableMouse, mouseFrame, false)
+    end
+end
+
+local function RestoreHeldStock()
+    for i = 1, #heldStock do
+        local item = heldStock[i]
+        if item.frame and item.alpha and type(item.frame.SetAlpha) == "function" then
+            pcall(item.frame.SetAlpha, item.frame, item.alpha)
+        end
+        if item.mouseFrame and item.mouse ~= nil
+            and type(item.mouseFrame.EnableMouse) == "function" then
+            pcall(item.mouseFrame.EnableMouse, item.mouseFrame, item.mouse)
         end
     end
-    trackerHiddenByNexus = false
-    local otf = ObjectiveTrackerRoot()
-    if otfHiddenByNexus and otf then
-        if type(otf.SetAlpha) == "function" then pcall(otf.SetAlpha, otf, 1) end
-        if type(otf.EnableMouse) == "function" then pcall(otf.EnableMouse, otf, true) end
-    end
-    otfHiddenByNexus = false
-    local bag = ObjectiveBagFrame()
-    if bagHiddenByNexus and bag then
-        if type(bag.SetAlpha) == "function" then pcall(bag.SetAlpha, bag, 1) end
-        if type(bag.EnableMouse) == "function" then pcall(bag.EnableMouse, bag, true) end
-    end
-    bagHiddenByNexus = false
-    if stockPouch and type(stockPouch.SetAlpha) == "function" then
-        pcall(stockPouch.SetAlpha, stockPouch, 1)
-        if type(stockPouch.EnableMouse) == "function" then
-            pcall(stockPouch.EnableMouse, stockPouch, true)
-        end
-    end
-    local wf = _G.WatchFrame
-    if watchFrameHiddenByNexus and wf and type(wf.SetAlpha) == "function" then
-        pcall(wf.SetAlpha, wf, 1)
-    end
-    watchFrameHiddenByNexus = false
+    heldStock = {}
 end
 
 -- True when EbonholdQuestTracker / WatchFrame has no other tracked quest or
@@ -401,61 +426,61 @@ local function TrackerOnlyHasCallboard(summary)
     return true
 end
 
--- Hide the stock ObjectiveTrackerFrame + rewardBagFrame when Nexus mirrors the
--- callboard objective, and hide EbonholdQuestTracker ("Objectives (1)" or
--- expanded) when the callboard quest is the only tracked objective.
-local function SyncStockTrackerVisibility(summary)
-    local observed = summary and summary.observed == true
-    if not observed then
-        RestoreTrackerAlpha()
+-- Suppress stock frames only while Nexus is showing this same objective.
+-- Remember the objects and the alpha/mouse values actually changed.
+local function ReplacementCovered(summary)
+    if not summary or summary.observed ~= true then return false end
+    local panelApi = Nexus.Panel
+    if not panelApi or type(panelApi.VisibilityFacts) ~= "function" then
+        return false
+    end
+    local okFacts, facts = pcall(panelApi.VisibilityFacts)
+    if not okFacts or type(facts) ~= "table" then return false end
+    if facts.shown ~= true or facts.committed ~= true or facts.hadFailure == true then
+        return false
+    end
+    local root = _G.NexusPanel
+    local title = root and root._callboardTitle
+    local line = root and root._callboardLine
+    if not title or not line then return false end
+    if type(title.IsShown) ~= "function" or not title:IsShown() then return false end
+    if type(line.IsShown) ~= "function" or not line:IsShown() then return false end
+    local titleHeight = type(title.GetHeight) == "function" and tonumber(title:GetHeight()) or 0
+    local lineHeight = type(line.GetHeight) == "function" and tonumber(line:GetHeight()) or 0
+    if not titleHeight or titleHeight < 17 or not lineHeight or lineHeight < 17 then
+        return false
+    end
+    local shown = Strip(type(title.GetText) == "function" and title:GetText() or "")
+    if shown == "" or NormalizeTitle(shown) ~= NormalizeTitle(summary.title or "") then
+        return false
+    end
+    return true
+end
+
+local function PublishStock(summary)
+    if not ReplacementCovered(summary) then
+        RestoreHeldStock()
         return
     end
-
     local otf = ObjectiveTrackerRoot()
-    if otf then
-        if type(otf.SetAlpha) == "function" then pcall(otf.SetAlpha, otf, 0) end
-        if type(otf.EnableMouse) == "function" then pcall(otf.EnableMouse, otf, false) end
-        otfHiddenByNexus = true
-    end
+    if otf then HoldFrame(otf, otf) end
     local bag = ObjectiveBagFrame()
-    if bag then
-        if type(bag.SetAlpha) == "function" then pcall(bag.SetAlpha, bag, 0) end
-        if type(bag.EnableMouse) == "function" then pcall(bag.EnableMouse, bag, false) end
-        bagHiddenByNexus = true
-    end
-    if stockPouch and stockPouch ~= bag then
-        if type(stockPouch.SetAlpha) == "function" then pcall(stockPouch.SetAlpha, stockPouch, 0) end
-        if type(stockPouch.EnableMouse) == "function" then pcall(stockPouch.EnableMouse, stockPouch, false) end
-    end
-
-    local onlyCallboard = TrackerOnlyHasCallboard(summary)
+    if bag and bag ~= otf then HoldFrame(bag, bag) end
+    local okOnly, onlyCallboard = pcall(TrackerOnlyHasCallboard, summary)
+    if not okOnly then onlyCallboard = false end
     local tracker = TrackerFrame()
-    if tracker and type(tracker.SetAlpha) == "function" then
-        if onlyCallboard then
-            pcall(tracker.SetAlpha, tracker, 0)
-            if type(tracker.collapse) == "table" and type(tracker.collapse.EnableMouse) == "function" then
-                pcall(tracker.collapse.EnableMouse, tracker.collapse, false)
-            end
-            trackerHiddenByNexus = true
-        elseif trackerHiddenByNexus then
-            pcall(tracker.SetAlpha, tracker, 1)
-            if type(tracker.collapse) == "table" and type(tracker.collapse.EnableMouse) == "function" then
-                pcall(tracker.collapse.EnableMouse, tracker.collapse, true)
-            end
-            trackerHiddenByNexus = false
-        end
+    if onlyCallboard and tracker then
+        local collapse = type(tracker.collapse) == "table" and tracker.collapse or nil
+        HoldFrame(tracker, collapse)
     end
-
     local wf = _G.WatchFrame
-    if wf and type(wf.SetAlpha) == "function" then
-        if onlyCallboard then
-            pcall(wf.SetAlpha, wf, 0)
-            watchFrameHiddenByNexus = true
-        elseif watchFrameHiddenByNexus then
-            pcall(wf.SetAlpha, wf, 1)
-            watchFrameHiddenByNexus = false
-        end
+    if onlyCallboard and wf and wf ~= tracker and wf ~= otf then
+        HoldFrame(wf, nil)
     end
+end
+
+function M.PublishCoverage()
+    pcall(PublishStock, cachedSummary)
 end
 
 local function CollectTrackerTexts()
@@ -663,155 +688,6 @@ local function ReadTooltipRewardRows()
     return #rows > 0 and rows or nil
 end
 
-local function ProbePouchCandidate(frame)
-    if not frame or not GameTooltip or type(frame.GetScript) ~= "function" then
-        return nil
-    end
-    local handler = frame:GetScript("OnEnter")
-    if type(handler) ~= "function" then return nil end
-    local ok = pcall(handler, frame)
-    local rows = ok and ReadTooltipRewardRows() or nil
-    pcall(function()
-        if GameTooltip:IsShown() then GameTooltip:Hide() end
-    end)
-    local leave = frame:GetScript("OnLeave")
-    if type(leave) == "function" then pcall(leave, frame) end
-    return rows
-end
-
--- Walk EbonholdQuestTracker's own descendants, WatchFrame's small button
--- descendants (fstack showed the bag on LOW strata `<3> table: 329A09F8`),
--- plus small UIParent frames with OnEnter near the tracker.
-local function CollectPouchCandidates(tracker)
-    local out, seen = {}, {}
-    local function walkTracker(frame, depth, smallOnly)
-        if not frame or seen[frame] or depth > 5 then return end
-        seen[frame] = true
-        if frame ~= tracker and frame ~= _G.WatchFrame
-            and type(frame.GetScript) == "function"
-            and frame:GetScript("OnEnter") then
-            if not smallOnly then
-                out[#out + 1] = frame
-            else
-                local w = type(frame.GetWidth) == "function" and frame:GetWidth() or 0
-                local h = type(frame.GetHeight) == "function" and frame:GetHeight() or 0
-                if w >= 12 and w <= 56 and h >= 12 and h <= 56 then
-                    out[#out + 1] = frame
-                end
-            end
-        end
-        if type(frame.GetChildren) == "function" then
-            local ok, kids = pcall(function() return { frame:GetChildren() } end)
-            if ok then
-                for i = 1, #kids do
-                    walkTracker(kids[i], depth + 1, smallOnly)
-                end
-            end
-        end
-    end
-    if tracker then
-        walkTracker(tracker, 0, false)
-    end
-    if _G.WatchFrame then
-        walkTracker(_G.WatchFrame, 0, true)
-    end
-
-    -- Fallback: fstack in the second screenshot showed `<3> table: 329A09F8`
-    -- on LOW strata when hovering the bag directly. Check small LOW/MEDIUM
-    -- frames with OnEnter near the tracker (max 2 levels below UIParent).
-    if _G.UIParent and type(_G.UIParent.GetChildren) == "function" then
-        local tx, ty
-        if tracker and type(tracker.GetCenter) == "function" then
-            local ok, x, y = pcall(tracker.GetCenter, tracker)
-            if ok then tx, ty = x, y end
-        end
-        local ok, children = pcall(function() return { _G.UIParent:GetChildren() } end)
-        if ok then
-            for i = 1, #children do
-                local child = children[i]
-                if child and not seen[child] then
-                    local function checkSmall(f)
-                        if not f or seen[f] then return end
-                        local w = type(f.GetWidth) == "function" and f:GetWidth() or 0
-                        local h = type(f.GetHeight) == "function" and f:GetHeight() or 0
-                        if w >= 12 and w <= 56 and h >= 12 and h <= 56
-                            and type(f.GetScript) == "function" and f:GetScript("OnEnter") then
-                            local near = true
-                            if tx and ty and type(f.GetCenter) == "function" then
-                                local cok, cx, cy = pcall(f.GetCenter, f)
-                                if cok and cx and cy then
-                                    local dx, dy = cx - tx, cy - ty
-                                    near = (dx * dx + dy * dy) <= (450 * 450)
-                                end
-                            end
-                            if near then
-                                seen[f] = true
-                                out[#out + 1] = f
-                            end
-                        end
-                    end
-                    checkSmall(child)
-                    -- Up to two levels below direct UIParent children for `<3>` under `<2>` under `<1>`.
-                    local cw = type(child.GetWidth) == "function" and child:GetWidth() or 0
-                    local ch = type(child.GetHeight) == "function" and child:GetHeight() or 0
-                    if cw > 0 and cw <= 500 and ch > 0 and ch <= 700
-                        and type(child.GetChildren) == "function" then
-                        local ok2, kids = pcall(function() return { child:GetChildren() } end)
-                        if ok2 then
-                            for j = 1, #kids do
-                                checkSmall(kids[j])
-                                if kids[j] and type(kids[j].GetChildren) == "function" then
-                                    local ok3, grand = pcall(function() return { kids[j]:GetChildren() } end)
-                                    if ok3 then
-                                        for k = 1, #grand do
-                                            checkSmall(grand[k])
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return out
-end
-
-local function TryCaptureRewardsFromPouch(currentTitle)
-    local norm = NormalizeTitle(currentTitle or "")
-    if scrapedRewards and scrapedForTitle == norm and norm ~= "" then
-        return scrapedRewards
-    end
-    if pouchProbeBusy then return scrapedRewards end
-    pouchProbeBusy = true
-    local rows
-    pcall(function()
-        if stockPouch then
-            local found = ProbePouchCandidate(stockPouch)
-            if found then
-                scrapedRewards = found
-                scrapedForTitle = norm
-                rows = found
-                return
-            end
-        end
-        local candidates = CollectPouchCandidates(TrackerFrame())
-        local limit = math.min(#candidates, 12)
-        for i = 1, limit do
-            local found = ProbePouchCandidate(candidates[i])
-            if found then
-                stockPouch = candidates[i]
-                scrapedRewards = found
-                scrapedForTitle = norm
-                rows = found
-                return
-            end
-        end
-    end)
-    pouchProbeBusy = false
-    return rows
-end
 
 local function FormatAsh(n)
     n = tonumber(n) or 0
@@ -907,7 +783,11 @@ local function ResolveObjective()
                 end
                 if QuestLogMatch(snap) then
                     Remember(list[i])
-                    return snap, trackerLines
+                    local useLines = nil
+                    if trackerObj and NormalizeTitle(snap.title) == NormalizeTitle(trackerObj.title) then
+                        useLines = trackerLines
+                    end
+                    return snap, useLines
                 end
             end
         end
@@ -932,45 +812,42 @@ local function ResolveObjective()
 end
 
 local function BuildSummary()
-    local objective, trackerLines = ResolveObjective()
-    local title = QuestTitle(objective)
-    if not title then
-        SyncStockTrackerVisibility(nil)
-        return { observed = false }
+    local ok, summary = pcall(function()
+        local objective, trackerLines = ResolveObjective()
+        local title = QuestTitle(objective)
+        if not title then
+            return { observed = false }
+        end
+        local logMatch = QuestLogMatch(objective)
+        if logMatch and NormalizeTitle(logMatch.title or "") ~= NormalizeTitle(title) then
+            logMatch = nil
+        end
+        local lines = trackerLines
+        if (not lines or #lines == 0) and logMatch
+            and NormalizeTitle(logMatch.title or "") == NormalizeTitle(title) then
+            lines = QuestLogLinesForIndex(logMatch.index, logMatch.isComplete)
+        end
+        local blurb = ObjectiveBlurb(objective)
+        if (not lines or #lines == 0) and blurb then
+            lines = { blurb }
+        end
+        local apiRewards = CollectRewardRows(objective)
+        local normTitle = NormalizeTitle((logMatch and logMatch.title) or title)
+        local rewards = (type(apiRewards) == "table" and #apiRewards > 0) and apiRewards
+            or (scrapedForTitle == normTitle and scrapedRewards)
+            or {}
+        return {
+            observed = true,
+            title = (logMatch and logMatch.title) or title,
+            lines = lines or {},
+            questId = (logMatch and logMatch.questId and logMatch.questId > 0 and logMatch.questId)
+                or tonumber(objective.questId or objective.id) or 0,
+            rewards = rewards,
+        }
+    end)
+    if not ok or type(summary) ~= "table" then
+        return cachedSummary or { observed = false }
     end
-    local logMatch = QuestLogMatch(objective)
-    local lines = trackerLines
-    if (not lines or #lines == 0) and logMatch then
-        lines = QuestLogLinesForIndex(logMatch.index, logMatch.isComplete)
-    end
-    local blurb = ObjectiveBlurb(objective)
-    if (not lines or #lines == 0) and blurb then
-        lines = { blurb }
-    end
-    local apiRewards = CollectRewardRows(objective)
-    local normTitle = NormalizeTitle((logMatch and logMatch.title) or title)
-    if scrapedForTitle and scrapedForTitle ~= normTitle then
-        scrapedRewards = nil
-        scrapedForTitle = nil
-    end
-    -- Probe the stock pouch once per quest title if API rewards are not yet populated.
-    if (not apiRewards or #apiRewards == 0) and not scrapedRewards
-        and probedForTitle ~= normTitle then
-        probedForTitle = normTitle
-        TryCaptureRewardsFromPouch(normTitle)
-    end
-    local rewards = (type(apiRewards) == "table" and #apiRewards > 0) and apiRewards
-        or scrapedRewards
-        or {}
-    local summary = {
-        observed = true,
-        title = (logMatch and logMatch.title) or title,
-        lines = lines or {},
-        questId = (logMatch and logMatch.questId and logMatch.questId > 0 and logMatch.questId)
-            or tonumber(objective.questId or objective.id) or 0,
-        rewards = rewards,
-    }
-    SyncStockTrackerVisibility(summary)
     return summary
 end
 
@@ -1006,18 +883,25 @@ end
 
 local function RefreshNow()
     local summary = BuildSummary()
+    if type(summary) ~= "table" then
+        pcall(PublishStock, nil)
+        return
+    end
     local sig = Signature(summary)
-    if sig == cachedSignature then return end
     local previous = cachedSummary
+    local changed = sig ~= cachedSignature
     cachedSignature = sig
     cachedSummary = summary
     -- Filling the empty cache is not a panel change. Rebuilding the HUD here
-    -- is what shifts a profiler-budgeted sync send by one frame.
+    -- is what shifts a profiler-budgeted sync send by one frame. An unchanged
+    -- observation does not refresh it again.
     local wasObserved = type(previous) == "table" and previous.observed == true
-    if not summary.observed and not wasObserved then return end
-    if Nexus.Panel and Nexus.Panel.Refresh then
-        pcall(Nexus.Panel.Refresh)
+    if changed and (summary.observed or wasObserved) then
+        if Nexus.Panel and Nexus.Panel.Refresh then
+            pcall(Nexus.Panel.Refresh)
+        end
     end
+    pcall(PublishStock, cachedSummary)
 end
 
 local function EnsureEbonholdHooks()
@@ -1029,14 +913,13 @@ local function EnsureEbonholdHooks()
         if type(pe.ObjectivesUI.UpdateTracker) == "function" then
             pcall(hooksecurefunc, pe.ObjectivesUI, "UpdateTracker", function(objective)
                 if type(objective) == "table" then Remember(objective) end
-                cachedSignature = ""
-                RefreshNow()
+                refreshQueued = true
+                fastPollRemaining = math.max(fastPollRemaining, 2)
             end)
         end
         if type(pe.ObjectivesUI.DisplayObjectives) == "function" then
             pcall(hooksecurefunc, pe.ObjectivesUI, "DisplayObjectives", function()
-                cachedSignature = ""
-                RefreshNow()
+                refreshQueued = true
             end)
         end
     end
@@ -1045,9 +928,26 @@ local function EnsureEbonholdHooks()
         if type(pe.QuestTracker.MarkDirty) == "function" then
             pcall(hooksecurefunc, pe.QuestTracker, "MarkDirty", function()
                 fastPollRemaining = math.max(fastPollRemaining, 2)
+                refreshQueued = true
             end)
         end
     end
+end
+
+local function TooltipSourceTitle()
+    if not GameTooltip or type(GameTooltip.GetOwner) ~= "function" then
+        return nil
+    end
+    local ok, owner = pcall(GameTooltip.GetOwner, GameTooltip)
+    if not ok or type(owner) ~= "table" then return nil end
+    local data = owner.objectiveData
+    if type(data) ~= "table" and type(owner.GetParent) == "function" then
+        local okParent, parent = pcall(owner.GetParent, owner)
+        if okParent and type(parent) == "table" then
+            data = parent.objectiveData
+        end
+    end
+    return QuestTitle(data)
 end
 
 function M.Init()
@@ -1060,45 +960,44 @@ function M.Init()
     scanner:SetScript("OnEvent", function(_, event)
         if not CallboardSourcePresent() and not remembered then return end
         EnsureEbonholdHooks()
-        cachedSignature = ""
+        refreshQueued = true
         fastPollRemaining = math.max(fastPollRemaining, 10)
         if event == "PLAYER_ENTERING_WORLD" then
-            stockPouch = nil
             scrapedRewards = nil
             scrapedForTitle = nil
-            probedForTitle = nil
             local service = ObjectivesService()
             if service and type(service.RequestObjectives) == "function" then
                 pcall(service.RequestObjectives)
             end
         end
-        RefreshNow()
     end)
     scanner:SetScript("OnUpdate", function(_, dt)
         if not CallboardSourcePresent() and not remembered then return end
         elapsed = elapsed + (tonumber(dt) or 0)
         local interval = fastPollRemaining > 0 and 0.2 or 1.0
-        if elapsed < interval then return end
+        if not refreshQueued and elapsed < interval then return end
         elapsed = 0
+        refreshQueued = false
         if fastPollRemaining > 0 then
             fastPollRemaining = fastPollRemaining - 1
         end
         EnsureEbonholdHooks()
         RefreshNow()
     end)
-    -- Passive capture: whenever GameTooltip displays the stock "Rewards by
-    -- Difficulty" tooltip, cache the parsed rows. Skip while Nexus itself is
-    -- populating GameTooltip so our formatted "59.2M Ash" never overwrites raw
-    -- reward values.
+    -- Passive capture of a tooltip the game already showed. The owner of that
+    -- tooltip names the objective. Nexus does not call foreign enter/leave
+    -- handlers and does not hide a tooltip it did not open.
     if GameTooltip and type(GameTooltip.HookScript) == "function" then
         pcall(GameTooltip.HookScript, GameTooltip, "OnShow", function()
             if showingOwnTooltip then return end
             local rows = ReadTooltipRewardRows()
-            if rows and #rows > 0 then
-                scrapedRewards = rows
-                if cachedSummary and cachedSummary.title then
-                    scrapedForTitle = NormalizeTitle(cachedSummary.title)
-                end
+            local sourceTitle = TooltipSourceTitle()
+            if not rows or not sourceTitle then return end
+            scrapedRewards = rows
+            scrapedForTitle = NormalizeTitle(sourceTitle)
+            if cachedSummary and cachedSummary.observed
+                and NormalizeTitle(cachedSummary.title or "") == scrapedForTitle then
+                refreshQueued = true
             end
         end)
     end
@@ -1106,8 +1005,11 @@ end
 
 function M.GetSummary()
     if cachedSignature == "" then
-        cachedSummary = BuildSummary()
-        cachedSignature = Signature(cachedSummary)
+        local summary = BuildSummary()
+        if type(summary) == "table" then
+            cachedSummary = summary
+            cachedSignature = Signature(summary)
+        end
     end
     return cachedSummary
 end
@@ -1165,25 +1067,9 @@ function M.ShowRewardsTooltip(owner)
     if not GameTooltip or not owner then return end
     local summary = M.GetSummary()
     local rows = summary and summary.rewards or nil
-    if not rows or #rows == 0 then
-        rows = TryCaptureRewardsFromPouch(summary and summary.title or "")
-    end
     if type(rows) == "table" and #rows > 0 then
         ShowRewardsRows(owner, rows)
         return
-    end
-
-    -- If parsing missed but we matched the stock pouch, let its own OnEnter
-    -- populate GameTooltip directly and then re-anchor to the left of the panel.
-    if stockPouch and type(stockPouch.GetScript) == "function" then
-        local handler = stockPouch:GetScript("OnEnter")
-        if type(handler) == "function" then
-            local ok = pcall(handler, stockPouch)
-            if ok and GameTooltip:IsShown() then
-                AnchorRewardsTooltipLeft(owner)
-                return
-            end
-        end
     end
 
     GameTooltip:SetOwner(owner, "ANCHOR_NONE")

@@ -65,6 +65,7 @@ local function Owned(H)
  H.Notify();Nexus.GameAdapter.Poll();H.Advance(1,.05)
 end
 H=F.Reload(F.OrbService);Owned(H)
+H.Advance(3.1)
 check(Nexus.StartupStatus().coreReady and NexusDB.settingsVersion==5,'reload keeps the saved marker')
 check(F.Serialize(NexusDB.chars[F.OWNER].savedFormatCarry)==carried,'the carry is not repeated on reload')
 check(F.Serialize(NexusDB.chars[F.NAME])==nameRowBefore,'the original row is still unchanged after reload')

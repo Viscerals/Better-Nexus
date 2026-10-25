@@ -757,30 +757,34 @@ local function turnAutoOff()
     return true
 end
 
-ensureFrame=function()
-    if frame then frame:Show();return end
+local function applyWorldEvent(event)
+    init()
+    if event=="PLAYER_LEAVING_WORLD" then
+        life.epoch=(life.epoch+1)%65536;life.phase="l";life.settleUntil=0
+    elseif event=="PLAYER_ENTERING_WORLD" then
+        -- Post-enter settle: Resume and new host calls wait until this
+        -- deadline passes. phase "r" alone is not that hold.
+        life.epoch=(life.epoch+1)%65536;life.phase="r"
+        life.settleUntil=now()+WORLD_SETTLE
+    end
+    journalNote(event=="PLAYER_LEAVING_WORLD" and "leave" or event=="PLAYER_ENTERING_WORLD" and "enter" or "logout",nil,run.pending)
+    -- Evidence that could not be saved when it was seen is saved now: a
+    -- reload or a logout follows these events.
+    flushEvidence()
+    -- A restored receipt is already passive. Keep its recovery explanation.
+    -- Stop is not sent through this path; a deliberate Stop still completes.
+    if run.pending and run.pending.restored and not run.running then return end
+    if run.running or run.pending then
+        run.running=false;setState("PAUSED",SESSION_INTERRUPTED);run.worldPausedAt=now()
+        if run.pending then savePending() else release() end
+    end
+end
+local function installObserver()
+    if frame then return false end
     frame=CreateFrame("Frame","NexusOrbRuntime",UIParent)
     frame:RegisterEvent("PLAYER_LOGOUT");frame:RegisterEvent("PLAYER_LEAVING_WORLD");frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:SetScript("OnEvent",function(_,event)
-        init()
-        if event=="PLAYER_LEAVING_WORLD" then
-            life.epoch=(life.epoch+1)%65536;life.phase="l";life.settleUntil=0
-        elseif event=="PLAYER_ENTERING_WORLD" then
-            -- Post-enter settle: Resume and new host calls wait until phase
-            -- becomes "w" (first successful read) and this deadline passes.
-            life.epoch=(life.epoch+1)%65536;life.phase="r"
-            life.settleUntil=now()+WORLD_SETTLE
-        end
-        journalNote(event=="PLAYER_LEAVING_WORLD" and "leave" or event=="PLAYER_ENTERING_WORLD" and "enter" or "logout",nil,run.pending)
-        -- Evidence that could not be saved when it was seen is saved now: a
-        -- reload or a logout follows these events.
-        flushEvidence()
-        -- A restored receipt is already passive. Keep its recovery explanation.
-        if run.pending and run.pending.restored and not run.running then return end
-        if run.running or run.pending then
-            run.running=false;setState("PAUSED",SESSION_INTERRUPTED);run.worldPausedAt=now()
-            if run.pending then savePending() else release() end
-        end
+        applyWorldEvent(event)
     end)
     local elapsed=0
     frame:SetScript("OnUpdate",function(_,dt)
@@ -794,6 +798,24 @@ ensureFrame=function()
         end
         if run and not run.running and not run.pending and not RS.after then frame:Hide() end
     end)
+    -- Hidden frames still receive lifecycle events. Stay hidden until a run
+    -- needs the pump, so an idle observer does not poll the host.
+    frame:Hide()
+    return true
+end
+ensureFrame=function()
+    installObserver()
+    frame:Show()
+end
+-- Passive registration. Lifecycle init calls this before the first spend so
+-- a world entry is not missed by a frame that does not exist yet. Returns
+-- true only when this call created the frame (that call cannot also receive
+-- the event that is already being dispatched).
+function M.ObserveLifecycle()
+    return installObserver()==true
+end
+function M.NoteWorldEnter()
+    applyWorldEvent("PLAYER_ENTERING_WORLD")
 end
 function M.Confirm(token)
     init();local a=approval
