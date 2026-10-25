@@ -758,7 +758,6 @@ local function turnAutoOff()
 end
 
 local function applyWorldEvent(event)
-    init()
     if event=="PLAYER_LEAVING_WORLD" then
         life.epoch=(life.epoch+1)%65536;life.phase="l";life.settleUntil=0
     elseif event=="PLAYER_ENTERING_WORLD" then
@@ -767,6 +766,15 @@ local function applyWorldEvent(event)
         life.epoch=(life.epoch+1)%65536;life.phase="r"
         life.settleUntil=now()+WORLD_SETTLE
     end
+    -- Lifecycle facts only until an Orb read or action has initialized this
+    -- runtime. The observer exists from addon load, before the Store admits
+    -- this character's saved row: init() here would copy and cache that
+    -- unadmitted row as runner state, and its cached owner key would then
+    -- hide a receipt that admission exposes later. Without a run there is
+    -- nothing to journal, save or pause. A later runtime read or action
+    -- (BlocksOrdinary, RecoveryView, Status, an edit) loads a saved receipt.
+    if not config then return end
+    init()
     journalNote(event=="PLAYER_LEAVING_WORLD" and "leave" or event=="PLAYER_ENTERING_WORLD" and "enter" or "logout",nil,run.pending)
     -- Evidence that could not be saved when it was seen is saved now: a
     -- reload or a logout follows these events.

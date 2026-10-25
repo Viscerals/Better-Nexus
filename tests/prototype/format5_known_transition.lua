@@ -98,4 +98,85 @@ F.Reload(F.OrbService)
 check(Durable()==once,'a further start-up changes none of the carried, settings, ledger or archive data')
 check(NexusDB.settings.autoPick==false,'the stored Take preference (autoPick) is still as saved')
 check(Nexus.RecomputeStats().autoEnabled==false,'the session Automation master switch (autoEnabled) is still OFF')
+-- 6. Early lifecycle observation before Store admission. MainLifecycle
+-- installs the Orb observer at addon load, so the startup enter reaches it
+-- while Store.State does not yet expose a plain-name row. The receipt that
+-- the explicit Start above created is round-tripped (no invented shape).
+-- Control: that receipt in the existing canonical row. Regression: the same
+-- receipt only in the plain name-keyed row, with no canonical row.
+local orbBefore=assert(loadstring('return '..pending))()
+local function Identity(p)
+ if type(p)~='table' then return nil end
+ return F.Serialize({removed=p.removed,chargesBefore=p.chargesBefore,before=p.before,lockedKey=p.lockedKey,
+  originalSlot=p.originalSlot,logSerial=p.logSerial,beforeStamp=p.beforeStamp,guid=p.guid})
+end
+local identity=Identity(orbBefore.pending)
+check(identity and type(orbBefore.pending.removed)=='string' and orbBefore.maxOrbs==1,
+ 'fixture: the round-tripped receipt is the pending action of the explicit Start above')
+local canonicalSaved=F.Serialize(NexusDB.chars[F.OWNER])
+check(Identity(NexusDB.chars[F.OWNER].orbRefinement.pending)==identity,'fixture: the existing canonical row holds that receipt')
+local function Sent(H,kind)local n=0;for _,a in ipairs(H.actions)do if a[1]==kind then n=n+1 end end;return n end
+-- Read-only facts at the startup enter, before any scheduler turn.
+local function EarlyFacts(into)
+ return function()
+  local st=Nexus.Store.State()
+  into.coreReady=Nexus.StartupStatus().coreReady
+  into.write=Nexus.Store.StateWriteStatus().mode
+  into.orb=type(st)=='table' and st.orbRefinement or nil
+  into.view=Nexus.OrbRuntime.RunnerView()
+  into.hidden=type(NexusOrbRuntime)=='table' and NexusOrbRuntime:IsShown()==false
+ end
+end
+local function EnterBeforeAdmission(seen,label)
+ check(seen.coreReady==false and seen.write=='loading',label..': the actual startup enter is dispatched before Store admission')
+ check(type(seen.view)=='table' and seen.view.lifecycleObserved==true and type(seen.view.epoch)=='number'
+  and seen.view.epoch>=1 and seen.view.phase=='r',label..': the observer installed at addon load records that enter as lifecycle facts')
+ check(Nexus.StartupStatus().coreReady and Nexus.Store.StateWriteStatus().mode=='durable',label..': Store admission then completes and writes are durable')
+end
+local function ReceiptHeld(H,label,nameRow)
+ local R,St=Nexus.OrbRuntime,Nexus.Store
+ local saved=St.State().orbRefinement
+ check(type(saved)=='table' and Identity(saved.pending)==identity,label..': after admission Store.State exposes the saved pending receipt')
+ check(R.BlocksOrdinary()==true,label..': once Store admission is ready the saved pending receipt blocks ordinary rolling')
+ local view=R.RecoveryView()
+ check(view.pending==true and view.restored==true and R.RunnerView().pending==true,
+  label..': the runtime holds the saved receipt as an unresolved restored Orb action')
+ local okLimit,whyLimit=R.SetLimit(orbBefore.maxOrbs+6)
+ check(okLimit~=true and type(whyLimit)=='string',label..': an explicit maximum edit is refused while the receipt is unresolved')
+ local okRecycle,whyRecycle=R.SetRecycle(orbBefore.recycle~=true)
+ check(okRecycle~=true and type(whyRecycle)=='string',label..': an explicit recycling edit is refused while the receipt is unresolved')
+ saved=St.State().orbRefinement
+ check(type(saved)=='table' and Identity(saved.pending)==identity and saved.maxOrbs==orbBefore.maxOrbs
+  and saved.recycle==orbBefore.recycle,label..': refused edits replace neither the saved receipt nor its preferences')
+ local row=NexusDB.chars[F.OWNER]
+ check(row==nil or (type(row.orbRefinement)=='table' and Identity(row.orbRefinement.pending)==identity),
+  label..': a canonical row carries the receipt; no canonical Orb state is written without it')
+ check(F.Serialize(NexusDB.chars[F.NAME])==nameRow,label..': the original name-keyed row is unchanged')
+ local st=St.State()
+ check(st.unknownGenField and st.unknownGenField.keep=='row' and NexusDB.genUnknownTopLevel.keep=='top'
+  and NexusDB.nexusNativeRecoveryArchiveF5.chars[F.NAME].archived and NexusDB.settingsVersion==5,
+  label..': unknown fields, the recovery archive and the saved marker are kept')
+ check(Sent(H,'orb-spend')==0 and Sent(H,'take')==0 and H.orbs.source==nil,label..': no Orb spend or Echo choice is sent')
+ check(R.BlocksOrdinary()==true,label..': the receipt still blocks ordinary rolling after the refused edits')
+end
+local control=F.Database({mutate=function(db)db.chars[F.OWNER]=assert(loadstring('return '..canonicalSaved))()end})
+check(control.chars[F.NAME].orbRefinement==nil and Identity(control.chars[F.OWNER].orbRefinement.pending)==identity,
+ 'control: the receipt is only in the existing canonical row')
+local seen={}
+H=F.Boot(control,F.OrbService,EarlyFacts(seen))
+EnterBeforeAdmission(seen,'control')
+ReceiptHeld(H,'control',nameRowBefore)
+seen={}
+local legacy=F.Database({mutate=function(db)db.chars[F.NAME].orbRefinement=assert(loadstring('return '..pending))()end})
+local legacyRow=F.Serialize(legacy.chars[F.NAME])
+check(legacy.chars[F.OWNER]==nil and Identity(legacy.chars[F.NAME].orbRefinement.pending)==identity,
+ 'name row: the receipt is only in the plain name-keyed row; no canonical row exists')
+H=F.Boot(legacy,F.OrbService,EarlyFacts(seen))
+EnterBeforeAdmission(seen,'name row')
+check(seen.orb==nil and seen.hidden==true,
+ 'name row: at that enter Store.State does not expose the unadmitted row, and the idle observer stays hidden')
+ReceiptHeld(H,'name row',legacyRow)
+check(seen.view.initialized==false,
+ 'name row: the passive startup enter kept lifecycle facts only; it did not initialize or cache Orb runner state from the unadmitted row')
+print('PASS format5_known_transition early enter: name-keyed and canonical receipts admitted after the enter block rolling and edits checks='..checks)
 print('PASS format5_known_transition: durable Store, owned row carried once, Orb eligibility agrees, receipt kept, idempotent checks='..checks)
