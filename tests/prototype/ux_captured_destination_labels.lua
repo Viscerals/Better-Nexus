@@ -199,8 +199,18 @@ local function ResultHoverFirstLine()
  end
  return nil
 end
--- The editor's context line: the text anchored directly under its title.
+-- The editor's context line: the shown cells of its destination row, joined
+-- in order; without that row (an older editor), the text anchored directly
+-- under its title.
 local function ContextLine()
+ local row=NexusEditorFrame and NexusEditorFrame._destinationRow
+ if type(row)=='table' and type(row.cells)=='table' then
+  local shown={}
+  for _,c in ipairs(row.cells) do
+   if c:IsVisible() then shown[#shown+1]=V.Plain(c:GetText() or '') end
+  end
+  return table.concat(shown,' / ')
+ end
  for _,r in ipairs(NexusEditorFrame and NexusEditorFrame.regions or {}) do
   local at=r.points and r.points[1]
   if r.kind=='FontString' and at and at[1]=='TOP' and type(at[2])=='table'
@@ -583,6 +593,128 @@ C.scenario('A10 a replaced editor context retires the result',function()
  C.guard(row~=nil and ResultRow()==nil,'A10: the earlier result is gone in the new context',ResultRow())
  C.guard(Others()==others and H.perks.serverActiveSlot==6,'A10: choosing a Saved Build activates nothing')
  Close()
+end)
+
+-- Destination row (helper successor): the real four-cell rows of the editor
+-- and the HUD, read as shown. EXPECT: behaviour of that row (a source
+-- without it fails one expectation and returns, never a setup); GUARD: the
+-- editor's existing quiet refresh. Geometry is the offline font model of
+-- layout_geometry_support, not native measurement.
+local G=dofile('tests/prototype/layout_geometry_support.lua')
+-- The four cells of a real destination row as shown (plain text), and each
+-- way one is not: not visible, wider than its own width, outside the row or
+-- overlapping another cell (one line: horizontal extents).
+local function RowCells(row)
+ local texts,bad,rects={},{},{}
+ local width=row:GetWidth()
+ if #row.cells~=4 then bad[#bad+1]=#row.cells..' cells' end
+ for i=1,4 do
+  local c=row.cells[i]
+  texts[i]=''
+  if type(c)~='table' or c.kind~='FontString' or not c:IsVisible() or (c:GetText() or '')=='' then
+   bad[#bad+1]='cell'..i..' not shown'
+  else
+   texts[i]=V.Plain(c:GetText())
+   if c:GetStringWidth()>c:GetWidth() then
+    bad[#bad+1]='cell'..i..' '..texts[i]..' measures '..c:GetStringWidth()..' in '..c:GetWidth()
+   end
+   local placed,r=pcall(G.Rect,c,row)
+   if not placed then
+    bad[#bad+1]='cell'..i..' not placed'
+   else
+    if r[1]<0 or r[3]>width then bad[#bad+1]='cell'..i..' outside the row '..G.Text(r) end
+    for j,o in pairs(rects) do
+     if r[1]<o[3] and o[1]<r[3] then bad[#bad+1]='cells '..j..' and '..i..' overlap' end
+    end
+    rects[i]=r
+   end
+  end
+ end
+ return texts,bad
+end
+
+C.scenario('the editor destination row keeps naming the captured Saved Build Six',function()
+ BoundWorld(6)
+ C.setup(NexusEditorFrame and NexusEditorFrame:IsVisible(),'R-ED: fixture: the real editor is shown')
+ local row=NexusEditorFrame and NexusEditorFrame._destinationRow
+ local has=type(row)=='table' and type(row.cells)=='table'
+ C.expect(has,'R-ED: the editor shows its destination row of cells')
+ if not has then return end
+ local function Shown(tag)
+  local t,bad=RowCells(row)
+  local all=table.concat(t,' / ')
+  print('OBSERVED','R-ED '..tag..' row='..all)
+  C.expect(#bad==0,'R-ED '..tag..': four visible cells, each within its own width, disjoint inside the row',table.concat(bad,'; '))
+  C.expect(t[1]:find(CHARACTER,1,true) and V.Names(t[2],'Six')
+   and (t[2]:find('slot 6)',1,true) or (t[2]:find('#6',1,true) and not t[2]:find('#6%d')))
+   and t[3]:find('W-Six',1,true) and t[4]:find('Captured',1,true)
+   and not V.Names(all,'One') and not t[2]:find('slot 1)',1,true) and not t[2]:find('#1',1,true),
+   'R-ED '..tag..': it shows '..CHARACTER..', the captured Six (slot 6), W-Six and Captured, never One',all)
+ end
+ Shown('opened')
+ H.perks.serverActiveSlot=1;H.Notify();A.Poll();H.Advance(1)
+ C.setup(A.Slots().activeSlot==1,'R-ED: fixture: Saved Build One is active now')
+ Nexus.WishlistEditor.Refresh()
+ Shown('after One became active')
+ C.guard(Ctx().loadoutSlot==6 and Ctx().name=='W-Six','R-ED: the editor still edits W-Six for Saved Build 6',Ctx().loadoutSlot)
+ -- Settled: five more real refreshes read only Level and act on nothing.
+ -- Public methods are wrapped and counted, then restored before leaving.
+ local reads={'Slots','Wishlist','GetLoadoutWishlist','AssignedWishlist','GetFirstRunWishlist','SelectedSavedBuild'}
+ local counts,restore={},{}
+ local function Count(t,k,label)
+  local real=t[k]
+  if type(real)~='function' then return end
+  counts[label]=0;restore[#restore+1]=function() t[k]=real end
+  t[k]=function(...) counts[label]=counts[label]+1;return real(...) end
+ end
+ local actions,sent,w,sp,auto=#H.actions,#H.sent,Writes(),spends,Auto()
+ for _,k in ipairs(reads) do Count(A,k,k) end
+ Count(A,'Level','Level');Count(Nexus.Store,'State','Store.State');Count(_G,'UnitName','UnitName')
+ local ok,err=pcall(function() for _=1,5 do Nexus.WishlistEditor.Refresh() end end)
+ for i=#restore,1,-1 do restore[i]() end
+ reads[#reads+1]='Store.State';reads[#reads+1]='UnitName'
+ local zero,profile=true,{'Level='..tostring(counts.Level)}
+ for _,k in ipairs(reads) do
+  profile[#profile+1]=k..'='..tostring(counts[k])
+  if (counts[k] or 0)~=0 then zero=false end
+ end
+ print('OBSERVED','R-ED warm '..table.concat(profile,','))
+ C.expect(ok and counts.Level==5 and zero,
+  'R-ED: five warm refreshes read Level 5 times and no slot, Wishlist, assignment, first-run, selected Saved Build, Store or UnitName',
+  ok and table.concat(profile,',') or err)
+ C.guard(#H.actions==actions and #H.sent==sent and Writes()==w and spends==sp and Auto()==auto,
+  'R-ED: they activate, save, send, assign, spend and change Auto nothing')
+ Close()
+end)
+
+C.scenario('the HUD destination row fits an empty long-named Saved Build 123 at the 2.0 font scale',function()
+ Boot({active=0,slots={[107]={name='W-Free',verified=false,echoes=EF}}})
+ G.UseFont(G.MODELS.double)
+ local ok,res=pcall(Nexus.Panel.Render,{character=CHARACTER,
+  progress={activeSlot=123,activeSlotName='Long \195\169cho | field '..string.rep('wide ',12),wishlistName='W-Free',
+   owned=0,total=2,missing={},shed={},unknownTomes={},toLock={},isCommunityPreview=false},
+  assignment={state='ready',name='W-Free',emptySlot=true},cards={},auto=false,level=40})
+ C.setup(ok and res~=false,'R-HUD: fixture: the real HUD renders the synthetic model',res)
+ local row=_G.NexusPanel and NexusPanel._destinationRow
+ local has=type(row)=='table' and type(row.cells)=='table'
+ C.expect(has,'R-HUD: the HUD shows its destination row of cells')
+ if not (ok and has) then return end
+ local t,bad=RowCells(row)
+ local all=table.concat(t,' / ')
+ print('OBSERVED','R-HUD row='..all)
+ C.expect(#bad==0,'R-HUD: before hover, four visible cells, each within its own width, disjoint inside the row',table.concat(bad,'; '))
+ local who=t[1]:gsub('^Character:%s*',''):gsub('^C:%s*',''):gsub('%.%.%.$','')
+ C.expect(who~='' and CHARACTER:sub(1,#who)==who
+  and ((t[2]:find('#123',1,true) and not t[2]:find('#123%d')) or t[2]:find('slot 123)',1,true))
+  and (t[3]:find('!$') or t[3]:find('Refused',1,true) or t[3]:find('No valid assignment',1,true) or t[3]:find('W-F',1,true))
+  and V.Names(t[4],'Empty'),
+  'R-HUD: it shows the leading character, the whole #123, the whole Wishlist refusal marker (or W-Free) and the whole Empty state',all)
+ local hit=type(row.hits)=='table' and row.hits[2] or nil
+ local enter=hit and hit:GetScript('OnEnter')
+ local tip=enter and V.Plain(table.concat(V.TooltipLines(function() enter(hit) end),' / ')) or ''
+ C.expect(tip:find('Character: '..CHARACTER,1,true) and tip:find('slot 123)',1,true)
+  and tip:find(string.rep('wide ',11)..'wide',1,true) and tip:find('holds no Echoes',1,true),
+  'R-HUD: hovering the Saved Build cell then discloses the whole destination',tip)
 end)
 
 C.finish('(confirmations name the captured destination; first-run labelled; no guessed destination)')
