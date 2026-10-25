@@ -838,6 +838,16 @@ local function EnsureFrame()
     end)
     switchBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        -- Issue #143: while the client shortens this button's one-line label
+        -- (its own FontString, bounded to the button in ApplyModel), its own
+        -- hover shows the complete label first. Nothing below takes the
+        -- tooltip again, so every line of its own follows unchanged. The
+        -- OneLineLabel owner hook is not attached: it would run after these
+        -- lines and take the tooltip again with its own SetOwner.
+        local metrics = Nexus.LayoutMetrics
+        if metrics and metrics.Shortened and metrics.Shortened(self:GetFontString()) then
+            GameTooltip:AddLine(tostring(self:GetText() or ""), 1, 1, 1, true)
+        end
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.open_my_builds"), 1, 1, 1)
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.my_builds_destination"), 0.75, 0.75, 0.75, true)
         -- M4 (UX-04): what this panel's run belongs to, from the facts the
@@ -1295,6 +1305,11 @@ local function EnsureFrame()
     end)
     setupGetStartedBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        -- Issue #143: the complete label first while it is shortened (see My Builds).
+        local metrics = Nexus.LayoutMetrics
+        if metrics and metrics.Shortened and metrics.Shortened(self:GetFontString()) then
+            GameTooltip:AddLine(tostring(self:GetText() or ""), 1, 1, 1, true)
+        end
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.assignment_heading"), 1, 1, 1)
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.assignment_chooser"), 0.9, 0.9, 0.9, true)
         GameTooltip:Show()
@@ -1310,6 +1325,11 @@ local function EnsureFrame()
     end)
     setupImportBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        -- Issue #143: the complete label first while it is shortened (see My Builds).
+        local metrics = Nexus.LayoutMetrics
+        if metrics and metrics.Shortened and metrics.Shortened(self:GetFontString()) then
+            GameTooltip:AddLine(tostring(self:GetText() or ""), 1, 1, 1, true)
+        end
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.create_wishlist_heading"), 1, 1, 1)
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.create_wishlist_source"), 0.9, 0.9, 0.9, true)
         -- M4 (M2 O1): this button only opens the editor. The editor's own
@@ -2563,6 +2583,33 @@ local function ApplyModel(model, signatures, roll)
 
     RenderBestDps(model, complete, noBuild, activeRoll, statusVisible)
     ApplyPanelLayout(responsiveLayout,complete)
+    -- Issue #143: the labels of the three mapped buttons keep one line inside
+    -- their final boxes: My Builds at the 68x19 set above, Assign Wishlist and
+    -- Create Wishlist at the setup boxes ApplyPanelLayout placed (their
+    -- creation size without a layout). As with the Wishlist editor's candidate
+    -- buttons (115 px wide, 103 px labels), each label is the button's own
+    -- FontString at the button's width less 12 px for the end caps and at its
+    -- height, one line (LayoutMetrics.OneLineLabel, with no owner). The client
+    -- shortens the rest and the button's own hover adds the complete label
+    -- (EnsureFrame). Each full layout refits them, so font and UI scale
+    -- revisions follow; nothing is created or hooked, and the buttons keep
+    -- their size, anchors, font and text.
+    local metrics = Nexus.LayoutMetrics
+    if metrics and type(metrics.OneLineLabel) == "function" then
+        for index = 1, 3 do
+            local button = setupImportBtn
+            if index == 1 then
+                button = frame._switchBtn
+            elseif index == 2 then
+                button = setupGetStartedBtn
+            end
+            local label = button and button:GetFontString()
+            if label then
+                label:SetWidth(math.max(1, (tonumber(button:GetWidth()) or 0) - 12))
+                metrics.OneLineLabel(label, nil, tonumber(button:GetHeight()) or 1)
+            end
+        end
+    end
     if frame._autoBtn:IsShown() then
         frame._autoBtn:SetText(AutoLabel(model.auto))
     end
