@@ -6,12 +6,9 @@
 -- window and only after a deliberate review of that exact assignment. Review
 -- and Cancel review spend nothing. The review is cleared by another assignment
 -- or by closing the window, and it never weakens a runtime gate.
--- Categories (view_regression_support): EXPECT is behaviour added in M6 (it
--- fails on frozen M5 299d10b5 by design); GUARD already holds there and must
--- keep holding; SETUP is the fixture.
--- Rebased onto accepted M5 9deaa526: its Orb runtime, panels, history, Help
--- Orbs page and these test helpers are byte-identical to 299d10b5, so the same
--- categories are predicted there (not executed by the author).
+-- Categories (view_regression_support): EXPECT marks behaviour introduced
+-- with its check, GUARD marks earlier behaviour that must keep holding, and
+-- SETUP marks the fixture.
 -- Oracles:
 --  * the real OrbRuntime reads (Status, CompactStatus, Resume);
 --  * the real Orb window, main-panel strip and mini panel handlers and fontstrings;

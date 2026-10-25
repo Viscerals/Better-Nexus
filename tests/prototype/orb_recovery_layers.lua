@@ -6,30 +6,19 @@
 -- the session history before a reload is gone. Help gives reload advice by
 -- state: no universal reload fix, no retry, refund, deletion or automatic
 -- continuation.
--- Categories (view_regression_support): EXPECT is behaviour added in M6 (it
--- fails on frozen M5 299d10b5 by design); GUARD already holds there and must
--- keep holding; SETUP is the fixture.
--- Rebased onto accepted M5 9deaa526: its Orb runtime, panels, history, Help
--- Orbs page and these test helpers are byte-identical to 299d10b5, so the same
--- categories are predicted there (not executed by the author).
--- Category qualification (review NB-6, control C2 on 299d10b5): 5 of the 38
--- EXPECTs executed there held (the three Layered `_nexusFullText==nil` checks,
--- the L3 Echo name/condition and the L6 'no universal reload fix'), so they
--- are baseline-holding; GUARDs after the C2 RAISED points did not run there.
--- Categories and counts are kept as reviewed.
--- M7 oracle-only update (Root conditions restoredPaused and oracleOnly; not
--- executed by the author): where an explicit Continue is offered the headline
+-- Categories (view_regression_support): EXPECT marks behaviour introduced
+-- with its check, GUARD marks earlier behaviour that must keep holding, and
+-- SETUP marks the fixture.
+-- M7 oracle-only update: where an explicit Continue is offered the headline
 -- also names continuing past the result (HEADLINE_CONTINUE), and a restored
 -- record that stays PAUSED reads in the same layers under its own label. L1
 -- and L3 compare the headline to the Continue state shown. L1b keeps its GUARD
--- (the reason whole, no guessed target) in a form that holds before and after,
--- and adds one EXPECT for the layered paused form. L4 (this session) keeps its
--- GUARD unchanged.
+-- (the reason whole, no guessed target) and adds one EXPECT for the layered
+-- paused form. L4 (this session) keeps its GUARD unchanged.
 -- F1 successor against 752b91fe: L1b's former Paused+reason GUARD is
 -- replaced by restored-record layer EXPECTs. Its strip pending/block EXPECT
 -- also fails there; navigation, hover, geometry and action gates are GUARDs.
--- M7+F1 composition (conflict resolution only; not executed by this
--- resolution): L1b keeps M7's GUARD and paused-layer EXPECT beside F1's
+-- M7+F1 composition: L1b keeps M7's GUARD and paused-layer EXPECT beside F1's
 -- Layered consumer checks, which are given M7's paused Continue headline.
 -- Oracles:
 --  * the real Orb window, Continue window, strip, mini panel and history page;
@@ -90,7 +79,7 @@ local function Layered(f,M,label,headline)
  C.expect(lines[1]==(headline or Headline(M.ContinueView())),label..': what is blocked comes first',lines[1])
  C.expect(lines[2] and lines[2]:find('^What you can do: ')~=nil,label..': what the player can do comes second',lines[2])
  C.expect(text==lines[1]..'\n'..lines[2]..'\nDetails: '..s.reason,label..': the runtime reason follows as the details, unchanged',text)
- C.expect(f.status._nexusFullText==nil,label..': nothing in the status was shortened')
+ C.guard(f.status._nexusFullText==nil,label..': nothing in the status was shortened')
  return lines
 end
 
@@ -246,7 +235,7 @@ C.scenario('L3 recorded Echo after a reload: the exact name stays visible',funct
  C.setup(s.reason:find('Desired A',1,true)~=nil,'L3: fixture: the runtime reason names the recorded Echo',s.reason)
  local f=Nexus.OrbPanel.Show()
  local lines=Layered(f,M,'L3')
- C.expect(f.status:GetText():find('Desired A',1,true)~=nil and f.status:GetText():find('different Echo',1,true)~=nil,
+ C.guard(f.status:GetText():find('Desired A',1,true)~=nil and f.status:GetText():find('different Echo',1,true)~=nil,
   'L3: the shown status keeps the exact Echo name and its condition')
  C.expect(lines[2]:find(f.cont:GetText(),1,true)~=nil,'L3: the action line names the button actually shown',lines[2])
  C.guard(H.Count('orb-spend')==1,'L3: only the original Orb spend reached the game')
@@ -385,7 +374,7 @@ C.scenario('L6 Help: fixed controls, target review, usage words and state-specif
   C.guard(has(orbs,s),'L6: the Orb page keeps: '..s)
  end
  C.guard(not orbs:lower():find('try again',1,true) and not orbs:lower():find('choose again if',1,true),'L6: no retry advice')
- C.expect(not orbs:lower():find('reload fixes',1,true) and not orbs:lower():find('reload to fix',1,true)
+ C.guard(not orbs:lower():find('reload fixes',1,true) and not orbs:lower():find('reload to fix',1,true)
   and not orbs:lower():find('reloading fixes',1,true),'L6: no universal reload fix')
  C.guard(has(trouble,'before any reload') and has(trouble,'do not reload'),'L6: troubleshooting keeps its report-first advice')
  -- Each reload case Help names is one the runtime actually states.

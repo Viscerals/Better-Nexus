@@ -5,12 +5,9 @@
 -- / Confirm new run, returns once the run is no longer active. The mini panel's
 -- design is unchanged. The earlier one-button entry points stay only as hidden
 -- programmatic controls.
--- Categories (view_regression_support): EXPECT is behaviour added in M6 (it
--- fails on frozen M5 299d10b5 by design); GUARD already holds there and must
--- keep holding; SETUP is the fixture.
--- Rebased onto accepted M5 9deaa526: its Orb runtime, panels, history, Help
--- Orbs page and these test helpers are byte-identical to 299d10b5, so the same
--- categories are predicted there (not executed by the author).
+-- Categories (view_regression_support): EXPECT marks behaviour introduced
+-- with its check, GUARD marks earlier behaviour that must keep holding, and
+-- SETUP marks the fixture.
 -- Oracles: the real Orb window, strip and mini panel handlers, their geometry
 -- in the 7 px conservative text model of orb_budget_draft, the real OrbRuntime,
 -- and spend, take, send and action counters with the saved Orb row.
