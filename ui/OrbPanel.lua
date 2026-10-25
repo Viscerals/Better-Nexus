@@ -1252,6 +1252,15 @@ function UI.AttachMainPanel(parent)
         elseif #v>STRIP_CHARS then cut=v:sub(1,STRIP_CHARS-3):gsub("[\192-\255][\128-\191]*$","").."..." end
         return (cut:gsub("|","||")),(v:gsub("|","||"))
     end
+    -- A paused target line: the second line's fact first, then the target
+    -- name, cut on a character boundary so the short kind caption after it
+    -- stays on the line; stripLine still bounds and escapes the whole line.
+    local function targetLine(fact,n,tag)
+        local room=math.max(4,STRIP_CHARS-#fact-#tag-3)
+        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Truncate then n=Nexus.LayoutMetrics.Truncate(n,room)
+        elseif #n>room then n=n:sub(1,room-3):gsub("[\192-\255][\128-\191]*$","").."..." end
+        return fact.."; "..n.." "..tag
+    end
     f.refresh=function()
         local s=Nexus.OrbRuntime.CompactStatus()
         if not s then f:Hide();return end
@@ -1273,10 +1282,22 @@ function UI.AttachMainPanel(parent)
         -- Details reads the exact explanation and action in the full window.
         if s.state=="PAUSED" and s.pending and not s.canResume and not instruction then third="Paused - result must settle" end
         local shown,full=stripLine(second)
-        -- While paused, the target takes the second line; a pending Orb then
-        -- stays on the third.
+        -- While paused, the target shares the second line: that line's fact in
+        -- short first, then the bounded name and a short kind caption. The
+        -- tooltip keeps the complete target and fact lines; a pending Orb then
+        -- also stays on the third.
         if what then
-            shown,full=stripLine(what)
+            local t=s.resumeTarget
+            local fact=s.reserved>0 and (s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending")
+                or (s.pending and "last Orb not settled")
+                or (s.remaining~=nil and (s.remaining..(s.remaining==1 and " copy left" or " copies left")) or "? copies left")
+            local line=fact.."; "..what
+            if t.kind~="unavailable" then
+                line=targetLine(fact,t.name~=nil and ("'"..tostring(t.name):gsub("%c"," ").."'") or "an unnamed Wishlist",
+                    t.kind=="changed" and (t.returned and "(back)" or "(new)") or "(same)")
+            end
+            local _,whatFull=stripLine(what)
+            shown,full=stripLine(line),whatFull.."\n"..full
             if s.reserved>0 and third=="Paused" then third="Paused - "..s.reserved..(s.reserved==1 and " Orb" or " Orbs").." pending" end
         end
         local body,whole=usage.."\n"..shown,usage.."\n"..full
