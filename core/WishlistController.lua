@@ -1306,12 +1306,26 @@ function Controller.New(options)
             state.createTargetContext = {loadoutSlot = active, loadoutName = name}
         end
         -- Display-only origin, from the slots this begin already read: slot
-        -- data not loaded is unknown; otherwise no populated Saved Build was
-        -- selected, the first-run case of the Journal's rule. No branch or
-        -- destination changes here.
+        -- data not loaded is unknown, and so is a Saved Build those slots
+        -- positively identify (the selected one, else the native active slot
+        -- when it is a whole number in 1..declared) whose row is absent:
+        -- missing data is no first-run proof. Otherwise no populated Saved
+        -- Build was selected, the first-run case of the Journal's rule. No
+        -- branch or destination changes here.
         if not state.createTargetContext then
-            state.destinationOrigin = (type(slots) ~= "table" or slots.activeKnown == false)
-                and "unknown" or "firstRun"
+            local origin = "firstRun"
+            if type(slots) ~= "table" or slots.activeKnown == false then
+                origin = "unknown"
+            else
+                local native = tonumber(slots.activeSlot)
+                local slot = (active >= 1 and active <= maxSlots) and active
+                    or (native and native >= 1 and native <= maxSlots
+                        and native == math.floor(native)) and native or nil
+                local rows = slots.bySlot
+                local row = slot and type(rows) == "table" and rows[slot] or nil
+                if slot and type(row) ~= "table" then origin = "unknown" end
+            end
+            state.destinationOrigin = origin
         end
     end
 
@@ -1331,10 +1345,22 @@ function Controller.New(options)
             return M.BeginWishlist(firstRun, nil), "wishlist", false
         end
         M.ResetNewWishlistDraft()
-        -- Display-only origin, from the slots this begin already read (see
-        -- BeginNewWishlist).
-        state.destinationOrigin = (type(slots) ~= "table" or slots.activeKnown == false)
-            and "unknown" or "firstRun"
+        -- Display-only origin, from the slots this begin already read, by
+        -- the same predicate as BeginNewWishlist (a selected slot cannot
+        -- reach here, so only the native active slot can identify one).
+        local origin = "firstRun"
+        if type(slots) ~= "table" or slots.activeKnown == false then
+            origin = "unknown"
+        else
+            local native = tonumber(slots.activeSlot)
+            local slot = (active >= 1 and active <= maxSlots) and active
+                or (native and native >= 1 and native <= maxSlots
+                    and native == math.floor(native)) and native or nil
+            local rows = slots.bySlot
+            local row = slot and type(rows) == "table" and rows[slot] or nil
+            if slot and type(row) ~= "table" then origin = "unknown" end
+        end
+        state.destinationOrigin = origin
         return true, "new", false
     end
 
