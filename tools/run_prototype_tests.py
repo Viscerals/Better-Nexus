@@ -342,6 +342,14 @@ TEST_TIMEOUT_SECONDS={'catalog_root_capacity':120,'sync_admission_traffic_accept
 # there. Each check also states its source-predicted outcome at 791cdcc (context check) and
 # 9c60456 (draft identity); these are predictions from source, not recorded executions.
 NAMES += ['wishlist_upload_context']
+# #151: pure local-pool codec (EXPECT fails on docs-only 15dace7 by design).
+NAMES += ['flexible_plan_persistence_codec']
+# #151: private Store pool seam and FlexiblePlanStore.New Read/Save/Clear through real boot/reload (EXPECT fails before the seam by design).
+NAMES += ['flexible_plan_persistence_store']
+# #151 retention: measured maximal-pool startup work against actual PumpCaps/SourceBounds, a 28,672-byte sibling, released 9049 and current peers keep the key; no pool message or action.
+NAMES += ['flexible_plan_persistence_retention']
+# #151: chooser SavePool/LoadPool/PersistenceState, owned Load/Clear consent and the visible Save pool/Load saved controls over the real facade (EXPECT fails at 4c92d3f by design).
+NAMES += ['flexible_plan_persistence_chooser']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

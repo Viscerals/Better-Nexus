@@ -86,6 +86,33 @@ The private admission policy keeps the existing 2048 hard build-identity cap, li
 
 Only synthetic offline checks cover this policy. Native saturation time, native impact and tester Sync causality are not established.
 
+## Local planning pool (`flexiblePlanPoolV1`)
+
+The Plan alternatives chooser can store one planning pool on the current character row, under the additive key `flexiblePlanPoolV1`. It does so only when the player presses Save pool.
+
+The record is version 1:
+
+- `version`, plus five equal-length arrays: exact Echo ID, quality, maximum stack, group (-1 for none) and count (0 for not chosen);
+- at most 256 entries and 79 chosen ordinary copies.
+
+The record grants no ownership, assignment or permission to act. It is in no Sync, Share or wire payload.
+
+| Case | Behavior |
+|---|---|
+| No pool saved | Unchanged; start-up adds nothing. |
+| Settings format 2, or an accepted format 3 to 5 | Save pool and Load saved work. |
+| Read-only saved data (future, unverified or malformed format) | A valid saved pool can be loaded into the session. Save pool and removal are refused, and nothing is written. |
+| A pool record of a newer version (an exact integer version above 1) | Kept unchanged. Load saved, Save pool and removal are refused. |
+| A pool record this build cannot read (an unknown or missing field, a wrong shape, or past a bound) | Kept unchanged. Load saved, Save pool and removal are refused. |
+| An older build | The key is an unknown character-row key to it, and it keeps it. Offline tests cover released build 9049 and the current build; builds in between were not run. |
+| Other saved data | Unchanged. The Store's session snapshot leaves out only this exact top-level row key. A same-named key nested elsewhere, other row keys and unknown fields are kept and compared as before. |
+
+No settings format, profile, catalog, schema or protocol version changes, and nothing is migrated.
+
+Only offline synthetic tests with serialized module reboots cover this. They are not a native game save, reload or login.
+
+Details: `docs/flexible-plans/LOCAL_PERSISTENCE_CONTRACT.md`.
+
 ## Locked rows: occupied records, and Saved Build mirrors
 
 The client mirrors each SS18 entry flagged locked as one record with its own locked stack, and the native journal's client-side lock gate compares the record count (not copies) with `GetMaximumPermanentEchoes`, which keeps its last positive value (CONTRACTS.md, Occupied locked records). Records of this build (DPS records, catalog records, received builds) can therefore hold more than six locked copies, for example five records holding 1, 1, 1, 3 and 1. Not established: one record per spell, every held copy in that record, or server enforcement of the record bound. The catalog holds a locked row to 120 copies and a record to its existing 256-row and 10000-copy ceilings. No field, schema, storage or protocol version changed.
