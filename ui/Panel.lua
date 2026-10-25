@@ -1812,6 +1812,32 @@ local function EnsureCallboardWidgets()
     frame._callboardDivider = divider
 end
 
+-- The title and detail hover areas follow their rows: shown and taking the
+-- mouse only while an objective is observed. Without one, each area is
+-- hidden and takes no mouse input; a complete-text tooltip it opened itself
+-- is closed (unless the tooltip has since passed to another owner) and its
+-- hover state is cleared, so no earlier objective's text stays reachable.
+-- Geometry stays with PlaceCallboardBox and PlaceCallboardManual.
+local function SetCallboardHit(hit, active)
+    if not hit then return end
+    if active then
+        hit:EnableMouse(true)
+        hit:Show()
+        return
+    end
+    if (hit._nexusFullTip or hit._nexusOneLineTip) and GameTooltip then
+        local owner
+        if type(GameTooltip.GetOwner) == "function" then
+            local ok, value = pcall(GameTooltip.GetOwner, GameTooltip)
+            if ok then owner = value end
+        end
+        if owner == nil or owner == hit then GameTooltip:Hide() end
+    end
+    hit._nexusFullTip, hit._nexusOneLineTip = nil, nil
+    hit:EnableMouse(false)
+    hit:Hide()
+end
+
 local function FillCallboard(summary)
     EnsureCallboardWidgets()
     if not summary or summary.observed ~= true then
@@ -1820,6 +1846,8 @@ local function FillCallboard(summary)
         SetVisible(frame._callboardLine, false)
         SetVisible(frame._callboardIcon, false)
         SetVisible(frame._callboardDivider, false)
+        SetCallboardHit(frame._callboardTitleHit, false)
+        SetCallboardHit(frame._callboardLineHit, false)
         -- No objective: the detail hover keeps no earlier complete lines.
         if frame._callboardLineHit then frame._callboardLineHit._nexusFullLines = nil end
         return false
@@ -1852,6 +1880,8 @@ local function FillCallboard(summary)
     SetVisible(frame._callboardTitle, true)
     SetVisible(frame._callboardLine, true)
     SetVisible(frame._callboardDivider, true)
+    SetCallboardHit(frame._callboardTitleHit, true)
+    SetCallboardHit(frame._callboardLineHit, true)
     return true
 end
 

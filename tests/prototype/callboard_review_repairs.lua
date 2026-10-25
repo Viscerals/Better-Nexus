@@ -234,4 +234,95 @@ check(InOrder(changedTip,snapshot.lines) and not changedText:find('Kill 3 rats',
 GameTooltip.AddLine=priorAddLine
 Nexus.CallboardStatus.GetSummary=realSummary
 
+-- Objective absence and return (offline, synthetic): without an observed
+-- objective the title and detail hover areas are hidden with their rows and
+-- take no mouse input, a detail hover left open on the vanished objective is
+-- closed, and a later objective brings both areas back over its own current
+-- rows and text. A literal snapshot at the public GetSummary boundary drives
+-- the real Panel.Show/Refresh render and the real hover scripts are used.
+-- The harness has no mouse getter or tooltip owner, so the existing Track
+-- helper observes the EnableMouse calls of the two hover areas and the
+-- tooltip owner is recorded from SetOwner. Native mouse input and tooltip
+-- display are not run here.
+do
+ local titleHit,lineHit=panel._callboardTitleHit,panel._callboardLineHit
+ check(titleHit and lineHit,'fixture: the callboard title and detail rows have hover areas')
+ Track(titleHit,1,true)
+ Track(lineHit,1,true)
+ local tipOwner
+ local priorSetOwner,priorGetOwner=rawget(GameTooltip,'SetOwner'),rawget(GameTooltip,'GetOwner')
+ GameTooltip.SetOwner=function(self,owner,...)
+  tipOwner=owner
+  if priorSetOwner then return priorSetOwner(self,owner,...) end
+ end
+ GameTooltip.GetOwner=function() return tipOwner end
+ function GameTooltip:AddLine(text,...)
+  tipLines[#tipLines+1]=tostring(text)
+  return priorAddLine(self,text,...)
+ end
+ Nexus.CallboardStatus.GetSummary=function() return snapshot end
+ local function SamePlace(hitArea,rowText)
+  local p1,r1,q1,x1,y1=hitArea:GetPoint(1)
+  local p2,r2,q2,x2,y2=rowText:GetPoint(1)
+  return hitArea:GetNumPoints()==1 and rowText:GetNumPoints()==1 and p1==p2 and r1==r2
+   and q1==q2 and x1==x2 and y1==y2 and hitArea:GetWidth()==rowText:GetWidth()
+   and hitArea:GetHeight()==rowText:GetHeight()
+ end
+ local function HoverTitle()
+  tipLines={}
+  titleHit:GetScript('OnEnter')(titleHit)
+  local shown=tipLines
+  local leave=titleHit:GetScript('OnLeave')
+  if leave then leave(titleHit) end
+  return shown
+ end
+ snapshot={observed=true,title='Callboard Ember Watch',
+  lines={'Light 4 braziers','Guard the Ember Gate'},rewards={}}
+ RenderDetail()
+ check(titleHit:IsShown() and lineHit:IsShown() and titleHit:IsMouseEnabled()==true
+  and lineHit:IsMouseEnabled()==true,'fixture: an observed objective has shown, mouse-enabled hover areas')
+ tipLines={}
+ lineHit:GetScript('OnEnter')(lineHit)
+ check(GameTooltip:IsShown() and tipOwner==lineHit and InOrder(tipLines,snapshot.lines),
+  'fixture: the detail hover is open on the current objective')
+ snapshot={observed=false,lines={},rewards={}}
+ Nexus.Panel.Show()
+ Nexus.Panel.Refresh()
+ H.Advance(0.25)
+ check(panel:IsShown(),'fixture: the panel stays shown without an objective')
+ check(not panel._callboardLabel:IsShown() and not panel._callboardTitle:IsShown()
+  and not panel._callboardLine:IsShown() and not panel._callboardIcon:IsShown(),
+  'without an objective the callboard label, title, detail and icon are hidden')
+ check(not titleHit:IsShown() and not lineHit:IsShown(),
+  'without an objective the title and detail hover areas are hidden with their rows')
+ check(titleHit:IsMouseEnabled()==false and lineHit:IsMouseEnabled()==false,
+  'without an objective the title and detail hover areas take no mouse input')
+ check(not GameTooltip:IsShown(),'the detail hover left open on the vanished objective is closed')
+ check(#HoverTitle()==0 and #HoverDetail()==0 and not GameTooltip:IsShown(),
+  'without an objective neither hover shows text of the earlier objective')
+ local newTitle='Callboard Return '..string.rep('Z',60)
+ snapshot={observed=true,title=newTitle,
+  lines={'Report to the Warden','Carry the sealed letter'},rewards={}}
+ local _,backText=RenderDetail()
+ check(titleHit:IsShown() and lineHit:IsShown() and titleHit:IsMouseEnabled()==true
+  and lineHit:IsMouseEnabled()==true,'a returning objective shows both hover areas and they take the mouse again')
+ check(panel._callboardTitle:IsShown() and panel._callboardTitle:GetText()==newTitle
+  and backText:find('Report to the Warden',1,true)==1 and backText:find('+1 more',1,true)~=nil
+  and not backText:find('braziers',1,true),'the returning rows show the current objective text')
+ check(SamePlace(titleHit,panel._callboardTitle) and SamePlace(lineHit,panel._callboardLine)
+  and panel._callboardTitle:GetHeight()>=17 and panel._callboardLine:GetHeight()>=17,
+  'the returning hover areas cover the current one-line title and detail rows')
+ local titleTip=table.concat(HoverTitle(),'|')
+ check(titleTip:find(newTitle,1,true)~=nil and not titleTip:find('Ember Watch',1,true),
+  'the returning title hover shows the complete current title and not the earlier one')
+ local backTip=HoverDetail()
+ local backTipText=table.concat(backTip,'|')
+ check(InOrder(backTip,snapshot.lines) and not backTipText:find('braziers',1,true)
+  and not backTipText:find('Ember Gate',1,true) and not backTipText:find('Ember Watch',1,true),
+  'the returning detail hover shows only the current complete lines')
+ GameTooltip.AddLine=priorAddLine
+ GameTooltip.SetOwner,GameTooltip.GetOwner=priorSetOwner,priorGetOwner
+ Nexus.CallboardStatus.GetSummary=realSummary
+end
+
 print('PASS callboard_review_repairs '..checks)
