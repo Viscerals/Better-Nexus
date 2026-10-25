@@ -1271,11 +1271,14 @@ local function EnsureFrame()
     titleText:SetPoint("TOP", 0, -14)
     titleText:SetText("Nexus Wishlist Editor")
 
+    -- The existing 900x18 context row under the title is the destination
+    -- row: editContextText is its first visible cell (character), and the
+    -- row, not that cell, is anchored below the title. M.Refresh fills it.
     editContextText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    editContextText:SetPoint("TOP", titleText, "BOTTOM", 0, -4)
-    editContextText:SetSize(900, 18)
-    editContextText:SetJustifyH("CENTER")
-    editContextText:SetText("Creating a new wishlist")
+    editContextText:SetJustifyH("LEFT")
+    frame._destinationRow = Nexus.Panel.CreateDestinationRow(frame, editContextText)
+    frame._destinationRow:SetPoint("TOP", titleText, "BOTTOM", 0, -4)
+    frame._destinationRow:SetSize(900, 18)
 
     wishlistNameLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     wishlistNameLabel:SetPoint("TOPLEFT", 34, -96)
@@ -2153,37 +2156,19 @@ local function RefreshView(catalogRevision)
         end
     end
 
-    if titleText and editContextText then
-        if editingContext then
-            titleText:SetText("Edit Wishlist")
-            local buildLabel = DisplayUntrusted(
-                    editingContext.loadoutName, 1024, false)
-                or (editingContext.loadoutSlot and ("Saved Build " .. tostring(editingContext.loadoutSlot)))
-                or "None"
-            -- The opened first-run plan has no Saved Build of its own; its
-            -- save updates the first-run target (controller destination).
-            if editingContext.destination == "first" and not editingContext.loadoutSlot then
-                buildLabel = buildLabel .. " (first-run target)"
-            end
-            local displayWishlistName = DisplayUntrusted(
-                editingContext.name, 1024, false) or "Wishlist"
-            editContextText:SetText("Wishlist: |cff7fd5ff" .. displayWishlistName
-                .. "|r   •   Saved Build: |cffffffff" .. buildLabel .. "|r")
-        else
-            titleText:SetText("Create New Wishlist")
-            if createTargetContext then
-                editContextText:SetText("New destination for |cffffffff"
-                    .. (DisplayUntrusted(createTargetContext.loadoutName,
-                        1024, false) or "Active Saved Build")
-                    .. "|r — it will be assigned after a successful save")
-            else
-                editContextText:SetText("Create a new destination wishlist for your first run")
-            end
-        end
+    -- The context line under the title is the destination row (its first
+    -- cell is editContextText); M.Refresh words it from the controller's
+    -- captured descriptor. Only the title is set here.
+    if titleText then
+        titleText:SetText(editingContext and "Edit Wishlist" or "Create New Wishlist")
     end
 
+    -- The destination row's view observation: this refresh's one existing
+    -- Slots read below, else none (nil, never an earlier stale read).
+    if frame._destinationRow then frame._destinationRow._nexusEditorSlots = nil end
     if loadoutSwitchBtn and not pendingLoadoutOpen then
         local slots = View and View.Slots and View.Slots()
+        if frame._destinationRow then frame._destinationRow._nexusEditorSlots = slots end
         local active = slots and tonumber(slots.activeSlot)
         -- The Saved Build of the Wishlist being edited, else the one a new
         -- Wishlist is created for; the selected one only with neither (never a
@@ -2535,6 +2520,19 @@ end
         end
         RefreshTimerStatus()
         RefreshTheme()
+        -- Row-only update, warm or cold, after the one-time theme pass so it
+        -- measures final fonts. Pure: the captured descriptor from the held
+        -- Slots observation (nil when none) and the session's cached
+        -- character; a settled update is a no-op in the helper.
+        local destinationRow = frame and frame._destinationRow
+        if destinationRow then
+            local panel = Nexus.Panel
+            panel.UpdateDestinationRow(destinationRow,
+                Controller.DestinationPresentation(
+                    destinationRow._nexusEditorSlots,
+                    panel.CachedDestinationCharacter()),
+                900, 18)
+        end
         return result
     end
 
