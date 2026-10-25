@@ -1,8 +1,10 @@
 # Flexible planning pool: #47 player-choice slice
 
-**Status: a session-only player-choice chooser and exact Wishlist-draft
-handoff are implemented for offline review. Full #47 remains incomplete and
-open; no public-beta release is scheduled. Native UI validation is NOT_RUN.**
+**Status: the player-choice chooser and exact Wishlist-draft handoff (first
+milestone) and a later local Save/Load of one planning pool per character
+(#151) are implemented for offline review. Full #47 remains incomplete and
+open. These documents claim no merge, release or native validation; native UI
+validation is NOT_RUN.**
 
 [Issue #47](https://github.com/Viscerals/Better-Nexus/issues/47) requests a way to
 describe a broader pool of acceptable Echoes and priorities when an exact ideal
@@ -13,8 +15,9 @@ rank, prioritize, substitute or break ties, and pool sharing is deferred.
 
 ## Current bounded scope
 
-The [player-choice slice](PLAYER_CHOICE_SLICE.md) is the current contract. In
-summary:
+The [player-choice slice](PLAYER_CHOICE_SLICE.md) is the first-milestone
+contract. The [local persistence contract](LOCAL_PERSISTENCE_CONTRACT.md)
+describes the separate #151 Save/Load extension. In summary:
 
 - The Wishlist Editor's **Plan alternatives** button opens a session-only
   chooser over an ordinary planning pool of at most 256 alternatives.
@@ -30,14 +33,67 @@ summary:
   draft, name or edit/destination context needs an in-product replacement
   confirmation. Cancel, refusal and stale callbacks preserve unrelated editor
   work.
-- The chooser and handoff save, assign, upload, share and spend nothing. Save
-  remains a separate, later player action.
-- Hide/reopen keeps the pool and choice for the session; a reload loses them.
-  No persistent schema, SavedVariables field or migration is added.
+- The chooser and handoff assign, upload, share and spend nothing. Saving the
+  new Wishlist draft remains a separate, later player action in the editor.
+- **Save pool** and **Load saved** keep one planning pool per character (see
+  below). A saved pool is planning state only, not ownership, an assignment
+  or permission to act.
 
-Unfinished: pool persistence, durable identity, edit and fork, migration,
+Unfinished: durable pool identity, several pools, edit and fork, migration,
 locked planning pools and sharing. Broader priority, substitution and tie
 decisions are outside the current user-selected slice. #47 remains open.
+
+## Saving the pool on this character
+
+### Saving and loading
+
+- **Save pool** stores this pool and its set counts on this character. It
+  replaces the pool saved there.
+- **Load saved** brings the saved pool back.
+- Nothing is saved or loaded automatically. After a reload the chooser opens
+  empty, and it says when a pool is saved.
+- **Hide** keeps the pool until reload. **Reset pool** clears only this
+  session; the saved pool stays.
+
+### Questions before changes
+
+- A count you typed but did not Set is pending. Save pool waits until you Set
+  each edited count.
+- Saving an empty pool over a saved one asks first. Cancel keeps the saved
+  pool.
+- Load saved over unsaved changes or pending counts asks first. Cancel keeps
+  your pool.
+
+### Load saved and Open as new Wishlist draft
+
+- These two actions are separate.
+- **Load saved** changes only the planning pool. The Wishlist Editor's draft,
+  its name and any Wishlist save still waiting stay as they are.
+- **Open as new Wishlist draft** builds a new editor draft from the chosen
+  counts. Replacing an existing draft asks first, and accepting that
+  replacement cancels the earlier draft's waiting save.
+
+### Changed catalog details
+
+- Load saved keeps an Echo's saved details and count even if its catalog
+  details changed since you saved. The status says how many Echoes changed.
+- Open as new Wishlist draft then refuses, and keeps your pool and counts.
+- To use the current details, Remove that Echo, Add it again, then Set its
+  count.
+
+### Saved data this version cannot change
+
+- Saved data from a newer Nexus version, or a saved pool this version cannot
+  read, is kept unchanged. Save pool and removing the saved pool are refused.
+- When the saved data is read-only, Load saved still works and Save pool is
+  refused.
+- If a save cannot be confirmed, the status says so and never says Saved. Use
+  Load saved to see what is stored.
+
+### What this does not do
+
+Saving, loading or removing a pool never assigns, uploads, shares, rolls or
+spends. Nexus still chooses nothing for you, and pools are not shared.
 
 The six locked target copies are an authored design budget, not a universal
 cap on held or received locked copies and not a server limit.
@@ -47,9 +103,11 @@ cap on held or received locked copies and not a server limit.
 1. [Boundaries](BOUNDARIES.md): source facts and invariants to preserve.
 2. [Resolution options](RESOLUTION_OPTIONS.md): the selected first-slice
    decisions and the decisions that remain open.
-3. [Player-choice slice](PLAYER_CHOICE_SLICE.md): the current model, chooser,
-   exact-draft handoff and their deliberate limits.
-4. [Acceptance matrix](ACCEPTANCE_MATRIX.md): prospective scenarios for the
+3. [Player-choice slice](PLAYER_CHOICE_SLICE.md): the first-milestone model,
+   chooser, exact-draft handoff and their deliberate limits.
+4. [Local persistence contract](LOCAL_PERSISTENCE_CONTRACT.md): the #151
+   Save/Load extension, its saved record, measured bounds and limits.
+5. [Acceptance matrix](ACCEPTANCE_MATRIX.md): prospective scenarios for the
    full feature, not tests already implemented or passed.
 
 “Flexible planning pool” is a working phrase in these documents. It names no
@@ -79,19 +137,23 @@ the production TOC module list, or the `core/`, `logic/`, `ui/` and `data/` sear
 for generalized/flexible-plan entity names. This bounded finding agrees with the
 issue comment; it is not a native or exhaustive semantic proof of absence. It
 remains historical evidence and is not restated as a current-source finding.
-The current slice adds `core/FlexiblePlanModel.lua`, `ui/FlexiblePlanChooser.lua`
+The first slice added `core/FlexiblePlanModel.lua`, `ui/FlexiblePlanChooser.lua`
 and `WishlistController.PrepareNewExactDraft`; none is a stored entity or an
-automatic resolver.
+automatic resolver. The #151 extension adds `core/FlexiblePlanStore.lua`, which
+keeps one local per-character pool record through the existing data owner; it
+is not a resolver.
 
 ## Remaining decisions
 
 The player chooses the exact target for the first slice; Nexus does not rank
 alternatives or propose a target. The [options table](RESOLUTION_OPTIONS.md)
 records the selected first-slice scope and the open rows. Durable entity
-wording, alternative-group semantics, persistence and edit/fork ownership,
-storage and work bounds for a persisted pool, locked planning pools and sharing
-still need a concrete reviewed contract. No automatic resolver, SavedVariables
-format or wire format is authorized.
+wording, alternative-group semantics, edit/fork ownership, locked planning
+pools and sharing still need a concrete reviewed contract.
+
+The local one-pool record and its measured bounds are recorded in the
+[local persistence contract](LOCAL_PERSISTENCE_CONTRACT.md). No automatic
+resolver, other SavedVariables format or wire format is authorized.
 
 Exact Wishlist behavior, identities, fingerprints, role accounting, action
 permissions and safety gates remain unchanged. Never-pick/banish preferences
@@ -102,13 +164,23 @@ client code is used here.
 
 ## Review and validation status
 
-Two synthetic offline fixtures exercise the production-loaded code:
-`tests/prototype/flexible_plan_player_choice.lua` covers the model's public seam,
-and `tests/prototype/flexible_plan_editor_handoff.lua` drives the real editor
-entry, Add, Set, Open, Cancel and replacement callbacks, refusals, detachment,
-the 256/257 bound and the session lifecycle. Both use a synthetic catalog and
-host. This document records no test result. Final full-suite and package checks
-and independent Spec and Standards review are separate gates.
+Two synthetic offline fixtures exercise the first slice's production-loaded
+code:
+
+- `tests/prototype/flexible_plan_player_choice.lua` covers the model's public
+  seam.
+- `tests/prototype/flexible_plan_editor_handoff.lua` drives the real editor
+  entry, Add, Set, Open, Cancel and replacement callbacks, refusals,
+  detachment, the 256/257 bound and the session lifecycle.
+
+The #151 fixtures, `tests/prototype/flexible_plan_persistence_*.lua`, drive
+Save pool, Load saved, Reset and removal through the real chooser and data
+owner across serialized module reboots. A module reboot is not a native
+reload or login.
+
+All of these fixtures use a synthetic catalog and host. This document records
+no test result. Final full-suite and package checks and independent Spec and
+Standards review are separate gates, and they are pending.
 
 No exact versioned native client/export reference was available. Native UI,
 client loading, pixels, scaling, input, mouse wheel and popups remain NOT_RUN
