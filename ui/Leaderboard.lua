@@ -858,6 +858,10 @@ local function ApplyRolesState()
         detail.copy:SetText("Request full build")
         detail.copy:Enable()
     end
+    -- Attach the poll only while a request is pending; clear it otherwise.
+    if type(detail._NexusResumeDetailUpdate) == "function" then
+        detail._NexusResumeDetailUpdate()
+    end
 end
 
 local function EnsureDetail(parent)
@@ -945,8 +949,12 @@ local function EnsureDetail(parent)
     detail.empty=detail:CreateFontString(nil,"OVERLAY","GameFontHighlight"); detail.empty:SetPoint("CENTER",0,15); detail.empty:SetSize(280,70); detail.empty:SetJustifyH("CENTER")
     -- While a roles request waits, re-read its status once per second (a
     -- read only). An arrived answer re-renders through the strict Copy path.
-    detail:SetScript("OnUpdate",function(self,elapsed)
-        if not self.rolesBuildId or self.rolesState~="pending" then return end
+    -- The script is attached only while pending; parent hide also clears it.
+    local function OnDetailUpdate(self,elapsed)
+        if not self.rolesBuildId or self.rolesState~="pending" then
+            self:SetScript("OnUpdate", nil)
+            return
+        end
         self.rolesTick=(self.rolesTick or 0)+(tonumber(elapsed) or 0)
         if self.rolesTick<1 then return end
         self.rolesTick=0
@@ -958,7 +966,15 @@ local function EnsureDetail(parent)
             self.rolesState,self.rolesReason=state,reason
             ApplyRolesState()
         end
-    end)
+    end
+    detail._NexusOnDetailUpdate = OnDetailUpdate
+    detail._NexusResumeDetailUpdate = function()
+        if detail.rolesBuildId and detail.rolesState == "pending" then
+            detail:SetScript("OnUpdate", OnDetailUpdate)
+        else
+            detail:SetScript("OnUpdate", nil)
+        end
+    end
     parent._leaderboardDetail=detail
 end
 
@@ -1211,10 +1227,10 @@ local function EnsureFrame()
         GameTooltip:AddLine("Asks other Nexus users for shared builds and DPS records.",0.8,0.8,0.8,true)
         local policy=Nexus.SyncModePolicy
         local mode=policy and type(policy.Mode)=="function" and policy.Mode() or nil
-        local modeText=mode=="automatic" and "Sync is Automatic: Nexus may send without a click (login requests, answers to other users, your new DPS bests with your character name)."
+        local modeText=mode=="automatic" and "Sync is Automatic: may send without a click (login requests, answers to other users, eligible character-best DPS with Echoes and player info)."
             or mode and type(policy.Text)=="function" and policy.Text(mode) or nil
         if modeText then GameTooltip:AddLine(modeText,1,0.82,0,true) end
-        GameTooltip:AddLine("With Automatic, a new personal DPS best (with its Echo list) and its Record Loadout build page may be sent, each only if this client admits it: the page as a summary first, its Echo list only in later answers to players who ask. Sending is not delivery.",0.7,0.7,0.7,true)
+        GameTooltip:AddLine("With Automatic, an eligible new character best for Training Dummy or Lich King may send a DPS record with Echoes, any locked Echoes and player info without a request. The Record Loadout summary is separate; even if it is refused, the DPS record may let receivers create that page. Each send needs this client's admission. Sending is not delivery.",0.7,0.7,0.7,true)
         GameTooltip:AddLine("Sent means it left this client, not that anyone stored it. Received means it arrived here; stored means this client kept it.",0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
@@ -1257,33 +1273,106 @@ local function EnsureFrame()
     listScroll:SetScript("OnMouseDown",function() classMenu:Hide() end)
     EnsureDetail(frame)
     frame:SetScript("OnMouseDown",function(self) if classMenu:IsShown() then classMenu:Hide() end end)
-    -- The class list is a separate UIParent frame. The close button, Escape
-    -- and another Nexus window hide only this frame, so its hide closes it.
-    frame:HookScript("OnHide",function() if classMenu then classMenu:Hide() end end)
-    frame:SetScript("OnUpdate",function(self,elapsed)
+    local pumpTicker = 0
+    local PUMP_INTERVAL = 0.1
+    -- Failure backoff: projection/bind errors must not retry at the 0.1s cap.
+    local FAIL_BACKOFF_BASE, FAIL_BACKOFF_MAX = 0.5, 8
+    local failBackoffUntil = 0
+    local lastReceiving = false
+    local function OnFrameUpdate(self,elapsed)
         if not self:IsShown() then return end
         local receiving = Nexus.Sync and Nexus.Sync.IsReceiving
             and Nexus.Sync.IsReceiving() or false
         local projections = Nexus and Nexus.ViewProjections
         local coldStart = not dataReady
-        if interactivePending or viewDiagnostic.projectionPending then
-            -- Requesting again is O(1) while the job is current and recreates
-            -- it after a represented-data revision canceled the prior cursor.
+        local now = type(GetTime) == "function" and GetTime() or 0
+        -- Receive-window coalescing: publish once when the burst ends; do not
+        -- rebuild on every dirty mark while Sync is still receiving.
+        local receiveEnded = lastReceiving and not receiving
+        lastReceiving = receiving
+        if receiveEnded and refreshDirty then
+            virtualStats.deferredRefreshes =
+                (tonumber(virtualStats.deferredRefreshes) or 0) + 1
+            failBackoffUntil = 0
             M.RefreshData()
+            self._tick=(self._tick or 0)+elapsed
+            if self._tick>1 then self._tick=0; M.RefreshStatus() end
+            return
         end
-        if projections and (not receiving or coldStart or interactivePending)
-            and type(projections.PumpLeaderboard) == "function" then
-            -- Populate persisted rankings even when login Sync is already
-            -- receiving. Once a last-good board exists, receive bursts remain
-            -- coalesced and publish through the established quiet path.
-            if receiving and coldStart then M.RefreshData() end
-            local ok, published, pumpError = pcall(projections.PumpLeaderboard)
-            if ok and published then M.RefreshData() end
-            if ok and pumpError then M.RefreshData() end
+        -- Dirty-flag gate: only request/pump while new data, a pending job,
+        -- an interactive filter change, or a cold open needs work. Cap 10 Hz.
+        local backingOff = now < failBackoffUntil
+            and viewDiagnostic.projectionError
+            and not interactivePending and not coldStart
+        local needPump = (not backingOff) and (refreshDirty or interactivePending
+            or viewDiagnostic.projectionPending or coldStart)
+        if not needPump then
+            pumpTicker = 0
+        else
+            pumpTicker = pumpTicker + elapsed
+            if pumpTicker >= PUMP_INTERVAL then
+                pumpTicker = 0
+                local function NoteRefreshOutcome()
+                    if viewDiagnostic.projectionError then
+                        local failures = math.max(1,
+                            tonumber(virtualStats.dataFailures) or 1)
+                        local delay = FAIL_BACKOFF_BASE
+                            * (2 ^ math.min(failures - 1, 4))
+                        if delay > FAIL_BACKOFF_MAX then delay = FAIL_BACKOFF_MAX end
+                        failBackoffUntil = now + delay
+                    else
+                        failBackoffUntil = 0
+                    end
+                end
+                if interactivePending or viewDiagnostic.projectionPending
+                    or (refreshDirty and not receiving) then
+                    -- Requesting again is O(1) while the job is current and
+                    -- recreates it after a represented-data revision canceled
+                    -- the prior cursor. refreshDirty alone must also request
+                    -- outside a receive window: MarkDataDirty clears
+                    -- projectionPending. While receiving, dirty marks coalesce
+                    -- until receiveEnded above (or interactive/cold work).
+                    M.RefreshData()
+                    NoteRefreshOutcome()
+                end
+                if projections and (not receiving or coldStart or interactivePending)
+                    and type(projections.PumpLeaderboard) == "function" then
+                    -- Populate persisted rankings even when login Sync is
+                    -- already receiving. Once a last-good board exists,
+                    -- receive bursts remain coalesced and publish through the
+                    -- established quiet path.
+                    if receiving and coldStart then
+                        M.RefreshData()
+                        NoteRefreshOutcome()
+                    end
+                    local ok, published, pumpError = pcall(projections.PumpLeaderboard)
+                    if ok and published then M.RefreshData(); NoteRefreshOutcome() end
+                    if ok and pumpError then M.RefreshData(); NoteRefreshOutcome() end
+                end
+            end
         end
         self._tick=(self._tick or 0)+elapsed
         if self._tick>1 then self._tick=0; M.RefreshStatus() end
-    end)
+    end
+    local function PauseFrameUpdates()
+        frame:SetScript("OnUpdate", nil)
+        pumpTicker = 0
+        failBackoffUntil = 0
+        if classMenu then classMenu:Hide() end
+        if detail then detail:SetScript("OnUpdate", nil) end
+    end
+    local function ResumeFrameUpdates()
+        frame:SetScript("OnUpdate", OnFrameUpdate)
+        if detail and type(detail._NexusResumeDetailUpdate) == "function" then
+            detail._NexusResumeDetailUpdate()
+        end
+    end
+    frame:SetScript("OnUpdate", OnFrameUpdate)
+    -- The class list is a separate UIParent frame. The close button, Escape
+    -- and another Nexus window hide only this frame, so its hide closes it
+    -- and clears this window's update scripts for full dormancy.
+    frame:HookScript("OnHide", PauseFrameUpdates)
+    frame:HookScript("OnShow", ResumeFrameUpdates)
     return frame
 end
 
@@ -1510,6 +1599,7 @@ function M.DiagnosticSnapshot()
         filterSearchActive=searchActive,filterSort="dps",
         filterCategory=(category == "dummy" or category == "combined")
             and category or "lk",
+        projectionError=viewDiagnostic.projectionError == true or lastDataError ~= nil,
         projectionCurrent=current,
         projectionPending=viewDiagnostic.projectionPending == true,
         projectionDirty=dirty,savedImportPending=false,

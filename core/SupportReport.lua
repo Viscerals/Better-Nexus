@@ -1498,7 +1498,7 @@ function M.TomeObservationLines()
     if not view then out[#out+1]="Tome observations: unavailable (no observational owner)";return out end
     local codes={not_observed=true,auto=true,permission=true,plan=true,advisor=true,
         discovery=true,pause=true,spacing=true,eligible=true,opt_out=true,disabled=true,
-        visit_done=true,candidate=true,no_known_member=true,accepted=true,refused=true,
+        visit_done=true,expired_retry=true,candidate=true,no_known_member=true,accepted=true,refused=true,
         passive=true,["no api"]=true,["unknown lever"]=true,["non-conformant lever"]=true,
         ["not level 1"]=true,pending=true,already=true,mirror_match=true,
         catalog_missing=true,expired=true,first=true,loadout=true,unknown=true}
@@ -1520,12 +1520,12 @@ function M.TomeObservationLines()
         .."; known_member="..factCount(arm.knownMember)
         .."; completed_association_sequence="..factCount(arm.assignmentSequence)
     local pause=type(view.pause)=="table" and view.pause or {}
-    local pauseSources={bag=true,popup=true,settling=true,clear=true,unknown=true}
+    local pauseSources={popup=true,settling=true,clear=true,unknown=true}
     out[#out+1]="Tome pause at last normal guard read: observed="..factFlag(pause.observed)
         .."; source="..factCode(pause.source,pauseSources)
         .."; last_positive="..factCode(pause.lastPositive,pauseSources)
         .."; remaining_seconds_at_read_rounded_up="..factCount(pause.remainingSeconds)
-        .." (not refreshed; bag short-circuits popup inspection; no current-state or duration proof)"
+        .." (not refreshed; popup-only pause; no current-state or duration proof)"
     local assignment=type(view.assignment)=="table" and view.assignment or {}
     out[#out+1]="Tome association: observed="..factFlag(assignment.observed)
         .."; kind="..factCode(assignment.kind,codes).."; destination="..factCount(assignment.loadout)

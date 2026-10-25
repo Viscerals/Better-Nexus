@@ -1,5 +1,6 @@
 -- Last normal pause-detector attribution, never a report-time probe.
 -- Synthetic host only; no native report trigger is inferred here.
+-- Policy: only a visible bind-confirmation popup pauses; bag occupancy does not.
 Nexus, NexusDB, WishlistRealizerDB = nil, nil, nil
 local H=dofile('tests/prototype/harness.lua')
 H.Boot()
@@ -32,11 +33,13 @@ local function read(want,source,last,remaining,clockReads)
     check(p.remainingSeconds==remaining,'rounded remaining value at read '..source)
 end
 read(false,'clear',nil,0,1)
-bag=true;shown=true;visible=true
-local popupReads=counts.popup
-read(true,'bag','bag',20,2)
-check(counts.popup==popupReads,'positive bag preserves popup short circuit')
-bag=false
+-- Bag alone must not pause or consult container APIs.
+bag=true;shown=false;visible=false
+local slotsBefore,linkBefore=counts.slots,counts.link
+read(false,'clear',nil,0,1)
+check(counts.slots==slotsBefore and counts.link==linkBefore,
+    'bag occupancy is not consulted by the pause guard')
+bag=false;shown=true;visible=true
 read(true,'popup','popup',20,2)
 shown=false;visible=false;H.now=H.now+5
 read(true,'settling','popup',15,1)
@@ -57,7 +60,6 @@ check(lines:find('remaining_seconds_at_read_rounded_up=0',1,true),'report labels
 check(lines:find('not refreshed',1,true) and lines:find('no current-state or duration proof',1,true),'report states temporal limit')
 for k,v in pairs(counts) do check(v==before[k],'report/facts do not re-enter '..k) end
 check(not lines:find('990001',1,true) and not lines:find('Tome of Echoes',1,true),'no item link/name in attributed report facts')
--- Malformed or older/missing facts remain unknown, not plausible detector data.
 A.TomeObservationPause('untrusted item text',math.huge)
 local malformed=facts().pause
 check(malformed.source=='unknown' and malformed.remainingSeconds==nil,'bounded malformed attribution')

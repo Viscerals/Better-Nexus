@@ -37,6 +37,41 @@
 -- printed), so S7 sees the final size refusal after the local save. The
 -- admitted Manual Share, its follow-ups and its decoded summary are in
 -- ux_share_admission.
+-- M5 first disclosure stage (S13, S14): what may be sent, read from the real
+-- controls: the Share tooltip, the confirmation note through the popup model
+-- above, and the Automatic option of the existing Sync mode dialog (opened
+-- and cancelled, never applied). EXPECT (fails on fcaeedd2 by design, after
+-- its controls and popup are reached): no claim that the listing goes only to
+-- players who ask; the summary carries no Echo list; the full listing can be
+-- sent in answers, and an answer on the shared Sync channel can be kept by
+-- other listeners; in Automatic a linked character-best Training Dummy or
+-- Lich King DPS record may also be sent with its Echoes, locked Echoes and
+-- player info without an additional request, also when the summary is not
+-- queued; the Automatic option names that DPS content. GUARD: every DPS
+-- statement stays conditional on Automatic and promises no send; the local
+-- save, possible summary, update, Off, cannot-recall, local Stop Sharing and
+-- unconfirmed-receipt clauses stay; the Automatic help keeps its requests and
+-- answers and fits its 386x51 box under the default and 16 px offline models
+-- and the runtime conservative model (models only, not native pixels);
+-- viewing the dialog saves no mode and starts no grant, admission or send.
+-- M5 qualifier correction (S14), EXPECT (fails on fc43f4b5 by design, after
+-- the dialog and its Automatic option are reached): the Automatic help says
+-- the DPS it may send is newly eligible (an eligibility or qualifying term)
+-- and is the character's best for an encounter (Training Dummy and Lich King
+-- named, or "encounter"), not a best across all encounters. Its former
+-- "with their Record Loadout pages" suffix is not a required clause.
+-- M5 disclosure parity (S13), EXPECT for the confirmation note and the Share
+-- tooltip alike (the tooltip fails on 8babe397 by design, after the real
+-- first-Share and update controls are reached; the unchanged note holds them):
+-- Share saves the title, description and Echo list as the shared listing;
+-- the possible summary has neither the Echo list nor the description; answers
+-- can carry the full listing with its description, not just an Echo list; and
+-- the Automatic DPS record may be sent also when the summary is not queued.
+-- Fake boundary, disclosed: for the Automatic and Off notes SyncModePolicy.Mode
+-- is replaced only during the one synchronous click that builds the note and
+-- restored before any time passes; nothing is applied, saved, queued or sent,
+-- and every confirmation is cancelled. The runtime stays on its saved Manual
+-- mode, so no Automatic send is exercised or claimed here.
 local F=dofile('tests/prototype/format5_support.lua')
 local V=dofile('tests/prototype/view_regression_support.lua')
 local G=dofile('tests/prototype/layout_geometry_support.lua')
@@ -540,6 +575,241 @@ C.scenario('S12 the Share action fits apart from the other actions',function()
   end
  end
  G.UseFont(G.MODELS.default);UIParent:SetSize(1366,768)
+end)
+
+-- Disclosure reading (S13, S14), in lower case, one sentence at a time
+-- (split at . ; ! ? and line breaks): semantic facts and negative claims,
+-- not one copied sentence.
+local function Sentences(text)
+ local out={}
+ for s in (V.Plain(text):lower()..'.'):gmatch('([^%.;!?\n]+)') do
+  s=s:gsub('^%s+',''):gsub('%s+$','')
+  if s~='' then out[#out+1]=s end
+ end
+ return out
+end
+local function Sentence(text,match)
+ for _,s in ipairs(Sentences(text)) do if match(s) then return s end end
+ return nil
+end
+local function Has(s,needle) return s:find(needle,1,true)~=nil end
+local function Word(s,word) return s:find('%f[%a]'..word..'%f[%A]')~=nil end
+-- A claim that the listing reaches only the players who ask for it.
+local function RequesterOnly(s)
+ return Word(s,'only') and (Has(s,'who ask') or Has(s,'request') or Has(s,'answer') or Has(s,'who fetch'))
+end
+-- What the Automatic DPS statement must say.
+local DPS_FACTS={
+ {'conditional (if, may)',function(s) return Word(s,'if') and Word(s,'may') end},
+ {"the character's best",function(s) return Has(s,"character's best") or Has(s,'character-best') end},
+ {'linked to the listing',function(s) return Has(s,'linked') end},
+ {'Training Dummy or Lich King',function(s) return Has(s,'training dummy') and Has(s,'lich king') end},
+ {'Echoes and locked Echoes',function(s) return Has(s,'echoes') and Has(s,'locked echoes') end},
+ {'player info',function(s) return Has(s,'player info')
+  or (Has(s,'name') and Has(s,'realm') and Has(s,'class') and Has(s,'level')) end},
+ {'no additional request',function(s) return Has(s,'without an additional request')
+  or Has(s,'without anyone asking') or Has(s,'unasked') end},
+}
+local function Missing(s)
+ local out={}
+ for _,fact in ipairs(DPS_FACTS) do if not (s and fact[2](s)) then out[#out+1]=fact[1] end end
+ return out
+end
+-- A DPS statement not conditional on Automatic, or one that promises a send
+-- or claims every or a personal best.
+local function UnconditionalDps(text)
+ return Sentence(text,function(s)
+  return Has(s,'dps') and not (Has(s,'in automatic') and Word(s,'may') and not Word(s,'every')
+   and not Word(s,'always') and not Word(s,'will') and not Has(s,'personal'))
+ end)
+end
+-- A sentence that denies the summary its description, with its Echo list
+-- ("no Echo list or description", "neither ... nor its description") or on
+-- its own ("no description"); one that only names the description does not.
+local function DeniesDescription(s)
+ return s:find('%f[%a]no echo list,? or [%a ]-description')~=nil
+  or s:find('%f[%a]nor [%a ]-description')~=nil or s:find('%f[%a]no description')~=nil
+end
+-- A sentence that says answers can carry the full listing: named so, or with
+-- its description among what can be sent (an Echo list alone is not it).
+local function AnswersCarryListing(s)
+ if not (Has(s,'answer') and (Has(s,'can be sent') or Has(s,'may be sent'))) then return false end
+ return Has(s,'full listing') or (Has(s,'description') and not DeniesDescription(s)
+  and s:find('%f[%a]not [%a ]-description')==nil)
+end
+-- The disclosure checks shared by the confirmation note and the tooltip:
+-- both are read for every clause, the DPS record's independence from the
+-- summary included.
+local function Disclosure(tag,what,text)
+ local only=Sentence(text,RequesterOnly)
+ C.expect(only==nil,tag..': the '..what..' makes no claim that the listing goes only to players who ask',only)
+ C.expect(Sentence(text,function(s) return Has(s,'save') and Has(s,'listing') and Has(s,'title')
+  and Has(s,'description') and Has(s,'echo list') end)~=nil,
+  tag..': the '..what..' says Share saves the title, description and Echo list as the shared listing',text)
+ C.expect(Sentence(text,function(s) return Has(s,'summary') and Has(s,'no echo list') end)~=nil,
+  tag..': the '..what..' says the summary carries no Echo list',text)
+ C.expect(Sentence(text,function(s) return Has(s,'summary') and DeniesDescription(s) end)~=nil,
+  tag..': the '..what..' says the summary carries no description either',text)
+ C.expect(Sentence(text,function(s) return Has(s,'answer') and (Has(s,'echo list') or Has(s,'full listing'))
+  and (Has(s,'can be sent') or Has(s,'may be sent')) end)~=nil,
+  tag..': the '..what..' says the full listing can be sent in answers, not only to askers',text)
+ C.expect(Sentence(text,AnswersCarryListing)~=nil,
+  tag..': the '..what..' says answers can carry the full listing with its description, not just an Echo list',text)
+ C.expect(Sentence(text,function(s) return Has(s,'sync channel') and (Has(s,'kept') or Has(s,'keep')) end)~=nil,
+  tag..': the '..what..' says an answer on the shared Sync channel can be kept by other listeners',text)
+ local dps=Sentence(text,function(s) return Has(s,'in automatic') and Has(s,'dps') end)
+ local missing=Missing(dps)
+ C.expect(dps~=nil and #missing==0,
+  tag..': the '..what..' says in Automatic a linked character-best DPS record may also be sent with its Echoes, locked Echoes and player info, unasked',
+  dps and ('missing: '..table.concat(missing,', ')) or 'no Automatic DPS statement')
+ C.expect(dps~=nil and Has(dps,'summary') and (Has(dps,'not queued') or Has(dps,'not admitted')),
+  tag..': the '..what..' does not tie that DPS record to the summary being queued',dps)
+ local loose=UnconditionalDps(text)
+ C.guard(loose==nil,tag..': every DPS statement in the '..what..' is conditional on Automatic and promises no send',loose)
+ local lower=V.Plain(text):lower()
+ C.guard(not Has(lower,'everyone') and not Has(lower,'every answer') and not Has(lower,'all players'),
+  tag..': the '..what..' claims no delivery to everyone',text)
+end
+
+-- The Share confirmation of mirror `id`, opened by its own action while the
+-- Sync mode reads as `mode`, then cancelled: its text and the tooltip. The
+-- mode is replaced only for that synchronous click, before any time passes.
+local function ReadShare(tag,id,mode)
+ local panel=ShowBuild(id)
+ local share=panel and panel.shareBtn
+ C.setup(share~=nil and share:IsShown() and share:IsEnabled(),tag..': fixture: the mirror offers its Share action')
+ if not (share and share:IsShown() and share:IsEnabled()) then return nil end
+ local policy=Nexus.SyncModePolicy
+ local realMode=policy.Mode
+ local before,sent,shown=Effects(id),#H.sent,shows
+ policy.Mode=function() return mode end
+ local ok,err=pcall(function() share:Click() end)
+ local opened=ok and slot:IsShown() and slot.which==DIALOG and shows==shown+1
+ local text=opened and V.Plain(slot.text or '') or nil
+ local tip=V.Plain(table.concat(V.TooltipLines(share:GetScript('OnEnter'),share),' '))
+ policy.Mode=realMode
+ C.setup(opened,tag..': fixture: the action opened its confirmation',printable(err))
+ Dismiss(false)
+ C.guard(Same(Effects(id),before) and #H.sent==sent and not slot:IsShown() and policy.Mode()=='manual',
+  tag..': reading and cancelling it shares and sends nothing; the Sync mode reads Manual again',Text(Effects(id)))
+ return text,tip
+end
+
+C.scenario('S13 the Share confirmation and its tooltip say what may be sent, in Manual, Automatic and Off',function()
+ local e1,e2=Effects(m1),Effects(m2)
+ for _,id in ipairs({m2,m1}) do
+  local published=(Row(id) or {}).publishedBuildId~=nil
+  local case=published and 'update' or 'first Share'
+  local clause=published and 'as an update' or 'as your shared listing'
+  local manualTip
+  for _,mode in ipairs({'manual','automatic','off'}) do
+   local tag='S13 '..case..' '..mode
+   local text,tip=ReadShare(tag,id,mode)
+   if text then
+    print('OBSERVED',tag,'confirmation='..text)
+    Disclosure(tag,'confirmation',text)
+    local t=text:lower()
+    local title=tostring((Row(id) or {}).title or '?'):lower()
+    C.guard(Has(t,title) and Has(t,clause) and Has(t,'saves') and Has(t,'on this client')
+     and Has(t,'queues a short summary') and Has(t,'if your saved sync mode and its size allow')
+     and Has(t,'cannot be recalled') and Has(t,'stop sharing removes only the listing on this client')
+     and Has(t,'cannot confirm who received'),
+     tag..': it keeps the build name, local save, possible summary, '..clause..', cannot-recall, local Stop Sharing and unconfirmed-receipt clauses',text)
+    if mode=='off' then
+     C.guard(Has(t,'your saved sync mode is off') and Has(t,'not sent'),tag..': under Off it says the listing is saved here and not sent',text)
+    else
+     C.guard(not Has(t,'sync mode is off'),tag..': no Off note outside Off',text)
+    end
+   end
+   if tip and mode=='manual' then
+    manualTip=tip
+    print('OBSERVED','S13 '..case..' tooltip='..tip)
+    Disclosure('S13 '..case..' tooltip','tooltip',tip)
+    local l=tip:lower()
+    C.guard(Has(l,'confirm') and Has(l,'cannot be recalled') and Has(l,'not copy into editor')
+     and Has(l,'not saving or activating a server saved build'),
+     'S13 '..case..' tooltip: it keeps the confirmed-Share, cannot-recall, not-Copy and not-a-server-save meanings',tip)
+   elseif tip then
+    C.guard(tip==manualTip,tag..': the tooltip reads the same in every mode',tip)
+   end
+  end
+ end
+ Until(40,function() return false end)
+ C.guard(Same(Effects(m1),e1) and Same(Effects(m2),e2) and Nexus.SyncModePolicy.Mode()=='manual'
+  and NexusDB.settings.syncMode=='manual',
+  'S13: no Share and no mode change follows after time passes',Text(Effects(m1))..' / '..Text(Effects(m2)))
+end)
+
+C.scenario('S14 the Automatic option of the Sync mode dialog names its DPS sends; viewing it changes nothing',function()
+ local root=NexusCommunityBuildsFrame
+ local modeBtn=root and root._modeBtn
+ C.setup(root~=nil and root:IsShown() and modeBtn~=nil and modeBtn:IsShown() and modeBtn:IsEnabled(),
+  'S14: fixture: the Build Library shows its Sync mode... action')
+ if not (modeBtn and modeBtn:IsShown() and modeBtn:IsEnabled()) then return end
+ local policy=Nexus.SyncModePolicy
+ local function Bytes()
+  local settings=rawget(NexusDB,'settings') or {}
+  local key=(policy.Choice() or {}).key or 'nexusSyncModeChoice'
+  return printable(rawget(settings,key))..'|'..printable(rawget(settings,'syncMode'))..'|'..printable(rawget(NexusDB,'settingsVersion'))
+ end
+ local function Counters()
+  local stats,parts=Nexus.Sync.Stats(),{}
+  for _,key in ipairs({'admittedPackets','admittedControl','admittedBulk','admittedShare','admissionRejected','modeRefused','sendAttempts'}) do
+   parts[#parts+1]=key..'='..printable(stats[key])
+  end
+  return table.concat(parts,' ')
+ end
+ local bytes,explicit,grant=Bytes(),(policy.Choice() or {}).explicit,policy.ActiveManualGrant()
+ local counters,sent,mark,e1,e2=Counters(),#H.sent,#said,Effects(m1),Effects(m2)
+ modeBtn:Click()
+ local d=NexusSyncModeDialog
+ local auto
+ for _,option in ipairs(d and d.options or {}) do if option.mode=='automatic' then auto=option end end
+ C.setup(d~=nil and d:IsShown() and auto~=nil and auto.help~=nil,'S14: fixture: the dialog is open with its Automatic option')
+ if not (d and auto and auto.help) then if d then d:Hide() end;return end
+ auto:Click()
+ C.guard(d._draft~=nil and d._draft.mode=='automatic' and auto:GetChecked()==true and Bytes()==bytes,
+  'S14: selecting the Automatic option changes only the uncommitted draft',Bytes())
+ local help=V.Plain(auto.help:GetText() or '')
+ local h=help:lower()
+ print('OBSERVED','S14 Automatic help='..help)
+ C.expect(Word(h,'may') and (Has(h,"character's best") or Has(h,'character-best')) and Has(h,'dps')
+  and Has(h,'echoes') and Has(h,'locked') and Has(h,'player info'),
+  'S14: the Automatic option says a new character-best DPS may be sent with its Echoes, locked Echoes and player info',help)
+ -- Its qualifiers (M5 qualifier correction), read from the help's DPS
+ -- sentence, not one copied sentence: that DPS is a newly eligible one (an
+ -- eligibility or qualifying term), and the character's best for an
+ -- encounter (both encounter names, or "encounter"), not across all of them.
+ local dpsHelp=Sentence(help,function(s) return Has(s,'dps') end)
+ C.expect(dpsHelp~=nil and (dpsHelp:find('%f[%a]eligib')~=nil or dpsHelp:find('%f[%a]qualif')~=nil),
+  'S14: the Automatic option says the DPS it may send is newly eligible (an eligibility or qualifying term)',help)
+ C.expect(dpsHelp~=nil and (Has(dpsHelp,'training dummy') and Has(dpsHelp,'lich king')
+   or dpsHelp:find('%f[%a]encounter')~=nil) and not Has(dpsHelp,'all encounters'),
+  'S14: the Automatic option scopes that character best to an encounter (Training Dummy or Lich King), not a best across all encounters',help)
+ C.guard(Has(h,'without a click') and Has(h,'request') and Has(h,'answer'),
+  'S14: it still names the requests and answers Automatic may send without a click',help)
+ C.guard(not Has(h,'personal') and not Word(h,'every') and not Word(h,'always') and not Word(h,'will'),
+  'S14: it promises no send and claims no personal best beyond the character best',help)
+ local width,height=auto.help:GetWidth(),auto.help:GetHeight()
+ for _,model in ipairs({G.MODELS.default,G.MODELS.px16}) do
+  local rows=G.Rows(help,width,model.char)
+  print('OBSERVED','S14 fit',model.name,rows..' rows x '..model.line..' px in '..width..'x'..height)
+  C.guard(rows>0 and rows*model.line<=height,'S14: under the '..model.name..' model the Automatic help fits its box',rows..' rows')
+ end
+ local metrics=Nexus.LayoutMetrics
+ local _,line=metrics.ConservativeText(1)
+ local rows=metrics.TextRows(help,width,1)
+ C.guard(rows>0 and rows*line<=height,'S14: under the runtime conservative text model it fits too',rows..' rows x '..line..' px')
+ d.cancel:Click()
+ C.guard(not d:IsShown() and d._draft==nil,'S14: Cancel closes the dialog and discards the draft')
+ C.guard(Bytes()==bytes and (policy.Choice() or {}).explicit==explicit and policy.Mode()=='manual'
+  and policy.ActiveManualGrant()==grant,'S14: viewing it saved no Sync mode and started no Sync Now grant',bytes..' -> '..Bytes())
+ C.guard(Counters()==counters and #H.sent==sent and SaidSince(mark,'Sync mode:')==nil
+  and Same(Effects(m1),e1) and Same(Effects(m2),e2),
+  'S14: it admitted, sent and shared nothing, and Apply was not used',Counters())
+ Until(40,function() return false end)
+ C.guard(Bytes()==bytes and policy.Mode()=='manual' and Same(Effects(m1),e1) and Same(Effects(m2),e2),
+  'S14: nothing follows after time passes',Bytes())
 end)
 
 print('OBSERVED','attempts='..#attempts,'handoffs='..#handoffs,'dpsBestHandoffs='..#dpsBests,

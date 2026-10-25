@@ -544,4 +544,117 @@ C.scenario('T2 Manual grant: same-choice no-op keeps it; Off ends a queued reque
  C.guard(#A.H.actions==0,'T2: no game action',#A.H.actions)
 end)
 
+-- D2/D3 characterization of existing pending-login behavior. These are
+-- GUARDs on f1b0a726: Apply itself sends nothing, while the ordinary scheduler
+-- can later start a login request retained under Manual or Off.
+-- D23 real dialog: the choice is made through the Build Library's own
+-- controls only (the patterns of ux_sync_mode_choice), never through
+-- SyncModePolicy.ApplyChoice directly. Cancel retires the first draft with
+-- its window; the "Sync mode..." button reopens a fresh draft of the saved
+-- mode bound to the current choice token; the Automatic option changes only
+-- that draft; the Apply button saves it, and the result and current lines,
+-- the renewed draft, the stored and effective choice and the shown Library
+-- status line read it back. No time passes from the reopening to Apply, and
+-- none of it sends or admits a packet. These checks characterize existing
+-- behavior (GUARD; SETUP for fixture states).
+for _,bootMode in ipairs({'manual','off'}) do
+ C.scenario('D23 '..bootMode..' boot -> Automatic retains pending login',function()
+  local A=Pair.Boot({'Modewaiter','Quietpeer'},{0,0},function(i,db)
+   db.settingsVersion=5;db.accountCharacters={};db.settings.syncMode=i==1 and bootMode or 'off'
+  end)
+  local e=A.e
+  C.setup(e.Nexus.SyncModePolicy.Mode()==bootMode,'D23 '..bootMode..': fresh boot uses saved mode')
+  local sent=#A.H.sent
+  Pair.Advance(40)
+  C.guard(#A.H.sent==sent,'D23 '..bootMode..': no click and no outgoing login request under saved mode')
+  e.Nexus.CommunityBuilds.Show()
+  local f=e.NexusCommunityBuildsFrame
+  C.setup(f and f._modeBtn,'D23 '..bootMode..': real mode button exists')
+  local admitted=Stats(A).admittedPackets or 0
+  if f and f._modeBtn then f._modeBtn:Click() end
+  local d=e.NexusSyncModeDialog
+  C.setup(d and d:IsShown(),'D23 '..bootMode..': real draft opens')
+  local cancelled=d and d._draft
+  if d and d.cancel then d.cancel:Click() end
+  C.guard(#A.H.sent==sent and (Stats(A).admittedPackets or 0)==admitted
+   and e.Nexus.SyncModePolicy.Mode()==bootMode and e.NexusDB.settings.nexusSyncModeChoice==nil,
+   'D23 '..bootMode..': opening and dismissing the draft changes and sends nothing')
+  C.guard(type(cancelled)=='table' and d~=nil and not d:IsShown() and d._draft==nil,
+   'D23 '..bootMode..': Cancel retires that draft with its window')
+  -- The choice through the real controls, as in ux_sync_mode_choice. No time
+  -- passes from the reopening to Apply.
+  local policy=e.Nexus.SyncModePolicy
+  local function Checked()
+   local out={}
+   for _,o in ipairs(d and d.options or {}) do if o:GetChecked() then out[#out+1]=o.mode end end
+   return table.concat(out,',')
+  end
+  local function StatusLine()
+   local fs=f and f._syncStatusText
+   return V.Plain(fs and fs:GetText() or '')
+  end
+  if f and f._modeBtn then f._modeBtn:Click() end
+  d=e.NexusSyncModeDialog
+  local draft=d and d._draft
+  local token=type(draft)=='table' and draft.token or nil
+  local opened=policy.Choice()
+  C.setup(d~=nil and d:IsShown() and type(draft)=='table',
+   'D23 '..bootMode..': the real mode button reopens the dialog with a draft')
+  C.guard(type(draft)=='table' and draft~=cancelled and draft.mode==bootMode and Checked()==bootMode
+   and type(token)=='table' and type(opened)=='table' and type(opened.token)=='table'
+   and opened.writable==true and opened.explicit==nil
+   and token.db==opened.token.db and token.settings==opened.token.settings and d.apply:IsEnabled()
+   and V.Plain(d.current:GetText()):find('Current: '..(bootMode=='manual' and 'Manual' or 'Off'),1,true)==1,
+   'D23 '..bootMode..': reopening makes a fresh draft of the saved mode, bound to the current choice token',
+   d and V.Plain(d.current:GetText()))
+  local option
+  for _,o in ipairs(d and d.options or {}) do if o.mode=='automatic' then option=o end end
+  C.setup(option~=nil,'D23 '..bootMode..': the real Automatic option exists')
+  if option then option:Click() end
+  C.guard(type(draft)=='table' and d._draft==draft and draft.token==token and draft.mode=='automatic'
+   and Checked()=='automatic' and policy.Mode()==bootMode and e.NexusDB.settings.nexusSyncModeChoice==nil
+   and #A.H.sent==sent and (Stats(A).admittedPackets or 0)==admitted,
+   'D23 '..bootMode..': reopening and clicking Automatic change only that draft (same token); nothing is saved, sent or admitted',
+   Checked())
+  local before,modeText=StatusLine(),policy.Text(bootMode)
+  C.setup(f~=nil and f:IsShown() and d~=nil and type(d._onApplied)=='function'
+   and not before:find('Sync is Automatic',1,true),
+   'D23 '..bootMode..': the Build Library is shown, the dialog holds its applied callback, and the status does not state Automatic yet',
+   before)
+  if d and d.apply then d.apply:Click() end
+  local after=policy.Choice()
+  local stored=e.NexusDB.settings.nexusSyncModeChoice
+  local resultText=d and V.Plain(d.result:GetText()) or ''
+  local status=StatusLine()
+  print('OBSERVED','D23 '..bootMode..' dialog apply',printable(resultText),'stored='..printable(stored),
+   'effective='..printable(policy.Mode()),'sent='..(#A.H.sent-sent),
+   'admitted='..((Stats(A).admittedPackets or 0)-admitted))
+  C.guard(resultText:find('Saved: your Sync mode is now Automatic',1,true)==1
+   and V.Plain(d.current:GetText()):find('Current: Automatic, your saved choice',1,true)==1
+   and type(d._draft)=='table' and d._draft~=draft and d._draft.mode=='automatic'
+   and type(after)=='table' and type(after.token)=='table' and type(d._draft.token)=='table'
+   and d._draft.token.db==after.token.db and d._draft.token.settings==after.token.settings,
+   'D23 '..bootMode..': the real Apply button states the saved result and the current choice, and renews the draft from the read-back status',
+   resultText)
+  C.guard(stored=='automatic' and policy.Mode()=='automatic' and type(after)=='table'
+   and after.explicit=='automatic' and after.effective=='automatic',
+   'D23 '..bootMode..': the explicit saved choice and the effective mode read back Automatic',printable(stored))
+  C.guard(status:find('Sync is Automatic: may send without a click',1,true)~=nil
+   and type(modeText)=='string' and not status:find(modeText,1,true),
+   'D23 '..bootMode..': with no time passing, the shown Library status line now states Automatic (the dialog\'s applied callback re-renders it)',
+   status)
+  C.guard(resultText:find('Saved:',1,true)==1 and stored=='automatic' and #A.H.sent==sent
+   and (Stats(A).admittedPackets or 0)==admitted,
+   'D23 '..bootMode..': Apply Automatic only saves the choice; no immediate send or queue admission',resultText)
+  Pair.Advance(40)
+  local requests=0
+  for i=sent+1,#A.H.sent do
+   local fields=Fields(A.H.sent[i].text)
+   if fields[1]=='WLRQ' and e.Nexus.Identity.SamePlayer(fields[2],A.name) then requests=requests+1 end
+  end
+  C.guard(requests>0,'D23 '..bootMode..': ordinary scheduler later emits the retained login request',requests)
+  C.guard(#A.H.actions==0,'D23 '..bootMode..': no game action',#A.H.actions)
+ end)
+end
+
 C.finish('(applied choices change later sending only through the existing admission and final-submit paths)')

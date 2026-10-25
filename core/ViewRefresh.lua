@@ -113,7 +113,8 @@ local function RefreshCommunity(receiving)
         return SafeRefresh("ViewRefresh.CommunityBuilds.MarkDataDirty",
             community.MarkDataDirty)
     end
-    return SafeRefresh("ViewRefresh.CommunityBuilds", community.Refresh)
+    return SafeRefresh("ViewRefresh.CommunityBuilds",
+        community.RefreshAutomatic or community.Refresh)
 end
 
 local function RunRefreshViews()
@@ -171,7 +172,8 @@ local function RunRefreshViews()
         deferredPanel = false
         if refreshCommunity then
             SafeRefresh("ViewRefresh.CommunityBuilds",
-                Nexus.CommunityBuilds and Nexus.CommunityBuilds.Refresh)
+                Nexus.CommunityBuilds and (Nexus.CommunityBuilds.RefreshAutomatic
+                    or Nexus.CommunityBuilds.Refresh))
         end
         if refreshLeaderboard then
             SafeRefresh("ViewRefresh.Leaderboard",

@@ -2678,19 +2678,37 @@ end
 function SavedFormat.ChoiceStatus()
     local db = NexusDB
     local class, savedFormat = SavedFormat.Classify(db)
-    local settings = type(db) == "table" and rawget(db, "settings") or nil
+    local settings
+    if type(db) == "table" then settings = rawget(db, "settings") end
     local explicit = SavedFormat.ExplicitSyncMode(db, class)
-    local stored = type(settings) == "table" and getmetatable(settings) == nil
-        and rawget(settings, SavedFormat.CHOICE_KEY) or nil
+    -- Observation is separate from the applied choice: read-only formats can
+    -- contain a recognized value this build deliberately does not honor.
+    -- Only plain saved tables establish absence; never inspect through a
+    -- metatable or stringify arbitrary saved values, including for the token.
+    local dbPlain = type(db) == "table" and getmetatable(db) == nil
+    local settingsPlain = type(settings) == "table" and getmetatable(settings) == nil
+    local stored, storedChoice, storedChoicePresent
+    local storedChoiceState = "unknown"
+    if dbPlain and settingsPlain then
+        stored = rawget(settings, SavedFormat.CHOICE_KEY)
+        storedChoicePresent = stored ~= nil
+        if stored == nil then storedChoiceState = "absent"
+        elseif stored == "automatic" or stored == "manual" or stored == "off" then
+            storedChoiceState, storedChoice = "recognized", stored
+        else storedChoiceState = "invalid" end
+    end
     local accepted = class == "supported" or class == "known"
     local legacy = class == "known" and type(settings) == "table"
         and rawget(settings, "syncMode") or nil
     if legacy ~= "off" and legacy ~= "manual" then legacy = nil end
     local status = {key=SavedFormat.CHOICE_KEY, effective=SavedFormat.SyncMode(db),
         explicit=explicit, storedInvalid=accepted and stored ~= nil and explicit == nil,
+        storedChoiceState=storedChoiceState, storedChoicePresent=storedChoicePresent,
+        storedChoice=storedChoice,
         inherited=legacy or "automatic", inheritedSource=legacy and "legacy" or "default",
         format=class, savedFormat=savedFormat, writable=false,
-        token={db=tostring(db), settings=tostring(settings)}}
+        token={db=dbPlain and tostring(db) or "uninspectable",
+            settings=settingsPlain and tostring(settings) or "uninspectable"}}
     if type(db) ~= "table" then status.reason = "database"; return status end
     if not accepted then status.reason = "saved-format"; return status end
     local C = boundCoordinator
