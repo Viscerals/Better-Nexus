@@ -2226,10 +2226,17 @@ function M.RunLog(which,from,count)
     init()
     local log=which=="previous" and logs.previous or logs.current
     if not log then return {sessionOnly=true,which=which or "current"} end
+    -- The log copies the run's usage at its own events, and a spend request is
+    -- logged just before its Orb is reserved, so between events that copy can
+    -- trail the run. The log of the live run shows the run's own usage and
+    -- exposure (both, so a confirmed Orb never drops out of both counts); any
+    -- other log keeps what it recorded. Reading only.
+    local live=log==logs.current and logOwned()==log
     local view={sessionOnly=true,which=which or "current",runId=log.runId,
         startedAt=log.startedAt,build=log.build,character=log.character,
         wishlist=log.wishlist,limit=log.limit,increased=log.increased,
-        state=log.state,reason=log.reason,spent=log.spent,reserved=log.reserved,
+        state=log.state,reason=log.reason,
+        spent=live and run.spent or log.spent,reserved=live and run.reserved or log.reserved,
         truncated=log.truncated,revision=log.revision,total=#log.entries,
         entries={}}
     local first=math.max(1,math.floor(tonumber(from) or 1))
@@ -2500,21 +2507,57 @@ end
 -- off or advance the run. Actual Resume still performs every fresh action check.
 -- Pending work keeps its original assignment/context; a settled run may adopt
 -- a different ready, valid assignment only on the explicit action.
+-- The second value is the assignment read it used (nil when it returned
+-- before reading), so a caller can describe it without a second read.
 local function resumeOffered(a,s)
-    if run.state~="PAUSED" or not run.token or not run.context then return false end
+    if run.state~="PAUSED" or not run.token or not run.context then return false,a end
     local p=run.pending
     if p and (run.targetChanged or p.restored or p.selectionAttempted
-        or (p.ambiguous and not p.spendConfirmed)) then return false end
+        or (p.ambiguous and not p.spendConfirmed)) then return false,a end
     a=a or assigned()
     if p then
-        if not matches(run.binding,a) then return false end
+        if not matches(run.binding,a) then return false,a end
     elseif a.state~="ready" or not P.Normalize(a.entries)
-        or run.spent+run.reserved>=run.limit then return false end
+        or run.spent+run.reserved>=run.limit then return false,a end
     -- Reuse Status's context; compact-only reads use passive scalars, not the
     -- adapter read. SameOwner/SameContext do not compare display-only `active`.
     local context=s and s.context or resumeDisplayContext()
-    if not context or not B.SameOwner(run.context,context) then return false end
-    return not p or B.SameContext(run.context,context)
+    if not context or not B.SameOwner(run.context,context) then return false,a end
+    return (not p or B.SameContext(run.context,context)),a
+end
+-- Display-only: what an explicit Resume of this paused run would act on, from
+-- the assignment read resumeOffered already made (no read of its own). It
+-- names the ready assignment a settled run would adopt (kind "same" or
+-- "changed"), or the original operation a pending run would continue
+-- ("original"), and keeps the original operation's name separately. A pending
+-- run whose target changed must settle first ("settle"); an assignment that is
+-- not ready is never named ("unavailable"); anything else Resume does not
+-- offer is "blocked". A pending record without a binding (one restored after a
+-- reload) has no target to compare, so it is "blocked", never "settle". key
+-- identifies the exact assignment shown, so a review of it can be told apart
+-- from a later one. It grants nothing: Resume still performs every check, and
+-- adopts what it reads then.
+local function resumeTargetView(a,offered)
+    if run.state~="PAUSED" then return nil end
+    local v={original=run.name,offered=offered==true}
+    if run.pending then
+        if offered then v.kind="original";v.name=run.name
+        elseif run.targetChanged or (run.binding and type(a)=="table" and not matches(run.binding,a)) then v.kind="settle"
+        else v.kind="blocked" end
+        return v
+    end
+    if type(a)~="table" then v.kind="blocked";return v end
+    if a.state~="ready" then v.kind="unavailable";v.assignmentState=a.state;return v end
+    v.changed=run.targetChanged==true or not matches(run.binding,a)
+    if not offered then v.kind="blocked";return v end
+    v.kind=v.changed and "changed" or "same"
+    v.name=a.name;v.slot=a.activeSlot
+    local parts={tostring(a.owner),tostring(a.activeSlot),tostring(a.identity),tostring(a.name)}
+    for _,e in ipairs(type(a.entries)=="table" and a.entries or {}) do
+        parts[#parts+1]=tostring(e.spellId)..":"..tostring(e.quality)..":"..tostring(e.stacks or 1)..":"..tostring(e.locked==true)
+    end
+    v.key=table.concat(parts,"|")
+    return v
 end
 -- Display snapshot. One adapter read per call (plus passive balance reads for
 -- the balance line and the maximum draft); it authorizes nothing (every
@@ -2563,6 +2606,7 @@ function M.Status(detail)
     r.canStart=not run.running and not run.pending and run.state~="PAUSED" and run.state~="LIMIT" and can~=nil
     r.startReason=why
     r.canResume=resumeOffered(a,resumeRead)
+    r.resumeTarget=resumeTargetView(a,r.canResume)
     -- Memory-only bookkeeping of this read; a failure in it changes nothing
     -- shown or allowed.
     pcall(observeReadiness,m and "ok" or stage,a,r.progress)
@@ -2571,9 +2615,10 @@ end
 function M.CompactStatus()
     init();if run.limit==0 and not run.pending then return nil end
     local remaining=run.displayProgress and run.displayProgress.rolledMissing
+    local offered,a=resumeOffered()
     return {state=run.state,running=run.running,pending=run.pending~=nil,spent=run.spent,reserved=run.reserved,
         limit=run.limit,remaining=remaining,reason=run.reason,
-        canResume=resumeOffered()}
+        canResume=offered,resumeTarget=resumeTargetView(a,offered)}
 end
 -- The adapter's hook reaches the evidence sink and the immediate notification.
 if type(B.CaptureSink)=="function" then B.CaptureSink(onPickRaw,onOwnerChoice,function() return life.phase,life.epoch end) end

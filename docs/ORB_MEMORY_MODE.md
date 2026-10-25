@@ -188,6 +188,97 @@ Stop, Recheck, and Help. Start is never implicit. Missing Orb APIs disable only
 this feature. Local Store/ownership capability readiness is required; Community
 preparation is not a prerequisite.
 
+During a run (running, paused, at its maximum or with an operation pending) the
+window shows Pause and Resume as two separate buttons in Start's place, and the
+main Nexus panel strip has the same two fixed buttons, so a repeated press of
+Pause never becomes Resume. Each click reads the status again and acts only if
+that read offers the action; Orb mode then makes its own final checks. Resume
+continues the paused run with the same approved maximum and does not reset its
+usage. Starting a run and approving its maximum stay in this window: Start,
+including the two-step **Start new run** / **Confirm new run**, returns once the
+run is no longer active. The earlier one-button Pause/Resume entry points are
+not shown during a run. They reach the same runtime actions and final checks,
+but what they withhold before that call is not identical to the fixed buttons
+(before a Resume, the window's hidden entry checks only the target review below).
+
+While a run is paused, the status names what Resume would act on (the runtime's
+`resumeTarget`). For an ordinary pending operation it is the original operation,
+which Resume continues. For a settled run it is the ready assigned Wishlist that
+Resume would use, shown as the same target or a new one. Same or new is the
+runtime's current comparison with the assignment the run is bound to: the one
+approved at Start, or the one a later Resume adopted. When a pending operation's
+assignment no longer matches, the status says that the original operation must
+settle first; when a settled run's assignment is restoring, loading, unavailable
+or not assigned, it says that the target is unknown. Neither names a Wishlist.
+No target is named for a record restored after a reload, an operation whose
+choice was already attempted, or any other case in which Resume is not offered.
+When the runtime records a target change, the status also names the original
+operation.
+
+When a settled run would resume with a new target, the window withholds Resume
+until **Review target** records a review of the exact target it shows, including
+its slot and Echo entries. The button then reads **Cancel review**, which clears
+the review. A click acts only on the target and the action that the button
+showed at the last refresh: when the target changed since, nothing is reviewed,
+the review is cleared, and the new target needs its own review. Review target
+shares Continue's place and is not shown with it. Review and Cancel review
+spend, send and save nothing. The review is held in memory and is cleared when
+the target shown changes, when the run leaves that state or when the window
+closes. It gates only the window's own Resume: the runtime's Resume does not
+check it, still makes every final check and adopts the assignment it reads
+then. The mini panel and the strip never resume a new target; they point to
+this window.
+
+An unresolved earlier result reads in layers in the window's status: first
+what it blocks ("Previous result is unresolved: no new Orb run or ordinary roll
+until it settles."), then what you can do now, by the Continue state actually
+shown (**Continue...**, **Why blocked...**, **Review check...**, or finishing or
+cancelling a check in the Continue window), then `Details:` with the runtime's
+own reason, unshortened, so recorded Echo names and earlier facts stay exact. A
+status longer than its box is complete on hover. The layers are shown in
+RECOVERY and also while a record restored after a reload is held in another
+state, for example paused by its saved loadout hold. Such a paused record names
+no Resume target; the mini panel and the strip say only that its result must
+settle, and **Open Orbs** or **Details** opens this window. Continue is offered
+only for an eligible record (`docs/ORB_RECOVERY_CONTINUE.md`). It needs its
+read-only check and your explicit confirmation; it does not confirm the earlier
+result, and it never refunds, retries or deletes it. Nexus never continues by
+itself. While this session's history is empty, the Continue window of a
+restored record says that the steps before the reload are not listed. A paused
+action of this session keeps the plain status: its state, any Resume target,
+then the runtime's instruction.
+
+Usage reads in one form. Orbs used counts spent Orbs against the approved
+maximum, written "X / Y approved" in the window, strip and history. A requested
+Orb whose spend is not confirmed yet is pending: the window adds "pending: 1 Orb
+requested, not confirmed yet" and the strip shows "1 Orb pending, not confirmed
+yet". When no requested Orb is waiting but the last action's result has not
+settled, the strip shows "Last Orb action is not settled" (in short while a
+target is named); that is not an unconfirmed request. The history page states
+the requested count and, separately in the same line, that the run has an
+unresolved operation; it shows that line only while an Orb is requested and not
+confirmed. The copied history report keeps its existing lines, labels and entry
+layout: its confirmed usage is the Orbs used count, and its unresolved exposure
+is the requested count.
+
+The strip has three lines: usage; then the pending count, an unsettled last
+action or the rolled target copies remaining; then the state. While a paused
+run names a Resume target, the second line keeps its fact first, in short (such
+as "1 Orb pending" or "3 copies left", with "?" for an unknown count), then the
+target's name, cut so that a short kind caption, "(new)" for a new target and
+"(same)" otherwise, stays on the line; an unknown target reads "Resume target
+unknown". The third line gives the instruction, such as "Paused - review it in
+the Orb window" or "Paused - 1 Orb pending". Hovering the strip shows the
+complete target, the complete fact line and the instruction. The strip has no
+Continue state: a paused unresolved result reads "Paused - result must settle",
+or "Paused - original must settle first" after a target change, and **Details**
+opens this window.
+
+Name bounds on the strip and the mini panel are character counts from offline
+font models, not native measurements. A longer name is shortened on a character
+boundary and is complete on hover; no native fit of a full name, or of a line
+drawn in a larger client font, is promised.
+
 The synthetic UI checks execute the real handlers and inspect structure. They do
 not reproduce native font measurement, focus, hit-testing, frame strata effects,
 or interference from other game addons.
@@ -201,9 +292,10 @@ offline comparison with an outside addon's source (3,000 offer decisions,
 3,000 result diffs, and 10,000 ordinary decisions) is retired (2026-09-24);
 it was never a claim of blanket parity.
 
-All tests in this build use Lua 5.4 with the included compatibility shims. They are
-not a LuaJIT, native client, original upstream inventory, or independent review
-result. No Orbs, player resources, live profiles, or game sessions were accessed.
+These checks are offline. They load the real Lua modules against synthetic game
+services and mocked Orb and ownership data. An offline pass is not a native client
+result, an original upstream inventory or an independent review, and the checks
+access no Orbs, player resources, live profiles or game sessions.
 
 Future native testing needs separate explicit consent, with an expendable approved
 source and a one-Orb limit first. An unresolved server operation must be handled
