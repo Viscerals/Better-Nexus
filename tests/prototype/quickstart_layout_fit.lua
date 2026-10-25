@@ -228,6 +228,70 @@ local actions,sent=#H.actions,#H.sent
 buttons.Close:Click()
 check(not qs:IsShown(),'Close closes Quick Start')
 check(#H.actions==actions and #H.sent==sent,'closing Quick Start submits nothing')
+
+-- Fresh first-launch warning constructors. The long Continue / Close answers
+-- above were fitted at one presentation only. Here every declared model runs
+-- with the real text measurement available and absent, and with the real
+-- LayoutMetrics table present and absent. Each case loads the public
+-- ui/OverwriteWarning.lua into a temporary Nexus namespace that holds only
+-- that table, over a fresh empty synthetic NexusDB. It opens its first-launch
+-- warning through its own EnsureOnboarding, whose outcome is session scoped.
+-- The original warning's outcome is only read, and no time passes. Each
+-- warning's own Close (X) hides it. The namespace, saved data and globals are
+-- restored even when a case raises. Body paragraphs are not fitted here.
+-- Offline models only; native NOT_RUN.
+do
+ local nexus0,db0,ow0,outcome0=Nexus,rawget(_G,'NexusDB'),Nexus.OverwriteWarning,Nexus.OverwriteWarning.EnsureOnboarding()
+ local dbCopy,w0,scroll0,qs0=H.Clone(db0),rawget(_G,'NexusOverwriteWarning'),rawget(_G,'NexusOverwriteWarningScroll'),rawget(_G,'NexusQuickStart')
+ local special0,yes0,no0,width0=#UISpecialFrames,w0.yes:GetText(),w0.no:GetText(),w0:GetWidth()
+ for _,m in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.small,G.MODELS.double})do
+  for _,measured in ipairs({true,false})do
+   for _,metrics in ipairs({true,false})do
+    local label='fresh onboarding warning, '..m.name..(measured and ', text measured' or ', text unmeasured')..(metrics and ', LayoutMetrics' or ', no LayoutMetrics')
+    under(label,m,measured,metrics,function()
+     local db={}
+     local ok,err=xpcall(function()
+      Nexus,NexusDB={LayoutMetrics=metrics and metrics0 or nil},db
+      local fresh=dofile('ui/OverwriteWarning.lua')
+      check(type(fresh)=='table' and fresh~=ow0 and Nexus.OverwriteWarning==fresh and nexus0.OverwriteWarning==ow0,label..': a fresh public warning module in its own namespace')
+      check(fresh.EnsureOnboarding()=='pending' and fresh.IsOpen(),label..': its EnsureOnboarding opens the first-launch warning')
+      local w=rawget(_G,'NexusOverwriteWarning')
+      check(w and w~=w0 and w:IsShown() and w.yes and w.no and w.close and not w.yes:IsEnabled() and not w.no:IsEnabled(),label..': a fresh warning is shown, its answers held for the reading interval')
+      local named=expect(w.yes:GetText()==CONTINUE and w.no:GetText()=='Close',label..': answers read exactly "'..CONTINUE..'" / "Close" ['..tostring(w.yes:GetText())..' / '..tostring(w.no:GetText())..']')
+      local dep=named and '' or ' [depends on the failed caption EXPECT]'
+      fits(w.yes,CONTINUE,m,label,dep);fits(w.no,'Close',m,label,dep)
+      local ww,wh=w:GetWidth(),w:GetHeight()
+      local yes,no=G.Rect(w.yes,w),G.Rect(w.no,w)
+      check(G.Inside(yes,{5,5,ww-5,wh-5}) and G.Inside(no,{5,5,ww-5,wh-5}) and ww<=1024,label..': answers inside a window on the smallest UI '..G.Text(yes)..G.Text(no)..dep)
+      check(G.Apart(yes,no),label..': answers do not overlap'..dep)
+      for _,o in ipairs(w.children)do
+       if o~=w.yes and o~=w.no and o:IsShown() then
+        local r=G.Rect(o,w);check(G.Apart(yes,r) and G.Apart(no,r),label..': answers apart from the control at '..G.Text(r)..dep)
+       end
+      end
+     end,debug.traceback)
+     local tmp,closed=rawget(_G,'NexusOverwriteWarning'),true
+     if tmp and tmp~=w0 then
+      pcall(function() tmp.close:Click() end)
+      closed=not tmp:IsShown() and tmp:GetScript('OnUpdate')==nil
+      if not closed then pcall(function() tmp:Hide() end);tmp:SetScript('OnUpdate',nil) end
+     end
+     Nexus,NexusDB=nexus0,db0
+     _G.NexusOverwriteWarning,_G.NexusOverwriteWarningScroll,_G.NexusQuickStart=w0,scroll0,qs0
+     for i=#UISpecialFrames,special0+1,-1 do UISpecialFrames[i]=nil end
+     if not ok then error(err,0) end
+     check(closed and next(db)==nil,label..': its own Close (X) hides it and stops its countdown; its synthetic NexusDB stays empty')
+    end)
+   end
+  end
+ end
+ local restored=Nexus==nexus0 and NexusDB==db0 and Nexus.OverwriteWarning==ow0 and Nexus.LayoutMetrics==metrics0 and G.model==nil
+  and rawget(_G,'NexusOverwriteWarning')==w0 and rawget(_G,'NexusQuickStart')==qs0 and rawget(_G,'NexusFontNormal')==font0 and #UISpecialFrames==special0
+ for _,k in ipairs(MEASURE)do restored=restored and rawget(methods,k)==saved[k] end
+ check(restored,'fresh warning cases restore the namespace, saved data, windows, font object, measurement and model')
+ check(T.Equal(NexusDB,dbCopy) and #H.actions==actions and #H.sent==sent and autoAccepted==0,'fresh warning cases change no saved data and accept, submit and spend nothing')
+ check(not ow0.IsOpen() and ow0.EnsureOnboarding()==outcome0 and not w0:IsShown() and w0.yes:GetText()==yes0 and w0.no:GetText()==no0 and w0:GetWidth()==width0 and not qs:IsShown(),'the original warning keeps its outcome, answers and width; the Welcome stays closed')
+end
 if #missed+#raised>0 then
  error('quickstart_layout_fit: '..#missed..' label EXPECT(s) failed and '..#raised..' label case(s) raised a setup or guard failure; first: '..tostring(missed[1] or raised[1]),0)
 end
