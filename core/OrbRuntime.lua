@@ -2332,6 +2332,30 @@ function M.RunnerView()
         running=run and run.running,pending=run and run.pending~=nil,
         lifecycleObserved=frame~=nil,epoch=frame and life.epoch or nil,phase=frame and life.phase or nil}
 end
+-- Passive reason view for the shared setup checklist and status (UX-09/LP-09).
+-- Unlike CompactStatus it never calls init(): it reads no saved, game,
+-- assignment or context state, starts no capture, transport, observer or
+-- pump, writes nothing and authorizes nothing. Each call returns a new table
+-- of plain scalars copied from this owner's run as it is held in memory.
+--   observed=false: this owner was not initialized in this session. Its run,
+--     and whether a saved receipt is unresolved, are unknown (not absent).
+--   observed=true, run=false: initialized, no run was approved and no
+--     receipt is held (the case CompactStatus answers nil for).
+--   observed=true, run=true: state, running, pending, restored; reason, the
+--     text this owner last recorded for its run (memory only: not a fresh
+--     game check or a present server cause); operation, the name the run
+--     recorded (absent for a receipt restored after a reload; never a Resume
+--     target). A field that is not a plain bounded value is left out.
+function M.ReasonView()
+    if not config or type(run)~="table" then return {observed=false} end
+    if run.limit==0 and not run.pending then return {observed=true,run=false} end
+    local p,state,reason,name=run.pending,run.state,run.reason,run.name
+    return {observed=true,run=true,
+        state=type(state)=="string" and #state<=32 and state:match("^[%u_]+$") or nil,
+        running=run.running==true,pending=p~=nil,restored=type(p)=="table" and p.restored==true,
+        reason=type(reason)=="string" and reason~="" and #reason<=4096 and reason or nil,
+        operation=type(name)=="string" and name~="" and #name<=512 and name or nil}
+end
 function M.RecoveryView()
     if not config then
         local st=Nexus.Store and Nexus.Store.State and Nexus.Store.State()
