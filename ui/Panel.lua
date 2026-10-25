@@ -318,7 +318,19 @@ do
         return text, DestMeasure(cell, text, memo, fallback)
     end
 
-    -- Cell texts, widths and left offsets for a row width.
+    -- Cell texts, widths and left offsets for a row width. Each cell first
+    -- steps down its own ladder, the widest first. A row still too wide then
+    -- reserves every floor before a name is shortened: a cell that is not
+    -- cut (a state, a one-glyph marker such as the refusal "!") keeps its
+    -- whole alternative, and a name keeps at least what DestClip shows at no
+    -- width (its slot token such as "#123" whole, else its leading
+    -- character). Only when those floors do not fit, and only when the
+    -- following together make them fit, optional parts yield in turn, each
+    -- no further than needed: the colon of a cue before a one-glyph
+    -- punctuation marker ("W:!" becomes "W!"), the gaps, then each box's
+    -- slack. The names then share the rest. Every text stays a whole
+    -- formatter alternative or a DestClip cut of a name; nothing is parsed
+    -- out of a state, slot token or marker.
     local function DestFit(layout, cells, fields, width)
         local gap = math.max(0, math.min(DEST_GAP, math.floor((width - 4) / 3)))
         local budget = width - 3 * gap
@@ -350,17 +362,65 @@ do
             local rung = ladders[index][level[index]]
             texts[index], widths[index] = rung.text, rung.width
         end
-        -- Still too wide: the whole cells keep their width and the names
-        -- share the rest, the shortest first, each shortened only when it
-        -- exceeds its share.
+        -- Still too wide: every cell is at its narrowest alternative. Each
+        -- floor is reserved before a name is shortened (see above).
+        local slackYields = false
         if total > budget then
-            local remaining, open = budget, {}
+            local open, isOpen, floors, need = {}, {}, {}, 0
             for index = 1, 4 do
                 local rung = ladders[index][level[index]]
                 if rung.clip and #DestUnitEnds(rung.value) >= 2 then
                     open[#open + 1] = index
+                    isOpen[index] = true
+                    local _, least = DestClip(cells[index], rung, 0, memos[index], fallback)
+                    floors[index] = least
                 else
-                    remaining = remaining - rung.width
+                    floors[index] = widths[index]
+                end
+                need = need + floors[index]
+            end
+            -- Optional parts yield only when the floors do not fit and they
+            -- together make them fit, each no further than needed.
+            if need > budget then
+                local marks, saving, room = {}, 0, 0
+                for index = 1, 4 do
+                    local rung = ladders[index][level[index]]
+                    local cue, value, least = rung.cue, rung.value, floors[index]
+                    if not isOpen[index] and type(cue) == "string" and cue:sub(-1) == ":"
+                        and type(value) == "string" and value:find("^%p$") then
+                        local text = cue:sub(1, -2) .. value
+                        local narrow = DestMeasure(cells[index], text, memos[index], fallback)
+                        if narrow < least then
+                            marks[#marks + 1] = {index = index, text = text, width = narrow}
+                            saving, least = saving + least - narrow, narrow
+                        end
+                    end
+                    room = room + math.min(DEST_SLACK, least - 1)
+                end
+                if need - saving - room <= budget + 3 * gap then
+                    for position = 1, #marks do
+                        if need <= budget then break end
+                        local mark = marks[position]
+                        need = need - floors[mark.index] + mark.width
+                        floors[mark.index] = mark.width
+                        texts[mark.index], widths[mark.index] = mark.text, mark.width
+                    end
+                    if need > budget then
+                        local less = math.min(gap, math.ceil((need - budget) / 3))
+                        gap, budget = gap - less, budget + 3 * less
+                    end
+                    slackYields = need > budget
+                end
+            end
+            -- The names share the rest, the shortest first, each shortened
+            -- only when it exceeds its share; a share never takes the floors
+            -- kept for the names after it.
+            local remaining, reserved = budget, 0
+            for index = 1, 4 do
+                if isOpen[index] then
+                    reserved = reserved + floors[index]
+                else
+                    remaining = remaining - widths[index]
                 end
             end
             table.sort(open, function(a, b)
@@ -369,7 +429,9 @@ do
             end)
             for position = 1, #open do
                 local index = open[position]
-                local share = math.floor(remaining / (#open - position + 1))
+                reserved = reserved - floors[index]
+                local share = math.min(math.floor(remaining / (#open - position + 1)),
+                    remaining - reserved)
                 if widths[index] > share then
                     texts[index], widths[index] = DestClip(cells[index],
                         ladders[index][level[index]], share, memos[index], fallback)
@@ -377,10 +439,18 @@ do
                 remaining = remaining - widths[index]
             end
         end
-        -- Below the floors: narrow the boxes (character first, state last)
-        -- so that the cells stay disjoint inside the row.
         local used = 0
         for index = 1, 4 do used = used + widths[index] end
+        -- The last optional part: each box's slack, character first.
+        if slackYields then
+            for index = 1, 4 do
+                if used <= budget then break end
+                local cut = math.min(used - budget, DEST_SLACK, widths[index] - 1)
+                widths[index], used = widths[index] - cut, used - cut
+            end
+        end
+        -- Below the floors: narrow the boxes (character first, state last)
+        -- so that the cells stay disjoint inside the row.
         for index = 1, 4 do
             if used <= budget then break end
             local cut = math.min(used - budget, widths[index] - 1)
