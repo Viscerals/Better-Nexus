@@ -1798,7 +1798,7 @@ class CatalogCoverageReport(unittest.TestCase):
     def test_invalid_declarations_are_rejected(self):
         fr_save = CATALOG_CURRENT_PACKS["frFR"]["entries"][REPORT_SAVE]
         de_save = CATALOG_CURRENT_PACKS["deDE"]["entries"][REPORT_SAVE]
-        good = lambda **changes: report_declaration("frFR", REPORT_SAVE, fr_save, **changes)
+        good = lambda **changes: dict(report_declaration("frFR", REPORT_SAVE, fr_save), **changes)
         cases = (
             ("hash of other text", [good(translatedTextSha256=report_sha("other text"))],
              "evidence-stale"),
