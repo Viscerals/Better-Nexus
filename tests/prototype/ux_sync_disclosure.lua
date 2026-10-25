@@ -227,7 +227,7 @@ local function Run(tag,database,mode,line)
   local okRect=r[1]>=11 and r[3]<=W-12 and r[2]>=12 and r[4]<=Ht-11
   local clear,seen=true,0
   local BUTTONS={['Set up current build']=true,['Import / Create Wishlist']=true,['Browse Community builds']=true,
-   ['Open Leaderboard']=true,['Help / Getting Started']=true,['Orbs / Lost Memories']=true,['Later']=true}
+   ['Open Leaderboard']=true,['Help / Getting Started']=true,['Orbs / Lost Memories']=true,['Close']=true}
   for _,c in ipairs(qs.children) do
    local button=c.kind=='Button' and BUTTONS[V.Plain(c:GetText() or '')]
    if button or c==qs.hint or c==qs.body then

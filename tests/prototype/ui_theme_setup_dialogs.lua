@@ -45,7 +45,7 @@ local function child(root,kind,text)
 end
 local welcomeTitle=assert(child(welcome,'FontString','Welcome to Nexus'))
 local displayTitle=assert(child(display,'FontString','On-Screen Wishlist'))
-local later=assert(child(welcome,'Button','Later'))
+local later=assert(child(welcome,'Button','Close'))
 local lock=assert(child(display,'Button','Lock Position')
     or child(display,'Button','Unlock to Move'))
 local reset=assert(child(display,'Button','Reset Position'))

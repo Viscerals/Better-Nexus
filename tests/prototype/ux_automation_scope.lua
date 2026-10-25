@@ -280,7 +280,7 @@ C.scenario('P10 M2 N5: Setup / Welcome keeps an open first-time Welcome first-ti
  local shown=Nexus.QuickStart.ShowSetup()
  C.expect(shown and NexusQuickStart:IsShown() and Title()=='Welcome to Nexus',
   'P10: Setup / Welcome leaves the open first-time Welcome as it is',Title())
- local later=ChildButton(NexusQuickStart,'Later')
+ local later=ChildButton(NexusQuickStart,'Close')
  if later then later:Click() end
  C.expect(rawget(NexusDB,'hasSeenQuickStart')==true,'P10: closing it records the first-time acknowledgement')
  C.guard(#H.sent==sent and #H.actions==actions and not Auto(),'P10: nothing is performed, sent or enabled')
@@ -293,7 +293,7 @@ C.scenario('P11 reading Help and the replay acts, requests, sends and writes not
  Nexus.Help.Show('rolling');Nexus.Help.Hide()
  local shown=Nexus.QuickStart.ShowSetup()
  C.setup(shown,'P11: fixture: the replay opens')
- local later=ChildButton(NexusQuickStart,'Later')
+ local later=ChildButton(NexusQuickStart,'Close')
  if later then later:Click() end
  C.guard(Same(Counters(),before) and Settings()==settings and rawget(NexusDB,'hasSeenQuickStart')==seen and not Auto(),
   'P11: Help and the replay leave actions, requests, sends, settings, seen state and Auto unchanged',Show(Counters()))

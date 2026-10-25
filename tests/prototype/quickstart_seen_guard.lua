@@ -35,7 +35,7 @@ Nexus.QuickStart.ShowIfFirstTime()
 check(NexusDB==nil,'absent data: deciding whether to show creates no saved table')
 check(Shown(),'absent data: the window is shown')
 check(Nexus.QuickStart.CanRecordSeen()==false,'absent data: the acknowledgement is withheld')
-Button('Later'):Click()
+Button('Close'):Click()
 check(NexusDB==nil,'absent data: closing the window creates no saved table')
 check(not Shown(),'absent data: the window closes')
 Nexus.QuickStart.ShowIfFirstTime()
@@ -49,7 +49,7 @@ NexusDB='not a saved table'
 Nexus.QuickStart.ShowIfFirstTime()
 check(NexusDB=='not a saved table','invalid data: the saved value is unchanged by the decision')
 check(Shown(),'invalid data: the window is shown')
-Button('Later'):Click()
+Button('Close'):Click()
 check(NexusDB=='not a saved table','invalid data: closing writes nothing and repairs nothing')
 NexusDB=keep
 
@@ -63,7 +63,7 @@ check(Flag()==nil,'ready: the acknowledgement is not set before the user acts')
 Nexus.QuickStart.ShowIfFirstTime()
 check(Shown(),'ready: the window is shown once')
 local before=F.Serialize(NexusDB)
-Button('Later'):Click()
+Button('Close'):Click()
 check(Flag()==true,'ready: the user action records the acknowledgement')
 NexusDB.hasSeenQuickStart=nil
 check(F.Serialize(NexusDB)==before,'ready: the acknowledgement is the only change')
@@ -92,7 +92,7 @@ local failedBefore=F.Serialize(NexusDB)
 Nexus.QuickStart.ShowIfFirstTime()
 check(Shown(),'failed: the window is still shown')
 check(Nexus.QuickStart.CanRecordSeen()==false,'failed: the acknowledgement is withheld')
-Button('Later'):Click()
+Button('Close'):Click()
 check(not Shown(),'failed: the window closes')
 check(Flag()==nil,'failed: no acknowledgement is written')
 check(F.Serialize(NexusDB)==failedBefore,'failed: the saved data is unchanged')
@@ -109,7 +109,7 @@ check(w.mode=='unavailable' and w.format=='malformed','read-only: the owner refu
 local roBefore=F.Serialize(NexusDB)
 Nexus.QuickStart.ShowIfFirstTime()
 check(Shown(),'read-only: the window is still shown')
-Button('Later'):Click()
+Button('Close'):Click()
 check(Flag()==nil,'read-only: no acknowledgement is written')
 check(F.Serialize(NexusDB)==roBefore,'read-only: the saved data and the marker are unchanged')
 
@@ -129,7 +129,7 @@ local communityBefore=F.Serialize({builds=NexusDB.communityBuilds,marker=NexusDB
 Nexus.QuickStart.ShowIfFirstTime()
 check(Shown(),'capacity: the window is shown')
 local capacityBefore=F.Serialize(NexusDB)
-Button('Later'):Click()
+Button('Close'):Click()
 check(Flag()==true,'capacity: the dismissal is recorded through the durable local owner')
 NexusDB.hasSeenQuickStart=nil
 check(F.Serialize(NexusDB)==capacityBefore,'capacity: the acknowledgement is the only change')
@@ -157,7 +157,7 @@ check(F.Serialize({builds=NexusDB.communityBuilds,marker=NexusDB.settingsVersion
  'capacity: the local save changed no shared Community data')
 
 -- 8. Every entry button opens its own view without creating a saved table.
-local buttons={'Later','Set up current build','Import / Create Wishlist',
+local buttons={'Close','Set up current build','Import / Create Wishlist',
  'Browse Community builds','Open Leaderboard','Help / Getting Started','Orbs / Lost Memories'}
 for _,label in ipairs(buttons)do
  F.Boot(F.Database())
@@ -178,7 +178,7 @@ local dismissed=false
 F.Boot(early,nil,function()
  if Nexus.Store.StateWriteStatus().mode~='durable' then
   Nexus.QuickStart.ShowIfFirstTime()
-  Button('Later'):Click()
+  Button('Close'):Click()
   dismissed=true
  end
 end)
@@ -192,7 +192,7 @@ end
 -- A session that can never save stops asking after its bounded attempts.
 F.Boot(F.Database({mutate=function(db)db.settingsVersion={version=5} end}))
 Nexus.QuickStart.ShowIfFirstTime()
-Button('Later'):Click()
+Button('Close'):Click()
 local settledAfter=nil
 for attempt=1,20 do
  if Nexus.QuickStart.ShowIfFirstTime()==true then settledAfter=attempt;break end

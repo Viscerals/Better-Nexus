@@ -17,8 +17,68 @@ local BODY="Already have a Saved Build? Assign the Wishlist you want it to follo
 local HINT="Reopen Help any time with /nexus help. Automation and Orb spending require separate explicit controls."
 local SUBTITLE="Plan your Echoes, then choose what to automate."
 local BUTTONS={'Set up current build','Import / Create Wishlist','Browse Community builds',
- 'Open Leaderboard','Help / Getting Started','Orbs / Lost Memories','Later'}
+ 'Open Leaderboard','Help / Getting Started','Orbs / Lost Memories','Close'}
 local MODELS={{name='default',char=5.5,line=12},{name='conservative',char=7.0,line=17}}
+
+-- Label cases at the declared models of layout_geometry_support (default,
+-- 16 px face, 0.75 and 2.0 scale; offline models, native NOT_RUN), through
+-- the real anchors of the real ui/OverwriteWarning and ui/QuickStart widgets.
+-- A label EXPECT (exact caption, whole label width, one complete line of
+-- height) is collected and reported at the end. Setup and guards still
+-- assert; inside a label case, a failed one is reported as a RAISED case.
+-- Every case restores the harness measurement, the font object and
+-- LayoutMetrics, and declines its own Auto request, also when it raises.
+local G=dofile('tests/prototype/layout_geometry_support.lua')
+local CONTINUE='Continue \226\128\148 Auto stays OFF' -- U+2014 em dash: the exact onboarding caption
+local CAPS=24 -- a button's end caps (docs/UI_TEXT_LAYOUT.md: label plus end caps)
+local methods,MEASURE=G.RegionMethods(),{'GetStringHeight','GetStringWidth','GetTextWidth','GetFont'}
+local saved,font0,metrics0={},rawget(_G,'NexusFontNormal'),Nexus.LayoutMetrics
+for _,k in ipairs(MEASURE)do saved[k]=rawget(methods,k) end
+local AUTO_OWNER,autoAccepted,missed,raised,warning={},0,{},{}
+local function expect(v,m)checks=checks+1;if v then return true end;missed[#missed+1]=m;print('FAIL EXPECT '..m);return false end
+-- measured=false hides the real text measurement (the fallback model);
+-- metrics=false hides LayoutMetrics.
+local function under(label,m,measured,metrics,fn)
+ local ok,err=xpcall(function()
+  G.UseFont(m)
+  if not measured then methods.GetTextWidth=nil end
+  if not metrics then Nexus.LayoutMetrics=nil end
+  fn()
+ end,debug.traceback)
+ for _,k in ipairs(MEASURE)do methods[k]=saved[k] end
+ _G.NexusFontNormal,Nexus.LayoutMetrics,G.model=font0,metrics0,nil
+ pcall(function() Nexus.OverwriteWarning.CancelAuto(AUTO_OWNER) end)
+ if not ok then raised[#raised+1]=label..': '..tostring(err);print('FAIL RAISED '..label..': '..tostring(err)) end
+end
+local function fits(button,caption,m,label,dep)
+ expect(G.Length(caption)*m.char+CAPS<=button:GetWidth(),label..': the whole "'..caption..'" fits its button width ['..button:GetWidth()..']'..dep)
+ expect(m.line<=button:GetHeight(),label..': one complete line fits its button height ['..button:GetHeight()..']'..dep)
+end
+local function answers(kind,m,name,yesCaption,noCaption)
+ local w,label=NexusOverwriteWarning,kind..' warning, '..m.name..name
+ check(w and w==warning and w:IsShown() and w.close and w.suppress and w.countdown,label..': the same warning is shown with its controls')
+ local named=expect(w.yes:GetText()==yesCaption and w.no:GetText()==noCaption,label..': answers read exactly "'..yesCaption..
+  '" / "'..noCaption..'" ['..tostring(w.yes:GetText())..' / '..tostring(w.no:GetText())..']')
+ local dep=named and '' or ' [depends on the failed caption EXPECT]'
+ fits(w.yes,yesCaption,m,label,dep);fits(w.no,noCaption,m,label,dep)
+ local ww,wh=w:GetWidth(),w:GetHeight()
+ local yes,no=G.Rect(w.yes,w),G.Rect(w.no,w)
+ check(G.Inside(yes,{5,5,ww-5,wh-5}) and G.Inside(no,{5,5,ww-5,wh-5}) and ww<=1024,label..': answers inside a window on the smallest UI '..G.Text(yes)..G.Text(no))
+ check(G.Apart(yes,no),label..': answers do not overlap')
+ for _,o in ipairs({w.close,w.suppress,w.countdown})do
+  local r=G.Rect(o,w);check(G.Apart(yes,r) and G.Apart(no,r),label..': answers apart from the control at '..G.Text(r))
+ end
+ return w
+end
+-- The first-launch warning opens once per session, so its full answers are
+-- measured at that presentation: 2.0 scale without text measurement (the
+-- supported fallback, the widest Continue). The original Show below then
+-- finds that warning still pending and opens nothing more.
+under('onboarding warning',G.MODELS.double,false,true,function()
+ Nexus.QuickStart.Show()
+ warning=NexusOverwriteWarning
+ answers('onboarding',G.MODELS.double,', text unmeasured, LayoutMetrics',CONTINUE,'Close')
+end)
 
 Nexus.QuickStart.Show()
 H.Advance(5.01);NexusOverwriteWarning.yes:Click()
@@ -40,8 +100,14 @@ check(hint,'Quick Start hint text unchanged')
 check(subtitle,'Quick Start subtitle text unchanged')
 local count=0;for _ in pairs(buttons)do count=count+1 end
 check(count==#BUTTONS,'Quick Start keeps its seven buttons')
+-- The Welcome dismissal must read exactly "Close" (a label EXPECT). Only after
+-- that failed EXPECT does the real legacy "Later" stand in as baseline control,
+-- so the unchanged guards still run; each Close check is then marked dependent.
+local closeNamed=expect(buttons.Close and buttons.Close:GetScript('OnClick'),'the Welcome dismissal reads exactly "Close" with its click handler')
+if not buttons.Close then buttons.Close=buttons.Later end
+local closeDep=closeNamed and '' or ' [depends on the failed Close caption EXPECT]'
 for _,label in ipairs(BUTTONS)do
- check(buttons[label] and buttons[label]:GetScript('OnClick'),'button "'..label..'" exists with its click handler')
+ check(buttons[label] and buttons[label]:GetScript('OnClick'),'button "'..label..'" exists with its click handler'..(label=='Close' and closeDep or ''))
 end
 
 -- Rectangles in window coordinates: x right, y DOWN from the window top.
@@ -73,7 +139,7 @@ local function apart(a,b,label)
  check(a[3]<=b[1] or b[3]<=a[1] or a[4]<=b[2] or b[4]<=a[2],label..' do not overlap')
 end
 local order={'Set up current build','Import / Create Wishlist','Browse Community builds','Open Leaderboard',
- 'Help / Getting Started','Orbs / Lost Memories','Later'}
+ 'Help / Getting Started','Orbs / Lost Memories','Close'}
 for _,label in ipairs(order)do
  local b=buttons[label];inside('button "'..label..'"',place(b,b:GetWidth(),b:GetHeight()))
 end
@@ -115,10 +181,54 @@ end
 -- The window stays on a 768 px high UI at its offset (centre +55).
 check(Ht/2+55<=384 and W<=1024,'window fits the smallest UI height at its offset')
 
--- Handlers keep their behaviour: Later closes the window and assigns, saves
+-- Label cases at every declared model, with the real text measurement
+-- available and absent (the fallback model, 2.0 scale included) and with
+-- LayoutMetrics available and absent. The same warning is rebound for an
+-- Auto request (Yes / No at the original 110 px answers in the original
+-- 520 px window, however wide Continue made it) and declined, never
+-- accepted. The Welcome's Close is fitted again on a deliberate Show: whole
+-- label, one complete line, inside the window border and apart from the
+-- hint, the Sync line and the other six controls. The old body paragraphs
+-- are not asked to fit these models; the body checks above stand.
+local closeW,closeH=buttons.Close:GetWidth(),buttons.Close:GetHeight()
+local actions0,sent0=#H.actions,#H.sent
+local function welcome(m,name)
+ Nexus.QuickStart.Show()
+ local close,label=buttons.Close,'Welcome, '..m.name..name
+ check(qs:IsShown() and qs.sync,label..': the Welcome and its Sync line are shown')
+ fits(close,'Close',m,label,closeDep)
+ local w2,h2,r=qs:GetWidth(),qs:GetHeight(),G.Rect(close,qs)
+ check(G.Inside(r,{11,12,w2-12,h2-11}) and w2<=1024 and h2/2+55<=384,label..': Close inside the window border, window on the smallest UI '..G.Text(r))
+ local others={hint,qs.sync}
+ for i=1,#order-1 do others[#others+1]=buttons[order[i]] end
+ for _,o in ipairs(others)do
+  local box=G.Rect(o,qs);check(G.Apart(r,box),label..': Close apart from the hint, Sync line or control at '..G.Text(box))
+ end
+end
+for _,m in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.small,G.MODELS.double})do
+ for _,measured in ipairs({true,false})do
+  for _,metrics in ipairs({true,false})do
+   local name=(measured and ', text measured' or ', text unmeasured')..(metrics and ', LayoutMetrics' or ', no LayoutMetrics')
+   under('Auto warning, '..m.name..name,m,measured,metrics,function()
+    check(Nexus.OverwriteWarning.RequestAuto(AUTO_OWNER,function() autoAccepted=autoAccepted+1 end)==false,'an Auto request opens the warning, accepting nothing')
+    local w=answers('Auto',m,name,'Yes','No')
+    check(w.yes:GetWidth()==110 and w.no:GetWidth()==110 and w:GetWidth()==520,'Auto warning, '..m.name..name..': Yes / No keep the original 110 px answers and 520 px window')
+   end)
+   under('Welcome, '..m.name..name,m,measured,metrics,function() welcome(m,name) end)
+  end
+ end
+end
+Nexus.QuickStart.Show()
+check(qs:GetWidth()==W and buttons.Close:GetWidth()==closeW and buttons.Close:GetHeight()==closeH,'restored measurement fits the Welcome as before the label cases')
+check(autoAccepted==0 and not NexusOverwriteWarning:IsShown() and #H.actions==actions0 and #H.sent==sent0,'label cases accept, submit and spend nothing')
+
+-- Handlers keep their behaviour: Close closes the window and assigns, saves
 -- and spends nothing.
 local actions,sent=#H.actions,#H.sent
-buttons.Later:Click()
-check(not qs:IsShown(),'Later closes Quick Start')
+buttons.Close:Click()
+check(not qs:IsShown(),'Close closes Quick Start')
 check(#H.actions==actions and #H.sent==sent,'closing Quick Start submits nothing')
-print('PASS Quick Start text fits its regions in the default and conservative font models; no overlap; inside the window; checks='..checks)
+if #missed+#raised>0 then
+ error('quickstart_layout_fit: '..#missed..' label EXPECT(s) failed and '..#raised..' label case(s) raised a setup or guard failure; first: '..tostring(missed[1] or raised[1]),0)
+end
+print('PASS Quick Start text fits its regions in the default and conservative font models; the full answer and Close labels fit the declared label models; no overlap; inside the window; checks='..checks)
