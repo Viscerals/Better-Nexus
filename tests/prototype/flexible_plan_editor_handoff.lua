@@ -716,6 +716,130 @@ do
     assert(#failures==0,'EXPECT fixed chooser text disclosure: '..table.concat(failures,'; '))
 end
 
+-- C2: a current replacement request accepted while the chooser is hidden.
+-- Its refusal must show the chooser and state the exact reason: the editor
+-- name changed after consent (EDITOR_CHANGED), or a count was typed after
+-- consent without Set (COUNT_PENDING). The later editor, its unaccepted Save
+-- confirmation, the committed counts and the pending input are all kept.
+-- Only the new visibility EXPECTs collect failures, so every setup, no-loss
+-- and positive control completes first; a refusal left hidden is reopened
+-- through the real entry so those controls still run. The editor, popups and
+-- planning session are restored before the original paths continue.
+do
+    local failures={}
+    local function expect(value,label)
+        print('C2 '..(value and 'PASS ' or 'FAIL ')..label)
+        if not value then failures[#failures+1]=label end
+        checks=checks+1
+    end
+    local A,B,C=410002,410003,410005
+    local actions0,sends0=#H.actions,#H.sent
+    local saveButton
+    -- Everything a refusal must keep: editor rows, debug state and maps, name,
+    -- destination, Save identity and data, held, saved data, traffic, actions.
+    local function snapshot()
+        local save=Popup.shown[CREATE]
+        return {state=H.Clone(editor.DebugDraftState()),rows=Rendered(),name=NexusWishlistNameInput:GetText(),
+            fulfilled=H.Clone(editor._fulfilledDraftTargets),applyPending=editor.IsApplyPending(),
+            destination=saveButton and saveButton:GetText(),save=tostring(save),
+            saveData=H.Clone(save and save.data),saveArgs={save and save.arg1,save and save.arg2},
+            db=H.Clone(NexusDB),held=H.Clone(H.locked),actions=#H.actions,sends=#H.sent}
+    end
+    -- A pool row: its committed count first in its label, its count text and Set label.
+    local function Shows(id,committed,text,action)
+        local row=PoolRow(id)
+        return row.label:GetText():find('Set: '..committed..'  #'..id,1,true)==1
+            and row.count:GetText()==text and row.action:GetText()==action
+    end
+    local function Budget(members,copies)
+        local text=ChooserText()
+        return text:find(members..' / 256 alternatives',1,true)~=nil
+            and text:find('Chosen: '..copies..' / 79',1,true)~=nil
+    end
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+    check(Add(A) and Add(B) and Count(A,2) and Count(B,1),'C2 setup explicit current choice through Add and Set')
+    NexusFlexiblePlanOpen:Click()
+    if Popup.shown[REPLACE] then Popup.Click(Popup.shown[REPLACE],1) end
+    check(equal(Rendered(),{{spellId=410002,quality=2,stacks=2},{spellId=410003,quality=3,stacks=1}})
+        and not NexusFlexiblePlanChooser:IsShown(),'C2 setup real exact editor draft 410002x2 410003x1')
+    NexusWishlistNameInput:SetText('C2 named exact draft')
+    for _,f in ipairs(H.frames) do
+        if f.kind=='Button' and f:GetParent()==NexusEditorFrame and f:IsVisible()
+            and f:GetText()=='Create unassigned' then saveButton=f;break end
+    end
+    check(saveButton~=nil,'C2 setup visible Create unassigned control')
+    saveButton:Click()
+    local savePopup=Popup.shown[CREATE]
+    check(savePopup~=nil and savePopup.data~=nil and Popup.shown[REPLACE]==nil,
+        'C2 setup real current Save confirmation is shown, not accepted')
+    local saveData=H.Clone(savePopup.data)
+    -- 1: the editor name changes after consent while the chooser is hidden.
+    NexusFlexiblePlanEntry:Click()
+    check(Add(C) and Count(C,3) and Count(A,1),'C2 setup next counts through real Add, edited count and Set')
+    check(Shows(A,1,'1','Set') and Shows(B,1,'1','Set') and Shows(C,3,'3','Set') and Budget(3,5)
+        and Status()=='','C2 setup next choice 410002x1 410003x1 410005x3 has no pending input')
+    NexusFlexiblePlanOpen:Click()
+    local request=Popup.shown[REPLACE]
+    check(request~=nil and Popup.shown[CREATE]==savePopup and equal(savePopup.data,saveData),
+        'C2 setup current replacement request beside the unaccepted Save confirmation')
+    NexusFlexiblePlanHide:Click()
+    NexusWishlistNameInput:SetText('C2 later typed name')
+    check(not NexusFlexiblePlanChooser:IsShown() and Popup.shown[REPLACE]==request
+        and NexusWishlistNameInput:GetText()=='C2 later typed name',
+        'C2 setup chooser hidden, then the editor name changed after consent')
+    local before=snapshot()
+    Popup.Click(request,1)
+    local visible,said=NexusFlexiblePlanChooser:IsVisible(),Status()
+    expect(visible,'hidden current request refused for a changed editor shows the chooser')
+    expect(said==Reason('EDITOR_CHANGED') and said:find('editor changed',1,true)~=nil,
+        'shown chooser status is exactly the EDITOR_CHANGED reason')
+    -- Reopen through the real entry only if the refusal stayed hidden, so the
+    -- controls below still run; this is setup, not an EXPECT or product stub.
+    if not visible then NexusFlexiblePlanEntry:Click() end
+    check(Popup.shown[REPLACE]==nil and equal(snapshot(),before),
+        'C2 EDITOR_CHANGED refusal keeps later editor rows, debug maps, name, destination, Save identity/data, held, db, traffic and actions')
+    check(Shows(A,1,'1','Set') and Shows(B,1,'1','Set') and Shows(C,3,'3','Set') and Budget(3,5),
+        'C2 EDITOR_CHANGED refusal keeps every committed count')
+    -- 2: a count is typed after consent without Set while the chooser is hidden.
+    NexusFlexiblePlanOpen:Click();request=Popup.shown[REPLACE]
+    check(request~=nil,'C2 setup fresh current replacement request for the later name')
+    PoolRow(B).count:SetText('4')
+    check(Shows(B,1,'4','Set *'),'C2 setup count typed after consent stays pending without Set')
+    NexusFlexiblePlanHide:Click()
+    check(not NexusFlexiblePlanChooser:IsShown() and Popup.shown[REPLACE]==request,
+        'C2 setup chooser hidden with the current request still shown')
+    before=snapshot()
+    Popup.Click(request,1)
+    visible,said=NexusFlexiblePlanChooser:IsVisible(),Status()
+    expect(visible,'hidden current request refused for pending count input shows the chooser')
+    expect(said==Reason('COUNT_PENDING') and said:find('Count input is pending',1,true)~=nil,
+        'shown chooser status is exactly the COUNT_PENDING reason')
+    if not visible then NexusFlexiblePlanEntry:Click() end
+    check(Popup.shown[REPLACE]==nil and equal(snapshot(),before),
+        'C2 COUNT_PENDING refusal keeps the complete editor, Save confirmation and effects')
+    check(Shows(A,1,'1','Set') and Shows(B,1,'4','Set *') and Shows(C,3,'3','Set') and Budget(3,5),
+        'C2 COUNT_PENDING refusal keeps committed counts and the typed 4 pending, uncommitted')
+    -- A valid fresh current consent, accepted while hidden, still installs.
+    check(Count(B,4) and Shows(B,4,'4','Set') and Budget(3,8) and Status()=='',
+        'C2 setup explicit Set commits the typed 4')
+    NexusFlexiblePlanOpen:Click();request=Popup.shown[REPLACE]
+    check(request~=nil,'C2 setup fresh current consent for the committed choice')
+    NexusFlexiblePlanHide:Click()
+    Popup.Click(request,1)
+    check(Popup.shown[REPLACE]==nil and not NexusFlexiblePlanChooser:IsShown()
+        and equal(Rendered(),{{spellId=410002,quality=2,stacks=1},{spellId=410003,quality=3,stacks=4},
+            {spellId=410005,quality=1,stacks=3}})
+        and NexusWishlistNameInput:GetText()=='' and #H.actions==actions0 and #H.sent==sends0,
+        'C2 CONTROL fresh current consent installs literal 410002x1 410003x4 410005x3 without actions')
+    StaticPopup_Hide(REPLACE);StaticPopup_Hide(CREATE)
+    editor.NewWishlist();NexusFlexiblePlanEntry:Click();NexusFlexiblePlanReset:Click()
+    check(Popup.shown[REPLACE]==nil and Popup.shown[CREATE]==nil and NexusFlexiblePlanChooser:IsShown()
+        and editor.DebugPendingCount()==0 and NexusWishlistNameInput:GetText()=='' and Status()==''
+        and Budget(0,0),'C2 checks leave an empty editor, no popup and an empty planning session')
+    print('C2 completed real paths; failures='..#failures)
+    assert(#failures==0,'EXPECT C2 hidden current-popup refusal visibility: '..table.concat(failures,'; '))
+end
+
 for i=1,100 do check(Add(ids[i]),'explicit catalog Add callback '..i) end
 check(editor.DebugPendingCount()==0,'100 pool members choose no editor rows')
 check(ChooserText():find('100 / 256',1,true) and ChooserText():find('Chosen: 0 / 79',1,true),
