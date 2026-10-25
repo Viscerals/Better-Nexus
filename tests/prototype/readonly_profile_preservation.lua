@@ -329,6 +329,36 @@ do
  end
 end
 
+-- 8b. Issue #123: the UI language preference in a read-only saved root. An
+-- exact saved enum ID is adopted into the detached settings view and is the
+-- active language; any other value is shown as English. The chooser refuses
+-- before the private writer, and the whole root stays byte for byte.
+for _,case in ipairs({PROTECTED[1],PROTECTED[3],PROTECTED[5]})do
+ for _,raw in ipairs({'esES','esEs'})do
+  local db=F.Database({mutate=function(d)d.settings.uiLanguage=raw;case.mutate(d)end})
+  local before=F.Serialize(db)
+  Boot(db)
+  local label=case.label..', saved language '..raw
+  local valid=raw=='esES'
+  local owner=Writer();local original,writes=owner.UpdateSettingsV1,0
+  owner.UpdateSettingsV1=function(...)writes=writes+1;return original(...)end
+  check(Class()==case.class,label..': classification unchanged')
+  check(Nexus.Store.Settings().uiLanguage==(valid and 'esES' or nil) and rawget(NexusDB.settings,'uiLanguage')==raw,label..': the view adopts only an exact enum ID; the saved value is kept')
+  check(Nexus.Localization.ActiveLanguage()==(valid and 'esES' or 'enUS'),label..': the active language')
+  local want=valid and Nexus.LocalizationPacks.esES.entries['reason.list_preparing'] or 'This list is still being prepared'
+  check(Nexus.UserText.Message('CURSOR_REQUIRED')==want,label..': the status text shown')
+  Nexus.Panel.Show()
+  local items;EasyMenu=function(list)items=list end;NexusPanel._menuBtn:Click()
+  local menu;for _,item in ipairs(items or {})do if type(item.text)=='string' and item.text:find('^Language')then menu=item end end
+  local disabled=0;for _,row in ipairs(menu and menu.menuList or {})do if row.func and row.disabled==true then disabled=disabled+1 end end
+  check(menu and disabled==7,label..': every language choice is disabled')
+  local result=Nexus.Panel.ChooseLanguage('frFR')
+  check(result.state=='refused' and result.reason=='read-only' and writes==0,label..': a choice is refused before the writer')
+  check(F.Serialize(NexusDB)==before,label..': the whole saved root is unchanged')
+  owner.UpdateSettingsV1=original
+ end
+end
+
 -- 9. Supported and verified profiles are unchanged: durable settings, their
 -- own bundle, and a writable catalog.
 for _,version in ipairs({2,3,4,5})do

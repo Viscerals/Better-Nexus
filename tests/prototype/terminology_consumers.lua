@@ -480,5 +480,255 @@ for _,b in ipairs(H.frames)do if b.kind=='Button' and b:GetText()=='Show details
 check(texts():find("server's supported level and state",1,true),'T47 actual Journal note')
 check(texts():find('Echo availability controls',1,true) and texts():find('Echo-availability control #12345',1,true),'T28 Journal producer -> fontstrings')
 check(not texts():find('level-1-only',1,true),'incorrect categorical level claim absent')
-
+-- Issue #123, optional language packs through the real preference, the real
+-- ... menu (EasyMenu capture), a durable Store write, reloads and the ordinary
+-- UserText -> Panel/Readout display path. Actual TOC boots of synthetic saved
+-- data (format5_support); no player data and no native payload. Technical
+-- checks only: no linguistic acceptance and no native rendering is claimed.
+do
+ ProjectEbonholdEchoJournal,ProjectEbonholdEchoJournalScroll,ProjectEbonholdEchoJournalTab1=nil,nil,nil
+ local F=dofile('tests/prototype/format5_support.lua')
+ local IDS={'frFR','deDE','esES','plPL','ptBR','ruRU'}
+ local COHORT={{'ROOT_MUTATION_PENDING','reason.save_in_progress','Saving is still in progress; wait for its final result'},
+  {'CURSOR_REQUIRED','reason.list_preparing','This list is still being prepared'},
+  {'STORE_PENDING','reason.saved_data_reading','Reading your saved data'},
+  {'waiting for three-card board','reason.wait_three_choices','Waiting for the next three Echo choices'},
+  {'waiting for pending-pick count','reason.wait_pending_pick_count','waiting for pending-pick count'}}
+ -- Issue #142: the row the real Readout shows for banish 0, reroll unknown and
+ -- freeze 7 under each active language (literal expectations).
+ local CHARGES={enUS='B:0 R:? F:7',frFR='Ban:0 Rel:? Gel:7',deDE='Verb:0 Neu:? Einfr:7',esES='Dest:0 Rel:? Cong:7',
+  plPL='Wygn:0 Przel:? Zamr:7',ptBR='Banir:0 Rolar:? Cong:7',
+  ruRU='\208\152\208\183\208\179:0 \208\159\208\181\209\128:? \208\151\208\176\208\188:7'}
+ local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
+ local PACKS=assert(penv.Nexus and penv.Nexus.LocalizationPacks,'pack data');checks=checks+1
+ local function Want(id,case)return id=='enUS' and case[3] or PACKS[id].entries[case[2]] end
+ local writes
+ local function CountWriter()
+  writes={n=0}
+  local owner=Nexus.MainInternals.StoreAuthorityOwner;local original=owner.UpdateSettingsV1
+  owner.UpdateSettingsV1=function(...)writes.n=writes.n+1;return original(...)end
+ end
+ local function LanguageMenu()
+  local items;EasyMenu=function(list)items=list end
+  NexusPanel._menuBtn:Click()
+  local found,rows=nil,0
+  for _,item in ipairs(items or {})do
+   if type(item.text)=='string' and item.text:find('^Language')then found=found or item;rows=rows+1 end
+  end
+  return found,rows
+ end
+ local function Row(menu,id)
+  local name=id=='enUS' and 'English' or PACKS[id].name
+  for _,row in ipairs(menu and menu.menuList or {})do
+   if type(row.text)=='string' and row.func and row.text:sub(1,#name)==name then return row end
+  end
+ end
+ local function MenuText(menu)
+  local out={}
+  for _,row in ipairs(menu and menu.menuList or {})do out[#out+1]=tostring(row.text)end
+  return table.concat(out,'\n')
+ end
+ local function Effects()
+  return F.Serialize({actions=#H.actions,sent=#H.sent,popup=H.popup~=nil,
+   auto=Nexus.RecomputeStats().autoEnabled==true,
+   option=ProjectEbonholdOptionsService:GetSetting('autoAcceptLoadoutEchoes')==true,
+   chars=NexusDB.chars,warnings=NexusDB.overwriteWarnings,ledger=NexusDB.accountCharacters,
+   top=NexusDB.genUnknownTopLevel,archive=NexusDB.nexusNativeRecoveryArchiveF5})
+ end
+ local function RootWithout()
+  local settings=NexusDB.settings;local value=rawget(settings,'uiLanguage')
+  settings.uiLanguage=nil;local text=F.Serialize(NexusDB);settings.uiLanguage=value
+  return text
+ end
+ local function Expect(id,label)
+  check(Nexus.Localization.ActiveLanguage()==id,label..': active language is '..id..' ('..tostring(Nexus.Localization.ActiveLanguage())..')')
+  for _,case in ipairs(COHORT)do
+   local want=Want(id,case)
+   check(Nexus.UserText.Message(case[1])==want and Nexus.UserText.Message(want)==want,label..': UserText shows the active text, stable when normalized again: '..case[1])
+   check(Nexus.Readout.Status({text=case[1],level=12})=='Lv 12 - '..want,label..': the readout status line: '..case[1])
+   local model={status=case[1],recommendation=case[1],cards={},auto=false,level=40,version=Nexus.VERSION,
+    progress={wishlistName='Language review',total=2,owned=0,missing={},shed={},unknownTomes={},toLock={}}}
+   Nexus.Panel.Show();assert(Nexus.Panel.Render(model))
+   check(model.status==case[1] and model.recommendation==case[1],label..': the raw reason stays the input: '..case[1])
+   check(Nexus.Panel._lastModel.status==want and NexusPanel._rollRec:GetText()==want and NexusPanel._rollArea:IsShown(),label..': the panel fontstring shows it: '..case[1])
+  end
+  local slots={banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}}
+  check(Nexus.Readout.ChargesLine({banish=0,freeze=7})==CHARGES[id] and Nexus.Readout.ChargesLine({banish=0,freeze=7,trustworthy=false})==CHARGES[id]..' ~',label..': the real Readout charge row of the active language; known 0 is 0 and unknown is ?')
+  check(Nexus.Localization.Format('readout.charge_counts',slots,{})=='B:0 R:? F:7',label..': an explicit {} pack still gives the English row')
+ end
+ -- A. English default: an absent preference, nothing added at start-up; menu reads write nothing.
+ H=F.Boot(F.Database({version=2}))
+ check(Nexus.StartupStatus().coreReady==true and Nexus.MainInternals.SavedRootReadOnlyV1()==nil,'fixture: a writable saved root started')
+ check(rawget(NexusDB.settings,'uiLanguage')==nil,'English default: start-up adds no language preference')
+ Expect('enUS','English default')
+ CountWriter()
+ local effects,settings0,chat0=Effects(),F.Serialize(NexusDB.settings),#H.chat
+ Nexus.Panel.Show()
+ local menu,rows=LanguageMenu()
+ check(menu and rows==1 and menu.hasArrow and type(menu.menuList)=='table','the ... menu has exactly one Language row with a submenu')
+ local text=MenuText(menu)
+ check(Row(menu,'enUS') and text:find('Only six messages are translated: five status messages and the Banish/Reroll/Freeze count row',1,true) and text:find('other Nexus text stays English',1,true) and not text:find('three status messages',1,true),'English and the partial six-message result are listed')
+ for _,id in ipairs(IDS)do
+  check(Row(menu,id) and not Row(menu,id).disabled,'the chooser lists '..id..' by its own name, enabled')
+  check(not text:find(id,1,true) and not menu.text:find(id,1,true),'no internal language ID is shown: '..id)
+ end
+ check(text:find('reload',1,true) and not text:lower():find('fully',1,true) and not text:find('Changes unavailable',1,true),'the reload requirement, no full-support claim, no refusal')
+ check(Row(menu,'enUS').checked==true and Row(menu,'enUS').text:find('active',1,true),'English is the active and saved choice')
+ NexusPanel._menuBtn.scripts.OnEnter(NexusPanel._menuBtn);NexusPanel._menuBtn.scripts.OnLeave(NexusPanel._menuBtn)
+ local status=Nexus.Panel.LanguageStatus()
+ check(status.active=='enUS' and status.saved=='enUS' and status.pending==false and status.refusal==nil,'status: English active, nothing pending, changes available')
+ check(writes.n==0 and F.Serialize(NexusDB.settings)==settings0 and Effects()==effects and #H.chat==chat0,'opening, hovering, closing and status reads write and print nothing')
+ Row(menu,'enUS').func()
+ check(writes.n==0 and F.Serialize(NexusDB.settings)==settings0,'choosing English while English is the default writes nothing')
+ -- B. An explicit supported change writes only settings.uiLanguage; the
+ -- active language stays until a reload.
+ local settingsTable,before=NexusDB.settings,RootWithout()
+ Row(menu,'frFR').func()
+ check(writes.n==1 and NexusDB.settings==settingsTable and rawget(NexusDB.settings,'uiLanguage')=='frFR','one durable write through the Store owner sets frFR in the same settings table')
+ check(RootWithout()==before,'nothing else changed: other and unknown settings, schema markers, rows, ledger, bundle')
+ check(Effects()==effects,'no game action, Sync send, consent popup, assignment or client option change')
+ status=Nexus.Panel.LanguageStatus()
+ check(status.active=='enUS' and status.saved=='frFR' and status.pending==true,'status: English stays active, French is saved and pending')
+ Expect('enUS','French chosen, before reload')
+ menu=LanguageMenu()
+ check(Row(menu,'frFR').checked==true and Row(menu,'frFR').text:find('reload',1,true) and Row(menu,'enUS').text:find('active',1,true) and menu.text:find('reload',1,true),'the menu shows the active and the pending choice')
+ Row(menu,'frFR').func()
+ check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='frFR','choosing the stored ID again is a no-op')
+ check(Nexus.Localization.InitializeActiveLanguage('frFR')=='enUS','a second initialization does not switch the session')
+ H.Fire('PLAYER_ENTERING_WORLD');H.Advance(3,.05)
+ Expect('enUS','after another world entry')
+ check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='frFR','world entry neither writes nor switches the language')
+ -- C. The user-requested reload applies the saved choice; then each pack in turn.
+ H=F.Reload();CountWriter()
+ Expect('frFR','French after reload')
+ status=Nexus.Panel.LanguageStatus()
+ check(rawget(NexusDB.settings,'uiLanguage')=='frFR' and status.saved=='frFR' and status.pending==false and writes.n==0,'after reload: the saved choice is active, kept and not pending')
+ for i=2,#IDS do
+  Nexus.Panel.Show();menu=LanguageMenu()
+  Row(menu,IDS[i]).func()
+  check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')==IDS[i] and Nexus.Panel.LanguageStatus().pending==true,IDS[i]..' chosen and pending')
+  Expect(IDS[i-1],IDS[i]..' chosen, before reload')
+  H=F.Reload();CountWriter()
+  Expect(IDS[i],IDS[i]..' after reload')
+ end
+ Nexus.Panel.Show();menu=LanguageMenu();Row(menu,'enUS').func()
+ check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='enUS','an explicit English choice is saved')
+ Expect('ruRU','English chosen, before reload')
+ H=F.Reload();CountWriter()
+ Expect('enUS','English after reload')
+ -- D. An unsupported saved value is shown as English and kept as saved; an
+ -- explicit English choice may replace it.
+ for _,raw in ipairs({'xxXX','frfr',42})do
+  NexusDB.settings.uiLanguage=raw
+  H=F.Reload();CountWriter()
+  Expect('enUS','unsupported saved value '..tostring(raw))
+  Nexus.Panel.Show();menu=LanguageMenu();status=Nexus.Panel.LanguageStatus()
+  check(rawget(NexusDB.settings,'uiLanguage')==raw and writes.n==0 and status.saved=='enUS' and status.pending==false and status.savedUnsupported==true,'unsupported '..tostring(raw)..': kept as saved, English shown, reads write nothing')
+  check(MenuText(menu):find('English is shown',1,true) and Row(menu,'enUS').checked==true,'the menu says the saved value is not offered')
+ end
+ Row(menu,'enUS').func()
+ check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='enUS','an explicit English choice replaces an unsupported saved value')
+ -- E. A capacity-refused start-up keeps saved data unchanged: a valid saved
+ -- choice is active, and a change is refused before the writer.
+ do
+  local db=F.Database({version=2})
+  db.settings.uiLanguage='deDE';db.communityBuilds={}
+  for i=1,2049 do db.communityBuilds['cap-'..i]={} end
+  H=F.Boot(db);CountWriter()
+  local s=Nexus.StartupStatus()
+  check(s.coreReady==true and s.reason=='ROOT_SLOT_LIMIT','fixture: a capacity-refused start-up with local tools ready ('..tostring(s.reason)..')')
+  Expect('deDE','capacity-refused session')
+  local saved=F.Serialize(NexusDB)
+  Nexus.Panel.Show();menu=LanguageMenu()
+  check(Row(menu,'frFR').disabled==true and MenuText(menu):find('Changes unavailable',1,true),'capacity refusal: every choice is disabled with its reason')
+  local r=Nexus.Panel.ChooseLanguage('frFR')
+  check(r.state=='refused' and r.reason=='capacity' and writes.n==0 and F.Serialize(NexusDB)==saved,'capacity refusal: refused before the writer, root unchanged')
+ end
+ -- A settings replacement under the admitted root has not itself been
+ -- admitted. Opening the real menu and clicking must preserve both tables.
+ do
+  H=F.Boot(F.Database({version=2}));CountWriter()
+  local admitted=NexusDB.settings
+  check(NexusDB.authorityBundle.storeData.settings==admitted,'fixture: original settings are admitted')
+  NexusDB.settings={uiLanguage='enUS',unknown={keep=true}}
+  local replacement=NexusDB.settings;local frozen=F.Serialize(NexusDB)
+  Nexus.Panel.Show();menu=LanguageMenu()
+  local r=Nexus.Panel.ChooseLanguage('frFR')
+  check(Row(menu,'frFR').disabled==true and r.state=='refused' and r.reason=='drift' and writes.n==0,'replaced settings: disabled and refused before the writer')
+  check(NexusDB.settings==replacement and NexusDB.authorityBundle.storeData.settings==admitted and F.Serialize(NexusDB)==frozen,'replaced settings: both identities and the whole root stay unchanged')
+  NexusDB.settings=admitted
+  r=Nexus.Panel.ChooseLanguage('frFR')
+  check(r.state=='saved' and writes.n==1 and admitted.uiLanguage=='frFR','restoring the admitted settings permits a durable choice')
+ end
+ -- The real Store writer can return session if authority changes at its
+ -- boundary. The real menu must keep the durable preference separate from
+ -- that detached projection, including an earlier durable pending choice.
+ for _,prior in ipairs({false,'frFR'})do
+  H=F.Boot(F.Database({version=2}));CountWriter()
+  Nexus.Panel.Show();menu=LanguageMenu()
+  if prior then Row(menu,prior).func() end
+  local saved=prior or 'enUS';local calls=writes.n
+  local effects=Effects()
+  local owner=Nexus.MainInternals.StoreAuthorityOwner;local original=owner.UpdateSettingsV1
+  local mode,frozen
+  owner.UpdateSettingsV1=function(key,value)
+   NexusDB.settingsVersion=6 -- authority drift at the actual writer boundary
+   frozen=F.Serialize(NexusDB)
+   local result=original(key,value);mode=result and result.mode
+   return result
+  end
+  menu=LanguageMenu();Row(menu,'ruRU').func()
+  check(mode=='session' and writes.n==calls+1 and Nexus.Store.Settings().uiLanguage=='ruRU','fixture: actual writer changed the detached session projection')
+  check(rawget(NexusDB.settings,'uiLanguage')==(prior or nil) and F.Serialize(NexusDB)==frozen and Effects()==effects,'session result: saved preference, whole root and game effects stay unchanged')
+  local status=Nexus.Panel.LanguageStatus()
+  check(status.saved==saved and status.pending==(prior~=false) and status.sessionOnly==true and status.active=='enUS','session result: status describes the durable choice, not the detached projection')
+  menu=LanguageMenu()
+  check(Row(menu,saved).checked==true and Row(menu,'ruRU').checked==false and not Row(menu,'ruRU').text:find('saved',1,true),'session result: reopening the real menu does not label the session choice saved')
+  check(MenuText(menu):find('The last choice was not saved',1,true) and (not prior or Row(menu,prior).text:find('saved, applies after reload',1,true)),'session result: truthful notice preserves any earlier durable pending choice')
+  check(writes.n==calls+1 and F.Serialize(NexusDB)==frozen,'session result: repeated status/menu reads invoke no writer')
+  H=F.Reload();CountWriter()
+  Expect(saved,'session choice discarded after reload')
+  check(Nexus.Panel.LanguageStatus().pending==false and writes.n==0 and F.Serialize(NexusDB)==frozen,'reload: only the original saved choice survives, with no write')
+ end
+ -- F. Early start-up, authority drift and a Store the session was not initialized with.
+ do
+  local early
+  H=F.Boot(F.Database({version=2}),nil,function()
+   local owner=Nexus.MainInternals.StoreAuthorityOwner;local original,n=owner.UpdateSettingsV1,0
+   owner.UpdateSettingsV1=function(...)n=n+1;return original(...)end
+   local settings=F.Serialize(NexusDB.settings)
+   local rows=Nexus.Panel.LanguageMenuItems(function(fn)return fn end)
+   local result=Nexus.Panel.ChooseLanguage('frFR')
+   early={menu={menuList=rows},result=result,writes=n,same=F.Serialize(NexusDB.settings)==settings}
+   owner.UpdateSettingsV1=original
+  end)
+  check(early.menu and Row(early.menu,'frFR').disabled==true and MenuText(early.menu):find('Nexus is still starting',1,true),'early start-up: choices are shown disabled with the reason')
+  check(early.result.state=='refused' and early.result.reason=='startup' and early.writes==0 and early.same,'early start-up: a choice is refused and nothing is written')
+  Expect('enUS','after the early refusal')
+  CountWriter()
+  local internals=Nexus.MainInternals;local realOwner,foreign=internals.StoreAuthorityOwner,0
+  internals.StoreAuthorityOwner={owner={},UpdateSettingsV1=function()foreign=foreign+1;return {mode='durable'}end}
+  local r=Nexus.Panel.ChooseLanguage('frFR')
+  internals.StoreAuthorityOwner=realOwner
+  check(r.state=='refused' and r.reason=='authority' and foreign==0 and writes.n==0,'another Store owner: refused, its writer never called')
+  local current=NexusDB;NexusDB=F.Database({version=2});local other=F.Serialize(NexusDB)
+  r=Nexus.Panel.ChooseLanguage('frFR')
+  check(r.state=='refused' and r.reason=='drift' and writes.n==0 and F.Serialize(NexusDB)==other,'a replaced saved root: refused, neither root written')
+  NexusDB=current;NexusDB.settingsVersion=6
+  local frozen=F.Serialize(NexusDB)
+  Nexus.Panel.Show();menu=LanguageMenu()
+  r=Nexus.Panel.ChooseLanguage('frFR')
+  check(Row(menu,'frFR').disabled==true and r.state=='refused' and r.reason=='read-only' and writes.n==0 and F.Serialize(NexusDB)==frozen,'a root that became read-only: disabled, refused, unchanged')
+  NexusDB.settingsVersion=2
+  r=Nexus.Panel.ChooseLanguage('plPL')
+  check(r.state=='saved' and r.pending==true and writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='plPL','control: with the authority current again the choice is saved and pending')
+  local oldOwner=Nexus.MainInternals.StoreAuthorityOwner
+  dofile('core/Store.lua')
+  local freshOwner=Nexus.MainInternals.StoreAuthorityOwner;local freshWriter,freshCalls=freshOwner.UpdateSettingsV1,0
+  freshOwner.UpdateSettingsV1=function(...)freshCalls=freshCalls+1;return freshWriter(...)end
+  check(freshOwner~=oldOwner and freshOwner.owner==Nexus.Store,'fixture: a reloaded Store module with its own writer')
+  r=Nexus.Panel.ChooseLanguage('ruRU')
+  check(r.state=='refused' and r.reason=='authority' and freshCalls==0 and writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='plPL','the session Store cannot use another Store module\'s writer')
+ end
+end
 print('PASS terminology actual consumer checks='..checks..'; native rendering not asserted')

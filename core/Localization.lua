@@ -1,10 +1,14 @@
 -- Nexus: core/Localization.lua
--- Issue #140 (parent #123), first slice (English only): the Nexus-owned presentation
--- seam for reviewed player-facing text. A caller asks for a stable semantic
--- key ("reason.save_in_progress") and gets text. This file reads no game
--- API, client locale, saved data or setting, and it prints, sends, schedules
--- or saves nothing. Its only state is the English base copied at load and
--- the fixed-size diagnostic record below.
+-- Issue #140 (parent #123), with the optional packs of issue #123: the one
+-- Nexus-owned presentation seam for reviewed player-facing text. A caller
+-- asks for a stable semantic key ("reason.save_in_progress") and gets text.
+-- This file reads no game API, client locale, saved data or setting, and it
+-- prints, sends, schedules or saves nothing. Its state is the English base
+-- and the optional packs copied at load (each pack covers at most the
+-- six-message cohort: five static messages and the charge-row template; all
+-- other Nexus text stays English), the
+-- session's active language (set once from the ID its caller supplies, see
+-- below) and the fixed-size diagnostic record below.
 --
 -- Text/data contract, for the English base and for an injected candidate:
 --  * key: a string of 3 to MAX_KEY_BYTES bytes made of two or more
@@ -15,8 +19,10 @@
 --    (the shortest-form encoding of Unicode scalar values only; see
 --    WellFormedUtf8), with at least one byte outside ASCII whitespace, no control
 --    byte (0-31, 127) and no "|" (so no colour, link or texture escape).
---    Static text is shown exactly as stored; formatted meanings use the
---    named count-template grammar below.
+--    Static text is shown exactly as stored: no placeholder or formatting.
+--    Formatted meanings use the named count-template grammar below, whose
+--    placeholders and typed counts are owned by a code schema, never by a
+--    translation and never by printf-style formatting.
 --    Whitespace here means ASCII bytes 9-13 and 32, not Unicode White_Space,
 --    grapheme or visibility classification. This is localized text, not an
 --    identifier or user-authored identity: Identity.ValidDisplayText is a
@@ -36,7 +42,9 @@
 -- (no entry count is invented). A plain base sets present=true; above
 -- MAX_BASE_ENTRIES it adopts nothing, sets oversized=true and rejected to
 -- the whole entry count. In an admitted plain base, invalid entries are
--- excluded and each is counted once as rejected.
+-- excluded and each is counted once as rejected. A key with a code-owned
+-- schema is admitted only as a valid template (counted in both accepted
+-- and formatted), never as static text.
 --
 -- L.Resolve(key, pack) -> text, source, reason. It never raises and records
 -- nothing. In this order:
@@ -52,9 +60,33 @@
 --     control byte, "|", too long, malformed or non-scalar UTF-8)
 --                                  -> English text, "base", "invalid_candidate"
 --  7. otherwise                    -> the entry, "candidate", nil
--- A candidate can only replace a reviewed English key, never add one. There
--- is no language choice, preference or client-locale lookup: the English
--- base is the only real pack; a candidate is injected data (offline tests).
+-- A candidate can only replace a reviewed English key, never add one.
+-- Resolve is pure: it reads only its arguments and the English base copied
+-- at load, so Resolve(key) without a pack is always the English base,
+-- whatever language is active.
+--
+-- Optional packs (data/LocalizationPacks.lua, loaded just before this file
+-- by Nexus.toc). The language IDs are the Nexus preference enum of
+-- data/DefaultProfile.lua (uiLanguages): Nexus presentation choices, not
+-- client locales or GetLocale() values. The default ID is the English base;
+-- every other ID names one pack. A pack is adopted only when it is a plain
+-- table whose name (its autonym: the text contract, at most MAX_NAME_BYTES)
+-- and plain entries table (at most MAX_BASE_ENTRIES entries) pass; an entry
+-- is copied only when its key is a reviewed English static key and its text
+-- passes the text contract, or its key holds an admitted English template
+-- (issue #142) and its text compiles under that key's code-owned schema
+-- (CompileTemplate). Anything else is left out and counted in
+-- Diagnostics().packs: a missing or invalid entry falls back to English for
+-- its key, and a refused or absent pack is not offered. Packs are read with
+-- next/rawget only and copied once, here; a later change to the data table
+-- changes nothing.
+--
+-- Active language. core/MainLifecycle.lua calls InitializeActiveLanguage(id)
+-- once per Lua session, after Store admission and before the ordinary UI is
+-- initialized, with the saved preference. An ID without an adopted pack
+-- (unknown, malformed or refused) gives English. Any later call returns the
+-- language already active and changes nothing, so a changed preference
+-- applies at the next reload or login. Until the call English is active.
 --
 -- L.Text(key, pack) is Resolve plus the diagnostic record: each result with
 -- a reason is counted by reason, and the first MAX_DIAGNOSTIC_KEYS distinct
@@ -62,7 +94,15 @@
 -- counts each miss occurrence whose shown key is unkept, including repeats
 -- of the ninth key; it does not count distinct unkept identities. The record
 -- has a fixed size, is never printed to chat, and Diagnostics() returns a
--- programmatic copy; no diagnostic UI is added here.
+-- programmatic copy; no diagnostic UI is added here. That copy also holds
+-- the base load facts (base.formatted counts the admitted templates, which
+-- base.accepted also counts), the copied-pack facts (packs.present,
+-- adopted, refused and a row of id, accepted and rejected per adopted
+-- pack) and the active-language facts (language.active, initialized).
+-- CHANGED CONTRACT (issue #123): with no pack, Text uses the active
+-- language's copied pack (none for English), so an ordinary consumer such as
+-- core/UserText.lua shows the active language. An explicit pack still
+-- decides alone, exactly as in Resolve.
 --
 -- Formatted meanings (issue #142). A code-owned schema (SCHEMAS below) names
 -- a key's placeholder names; every current slot has the count type defined
@@ -79,8 +119,9 @@
 --  2. a static text key             -> UNAVAILABLE, "unavailable", "wrong_key_kind"
 --  3. no valid English template     -> UNAVAILABLE, "unavailable", "unknown_key"
 --  4. arguments outside the schema  -> UNAVAILABLE, "unavailable", "invalid_arguments"
---  5. pack nil, not a plain table, without an entry or with an invalid
---     template -> the English template, same arguments, "base", and nil,
+--  5. pack nil with no active pack (English active or not yet initialized),
+--     pack not a plain table, without an entry or with an invalid template
+--     -> the English template, same arguments, "base", and nil,
 --     "unsupported_pack", "missing_candidate" or "invalid_candidate"
 --  6. candidate output above the schema's result limit -> the English
 --     template, same arguments, "base", "output_limit"
@@ -90,6 +131,11 @@
 -- names, each a plain record {known = true, value = N} (N a finite whole
 -- number >= 0, shown with tostring) or {known = false} (shown as "?").
 -- Substitution is one pass: an inserted value is never parsed again.
+-- CHANGED CONTRACT (issue #142): as with Text, a nil pack selects the active
+-- language's copied pack, which may hold a template copied at load, so an
+-- ordinary consumer such as ui/Readout.lua shows the active language. An
+-- explicit pack (including {} or an invalid candidate) still decides alone,
+-- and Resolve and FormatResolve stay pure supplied-pack owners.
 
 Nexus = Nexus or {}
 local L = {}
@@ -99,10 +145,13 @@ local MAX_KEY_BYTES = 64
 local MAX_TEXT_BYTES = 256
 local MAX_BASE_ENTRIES = 64
 local MAX_DIAGNOSTIC_KEYS = 8
+local MAX_NAME_BYTES = 64
+local MAX_LANGUAGES = 16
 L.MAX_KEY_BYTES = MAX_KEY_BYTES
 L.MAX_TEXT_BYTES = MAX_TEXT_BYTES
 L.MAX_BASE_ENTRIES = MAX_BASE_ENTRIES
 L.MAX_DIAGNOSTIC_KEYS = MAX_DIAGNOSTIC_KEYS
+L.MAX_NAME_BYTES = MAX_NAME_BYTES
 
 -- The documented safe status for a key without reviewed text: nonempty and
 -- inside the text contract. Resolve returns this local, not the field.
@@ -337,6 +386,82 @@ local function Resolve(key, pack)
 end
 L.Resolve = Resolve
 
+-- The language IDs and the copied packs (see "Optional packs" above).
+local DEFAULT_LANGUAGE = "enUS"
+local ENGLISH_NAME = "English"
+L.DEFAULT_LANGUAGE = DEFAULT_LANGUAGE
+local languageIds = {DEFAULT_LANGUAGE}
+local packs = {}
+local packLoad = {present = false, adopted = 0, refused = 0, rows = {}}
+do
+    local profile = Nexus.DefaultProfile
+    local enum = type(profile) == "table" and rawget(profile, "uiLanguages") or nil
+    local ids = type(enum) == "table" and getmetatable(enum) == nil
+        and rawget(enum, "ids") or nil
+    local seen = {[DEFAULT_LANGUAGE] = true}
+    if type(ids) == "table" and getmetatable(ids) == nil then
+        for index = 1, MAX_LANGUAGES do
+            local id = rawget(ids, index)
+            if id == nil then break end
+            if type(id) == "string" and id:find("^[a-z][a-z][A-Z][A-Z]$")
+                and not seen[id] then
+                seen[id] = true
+                languageIds[#languageIds + 1] = id
+            end
+        end
+    end
+    local source = Nexus.LocalizationPacks
+    if type(source) == "table" and getmetatable(source) == nil then
+        packLoad.present = true
+    else
+        source = nil
+    end
+    for index = 2, #languageIds do
+        local id = languageIds[index]
+        local pack = source and rawget(source, id) or nil
+        local plain = type(pack) == "table" and getmetatable(pack) == nil
+        local name = plain and rawget(pack, "name") or nil
+        local entries = plain and rawget(pack, "entries") or nil
+        local count = 0
+        if ValidText(name) and #name <= MAX_NAME_BYTES
+            and type(entries) == "table" and getmetatable(entries) == nil then
+            for _ in next, entries do count = count + 1 end
+        else
+            entries = nil
+        end
+        if entries and count <= MAX_BASE_ENTRIES then
+            local copy, accepted = {}, 0
+            for key, text in next, entries do
+                -- Issue #142: a key holding an admitted English template is
+                -- copied only as a template that compiles under its schema.
+                local schema = ValidKey(key) and templates[key] ~= nil and SCHEMAS[key] or nil
+                if schema then
+                    if CompileTemplate(text, schema) then
+                        copy[key] = text
+                        accepted = accepted + 1
+                    end
+                elseif ValidKey(key) and base[key] ~= nil and ValidText(text) then
+                    copy[key] = text
+                    accepted = accepted + 1
+                end
+            end
+            packs[id] = {name = name, entries = copy}
+            packLoad.adopted = packLoad.adopted + 1
+            packLoad.rows[#packLoad.rows + 1] = {id = id, accepted = accepted,
+                rejected = count - accepted}
+        else
+            packLoad.refused = packLoad.refused + 1
+        end
+    end
+end
+
+-- The session's active language (see "Active language" above).
+local active = {id = DEFAULT_LANGUAGE, entries = nil, initialized = false}
+
+local function Available(id)
+    return id == DEFAULT_LANGUAGE or (type(id) == "string" and packs[id] ~= nil)
+end
+
 -- The fixed-size diagnostic record (see above). Local memory only.
 local REASONS = {"invalid_key", "unknown_key", "unsupported_pack",
     "missing_candidate", "invalid_candidate", "format_requires_arguments",
@@ -367,8 +492,10 @@ local function Note(key, reason)
     end
 end
 
--- The text a player-facing consumer shows: Resolve plus the record.
+-- The text a player-facing consumer shows: Resolve plus the record. Without
+-- a pack it uses the active language's pack (see CHANGED CONTRACT above).
 function L.Text(key, pack)
+    if pack == nil then pack = active.entries end
     local text, source, reason = Resolve(key, pack)
     if reason then Note(key, reason) end
     return text, source, reason
@@ -405,7 +532,11 @@ local function FormatResolve(key, arguments, pack)
     return UNAVAILABLE, "unavailable", "output_limit"
 end
 
+-- The row a player-facing consumer shows: FormatResolve plus the record.
+-- Without a pack it uses the active language's pack, as Text does (see the
+-- issue #142 CHANGED CONTRACT at the top of the file).
 function L.Format(key, arguments, pack)
+    if pack == nil then pack = active.entries end
     local text, source, reason = FormatResolve(key, arguments, pack)
     if reason then Note(key, reason) end
     return text, source, reason
@@ -436,11 +567,66 @@ function L.Diagnostics()
     local byReason, keys = {}, {}
     for _, reason in ipairs(REASONS) do byReason[reason] = diagnostics.byReason[reason] end
     for index = 1, #diagnostics.keys do keys[index] = diagnostics.keys[index] end
+    local rows = {}
+    for index, row in ipairs(packLoad.rows) do
+        rows[index] = {id = row.id, accepted = row.accepted, rejected = row.rejected}
+    end
     return {
         base = {present = baseLoad.present, accepted = baseLoad.accepted,
             rejected = baseLoad.rejected, oversized = baseLoad.oversized,
             formatted = baseLoad.formatted},
+        packs = {present = packLoad.present, adopted = packLoad.adopted,
+            refused = packLoad.refused, rows = rows},
+        language = {active = active.id, initialized = active.initialized},
         misses = diagnostics.misses, byReason = byReason, keys = keys,
         keysNotKept = diagnostics.keysNotKept, last = diagnostics.last,
     }
+end
+
+-- The offered languages in enum order, English first: the default and each
+-- adopted pack, as {id=, name=, available=true} copies. The name is the
+-- language's own name. Reads only.
+function L.Languages()
+    local out = {}
+    for _, id in ipairs(languageIds) do
+        if id == DEFAULT_LANGUAGE then
+            out[#out + 1] = {id = id, name = ENGLISH_NAME, available = true}
+        elseif packs[id] then
+            out[#out + 1] = {id = id, name = packs[id].name, available = true}
+        end
+    end
+    return out
+end
+
+-- Whether a value is one of the enum IDs, adopted or not.
+function L.IsLanguage(id)
+    if type(id) ~= "string" then return false end
+    for _, known in ipairs(languageIds) do
+        if known == id then return true end
+    end
+    return false
+end
+
+-- The language a saved preference shows: the ID itself when it is the
+-- default or an adopted pack, English otherwise. Pure: the saved value is
+-- never rewritten.
+function L.EffectiveLanguage(id)
+    if Available(id) then return id end
+    return DEFAULT_LANGUAGE
+end
+
+-- The active language ID, and whether it was initialized this session.
+function L.ActiveLanguage()
+    return active.id, active.initialized
+end
+
+-- Once per Lua session (see "Active language" above). Returns the active ID
+-- and whether this call set it; a later call changes nothing.
+function L.InitializeActiveLanguage(id)
+    if active.initialized then return active.id, false end
+    active.initialized = true
+    if id ~= DEFAULT_LANGUAGE and Available(id) then
+        active.id, active.entries = id, packs[id].entries
+    end
+    return active.id, true
 end
