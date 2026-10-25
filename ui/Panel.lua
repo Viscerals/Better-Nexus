@@ -1782,9 +1782,29 @@ local function EnsureCallboardWidgets()
     local lineHit = CreateFrame("Frame", nil, frame)
     lineHit:EnableMouse(true)
     frame._callboardLineHit = lineHit
+    -- The detail row shows the first objective line and +N more. Its hover
+    -- shows every complete line in order, from the lines the last render
+    -- stored (FillCallboard); it reads no Callboard data itself.
+    lineHit:SetScript("OnEnter", function(self)
+        local full = self._nexusFullLines
+        if not (GameTooltip and type(full) == "table" and #full > 0) then return end
+        local layout = Nexus.LayoutMetrics
+        local shortened = layout and layout.Shortened and layout.Shortened(line)
+        if #full == 1 and not shortened then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        for _, text in ipairs(full) do GameTooltip:AddLine(text, 1, 1, 1, true) end
+        GameTooltip:Show()
+        self._nexusFullTip = true
+    end)
+    lineHit:SetScript("OnLeave", function(self)
+        if self._nexusFullTip and GameTooltip then GameTooltip:Hide() end
+        self._nexusFullTip = nil
+    end)
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
         Nexus.LayoutMetrics.OneLineLabel(title, titleHit, 17)
-        Nexus.LayoutMetrics.OneLineLabel(line, lineHit, 17)
+        -- One 17px line. The row's own hover above replaces the label-text
+        -- hover, so that hover is not added to this row.
+        Nexus.LayoutMetrics.OneLineLabel(line, nil, 17)
     end
     local divider = frame:CreateTexture(nil, "ARTWORK")
     divider:SetHeight(1)
@@ -1800,6 +1820,8 @@ local function FillCallboard(summary)
         SetVisible(frame._callboardLine, false)
         SetVisible(frame._callboardIcon, false)
         SetVisible(frame._callboardDivider, false)
+        -- No objective: the detail hover keeps no earlier complete lines.
+        if frame._callboardLineHit then frame._callboardLineHit._nexusFullLines = nil end
         return false
     end
     local callboard = Nexus.CallboardStatus
@@ -1809,6 +1831,15 @@ local function FillCallboard(summary)
     frame._callboardLabel:SetText("CALLBOARD")
     frame._callboardTitle:SetText(summary.title or "Callboard objective")
     local detail = ""
+    -- Every complete detail line, in order, for the row's hover: a new table
+    -- on each render, so an earlier objective's lines are never shown.
+    local fullLines = {}
+    if type(summary.lines) == "table" then
+        for i = 1, #summary.lines do
+            if summary.lines[i] ~= nil then fullLines[#fullLines + 1] = tostring(summary.lines[i]) end
+        end
+    end
+    if frame._callboardLineHit then frame._callboardLineHit._nexusFullLines = fullLines end
     if type(summary.lines) == "table" and summary.lines[1] then
         detail = tostring(summary.lines[1])
         if #summary.lines > 1 then
