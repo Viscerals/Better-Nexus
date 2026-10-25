@@ -215,7 +215,28 @@ do
  local SAVE='Saving is still in progress; wait for its final result'
  local complete={['reason.wait_three_choices']=C3,['reason.wait_pending_pick_count']=CP,
   ['reason.save_in_progress']=SAVE,['reason.list_preparing']='This list is still being prepared',
-  ['reason.saved_data_reading']='Reading your saved data'}
+  ['reason.saved_data_reading']='Reading your saved data',
+  ['panel.button.my_builds']='My Builds',
+  ['panel.tooltip.open_my_builds']='Open My Builds',
+  ['panel.tooltip.my_builds_destination']='Open the server My Builds page. Choosing a different Saved Build there changes the active loadout.',
+  ['panel.button.assign_wishlist']='Assign Wishlist',
+  ['panel.tooltip.assignment_heading']='Assign Wishlist',
+  ['panel.tooltip.assignment_chooser']='Opens the Echo Journal with its Wishlist chooser for this loadout. Nothing is assigned until you choose a Wishlist there.',
+  ['panel.button.create_wishlist']='Create Wishlist',
+  ['panel.tooltip.create_wishlist_heading']='Import or create a wishlist',
+  ['panel.tooltip.create_wishlist_source']='Paste a wishlist string or build one directly in Nexus.',
+  ['panel.tooltip.create_wishlist_draft']='This opens the Wishlist editor with a draft. Nothing is saved or assigned until you press Create & assign or Create unassigned there.',
+  ['panel.heading.locked_targets']='LOCKED TARGETS',
+  ['panel.tooltip.locked_remaining']='Locked targets remaining',
+  ['panel.tooltip.locked_plan']='These targets are planned for your locked Echo slots (a plan designs at most six target copies).',
+  ['panel.tooltip.locked_acquire']='Acquire the exact requested Echo and quality first.',
+  ['panel.tooltip.locked_placement']='Owned copies still need to be placed in locked Echo slots.',
+  ['panel.tooltip.locked_not_freeze']='Current locked Echo slots and card Freeze are separate.',
+  ['panel.tooltip.locked_acquire_list']='Still need to acquire:',
+  ['panel.tooltip.open_wishlist_editor']='Click to open Wishlist Editor',
+  ['panel.heading.progress']='PROGRESS',
+  ['panel.heading.still_needed']='STILL NEEDED',
+  ['panel.heading.extra_copies']='EXTRA COPIES'}
  local function exact(text,label)
   local m,shown=Nexus.Panel._lastModel,texts()
   check(m.status==text and m.recommendation==text and shown:find(text,1,true)~=nil,label)
@@ -578,7 +599,7 @@ do
  local menu,rows=LanguageMenu()
  check(menu and rows==1 and menu.hasArrow and type(menu.menuList)=='table','the ... menu has exactly one Language row with a submenu')
  local text=MenuText(menu)
- check(Row(menu,'enUS') and text:find('Only six messages are translated: five status messages and the Banish/Reroll/Freeze count row',1,true) and text:find('other Nexus text stays English',1,true) and not text:find('three status messages',1,true),'English and the partial six-message result are listed')
+ check(Row(menu,'enUS') and text:find('other Nexus text stays English',1,true) and not text:find('three status messages',1,true),'English and the bounded coverage note are listed (#143: its exact wording is checked after the Panel consumer cohort below)')
  for _,id in ipairs(IDS)do
   check(Row(menu,id) and not Row(menu,id).disabled,'the chooser lists '..id..' by its own name, enabled')
   check(not text:find(id,1,true) and not menu.text:find(id,1,true),'no internal language ID is shown: '..id)
@@ -741,6 +762,347 @@ do
   r=Nexus.Panel.ChooseLanguage('ruRU')
   check(r.state=='refused' and r.reason=='authority' and freshCalls==0 and writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='plPL','the session Store cannot use another Store module\'s writer')
  end
+end
+
+-- Issue #143 Panel consumer cohort: 21 static meanings at the 24 mapped
+-- Panel calls, through the real TOC, the real Localization copy, the real
+-- Panel widgets, their registered hovers and the existing navigation
+-- callbacks. FIXTURE SUBSTITUTION, not shipped data: F.fileHooks, right after
+-- each data file loads, adds the 21 reviewed English meanings and test-only
+-- candidate or invalid pack entries, which the real Localization checks and
+-- copies; the prior hooks are restored after each boot. It is no production
+-- setter and no linguistic review. Adoption of the data owner's real 27-key
+-- base and 126 drafts is a later integration check against that pin. The
+-- charge GUARD uses the six real packs unchanged. Offline font models only:
+-- native fit, tooltips and clicks are NOT TESTED.
+do
+ local F=dofile('tests/prototype/format5_support.lua')
+ local G=dofile('tests/prototype/layout_geometry_support.lua')
+ local KEYS={
+  {'panel.button.my_builds','My Builds'},
+  {'panel.tooltip.open_my_builds','Open My Builds'},
+  {'panel.tooltip.my_builds_destination','Open the server My Builds page. Choosing a different Saved Build there changes the active loadout.'},
+  {'panel.button.assign_wishlist','Assign Wishlist'},
+  {'panel.tooltip.assignment_heading','Assign Wishlist'},
+  {'panel.tooltip.assignment_chooser','Opens the Echo Journal with its Wishlist chooser for this loadout. Nothing is assigned until you choose a Wishlist there.'},
+  {'panel.button.create_wishlist','Create Wishlist'},
+  {'panel.tooltip.create_wishlist_heading','Import or create a wishlist'},
+  {'panel.tooltip.create_wishlist_source','Paste a wishlist string or build one directly in Nexus.'},
+  {'panel.tooltip.create_wishlist_draft','This opens the Wishlist editor with a draft. Nothing is saved or assigned until you press Create & assign or Create unassigned there.'},
+  {'panel.heading.locked_targets','LOCKED TARGETS'},
+  {'panel.tooltip.locked_remaining','Locked targets remaining'},
+  {'panel.tooltip.locked_plan','These targets are planned for your locked Echo slots (a plan designs at most six target copies).'},
+  {'panel.tooltip.locked_acquire','Acquire the exact requested Echo and quality first.'},
+  {'panel.tooltip.locked_placement','Owned copies still need to be placed in locked Echo slots.'},
+  {'panel.tooltip.locked_not_freeze','Current locked Echo slots and card Freeze are separate.'},
+  {'panel.tooltip.locked_acquire_list','Still need to acquire:'},
+  {'panel.tooltip.open_wishlist_editor','Click to open Wishlist Editor'},
+  {'panel.heading.progress','PROGRESS'},
+  {'panel.heading.still_needed','STILL NEEDED'},
+  {'panel.heading.extra_copies','EXTRA COPIES'},
+ }
+ local EN,CAND={},{}
+ for i,row in ipairs(KEYS)do
+  EN[row[1]]=row[2]
+  local out={string.format('\195\137preuve %02d \226\128\148 ',i)};local n=#out[1]
+  while n+13<=250 do out[#out+1]='d\195\169velopp\195\169e ';n=n+13 end
+  out[#out+1]='fin';CAND[row[1]]=table.concat(out)
+ end
+ local function ENT(key)return EN[key]end
+ local function CANDT(key)return CAND[key]end
+ local BAD={'|cffff0000Fixture','Fixture\nline','Fixture\1control',string.rep('x',257),'Fixture \237\160\128','   ',''}
+ local FILL=string.rep('pr\195\169cis\195\169ment ',12)..'fin'
+ local LONGCHARGE='Bannissements:{banish} Relances:{reroll} Gels:{freeze} \226\128\148 '..FILL
+ local LONGROW='Bannissements:0 Relances:? Gels:7 \226\128\148 '..FILL
+ local function Hooks(mode)
+  local hooks={}
+  hooks['data\\LocalizationEnglish.lua']=function()
+   local base={};for key,text in pairs(Nexus.LocalizationEnglish)do base[key]=text end
+   for _,row in ipairs(KEYS)do base[row[1]]=row[2] end
+   Nexus.LocalizationEnglish=base
+  end
+  hooks['data\\LocalizationPacks.lua']=function()
+   local packs={}
+   for id,pack in pairs(Nexus.LocalizationPacks)do
+    local entries={};for key,text in pairs(pack.entries)do entries[key]=text end
+    packs[id]={name=pack.name,entries=entries}
+   end
+   for i,row in ipairs(KEYS)do
+    if mode=='candidate' then packs.frFR.entries[row[1]]=CAND[row[1]]
+    elseif mode=='fallback' then packs.deDE.entries[row[1]]=i%2==1 and BAD[((i-1)/2)%#BAD+1] or nil end
+   end
+   if mode=='candidate' then packs.frFR.entries['readout.charge_counts']=LONGCHARGE end
+   Nexus.LocalizationPacks=packs
+  end
+  return hooks
+ end
+ local log
+ local function Boot(language,mode)
+  local db=F.Database({version=2});db.settings.uiLanguage=language
+  local prior=F.fileHooks;F.fileHooks=mode and Hooks(mode) or nil
+  log={}
+  local ok,booted=pcall(F.Boot,db,function()
+   local methods=G.RegionMethods();local set=methods.SetText
+   methods.SetText=function(self,text,...)log[#log+1]={self,text};return set(self,text,...)end
+   methods.SetWordWrap=function(self,value)self.wordWrap=value end
+  end)
+  F.fileHooks=prior
+  if not ok then error(booted,0)end
+  H=booted
+  check(F.fileHooks==nil and Nexus.StartupStatus().coreReady==true and Nexus.Localization.ActiveLanguage()==(language or 'enUS'),'SETUP #143: real TOC boot ready with '..(language or 'enUS')..' active; prior fixture hooks restored')
+  Nexus.Panel.Show()
+ end
+ local P={}
+ local function Child(i)return NexusPanel.children[i]end
+ local function Region(i)return NexusPanel.regions[i]end
+ local function Sets(widget)
+  local out={};for _,entry in ipairs(log)do if entry[1]==widget then out[#out+1]=entry[2] end end;return out
+ end
+ local function Lines(owner)
+  local lines,saved={},rawget(GameTooltip,'AddLine')
+  rawset(GameTooltip,'AddLine',function(_,text,r,g,b,wrap)lines[#lines+1]={text,r,g,b,wrap}end)
+  local ok,err=pcall(owner:GetScript('OnEnter'),owner)
+  rawset(GameTooltip,'AddLine',saved)
+  local leave=owner:GetScript('OnLeave');if leave then leave(owner)end
+  assert(ok,err)
+  return lines
+ end
+ local function Setup()
+  return {status='STORE_PENDING',recommendation='',cards={},auto=false,level=40,version=Nexus.VERSION,
+   progress={},assignment={state='unassigned'}}
+ end
+ local function Active()
+  return {status='STORE_PENDING',recommendation='Take',cards={{text='Fixture card'}},auto=false,level=40,
+   version=Nexus.VERSION,charges={banish=0,freeze=7},
+   progress={wishlistName='Fixture plan',total=12,owned=3,activeSlot=1,unknownTomes={},
+    missing={'Echo 1 (Rare:x2)','Echo 2'},shed={'Echo 3'},toLock={'Echo 80','Gl\195\164nzend Echo'}}}
+ end
+ local BULLET='  \226\128\162 '
+ local function Tips(T)
+  local editor={T('panel.tooltip.open_wishlist_editor'),0.4,0.8,1}
+  return {
+   assign={{T('panel.tooltip.assignment_heading'),1,1,1},{T('panel.tooltip.assignment_chooser'),0.9,0.9,0.9,true}},
+   create={{T('panel.tooltip.create_wishlist_heading'),1,1,1},{T('panel.tooltip.create_wishlist_source'),0.9,0.9,0.9,true},
+    {T('panel.tooltip.create_wishlist_draft'),0.75,0.75,0.75,true}},
+   switch={{T('panel.tooltip.open_my_builds'),1,1,1},{T('panel.tooltip.my_builds_destination'),0.75,0.75,0.75,true},{' '},
+    {'Character: PrototypeTester',0.85,0.85,0.85,true},{'Destination: Saved Build 1 - active in the game',0.85,0.85,0.85,true},
+    {'Wishlist: Fixture plan',0.85,0.85,0.85,true}},
+   lock={{T('panel.tooltip.locked_remaining'),1,1,1},{T('panel.tooltip.locked_plan'),0.9,0.9,0.9,true},
+    {T('panel.tooltip.locked_acquire'),0.9,0.9,0.9,true},{T('panel.tooltip.locked_placement'),0.9,0.9,0.9,true},
+    {T('panel.tooltip.locked_not_freeze'),0.9,0.9,0.9,true},{' '},{T('panel.tooltip.locked_acquire_list'),0.85,0.6,1},
+    {BULLET..'Echo 80',0.85,0.7,1},{BULLET..'Gl\195\164nzend Echo',0.85,0.7,1},{' '},editor},
+   need={{'Still needed this run',1,1,1},{'These wishlist Echoes have not been obtained yet.',0.9,0.9,0.9,true},{' '},
+    {'When your wishlist Echoes are not on the board,',0.75,0.75,0.75,true},
+    {'Nexus may take an off-Wishlist Echo when no eligible',0.75,0.75,0.75,true},
+    {'target or search action is available. A later run may',0.75,0.75,0.75,true},
+    {'improve the result; replacement is not guaranteed.',0.75,0.75,0.75,true},{' '},
+    {'Missing Echoes:',1,0.65,0.25},{BULLET..'Echo 1',0.9,0.9,0.9},{'      Rare:x2',0.7,0.7,0.7},
+    {BULLET..'Echo 2',0.9,0.9,0.9},{' '},editor},
+  }
+ end
+ local function Verify(T,tag,recovered)
+  local tips=Tips(T)
+  assert(Nexus.Panel.Render(Setup()))
+  local assign,create=Child(P.assign),Child(P.create)
+  check(assign:IsShown() and create:IsShown() and assign:GetText()==T('panel.button.assign_wishlist')
+   and create:GetText()==T('panel.button.create_wishlist'),tag..': the actual setup buttons show Assign Wishlist and Create Wishlist')
+  check(same(Lines(assign),tips.assign) and same(Lines(create),tips.create),tag..': the setup hovers keep their exact ordered lines, colours and wrap (nothing assigned until a choice; a draft, both save actions named)')
+  assert(Nexus.Panel.Render(Active()))
+  local switch,lock=NexusPanel._switchBtn,NexusPanel.toLockLabel
+  check(switch:GetText()==T('panel.button.my_builds') and Region(P.progress):GetText()==T('panel.heading.progress')
+   and Region(P.still):GetText()==T('panel.heading.still_needed') and Region(P.extra):GetText()==T('panel.heading.extra_copies')
+   and lock:IsShown() and lock:GetText()==T('panel.heading.locked_targets'),tag..': My Builds, PROGRESS, STILL NEEDED, EXTRA COPIES and the lazily created LOCKED TARGETS')
+  if recovered then tips.lock[#tips.lock+1]={T('panel.heading.locked_targets'),1,1,1,true} end
+  check(same(Lines(NexusPanel.toLockHit),tips.lock),tag..': the locked-target hover keeps six copies, the exact Echo and quality, ownership versus placement, locked slots versus Freeze, the untranslated names and the editor link')
+  check(same(Lines(Child(P.need)),tips.need),tag..': the Still needed hover keeps its lines, the untranslated names and the shared editor link')
+  check(same(Lines(switch),tips.switch),tag..': the My Builds hover keeps its consequence, then the destination lines with the player and Wishlist names unchanged')
+  for _,w in ipairs({{switch,'panel.button.my_builds',2},{Region(P.still),'panel.heading.still_needed',2},
+   {Region(P.progress),'panel.heading.progress',1},{Region(P.extra),'panel.heading.extra_copies',1},
+   {lock,'panel.heading.locked_targets',1},{assign,'panel.button.assign_wishlist',1},{create,'panel.button.create_wishlist',1}})do
+   local sets,all=Sets(w[1]),true
+   for _,value in ipairs(sets)do all=all and value==T(w[2]) end
+   check(all and #sets>=w[3],tag..': every creation and render-reset SetText of '..w[2]..' shows it ('..#sets..' calls)')
+  end
+  check(NexusPanel._chargesText:IsShown() and NexusPanel._chargesText:GetWidth()==72,tag..': the compact charge row is shown in its 72 px box')
+ end
+ local function Effects()
+  local id,initialized=Nexus.Localization.ActiveLanguage()
+  return {db=F.Serialize(NexusDB),settings=H.Clone(Nexus.Store.Settings()),language=id,initialized=initialized,
+   actions=#H.actions,sent=#H.sent,chat=#H.chat,popup=H.popup,auto=Nexus.RecomputeStats().autoEnabled,
+   readOnly=Nexus.MainInternals.SavedRootReadOnlyV1(),warning=Nexus.OverwriteWarning.IsOpen()}
+ end
+ -- Narrow spies on the two existing destinations; nothing is opened, assigned or saved.
+ local function Navigate()
+  local journal,editor=Nexus.JournalTab,Nexus.WishlistEditor
+  local openBuilds,show,calls=journal.OpenBuilds,editor.Show,{}
+  journal.OpenBuilds=function(...)
+   local shape={n=select('#',...)};for i=1,shape.n do shape[i]=type((select(i,...)))end
+   calls[#calls+1]={'builds',shape};return true
+  end
+  editor.Show=function(...)calls[#calls+1]={'editor',select('#',...)}end
+  local ok,err=pcall(function()
+   NexusPanel._switchBtn:Click();Child(P.assign):Click();Child(P.create):Click()
+   NexusPanel.toLockHit:GetScript('OnMouseUp')(NexusPanel.toLockHit)
+   Child(P.need):GetScript('OnMouseUp')(Child(P.need))
+  end)
+  journal.OpenBuilds,editor.Show=openBuilds,show
+  assert(ok,err)
+  return calls
+ end
+ -- English: the substituted reviewed English base, the real packs.
+ Boot(nil,'english')
+ for _,row in ipairs(KEYS)do
+  check(Nexus.Localization.Kind(row[1])=='text' and Nexus.Localization.Text(row[1])==row[2],'SETUP FIXTURE: the real Localization copied the substituted reviewed English '..row[1])
+ end
+ local misses=Nexus.Localization.Diagnostics().misses
+ assert(Nexus.Panel.Render(Setup()))
+ for i,c in ipairs(NexusPanel.children)do
+  if c.kind=='Button' and c:GetText()=='Assign Wishlist' then P.assign=i
+  elseif c.kind=='Button' and c:GetText()=='Create Wishlist' then P.create=i end
+ end
+ assert(Nexus.Panel.Render(Active()))
+ for i,r in ipairs(NexusPanel.regions)do
+  local text=r:GetText()
+  if text=='PROGRESS' then P.progress=i elseif text=='STILL NEEDED' then P.still=i elseif text=='EXTRA COPIES' then P.extra=i end
+ end
+ for i,c in ipairs(NexusPanel.children)do
+  if c.kind=='Frame' and c~=NexusPanel.toLockHit and c:GetScript('OnEnter') and c:GetScript('OnMouseUp') then
+   local first=Lines(c)[1];if first and first[1]=='Still needed this run' then P.need=i end
+  end
+ end
+ check(P.assign and P.create and P.progress and P.still and P.extra and P.need,'SETUP #143: the real setup buttons, headings and Still needed hover were found')
+ local effects=Effects()
+ Verify(ENT,'#143 English',false)
+ check(NexusPanel._chargesText:GetText()=='B:0 R:? F:7','GUARD #143 English: the charge row shows 0, unknown and 7')
+ check(Nexus.Localization.Diagnostics().misses==misses,'GUARD #143 English: the mapped calls record no fallback while the reviewed English is present')
+ local NAV={{'builds',{n=0}},{'builds',{n=2,'boolean','function'}},{'editor',0},{'editor',0},{'editor',0}}
+ local navEnglish=Navigate()
+ check(same(navEnglish,NAV),'GUARD #143 English: the existing navigation callbacks reach the same destinations once each, with the same signatures')
+ check(same(Effects(),effects),'GUARD #143 English: renders, hovers and navigation change no saved root, setting, language, action, send, chat, popup, consent or Auto')
+ -- Candidate: frFR holds distinct long accented candidates for all 21 meanings.
+ Boot('frFR','candidate')
+ local LZ=Nexus.Localization
+ for _,row in ipairs(KEYS)do
+  local text,source=LZ.Text(row[1])
+  check(text==CAND[row[1]] and source=='candidate' and (LZ.Text(row[1],{}))==row[2] and (LZ.Resolve(row[1]))==row[2],
+   'SETUP FIXTURE: the real Localization copied the frFR candidate; {} forces English and Resolve stays pure: '..row[1])
+ end
+ check(LZ.Format('readout.charge_counts',{banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}})==LONGROW,'SETUP FIXTURE: the long valid charge template was copied')
+ effects=Effects();misses=LZ.Diagnostics().misses
+ local message,fed=Nexus.UserText.Message,{}
+ Nexus.UserText.Message=function(value,...)fed[#fed+1]=value;return message(value,...)end
+ Verify(CANDT,'#143 candidate',true)
+ for _,h in ipairs({{'_progressLabelHit',P.progress,'panel.heading.progress'},{'_needLabelHit',P.still,'panel.heading.still_needed'},
+  {'_shedLabelHit',P.extra,'panel.heading.extra_copies'}})do
+  local hit,label=NexusPanel[h[1]],Region(h[2])
+  check(hit and hit:IsShown() and label.wordWrap==false and same(Lines(hit),{{CAND[h[3]],1,1,1,true}}),'#143 candidate: '..h[3]..' is one line and its actual hover recovers the complete heading')
+ end
+ check(NexusPanel.toLockLabel.wordWrap==false,'#143 candidate: LOCKED TARGETS is one line; its own row hover recovered it above')
+ local uiScale=rawget(UIParent,'GetEffectiveScale')
+ for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.small,G.MODELS.double})do
+  for _,ui in ipairs({1,0.64})do
+   G.UseFont(model);rawset(UIParent,'GetEffectiveScale',function()return ui end)
+   local tag='#143 fit, '..model.name..', UI scale '..ui
+   assert(Nexus.Panel.Render(Setup()))
+   local layout=NexusPanel._responsiveLayout
+   local assign,create=Child(P.assign),Child(P.create)
+   check(NexusPanel:GetWidth()==272 and layout.boxes.setupAssign.w==146 and assign:GetWidth()==146 and assign:GetHeight()==layout.boxes.setupAssign.h
+    and create:GetWidth()==146 and create:GetHeight()==layout.boxes.setupCreate.h and assign:GetText()==CAND['panel.button.assign_wishlist']
+    and create:GetText()==CAND['panel.button.create_wishlist'],tag..': the setup buttons keep their fixed boxes and the selected text')
+   assert(Nexus.Panel.Render(Active()))
+   layout=NexusPanel._responsiveLayout
+   local box,panel=layout.boxes,{0,0,NexusPanel:GetWidth(),NexusPanel:GetHeight()}
+   local switch=NexusPanel._switchBtn
+   check(NexusPanel:GetWidth()==272 and switch:GetWidth()==68 and switch:GetHeight()==19 and switch:GetText()==CAND['panel.button.my_builds'],tag..': My Builds keeps its 68x19 box and the selected text')
+   for _,h in ipairs({{Region(P.progress),box.progressHeader,'panel.heading.progress',NexusPanel._progressLabelHit},
+    {Region(P.still),box.needed,'panel.heading.still_needed',NexusPanel._needLabelHit},
+    {Region(P.extra),box.shed,'panel.heading.extra_copies',NexusPanel._shedLabelHit},
+    {NexusPanel.toLockLabel,box.toLock,'panel.heading.locked_targets',NexusPanel.toLockHit}})do
+    local label=h[1]
+    check(label:GetText()==CAND[h[3]] and label.wordWrap==false and label:GetWidth()==h[2].w and label:GetHeight()==layout.small
+     and G.Inside(G.Rect(label,NexusPanel),panel) and Nexus.LayoutMetrics.Shortened(label),tag..': '..h[3]..' stays one line in its unchanged layout box, shortened there')
+    local lines=Lines(h[4])
+    check(same(lines[#lines],{CAND[h[3]],1,1,1,true}),tag..': the actual hover of '..h[3]..' recovers the complete text')
+   end
+   local charges=NexusPanel._chargesText
+   check(charges:IsShown() and charges:GetText()==LONGROW and charges:GetWidth()==72 and charges:GetHeight()==layout.small
+    and Nexus.LayoutMetrics.Shortened(charges) and G.Inside(G.Rect(charges,NexusPanel),G.Rect(NexusPanel._rollArea,NexusPanel)),tag..': the long valid charge row stays in its unchanged 72 px box')
+   local lines=Lines(NexusPanel._chargesHover)
+   check(same(lines[1],{'Charges',1,1,1}) and same(lines[2],{LONGROW,1,1,1,true}),tag..': the actual charge hover recovers the complete row')
+  end
+ end
+ rawset(UIParent,'GetEffectiveScale',uiScale)
+ local frames=#H.frames
+ for i=1,3 do
+  local model=Active();model.progress.owned=3+i;model.progress.missing={'Echo 1 (Rare:x2)','Echo '..(10+i)}
+  local pristine=H.Clone(model)
+  assert(Nexus.Panel.Render(model));assert(Nexus.Panel.Render(H.Clone(Nexus.Panel._lastModel)))
+  check(same(model,pristine),'#143 candidate: Render leaves the raw model untouched ('..i..')')
+ end
+ Nexus.Panel.Hide();Nexus.Panel.Show()
+ Lines(NexusPanel._switchBtn);Lines(NexusPanel.toLockHit);Lines(NexusPanel._chargesHover)
+ check(#H.frames==frames and NexusPanel._switchBtn:GetText()==CAND['panel.button.my_builds'] and Region(P.still):GetText()==CAND['panel.heading.still_needed']
+  and NexusPanel.toLockLabel:GetText()==CAND['panel.heading.locked_targets'],'#143 candidate: changed models, copied re-renders, hovers and reopen reuse warm widgets and keep the selected text')
+ for _,w in ipairs({{NexusPanel._switchBtn,'panel.button.my_builds'},{Region(P.progress),'panel.heading.progress'},
+  {Region(P.still),'panel.heading.still_needed'},{Region(P.extra),'panel.heading.extra_copies'},{NexusPanel.toLockLabel,'panel.heading.locked_targets'},
+  {Child(P.assign),'panel.button.assign_wishlist'},{Child(P.create),'panel.button.create_wishlist'}})do
+  local sets,all=Sets(w[1]),true
+  for _,value in ipairs(sets)do all=all and value==CAND[w[2]] end
+  check(all and #sets>=1,'#143 candidate: every SetText of '..w[2]..' kept the selected text: no English reset, double conversion or markup')
+ end
+ check(same(Navigate(),navEnglish),'#143 candidate: identical navigation destinations, signatures and counts under the selected language')
+ Nexus.UserText.Message=message
+ local fedSelected=false
+ for _,value in ipairs(fed)do for _,text in pairs(CAND)do if value==text then fedSelected=true end end end
+ check(#fed>0 and not fedSelected,'#143 candidate: UserText.Message receives only raw producer text, never a selected Panel text')
+ check(LZ.InitializeActiveLanguage('deDE')=='frFR' and LZ.ActiveLanguage()=='frFR','GUARD #143: the fixed session keeps its language')
+ check(LZ.Diagnostics().misses==misses,'#143 candidate: the mapped calls record no fallback')
+ check(same(Effects(),effects),'#143 candidate: renders, hovers, reopen and navigation change no saved root, setting, language, action, send, chat, popup, consent or Auto')
+ -- Fallback: deDE without valid entries for the 21 meanings shows reviewed English.
+ Boot('deDE','fallback')
+ LZ=Nexus.Localization
+ local refused
+ for _,row in ipairs(LZ.Diagnostics().packs.rows)do if row.id=='deDE' then refused=row.rejected end end
+ check(refused==11,'SETUP FIXTURE: the real Localization refused the eleven invalid deDE entries at load')
+ for _,row in ipairs(KEYS)do
+  local text,source,reason=LZ.Text(row[1])
+  check(text==row[2] and source=='base' and reason=='missing_candidate','SETUP FIXTURE: a missing or refused deDE entry falls back to reviewed English: '..row[1])
+ end
+ local diagnostics=LZ.Diagnostics()
+ Verify(ENT,'#143 fallback',false)
+ for _,h in ipairs({'_progressLabelHit','_needLabelHit','_shedLabelHit'})do
+  check(same(Lines(NexusPanel[h]),{}),'#143 fallback: a reviewed English heading that fits adds no hover line ('..h..')')
+ end
+ local after=LZ.Diagnostics()
+ check(after.byReason.unknown_key==diagnostics.byReason.unknown_key and after.byReason.invalid_key==diagnostics.byReason.invalid_key
+  and after.byReason.missing_candidate>diagnostics.byReason.missing_candidate,'#143 fallback: only missing-candidate fallbacks, never a raw key, blank or unavailable status')
+ -- GUARD: the real charge rows of the six real packs, unchanged (no fixture).
+ local ROWS={frFR='Ban:0 Rel:? Gel:7',deDE='Verb:0 Neu:? Einfr:7',esES='Dest:0 Rel:? Cong:7',plPL='Wygn:0 Przel:? Zamr:7',
+  ptBR='Banir:0 Rolar:? Cong:7',ruRU='\208\152\208\183\208\179:0 \208\159\208\181\209\128:? \208\151\208\176\208\188:7'}
+ for _,id in ipairs({'frFR','deDE','esES','plPL','ptBR','ruRU'})do
+  Boot(id,nil)
+  assert(Nexus.Panel.Render(Active()))
+  local charges=NexusPanel._chargesText
+  check(charges:IsShown() and charges:GetText()==ROWS[id] and charges:GetWidth()==72 and charges:GetHeight()==NexusPanel._responsiveLayout.small,'GUARD #143 real '..id..' pack: Panel._chargesText shows 0, unknown and 7 in its unchanged 72 px box')
+  local want={{'Charges',1,1,1},{ROWS[id],1,1,1,true}}
+  for _,line in ipairs(Nexus.Readout.ChargesLegend())do want[#want+1]={line,0.85,0.85,0.85,true}end
+  check(same(Lines(NexusPanel._chargesHover),want),'GUARD #143 real '..id..': the actual _chargesHover carries the complete row and the unchanged English legend')
+ end
+ -- The explicit coverage-literal exception, checked last so a pre-binding
+ -- Panel first fails on its mapped consumers above.
+ local SCOPE='Only selected main-panel labels and tooltips, status messages and the compact charge-count row are translated; other Nexus text stays English. Translations are drafts pending fluent and native review.'
+ local easy,items=EasyMenu,nil
+ local before=Effects()
+ EasyMenu=function(list)items=list end
+ NexusPanel._menuBtn:Click()
+ EasyMenu=easy
+ local language,found,stale
+ for _,item in ipairs(items or {})do if type(item.text)=='string' and item.text:find('^Language')then language=item end end
+ for _,row in ipairs(language and language.menuList or {})do
+  if row.text==SCOPE and row.disabled==true and row.notCheckable==true then found=true end
+  if tostring(row.text):find('six messages',1,true)then stale=true end
+ end
+ check(found and not stale and same(Effects(),before),'#143: the actual Language menu states the bounded coverage exactly, without the six-message claim, and opening it writes nothing')
 end
 
 print('PASS terminology actual consumer checks='..checks..'; native rendering not asserted')
