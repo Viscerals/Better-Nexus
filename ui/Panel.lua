@@ -120,12 +120,25 @@ local function SafeText(v) return v ~= nil and tostring(v) or "" end
 -- character and Saved Build compact values and a Wishlist minimum longer
 -- than one character (the formatter's assigned name; its refusal, unknown
 -- and unavailable markers are one character). A Wishlist compact value is
--- shown whole or replaced by its minimum, never cut. A name is tried
+-- shown whole or replaced by its minimum, unless the name cut below
+-- applies. A name is tried
 -- whole first, with its cue and then without it; only then is it cut. A
 -- cut falls at a UTF-8 character, an escaped pipe pair "||" counting as
 -- one, keeps the leading token (up to 3 characters; a slot token, "#" and
 -- all its digits such as "#123", always whole, never "#" or "#1" of "#12")
 -- and adds "..." when that still fits, else omits the "...", else the cue.
+-- The name cut follows its own rules: when the Wishlist cell would show a
+-- minimum that begins its compact value within the value's leading token
+-- (up to its first space), such as "?" of "?: name", and its shortest cut
+-- fits beside every other cell's whole alternative short of the minima,
+-- that cut is shown instead, such as "W:?: Starter..." for "W:?", and the
+-- other cells show those alternatives. It keeps the cue, the whole token
+-- and at least its next 4 characters (the space and 3 more; trailing
+-- spaces dropped), falls at a UTF-8 character as above, adds "..." and is
+-- the longest such cut that fits the room the other cells leave. A
+-- compact that such a cut would not narrow, or one that its minimum does
+-- not begin, is shown whole or as its minimum; a state and a
+-- one-character marker are never cut.
 -- Below the whole floors (a slot token alone included) the cells stay
 -- disjoint in the row and the client shortens them, the state last; the
 -- tooltip keeps every full line.
@@ -134,7 +147,9 @@ do
     local DEST_MIN_HEIGHT, DEST_GAP, DEST_SLACK, DEST_LEAD = 17, 4, 1, 3
     local DEST_ELLIPSIS = "..."
     local DEST_CUES = {character = "C:", savedBuild = "B:", wishlist = "W:", state = ""}
-    -- The value a cell may shorten (names only, see above).
+    -- The value a cell may cut (names only, see above). A Wishlist compact
+    -- is not listed: only the name cut shortens it, and only while its
+    -- minimum is the Wishlist value listed here (see above).
     local DEST_CLIP = {character = "compact", savedBuild = "compact", wishlist = "minimum"}
 
     local function DestLayout()
@@ -805,6 +820,17 @@ function M.ObserveDestinationCharacter(character, event)
         renderState.destinationCharacter =
             (type(character) == "string" and character ~= "") and character or nil
     end
+end
+
+-- The private destination world-session count itself, read only: the
+-- session that M.destinationSessionRevision publishes. One value; it
+-- captures, validates, writes, advances and reads nothing else. The
+-- writable public scalar stays for compatibility and diagnostics; a view
+-- holds an observation only while that scalar equals this count, so a
+-- corrupted or restored public value cannot stand in for the actual
+-- session. Memory only; presentation only.
+function M.DestinationSessionCount()
+    return destinationSessionCounter
 end
 
 -- The latest validated capture in the current world session, else nil.

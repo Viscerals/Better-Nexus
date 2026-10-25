@@ -689,32 +689,65 @@ end)
 
 C.scenario('the HUD destination row fits an empty long-named Saved Build 123 at the 2.0 font scale',function()
  Boot({active=0,slots={[107]={name='W-Free',verified=false,echoes=EF}}})
- G.UseFont(G.MODELS.double)
- local ok,res=pcall(Nexus.Panel.Render,{character=CHARACTER,
-  progress={activeSlot=123,activeSlotName='Long \195\169cho | field '..string.rep('wide ',12),wishlistName='W-Free',
-   owned=0,total=2,missing={},shed={},unknownTomes={},toLock={},isCommunityPreview=false},
-  assignment={state='ready',name='W-Free',emptySlot=true},cards={},auto=false,level=40})
- C.setup(ok and res~=false,'R-HUD: fixture: the real HUD renders the synthetic model',res)
- local row=_G.NexusPanel and NexusPanel._destinationRow
- local has=type(row)=='table' and type(row.cells)=='table'
- C.expect(has,'R-HUD: the HUD shows its destination row of cells')
- if not (ok and has) then return end
- local t,bad=RowCells(row)
- local all=table.concat(t,' / ')
- print('OBSERVED','R-HUD row='..all)
- C.expect(#bad==0,'R-HUD: before hover, four visible cells, each within its own width, disjoint inside the row',table.concat(bad,'; '))
- local who=t[1]:gsub('^Character:%s*',''):gsub('^C:%s*',''):gsub('%.%.%.$','')
- C.expect(who~='' and CHARACTER:sub(1,#who)==who
-  and ((t[2]:find('#123',1,true) and not t[2]:find('#123%d')) or t[2]:find('slot 123)',1,true))
-  and (t[3]:find('!$') or t[3]:find('Refused',1,true) or t[3]:find('No valid assignment',1,true))
-  and V.Names(t[4],'Empty'),
-  'R-HUD: it shows the leading character, the whole #123, the whole Wishlist refusal marker and the whole Empty state',all)
- local hit=type(row.hits)=='table' and row.hits[2] or nil
- local enter=hit and hit:GetScript('OnEnter')
- local tip=enter and V.Plain(table.concat(V.TooltipLines(function() enter(hit) end),' / ')) or ''
- C.expect(tip:find('Character: '..CHARACTER,1,true) and tip:find('slot 123)',1,true)
-  and tip:find(string.rep('wide ',11)..'wide',1,true) and tip:find('holds no Echoes',1,true),
-  'R-HUD: hovering the Saved Build cell then discloses the whole destination',tip)
+ -- The double font model is set for this case only. The four region font
+ -- methods, the model and the font object as they were before it are
+ -- restored on every exit (a return, a failed check or a raised error,
+ -- which is raised again after the restore), and a following boot is
+ -- checked against the font object, size and model found before it.
+ local KEYS={'GetStringHeight','GetStringWidth','GetTextWidth','GetFont'}
+ local methods,saved=G.RegionMethods(),{}
+ for _,k in ipairs(KEYS) do saved[k]=rawget(methods,k) end
+ local savedModel,savedObject=G.model,rawget(_G,'NexusFontNormal')
+ -- The font object the runtime font scale reads, and the size it reports.
+ local function Font()
+  local object=rawget(_G,'NexusFontNormal')
+  if type(object)~='table' or type(object.GetFont)~='function' then return object,nil end
+  local got,_,size=pcall(object.GetFont,object)
+  return object,got and size or nil
+ end
+ local beforeObject,beforeSize=Font()
+ local fitted,err=pcall(function()
+  G.UseFont(G.MODELS.double)
+  local ok,res=pcall(Nexus.Panel.Render,{character=CHARACTER,
+   progress={activeSlot=123,activeSlotName='Long \195\169cho | field '..string.rep('wide ',12),wishlistName='W-Free',
+    owned=0,total=2,missing={},shed={},unknownTomes={},toLock={},isCommunityPreview=false},
+   assignment={state='ready',name='W-Free',emptySlot=true},cards={},auto=false,level=40})
+  C.setup(ok and res~=false,'R-HUD: fixture: the real HUD renders the synthetic model',res)
+  local row=_G.NexusPanel and NexusPanel._destinationRow
+  local has=type(row)=='table' and type(row.cells)=='table'
+  C.expect(has,'R-HUD: the HUD shows its destination row of cells')
+  if not (ok and has) then return end
+  local t,bad=RowCells(row)
+  local all=table.concat(t,' / ')
+  print('OBSERVED','R-HUD row='..all)
+  C.expect(#bad==0,'R-HUD: before hover, four visible cells, each within its own width, disjoint inside the row',table.concat(bad,'; '))
+  local who=t[1]:gsub('^Character:%s*',''):gsub('^C:%s*',''):gsub('%.%.%.$','')
+  C.expect(who~='' and CHARACTER:sub(1,#who)==who
+   and ((t[2]:find('#123',1,true) and not t[2]:find('#123%d')) or t[2]:find('slot 123)',1,true))
+   and (t[3]:find('!$') or t[3]:find('Refused',1,true) or t[3]:find('No valid assignment',1,true))
+   and V.Names(t[4],'Empty'),
+   'R-HUD: it shows the leading character, the whole #123, the whole Wishlist refusal marker and the whole Empty state',all)
+  local hit=type(row.hits)=='table' and row.hits[2] or nil
+  local enter=hit and hit:GetScript('OnEnter')
+  local tip=enter and V.Plain(table.concat(V.TooltipLines(function() enter(hit) end),' / ')) or ''
+  C.expect(tip:find('Character: '..CHARACTER,1,true) and tip:find('slot 123)',1,true)
+   and tip:find(string.rep('wide ',11)..'wide',1,true) and tip:find('holds no Echoes',1,true),
+   'R-HUD: hovering the Saved Build cell then discloses the whole destination',tip)
+ end)
+ for _,k in ipairs(KEYS) do methods[k]=saved[k] end
+ G.model,_G.NexusFontNormal=savedModel,savedObject
+ local changed={}
+ for _,k in ipairs(KEYS) do if not rawequal(rawget(methods,k),saved[k]) then changed[#changed+1]=k end end
+ if not rawequal(G.model,savedModel) then changed[#changed+1]='model' end
+ if not rawequal(rawget(_G,'NexusFontNormal'),savedObject) then changed[#changed+1]='NexusFontNormal' end
+ C.setup(#changed==0,'R-HUD: fixture: the four region font methods, the font model and the font object are restored',
+  table.concat(changed,', '))
+ if not fitted then error(err,0) end
+ Boot({active=0,slots={[107]={name='W-Free',verified=false,echoes=EF}}})
+ local object,size=Font()
+ C.setup(rawequal(object,beforeObject) and size==beforeSize and rawequal(G.model,savedModel),
+  'R-HUD: fixture: after the next boot the font object, its size and the font model are those found before the double model',
+  tostring(object)..'/'..tostring(size)..' before '..tostring(beforeObject)..'/'..tostring(beforeSize)..' model='..tostring(G.model and G.model.name))
 end)
 
 -- C (Preview classification): a Community Build preview's title
@@ -1389,6 +1422,392 @@ do
   end)
   for i=#restore,1,-1 do pcall(restore[i]) end
   if not ok then error(err,0) end
+ end)
+end
+-- S6/F2 (destination truth from current facts; fixture only). An empty Echo
+-- list proves a known empty Saved Build only when ReadSlots marked its
+-- source valid (roleSourceValid, as IsKnownEmptyLoadout requires). For a
+-- draft that captured nothing, a selected row whose list is malformed,
+-- missing or sparse (projected to no Echoes) is not loaded yet, never the
+-- first-run target; so is a native active slot that is not a finite whole
+-- number from 0 (math.huge) or a declared maximum below 1 (0). A captured
+-- Saved Build keeps its slot and name when its row turns malformed or the
+-- native active slot is invalid, but a malformed row is not called empty
+-- and gets no refusal. Controls: native 0 with a valid maximum and a valid
+-- empty selected row stay the first-run target, a valid populated row is
+-- none captured, a valid empty captured row is empty and refused. Real
+-- service inputs only (H.perks and the service's GetServerMaxSlots,
+-- restored on every exit); each projection with its roleSourceValid and
+-- the selected Saved Build are read through the public Slots and
+-- SelectedSavedBuild ports. EXPECT: the reproduced defects. GUARD: the
+-- controls, the captured identity, no capture or retarget, no effect.
+-- SETUP: fixture state. Cells are read as shown (RowCells), the row's own
+-- hover only once they are. Offline synthetic only; native NOT RUN.
+do
+ local ALPHA,ECHO='Alpha',{spellId=201172,quality=0,stacks=1}
+ -- Literal full, compact and minimum values of the Saved Build and State
+ -- cells, and the hover lines that state the same meaning.
+ local WORDS={
+  firstRun={label='the first-run target',build={'none in use','none'},
+   state={'first-run target (no saved build in use)','first run','1st'},
+   tip={'saved build: none in use','state: first-run target (no saved build in use)'}},
+  none={label='none captured',build={'none captured','?'},state={'none captured','none'},
+   tip={'saved build: none captured','state: none captured'}},
+  unknown={label='not loaded yet',build={'not loaded yet','?'},
+   state={'saved build data is not loaded yet','not loaded','?'},
+   tip={'saved build: not loaded yet','state: saved build data is not loaded yet'}},
+ }
+ local function OneOf(s,list) for _,v in ipairs(list) do if s==v then return true end end return false end
+ -- A shown cell value, plain and lower case, without its full or short label.
+ local function Value(text,labels)
+  local s=V.Plain(text):lower():gsub('^%s+',''):gsub('%s+$','')
+  for _,l in ipairs(labels) do
+   local rest=s:match('^'..l..':%s*(.-)$')
+   if rest then return rest end
+  end
+  return s
+ end
+ -- The editor's destination row as shown, then, only once its four cells
+ -- are shown, every line its own hover areas write (OnEnter, then OnLeave).
+ local function Read(tag)
+  local row=NexusEditorFrame and NexusEditorFrame:IsVisible() and NexusEditorFrame._destinationRow
+  if type(row)~='table' or type(row.cells)~='table' then
+   C.expect(false,'S6 '..tag..': the editor shows its destination row');return nil
+  end
+  local t,bad=RowCells(row)
+  local lines,n,raised={},0,nil
+  if #bad==0 and row:IsVisible() then
+   local hits=type(row.hits)=='table' and (rawget(row.hits,'kind') and {row.hits} or row.hits) or {}
+   for _,f in pairs(hits) do
+    local enter=type(f)=='table' and rawget(f,'kind') and f:IsVisible() and f:GetScript('OnEnter')
+    if enter then
+     n=n+1
+     local got,ok,err=V.TooltipLines(enter,f)
+     if not ok then raised=V.printable(err) end
+     for _,l in ipairs(got) do lines[#lines+1]=V.Plain(l):lower() end
+     local leave=f:GetScript('OnLeave')
+     if leave then pcall(leave,f) end
+    end
+   end
+  end
+  local tip=table.concat(lines,'\n')
+  return {ok=#bad==0 and n>0 and raised==nil,tip=tip,build=Value(t[2],{'saved build','b'}),
+   wishlist=Value(t[3],{'wishlist','w'}),state=Value(t[4],{'state','s'}),
+   detail=table.concat(t,' | ')..(#bad>0 and (' bad='..table.concat(bad,'; ')) or '')
+    ..' || '..(raised or (tip:gsub('\n',' / ')))}
+ end
+ -- Real service inputs (row 1 beside W-Free, the native active slot and the
+ -- declared maximum), then their public projection: row 1 with its Echo
+ -- count and roleSourceValid (n nil: no row 1) and the selected Saved Build.
+ local function Serve(tag,row1,active,max,sel,n,valid)
+  H.service.GetServerMaxSlots=function() return max end
+  H.perks.serverBuildSlots={[1]=row1,[107]={name='W-Free',verified=false,echoes=H.Clone(EF)}}
+  H.perks.serverActiveSlot=active
+  H.Notify();A.Poll();H.Advance(2)
+  local s=A.Slots()
+  local r=type(s)=='table' and type(s.bySlot)=='table' and s.bySlot[1] or nil
+  local got,kept=A.SelectedSavedBuild(s)
+  local rowOK=r==nil
+  if n~=nil then
+   rowOK=type(r)=='table' and type(r.echoes)=='table' and #r.echoes==n and r.roleSourceValid==valid
+  end
+  local ok=C.setup(type(s)=='table' and s.activeKnown==true and s.activeSlot==active and s.maxSlots==max
+   and rowOK and got==sel and kept~=true,
+   'S6 '..tag..': fixture: native active '..tostring(active)..', declared maximum '..max..', row 1 '
+    ..(n and (n..' projected Echo(es) with roleSourceValid '..tostring(valid)) or 'absent')..', selected '..tostring(sel),
+   type(s)=='table' and (tostring(s.activeKnown)..'/'..tostring(s.activeSlot)..'/'..tostring(s.maxSlots)..' row1='
+    ..(type(r)=='table' and (tostring(type(r.echoes)=='table' and #r.echoes)..'/'..tostring(r.roleSourceValid)) or 'none')
+    ..' selected='..tostring(got)..'/'..tostring(kept)) or 'no slots')
+  Nexus.WishlistEditor.Refresh()
+  return ok
+ end
+ -- A draft that captured nothing: the shown Saved Build and State cells,
+ -- then the row hover, read want, with no capture cue, no empty Saved Build
+ -- and no Alpha.
+ local function Current(kind,tag,want)
+  local s=Read(tag)
+  if not s then return end
+  local w=WORDS[want]
+  C[kind](s.ok and OneOf(s.build,w.build) and OneOf(s.state,w.state)
+   and s.tip:find(w.tip[1],1,true)~=nil and s.tip:find(w.tip[2],1,true)~=nil
+   and not s.tip:find('shown as captured earlier',1,true) and not s.tip:find('holds no echoes',1,true)
+   and not V.Names(s.tip,ALPHA),
+   'S6 '..tag..': the shown Saved Build and State cells, then the row hover, read '..w.label
+    ..', with nothing captured, empty or named Alpha',s.detail)
+ end
+ -- The captured draft: the cells and the hover keep Alpha (slot 1) as
+ -- captured (GUARD); its state is empty with a refused Wishlist only when
+ -- empty (kind).
+ local function Held(kind,tag,empty)
+  local s=Read(tag)
+  if not s then return end
+  local ctx=Ctrl().CreateTargetContext()
+  C.guard(s.ok and OneOf(s.build,{'alpha (slot 1)','#1 alpha'}) and s.tip:find('saved build: alpha (slot 1)',1,true)~=nil
+   and s.tip:find('shown as captured earlier',1,true)~=nil and type(ctx)=='table' and ctx.loadoutSlot==1
+   and ctx.loadoutName==ALPHA and not Ctrl().IsEditing(),
+   'S6 '..tag..': the draft keeps its captured Saved Build Alpha (slot 1), shown and disclosed as captured',
+   s.detail..' ctx='..(type(ctx)=='table' and (tostring(ctx.loadoutSlot)..'/'..tostring(ctx.loadoutName)) or 'none'))
+  local st,wl=s.state,s.wishlist
+  local said=st:find('empty',1,true)~=nil or st:find('no echoes',1,true)~=nil or st=='c:0'
+  local refused=wl:find('no valid assignment',1,true)~=nil or wl:find('^refused')~=nil or wl=='!'
+  local told=s.tip:find('holds no echoes',1,true)~=nil
+  C[kind](s.ok and (st:find('^captured')~=nil or st:find('^c:')~=nil) and said==empty and refused==empty and told==empty,
+   'S6 '..tag..': the captured state '..(empty and 'is empty and the Wishlist refused' or 'claims no empty Saved Build and no refusal')
+    ..', in the cells and the hover',s.detail)
+ end
+ C.scenario('S6/F2 malformed rows and invalid current facts prove no first-run target or empty Saved Build',function()
+  Boot({active=0,slots={[107]={name='W-Free',verified=false,echoes=EF}}})
+  local realMax=H.service.GetServerMaxSlots
+  local ok,err=pcall(function()
+   local Ed=Nexus.WishlistEditor
+   if not (type(Ed)=='table' and type(Ed.Refresh)=='function' and type(A.Slots)=='function'
+    and type(A.SelectedSavedBuild)=='function') then
+    C.expect(false,'S6: the public editor Refresh and the Slots and SelectedSavedBuild ports exist');return
+   end
+   local others,auto,facts=Others(),Auto(),Facts()
+   SlashCmdList.NEXUS('editor');H.Advance(1)
+   if not C.setup(NexusEditorFrame and NexusEditorFrame:IsShown() and Ctrl().CreateTargetContext()==nil
+    and not Ctrl().IsEditing(),'S6: fixture: a new draft begun at native 0 captured no Saved Build') then return end
+   local function Row1(echoes) return {name=ALPHA,verified=true,echoes=echoes} end
+   if Serve('native 0',nil,0,6,nil) then Current('guard','native 0 with a valid maximum','firstRun') end
+   if Serve('valid empty',Row1({}),1,6,1,0,true) then Current('guard','valid empty selected row','firstRun') end
+   if Serve('malformed',Row1({{spellId='bad'}}),1,6,1,0,false) then Current('expect','malformed selected row','unknown') end
+   if Serve('missing',{name=ALPHA,verified=true},1,6,1,0,false) then
+    Current('expect','selected row without an Echo list','unknown')
+   end
+   if Serve('sparse',Row1({[2]=H.Clone(ECHO)}),1,6,1,0,false) then Current('expect','sparse selected row','unknown') end
+   if Serve('infinite native',nil,math.huge,6,nil) then Current('expect','native active slot math.huge','unknown') end
+   if Serve('zero maximum',nil,1,0,nil) then Current('expect','native 1 with declared maximum 0','unknown') end
+   if Serve('valid populated',Row1({H.Clone(ECHO)}),1,6,1,1,true) then
+    Current('guard','valid populated selected row','none')
+   end
+   C.guard(Ctrl().CreateTargetContext()==nil and not Ctrl().IsEditing(),
+    'S6: the uncaptured draft captured and retargeted to no Saved Build')
+   -- Reopened through the editor's own Show, the new draft captures the
+   -- populated Saved Build selected now.
+   Close();SlashCmdList.NEXUS('editor');H.Advance(1)
+   local ctx=Ctrl().CreateTargetContext()
+   if not C.setup(NexusEditorFrame and NexusEditorFrame:IsShown() and type(ctx)=='table' and ctx.loadoutSlot==1
+    and ctx.loadoutName==ALPHA and not Ctrl().IsEditing(),
+    'S6 captured: fixture: reopened, the new draft captured the populated Saved Build Alpha (slot 1)',
+    type(ctx)=='table' and (tostring(ctx.loadoutSlot)..'/'..tostring(ctx.loadoutName)) or 'none') then return end
+   Ed.Refresh();Held('guard','captured populated row',false)
+   if Serve('captured malformed',Row1({{spellId='bad'}}),1,6,1,0,false) then
+    Held('expect','captured row turned malformed',false)
+   end
+   if Serve('captured valid empty',Row1({}),1,6,1,0,true) then Held('guard','captured row valid empty',true) end
+   if Serve('captured, infinite native',Row1({H.Clone(ECHO)}),math.huge,6,nil,1,true) then
+    Held('guard','captured populated row, native active slot math.huge',false)
+   end
+   Quiet('S6',others,auto)
+   C.guard(Writes()==0 and Uploads()==0 and Facts()==facts,'S6: no assignment written and nothing uploaded (unchanged)',Facts())
+  end)
+  H.service.GetServerMaxSlots=realMax
+  pcall(Close)
+  if not ok then error(err,0) end
+ end)
+end
+-- F4 (world-session identity of the held observation): the destination
+-- row's held observation counts only in the actual world session, which the
+-- Panel's read-only DestinationSessionCount returns; the writable public
+-- Panel.destinationSessionRevision alone cannot stand in for it. A new
+-- draft at active 0 holds the current first-run facts; the HUD is hidden
+-- while the editor stays shown. A real PLAYER_LEAVING_WORLD publishes the
+-- next revision and no editor refresh runs; only then is that one public
+-- scalar rolled back to the held revision, before the first refresh, and it
+-- is restored to the published value on every exit. EXPECT: the shown Saved
+-- Build and State cells, then the row hover, read not loaded, never the held
+-- first-run facts; the accessor gives the actual session as one value and
+-- reads or changes nothing. GUARD: accepted behaviour (the restored revision,
+-- a real entry and a fresh capture of the same name revive nothing; the next
+-- natural cold observation reacquires; warm read profile; no effect).
+-- SETUP: fixture state, including the advanced publication, no refresh
+-- before the rollback and warm measured refreshes. No private Panel state is
+-- read or written. Offline synthetic only; native NOT RUN.
+do
+ local NOT_LOADED={label='Saved Build data not loaded yet',build={'Not loaded yet','?'},
+  state={'Saved Build data is not loaded yet','Not loaded','?'},
+  tip={{'saved build','not loaded yet'},{'state','saved build data is not loaded yet'}}}
+ local FIRST={label='the first-run target',build={'None in use','None'},
+  state={'First-run target (no Saved Build in use)','First run','1st'},
+  tip={{'saved build','none in use'},{'state','first-run target (no saved build in use)'}}}
+ local NONE={label='no destination captured',build={'None captured','?'},state={'None captured','None'},
+  tip={{'saved build','none captured'},{'state','none captured'}}}
+ local READS={'slots','selected','loadout','wishlist','backend','active','unit'}
+ local function Esc(s) return (tostring(s):lower():gsub('(%p)','%%%1')) end
+ -- Shown text (an optional Label: prefix aside) that is one of the literal
+ -- alternatives, or one of them cut at its end.
+ local function Is(text,alternatives,label)
+  local shown=V.Plain(text):lower()
+  for _,t in ipairs({shown,label and shown:match('^'..Esc(label)..':%s*(.-)$') or nil}) do
+   local stem=t:match('^(.-)%.%.%.$') or t:match('^(.-)\226\128\166$')
+   for _,a in ipairs(alternatives) do
+    a=a:lower()
+    if t==a or (stem and #stem>=3 and #stem<#a and a:sub(1,#stem)==stem) then return true end
+   end
+  end
+  return false
+ end
+ local function Has(tip,pair) return tip:find(Esc(pair[1])..':?%s*'..Esc(pair[2]))~=nil end
+ local function ValidRev(v) return type(v)=='number' and v>=0 and v<math.huge and v==math.floor(v) end
+ -- The editor's destination row as shown, then, only while it is shown,
+ -- every line its own hover areas disclose (plain, lower case).
+ local function Read()
+  local row=NexusEditorFrame and NexusEditorFrame._destinationRow
+  local s={t={'','','',''},bad={'no destination row'},tip=''}
+  if type(row)=='table' and type(row.cells)=='table' then
+   s.t,s.bad=RowCells(row)
+   local lines={}
+   if row:IsVisible() and type(row.hits)=='table' then
+    for _,h in ipairs(row.hits) do
+     local enter=type(h)=='table' and h:IsVisible() and h:GetScript('OnEnter')
+     if enter then
+      for _,l in ipairs((V.TooltipLines(function() enter(h) end))) do lines[#lines+1]=V.Plain(l):lower() end
+      local leave=h:GetScript('OnLeave');if leave then pcall(leave,h) end
+     end
+    end
+   end
+   s.tip=table.concat(lines,'\n')
+  end
+  s.detail=table.concat(s.t,' | ')..(#s.bad>0 and (' bad='..table.concat(s.bad,'; ')) or '')
+  return s
+ end
+ local function Shows(kind,tag,s,want)
+  C[kind](#s.bad==0 and Is(s.t[2],want.build,'saved build') and Is(s.t[4],want.state,'state'),
+   tag..': the shown Saved Build and State cells read '..want.label,s.detail)
+  C[kind](Has(s.tip,want.tip[1]) and Has(s.tip,want.tip[2]) and not s.tip:find('shown as captured earlier',1,true),
+   tag..': the row hover, read once shown, discloses '..want.label..', not captured',(s.tip:gsub('\n',' / ')))
+ end
+ local function Person(tag,s,known)
+  C.guard(#s.bad==0 and Is(s.t[1],known and {CHARACTER} or {'Not known','?'},'character')
+   and Has(s.tip,{'character',known and CHARACTER or 'not known'}),
+   tag..': the shown character cell and hover read '..(known and CHARACTER or 'not known'),s.detail)
+ end
+
+ C.scenario('F4: a real world leave and a public revision rollback before any refresh revive no held facts',function()
+  Boot({active=0,slots=World()})
+  local P,Ed=Nexus.Panel,Nexus.WishlistEditor
+  local slash=SlashCmdList and SlashCmdList.NEXUS
+  if not (type(P)=='table' and type(P.Hide)=='function' and type(P.CachedDestinationCharacter)=='function'
+   and type(Ed)=='table' and type(Ed.Refresh)=='function' and type(Nexus.RefreshHudView)=='function'
+   and type(slash)=='function') then
+   C.expect(false,'F4: the public editor, HUD hide, cached character and HUD capture exist');return
+  end
+  local n,restore={},{}
+  -- Counting wrappers of existing public getters, server reads, UnitName and
+  -- the editor's public Refresh, each restored on every exit.
+  local function Wrap(t,k,key)
+   local real=t[k]
+   if type(real)~='function' then return end
+   n[key]=0
+   t[k]=function(...) n[key]=n[key]+1;return real(...) end
+   restore[#restore+1]=function() t[k]=real end
+  end
+  local function Reads() return (n.slots or 0)+(n.selected or 0)+(n.backend or 0)+(n.active or 0) end
+  local function Refresh(tag)
+   local r0=Reads()
+   Ed.Refresh()
+   C.setup(Reads()==r0 and NexusEditorFrame:IsVisible(),
+    tag..': the editor stays shown and this refresh is warm (no Slots, selected or server slot read)',Reads()-r0)
+   return Read()
+  end
+  local ok,err=pcall(function()
+   slash('editor');Nexus.RefreshHudView();Ed.Refresh()
+   local found,ctl=pcall(Ctrl)
+   if not found then C.expect(false,'F4: the editor controller is reachable',ctl);return end
+   local function Uncaptured()
+    local c,t=Ctx(),type(ctl.CreateTargetContext)=='function' and ctl.CreateTargetContext() or nil
+    return c.loadoutSlot==nil and c.name==nil and not (type(t)=='table' and tonumber(t.loadoutSlot))
+   end
+   C.setup(NexusEditorFrame and NexusEditorFrame:IsVisible() and Uncaptured(),
+    'F4: fixture: a new draft is open at active 0 and captured no destination')
+   local row=NexusEditorFrame and NexusEditorFrame._destinationRow
+   if type(row)~='table' or type(row.cells)~='table' then
+    C.expect(false,'F4: the editor shows its destination row');return
+   end
+   for _,w in ipairs({{A,'Slots','slots'},{A,'SelectedSavedBuild','selected'},{A,'GetLoadoutWishlist','loadout'},
+    {A,'Wishlist','wishlist'},{A,'Level','level'},{H.service,'GetServerBuildSlots','backend'},
+    {H.service,'GetServerActiveSlot','active'},{_G,'UnitName','unit'},{Ed,'Refresh','refresh'}}) do Wrap(w[1],w[2],w[3]) end
+   local s=Read()
+   local token=P.destinationSessionRevision
+   C.setup(ValidRev(token) and #s.bad==0 and Is(s.t[1],{CHARACTER},'character')
+    and Is(s.t[2],FIRST.build,'saved build') and Is(s.t[4],FIRST.state,'state'),
+    'F4: fixture: the row holds the current first-run facts and '..CHARACTER..' at a valid revision',tostring(token)..' '..s.detail)
+   local others,w0,u0,auto,facts=Others(),Writes(),(Uploads()),Auto(),Facts()
+   restore[#restore+1]=function() if type(P.Show)=='function' then P.Show() end end
+   P.Hide()
+   C.setup(NexusEditorFrame:IsVisible(),'F4: fixture: the HUD is hidden and the editor stays shown')
+   local f0=n.refresh or 0
+   H.Fire('PLAYER_LEAVING_WORLD')
+   local left=P.destinationSessionRevision
+   s=Read()
+   local advanced=ValidRev(token) and ValidRev(left) and left==token+1
+   C.setup(advanced and (n.refresh or 0)==f0 and #s.bad==0 and Is(s.t[1],{CHARACTER},'character')
+    and Is(s.t[4],FIRST.state,'state'),
+    'F4: fixture: the real leave published the next revision and no editor refresh or row update ran since',
+    tostring(token)..' -> '..tostring(left)..' refreshes='..((n.refresh or 0)-f0)..' '..s.detail)
+   if not advanced then return end
+   -- Only the public scalar is rolled back, to the held revision, before the
+   -- first refresh; the published value is restored on every exit.
+   P.destinationSessionRevision=token
+   local done,why=pcall(function()
+    local get=P.DestinationSessionCount
+    if C.expect(type(get)=='function','F4: the Panel offers its read-only world-session accessor') then
+     local n0={}
+     for k,v in pairs(n) do n0[k]=v end
+     local count,value=select('#',get()),get()
+     local idle=true
+     for k,v in pairs(n) do if v~=n0[k] then idle=false end end
+     C.expect(count==1 and value==left and rawequal(P.destinationSessionRevision,token) and idle,
+      'F4: the accessor gives the actual session as one value while the public scalar is rolled back; it reads and changes nothing',
+      tostring(value)..' values='..count..' public='..tostring(P.destinationSessionRevision)..' idle='..tostring(idle))
+    end
+    s=Refresh('F4 rollback')
+    Shows('expect','F4 rollback before the first refresh',s,NOT_LOADED)
+    Person('F4 rollback before the first refresh',s,false)
+    C.guard(Uncaptured(),'F4 rollback: the draft adopted no Saved Build',Ctx().loadoutSlot)
+   end)
+   P.destinationSessionRevision=left
+   if not done then error(why,0) end
+   s=Refresh('F4 restored revision')
+   Shows('guard','F4 restored revision alone',s,NOT_LOADED);Person('F4 restored revision alone',s,false)
+   H.Fire('PLAYER_ENTERING_WORLD')
+   local entered,u=P.destinationSessionRevision,n.unit or 0
+   Nexus.RefreshHudView()
+   local cached=P.CachedDestinationCharacter()
+   C.setup(ValidRev(entered) and entered>left and (n.unit or 0)>u and cached==CHARACTER,
+    'F4: fixture: a real entry published a newer revision and Main freshly captured the same name',
+    tostring(left)..' -> '..tostring(entered)..' '..tostring(cached))
+   s=Refresh('F4 entry and fresh capture')
+   Shows('guard','F4 entry and a fresh capture of the same name',s,NOT_LOADED)
+   Person('F4 entry and a fresh capture of the same name',s,true)
+   local r0=Reads()
+   H.perks.serverActiveSlot=1;H.Notify();A.Poll();H.Advance(1);Ed.Refresh()
+   C.setup(Reads()>r0,'F4: the natural server revision to active 1 made its existing cold reads',Reads()-r0)
+   s=Read()
+   Shows('guard','F4 next natural cold observation',s,NONE);Person('F4 next natural cold observation',s,true)
+   C.guard(Uncaptured(),'F4: the draft adopted no Saved Build',Ctx().loadoutSlot)
+   local held,n0=table.concat(s.t,'|'),{}
+   for k,v in pairs(n) do n0[k]=v end
+   for _=1,5 do Ed.Refresh() end
+   local level=(n.level or 0)-(n0.level or 0)
+   local idle,profile=level==5,{'level='..level}
+   for _,k in ipairs(READS) do
+    local d=(n[k] or 0)-(n0[k] or 0)
+    profile[#profile+1]=k..'='..d
+    if d~=0 then idle=false end
+   end
+   C.guard(idle and held==table.concat(Read().t,'|'),
+    'F4 quiet: five warm refreshes read Level 5 times and no Slots, selected, Wishlist, server slot or UnitName; the row holds still',
+    table.concat(profile,' '))
+   Quiet('F4',others,auto)
+   C.guard(Writes()==w0 and (Uploads())==u0 and Facts()==facts,'F4: no assignment write, upload or stored assignment change',
+    'writes='..Writes()..'/'..w0..' uploads='..(Uploads())..'/'..u0..' '..Facts())
+  end)
+  for i=#restore,1,-1 do pcall(restore[i]) end
+  local closed,closeErr=pcall(Close)
+  if not ok then error(err,0) end
+  if not closed then error(closeErr,0) end
  end)
 end
 C.finish('(confirmations name the captured destination; first-run labelled; no guessed destination)')

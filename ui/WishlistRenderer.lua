@@ -71,9 +71,25 @@ function Renderer.New(options)
     local autoLockCheck
     local displayPopup, displayCheck, displayLockBtn
     local refreshCache = {known=false}
-    -- Renderer reads only controller-published projections. The controller
+    -- Renderer reads controller-published projections (View below), with one
+    -- narrow, authorized display-fact exception for the destination row: it
+    -- reuses the Panel's cached current-session character
+    -- (Nexus.Panel.CachedDestinationCharacter) and world-session revision
+    -- (Nexus.Panel.destinationSessionRevision). The cold refresh binds its
+    -- existing Slots and SelectedSavedBuild observation to that row widget
+    -- with the revision; M.Refresh passes Controller.DestinationPresentation
+    -- the character, and that observation only while that revision is
+    -- current. These are display facts only, never draft, target or Save
+    -- authority, and the Panel keeps owning the character and revision.
+    -- Nexus.Panel is a hard dependency of that row: EnsureFrame creates it
+    -- through Nexus.Panel.CreateDestinationRow and both refresh paths
+    -- dereference Nexus.Panel directly, so an unavailable Panel is outside
+    -- this module's contract and raises an error instead of skipping the
+    -- row. The controller
     -- remains the sole owner of Adapter access, associations, uploads, Store
-    -- writes, preferences, retries, and mutable draft/session state.
+    -- writes, preferences, retries, and mutable draft authority; the
+    -- renderer owns its transient presentation caches as before, the held
+    -- observation among them.
     local View = {
         Catalog = function() return Controller.CatalogProjection() end,
         Owned = function() return Controller.OwnedProjection() end,
@@ -2187,9 +2203,11 @@ local function RefreshView(catalogRevision)
         -- target or Save authority.
         if frame._destinationRow then
             local destinationRow, panel = frame._destinationRow, Nexus.Panel
-            local session = panel and panel.destinationSessionRevision
+            local session = panel.destinationSessionRevision
             if type(session) == "number" and session >= 0
-                and session < math.huge and session == math.floor(session) then
+                and session < math.huge and session == math.floor(session)
+                and type(panel.DestinationSessionCount) == "function"
+                and panel.DestinationSessionCount() == session then
                 destinationRow._nexusEditorSlots = slots
                 destinationRow._nexusEditorSelected =
                     (type(slots) == "table" and slots.activeKnown ~= false)
@@ -2555,6 +2573,8 @@ end
             local session = panel.destinationSessionRevision
             if not (type(session) == "number" and session >= 0
                 and session < math.huge and session == math.floor(session)
+                and type(panel.DestinationSessionCount) == "function"
+                and panel.DestinationSessionCount() == session
                 and destinationRow._nexusEditorSession == session
                 and type(destinationRow._nexusEditorSlots) == "table") then
                 destinationRow._nexusEditorSlots = nil

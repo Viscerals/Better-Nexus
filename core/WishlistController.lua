@@ -706,10 +706,19 @@ function Controller.New(options)
                     and selected == math.floor(selected) then
                     local maxSlots = tonumber(slots.maxSlots) or 5
                     local native = tonumber(slots.activeSlot)
+                    -- Current facts prove nothing unless the native active
+                    -- slot is a finite whole number from 0 and the declared
+                    -- maximum a finite whole number from 1: a missing,
+                    -- infinite, NaN, fractional or negative active slot, or
+                    -- a declared maximum below 1, stays unknown.
+                    local valid = native ~= nil and native >= 0
+                        and native < math.huge and native == math.floor(native)
+                        and maxSlots >= 1 and maxSlots < math.huge
+                        and maxSlots == math.floor(maxSlots)
                     -- A native active Saved Build is the selected one
                     -- (SelectedSavedBuild); a scalar that differs proves
                     -- nothing, so a missing row stays unknown.
-                    local agrees = not (native and native >= 1
+                    local agrees = valid and not (native and native >= 1
                         and native <= maxSlots and native == math.floor(native)
                         and selected ~= native)
                     local rows = slots.bySlot
@@ -721,7 +730,10 @@ function Controller.New(options)
                     elseif type(echoes) == "table" then
                         if #echoes > 0 then
                             kind, reason = "none", "noDestination"
-                        else
+                        elseif row.roleSourceValid == true then
+                            -- An empty list proves first run only from a
+                            -- source ReadSlots marked valid; a malformed,
+                            -- missing or sparse one stays unknown.
                             kind, reason = "firstRun", nil
                         end
                     end
@@ -743,7 +755,11 @@ function Controller.New(options)
         name = tostring(name or "")
         if name == "" and type(row) == "table" then name = tostring(row.name or "") end
         if name ~= "" then d.name = name end
-        if type(row) == "table" and type(row.echoes) == "table" and #row.echoes == 0 then
+        -- Empty only from a source list ReadSlots marked valid
+        -- (roleSourceValid, as IsKnownEmptyLoadout): a malformed, missing
+        -- or sparse list projected to no Echoes is not known to be empty.
+        if type(row) == "table" and type(row.echoes) == "table"
+            and row.roleSourceValid == true and #row.echoes == 0 then
             d.empty = true
         end
         return d
