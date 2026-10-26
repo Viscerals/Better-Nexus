@@ -3897,7 +3897,12 @@ function M.LanguageStatus()
         local ok, status = pcall(callbacks.LanguageStatus)
         if ok and type(status) == "table" then return status end
     end
-    local status = {active = "enUS", saved = "enUS", pending = false,
+    -- No reliable lifecycle status: before Panel.Init, or the callback
+    -- failed or gave no table. The active language and the startup refusal
+    -- are known; the saved preference is not. Issue #141: saved, preference
+    -- and automatic stay unset, so no Automatic or manual row is checked and
+    -- the active language is never reported as a saved choice.
+    local status = {active = "enUS", pending = false,
         refusal = "startup", languages = {}}
     local localization = Nexus.Localization
     if localization and type(localization.Languages) == "function" then
@@ -3906,7 +3911,7 @@ function M.LanguageStatus()
     end
     if localization and type(localization.ActiveLanguage) == "function" then
         local ok, id = pcall(localization.ActiveLanguage)
-        if ok and type(id) == "string" then status.active, status.saved = id, id end
+        if ok and type(id) == "string" then status.active = id end
     end
     -- Issue #141: the Automatic value and what it shows; the saved
     -- preference itself is not known here.
