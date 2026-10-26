@@ -83,7 +83,7 @@ local H
 -- steps until the real entry has shown it (bounded), and no further, so its
 -- reading delay starts from that moment.
 local function Fresh(mutate,keepPrompts)
- NexusOverwriteWarning=nil;NexusQuickStart=nil;NexusHelpWindow=nil;NexusPanel=nil
+ NexusOverwriteWarning=nil;NexusQuickStart=nil;NexusHelpWindow=nil;NexusPanel=nil;NexusGuidedSetup=nil;NexusGuidedSetupEscape=nil
  local h=F.Boot(F.Database({mutate=function(db)
   db.overwriteWarnings=nil
   if mutate then mutate(db) end
@@ -333,10 +333,18 @@ C.scenario('S3 Yes after reading: the first-time Welcome, then the replay and no
  H.Advance(5.01)
  local before=Counters()
  w.yes:Click()
- C.guard(Shown() and Title()=='Welcome to Nexus','S3: Yes resumes the first-time Welcome with its own title')
+ -- First use in a healthy session is the guided setup coach now, with no
+ -- first-time Welcome beside it; its Close is the first-use dismissal.
+ local coach=NexusGuidedSetup
+ C.expect(coach~=nil and coach:IsShown() and not Shown(),'S3: Yes resumes first use as the guided setup coach; no first-time Welcome beside it')
  C.guard(NexusDB.overwriteWarnings==nil and Seen()==nil,'S3: unchecked Yes saves neither acknowledgement')
- Dismiss('S3: the first-time Welcome after Yes')
- C.guard(Seen()==true and not Shown(),'S3: Close records the first-time acknowledgement through the durable owner')
+ local coachClose
+ for _,c in ipairs(coach and coach.children or {}) do
+  if c.kind=='Button' and c:IsShown() and c:GetText()=='Close' then coachClose=c end
+ end
+ C.expect(coachClose~=nil,'S3: the first-use coach offers Close')
+ if coachClose then coachClose:Click() end
+ C.expect(Seen()==true and not (coach and coach:IsShown()) and not Shown(),'S3: the coach Close records the first-time acknowledgement through the durable owner')
  local savedBefore=Saved()
  local shown=Replay()
  C.expect(shown==true and Shown() and Title():find('information only',1,true)~=nil,'S3: the seen Welcome can still be replayed',Title())

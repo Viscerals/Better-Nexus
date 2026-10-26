@@ -133,6 +133,31 @@ local function StartRecordRetry()
     end)
 end
 
+-- The first-use dismissal: the first-time Welcome's Close, Escape or entry
+-- buttons, or the first-use guided setup coach's Close or Escape (see
+-- ShowFirstUseCoach below). One durable policy for both: recorded only through
+-- CanRecordSeen, otherwise retried within its bound and said once. Truthful
+-- about a dismissal that is not saved (yet): nothing is claimed complete, and
+-- the first-use window may be offered again later.
+local UNSAVED_NOTICE = {
+    welcome = "The Welcome is closed, but this cannot be saved right now "
+        .. "(saved data is still loading or is read-only). If it cannot be saved this session, "
+        .. "the Welcome is offered again next time. Setup / Welcome in the ... menu reopens it.",
+    coach = "Guided setup is closed, but this cannot be saved right now "
+        .. "(saved data is still loading or is read-only). If it cannot be saved this session, "
+        .. "Guided setup is offered again next time. Setup / Welcome in Help reopens it.",
+}
+local function Dismiss(kind)
+    dismissedThisSession = true
+    if not RecordSeen() then
+        StartRecordRetry()
+        if not unsavedNoticeShown then
+            unsavedNoticeShown = true
+            print("|cffffd200Nexus:|r " .. (UNSAVED_NOTICE[kind] or UNSAVED_NOTICE.welcome))
+        end
+    end
+end
+
 local function Finish()
     -- The informational replay is not the first-time window: closing it or
     -- following one of its buttons records nothing and dismisses nothing.
@@ -141,18 +166,7 @@ local function Finish()
         frame:Hide()
         return
     end
-    dismissedThisSession = true
-    if not RecordSeen() then
-        StartRecordRetry()
-        -- Truthful about a dismissal that is not saved (yet): nothing is
-        -- claimed complete, and the window may be offered again later.
-        if not unsavedNoticeShown then
-            unsavedNoticeShown = true
-            print("|cffffd200Nexus:|r The Welcome is closed, but this cannot be saved right now "
-                .. "(saved data is still loading or is read-only). If it cannot be saved this session, "
-                .. "the Welcome is offered again next time. Setup / Welcome in the ... menu reopens it.")
-        end
-    end
+    Dismiss("welcome")
     if frame then frame:Hide() end
 end
 
@@ -396,7 +410,8 @@ function M.Show()
     NormalTexts(EnsureFrame()):Show()
 end
 
--- Setup / Welcome replay (the ... menu and Help). Information only, and not
+-- Setup / Welcome replay (the ... menu; Help's own Setup / Welcome button opens
+-- the guided setup coach instead). A secondary route. Information only, and not
 -- the warning's consent: it opens after the warning was answered Yes or No,
 -- after the first-time window was seen, and while saved data is read-only or
 -- loading. It records no acknowledgement, writes no saved data, enables
@@ -608,6 +623,41 @@ function M.HideChecklist()
     if checklist then checklist:Hide() end
 end
 
+-- First use is the guided setup coach (ui/GuidedSetup.lua) in a healthy
+-- session: the coach is loaded and the acknowledgement can be recorded now
+-- (CanRecordSeen: a durable saved-data owner after local start-up). Any other
+-- session keeps the first-time Welcome above as its first-use window,
+-- unchanged: an absent, invalid or read-only saved table, a start-up that has
+-- not finished or failed, or no coach. Only the coach's deliberate Close or
+-- Escape is the first-use dismissal (Dismiss: the same durable policy, bounded
+-- retries and notice), and only for the character and saved root it was
+-- shown for. A hide by a route the coach opens, a warning or another window
+-- records nothing, and a dismissal records only that first use was seen:
+-- guide steps keep their own state.
+local coachOffer
+local function OwnerKey()
+    local store = Nexus.Store
+    if type(store) ~= "table" or type(store.CurrentOwnerKey) ~= "function" then return nil end
+    local ok, key = pcall(store.CurrentOwnerKey)
+    return ok and key or nil
+end
+local function CoachClosed()
+    local offer = coachOffer
+    coachOffer = nil
+    if not offer or offer.database ~= NexusDB or offer.owner ~= OwnerKey() then return end
+    Dismiss("coach")
+end
+local function ShowFirstUseCoach()
+    local ui = Nexus.GuidedSetupUI
+    if type(ui) ~= "table" or type(ui.ShowFirstUse) ~= "function" or not CanRecordSeen() then return false end
+    local owner = OwnerKey()
+    if owner == nil then return false end
+    local ok, shown = pcall(ui.ShowFirstUse, CoachClosed)
+    if not (ok and shown == true) then return false end
+    coachOffer = {owner = owner, database = NexusDB}
+    return true
+end
+
 -- Returns true when this window needs no further attention in this session.
 function M.ShowIfFirstTime()
     if Nexus.OverwriteWarning then
@@ -627,6 +677,11 @@ function M.ShowIfFirstTime()
     end
     local db = NexusDB
     if type(db) == "table" and rawget(db, "hasSeenQuickStart") then return true end
+    if ShowFirstUseCoach() then
+        -- No first-time Welcome beside the coach (a plain hide records nothing).
+        if frame and frame:IsShown() and not frame._informational then frame:Hide() end
+        return false
+    end
     NormalTexts(EnsureFrame()):Show()
     return false
 end

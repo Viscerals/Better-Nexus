@@ -42,12 +42,17 @@ end
 Captions(f,'first launch with Readout')
 local actions=#H.actions
 H.Advance(5.01);f.yes:Click()
-assert(NexusQuickStart and NexusQuickStart:IsShown(),'affirmation resumes existing first-time welcome')
+-- First use in this healthy session is the guided setup coach (no
+-- first-time Welcome beside it); its Close is the first-use dismissal.
+local coach=NexusGuidedSetup
+assert(coach and coach:IsShown() and not (NexusQuickStart and NexusQuickStart:IsShown()),'affirmation resumes first use as the guided setup coach, with no legacy Welcome')
 assert(not Nexus.RecomputeStats().autoEnabled and #H.actions==actions,'reading enables no automation/action')
 assert(NexusDB.overwriteWarnings==nil and not NexusDB.hasSeenQuickStart,'unchecked warning is not either saved acknowledgment')
-local dismiss=Dismiss(NexusQuickStart,'first-time')
-if dismiss then dismiss:Click() end
-assert(NexusDB.hasSeenQuickStart and not NexusQuickStart:IsShown(),'existing first-time Welcome Close (formerly Later) Finish behavior is retained')
+local coachClose
+for _,c in ipairs(coach.children)do if c:IsObjectType('Button') and c:IsShown() and c:GetText()=='Close' then coachClose=c end end
+assert(coachClose,'the first-use coach offers Close')
+coachClose:Click()
+assert(NexusDB.hasSeenQuickStart and not coach:IsShown(),'the first-use coach Close keeps the existing first-time acknowledgement policy')
 local F=dofile('tests/prototype/format5_support.lua')
 H=F.Reload(function(h)h.keepOverwriteWarningPrompts=true end)
 H.Advance(1,.05) -- allow the first decision/welcome check after startup readiness
@@ -55,7 +60,7 @@ f=NexusOverwriteWarning
 assert(f:IsShown(),'old welcome acknowledgment cannot suppress warning after real module reload')
 H.Advance(5.01);f.suppress:SetChecked(true);f.yes:Click()
 assert(NexusDB.overwriteWarnings.onboarding.suppressed and not NexusDB.overwriteWarnings.auto,'only checked onboarding opt-out survives')
-assert(not NexusQuickStart:IsShown() and not Nexus.RecomputeStats().autoEnabled,'old welcome stays seen and Auto stays OFF')
+assert(not (NexusQuickStart and NexusQuickStart:IsShown()) and not (NexusGuidedSetup and NexusGuidedSetup:IsShown()) and not Nexus.RecomputeStats().autoEnabled,'first use stays seen (no Welcome, no coach) and Auto stays OFF')
 H=F.Reload(function(h)h.keepOverwriteWarningPrompts=true end)
 H.Advance(1,.05)
 assert(not NexusOverwriteWarning:IsShown(),'matching saved onboarding opt-out skips warning after reload')

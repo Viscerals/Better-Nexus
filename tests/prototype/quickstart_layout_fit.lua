@@ -304,6 +304,11 @@ check(autoAccepted==0 and not NexusOverwriteWarning:IsShown() and #H.actions==ac
 -- state are only read. Offline models only; native NOT_RUN.
 do
  local Q,OW,title=Nexus.QuickStart,Nexus.OverwriteWarning,texts['Welcome to Nexus']
+ -- First use in a healthy session is the guided setup coach. These steps
+ -- check the first-time Welcome's own fit, so they run with the coach module
+ -- set aside: QuickStart.ShowIfFirstTime then falls back to that Welcome, its
+ -- first-use window whenever the coach cannot be shown. Restored below.
+ local coachUI=Nexus.GuidedSetupUI;Nexus.GuidedSetupUI=nil
  local SETUP_TITLE,SETUP_HINT='Nexus setup (information only)','Information only: this guide saves nothing and never turns Auto ON.'
  local db1,settled0,actions1,sent1=H.Clone(rawget(_G,'NexusDB')),Q.Settled(),#H.actions,#H.sent
  local function reads(t,h) return title~=nil and G.Visible(title:GetText())==t and G.Visible(hint:GetText())==h end
@@ -350,6 +355,7 @@ do
   print('FAIL RAISED '..raised[#raised])
   Nexus.QuickStart.Show()
  end
+ Nexus.GuidedSetupUI=coachUI
  check(qs:IsShown() and reads('Welcome to Nexus',HINT) and qs:GetWidth()==W and buttons.Close:GetWidth()==closeW and buttons.Close:GetHeight()==closeH,
   'SETUP the first-time Welcome is restored at the harness measurement for the original Close handler')
  guard(Q.Settled()==settled0 and T.Equal(rawget(_G,'NexusDB'),db1) and #H.actions==actions1 and #H.sent==sent1 and autoAccepted==0

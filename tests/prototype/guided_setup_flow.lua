@@ -47,6 +47,9 @@ local function Boot(o)
  for _,k in ipairs(WRITERS) do local real=A[k]
   if type(real)=='function' then writes[k]=0;A[k]=function(...) writes[k]=writes[k]+1;return real(...) end end end
  if NexusQuickStart and NexusQuickStart:IsShown() then NexusQuickStart:Hide() end
+ -- First use is the guided setup coach now; these scenarios start with it
+ -- closed by a plain hide, which records no first-use acknowledgement.
+ if NexusGuidedSetup and NexusGuidedSetup:IsShown() then NexusGuidedSetup:Hide() end
  local journal=CreateFrame('Frame','ProjectEbonholdEchoJournal',UIParent);journal:Hide()
  CreateFrame('Button','EchoJournalMicroButton',UIParent):SetScript('OnClick',function() journal:Show() end)
 end
@@ -100,9 +103,11 @@ C.scenario('F1 first use: every navigation control moves the guide only',functio
  Press(Opt('I am new'));C.expect(Step()=='wishlist','F1: New opens the Wishlist step')
  Press(Btn('Close'));C.expect(not Shown(),'F1: Close hides the coach')
  Nexus.GuidedSetupUI.Show();C.expect(Shown() and Step()=='wishlist','F1: reopening resumes the same step')
- local reg=0;for _,n in ipairs(UISpecialFrames) do if n=='NexusGuidedSetup' then reg=reg+1 end end
- C.expect(reg==1,'F1: Escape closes the coach (registered once)',reg)
- if Guide() then Guide():Hide() end
+ local reg,raw=0,0
+ for _,n in ipairs(UISpecialFrames) do if n=='NexusGuidedSetupEscape' then reg=reg+1 elseif n=='NexusGuidedSetup' then raw=raw+1 end end
+ C.expect(reg==1 and raw==0,'F1: Escape closes the coach through its one listed Escape child (the coach itself is not listed)',reg..'/'..raw)
+ if _G.NexusGuidedSetupEscape then NexusGuidedSetupEscape:Hide() end
+ C.expect(not Shown(),'F1: Escape (the listed child hidden, as the client does) closes the coach')
  Nexus.GuidedSetupUI.Show();C.expect(Step()=='wishlist','F1: after Escape it resumes')
  Press(Btn('Help'));C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown(),'F1: Help opens')
  if _G.NexusHelpWindow then NexusHelpWindow:Hide() end

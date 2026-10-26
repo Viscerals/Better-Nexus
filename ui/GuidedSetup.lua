@@ -119,8 +119,21 @@ local function Ensure()
         if theme.StyleTree then theme.StyleTree(frame) end
         if theme.StyleLabel then theme.StyleLabel(frame.title, 'accent'); theme.StyleLabel(frame.step, 'muted') end
     end
+    -- Escape closes the coach exactly as Close does (U.Close). As for the
+    -- Welcome (ui/QuickStart.lua), the coach itself is not listed in
+    -- UISpecialFrames: a route that steps aside, a warning or another window
+    -- hides it without closing it, and a first-use dismissal must not be taken
+    -- from such a hide. This invisible child is listed instead. It is shown
+    -- exactly while the coach is, and its own hide closes the coach only while
+    -- the coach is still visible; an explicit hide of the coach hides it first,
+    -- so that closes nothing. Offline model only; native NOT_RUN.
+    local escape = CreateFrame('Frame', 'NexusGuidedSetupEscape', frame)
+    escape:SetScript('OnHide', function() if frame and frame:IsVisible() then U.Close() end end)
+    frame:HookScript('OnShow', function() escape:Show() end)
+    frame:HookScript('OnHide', function() escape:Hide() end)
+    escape:Hide()
     UISpecialFrames = UISpecialFrames or {}
-    UISpecialFrames[#UISpecialFrames + 1] = 'NexusGuidedSetup'
+    UISpecialFrames[#UISpecialFrames + 1] = 'NexusGuidedSetupEscape'
     local g = Core()
     if g then g.onChange = function(receipt) U.OnChange(receipt) end end
     return frame
@@ -309,7 +322,7 @@ function U.Render()
     SetButton(f.next, not v.noNext and {label = b.next, enabled = g.CanNext(),
         act = function() note = nil; g.Next() end} or nil)
     SetButton(f.help, {label = b.help, act = function() if Nexus.Help then Nexus.Help.Show(HELP[id]) end end})
-    SetButton(f.close, {label = b.close, act = function() U.Hide() end})
+    SetButton(f.close, {label = b.close, act = function() U.Close() end})
     Layout()
 end
 
@@ -359,6 +372,27 @@ function U.Show()
     local warning = Nexus.OverwriteWarning
     if warning and type(warning.IsOpen) == 'function' and warning.IsOpen() then return false, 'warning-open' end
     local f = Ensure()
+    -- Shown again after another window or a warning hid it, the coach is a
+    -- replay, not first use. A coach still on screen, or one that stepped
+    -- aside for its own route (the editor, the Journal chooser), keeps it.
+    if not f:IsShown() and not f.waiting then f.firstUse = nil end
+    f.waiting, note = nil, nil
+    f:Show()
+    U.Render()
+    return true
+end
+
+-- First use (ui/QuickStart.lua ShowIfFirstTime): the same coach, and the one
+-- caller told when it is deliberately closed (Close or Escape: U.Close); no
+-- other hide tells it anything. A coach that stepped aside for its own route
+-- is not reopened over that window: the route's outcome returns it.
+function U.ShowFirstUse(onClose)
+    if type(onClose) ~= 'function' then return false end
+    local warning = Nexus.OverwriteWarning
+    if warning and type(warning.IsOpen) == 'function' and warning.IsOpen() then return false, 'warning-open' end
+    local f = Ensure()
+    f.firstUse = onClose
+    if f.waiting and not f:IsShown() then return true end
     f.waiting, note = nil, nil
     f:Show()
     U.Render()
@@ -370,6 +404,16 @@ function U.Replay()
     return U.Show()
 end
 function U.Hide() if frame then frame.waiting = nil; frame:Hide() end end
+-- Close and Escape: the deliberate close. A first-use coach tells its caller
+-- once, after it is hidden; that caller decides what is recorded (only that
+-- first use was seen: guide steps keep their own state).
+function U.Close()
+    if not frame then return end
+    local onClose = frame.firstUse
+    frame.firstUse, frame.waiting = nil, nil
+    frame:Hide()
+    if type(onClose) == 'function' then pcall(onClose) end
+end
 
 function U.OnChange(receipt)
     if not frame then return end

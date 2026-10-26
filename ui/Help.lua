@@ -5,9 +5,9 @@ local frame,index= nil,1
 -- Keep the complete Help window above the Orb dialog's 30-33 layer band.
 local HELP_LEVEL=40
 local pages={
- {id="start",title="Getting started",text=[[Start here: the page buttons above open any page directly. Setup / Welcome reopens the first-launch guide; it is information only, saves nothing and never turns Auto ON. Assign Wishlist... opens the Echo Journal with its Wishlist chooser for the Saved Build the Journal shows; nothing is assigned until you choose a Wishlist there.
+ {id="start",title="Getting started",text=[[Start here: the page buttons above open any page directly. Setup / Welcome opens Guided setup, the first-launch guide, at the step you left; opening it never turns Auto ON. The information-only Welcome stays in the ... menu as Setup / Welcome. Assign Wishlist... opens the Echo Journal with its Wishlist chooser for the Saved Build the Journal shows; nothing is assigned until you choose a Wishlist there.
 
-Guided setup (the Guided setup button in Setup / Welcome) goes one step at a time: choose or create a Wishlist, choose the Saved Build that should follow it, assign it in the Echo Journal chooser, try a SIMULATED recommendation and decide about Auto. A step is done only after Nexus reads the result back; a skipped, pending or unknown step is not done. Opening, navigating or closing the guide assigns, saves, shares, spends and turns on nothing.
+Guided setup (the Guided setup button in Setup / Welcome) goes one step at a time: choose or create a Wishlist, choose the Saved Build that should follow it, assign it in the Echo Journal chooser, try a SIMULATED recommendation and decide about Auto. A step is done only after Nexus reads the result back; a skipped, pending or unknown step is not done. Opening, navigating or closing the guide assigns, saves, shares, spends and turns on nothing. Closing the first-launch guide the first time (Close or Escape) only records that it was seen, when saved data can be written; its steps stay as they are.
 
 Setup checklist (also in the ... menu) shows what Nexus can read now: start-up, the Saved Build Nexus would act on, its assigned Wishlist, Auto, Sync and any Orb run. A step is done only when that is true now; unknown or still loading is never shown as done, and closing the Welcome is not a setup step. Its buttons only open the same windows as here.
 
@@ -219,15 +219,15 @@ local function ensure()
         t:SetScript("OnClick",function()index=i;refresh();scroll:SetVerticalScroll(0)end)
         frame.tabs[i]=t
     end
-    -- The primary setup path. Each button only navigates (H.OpenSetup,
-    -- H.OpenAssignment, H.OpenEditor, H.OpenChecklist); none assigns, spends,
-    -- sends or turns Auto ON, and a route that cannot open says why in the
-    -- note below.
+    -- The primary setup path. Each button only navigates (H.OpenGuide: Setup /
+    -- Welcome opens or resumes Guided setup; H.OpenAssignment, H.OpenEditor,
+    -- H.OpenChecklist); none assigns, spends, sends or turns Auto ON, and a
+    -- route that cannot open says why in the note below.
     local function action(x,w,label,fn)
         local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("TOPLEFT",x,-68);f:SetSize(w,22)
         f:SetText(label);f:SetFrameLevel(HELP_LEVEL+2);f:SetScript("OnClick",fn);return f
     end
-    action(20,150,"Setup / Welcome",function()H.OpenSetup()end)
+    action(20,150,"Setup / Welcome",function()H.OpenGuide()end)
     action(176,160,"Assign Wishlist...",function()H.OpenAssignment()end)
     action(342,140,"Wishlist Editor",function()H.OpenEditor()end)
     frame.checklist=action(488,140,"Setup checklist",function()H.OpenChecklist()end)
@@ -259,7 +259,9 @@ local function Refuse(text)
     print("|cffffd200Nexus:|r "..text)
     return false, text
 end
--- Setup / Welcome: the informational replay (QuickStart.ShowSetup).
+-- The informational replay (QuickStart.ShowSetup): a secondary route kept for
+-- its existing callers. Help's own Setup / Welcome button opens Guided setup
+-- (H.OpenGuide).
 function H.OpenSetup()
     local quick=Nexus.QuickStart
     if not (quick and type(quick.ShowSetup)=="function") then
@@ -268,7 +270,7 @@ function H.OpenSetup()
     local shown,why=quick.ShowSetup()
     if not shown then
         return Refuse(why=="warning-open"
-            and "Answer the open Auto warning first (Yes or No); Setup / Welcome opens after it."
+            and "Setup / Welcome did not open. Answer the open warning (Yes or No), then open it again."
             or "Setup / Welcome is not available right now.")
     end
     if frame then frame:Hide() end
@@ -306,8 +308,10 @@ function H.OpenChecklist()
     quick.ShowChecklist()
     return true
 end
--- Guided setup: the step-by-step coach (ui/GuidedSetup.lua). It waits for
--- an open Auto warning and changes nothing by opening.
+-- Guided setup: the step-by-step coach (ui/GuidedSetup.lua), Help's primary
+-- Setup / Welcome. It does not open over a warning that waits for its answer
+-- and says so; nothing is queued, so it opens only when asked again. Opening
+-- it changes nothing.
 function H.OpenGuide()
     local ui=Nexus.GuidedSetupUI
     if not (ui and type(ui.Show)=="function") then
@@ -316,7 +320,7 @@ function H.OpenGuide()
     local shown,why=ui.Show()
     if not shown then
         return Refuse(why=="warning-open"
-            and "Answer the open Auto warning first (Yes or No); Guided setup opens after it."
+            and "Guided setup did not open. Answer the open warning (Yes or No), then open Guided setup again."
             or "Guided setup is not available right now.")
     end
     if frame then frame:Hide() end

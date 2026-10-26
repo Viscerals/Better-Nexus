@@ -353,6 +353,8 @@ NAMES += ['flexible_plan_persistence_retention']
 NAMES += ['flexible_plan_persistence_chooser']
 # Issue #131: guided setup coach flow/navigation and receipt/read-back evidence (EXPECT fails at 2b287ef8 by design).
 NAMES += ['guided_setup_flow','guided_setup_readback']
+# First entry routing: a healthy first use is the guided setup coach; Help's primary Setup / Welcome opens it; declines, read-only and refusals stay honest (EXPECT fails at f67ba51e by design).
+NAMES += ['guided_first_entry']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
