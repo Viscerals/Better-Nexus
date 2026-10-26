@@ -10,17 +10,21 @@ H.Fire('PLAYER_ENTERING_WORLD');assert(Nexus.RecomputeStats().autoEnabled and H.
 H.Fire('PLAYER_ENTERING_WORLD')
 assert(not Nexus.RecomputeStats().autoEnabled,'reconnect without a leave notification is OFF')
 SlashCmdList.NEXUS('auto');H.Fire('PLAYER_LOGOUT');assert(not Nexus.RecomputeStats().autoEnabled,'logout revokes ordinary permission')
-H.OrbPlan();assert(M.Start(2))
--- The earlier cold leave/entry also protects a first explicit approval. Wait
--- for its real submission before testing a transition of an existing receipt.
-assert(M.Status().running and not M.Status().pending and H.Count('orb-spend')==0,
- 'first approved run remains held by the earlier cold loading deadline')
+H.OrbPlan()
+-- The earlier cold leave/entry also protects a first explicit approval: it is
+-- refused during the settle and submits nothing.
+local cold,coldWhy=M.Start(2)
+assert(cold~=true and not M.Status().running and not M.Status().pending and H.Count('orb-spend')==0,
+ 'first explicit approval submits nothing during the earlier cold loading settle: '..tostring(coldWhy))
 H.Advance(.5)
-assert(not M.Status().pending and H.Count('orb-spend')==0,'cold hold still submits nothing after half a second')
-H.Advance(2.6);M.Pump()
-assert(M.Status().pending and H.Count('orb-spend')==1,'SETUP actual first submission after the cold hold')
+cold,coldWhy=M.Start(2)
+assert(cold~=true and not M.Status().pending and H.Count('orb-spend')==0,'cold settle still submits nothing after half a second: '..tostring(coldWhy))
+H.Advance(2.6)
+assert(M.Start(2))
+assert(M.Status().running and M.Status().pending and H.Count('orb-spend')==1,'SETUP actual first submission after the cold settle')
 H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD')
-assert(M.Status().running and M.Status().pending and H.Count('orb-spend')==1,'a classified loading screen retains only the approved Orb run')
+assert(M.Status().running and M.Status().state=='WAIT_WORLD' and M.Status().pending and H.Count('orb-spend')==1 and H.Count('take')==0,
+ 'a classified loading screen retains only the approved Orb run; every host submission stays held')
 SlashCmdList.NEXUS('auto');assert(not Nexus.RecomputeStats().autoEnabled,'ordinary Auto stays OFF while the Orb receipt is unresolved')
 H.Fire('PLAYER_ENTERING_WORLD')
 assert(not M.Status().running and M.Status().pending,'world entry without a preceding leave pauses the Orb run')

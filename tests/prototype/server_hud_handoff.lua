@@ -657,4 +657,680 @@ do
  NexusDB.soulAshHudMode=savedMode
 end
 
+----------------------------------------------------------------------------
+-- Part C: Callboard stock ownership. Each case loads a fresh copy of the
+-- real ui/CallboardStatus.lua and drives it only through Init, GetSummary,
+-- PublishCoverage and its own scanner event and update, against synthetic
+-- stock frames and a synthetic covered Nexus row. Each expectation is a
+-- literal alpha, mouse or write count of a stock object. The cases run
+-- independently and are reported together. Offline characterization only:
+-- none of this is native client evidence.
+----------------------------------------------------------------------------
+do
+ local function StockObject(alpha,mouse,parent)
+  local f={alpha=alpha,mouse=mouse,parent=parent,alphaSets=0,mouseSets=0,showHides=0}
+  function f:GetAlpha() return self.alpha end
+  function f:SetAlpha(v) self.alphaSets=self.alphaSets+1;self.alpha=v end
+  function f:IsMouseEnabled() return self.mouse end
+  function f:EnableMouse(v) self.mouseSets=self.mouseSets+1;self.mouse=v and true or false end
+  function f:GetParent() return self.parent end
+  function f:IsShown() return true end
+  function f:Show() self.showHides=self.showHides+1 end
+  function f:Hide() self.showHides=self.showHides+1 end
+  return f
+ end
+ -- A stock object whose alpha and mouse originals cannot be read.
+ local function Unreadable(kind,parent)
+  local f=StockObject(nil,nil,parent)
+  if kind=='nil' then
+   f.GetAlpha=function() return nil end
+   f.IsMouseEnabled=function() return nil end
+  elseif kind=='throws' then
+   f.GetAlpha=function() error('alpha getter raises') end
+   f.IsMouseEnabled=function() error('mouse getter raises') end
+  elseif kind=='missing' then
+   f.GetAlpha=nil;f.IsMouseEnabled=nil
+  else
+   f.GetAlpha=function() return '1' end
+   f.IsMouseEnabled=function() return 1 end
+  end
+  return f
+ end
+ local function Objective(rewards)
+  local o={title='Callboard Quest',questId=77,objectiveText='Bring the tome'}
+  if rewards then o.normalSoulAshes=1200;o.normalMoney=45000 end
+  return o
+ end
+ -- Synthetic globals in the shape the module reads. The Nexus row is covered
+ -- (shown, committed, healthy, same title, 17px rows) until a case changes it.
+ local function CallboardHost(o)
+  local host={facts={shown=true,committed=true,hadFailure=false},
+   objective=o.objective,log={{title='Callboard Quest',id=77}}}
+  Nexus={};UIParent={}
+  GameTooltip=o.tooltip;hooksecurefunc=nil;EbonAPI=nil
+  ObjectiveTrackerFrame=o.root;EbonholdQuestTracker=o.tracker
+  ProjectEbonholdQuestTracker=nil;WatchFrame=o.watch
+  ProjectEbonholdDB={questTracker={watchedQuests={}}}
+  GetTrackedAchievements=nil;GetAchievementInfo=nil;GetNumTrackedAchievements=nil
+  GetNumQuestWatches=nil;GetQuestIndexForWatch=nil
+  GetNumQuestLeaderBoards=nil;GetQuestLogLeaderBoard=nil
+  GetNumQuestLogEntries=function() return #host.log end
+  GetQuestLogTitle=function(i)
+   local q=host.log[i]
+   if q then return q.title,80,nil,nil,nil,nil,q.complete,nil,q.id end
+  end
+  UnitLevel=function() return 80 end
+  ProjectEbonhold={ObjectivesService={GetActiveObjective=function() return host.objective end}}
+  local function Row(text)
+   local row={text=text}
+   function row:IsShown() return host.facts.shown==true end
+   function row:GetHeight() return 17 end
+   function row:GetText() return self.text end
+   return row
+  end
+  NexusPanel={_callboardTitle=Row('Callboard Quest'),_callboardLine=Row('Bring the tome')}
+  Nexus.Panel={VisibilityFacts=function() return host.facts end}
+  local scanner
+  function CreateFrame(_,name)
+   local f={scripts={}}
+   function f:RegisterEvent() end
+   function f:SetScript(event,fn) self.scripts[event]=fn end
+   if name=='NexusCallboardStatusScanner' then scanner=f end
+   return f
+  end
+  dofile('ui/CallboardStatus.lua')
+  host.status=Nexus.CallboardStatus
+  host.status.Init()
+  assert(scanner and scanner.scripts.OnEvent and scanner.scripts.OnUpdate,
+   'fixture: the Callboard scanner is created')
+  -- The module's own scanner: a quest event, then one update.
+  function host.Scan()
+   scanner.scripts.OnEvent(scanner,'QUEST_LOG_UPDATE')
+   scanner.scripts.OnUpdate(scanner,0.25)
+  end
+  -- What the Nexus panel does on its own show and hide.
+  function host.Cover(shown)
+   host.facts.shown=shown
+   host.status.PublishCoverage()
+  end
+  return host
+ end
+ local failures={}
+ local function Case(name,fn)
+  local ok,err=pcall(fn)
+  if not ok then failures[#failures+1]=name..': '..tostring(err) end
+ end
+
+ for _,kind in ipairs({'nil','throws','missing','wrong type'}) do
+  Case('unreadable originals ('..kind..')',function()
+   local root=Unreadable(kind)
+   local bag=Unreadable(kind,root)
+   root.rewardBagFrame=bag
+   local watch=Unreadable(kind)
+   local tracker=StockObject(0.8,true)
+   local collapse=StockObject(1,true,tracker)
+   tracker.collapse=collapse
+   local host=CallboardHost({objective=Objective(true),root=root,tracker=tracker,watch=watch})
+   host.Scan()
+   check(#host.status.GetSummary().rewards==1,'fixture: the covered objective has a usable reward row')
+   check(tracker.alpha==0 and collapse.mouse==false,
+    'positive control: the tracker alpha and collapse mouse with known originals are taken over')
+   check(root.alphaSets==0 and root.mouseSets==0 and bag.alphaSets==0 and bag.mouseSets==0
+    and watch.alphaSets==0,
+    'an alpha or mouse whose original cannot be read is never written: '..kind)
+   host.Cover(false)
+   check(tracker.alpha==0.8 and collapse.mouse==true and tracker.mouseSets==0,
+    'the positive control gets its exact alpha and mouse back')
+   check(root.alphaSets==0 and root.mouseSets==0 and bag.alphaSets==0 and bag.mouseSets==0
+    and watch.alphaSets==0 and root.alpha==nil and root.mouse==nil,
+    'and no guessed default is written in their place on restore: '..kind)
+  end)
+ end
+
+ Case('one-shot throwing setters',function()
+  local root=StockObject(0.35,true)
+  local tracker=StockObject(0.8,true)
+  local collapse=StockObject(1,true,tracker)
+  tracker.collapse=collapse
+  -- The tracker alpha setter refuses its first restore and changes nothing.
+  local setAlpha=tracker.SetAlpha
+  tracker.SetAlpha=function(self,v)
+   if v~=0 and not self.refused then self.refused=true;error('alpha setter raises once') end
+   return setAlpha(self,v)
+  end
+  -- The collapse mouse setter changes the value and then raises, once.
+  local enableMouse=collapse.EnableMouse
+  collapse.EnableMouse=function(self,v)
+   enableMouse(self,v)
+   if not self.raised then self.raised=true;error('mouse setter raises after changing') end
+  end
+  local host=CallboardHost({objective=Objective(true),root=root,tracker=tracker})
+  host.Scan()
+  check(root.alpha==0 and tracker.alpha==0 and collapse.mouse==false,
+   'fixture: the stock trackers are replaced, including the mouse a raising setter changed')
+  host.Cover(false)
+  check(root.alpha==0.35 and root.mouse==true,'hiding the row restores the objective root at once')
+  check(collapse.mouse==true,
+   'a mouse changed by a setter that then raised was owned, and is given back')
+  check(tracker.alpha==0,'fixture: the tracker restore raised and changed nothing')
+  host.status.PublishCoverage()
+  check(tracker.alpha==0.8,
+   'the failed restore is retried by the next publish, with no replacement on screen, to the exact alpha')
+  local writes=tracker.alphaSets
+  host.Scan()
+  check(tracker.alpha==0.8 and tracker.alphaSets==writes,
+   'and once a getter confirms it, a later scan does not write it again')
+ end)
+
+ Case('silent setter success with a failed readback',function()
+  local root=StockObject(0.35,true)
+  local host=CallboardHost({objective=Objective(true),root=root})
+  host.Scan()
+  check(root.alpha==0 and root.mouse==false,'fixture: the objective root is replaced')
+  -- The alpha setter returns normally once and changes nothing.
+  local setAlpha=root.SetAlpha
+  root.SetAlpha=function(self,v)
+   if not self.ignored then self.ignored=true;self.alphaSets=self.alphaSets+1;return end
+   return setAlpha(self,v)
+  end
+  host.Cover(false)
+  check(root.mouse==true,'the mouse is restored and confirmed')
+  check(root.alpha==0,'fixture: the alpha setter reported success and changed nothing')
+  host.Scan()
+  check(root.alpha==0.35,
+   'a readback that did not confirm the original keeps the record, and a later scan restores the exact alpha')
+  local writes=root.alphaSets
+  host.Cover(false)
+  check(root.alpha==0.35 and root.alphaSets==writes,'and a confirmed alpha is not written again')
+ end)
+
+ Case('partial restore',function()
+  local root=StockObject(0.35,true)
+  local host=CallboardHost({objective=Objective(true),root=root})
+  host.Scan()
+  check(root.alpha==0 and root.mouse==false,'fixture: alpha and mouse are both held')
+  local enableMouse=root.EnableMouse
+  root.EnableMouse=function(self,v)
+   if v==true and not self.refused then self.refused=true;error('mouse setter raises once') end
+   return enableMouse(self,v)
+  end
+  host.Cover(false)
+  check(root.alpha==0.35,'the alpha is restored although the mouse restore raised')
+  check(root.mouse==false,'fixture: the mouse restore failed')
+  -- The game changes the alpha after Nexus gave it back.
+  root.alpha=0.6
+  local alphaWrites=root.alphaSets
+  host.status.PublishCoverage()
+  check(root.mouse==true,'the mouse alone is retried and restored')
+  check(root.alpha==0.6 and root.alphaSets==alphaWrites,
+   'the alpha restored earlier is not written again by the mouse retry')
+ end)
+
+ Case('another watched quest',function()
+  local watch=StockObject(0.9,true)
+  local root=StockObject(0.35,true,watch)
+  local bag=StockObject(1,true,root)
+  root.rewardBagFrame=bag
+  local tracker=StockObject(0.8,true)
+  local collapse=StockObject(1,true,tracker)
+  tracker.collapse=collapse
+  local host=CallboardHost({objective=Objective(true),root=root,tracker=tracker,watch=watch})
+  host.Scan()
+  check(root.alpha==0 and bag.alpha==0 and tracker.alpha==0 and collapse.mouse==false
+   and watch.alpha==0,'fixture: only the callboard objective is tracked and every stock role is replaced')
+  host.log[2]={title='One More Door',id=901}
+  ProjectEbonholdDB.questTracker.watchedQuests[901]=true
+  host.Scan()
+  check(tracker.alpha==0.8 and collapse.mouse==true and watch.alpha==0.9,
+   'another watched quest gives the quest tracker, its collapse control and WatchFrame back on that pass')
+  check(root.alpha==0 and root.mouse==false and bag.alpha==0 and bag.mouse==false,
+   'while the covered objective root and its reward bag stay replaced')
+  ProjectEbonholdDB.questTracker.watchedQuests[901]=nil
+  host.Scan()
+  check(tracker.alpha==0 and collapse.mouse==false and watch.alpha==0,
+   'when it is no longer watched the tracker roles are replaced again')
+  host.Cover(false)
+  check(tracker.alpha==0.8 and collapse.mouse==true and watch.alpha==0.9 and root.alpha==0.35
+   and root.mouse==true and bag.alpha==1 and bag.mouse==true,
+   'and hiding the row gives every exact original back')
+ end)
+
+ Case('shared stock object',function()
+  -- The quest tracker and WatchFrame are the objective root itself here.
+  local root=StockObject(0.35,true)
+  local collapse=StockObject(1,true,root)
+  root.collapse=collapse
+  local host=CallboardHost({objective=Objective(true),root=root,tracker=root,watch=root})
+  host.Scan()
+  check(root.alpha==0 and root.mouse==false and collapse.mouse==false,
+   'the shared frame and the collapse control of its tracker role are both replaced')
+  local alphaWrites,mouseWrites=root.alphaSets,root.mouseSets
+  host.log[2]={title='One More Door',id=901}
+  ProjectEbonholdDB.questTracker.watchedQuests[901]=true
+  host.Scan()
+  check(collapse.mouse==true,'another watched quest releases the tracker-only collapse role')
+  check(root.alpha==0 and root.mouse==false and root.alphaSets==alphaWrites
+   and root.mouseSets==mouseWrites,
+   'the objective root role still covers the shared frame: it is neither given back nor taken again')
+  host.Cover(false)
+  check(root.alpha==0.35 and root.mouse==true,'hiding the row gives its exact original back')
+ end)
+
+ Case('replaced stock objects',function()
+  local rootA=StockObject(0.35,true)
+  local trackerA=StockObject(0.8,true)
+  local collapseA=StockObject(1,true,trackerA)
+  trackerA.collapse=collapseA
+  local host=CallboardHost({objective=Objective(true),root=rootA,tracker=trackerA})
+  host.Scan()
+  check(rootA.alpha==0 and trackerA.alpha==0 and collapseA.mouse==false,
+   'fixture: the first stock objects are replaced')
+  -- The game rebuilds the collapse control of the same tracker.
+  local collapseB=StockObject(1,true,trackerA)
+  trackerA.collapse=collapseB
+  host.Scan()
+  check(collapseA.mouse==true,'the replaced collapse control gets its own exact mouse back')
+  check(collapseB.mouse==false and trackerA.alpha==0,
+   'its successor is taken over independently and the tracker stays replaced')
+  -- Then the objective root and the tracker themselves are replaced.
+  local rootB=StockObject(0.5,true)
+  local trackerB=StockObject(0.6,true)
+  local collapseC=StockObject(1,true,trackerB)
+  trackerB.collapse=collapseC
+  ObjectiveTrackerFrame=rootB;EbonholdQuestTracker=trackerB
+  host.Scan()
+  check(rootA.alpha==0.35 and rootA.mouse==true and trackerA.alpha==0.8 and collapseB.mouse==true,
+   'every replaced object gets its exact original back')
+  check(rootB.alpha==0 and rootB.mouse==false and trackerB.alpha==0 and collapseC.mouse==false,
+   'and every successor is held on its own')
+  local writes=rootA.alphaSets+rootA.mouseSets+trackerA.alphaSets+collapseA.mouseSets+collapseB.mouseSets
+  host.Cover(false)
+  check(rootB.alpha==0.5 and rootB.mouse==true and trackerB.alpha==0.6 and collapseC.mouse==true,
+   'hiding the row gives each successor its own original, not its predecessor value')
+  check(rootA.alphaSets+rootA.mouseSets+trackerA.alphaSets+collapseA.mouseSets+collapseB.mouseSets==writes,
+   'and the predecessors already given back are not written again')
+ end)
+
+ Case('reward access without usable reward rows',function()
+  local watch=StockObject(1,true)
+  local tracker=StockObject(0.8,true,watch)
+  local collapse=StockObject(1,true,tracker)
+  tracker.collapse=collapse
+  local root=StockObject(0.35,true,tracker)
+  local bag=StockObject(1,true,root)
+  root.rewardBagFrame=bag
+  local host=CallboardHost({objective=Objective(false),root=root,tracker=tracker,watch=watch})
+  host.Scan()
+  local summary=host.status.GetSummary()
+  check(summary.observed==true and type(summary.rewards)=='table' and #summary.rewards==0,
+   'fixture: the covered objective has no reward rows')
+  check(bag.alpha==1 and bag.mouse==true and bag.alphaSets==0 and bag.mouseSets==0,
+   'without usable reward rows the stock reward bag keeps its alpha and mouse')
+  check(root.alpha==0.35 and root.mouse==true and root.alphaSets==0 and root.mouseSets==0,
+   'and so does the objective root that holds it')
+  check(tracker.alpha==0.8 and collapse.mouse==true and watch.alpha==1 and tracker.alphaSets==0
+   and collapse.mouseSets==0 and watch.alphaSets==0,
+   'and so do the tracker and WatchFrame above it: a bag at alpha 1 is not usable inside a parent at alpha 0')
+  host.objective=Objective(true)
+  host.Scan()
+  check(#host.status.GetSummary().rewards==1,'fixture: usable reward rows arrive')
+  check(bag.alpha==0 and bag.mouse==false and root.alpha==0 and root.mouse==false
+   and tracker.alpha==0 and collapse.mouse==false and watch.alpha==0,
+   'with usable reward rows the covered row replaces the bag and every stock role above it')
+  host.objective=Objective(false)
+  host.Scan()
+  check(#host.status.GetSummary().rewards==0,'fixture: the reward rows are gone again')
+  check(bag.alpha==1 and bag.mouse==true and root.alpha==0.35 and root.mouse==true
+   and tracker.alpha==0.8 and collapse.mouse==true and watch.alpha==1,
+   'without them the exact originals come back while the row itself stays covered')
+  check(bag.showHides+root.showHides+tracker.showHides+collapse.showHides+watch.showHides==0,
+   'no stock frame is shown or hidden: only alpha and mouse are used')
+ end)
+
+ Case('progress-only tracker without reward rows',function()
+  local watch=StockObject(1,true)
+  local root=StockObject(0.35,true,watch)
+  local bag=StockObject(1,true,root)
+  root.rewardBagFrame=bag
+  local tracker=StockObject(0.8,true)
+  local collapse=StockObject(1,true,tracker)
+  tracker.collapse=collapse
+  local host=CallboardHost({objective=Objective(false),root=root,tracker=tracker,watch=watch})
+  host.Scan()
+  check(bag.alpha==1 and bag.mouse==true and root.alpha==0.35 and root.mouse==true
+   and watch.alpha==1 and bag.alphaSets+bag.mouseSets+root.alphaSets+root.mouseSets+watch.alphaSets==0,
+   'the reward bag, its objective root and the WatchFrame above them keep their state')
+  check(tracker.alpha==0 and collapse.mouse==false,
+   'a progress-only tracker outside the parents of the reward bag stays replaced')
+  host.Cover(false)
+  check(tracker.alpha==0.8 and collapse.mouse==true,'and gets its exact original back')
+ end)
+
+ Case('initially hidden or disabled stock state',function()
+  local root=StockObject(0,false)
+  local bag=StockObject(1,false,root)
+  root.rewardBagFrame=bag
+  local tracker=StockObject(0,true)
+  local collapse=StockObject(1,false,tracker)
+  tracker.collapse=collapse
+  local host=CallboardHost({objective=Objective(true),root=root,tracker=tracker})
+  host.Scan()
+  check(bag.alpha==0,'fixture: the visible reward bag alpha is replaced')
+  check(root.alphaSets==0 and root.mouseSets==0 and bag.mouseSets==0 and tracker.alphaSets==0
+   and collapse.mouseSets==0,
+   'alpha already 0 and mouse already off are the game state, not changed by Nexus and never written')
+  -- While the row stays covered the game fades its root in and enables it.
+  root.alpha=0.5;root.mouse=true
+  host.status.PublishCoverage()
+  check(root.alpha==0 and root.mouse==false,'the next pass takes over the values the game raised')
+  host.Cover(false)
+  check(root.alpha==0.5 and root.mouse==true,
+   'hiding the row gives back the game values, not the initial alpha 0 and mouse off')
+  check(bag.alpha==1 and bag.mouse==false and tracker.alpha==0 and tracker.mouse==true
+   and collapse.mouse==false,'every initially hidden or disabled property is exactly as the game left it')
+  check(bag.mouseSets==0 and tracker.alphaSets==0 and collapse.mouseSets==0,
+   'and none of those was ever written')
+ end)
+
+ Case('coverage ends',function()
+  local root=StockObject(0.35,true)
+  local host=CallboardHost({objective=Objective(true),root=root})
+  host.Scan()
+  check(root.alpha==0 and root.mouse==false,'fixture: the objective root is replaced')
+  host.facts.committed=false;host.status.PublishCoverage()
+  check(root.alpha==0.35 and root.mouse==true,'an uncommitted Nexus panel gives the root back')
+  host.facts.committed=true;host.status.PublishCoverage()
+  check(root.alpha==0 and root.mouse==false,'a committed one replaces it again')
+  host.facts.hadFailure=true;host.status.PublishCoverage()
+  check(root.alpha==0.35 and root.mouse==true,'a failed render gives it back')
+  host.facts.hadFailure=false;host.status.PublishCoverage()
+  check(root.alpha==0,'fixture: covered again')
+  host.objective=nil;host.log={}
+  host.Scan()
+  check(host.status.GetSummary().observed==false and root.alpha==0.35 and root.mouse==true,
+   'an objective that disappears gives it back')
+ end)
+
+ -- Part C2: objective identity and reward attribution, through the same host,
+ -- its scanner, GetSummary and ShowRewardsTooltip. The synthetic GameTooltip
+ -- is drawn by the game for its own owner and only read by Nexus, through the
+ -- OnShow hook Init installs. Two known positive quest IDs that differ are two
+ -- objectives even under one title. Synthetic source behaviour only.
+ local function RewardTooltip()
+  local tip={left={},right={},hooks={},writes=0}
+  for i=1,8 do
+   _G['GameTooltipTextLeft'..i]={GetText=function() return tip.left[i] end}
+   _G['GameTooltipTextRight'..i]={GetText=function() return tip.right[i] end}
+  end
+  function tip:HookScript(event,fn) self.hooks[event]=fn end
+  function tip:NumLines() return #self.left end
+  function tip:GetOwner() return self.owner end
+  function tip:SetOwner(owner) self.writes=self.writes+1;self.owner=owner end
+  function tip:ClearAllPoints() end
+  function tip:SetPoint() end
+  function tip:ClearLines() self.writes=self.writes+1;self.left,self.right={},{} end
+  function tip:AddLine(text)
+   self.writes=self.writes+1;self.left[#self.left+1]=tostring(text);self.right[#self.left]=''
+  end
+  function tip:AddDoubleLine(l,r)
+   self.writes=self.writes+1;self.left[#self.left+1]=tostring(l);self.right[#self.left]=tostring(r)
+  end
+  function tip:Hide() self.writes=self.writes+1 end
+  function tip:Show() if self.hooks.OnShow then self.hooks.OnShow(self) end end
+  -- The game shows its own reward tooltip for owner.
+  function tip:Observe(owner,ash)
+   self.owner=owner
+   self.left,self.right={'Rewards by Difficulty','Normal'},{'',tostring(ash)}
+   self:Show()
+  end
+  function tip:Drawn() return table.concat(self.left,'|')..'|'..table.concat(self.right,'|') end
+  return tip
+ end
+ -- Ordinary quest tracker text: a header, an ordinary quest and its progress.
+ local function TrackerTexts(tracker,texts)
+  function tracker:GetChildren()
+   local out={}
+   for i=1,#texts do out[i]={text=texts[i]} end
+   return unpack(out)
+  end
+ end
+
+ Case('same-title quest log row under another quest ID',function()
+  local host=CallboardHost({objective=Objective(true),root=StockObject(0.35,true)})
+  -- The log holds this title under quest 900 and in a row without an ID;
+  -- neither is quest 77.
+  host.log={{title='Callboard Quest',id=900,complete=1},{title='Callboard Quest',complete=-1}}
+  host.Scan()
+  local summary=host.status.GetSummary()
+  local text=table.concat(summary.lines or {},'|')
+  check(summary.observed==true and summary.questId==77,
+   'the active objective keeps its own quest ID, not that of a same-title log row: '..tostring(summary.questId))
+  check(text=='Bring the tome' and summary.progressSource=='objective',
+   'no progress of the other quest, and no same-title row without an ID in its place: '..text)
+  check(summary.rewards[1] and summary.rewards[1].ash==1200 and summary.rewardSource=='api'
+   and summary.rewards[1].source=='api','its own API reward rows stay attributed to it')
+  -- Control: the row with the matching ID is this objective, after the other one.
+  host.log={{title='Callboard Quest',id=900,complete=-1},{title='Callboard Quest',id=77,complete=1}}
+  host.Scan()
+  summary=host.status.GetSummary()
+  text=table.concat(summary.lines or {},'|')
+  check(summary.questId==77 and text:find('Ready for turn-in',1,true)~=nil
+   and text:find('Failed',1,true)==nil and summary.progressSource=='questlog',
+   'the log row with the matching ID gives its progress: '..text)
+  -- Control: with no ID on the log side the title still matches.
+  host.log={{title='Callboard Quest',complete=1}}
+  host.Scan()
+  summary=host.status.GetSummary()
+  check(summary.questId==77
+   and table.concat(summary.lines or {},'|'):find('Ready for turn-in',1,true)~=nil,
+   'a same-title row without an ID is a title fallback when no ID conflicts')
+ end)
+
+ Case('tooltip owner identity',function()
+  local tip=RewardTooltip()
+  local host=CallboardHost({objective=Objective(false),root=StockObject(0.35,true),tooltip=tip})
+  host.Scan()
+  check(#(host.status.GetSummary().rewards or {})==0,'fixture: the objective has no API reward rows')
+  tip:Observe({objectiveData={title='Callboard Quest',questId=900}},3000)
+  host.Scan()
+  check(#(host.status.GetSummary().rewards or {})==0,
+   'rows under a same-title tooltip owner with another quest ID are not attributed to this objective')
+  local other={objectiveData={title='Callboard Quest',questId=900}}
+  tip:Observe({objectiveData={title='Callboard Quest'},GetParent=function() return other end},3500)
+  host.Scan()
+  check(#(host.status.GetSummary().rewards or {})==0,
+   'an owner without an ID does not override the conflicting ID its parent objective holds')
+  local own={objectiveData={title='Callboard Quest',questId=77}}
+  local owner={GetParent=function() return own end}
+  tip:Observe(owner,4000)
+  host.Scan()
+  local summary=host.status.GetSummary()
+  check(summary.rewards[1] and summary.rewards[1].ash==4000 and summary.rewards[1].source=='tooltip'
+   and summary.rewardSource=='tooltip',
+   'the parent objective with the matching ID attributes the observed rows to this objective')
+  check(tip.writes==0 and tip.owner==owner and tip.left[2]=='Normal',
+   'reading the game tooltip changed neither its owner nor its lines')
+  local row={}
+  host.status.ShowRewardsTooltip(row)
+  check(tip.owner==row and tip:Drawn():find('4K Ash',1,true)~=nil,
+   'the Nexus rewards tooltip shows the attributed rows')
+ end)
+
+ Case('same-title objective change and removal',function()
+  local tip=RewardTooltip()
+  local host=CallboardHost({objective=Objective(false),root=StockObject(0.35,true),tooltip=tip})
+  host.Scan()
+  tip:Observe({objectiveData={title='Callboard Quest'}},3000)
+  host.Scan()
+  local summary=host.status.GetSummary()
+  check(summary.questId==77 and summary.rewards[1] and summary.rewards[1].ash==3000,
+   'fixture: a capture whose owner has no ID is attributed to the observed objective by its title')
+  local row={}
+  host.status.ShowRewardsTooltip(row)
+  check(tip:Drawn():find('3K Ash',1,true)~=nil,'fixture: the Nexus rewards tooltip shows those rows')
+  -- The board moves on to another objective under the same title.
+  host.objective={title='Callboard Quest',questId=900,objectiveText='Bring the other tome'}
+  host.log={{title='Callboard Quest',id=900}}
+  host.Scan()
+  summary=host.status.GetSummary()
+  check(summary.observed==true and summary.questId==900
+   and (summary.lines or {})[1]=='Bring the other tome','fixture: the new objective is observed')
+  check(#(summary.rewards or {})==0,
+   'it does not inherit the reward rows cached for the old objective of the same title')
+  host.status.ShowRewardsTooltip(row)
+  check(tip:Drawn():find('not available',1,true)~=nil and tip:Drawn():find('3K Ash',1,true)==nil,
+   'and the Nexus rewards tooltip says its rewards are not available')
+  tip:Observe({objectiveData={title='Callboard Quest',questId=900}},5000)
+  host.Scan()
+  summary=host.status.GetSummary()
+  check(summary.rewards[1] and summary.rewards[1].ash==5000,'its own observed rows are attributed')
+  -- The objective is removed, and then the same one is observed again.
+  host.objective=nil;host.log={}
+  host.Scan()
+  check(host.status.GetSummary().observed==false,'fixture: the objective is gone')
+  host.objective={title='Callboard Quest',questId=900,objectiveText='Bring the other tome'}
+  host.log={{title='Callboard Quest',id=900}}
+  host.Scan()
+  summary=host.status.GetSummary()
+  check(summary.observed==true and #(summary.rewards or {})==0,
+   'rows read before a removal are not inherited afterwards')
+ end)
+
+ Case('ordinary tracker without a Callboard source',function()
+  local root=StockObject(0.35,true)
+  local tracker=StockObject(0.8,true)
+  TrackerTexts(tracker,{'Quests','One More Door','0/1 Doors'})
+  local host=CallboardHost({objective=nil,root=root,tracker=tracker})
+  host.log={{title='One More Door',id=901}}
+  host.Scan()
+  local summary=host.status.GetSummary()
+  check(summary.observed==false,
+   'a shown objective tracker does not make its first ordinary quest a Callboard objective: '
+   ..tostring(summary.title))
+  check(root.alphaSets+root.mouseSets+tracker.alphaSets+tracker.mouseSets==0,
+   'and no stock state is changed for it')
+  -- Control: the objectiveData of the reward bag is an authoritative source.
+  local bag=StockObject(1,true,root)
+  bag.objectiveData={title='Callboard Quest',questId=77,objectiveText='Bring the tome'}
+  root.rewardBagFrame=bag
+  host.Scan()
+  summary=host.status.GetSummary()
+  check(summary.observed==true and summary.title=='Callboard Quest' and summary.questId==77
+   and (summary.lines or {})[1]=='Bring the tome' and summary.source=='bag',
+   'the reward bag objective is observed, without the progress of the ordinary tracked quest')
+ end)
+
+ Case('current objective list matched by quest ID',function()
+  local host=CallboardHost({objective=nil,root=StockObject(0.35,true)})
+  local other={title='Callboard Quest',questId=900,objectiveText='Another board',normalSoulAshes=9000}
+  local own={title='Callboard Quest',questId=77,objectiveText='Bring the tome',normalSoulAshes=1200}
+  ProjectEbonhold.ObjectivesService.GetCurrentObjectives=function() return {other,own} end
+  host.Scan()
+  local summary=host.status.GetSummary()
+  check(summary.observed==true and (summary.lines or {})[1]=='Bring the tome'
+   and summary.rewards[1] and summary.rewards[1].ash==1200,
+   'the current objective whose quest ID the log holds is observed with its own progress and rewards')
+  check(summary.questId==77 and summary.source=='list' and summary.rewardSource=='api',
+   'and attributed to the matched current-objective list and its API fields')
+ end)
+
+ -- Part C3: reward fidelity and the tracker identity rule, through the same
+ -- host, its scanner, GetSummary and ShowRewardsTooltip. API XP stays XP: no
+ -- money is derived from it, and money is what the source states. A passive
+ -- single-line tooltip row keeps its own difficulty label. A watched quest of
+ -- the same title under another known positive quest ID is another quest.
+ Case('literal XP and explicit money',function()
+  local tip=RewardTooltip()
+  local o=Objective(false);o.normalXp=5000
+  local host=CallboardHost({objective=o,root=StockObject(0.35,true),tooltip=tip})
+  host.Scan()
+  local summary=host.status.GetSummary()
+  local first=(summary.rewards or {})[1]
+  check(first and first.label=='Normal' and first.xp==5000 and first.copper==0
+   and summary.rewardSource=='api',
+   'API XP at level 80 stays XP and no money is derived from it: '..tostring(first and first.copper))
+  local row={}
+  host.status.ShowRewardsTooltip(row)
+  local drawn=tip:Drawn()
+  check(drawn:find('5000 XP',1,true)~=nil and drawn:find('MoneyFrame',1,true)==nil,
+   'the Nexus rewards tooltip states the literal XP and no coin: '..drawn)
+  o=Objective(false);o.normalXp=5000;o.normalMoney=45000;o.hc1Xp=7000;o.hc1Gold=3
+  host.objective=o
+  host.Scan()
+  summary=host.status.GetSummary()
+  local normal,hc1=(summary.rewards or {})[1],(summary.rewards or {})[2]
+  check(normal and normal.copper==45000 and normal.xp==5000 and hc1 and hc1.label=='Hardcore I'
+   and hc1.copper==30000 and hc1.xp==7000,
+   'explicitly supplied money and gold stay the observed amounts beside their XP')
+  host.status.ShowRewardsTooltip(row)
+  drawn=tip:Drawn()
+  check(drawn:find('|cffffffff4|r',1,true)~=nil and drawn:find('|cffffffff50|r',1,true)~=nil
+   and drawn:find('|cffffffff3|r',1,true)~=nil and drawn:find('UI-GoldIcon',1,true)~=nil,
+   'and the Nexus rewards tooltip shows that observed money: '..drawn)
+ end)
+
+ Case('single-line passive Hardcore II and III rows',function()
+  local tip=RewardTooltip()
+  local host=CallboardHost({objective=Objective(false),root=StockObject(0.35,true),tooltip=tip})
+  host.Scan()
+  check(#(host.status.GetSummary().rewards or {})==0,'fixture: the objective has no API reward rows')
+  -- The game draws each difficulty and its amount on one line for its own owner.
+  tip.owner={objectiveData={title='Callboard Quest',questId=77}}
+  tip.left={'Rewards by Difficulty','Hardcore II 2000','Hardcore III 3000','Hardcore IV 4000'}
+  tip.right={'','','',''}
+  tip:Show()
+  host.Scan()
+  local summary=host.status.GetSummary()
+  local labels={}
+  for i,r in ipairs(summary.rewards or {}) do
+   labels[i]=tostring(r.label)..'='..tostring(r.ash)..'/'..tostring(r.source)
+  end
+  local seen=table.concat(labels,',')
+  check(seen=='Hardcore II=2000/tooltip,Hardcore III=3000/tooltip,Hardcore IV=4000/tooltip'
+   and summary.rewardSource=='tooltip',
+   'each observed row keeps its own longest difficulty label, never a shorter prefix: '..seen)
+  local row={}
+  host.status.ShowRewardsTooltip(row)
+  local drawn=tip:Drawn()
+  check(drawn:find('Hardcore II|Hardcore III|Hardcore IV|',1,true)~=nil
+   and drawn:find('2K Ash',1,true)~=nil and drawn:find('3K Ash',1,true)~=nil,
+   'and the Nexus rewards tooltip shows Hardcore II and III with their own amounts: '..drawn)
+ end)
+
+ Case('same-title watched quest under another quest ID',function()
+  local watch=StockObject(0.9,true)
+  local root=StockObject(0.35,true,watch)
+  local bag=StockObject(1,true,root)
+  root.rewardBagFrame=bag
+  local tracker=StockObject(0.8,true)
+  local collapse=StockObject(1,true,tracker)
+  tracker.collapse=collapse
+  local own={title='Callboard Quest',questId=991901,objectiveText='Bring the tome',
+   normalSoulAshes=1200,normalMoney=45000}
+  local host=CallboardHost({objective=own,root=root,tracker=tracker,watch=watch})
+  host.log={{title='Callboard Quest',id=991901},{title='Callboard Quest',id=991999}}
+  host.Scan()
+  check(host.status.GetSummary().questId==991901 and tracker.alpha==0 and collapse.mouse==false
+   and watch.alpha==0 and root.alpha==0,
+   'fixture: nothing else is watched and every stock role is replaced')
+  ProjectEbonholdDB.questTracker.watchedQuests[991999]=true
+  host.Scan()
+  check(tracker.alpha==0.8 and collapse.mouse==true and watch.alpha==0.9,
+   'a watched same-title quest under another known quest ID gives the tracker, its collapse control and WatchFrame back')
+  check(root.alpha==0 and root.mouse==false and bag.alpha==0 and bag.mouse==false,
+   'while the covered objective root and its reward bag stay replaced')
+  ProjectEbonholdDB.questTracker.watchedQuests[991999]=nil
+  ProjectEbonholdDB.questTracker.watchedQuests[991901]=true
+  host.Scan()
+  check(tracker.alpha==0 and collapse.mouse==false and watch.alpha==0,
+   'watching the objective under its own quest ID keeps the tracker roles replaced')
+  host.Cover(false)
+  check(tracker.alpha==0.8 and collapse.mouse==true and watch.alpha==0.9 and root.alpha==0.35
+   and root.mouse==true and bag.alpha==1 and bag.mouse==true,
+   'and hiding the row gives every exact original back')
+ end)
+
+ check(#failures==0,'Callboard stock ownership: '..table.concat(failures,' | '))
+end
+
 print('PASS server_hud_handoff: the stock HUD is replaced only by a replacement that exists checks='..checks)

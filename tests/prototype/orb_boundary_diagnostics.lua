@@ -19,8 +19,10 @@ local stable=R.Saved();local retained=v.retained
 for i=1,30 do M.Status(false);M.Pump()end
 check(writes==0 and M.BoundaryDiagnostics().retained==retained and R.Same(R.Saved(),stable),'stable reads do not write or append repeated evidence')
 owner.UpdateStateV1=raw
+local epochBefore=M.BoundaryDiagnostics().epoch
 H.Fire('PLAYER_LEAVING_WORLD');v=M.BoundaryDiagnostics()
-check(v.phase=='l' and v.epoch==1 and M.Status().state=='WAIT_WORLD' and M.Status().running and M.Status().pending,'loading holds existing authorization; exposure retained')
+check(v.phase=='l' and v.epoch==epochBefore+1 and M.Status().state=='WAIT_WORLD' and M.Status().running and M.Status().pending
+ and H.Count('orb-spend')==1 and H.Count('take')==0,'loading holds existing authorization without a new submission; one epoch per observed event; exposure retained')
 check(v.unsaved==false and v.durableRetained==v.retained,'live lifecycle write includes diagnostic boundary')
 H.Fire('PLAYER_ENTERING_WORLD');M.Pump()
 -- Vary only observed balance after classified entry; no action repeats.
