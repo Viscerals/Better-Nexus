@@ -73,7 +73,17 @@ local CATEGORICAL_DPS_PAGE='With Automatic, a new personal DPS best also shares 
 -- nine; this build's facade carries these ten functions, unchanged by 14d).
 local STORE_EXPORTS={'AccountCharacters','CurrentOwnerKey','Init','IsAccountBuild','IsAccountOwnerKey',
  'RegisterCurrentCharacter','Settings','SettingsVersion','State','StateWriteStatus'}
-local OWNER_ENTRIES={'ReadStateV1','ResolveStateRowV1','UpdateSettingsV1','UpdateStateV1'}
+-- The private Store owner's function entries, sorted. Its counted writers are
+-- UpdateSettingsV1 and UpdateStateV1. ReadStateV1 and ResolveStateRowV1 are the
+-- existing row resolution beside them. #151 (docs/flexible-plans/
+-- LOCAL_PERSISTENCE_CONTRACT.md, Data owner) adds no writer.
+-- PlanPoolReadV1 is a bounded detached-copy reader with a scalar root token.
+-- IsDurableStateRowV1 is a live-row predicate. SameSnapshotV1 is the
+-- UpdateStateV1 change test. The pool owner writes only through UpdateStateV1.
+-- This list proves no purity (flexible_plan_persistence_store checks that);
+-- any other entry still fails here.
+local OWNER_ENTRIES={'IsDurableStateRowV1','PlanPoolReadV1','ReadStateV1','ResolveStateRowV1',
+ 'SameSnapshotV1','UpdateSettingsV1','UpdateStateV1'}
 local WELCOME_TAIL=' Help: Sharing lists what is sent.'
 local MODELS={{name='default',char=5.5,line=12},{name='conservative',char=7.0,line=17}}
 
@@ -350,7 +360,8 @@ local function Run(tag,database,mode,line)
  C.guard(later.mode==afterBoot.mode and later.saved==afterBoot.saved and later.version==afterBoot.version,
   tag..': after time passes the mode, the saved mode value and the marker are as they were',Text(afterBoot)..' -> '..Text(later))
  -- The choice writes only through the existing private Store owner: the
- -- Store facade and the owner's entries are exactly the preimage ones.
+ -- Store facade is exactly the preimage one, and the owner's entries are
+ -- exactly the known ones above (its counted writers are unchanged).
  local function Names(t,functionsOnly)
   local out={}
   for k,v in pairs(type(t)=='table' and t or {}) do
