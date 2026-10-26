@@ -62,15 +62,48 @@ local warningShown=NexusOverwriteWarning and NexusOverwriteWarning:IsShown() or 
 local warningOpen=warning.IsOpen()
 local before={actions=#H.actions,sent=#H.sent,chat=#H.chat,popup=H.popup,auto=Nexus.RecomputeStats().autoEnabled}
 local d0=L.Diagnostics()
-check(d0.base.present and d0.base.accepted==6 and d0.base.formatted==1 and d0.base.rejected==0 and not d0.base.oversized,'English base loaded whole at boot: five texts and one template')
+check(d0.base.present and d0.base.accepted==27 and d0.base.formatted==1 and d0.base.rejected==0 and not d0.base.oversized,'English base loaded whole at boot: twenty-six static texts and one template')
 check(d0.misses==0,'English boot resolved without any fallback')
 local keys=L.Keys()
-check(#keys==6 and keys[1]=='readout.charge_counts' and keys[2]=='reason.list_preparing' and keys[3]=='reason.save_in_progress' and keys[4]=='reason.saved_data_reading' and keys[5]=='reason.wait_pending_pick_count' and keys[6]=='reason.wait_three_choices','base holds exactly the six reviewed keys')
+-- Issues #143/#148: the 21 static ui/Panel.lua meanings with their exact
+-- current English bytes (literal expectations, not read from the data file).
+local panelCohort={
+ {'panel.button.my_builds','My Builds'},
+ {'panel.tooltip.open_my_builds','Open My Builds'},
+ {'panel.tooltip.my_builds_destination','Open the server My Builds page. Choosing a different Saved Build there changes the active loadout.'},
+ {'panel.button.assign_wishlist','Assign Wishlist'},
+ {'panel.tooltip.assignment_heading','Assign Wishlist'},
+ {'panel.tooltip.assignment_chooser','Opens the Echo Journal with its Wishlist chooser for this loadout. Nothing is assigned until you choose a Wishlist there.'},
+ {'panel.button.create_wishlist','Create Wishlist'},
+ {'panel.tooltip.create_wishlist_heading','Import or create a wishlist'},
+ {'panel.tooltip.create_wishlist_source','Paste a wishlist string or build one directly in Nexus.'},
+ {'panel.tooltip.create_wishlist_draft','This opens the Wishlist editor with a draft. Nothing is saved or assigned until you press Create & assign or Create unassigned there.'},
+ {'panel.heading.locked_targets','LOCKED TARGETS'},
+ {'panel.tooltip.locked_remaining','Locked targets remaining'},
+ {'panel.tooltip.locked_plan','These targets are planned for your locked Echo slots (a plan designs at most six target copies).'},
+ {'panel.tooltip.locked_acquire','Acquire the exact requested Echo and quality first.'},
+ {'panel.tooltip.locked_placement','Owned copies still need to be placed in locked Echo slots.'},
+ {'panel.tooltip.locked_not_freeze','Current locked Echo slots and card Freeze are separate.'},
+ {'panel.tooltip.locked_acquire_list','Still need to acquire:'},
+ {'panel.tooltip.open_wishlist_editor','Click to open Wishlist Editor'},
+ {'panel.heading.progress','PROGRESS'},
+ {'panel.heading.still_needed','STILL NEEDED'},
+ {'panel.heading.extra_copies','EXTRA COPIES'},
+}
+local panelEnglish={};for _,case in ipairs(panelCohort)do panelEnglish[case[1]]=case[2] end
+local panelSeen,panelListed,sorted=0,0,true
+for _ in pairs(panelEnglish)do panelSeen=panelSeen+1 end
+for i=1,#keys do
+ if panelEnglish[keys[i]]~=nil then panelListed=panelListed+1 end
+ if i>1 then sorted=sorted and keys[i-1]<keys[i] end
+end
+check(#panelCohort==21 and panelSeen==21,'SETUP the Panel cohort names 21 distinct keys')
+check(#keys==27 and panelListed==21 and sorted and keys[22]=='readout.charge_counts' and keys[23]=='reason.list_preparing' and keys[24]=='reason.save_in_progress' and keys[25]=='reason.saved_data_reading' and keys[26]=='reason.wait_pending_pick_count' and keys[27]=='reason.wait_three_choices','base holds exactly the 27 reviewed keys, sorted: the 21 Panel meanings, then the inherited six')
 check(L.Kind('readout.charge_counts')=='format' and L.Kind('reason.wait_three_choices')=='text' and L.Kind('reason.not_reviewed')==nil,'the formatted meaning is distinguished from static text')
 local env={};local chunk=setfenv and setfenv(assert(loadfile('data/LocalizationEnglish.lua')),env) or assert(loadfile('data/LocalizationEnglish.lua','t',env));chunk()
 local data=env.Nexus and env.Nexus.LocalizationEnglish
 local function count(t)local n=0;for _ in pairs(t)do n=n+1 end;return n end
-check(count(env)==1 and count(env.Nexus)==1 and type(data)=='table' and getmetatable(data)==nil and count(data)==6,'English data file sets one plain table and calls nothing')
+check(count(env)==1 and count(env.Nexus)==1 and type(data)=='table' and getmetatable(data)==nil and count(data)==27,'English data file sets one plain table and calls nothing')
 local cohort={
  {'ROOT_MUTATION_PENDING','reason.save_in_progress','Saving is still in progress; wait for its final result'},
  {'CURSOR_REQUIRED','reason.list_preparing','This list is still being prepared'},
@@ -85,6 +118,12 @@ for _,case in ipairs(cohort)do
  check(T.Message(code)==english and T.Message(T.Message(code))==english,'UserText exact bytes, stable when normalized again: '..code)
  check(T.Message('waiting: '..code)==english and T.Message('L3 -- '..code)=='L3 -- '..english,'existing prefixes still reach the seam: '..code)
  check(T.Annotation(code)==english,'annotation fallback reaches the seam: '..code)
+end
+for _,case in ipairs(panelCohort)do
+ local key,english=case[1],case[2]
+ check(data[key]==english and L.Has(key) and L.Kind(key)=='text','reviewed Panel data bytes, static text: '..key)
+ local text,source,why=L.Text(key);check(text==english and source=='base' and why==nil,'seam resolves exact Panel English: '..key)
+ text,source,why=L.Resolve(key);check(text==english and source=='base' and why==nil,'Resolve gives exact Panel English: '..key)
 end
 check(L.Diagnostics().misses==0,'ordinary resolution records nothing')
 check(T.Message('pending-pick count')=='Waiting for the remaining-choice count','the older pending-pick mapping is unchanged and distinct')
@@ -291,7 +330,7 @@ do
  for _=1,3 do record.Text('reason.counter_9')end
  local rd=record.Diagnostics()
  check(#rd.keys==8 and rd.keysNotKept==3 and rd.misses==11 and rd.byReason.unknown_key==11,'GUARD unkept ninth key counts every occurrence without retention')
- check(#L.Keys()==6 and Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'GUARD real six-key English seam restored after boundary fixtures')
+ check(#L.Keys()==27 and Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'GUARD real 27-key English seam restored after boundary fixtures')
 end
 local partial=assert(reload({['reason.save_in_progress']='Saving is still in progress; wait for its final result',['Bad Key']='Bad',['reason.blank']='  ',['reason.number']=5}))
 local pd=partial.Diagnostics().base
@@ -354,7 +393,7 @@ do
   local value,source,why=accepting.Resolve(key)
   check(accepting.Has(key) and value==validBase[key] and source=='base' and why==nil,'scalar base text resolves with its exact bytes: '..key)
  end
- check(#L.Keys()==6 and L.Has(K) and L.Resolve(K)==E,'the real English base is unchanged by the loader checks')
+ check(#L.Keys()==27 and L.Has(K) and L.Resolve(K)==E,'the real English base is unchanged by the loader checks')
 end
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'real seam and data restored after the loader checks')
 -- Issue #142 first cohort: the named-template formatter. Failure cases run on
@@ -373,7 +412,7 @@ do
   return text
  end
  local fd=F.Diagnostics().base
- check(fd.accepted==6 and fd.formatted==1 and fd.rejected==0 and F.Has(CK) and F.Kind(CK)=='format','the formatted meaning is admitted and listed')
+ check(fd.accepted==27 and fd.formatted==1 and fd.rejected==0 and F.Has(CK) and F.Kind(CK)=='format','the formatted meaning is admitted and listed')
  local misses0=L.Diagnostics().misses
  fmt(L,A3(kn(2),kn(1),kn(0)),nil,'B:2 R:1 F:0','base',nil,'all-known counts')
  fmt(L,A3(un(),kn(0),un()),nil,'B:? R:0 F:?','base',nil,'explicit unknown is ? and known zero is 0')
@@ -529,7 +568,7 @@ do
  check(L.ActiveLanguage()=='enUS' and select(2,L.ActiveLanguage())==true,'the English profile starts with English active, initialized once')
  local d=L.Diagnostics()
  check(d.packs.present and d.packs.adopted==6 and d.packs.refused==0 and #d.packs.rows==6 and d.language.active=='enUS','every real pack is adopted at load')
- for _,row in ipairs(d.packs.rows)do check(row.accepted==6 and row.rejected==0,'real pack '..row.id..' has all six entries: three original static, two newer static and the charge-row template')end
+ for _,row in ipairs(d.packs.rows)do check(row.accepted==27 and row.rejected==0,'real pack '..row.id..' has all 27 entries: three original static, two newer static, 21 Panel static and the charge-row template')end
  local penv={};local pchunk=setfenv and setfenv(assert(loadfile('data/LocalizationPacks.lua')),penv) or assert(loadfile('data/LocalizationPacks.lua','t',penv));pchunk()
  local packData=penv.Nexus and penv.Nexus.LocalizationPacks
  check(count(penv)==1 and count(penv.Nexus)==1 and type(packData)=='table' and getmetatable(packData)==nil and count(packData)==6,'the pack data file sets one plain table of six packs and calls nothing')
@@ -537,6 +576,8 @@ do
  -- messages with their existing exact English bytes, kept as a named control.
  -- Each real pack now also holds the issue #142 six-message additions: the two
  -- newer static wait reasons and the charge-row template (AUTHORED above).
+ -- Issues #143/#148 add the 21 static Panel meanings (panelCohort, near the
+ -- top): each is checked against the text contract and the active output.
  local packCohort={
   {'ROOT_MUTATION_PENDING','reason.save_in_progress','Saving is still in progress; wait for its final result'},
   {'CURSOR_REQUIRED','reason.list_preparing','This list is still being prepared'},
@@ -553,10 +594,27 @@ do
  for _,case in ipairs(newer)do check(L.Kind(case[2])=='text' and data[case[2]]==case[3],'SETUP newer static English meaning keeps its exact bytes: '..case[2])end
  for i=2,#IDS do
   local id=IDS[i];local pack=packData[id]
-  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and count(pack.entries)==6,'pack '..id..': its own name and exactly the six-message cohort entries')
+  check(type(pack)=='table' and getmetatable(pack)==nil and count(pack)==2 and pack.name==NAMES[id] and type(pack.entries)=='table' and count(pack.entries)==27,'pack '..id..': its own name and exactly 27 entries: the six-message cohort and the 21 Panel meanings')
   local onlyCohort=true
-  for key in pairs(pack.entries)do onlyCohort=onlyCohort and (packKeys[key]==true or AUTHORED[id][key]~=nil) end
-  check(onlyCohort,'pack '..id..' holds only six-message cohort keys: no other English key')
+  for key in pairs(pack.entries)do onlyCohort=onlyCohort and (packKeys[key]==true or AUTHORED[id][key]~=nil or panelEnglish[key]~=nil) end
+  check(onlyCohort,'pack '..id..' holds only six-message and Panel cohort keys: no other English key')
+  for _,case in ipairs(panelCohort)do
+   local key,text=case[1],pack.entries[case[1]]
+   local copied=false
+   for _,other in ipairs(cohort)do copied=copied or text==other[3] end
+   for _,other in ipairs(panelCohort)do copied=copied or text==other[2] end
+   check(type(text)=='string' and isolated(text) and not copied and not text:find('[%%{}<>|]') and not text:find('TODO',1,true) and not text:find('TBD',1,true),'pack '..id..' '..key..': a drafted static text, not English, a placeholder or markup')
+   resolves(key,{[key]=text},text,'candidate',nil,'pack '..id..' '..key..' passes the text contract')
+  end
+  local required={['panel.tooltip.my_builds_destination']={'My Builds','Saved Build'},
+   ['panel.tooltip.open_my_builds']={'My Builds'},['panel.tooltip.assignment_chooser']={'Echo Journal'},
+   ['panel.tooltip.create_wishlist_source']={'Nexus'},
+   ['panel.tooltip.create_wishlist_draft']={'Create & assign','Create unassigned'},
+   ['panel.tooltip.locked_plan']={'Echo'},['panel.tooltip.locked_acquire']={'Echo'},
+   ['panel.tooltip.locked_placement']={'Echo'},['panel.tooltip.locked_not_freeze']={'Echo','Freeze'}}
+  for key,labels in pairs(required)do for _,label in ipairs(labels)do
+   check(type(pack.entries[key])=='string' and pack.entries[key]:find(label,1,true)~=nil,'pack '..id..' '..key..' keeps the identifiable English label '..label)
+  end end
   for _,key in ipairs({W3K,WPK,CHK})do
    local text=pack.entries[key]
    check(text==AUTHORED[id][key] and isolated(text) and text~=data[key],'pack '..id..' '..key..': exactly the authored draft bytes, not the English')
@@ -599,6 +657,13 @@ do
    end
    mt,ms,mw=m.Format(CHK,args)
    check(mt==CHARGE07[id] and ms=='candidate' and mw==nil and mt~='B:0 R:? F:7','active '..id..' Format renders its authored charge row: 0 stays 0, unknown is ?')
+   for _,case in ipairs(panelCohort)do
+    local want=packData[id].entries[case[1]]
+    local text,source,why=m.Text(case[1])
+    check(type(want)=='string' and text==want and source=='candidate' and why==nil and text~=case[2],'active '..id..' Text gives its Panel draft: '..case[1])
+    text,source,why=m.Resolve(case[1])
+    check(text==case[2] and source=='base' and why==nil,'Resolve stays the exact Panel English under '..id..': '..case[1])
+   end
    check(m.Diagnostics().misses==m0.misses,'the complete real '..id..' pack records no fallback')
    Nexus.Localization=m
    local line,wait=Nexus.Readout.ChargesLine({banish=0,freeze=7}),T.Message('waiting: waiting for pending-pick count')
@@ -606,6 +671,13 @@ do
    check(line==CHARGE07[id] and wait==AUTHORED[id][WPK],'the real Readout and UserText consumers show the active '..id..' drafts')
    mt,ms,mw=m.Format(CHK,args,{})
    check(mt=='B:0 R:? F:7' and ms=='base' and mw=='missing_candidate','an explicit {} pack still decides alone under '..id)
+   local f0=m.Diagnostics()
+   for _,case in ipairs(panelCohort)do
+    local text,source,why=m.Text(case[1],{})
+    check(text==case[2] and source=='base' and why=='missing_candidate','an explicit {} pack gives the exact Panel English under '..id..': '..case[1])
+   end
+   local f1=m.Diagnostics()
+   check(f1.misses-f0.misses==#panelCohort and f1.byReason.missing_candidate-f0.byReason.missing_candidate==#panelCohort and f1.last=='missing_candidate' and #f1.keys==#f0.keys and f1.keysNotKept==f0.keysNotKept,'each explicit {} Panel fallback under '..id..' is counted once as missing_candidate and keeps no key')
   end
   check(Nexus.Localization==real and L.ActiveLanguage()=='enUS' and L.Format(CHK,args)=='B:0 R:? F:7','the real English session is untouched by the per-pack loads')
  end
@@ -734,6 +806,13 @@ do
   check(ft=='B:0 R:? F:7' and fs=='base' and fw=='missing_candidate','a charge row a partial pack lacks falls back to the English template with the same counts')
   local p1=pm.Diagnostics()
   check(p1.misses-p0.misses==#newer+1 and p1.byReason.missing_candidate-p0.byReason.missing_candidate==#newer+1 and p1.last=='missing_candidate' and #p1.keys==#p0.keys and p1.keysNotKept==p0.keysNotKept,'each partial-pack fallback is counted once as missing_candidate and keeps no key')
+  local q0=pm.Diagnostics()
+  for _,case in ipairs(panelCohort)do
+   local t,s,w=pm.Text(case[1])
+   check(t==case[2] and s=='base' and w=='missing_candidate','a Panel meaning the deliberate partial frFR fixture lacks falls back to its exact English: '..case[1])
+  end
+  local q1=pm.Diagnostics()
+  check(q1.misses-q0.misses==#panelCohort and q1.byReason.missing_candidate-q0.byReason.missing_candidate==#panelCohort and #q1.keys==#q0.keys and q1.keysNotKept==q0.keysNotKept,'each partial-fixture Panel fallback is counted once and keeps no key')
   Nexus.Localization=pm
   local partialRow,partialWait=Nexus.Readout.ChargesLine({banish=0,freeze=7}),T.Message('waiting for three-card board')
   Nexus.Localization=real
