@@ -340,6 +340,14 @@ function H.OpenEditor()
     if not (editor and type(editor.Show)=="function") then
         return Refuse("The Wishlist Editor is not available.")
     end
+    -- Help can sit on top of an already-open Plan. Re-running Show() there
+    -- starts a fresh editor session and discards unsaved Echo edits; simply
+    -- reveal the existing frame instead.
+    local plan=_G.NexusEditorFrame
+    if plan and plan.IsShown and plan:IsShown() then
+        if frame then frame:Hide() end
+        return true
+    end
     if frame then frame:Hide() end
     editor.Show()
     return true

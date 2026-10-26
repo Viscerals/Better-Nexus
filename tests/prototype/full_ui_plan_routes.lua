@@ -74,6 +74,21 @@ check(Nexus.FullUIWorkspaces.ShowPlan()==true and plan:IsShown()
     and name:GetText()=='Unsaved Help route draft',
     'returning from Help assignment restores unsaved Plan text')
 
+name:SetText('Unsaved Help editor draft')
+for _,button in ipairs(H.frames) do
+    if button.kind=='Button' and button:IsVisible()
+        and button.status and button.data and button.data.spellId then
+        button:Click()
+        break
+    end
+end
+check(editor.DebugDraftState().pending>0,'Help return starts with a real unsaved Echo draft')
+local beforeHelpEditor=F.Serialize(editor.DebugDraftState())
+check(Nexus.Help.OpenEditor()==true and plan:IsShown()
+    and name:GetText()=='Unsaved Help editor draft'
+    and F.Serialize(editor.DebugDraftState())==beforeHelpEditor,
+    'Help returning to an already visible Plan does not reset its unsaved draft')
+
 editor.SuspendForWorkspace=originalSuspend
 journal.CanOpenBuilds=originalCan
 journal.OpenBuilds=originalOpen
