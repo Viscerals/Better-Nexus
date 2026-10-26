@@ -8,7 +8,9 @@ Nexus.SettingsWindow = M
 local frame, title, explanation, pageLabel, previous, nextPage
 local categoryButtons, rowButtons = {}, {}
 local selected, page = "automation", 1
-local PAGE_SIZE = 4
+-- Three tall rows leave a bounded text area above paging, even on the
+-- 420px compact viewport. Every row also exposes its complete copy on hover.
+local PAGE_SIZE = 3
 local categories = {
     {id="automation", label="Automation", note="Changing a permission uses Nexus's existing controls. Opening this page never starts Auto or spends Orbs."},
     {id="sync", label="Share & Sync", tab="Sync", note="The library's Sync choices and Share use their existing explicit controls."},
@@ -93,12 +95,12 @@ function M.Rows(category)
     elseif category == "notices" then
         out = MoreSection("Notices")
     elseif category == "support" then
-        out[#out+1] = Route("Help / Getting Started", function()
-            if Nexus.Help and Nexus.Help.Show then Nexus.Help.Show("start") end
-        end)
-        out[#out+1] = Route("Setup / Welcome", function()
+        out[#out+1] = Route("Guided setup", function()
+            if Nexus.Help and Nexus.Help.OpenGuide then Nexus.Help.OpenGuide() end
+        end, "Opens or resumes the step-by-step coach; it never enables Auto by navigation.")
+        out[#out+1] = Route("Welcome information", function()
             if Nexus.QuickStart and Nexus.QuickStart.ShowSetup then Nexus.QuickStart.ShowSetup() end
-        end, "Reopens the guide; it does not enable Auto or mark a step complete.")
+        end, "Secondary information-only Welcome; the guided coach is the separate row above.")
         out[#out+1] = Route("Support report", function()
             if Nexus.SupportReportUI and Nexus.SupportReportUI.Show then Nexus.SupportReportUI.Show() end
         end)
@@ -132,12 +134,23 @@ local function StyledButton(parent, text, width, height, point, x, y)
     return button
 end
 
+local function ShowRowTooltip(button)
+    if not GameTooltip then return end
+    GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(button._nexusFullText or "", 1, 1, 1, true)
+    if button._nexusFullDetail and button._nexusFullDetail ~= "" then
+        GameTooltip:AddLine(button._nexusFullDetail, 0.85, 0.85, 0.85, true)
+    end
+    GameTooltip:Show()
+end
+
 local function EnsureFrame()
     if frame then return frame end
     frame = CreateFrame("Frame", "NexusSettingsWindow", UIParent)
     frame:SetSize(396, 548)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     frame:SetFrameStrata("DIALOG")
+    if frame.SetClampedToScreen then frame:SetClampedToScreen(true) end
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
@@ -156,25 +169,56 @@ local function EnsureFrame()
         local button = StyledButton(frame, entry.label, 118, 29, "TOPLEFT",
             16 + column*124, -54 - row*33)
         button:SetScript("OnClick", function() M.Select(entry.id) end)
+        button:SetScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(entry.label, 1, 1, 1, true)
+            GameTooltip:AddLine(entry.note, 0.85, 0.85, 0.85, true)
+            GameTooltip:Show()
+        end)
+        button:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
         categoryButtons[index] = button
     end
     explanation = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     explanation:SetPoint("TOPLEFT", 18, -163)
     explanation:SetWidth(360)
+    explanation:SetHeight(54)
     explanation:SetJustifyH("LEFT")
     explanation:SetJustifyV("TOP")
     if explanation.SetWordWrap then explanation:SetWordWrap(true) end
     if Nexus.Theme and Nexus.Theme.StyleLabel then Nexus.Theme.StyleLabel(explanation, "muted") end
     for index=1,PAGE_SIZE do
-        local y = -223 - (index-1)*63
-        local button = StyledButton(frame, "", 358, 31, "TOPLEFT", 18, y)
+        local y = -223 - (index-1)*94
+        local button = StyledButton(frame, "", 358, 54, "TOPLEFT", 18, y)
+        local label = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        label:SetPoint("LEFT", button, "LEFT", 11, 0)
+        label:SetWidth(334)
+        label:SetHeight(50)
+        label:SetJustifyH("LEFT")
+        label:SetJustifyV("MIDDLE")
+        if label.SetWordWrap then label:SetWordWrap(true) end
+        if Nexus.Theme and Nexus.Theme.StyleLabel then Nexus.Theme.StyleLabel(label, "text") end
+        button._nexusFullLabel = label
+        button:SetScript("OnEnter", ShowRowTooltip)
+        button:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
         local detail = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        detail:SetPoint("TOPLEFT", 22, y-33)
-        detail:SetWidth(350)
+        detail:SetPoint("TOPLEFT", 22, y-56)
+        detail:SetWidth(346)
+        detail:SetHeight(34)
         detail:SetJustifyH("LEFT")
         if detail.SetWordWrap then detail:SetWordWrap(true) end
         if Nexus.Theme and Nexus.Theme.StyleLabel then Nexus.Theme.StyleLabel(detail, "muted") end
-        rowButtons[index] = {button=button, detail=detail}
+        button._nexusDetail = detail
+        -- Disabled stock buttons may not deliver OnEnter. This independent
+        -- overlay makes their full informational text inspectable on hover.
+        local infoHover = CreateFrame("Frame", nil, frame)
+        infoHover:SetAllPoints(button)
+        infoHover:EnableMouse(true)
+        infoHover:SetScript("OnEnter", function() ShowRowTooltip(button) end)
+        infoHover:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        infoHover:Hide()
+        button._nexusInfoHover = infoHover
+        rowButtons[index] = {button=button, detail=detail, infoHover=infoHover}
     end
     previous = StyledButton(frame, "Previous", 92, 25, "BOTTOMLEFT", 16, 13)
     previous:SetScript("OnClick", function() page=math.max(1,page-1);M.Refresh() end)
@@ -205,13 +249,23 @@ function M.Refresh()
         local row = rows[index]
         if row then
             local label = (row.checked and "[x] " or "") .. row.text
-            widget.button:SetText(label)
+            widget.button._nexusFullText = label
+            widget.button._nexusFullDetail = row.detail or ""
+            -- The rendered label is bounded to the two-line action area;
+            -- the complete original text remains available on hover.
+            widget.button._nexusFullLabel:SetText(#label > 100
+                and "Long setting — hover for full label" or label)
             widget.button:SetScript("OnClick", function() M.Activate(index, row.text) end)
-            if row.action then widget.button:Enable() else widget.button:Disable() end
-            widget.detail:SetText(row.detail or "")
+            if row.action then
+                widget.button:Enable();widget.infoHover:Hide()
+            else
+                widget.button:Disable();widget.infoHover:Show()
+            end
+            widget.detail:SetText(#(row.detail or "") > 56
+                and "Hover for the full explanation." or (row.detail or ""))
             widget.button:Show();widget.detail:Show()
         else
-            widget.button:Hide();widget.detail:Hide()
+            widget.button:Hide();widget.detail:Hide();widget.infoHover:Hide()
         end
     end
     if page > 1 then previous:Enable() else previous:Disable() end
