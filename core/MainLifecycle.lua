@@ -540,12 +540,28 @@ function Lifecycle.New(options)
         if type(saved) == "table" and getmetatable(saved) == nil then
             languageSavedSettings = saved
         end
-        languageStartPreference = LanguagePreference(SavedLanguage())
+        local savedRaw = SavedLanguage()
+        languageStartPreference = LanguagePreference(savedRaw)
+        -- Issue #141: Localization starts from the session projection (raw).
+        -- On a writable root that is the saved settings table itself; a
+        -- read-only projection keeps only an exact language ID or the exact
+        -- Automatic value and omits any other present saved value (a
+        -- near-case or future ID, a number, false or a table). Such a value
+        -- is not an absent preference: it is unsupported, as the start
+        -- preference above says, so Localization gets the unsupported value
+        -- false and shows English without starting Automatic. An absent value
+        -- and the exact Automatic value still start Automatic, and an ID the
+        -- projection holds is passed as before. The retained saved source is
+        -- only read here: nothing is normalized or written.
+        local start = raw
+        if start == nil and savedRaw ~= nil and languageStartPreference ~= "automatic" then
+            start = false
+        end
         local localization = Nexus.Localization
         local initialize = type(localization) == "table"
             and rawget(localization, "InitializeActiveLanguage") or nil
         if type(initialize) ~= "function" then return end
-        local ok, err = pcall(initialize, raw)
+        local ok, err = pcall(initialize, start)
         if not ok then RecordError("Localization.InitializeActiveLanguage", err) end
     end
 

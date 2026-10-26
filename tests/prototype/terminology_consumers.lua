@@ -572,6 +572,48 @@ do
   settings.uiLanguage=nil;local text=F.Serialize(NexusDB);settings.uiLanguage=value
   return text
  end
+ -- Review F3: the eight choices the real Language submenu offers, Automatic
+ -- and the seven manual packs, in this literal order. Choices finds each by
+ -- its visible name whether or not its row carries a click; checkable counts
+ -- every choice row (the title and the notices are not checkable).
+ local CHOICES={'automatic','enUS','frFR','deDE','esES','plPL','ptBR','ruRU'}
+ local function Choices(menu)
+  local found,count,checkable={},0,0
+  for _,row in ipairs(menu and menu.menuList or {})do
+   if type(row)=='table' and not row.notCheckable and not row.isTitle then
+    checkable=checkable+1
+    local text,id=tostring(row.text),nil
+    if text:sub(1,11)=='Automatic (' then
+     id='automatic'
+    else
+     for i=2,#CHOICES do
+      local name=CHOICES[i]=='enUS' and 'English' or PACKS[CHOICES[i]].name
+      if text:sub(1,#name)==name then id=CHOICES[i] end
+     end
+    end
+    if id and not found[id] then found[id]=row;count=count+1 end
+   end
+  end
+  return found,count,checkable
+ end
+ -- The checked choices in CHOICES order, joined ('' when none is checked).
+ local function CheckedChoices(found)
+  local out={}
+  for _,id in ipairs(CHOICES)do if found[id] and found[id].checked==true then out[#out+1]=id end end
+  return table.concat(out,',')
+ end
+ -- A refused menu: all eight offered choices present and visibly disabled,
+ -- the Automatic row without a click, and the reason row naming the refusal.
+ local function RefusedChoices(menu,reason,label)
+  local found,count,checkable=Choices(menu)
+  check(count==8 and checkable==8,label..': all eight offered choices are listed ('..count..' found in '..checkable..' choice rows)')
+  for _,id in ipairs(CHOICES)do
+   check(found[id]~=nil and found[id].disabled==true,label..': the '..id..' choice is present and visibly disabled')
+  end
+  check(found.automatic.func==nil,label..': the refused Automatic row carries no click')
+  check(MenuText(menu):find('Changes unavailable: '..reason..'.',1,true)~=nil,label..': the menu names the refusal: '..reason)
+  return found
+ end
  local function Expect(id,label)
   check(Nexus.Localization.ActiveLanguage()==id,label..': active language is '..id..' ('..tostring(Nexus.Localization.ActiveLanguage())..')')
   for _,case in ipairs(COHORT)do
@@ -706,6 +748,22 @@ do
   check(Row(menu,'frFR').disabled==true and MenuText(menu):find('Changes unavailable',1,true),'capacity refusal: every choice is disabled with its reason')
   local r=Nexus.Panel.ChooseLanguage('frFR')
   check(r.state=='refused' and r.reason=='capacity' and writes.n==0 and F.Serialize(NexusDB)==saved,'capacity refusal: refused before the writer, root unchanged')
+  -- Review F3: the same oversized root through the real registered menu.
+  -- Its known durable preference is the manual deDE, not the Automatic
+  -- default: all eight offered choices are disabled, only deDE is checked,
+  -- and a direct Automatic submit is refused for capacity before the writer.
+  local effects=Effects()
+  local status=Nexus.Panel.LanguageStatus()
+  check(status.refusal=='capacity' and status.active=='deDE' and status.saved=='deDE' and status.preference=='deDE'
+   and status.automatic==false and status.activeAutomatic==false and status.pending==false and status.preferencePending==false
+   and status.savedUnsupported==false and select(3,Nexus.Localization.ActiveLanguage())==false,
+   'capacity refusal: the status and the session start name the durable manual deDE, not the Automatic default')
+  menu=LanguageMenu()
+  local found=RefusedChoices(menu,'saved data is kept unchanged after a shared-data capacity refusal','capacity refusal')
+  check(CheckedChoices(found)=='deDE','capacity refusal: only the durable manual deDE is checked; Automatic is not')
+  r=Nexus.Panel.ChooseLanguage('automatic')
+  check(r.state=='refused' and r.reason=='capacity' and writes.n==0 and F.Serialize(NexusDB)==saved and Effects()==effects,
+   'capacity refusal: a direct Automatic submit is refused before the writer; the whole root and game effects are unchanged')
  end
  -- A settings replacement under the admitted root has not itself been
  -- admitted. Opening the real menu and clicking must preserve both tables.
@@ -719,6 +777,18 @@ do
   local r=Nexus.Panel.ChooseLanguage('frFR')
   check(Row(menu,'frFR').disabled==true and r.state=='refused' and r.reason=='drift' and writes.n==0,'replaced settings: disabled and refused before the writer')
   check(NexusDB.settings==replacement and NexusDB.authorityBundle.storeData.settings==admitted and F.Serialize(NexusDB)==frozen,'replaced settings: both identities and the whole root stay unchanged')
+  -- Review F3: the drifted session's real menu offers all eight choices,
+  -- each disabled. It checks the admitted saved preference (absent, so
+  -- Automatic), never the unadmitted replacement's enUS, and a direct
+  -- Automatic submit is refused for drift before the writer.
+  local effects=Effects()
+  local status=Nexus.Panel.LanguageStatus()
+  check(status.refusal=='drift' and status.preference=='automatic' and status.automatic==true and status.savedUnsupported==false,'replaced settings: the status reads the admitted saved source and refuses for drift')
+  local found=RefusedChoices(menu,'the saved data changed since start-up; reload first','replaced settings')
+  check(CheckedChoices(found)=='automatic','replaced settings: Automatic, the admitted absent preference, is the only checked choice')
+  r=Nexus.Panel.ChooseLanguage('automatic')
+  check(r.state=='refused' and r.reason=='drift' and writes.n==0 and Effects()==effects,'replaced settings: a direct Automatic submit is refused before the writer')
+  check(NexusDB.settings==replacement and NexusDB.authorityBundle.storeData.settings==admitted and F.Serialize(NexusDB)==frozen,'replaced settings: after the Automatic refusal both identities and the whole root stay unchanged')
   NexusDB.settings=admitted
   r=Nexus.Panel.ChooseLanguage('frFR')
   check(r.state=='saved' and writes.n==1 and admitted.uiLanguage=='frFR','restoring the admitted settings permits a durable choice')
@@ -870,17 +940,37 @@ do
  -- F. Early start-up, authority drift and a Store the session was not initialized with.
  do
   local early
-  H=F.Boot(F.Database({version=2}),nil,function()
+  H=F.Boot(F.Database({version=2}),nil,function(h)
    local owner=Nexus.MainInternals.StoreAuthorityOwner;local original,n=owner.UpdateSettingsV1,0
    owner.UpdateSettingsV1=function(...)n=n+1;return original(...)end
-   local settings=F.Serialize(NexusDB.settings)
+   local settings,root=F.Serialize(NexusDB.settings),F.Serialize(NexusDB)
+   local actions,sent,popup=#h.actions,#h.sent,h.popup
+   -- Review F2/F3: start-up has not initialized the language yet, so these
+   -- reads and submits use the Panel fallback; nothing here drives start-up.
+   local _,initialized=Nexus.Localization.ActiveLanguage()
+   local status=Nexus.Panel.LanguageStatus()
    local rows=Nexus.Panel.LanguageMenuItems(function(fn)return fn end)
    local result=Nexus.Panel.ChooseLanguage('frFR')
-   early={menu={menuList=rows},result=result,writes=n,same=F.Serialize(NexusDB.settings)==settings}
+   local automatic=Nexus.Panel.ChooseLanguage('automatic')
+   early={menu={menuList=rows},status=status,result=result,automatic=automatic,writes=n,initialized=initialized,
+    same=F.Serialize(NexusDB.settings)==settings,root=F.Serialize(NexusDB)==root,
+    quiet=#h.actions==actions and #h.sent==sent and h.popup==popup}
    owner.UpdateSettingsV1=original
   end)
   check(early.menu and Row(early.menu,'frFR').disabled==true and MenuText(early.menu):find('Nexus is still starting',1,true),'early start-up: choices are shown disabled with the reason')
   check(early.result.state=='refused' and early.result.reason=='startup' and early.writes==0 and early.same,'early start-up: a choice is refused and nothing is written')
+  -- Review F2/F3: before the lifecycle's status callback exists the Panel
+  -- fallback knows the active language and the startup refusal but not the
+  -- saved preference. All eight offered choices are shown disabled,
+  -- Automatic carries no click, and a direct Automatic submit is refused
+  -- for startup with no writer, settings, root, action, send or popup.
+  check(early.initialized==false,'SETUP early start-up: the language is not initialized yet, so no lifecycle status callback exists')
+  local found=RefusedChoices(early.menu,'Nexus is still starting','early start-up')
+  check(early.automatic.state=='refused' and early.automatic.reason=='startup' and early.writes==0 and early.same and early.root and early.quiet,'early start-up: a direct Automatic submit is refused and nothing is written, sent or shown')
+  local fallback=early.status
+  check(fallback.active=='enUS' and fallback.refusal=='startup' and fallback.pending==false and fallback.automaticPreference=='automatic' and fallback.automaticLanguage=='enUS' and #fallback.languages==7,'early start-up: the fallback keeps the active English, the startup refusal, the Automatic value and every installed language')
+  check(fallback.saved==nil and fallback.preference==nil and fallback.automatic==nil and fallback.savedUnsupported==nil,'EXPECT F2 early start-up: the fallback leaves the saved preference unknown, never a saved English ('..tostring(fallback.saved)..')')
+  check(CheckedChoices(found)=='','EXPECT F2 early start-up: with the saved preference unknown no Automatic or manual row is checked ('..CheckedChoices(found)..')')
   Expect('enUS','after the early refusal')
   CountWriter()
   local internals=Nexus.MainInternals;local realOwner,foreign=internals.StoreAuthorityOwner,0
@@ -906,6 +996,74 @@ do
   check(freshOwner~=oldOwner and freshOwner.owner==Nexus.Store,'fixture: a reloaded Store module with its own writer')
   r=Nexus.Panel.ChooseLanguage('ruRU')
   check(r.state=='refused' and r.reason=='authority' and freshCalls==0 and writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='plPL','the session Store cannot use another Store module\'s writer')
+  -- Review F2: a status callback that fails, or gives no table, is never
+  -- accepted. Nexus.Panel.Init is the existing public callback seam; this
+  -- replacement lasts only to the end of the scenario (the next block boots
+  -- the addon again). The fallback keeps the active English and the startup
+  -- refusal and leaves the saved plPL unknown: every choice is disabled,
+  -- none is checked and nothing is written.
+  local effects,root=Effects(),F.Serialize(NexusDB)
+  local failing={{'a failing status callback',function()error('fixture: the status callback failed',0)end},
+   {'a status callback without a table',function()return 'not a status table' end}}
+  for _,case in ipairs(failing)do
+   Nexus.Panel.Init({LanguageStatus=case[2]})
+   local status=Nexus.Panel.LanguageStatus()
+   local found=RefusedChoices({menuList=Nexus.Panel.LanguageMenuItems(function(fn)return fn end)},'Nexus is still starting',case[1])
+   check(status.active=='enUS' and status.refusal=='startup' and status.saved==nil and status.preference==nil and status.automatic==nil and CheckedChoices(found)=='',case[1]..': the fallback keeps the active English and leaves the saved preference unknown, with no row checked')
+   local refused=Nexus.Panel.ChooseLanguage('automatic')
+   check(refused.state=='refused' and refused.reason=='startup' and freshCalls==0 and writes.n==1 and F.Serialize(NexusDB)==root and Effects()==effects,case[1]..': a direct Automatic submit is refused; no writer, root or game effect')
+  end
+ end
+ -- R. Review F1/F3: future-format (6) saved roots, kept read-only, through
+ -- actual TOC boots and the real Language menu. The read-only projection
+ -- adopts only an exact language ID or the exact Automatic value; any other
+ -- present saved value stays in the root exactly as saved and is
+ -- unsupported: English, not Automatic. The module's third ActiveLanguage
+ -- result must agree with the lifecycle status, every offered choice is
+ -- refused before the writer and the whole root stays byte for byte. The
+ -- older read-only fixture counts seven clickable rows; these controls count
+ -- all eight offered choices. Offline synthetic data only: a native
+ -- SavedVariables round trip is NOT_RUN.
+ do
+  local NOTICE='The saved language is not offered by this build; English is shown.'
+  local CASES={
+   {label='absent (healthy control)',saved='enUS',active='enUS',preference='automatic',automatic=true,unsupported=false,checked='automatic'},
+   {label='exact saved automatic',value='automatic',projection='automatic',saved='enUS',active='enUS',preference='automatic',automatic=true,unsupported=false,checked='automatic'},
+   {label='valid manual frFR (control)',value='frFR',projection='frFR',saved='frFR',active='frFR',preference='frFR',automatic=false,unsupported=false,checked='frFR'},
+   {label='near-case esEs',value='esEs',saved='enUS',active='enUS',preference=false,automatic=false,unsupported=true,checked='enUS'},
+   {label='numeric 42',value=42,saved='enUS',active='enUS',preference=false,automatic=false,unsupported=true,checked='enUS'},
+   {label='upper AUTOMATIC',value='AUTOMATIC',saved='enUS',active='enUS',preference=false,automatic=false,unsupported=true,checked='enUS'},
+   {label='future pack itIT',value='itIT',saved='enUS',active='enUS',preference=false,automatic=false,unsupported=true,checked='enUS'},
+   {label='false',value=false,saved='enUS',active='enUS',preference=false,automatic=false,unsupported=true,checked='enUS'},
+   {label='plain table',value={keep='raw'},saved='enUS',active='enUS',preference=false,automatic=false,unsupported=true,checked='enUS'},
+  }
+  for _,case in ipairs(CASES)do
+   local value,label=case.value,'read-only '..case.label
+   local db=F.Database({version=6,mutate=function(d)d.settings.uiLanguage=assert(loadstring('return '..F.Serialize(value)))()end})
+   local input=F.Serialize(db)
+   H=F.Boot(db);CountWriter()
+   check(Nexus.StartupStatus().coreReady==true and Nexus.MainInternals.SavedRootReadOnlyV1()=='future','SETUP '..label..': a ready session over a future-format saved root')
+   check(F.Serialize(rawget(NexusDB.settings,'uiLanguage'))==F.Serialize(value) and Nexus.Store.Settings().uiLanguage==case.projection,'SETUP '..label..': the saved value is kept as saved and the read-only projection holds '..tostring(case.projection))
+   Expect(case.active,label)
+   local status=Nexus.Panel.LanguageStatus()
+   check(status.active==case.active and status.saved==case.saved and status.pending==false and status.preferencePending==false
+    and status.refusal=='read-only' and status.preference==case.preference and status.automatic==case.automatic
+    and status.activeAutomatic==case.automatic and status.savedUnsupported==case.unsupported,
+    'GUARD '..label..': the lifecycle status tells the saved preference and the session start truthfully')
+   local id,initialized,automatic=Nexus.Localization.ActiveLanguage()
+   check(id==case.active and initialized==true and automatic==case.automatic,
+    'EXPECT F1 '..label..': the module '..(case.automatic and 'starts' or 'does not start')..' on Automatic, as the lifecycle status says (third result '..tostring(automatic)..')')
+   local effects=Effects()
+   Nexus.Panel.Show();menu=LanguageMenu()
+   local found=RefusedChoices(menu,'this saved data is kept read-only by this build',label)
+   check(CheckedChoices(found)==case.checked,label..': the menu checks '..case.checked..' and nothing else ('..CheckedChoices(found)..')')
+   check((found.automatic.text:find(' - in use',1,true)~=nil)==case.automatic and (MenuText(menu):find(NOTICE,1,true)~=nil)==case.unsupported,
+    label..': Automatic is in use only for an Automatic start; the unsupported notice only for an unsupported saved value')
+   local r=Nexus.Panel.ChooseLanguage('automatic')
+   check(r.state=='refused' and r.reason=='read-only' and writes.n==0,label..': a direct Automatic submit is refused before the writer')
+   check(F.Serialize(NexusDB)==input and Nexus.Store.Settings().uiLanguage==case.projection and Effects()==effects,
+    label..': the whole saved root stays byte for byte, the projection is unchanged and there is no game effect')
+  end
  end
 end
 
