@@ -982,4 +982,243 @@ C.scenario('J2c fixture discriminators (not product evidence): the J2b oracle re
  if not ok then error(err,0) end
 end)
 
+-- J1 (issue #131 J1: fresh import, no Saved Build). One measured real-handler
+-- journey on a fresh profile in which no Saved Build holds Echoes and none is
+-- active. Boot(0) above is not used: it keeps populated Saved Builds. Steps:
+-- the live checklist before any Wishlist exists, a refused invalid code, the
+-- checklist Wishlist Editor route, the editor registered EBH1 import and naming
+-- dialogs (their StaticPopupDialogs handlers; the renderer Import button that
+-- opens the first dialog is not exercised), a cancelled Create confirmation,
+-- the explicit Create confirmation and its first-run writer, then the readback
+-- through the runtime/HUD and the checklist with Auto OFF and no Echo choice.
+-- The server listing the uploaded Wishlist is a SYNTHETIC host mirror built
+-- from the upload the host recorded (as ux_save_intents I10b); nothing else is
+-- injected and no product method is replaced (the upload spy and the writer
+-- counters pass through). The first-run writer existing slot-1 handoff record
+-- (GameAdapter SetFirstLoadoutWishlistIdentity) is observed, not asserted; the
+-- confirmation and the checklist must name no Saved Build. Categories as J2b:
+-- GUARD for existing import/editor/writer behaviour, EXPECT for the M7
+-- checklist readback, SETUP for the fixture. No native claim.
+local function J1Boot()
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
+ ProjectEbonholdEchoJournal=nil;EchoJournalMicroButton=nil
+ NexusEditorFrame=nil;NexusWishlistNameInput=nil;NexusPanel=nil;NexusHelpWindow=nil;NexusSetupChecklist=nil
+ NexusWishlistEditorSwitchButton=nil;NexusActiveWishlistSelector=nil;NexusWishlistOnlyPicker=nil
+ NexusWishlistAssignNowButton=nil;NexusWishlistEditorLoadoutMenu=nil;NexusWishlistSaveOnlyButton=nil
+ NexusLoadoutAssociationPanel=nil;NexusWishlistRolePicker=nil;NexusWishlistRoleConfirm=nil
+ NexusWishlistRoleUseOwned=nil;NexusWishlistRoleCancel=nil
+ H=dofile('tests/prototype/harness.lua')
+ H.playerLevel=80
+ wipe(H.db)
+ H.AddEcho(201172,'Echo One',0,5);H.AddEcho(201174,'Echo Free',0,5);H.AddEcho(201175,'Echo Fire',0,5)
+ H.service.GetServerMaxSlots=function() return 6 end
+ H.perks.serverBuildSlots={[107]={name='W-Free',verified=false,echoes=H.Clone(EF)}}
+ H.perks.serverActiveSlot=0
+ ProjectEbonhold.OrbService={IsStateKnown=function()return true end,GetCharges=function()return 0 end,
+  IsOfferPending=function()return false end,RequestCharges=function()end,
+  ConfirmSpend=function() error('the J1 journey must not spend') end}
+ H.Boot();A=Nexus.GameAdapter
+ H.Notify();A.Poll();H.Advance(1)
+ writes={}
+ for _,k in ipairs(WRITERS) do
+  local real=A[k]
+  if type(real)=='function' then
+   writes[k]=0
+   A[k]=function(...) writes[k]=writes[k]+1;return real(...) end
+  end
+ end
+ if NexusQuickStart and NexusQuickStart:IsShown() then NexusQuickStart:Hide() end
+end
+
+C.scenario('J1 a fresh import with no Saved Build stays a draft until an explicit Create; Create makes it the first-run target and the checklist reads setup complete with Auto OFF',function()
+ J1Boot()
+ local J={slotWrites={},uploadCalls=0}
+ local realUpload=A.UploadWishlist
+ A.UploadWishlist=function(...) J.uploadCalls=J.uploadCalls+1;return realUpload(...) end
+ local ok,err=pcall(function()
+  local function First() local s=Nexus.Store.State() or {};return s.firstRunWishlist end
+  local function Links()
+   local s=Nexus.Store.State() or {}
+   return type(s.loadoutWishlists)=='table' and s.loadoutWishlists or {}
+  end
+  local function Creates()
+   local n=0
+   for _,a in ipairs(H.actions) do if a[1]=='upload' and a[2]==0 then n=n+1 end end
+   return n
+  end
+  local function Populated()
+   local s,n=A.Slots(),0
+   if type(s)~='table' or type(s.bySlot)~='table' then return nil,s end
+   for slot=1,(tonumber(s.maxSlots) or 5) do
+    local row=s.bySlot[slot]
+    if type(row)=='table' and type(row.echoes)=='table' and #row.echoes>0 then n=n+1 end
+   end
+   return n,s
+  end
+  local function Accept(p)
+   if not p then return nil end
+   if H.popup==p then H.popup=nil end
+   return StaticPopupDialogs[p.which].OnAccept(p.frame,p.data)
+  end
+  local function Cancel(p)
+   if not p then return end
+   if H.popup==p then H.popup=nil end
+   local d=StaticPopupDialogs[p.which]
+   if d and d.OnCancel then d.OnCancel(p.frame,p.data) end
+  end
+  local function Asked(p)
+   if not p then return '' end
+   local d=StaticPopupDialogs[p.which] or {}
+   local okText,s=pcall(string.format,tostring(d.text or ''),p.arg1,p.arg2)
+   return V.Plain(okText and s or tostring(d.text or ''))
+  end
+  local APPLY={['Create Wishlist']=true,['Create & assign']=true,['Create unassigned']=true,['Saved']=true,['Saving...']=true}
+  local function Apply()
+   for _,b in ipairs(H.frames) do
+    if b.kind=='Button' and b:IsVisible() and b:GetParent()==NexusEditorFrame
+     and APPLY[V.Plain(b:GetText() or '')] then return b end
+   end
+   return nil
+  end
+  local function Click(b)
+   if not b then return nil end
+   local before=H.popup
+   b:Click()
+   if H.popup~=nil and H.popup~=before then return H.popup end
+   return nil
+  end
+  Refresh()
+  local populated,slots=Populated()
+  local fresh=C.setup(populated==0 and type(slots)=='table' and slots.activeKnown~=false and tonumber(slots.activeSlot)==0
+   and First()==nil and next(Links())==nil and not Auto() and H.perks.currentChoice==nil,
+   'J1: fixture: a fresh profile: no Saved Build holds Echoes, none is active, nothing is assigned, Auto is OFF and no Echo choice is shown',
+   tostring(populated)..'/'..tostring(type(slots)=='table' and slots.activeSlot or nil))
+  if not fresh then return end
+  local base=J2Frontier(J)
+  -- 1. The live checklist before any Wishlist exists.
+  local f=Open('J1 before import')
+  if not f then return end
+  local rows=Rows(f)
+  print('OBSERVED','J1 before import rows='..table.concat(rows,' / '))
+  C.expect(f.steps~=nil and f.steps.complete==false and not Has(rows[3],'[done]'),
+   'J1: with no Wishlist yet the Wishlist step is not done and setup is not complete',table.concat(rows,' / '))
+  C.expect(not Has(rows[2],'(slot ') and not Has(rows[2],'is active in the game'),
+   'J1: the checklist guesses no Saved Build destination',rows[2])
+  C.guard(J2Unchanged(J2Frontier(J),base,true),'J1 frontier 1: opening the checklist changes nothing',J2Describe(J2Frontier(J)))
+  -- 2. An invalid code is refused and changes nothing.
+  local said=J2Heard(function() Nexus.WishlistEditor.ImportEBH1String('EBH1:not-a-code:MAGE:Broken') end)
+  C.guard(Has(said,[[couldn't parse that as an EBH1 string]]) and H.popup==nil and First()==nil
+   and J2Unchanged(J2Frontier(J),base,true),'J1: an invalid code is refused visibly; no draft, dialog, upload or write',said)
+  -- 3. Passive navigation: the Wishlist Editor route of the checklist.
+  if not C.setup(f.editor~=nil,'J1: fixture: the checklist offers Wishlist Editor') then return end
+  f.editor:Click()
+  C.expect(_G.NexusEditorFrame~=nil and NexusEditorFrame:IsShown(),'J1: the checklist Wishlist Editor route opens the editor')
+  C.guard(J2Unchanged(J2Frontier(J),base,true),
+   'J1 frontier 1: opening the editor assigns, uploads, acts and sends nothing',J2Describe(J2Frontier(J)))
+  -- 4. The registered import and naming dialogs of the editor.
+  local code=Nexus.Codec.EncodeEBH1({{spellId=201172,quality=0,stacks=1,locked=false}},'MAGE','Starter')
+  if not C.setup(type(code)=='string' and code:sub(1,6)~='EBH1::','J1: fixture: an EBH1 code with one ordinary Echo named Starter',code) then return end
+  local paste=StaticPopup_Show('NEXUS_IMPORT_WISHLIST')
+  if not C.setup(paste~=nil and paste.which=='NEXUS_IMPORT_WISHLIST' and paste.editBox~=nil,'J1: fixture: the import dialog is shown') then return end
+  paste.editBox:SetText(code)
+  Accept(paste)
+  local naming=H.popup
+  local suggested=naming and naming.editBox and naming.editBox._NexusRawText and naming.editBox:_NexusRawText() or nil
+  C.guard(naming~=nil and naming.which=='NEXUS_NAME_IMPORTED_WISHLIST' and suggested=='Starter',
+   'J1: Continue asks for the draft name and suggests the name in the code',tostring(suggested))
+  if not (naming and naming.which=='NEXUS_NAME_IMPORTED_WISHLIST') then return end
+  said=J2Heard(function() Accept(naming) end)
+  print('OBSERVED','J1 import said='..said)
+  C.guard(Has(said,[[as new wishlist 'Starter']]) and NexusEditorFrame~=nil and NexusEditorFrame:IsShown(),
+   'J1: the imported code opens as a new editor draft named Starter',said)
+  C.guard(H.popup==nil and First()==nil and next(Links())==nil and J2Unchanged(J2Frontier(J),base,true),
+   'J1 frontier 1: the import is draft-only: no confirmation, upload, assignment, action or send',J2Describe(J2Frontier(J)))
+  f=Open('J1 after import')
+  if not f then return end
+  rows=Rows(f)
+  C.expect(f.steps~=nil and f.steps.complete==false and not Has(rows[3],'[done]'),
+   'J1: an imported draft completes nothing: the Wishlist step is still not done',table.concat(rows,' / '))
+  Nexus.QuickStart.HideChecklist()
+  -- 5. Create: a cancelled confirmation, then the explicit one.
+  local p=Click(Apply())
+  local asked=Asked(p)
+  print('OBSERVED','J1 confirmation='..asked)
+  C.guard(p~=nil and p.which=='WISHLISTREALIZER_CREATE_WISHLIST' and Has(asked,'first-run target') and not Has(asked,'(slot ')
+   and type(p.data)=='table' and type(p.data.confirmation)=='table' and p.data.confirmation.destinationKey=='firstRun',
+   'J1: Create asks for confirmation naming the captured first-run target and no Saved Build',asked)
+  if not p then return end
+  Cancel(p)
+  C.guard(H.popup==nil and Creates()==0 and First()==nil and J2Unchanged(J2Frontier(J),base,true),
+   'J1 frontier 1: cancelling the confirmation uploads, assigns, acts and sends nothing',J2Describe(J2Frontier(J)))
+  p=Click(Apply())
+  C.guard(p~=nil and p.which=='WISHLISTREALIZER_CREATE_WISHLIST','J1: after Cancel, Create is offered again')
+  if not p then return end
+  local before=J2Frontier(J)
+  said=J2Heard(function() Accept(p) end)
+  local after=J2Frontier(J)
+  local first=First()
+  print('OBSERVED','J1 create said='..said..' '..J2Describe(after))
+  C.guard(Creates()==1 and after.uploadCalls==before.uploadCalls+1 and writes.SetFirstLoadoutWishlistIdentity==1
+   and after.writes==before.writes+1,
+   'J1 frontier 2: the explicit Create uploads once to the create sentinel and makes one first-run writer call, no other writer',J2Describe(after))
+  C.guard(type(first)=='table' and first.name=='Starter','J1: the first-run plan is the created Starter',
+   tostring(type(first)=='table' and first.name or nil))
+  C.guard(after.others==before.others and after.auto==before.auto and after.orb==before.orb and after.seen==before.seen,
+   'J1 frontier 2: the Create takes no other game action or spend; Auto stays OFF',J2Describe(after))
+  C.guard(Has(said,[['Starter' is the first-run Wishlist target]]),'J1: the save result names the first-run target',said)
+  local handoff=Links()[1]
+  print('OBSERVED','J1 slot-1 handoff record (existing writer policy, not asserted)='
+   ..tostring(type(handoff)=='table' and handoff.name or handoff))
+  -- 6. SYNTHETIC host mirror: the server lists the upload the host recorded.
+  local last
+  for _,a in ipairs(H.actions) do if a[1]=='upload' and a[2]==0 then last=a end end
+  if not C.setup(last~=nil,'J1: fixture: the host recorded the Create upload') then return end
+  local listed=H.Clone(H.perks.serverBuildSlots or {})
+  listed[108]={name=last[3],verified=false,echoes=H.Clone(last[4])}
+  H.perks.serverBuildSlots=listed;H.Notify();A.Poll();H.Advance(4)
+  populated,slots=Populated()
+  if not C.setup(populated==0 and type(slots)=='table' and tonumber(slots.activeSlot)==0 and type(slots.bySlot)=='table'
+   and type(slots.bySlot[108])=='table' and slots.bySlot[108].name=='Starter',
+   'J1: fixture: the server lists Starter as a Wishlist; still no Saved Build holds Echoes or is active') then return end
+  -- 7. Production readback through the runtime and the HUD.
+  local w,note
+  local _,settled=J2Settle(function()
+   w=A.Wishlist();note=A.WishlistNote and A.WishlistNote() or nil
+   return type(w)=='table' and w.name=='Starter'
+  end)
+  local readOk=C.guard(settled and note=='First-run wishlist target' and type(First())=='table' and First().name=='Starter',
+   'J1: production readback: the runtime targets Starter as the first-run Wishlist',
+   tostring(type(w)=='table' and w.name or nil)..'/'..tostring(note))
+  local _,shown=J2Settle(function()
+   local facts=type(Nexus.Panel.SetupFacts)=='function' and Nexus.Panel.SetupFacts() or {}
+   local d=type(facts.destination)=='table' and facts.destination or {}
+   return d.kind=='firstRun' and d.wishlistState=='assigned'
+  end)
+  f=Open('J1 readback')
+  if not f then return end
+  rows=Rows(f)
+  print('OBSERVED','J1 readback settled='..tostring(shown)..' rows='..table.concat(rows,' / ')..' summary='..V.Plain(f.summary:GetText() or ''))
+  if readOk then
+   C.expect(Has(rows[2],'[done] Destination') and Has(rows[2],'first-run target') and not Has(rows[2],'(slot '),
+    'J1: the checklist names the first-run target as the done destination and no Saved Build',rows[2])
+   C.expect(Has(rows[3],'[done] Wishlist') and Has(rows[3],[['Starter' is assigned]]),'J1: its Wishlist step reads Starter as assigned',rows[3])
+   C.expect(f.steps~=nil and f.steps.complete==true and Has(f.summary:GetText(),'3 of 3'),'J1: every setup step is done now',
+    f.summary:GetText())
+  else
+   print('OBSERVED','J1: not evaluated after the failed production readback GUARD: the checklist destination, Wishlist and completion readback')
+  end
+  C.expect(Has(Status(f)[1],'Auto: OFF'),'J1: the status says Auto OFF; setup completed without turning it ON',Status(f)[1])
+  -- 8. Later passive refreshes.
+  local settledFrontier=J2Frontier(J)
+  Refresh();Refresh()
+  Nexus.QuickStart.RefreshChecklist();H.Advance(1)
+  local now=J2Frontier(J)
+  C.guard(J2Unchanged(now,settledFrontier,false) and now.writes==after.writes and now.uploads==1 and now.others==base.others
+   and not now.auto and not now.orb and H.perks.currentChoice==nil,
+   'J1 frontier 3: the mirror, readback and later passive refreshes write, upload, act and turn nothing ON; no Echo choice appears',J2Describe(now))
+ end)
+ A.UploadWishlist=realUpload
+ if not ok then error(err,0) end
+end)
+
 C.finish('(read-only checklist from current facts; Welcome and warning are not facts; navigation only)')
