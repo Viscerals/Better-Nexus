@@ -1,0 +1,199 @@
+{
+  "schema": "nexus.l10n.release_languages",
+  "schemaVersion": 1,
+  "refs": ["#139", "#147"],
+  "sourcePin": {"base": "5c77eec5b791f64468576e37a70b3855375b7fcb", "tree": "692c6693ba50ba5ffc2bf8f3f724b0bceeeda65c"},
+  "contractKind": "declarative_metadata_only",
+  "validator": {"path": "tools/l10n_catalog.py", "status": "IMPLEMENTED_DRAFT_REVIEW_PENDING"},
+  "requiredCiRegistration": "REGISTERED_IN_PYTHON_TESTS",
+  "selectionDecision": {"issue": 139, "record": "issue #139 recorded public language decision", "status": "resolved"},
+  "commissionScope": "Supersedes only the old generic deferral for isolated English/runtime preparation and optional UI-pack work. PR138, exact client evidence and native/release gates retain their scopes.",
+  "productIdNamespace": "Nexus presentation choices from data/DefaultProfile.lua uiLanguages; not game client locale codes, GetLocale() results or aliases",
+  "fallbackProductId": "enUS",
+  "packReviewStatementAtBase": "data/LocalizationPacks.lua states that the pack wording was drafted and has had a technical review only, and that no competent human reviewer of each language has accepted it. No reviewer identity or date is recorded, so no review record is entered here.",
+  "products": [
+    {
+      "productId": "enUS",
+      "kind": "english_baseline",
+      "englishName": "English",
+      "autonym": "English",
+      "textSource": "data/LocalizationEnglish.lua",
+      "clientLocaleCode": "UNKNOWN",
+      "evidencedClientAliases": [],
+      "productIdIsClientLocale": false,
+      "wordingState": "existing_english_base_bytes",
+      "review": {
+        "technicalAuthorReview": {"status": "pending", "records": []},
+        "fluentHumanAcceptance": {"responsibility": "UNASSIGNED", "status": "pending", "records": []},
+        "nativeAcceptance": {"status": "NOT_RUN", "records": []}
+      }
+    },
+    {
+      "productId": "frFR",
+      "kind": "optional_ui_pack",
+      "englishName": "French",
+      "autonym": "Français",
+      "textSource": "data/LocalizationPacks.lua",
+      "clientLocaleCode": "UNKNOWN",
+      "evidencedClientAliases": [],
+      "productIdIsClientLocale": false,
+      "wordingState": "draft_unreviewed",
+      "review": {
+        "technicalAuthorReview": {"status": "pending", "records": []},
+        "fluentHumanAcceptance": {"responsibility": "UNASSIGNED", "status": "pending", "records": []},
+        "nativeAcceptance": {"status": "NOT_RUN", "records": []}
+      }
+    },
+    {
+      "productId": "deDE",
+      "kind": "optional_ui_pack",
+      "englishName": "German",
+      "autonym": "Deutsch",
+      "textSource": "data/LocalizationPacks.lua",
+      "clientLocaleCode": "UNKNOWN",
+      "evidencedClientAliases": [],
+      "productIdIsClientLocale": false,
+      "wordingState": "draft_unreviewed",
+      "review": {
+        "technicalAuthorReview": {"status": "pending", "records": []},
+        "fluentHumanAcceptance": {"responsibility": "UNASSIGNED", "status": "pending", "records": []},
+        "nativeAcceptance": {"status": "NOT_RUN", "records": []}
+      }
+    },
+    {
+      "productId": "esES",
+      "kind": "optional_ui_pack",
+      "englishName": "Spanish",
+      "autonym": "Español",
+      "textSource": "data/LocalizationPacks.lua",
+      "clientLocaleCode": "UNKNOWN",
+      "evidencedClientAliases": [],
+      "productIdIsClientLocale": false,
+      "wordingState": "draft_unreviewed",
+      "review": {
+        "technicalAuthorReview": {"status": "pending", "records": []},
+        "fluentHumanAcceptance": {"responsibility": "UNASSIGNED", "status": "pending", "records": []},
+        "nativeAcceptance": {"status": "NOT_RUN", "records": []}
+      }
+    },
+    {
+      "productId": "plPL",
+      "kind": "optional_ui_pack",
+      "englishName": "Polish",
+      "autonym": "Polski",
+      "textSource": "data/LocalizationPacks.lua",
+      "clientLocaleCode": "UNKNOWN",
+      "evidencedClientAliases": [],
+      "productIdIsClientLocale": false,
+      "wordingState": "draft_unreviewed",
+      "review": {
+        "technicalAuthorReview": {"status": "pending", "records": []},
+        "fluentHumanAcceptance": {"responsibility": "UNASSIGNED", "status": "pending", "records": []},
+        "nativeAcceptance": {"status": "NOT_RUN", "records": []}
+      }
+    },
+    {
+      "productId": "ptBR",
+      "kind": "optional_ui_pack",
+      "englishName": "Brazilian Portuguese",
+      "autonym": "Português (Brasil)",
+      "textSource": "data/LocalizationPacks.lua",
+      "clientLocaleCode": "UNKNOWN",
+      "evidencedClientAliases": [],
+      "productIdIsClientLocale": false,
+      "wordingState": "draft_unreviewed",
+      "review": {
+        "technicalAuthorReview": {"status": "pending", "records": []},
+        "fluentHumanAcceptance": {"responsibility": "UNASSIGNED", "status": "pending", "records": []},
+        "nativeAcceptance": {"status": "NOT_RUN", "records": []}
+      }
+    },
+    {
+      "productId": "ruRU",
+      "kind": "optional_ui_pack",
+      "englishName": "Russian",
+      "autonym": "Русский",
+      "textSource": "data/LocalizationPacks.lua",
+      "clientLocaleCode": "UNKNOWN",
+      "evidencedClientAliases": [],
+      "productIdIsClientLocale": false,
+      "wordingState": "draft_unreviewed",
+      "review": {
+        "technicalAuthorReview": {"status": "pending", "records": []},
+        "fluentHumanAcceptance": {"responsibility": "UNASSIGNED", "status": "pending", "records": []},
+        "nativeAcceptance": {"status": "NOT_RUN", "records": []}
+      }
+    }
+  ],
+  "pseudoAndTestData": {
+    "shippedProductIds": [],
+    "rule": "Pseudo-locale and test fixture data are separate from product choices, are never shipped languages and are excluded from shipped-language counts."
+  },
+  "clientEvidence": {
+    "evidencedClientAliases": [],
+    "clientManifest": "UNKNOWN",
+    "clientBuild": "UNKNOWN",
+    "clientHash": "UNKNOWN",
+    "runtimeLocale": "UNKNOWN",
+    "fontFace": "UNKNOWN",
+    "glyphCoverage": "UNKNOWN",
+    "nativeLayout": "NOT_RUN",
+    "officialInstallationGuideObservation": {
+      "observedOn": "2026-10-23",
+      "nature": "historical_observation",
+      "describes": ["English gameplay", "existing English enUS 3.3.5a installation", "launcher 1.0.6"],
+      "isExactClientManifest": false
+    },
+    "rule": "No client locale code or alias is added from general knowledge, website or chat languages, another addon or fixture values. A product ID is not evidence of a client alias."
+  },
+  "automaticMode": {
+    "chooserProductId": "NONE_AT_BASE",
+    "existingCodeDefault": "enUS",
+    "unknownOrUnsupportedResolvesTo": "enUS",
+    "evidencedMappings": [],
+    "mappingRule": "Automatic may map only an evidenced raw client code or alias. None is evidenced, so unknown or unsupported input resolves to English.",
+    "explicitPackChoice": "An explicit optional UI pack choice does not require the game itself to be translated.",
+    "followUp": {"issue": 141, "status": "OUTSTANDING", "codeChangeInThisTask": "none"}
+  },
+  "sessionRefresh": {
+    "preference": "saved for the next user-requested reload or login",
+    "activeLanguage": "fixed for the Lua session",
+    "implicitReload": "none",
+    "halfRefreshedWindows": "none",
+    "source": "core/Localization.lua InitializeActiveLanguage, called once per session by core/MainLifecycle.lua"
+  },
+  "sourceLineage": {
+    "kind": "independently_drafted_nexus_presentation_text",
+    "newHumanRightsAttestation": "none",
+    "importedCorpus": "none",
+    "excludedSources": ["another addon's translation corpus", "game client text", "player or private client content"]
+  },
+  "names": {
+    "englishGameNames": "retained",
+    "userIdentities": "retained_exact",
+    "transliteration": "none",
+    "normalization": "none"
+  },
+  "evidenceRule": "A well-formed evidence record does not prove fluent or native truth.",
+  "terminology": {
+    "status": "pending",
+    "reference": "docs/localization/KEYS_AND_GLOSSARY.md (historical proposal, unchanged)",
+    "gameTermWording": "UNKNOWN until a verified client reference exists"
+  },
+  "entryReview": {
+    "contract": "nexus.l10n.entry_review_declaration",
+    "contractVersion": 1,
+    "declarations": [],
+    "declarationFields": {
+      "productId": "productId of an optional_ui_pack product above; never enUS, pseudo or test data",
+      "key": "a semantic key of data/LocalizationEnglish.lua",
+      "translatedTextSha256": "64 lower-case hex digits: SHA-256 of the exact UTF-8 bytes of that entry in data/LocalizationPacks.lua",
+      "reviewer": "name of the explicitly assigned reviewer, 1 to 128 characters; UNASSIGNED, pending, unknown and similar placeholders are refused",
+      "decision": "translated when the entry differs from the English text, legitimately_identical when it is identical to it",
+      "evidenceReference": "https:// URL of the retrievable review evidence, at most 512 printable ASCII characters; never fetched by the tool",
+      "status": "declared"
+    },
+    "rule": "Each declaration is a JSON object with exactly these seven string fields. There is at most one declaration per productId and key, and only for a present entry whose current bytes match the hash. None of the following grants entry review: a missing reviewer or reference, another status, a boolean, a generic pending or accepted state, technical author review or a product review record. Duplicate, conflicting, stale and contradicting declarations are refused.",
+    "notEvidenceOf": "A structurally qualified declaration is not evidence of fluent competence, contributor rights or native truth. Root, fluent human and native acceptance stay separate. No declaration changes technicalAuthorReview, fluentHumanAcceptance, nativeAcceptance or their records."
+  }
+}

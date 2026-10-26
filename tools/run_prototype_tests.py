@@ -356,7 +356,7 @@ NAMES += ['flexible_plan_persistence_chooser']
 # tools/ci_check.py checks this list against every tools/tests/test_*.py file and runs each entry
 # as its own process with the current Python interpreter. This runner never passes one to a Lua
 # runtime and never counts one with NAMES.
-PYTHON_TESTS=['tools/tests/test_l10n_inventory.py']
+PYTHON_TESTS=['tools/tests/test_l10n_inventory.py','tools/tests/test_l10n_catalog.py']
 # Wall-clock limit for one Python test process, read by tools/ci_check.py.
 PYTHON_TEST_TIMEOUT_SECONDS=DEFAULT_TIMEOUT_SECONDS
 
