@@ -228,4 +228,37 @@ C.scenario('F5 420 px, 125% text and a long UTF-8 name stay inside the coach wit
  C.expect(Text():find(LONG,1,true)~=nil,'F5: the chosen long name is shown in full in the wrapped status')
 end)
 
+C.scenario('F6 Step 5 option captions fit their rows at 420 px and 125% text',function()
+ Boot()
+ L.UseFont({name='125%',char=8.75,line=15,size=15})
+ if not Open('F6') then return end
+ Press(Opt('Just explore'))
+ C.setup(Step()=='manual','F6: fixture: the rendered coach is on Step 5')
+ local g=Guide()
+ local function checkRows(tag)
+  local root=L.Rect(g,g)
+  local previous=nil
+  for i,b in ipairs(g.options) do
+   if b:IsShown() then
+    local r=L.Rect(b,g)
+    local lines=L.Rows(b:GetText(),b:GetWidth()-16,8.75)
+    C.expect(b:GetHeight()>=lines*15+8,tag..': option '..i..' caption fits its button height',
+     'text lines='..lines..' button height='..b:GetHeight())
+    C.expect(L.Inside(r,root),tag..': option '..i..' stays inside the coach',L.Text(r))
+    if previous then C.expect(L.Apart(previous,r),tag..': option '..i..' does not overlap the prior row') end
+    previous=r
+   end
+  end
+  if previous then C.expect(L.Apart(previous,L.Rect(g.primary,g)),tag..': last option does not overlap its action') end
+ end
+ checkRows('default Step 5 copy')
+ local cards=Nexus.UserText.Guide.sim.cards
+ local original=cards[1]
+ cards[1]=original..' - Wunschliste \195\156ber-Gr\195\182\195\159e \226\128\148 \240\159\148\165 mit sehr langem lokalisiertem Text'
+ Nexus.GuidedSetupUI.Render()
+ C.expect(g.options[1].full==('[SIMULATED] '..cards[1]),'F6: full localized option remains available on hover')
+ checkRows('long localized Step 5 copy')
+ cards[1]=original
+end)
+
 C.finish('(guided coach: one step at a time; navigation changes nothing; verified only after read back)')

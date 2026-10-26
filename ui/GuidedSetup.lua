@@ -72,6 +72,34 @@ local function SetButton(b, spec)
     b:Show()
 end
 
+-- The simulated offer labels can wrap at the coach's narrow width. Measure
+-- their actual button text after setting a fixed text width, then reserve that
+-- height in the option stack. The full label stays available on hover when a
+-- particularly long translation reaches the row cap.
+local function FitManualOption(b)
+    local width = math.max(1, b:GetWidth() - 16)
+    local font = type(b.GetFontString) == 'function' and b:GetFontString() or nil
+    if font then
+        font:SetWidth(width)
+        font:SetWordWrap(true)
+        font:SetHeight(0)
+    end
+    local measured = 0
+    if font and type(font.GetStringHeight) == 'function' then
+        local ok, height = pcall(font.GetStringHeight, font)
+        if ok and type(height) == 'number' and height > 0 and height < math.huge then measured = height end
+    end
+    local metrics = Nexus.LayoutMetrics
+    if metrics and type(metrics.TextRows) == 'function' and type(metrics.ConservativeText) == 'function' then
+        local scale = type(metrics.RuntimeMetrics) == 'function' and metrics.RuntimeMetrics() or 1
+        local _, line = metrics.ConservativeText(scale)
+        measured = math.max(measured, metrics.TextRows(b:GetText(), width, scale) * line)
+    end
+    local height = math.min(BLOCK_MAX, math.max(22, math.ceil(measured + 8)))
+    b:SetHeight(height)
+    if font then font:SetHeight(height - 8) end
+end
+
 local function Ensure()
     if frame then return frame end
     frame = CreateFrame('Frame', 'NexusGuidedSetup', UIParent)
@@ -163,7 +191,7 @@ local function Layout()
         if b:IsShown() then
             b:ClearAllPoints()
             b:SetPoint('TOPLEFT', frame, 'TOPLEFT', 24, y)
-            y = y - 26
+            y = y - b:GetHeight() - 4
         end
     end
     if frame.options[1]:IsShown() then y = y - 4 end
@@ -314,7 +342,11 @@ function U.Render()
     local extra = v.extra
     if note then extra = extra and (extra .. '\n' .. note) or note end
     f.extra:SetText(extra or '')
-    for i, btn in ipairs(f.options) do SetButton(btn, (v.options or {})[i]) end
+    for i, btn in ipairs(f.options) do
+        SetButton(btn, (v.options or {})[i])
+        btn:SetHeight(22)
+        if id == 'manual' and btn:IsShown() then FitManualOption(btn) end
+    end
     SetButton(f.primary, v.primary)
     SetButton(f.secondary, v.secondary)
     SetButton(f.back, s.index > 1 and {label = b.back, act = function() note = nil; g.Back() end} or nil)
