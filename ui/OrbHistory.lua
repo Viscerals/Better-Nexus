@@ -38,7 +38,9 @@ local RESULTS = {
     ["confirmed"] = { label = "Confirmed", confirmed = true, status = "confirmed" },
     ["selected"] = { label = "Awaiting result", pending = true, status = "awaiting" },
     ["offered"] = { label = "Waiting for choice", pending = true, status = "choice" },
-    ["requested"] = { label = "Waiting for offer", pending = true, status = "offer" },
+    -- This is written before the adapter's spend call. It is not a send
+    -- receipt, even when a later offer eventually appears.
+    ["requested"] = { label = "Request prepared", pending = true, status = "requested" },
     ["submitted"] = { label = "Unconfirmed", pending = true, status = "unconfirmed" },
     ["not sent"] = { label = "Not sent", refused = true, status = "notSent" },
     ["unknown"] = { label = "Unconfirmed", unresolved = true, status = "unconfirmed" },
@@ -218,6 +220,13 @@ end
 
 local function resultOf(entry)
     local state = entry and entry.state
+    -- A malformed/incomplete record must not display a confirmed replacement
+    -- without the identity that the runtime normally saves with that state.
+    if state == "confirmed" and not (type(entry.obtained) == "string"
+        and entry.obtained ~= "") then
+        return {label = "Unconfirmed", unresolved = true, status = "unconfirmed",
+            state = state}
+    end
     local mapped = state and RESULTS[state]
     if mapped then
         return { label = mapped.label, confirmed = mapped.confirmed == true,
@@ -228,6 +237,40 @@ local function resultOf(entry)
         state = state and tostring(state) or "not recorded" }
 end
 M.Result = resultOf
+
+-- A compact chronology of evidence within a single runtime log entry. The
+-- log keeps an opening stamp and (sometimes) a confirmation stamp, but does
+-- not timestamp offer/choice or record a separate successful host-call send.
+-- Therefore these are ordered recorded facts, not a reconstructed wire trace
+-- or invented durations. "Sent" is deliberately absent unless a future
+-- runtime revision persists an explicit send receipt.
+function M.Timeline(entry)
+    if type(entry) ~= "table" then return {} end
+    local stages = {{kind = "stored", text = "Operation recorded on this client."}}
+    if entry.sourceKey and entry.state ~= "not sent" then
+        stages[#stages + 1] = {kind = "requested",
+            text = "Orb request prepared; a send receipt is not recorded."}
+    end
+    if type(entry.offered) == "table" and #entry.offered > 0 then
+        stages[#stages + 1] = {kind = "choice", text = "Actual Orb offer observed."}
+    end
+    if entry.selectedKey then
+        stages[#stages + 1] = {kind = "unconfirmed",
+            text = "Choice proposed; submission and result are not confirmed by this stage."}
+    end
+    local result = resultOf(entry)
+    if result.confirmed then
+        stages[#stages + 1] = {kind = "confirmed",
+            text = "Replacement confirmed from the recorded result."}
+    elseif result.refused then
+        stages[#stages + 1] = {kind = "notSent",
+            text = "Action not sent according to the recorded result."}
+    else
+        stages[#stages + 1] = {kind = "unconfirmed",
+            text = "Result not confirmed; the current outcome remains unconfirmed."}
+    end
+    return stages
+end
 
 local function reasonOf(entry)
     local kind = entry and entry.selectionKind
@@ -254,7 +297,7 @@ function M.Rows(view, resolve)
     for _, entry in ipairs(view and view.entries or {}) do
         local result = resultOf(entry)
         local replacement
-        if entry.obtained then
+        if result.confirmed then
             replacement = M.Echo(entry.obtained, entry, resolve)
             replacement.confirmed = true
         elseif entry.selectedKey then
@@ -290,12 +333,13 @@ function M.Offers(entry, resolve)
         return nil
     end
     local offers = {}
+    local confirmed = resultOf(entry).confirmed
     for index, offer in ipairs(entry.offered) do
         local key = tostring(offer.spellId) .. ":" .. tostring(offer.quality)
         local echo = M.Echo(key, entry, resolve)
         echo.index = index
         echo.selected = entry.selectedKey == key
-        echo.confirmed = entry.obtained == key
+        echo.confirmed = confirmed and entry.obtained == key
         offers[#offers + 1] = echo
     end
     return offers
@@ -328,8 +372,9 @@ function M.Details(entry, resolve, runStartedAt)
             obtained = entry.obtained, recordedAt = entry.at,
             confirmedAt = entry.confirmedAt, reason = entry.reason,
         },
+        timeline = M.Timeline(entry),
     }
-    if entry.obtained then
+    if result.confirmed then
         details.consumed = details.source
         details.received = M.Echo(entry.obtained, entry, resolve)
     elseif entry.selectedKey then

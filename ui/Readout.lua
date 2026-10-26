@@ -179,6 +179,7 @@ end
 -- success or as zero.
 local STATUS = {
     confirmed   = {glyph = "+",   word = "Confirmed"},
+    requested   = {glyph = ">",   word = "Request prepared"},
     awaiting    = {glyph = "...", word = "Awaiting result"},
     choice      = {glyph = ">",   word = "Waiting for choice"},
     offer       = {glyph = "...", word = "Waiting for offer"},
@@ -195,7 +196,7 @@ local STATUS = {
     ready       = {glyph = "+",   word = "Ready"},
     unknown     = {glyph = "?",   word = "Unknown"},
 }
-M.STATUS_KINDS = {"confirmed", "awaiting", "choice", "offer", "paused", "unconfirmed", "notSent",
+M.STATUS_KINDS = {"confirmed", "requested", "awaiting", "choice", "offer", "paused", "unconfirmed", "notSent",
     "sent", "stored", "refused", "unavailable", "estimated", "stale", "loading", "ready", "unknown"}
 
 -- {kind, glyph, word} for a kind (a new table; changing it changes nothing

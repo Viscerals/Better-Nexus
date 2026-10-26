@@ -97,8 +97,7 @@ C.scenario('V1 one status vocabulary: a glyph and a word per kind; unknown is ne
  C.expect(counts[1]=='?' and counts[2]=='?' and counts[3]=='?' and counts[4]=='?' and counts[5]=='?'
   and counts[6]=='0' and counts[7]=='4' and counts[8]=='~12',
   'V1: a missing or invalid count is "?", never 0; zero stays 0; an estimate carries "~"',table.concat(counts,','))
- -- The Orb history keeps its labels; each names its vocabulary kind, whose
- -- word is that label.
+ -- Each recorded state names a vocabulary kind, whose word is its label.
  local mismatched={}
  for state,entry in pairs(Nexus.OrbHistory.RESULTS) do
   if type(entry.status)~='string' or not seen[entry.status] or R.StatusParts(entry.status).word~=entry.label then
@@ -109,8 +108,11 @@ C.scenario('V1 one status vocabulary: a glyph and a word per kind; unknown is ne
  local odd=Nexus.OrbHistory.Result({state='not a recorded state'})
  C.expect(odd.status=='unconfirmed' and odd.label=='Unconfirmed' and not odd.confirmed,
   'V1: an unrecorded Orb state stays unconfirmed, never confirmed',odd.status)
- C.guard(Nexus.OrbHistory.Result({state='confirmed'}).label=='Confirmed' and Nexus.OrbHistory.Result({state='selected'}).label=='Awaiting result',
-  'V1: the Orb history labels are unchanged')
+ C.guard(Nexus.OrbHistory.Result({state='confirmed',obtained='410002:2'}).label=='Confirmed'
+  and Nexus.OrbHistory.Result({state='confirmed'}).label=='Unconfirmed'
+  and Nexus.OrbHistory.Result({state='requested'}).label=='Request prepared'
+  and Nexus.OrbHistory.Result({state='selected'}).label=='Awaiting result',
+  'V1: the Orb history requires obtained identity to confirm and never calls a prepared request sent')
  C.guard(R.ChargesLine({banish=1,reroll=nil,freeze=0})=='B:1 R:? F:0','V1: the charges row keeps "?" for an unreported count')
 end)
 

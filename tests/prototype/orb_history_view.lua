@@ -96,6 +96,8 @@ check(rows[6].source.label=='Unknown Echo (999999)',
  'an unresolvable name stays usable with its id: '..rows[6].source.label)
 check(rows[6].source.rarity.label=='Unknown quality',
  'and an unlisted quality stays unknown: '..rows[6].source.rarity.label)
+check(rows[6].result.label=='Request prepared' and rows[6].result.status=='requested',
+ 'pre-host preparation does not claim an Orb was sent: '..rows[6].result.label)
 
 -- 3. Details show the actual recorded offers and nothing else.
 local details=V.Details(confirmed,nil,100)
@@ -112,6 +114,47 @@ check(noOffer.offers==nil and noOffer.offersNote=='Offer not recorded',
  'a missing offer says so instead of being reconstructed: '..tostring(noOffer.offersNote))
 check(V.Details(bare,nil,nil).sinceStart==nil,
  'one timestamp alone is never turned into a duration')
+-- Timeline stages are recorded facts, never reconstructed host calls. A
+-- prepared request and a proposed selection predate their respective calls.
+local confirmedLine=V.Timeline(confirmed)
+check(confirmedLine[1].kind=='stored' and confirmedLine[1].text:find('recorded',1,true),
+ 'the operation has a local record, not an implied server acknowledgement')
+check(confirmedLine[2].kind=='requested' and confirmedLine[2].text:find('send receipt is not recorded',1,true),
+ 'a prepared Orb request is not shown as sent')
+check(confirmedLine[3].kind=='choice' and confirmedLine[3].text:find('observed',1,true),
+ 'the actual offer is shown only when recorded')
+check(confirmedLine[4].kind=='unconfirmed' and confirmedLine[4].text:find('proposed',1,true),
+ 'selection remains a proposal until a result is recorded')
+check(confirmedLine[#confirmedLine].kind=='confirmed' and confirmedLine[#confirmedLine].text:find('confirmed',1,true),
+ 'only a recorded confirmed outcome finishes the timeline')
+local proposedLine=V.Timeline(pending)
+check(proposedLine[#proposedLine].kind=='unconfirmed'
+ and proposedLine[#proposedLine].text:find('not confirmed',1,true),
+ 'a selected entry never claims a sent choice or obtained result')
+local refusedLine=V.Timeline(refused)
+check(refusedLine[#refusedLine].kind=='notSent'
+ and refusedLine[#refusedLine].text:find('not sent',1,true),
+ 'a local refusal remains not sent')
+local unknownLine=V.Timeline(unknown)
+check(unknownLine[#unknownLine].kind=='unconfirmed'
+ and unknownLine[#unknownLine].text:find('unconfirmed',1,true),
+ 'unknown stays unconfirmed')
+check(#V.Timeline(bare)==3 and V.Timeline(bare)[2].kind=='requested'
+ and V.Timeline(bare)[3].kind=='unconfirmed',
+ 'a prepared request alone neither invents an offer nor a sent result')
+local incomplete={serial=7,ordinal=7,state='confirmed',sourceKey='410001:1'}
+check(V.Result(incomplete).status=='unconfirmed'
+ and V.Timeline(incomplete)[#V.Timeline(incomplete)].kind=='unconfirmed',
+ 'an incomplete confirmed-state record without obtained identity is unconfirmed')
+local disputed={serial=8,ordinal=8,state='unknown',sourceKey='410001:1',
+ offered={{spellId=410002,quality=2,name='Desired A'}},
+ selectedKey='410002:2',obtained='410002:2'}
+check(V.Rows(view({disputed}),nil)[1].replacement.confirmed~=true
+ and V.Offers(disputed,nil)[1].confirmed~=true
+ and V.Details(disputed,nil,100).received==nil,
+ 'an obtained field without a confirmed state is retained technically but not portrayed as a confirmed result')
+check(V.Timeline({state='offered'})[2].kind=='unconfirmed',
+ 'an offered label alone cannot invent offer cards absent from the entry')
 
 -- 4. The report carries the whole run in order, and only technical mode
 -- exposes the identifiers.
@@ -184,7 +227,7 @@ check(log.rows[1].source:GetText():find('Uncommon',1,true)~=nil,
  'and states its rarity in words: '..log.rows[1].source:GetText())
 check(log.rows[1].replacement:GetText():find('Desired A',1,true)~=nil,
  'and names the replacement: '..log.rows[1].replacement:GetText())
-check(log.rows[1].result:GetText()=='Confirmed','and its result: '..log.rows[1].result:GetText())
+check(log.rows[1].result:GetText()=='+ Confirmed','and its worded result: '..log.rows[1].result:GetText())
 check(log.rows[8]:IsShown() and log.rows[8].index:GetText()=='8.','eight rows are used on a full page')
 check(not log.prev:IsEnabled(),'Previous is disabled on the first page')
 check(log.next:IsEnabled(),'Next is enabled while pages remain')
@@ -264,6 +307,10 @@ log.rows[2]:Click()
 check(log.rows[2].highlight:IsShown(),'the selected row is highlighted')
 local detailText=log.details:GetText()
 check(detailText:find('Operation 2',1,true)~=nil,'the details name the operation: '..detailText)
+check(detailText:find('Recorded timeline',1,true)
+ and detailText:find('Actual Orb offer observed',1,true)
+ and detailText:find('Replacement confirmed',1,true),
+ 'the real panel renders only recorded milestones: '..detailText)
 check(detailText:find('Desired A',1,true) and detailText:find('Disposable B',1,true)
  and detailText:find('Desired B',1,true),'the details list the three recorded offers')
 check(detailText:find('[received]',1,true)~=nil,
@@ -320,10 +367,10 @@ log.rows[1]:GetScript('OnEnter')(log.rows[1])
 check(log.rows[1].full:find('Extremely Long Echo Name Extremely',1,true)~=nil,
  'the whole recorded name stays available on hover: '..log.rows[1].full)
 log.rows[1]:GetScript('OnLeave')(log.rows[1])
-check(log.rows[2].result:GetText()=='Awaiting result','a pending row says so: '..log.rows[2].result:GetText())
+check(log.rows[2].result:GetText()=='... Awaiting\nresult','a pending row says so: '..log.rows[2].result:GetText())
 check(log.rows[2].replacement:GetText():find('proposed',1,true)~=nil,
  'and marks its replacement as proposed: '..log.rows[2].replacement:GetText())
-check(log.rows[3].result:GetText()=='Not sent','a refusal is visible: '..log.rows[3].result:GetText())
+check(log.rows[3].result:GetText()=='- Not sent','a refusal is visible: '..log.rows[3].result:GetText())
 check(log.rows[4].source:GetText():find('Unknown Echo (777777)',1,true)~=nil,
  'an unresolvable name keeps its id: '..log.rows[4].source:GetText())
 -- A selected choice that was never confirmed is marked selected, not received.
@@ -425,14 +472,14 @@ check(log.page:GetText():find(' of 40',1,true)~=nil,
 stubEntries=stub(15)
 stubHeader.revision=10
 log:Hide();log=Nexus.OrbPanel.ShowLog()
-check(log.rows[1].result:GetText()=='Confirmed','the first row starts confirmed')
+check(log.rows[1].result:GetText()=='+ Confirmed','the first row starts confirmed')
 button('Copy report',log):Click()
 local staleCopy=NexusOrbHistoryCopy.editBox:GetText()
 button('Close',NexusOrbHistoryCopy):Click()
 stubEntries[1].state='selected';stubEntries[1].obtained=nil
 stubHeader.revision=11
 log:GetScript('OnUpdate')(log,1)
-check(log.rows[1].result:GetText()=='Awaiting result',
+check(log.rows[1].result:GetText()=='... Awaiting\nresult',
  'the open window follows a recorded change at constant total: '..log.rows[1].result:GetText())
 button('Copy report',log):Click()
 check(NexusOrbHistoryCopy.editBox:GetText()~=staleCopy,
@@ -493,7 +540,7 @@ for step=1,3 do
 end
 log=Nexus.OrbPanel.ShowLog()
 check(log.page:GetText()=='Operations 1-3 of 3','the real run records three operations: '..log.page:GetText())
-check(log.rows[1].result:GetText()=='Confirmed','the first real operation is confirmed: '..log.rows[1].result:GetText())
+check(log.rows[1].result:GetText()=='+ Confirmed','the first real operation is confirmed: '..log.rows[1].result:GetText())
 check(log.rows[1].source:GetText():find('Disposable',1,true)~=nil,
  'the replaced Echo is the source the runtime recorded: '..log.rows[1].source:GetText())
 check(log.rows[1].replacement:GetText():find('Desired A',1,true)~=nil,

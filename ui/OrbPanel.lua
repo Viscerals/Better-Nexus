@@ -778,6 +778,19 @@ local function logRowTone(result)
     if result.unresolved then return RESULT_TONE.Unconfirmed end
     return {.82,.84,.88}
 end
+local function logResultCell(result)
+    local parts=Nexus.Readout and Nexus.Readout.StatusParts
+        and Nexus.Readout.StatusParts(result.status) or nil
+    local glyph=parts and (parts.glyph.." ") or ""
+    local label=tostring(result.label or "Unconfirmed")
+    -- The result column is only 105 units wide. Keep long words complete and
+    -- on two lines instead of clipping the status at enlarged UI scale.
+    if #label>13 then
+        local first,rest=label:match("^(%S+)%s+(.+)$")
+        if first then return glyph..first.."\n"..rest end
+    end
+    return glyph..label
+end
 local function logCell(fs,label,color)
     fs:SetText(label or "")
     if color then pcall(fs.SetTextColor,fs,color[1],color[2],color[3]) end
@@ -806,6 +819,12 @@ local function logDetailText(details,history)
     local lines={}
     local function add(text) lines[#lines+1]=text end
     add("Operation "..tostring(details.ordinal)..": "..details.result.label)
+    add("Recorded timeline (intermediate steps have no saved timestamps):")
+    for _,stage in ipairs(details.timeline or {}) do
+        local line=Nexus.Readout and Nexus.Readout.StatusText
+            and Nexus.Readout.StatusText(stage.kind,stage.text) or stage.text
+        add("  "..line)
+    end
     if details.offers then
         local parts={}
         for _,offer in ipairs(details.offers) do
@@ -898,7 +917,7 @@ function refreshLog(force)
             logCell(row.source,logEchoText(model.source),model.source.rarity.color)
             logCell(row.replacement,logEchoText(model.replacement),model.replacement.rarity.color)
             logCell(row.reason,model.reason.label)
-            logCell(row.result,model.result.label,logRowTone(model.result))
+            logCell(row.result,logResultCell(model.result),logRowTone(model.result))
             row.detail=model.reason.detail
             row.full=model.source.full.." ("..model.source.rarity.label..")"
                 .."  ->  "..model.replacement.full
