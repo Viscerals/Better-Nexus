@@ -455,7 +455,7 @@ do
 end
 
 
-Nexus.WishlistEditor.Show();check(texts():find('Build Library',1,true),'T01 actual Wishlist navigation')
+Nexus.WishlistEditor.Show();check(NexusEditorFrame:IsShown() and texts():find('Explore',1,true),'T01 actual Wishlist navigation to Explore')
 Nexus.CommunityBuilds.Show();check(texts():find('Build Library',1,true),'T01 actual library navigation/title')
 -- Real projection Detail and its normal renderer, with fixture read dependencies.
 local owner=Nexus.Store.CurrentOwnerKey()
@@ -1418,7 +1418,9 @@ do
  Verify(ENT,'#143 English',false)
  check(NexusPanel._chargesText:GetText()=='B:0 R:? F:7','GUARD #143 English: the charge row shows 0, unknown and 7')
  check(Nexus.Localization.Diagnostics().misses==misses,'GUARD #143 English: the mapped calls record no fallback while the reviewed English is present')
- local NAV={{'builds',{n=0}},{'builds',{n=2,'boolean','function'}},{'editor',0},{'editor',0},{'editor',0}}
+ -- Both game-page routes now defer closing Plan until the game's button is
+ -- available. The visible UI still reaches the same destinations once each.
+ local NAV={{'builds',{n=2,'boolean','function'}},{'builds',{n=2,'boolean','function'}},{'editor',0},{'editor',0},{'editor',0}}
  local navEnglish=Navigate()
  check(same(navEnglish,NAV),'GUARD #143 English: the existing navigation callbacks reach the same destinations once each, with the same signatures')
  check(same(Effects(),effects),'GUARD #143 English: renders, hovers and navigation change no saved root, setting, language, action, send, chat, popup, consent or Auto')

@@ -284,18 +284,22 @@ C.scenario('R5 terminology lint: no deprecated unqualified form in the shipped U
  C.guard(#missing==0,'R5: the game\'s own My Builds page keeps its name where it means that page',table.concat(missing,'; '))
  -- The actual bound button in this English session, and its unchanged
  -- destination: the real Panel's My Builds button shows exactly My Builds,
- -- and its click still opens the game's own My Builds page through
- -- JournalTab.OpenBuilds with no argument (a narrow spy: nothing is opened).
+ -- and its click still opens the game's own My Builds page through the
+ -- deferred close callback. A refused game-page open must leave Plan intact.
  Nexus.Panel.Show()
  local switch=NexusPanel and NexusPanel._switchBtn
  local shown=switch and V.Plain(switch:GetText() or '') or ''
  local journal=Nexus.JournalTab
  local openBuilds,calls=journal and journal.OpenBuilds,{}
- if journal then journal.OpenBuilds=function(...) calls[#calls+1]=select('#',...);return true end end
+ if journal then journal.OpenBuilds=function(deferred,close,...)
+  calls[#calls+1]={deferred=deferred,close=close,extra=select('#',...)}
+  return true
+ end end
  local clicked=switch~=nil and pcall(switch.Click,switch)
  if journal then journal.OpenBuilds=openBuilds end
- C.guard(Nexus.Localization.ActiveLanguage()=='enUS' and shown=='My Builds' and clicked==true and #calls==1 and calls[1]==0,
-  'R5: the actual My Builds button shows the game page name in English and still opens that page',shown..' / '..#calls..' call(s)')
+ C.guard(Nexus.Localization.ActiveLanguage()=='enUS' and shown=='My Builds' and clicked==true
+  and #calls==1 and calls[1].deferred==false and type(calls[1].close)=='function' and calls[1].extra==0,
+  'R5: the My Builds button keeps its name and guarded game-page route',shown..' / '..#calls..' call(s)')
 end)
 
 -- R6: the real Build Library window. The Mine scope (internal key "mine"),

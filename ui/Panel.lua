@@ -2508,7 +2508,7 @@ function M.MoreMenuItems(anchor)
 
     Add(MenuTitle("Settings"))
     Add({ text = "Open Settings...", notCheckable = true,
-        tooltipTitle = "Nexus Settings",
+        tooltipTitle = "Settings",
         tooltipText = "Open the grouped settings window. Opening it changes no preferences.",
         func = MenuAction(function()
             if Nexus.SettingsWindow and Nexus.SettingsWindow.Show then
