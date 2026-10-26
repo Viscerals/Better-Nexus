@@ -104,6 +104,12 @@ function G.AwaitSave()
     s.awaitSave, s.saveSeen, s.draft = Tick(), nil, nil
 end
 
+-- A canceled editor/import route must not claim a later unrelated save.
+function G.CancelAwaitSave()
+    local s = G.State()
+    s.awaitSave = nil
+end
+
 -- Fresh read back of one destination: its action token and assigned plan.
 function G.ReadAssignment(dest)
     local a = Nexus.GameAdapter

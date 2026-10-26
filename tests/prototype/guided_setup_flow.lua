@@ -113,7 +113,8 @@ C.scenario('F1 first use: every navigation control moves the guide only',functio
  if _G.NexusHelpWindow then NexusHelpWindow:Hide() end
  Nexus.GuidedSetupUI.Replay();C.expect(Step()=='welcome','F1: replay starts again at Welcome')
  C.guard(Effects()==before,'F1: navigation wrote, acted, sent, spent and toggled nothing',Effects())
- C.guard(rawget(NexusDB,'hasSeenQuickStart')==nil,'F1: the informational Setup / Welcome records no acknowledgement')
+ C.guard(rawget(NexusDB,'hasSeenQuickStart')==true,
+  'F1: the later deliberate Close of the pending first-use coach records only its dismissal')
 end)
 
 C.scenario('F2 existing path: choice, target, one explicit assignment, verified read back',function()

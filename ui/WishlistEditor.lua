@@ -859,10 +859,21 @@ StaticPopupDialogs["NEXUS_IMPORT_WISHLIST"] = {
         -- The field was claimed by OnShow, so its text is the pasted bytes.
         M.ImportEBH1String(self and self.editBox and self.editBox:GetText())
     end,
+    OnCancel = function(self)
+        if self and self.Hide then self:Hide() end
+        if Nexus.GuidedSetupUI and Nexus.GuidedSetupUI.RouteEnded then
+            Nexus.GuidedSetupUI.RouteEnded('import')
+        end
+    end,
     EditBoxOnEnterPressed = function(self)
         self:GetParent().button1:Click()
     end,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    EditBoxOnEscapePressed = function(self)
+        self:GetParent():Hide()
+        if Nexus.GuidedSetupUI and Nexus.GuidedSetupUI.RouteEnded then
+            Nexus.GuidedSetupUI.RouteEnded('import')
+        end
+    end,
     timeout = 0, whileDead = true, hideOnEscape = true,
 }
 

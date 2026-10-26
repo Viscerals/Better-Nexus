@@ -5,7 +5,8 @@
 -- no legacy Welcome. Its deliberate Close or Escape is the first-use
 -- dismissal, recorded with the existing durable policy; a raw hide, a coach
 -- route that steps aside or a changed character records nothing, and closing
--- leaves guide steps not done. A first-launch No, X or Escape keeps the
+-- leaves guide steps not done. Help reopen retains the first-use Close, while
+-- editor/import Cancel and Escape resume without claiming a save. A first-launch No, X or Escape keeps the
 -- information-only Welcome (no coach consent, Auto OFF, no acknowledgement).
 -- Help's visible primary Setup / Welcome opens or resumes the coach directly;
 -- the Setup checklist stays its own window. While an Auto warning waits for
@@ -181,6 +182,70 @@ C.scenario('E4 Help primary Setup / Welcome opens and resumes the coach directly
  C.expect(Coach(),'E4: the coach stays open beside the checklist, not replaced')
  C.guard(Saved()==saved and Seen()==true,'E4: nothing is written by Help, the coach or the checklist')
  Quiet('E4',b)
+end)
+
+C.scenario('E8 a raw hide followed by Help reopening keeps the first-use Close acknowledgement',function()
+ if not FirstBoot('E8') then return end
+ NexusOverwriteWarning.yes:Click()
+ if not C.setup(Coach() and Seen()==nil,'E8: fixture: first-use coach open and unseen') then return end
+ Nexus.GuidedSetupUI.Hide()
+ C.guard(not Coach() and Seen()==nil,'E8: raw hide does not acknowledge first use')
+ Nexus.Help.Show('start')
+ local setup=HelpButton('Setup / Welcome')
+ if not C.setup(setup~=nil,'E8: fixture: Help primary setup action exists') then return end
+ setup:Click()
+ C.expect(Coach() and Seen()==nil,'E8: Help reopens the same first-use coach without recording a dismissal')
+ local close=CoachButton('Close')
+ if close then close:Click() end
+ C.expect(not Coach() and Seen()==true,'E8: deliberate Close after Help reopen acknowledges first use')
+end)
+
+C.scenario('E9 canceling first-use Wishlist creation returns to the same coach',function()
+ if not FirstBoot('E9') then return end
+ NexusOverwriteWarning.yes:Click()
+ if not C.setup(Coach(),'E9: fixture: first-use coach open') then return end
+ local b=Counts()
+ local new=CoachOption('I am new');if new then new:Click() end
+ local create=CoachButton('Create a new Wishlist')
+ if not C.setup(Step()=='wishlist' and create~=nil,'E9: fixture: create action on Wishlist step') then return end
+ create:Click()
+ if not C.setup(not Coach() and NexusEditorFrame and NexusEditorFrame:IsShown(),
+  'E9: fixture: editor opened and coach stepped aside') then return end
+ NexusEditorFrame:Hide() -- Cancel/close without saving a draft
+ C.expect(Coach() and Step()=='wishlist' and Seen()==nil,
+  'E9: closing the unsaved editor returns the coach without completing or acknowledging')
+ C.expect(Nexus.GuidedSetup.State().awaitSave==nil,
+  'E9: an abandoned editor no longer accepts a later unrelated save receipt')
+ Quiet('E9',b)
+end)
+
+C.scenario('E10 canceling first-use Wishlist import returns to the same coach',function()
+ if not FirstBoot('E10') then return end
+ NexusOverwriteWarning.yes:Click()
+ if not C.setup(Coach(),'E10: fixture: first-use coach open') then return end
+ local b=Counts()
+ local new=CoachOption('I am new');if new then new:Click() end
+ local import=CoachButton('Import a code')
+ if not C.setup(Step()=='wishlist' and import~=nil,'E10: fixture: import action on Wishlist step') then return end
+ import:Click()
+ local dialog=StaticPopupDialogs.NEXUS_IMPORT_WISHLIST
+ if not C.setup(not Coach() and H.popup and H.popup.which=='NEXUS_IMPORT_WISHLIST' and dialog,
+  'E10: fixture: import popup opened and coach stepped aside') then return end
+ if dialog.OnCancel then dialog.OnCancel(H.popup.frame) end
+ C.expect(Coach() and Step()=='wishlist' and Seen()==nil,
+  'E10: canceling the import popup returns the coach without completing or acknowledging')
+ C.expect(Nexus.GuidedSetup.State().awaitSave==nil,
+  'E10: a canceled import no longer accepts a later unrelated save receipt')
+ import=CoachButton('Import a code')
+ if import then import:Click() end
+ if C.setup(H.popup and H.popup.which=='NEXUS_IMPORT_WISHLIST' and not Coach(),
+  'E10: fixture: import can be opened again') then
+  local escape=dialog.EditBoxOnEscapePressed
+  if escape then escape(H.popup.frame.editBox) end
+  C.expect(Coach() and Seen()==nil and Nexus.GuidedSetup.State().awaitSave==nil,
+   'E10: Escape also returns the coach without claiming a save or first-use dismissal')
+ end
+ Quiet('E10',b)
 end)
 
 C.scenario('E5 an open Auto warning refuses Setup / Welcome truthfully; nothing is queued; an explicit retry opens the coach',function()

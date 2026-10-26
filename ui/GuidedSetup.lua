@@ -326,8 +326,23 @@ function U.Render()
     Layout()
 end
 
+-- An unsaved route may be canceled without a save receipt. Return to the
+-- same guide step, but never claim the Wishlist was completed.
+function U.RouteEnded(kind)
+    local f = frame
+    if not f or not f.waiting or f.waitingKind ~= kind then return end
+    local warning = Nexus.OverwriteWarning
+    if warning and type(warning.IsOpen) == 'function' and warning.IsOpen() then return end
+    local g = Core()
+    if g and type(g.CancelAwaitSave) == 'function' then g.CancelAwaitSave() end
+    f.waiting, f.waitingKind = nil, nil
+    f:Show()
+    U.Render()
+end
+
 -- Opens the editor or the import dialog; the guide steps aside and returns
--- when the editor reports a save. Opening a draft completes nothing.
+-- when the editor reports a save or the route is canceled. Opening a draft
+-- completes nothing.
 function U.RouteEditor(kind)
     local g, n, f = Core(), Copy().notes or {}, frame
     if not Ready() then note = n.startup; return end
@@ -336,8 +351,19 @@ function U.RouteEditor(kind)
         if type(StaticPopup_Show) ~= 'function' or not (StaticPopupDialogs or {}).NEXUS_IMPORT_WISHLIST then note = n.noEditor; return end
     elseif not (editor and type(editor.NewWishlist) == 'function') then note = n.noEditor; return end
     g.AwaitSave(); note = nil
-    f.waiting = true; f:Hide()
-    if kind == 'import' then StaticPopup_Show('NEXUS_IMPORT_WISHLIST') else editor.NewWishlist() end
+    f.waiting, f.waitingKind = true, kind
+    f:Hide()
+    if kind == 'import' then
+        StaticPopup_Show('NEXUS_IMPORT_WISHLIST')
+    else
+        editor.NewWishlist()
+        local editorFrame = _G.NexusEditorFrame
+        if editorFrame and type(editorFrame.HookScript) == 'function' and not editorFrame._NexusGuideOnHide then
+            editorFrame._NexusGuideOnHide = true
+            editorFrame:HookScript('OnHide', function() U.RouteEnded('new') end)
+        end
+        if not editorFrame or not editorFrame:IsShown() then U.RouteEnded('new') end
+    end
 end
 
 -- Arms one request, then opens the existing Echo Journal chooser. A target
@@ -372,11 +398,9 @@ function U.Show()
     local warning = Nexus.OverwriteWarning
     if warning and type(warning.IsOpen) == 'function' and warning.IsOpen() then return false, 'warning-open' end
     local f = Ensure()
-    -- Shown again after another window or a warning hid it, the coach is a
-    -- replay, not first use. A coach still on screen, or one that stepped
-    -- aside for its own route (the editor, the Journal chooser), keeps it.
-    if not f:IsShown() and not f.waiting then f.firstUse = nil end
-    f.waiting, note = nil, nil
+    -- An ordinary hide does not acknowledge first use. Keep its guarded
+    -- callback across a Help reopen so a later deliberate Close can do so.
+    f.waiting, f.waitingKind, note = nil, nil, nil
     f:Show()
     U.Render()
     return true
@@ -393,7 +417,7 @@ function U.ShowFirstUse(onClose)
     local f = Ensure()
     f.firstUse = onClose
     if f.waiting and not f:IsShown() then return true end
-    f.waiting, note = nil, nil
+    f.waiting, f.waitingKind, note = nil, nil, nil
     f:Show()
     U.Render()
     return true
@@ -403,14 +427,14 @@ function U.Replay()
     if g then g.Replay() end
     return U.Show()
 end
-function U.Hide() if frame then frame.waiting = nil; frame:Hide() end end
+function U.Hide() if frame then frame.waiting, frame.waitingKind = nil, nil; frame:Hide() end end
 -- Close and Escape: the deliberate close. A first-use coach tells its caller
 -- once, after it is hidden; that caller decides what is recorded (only that
 -- first use was seen: guide steps keep their own state).
 function U.Close()
     if not frame then return end
     local onClose = frame.firstUse
-    frame.firstUse, frame.waiting = nil, nil
+    frame.firstUse, frame.waiting, frame.waitingKind = nil, nil, nil
     frame:Hide()
     if type(onClose) == 'function' then pcall(onClose) end
 end
@@ -420,7 +444,7 @@ function U.OnChange(receipt)
     if frame.waiting and type(receipt) == 'table' and (receipt.kind == 'save' or receipt.kind == 'assign') then
         local warning = Nexus.OverwriteWarning
         if not (warning and type(warning.IsOpen) == 'function' and warning.IsOpen()) then
-            frame.waiting = nil
+            frame.waiting, frame.waitingKind = nil, nil
             frame:Show()
         end
     end
