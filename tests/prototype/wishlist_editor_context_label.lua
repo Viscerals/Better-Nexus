@@ -15,6 +15,21 @@ local saved=H.Clone(Nexus.Store.State());local actions=#H.actions
 local assigned=A.AssignedWishlist()
 assert(assigned.state=='ready' and assigned.activeSlot==0,'real edited first-run assignment is ready')
 local function header()
+ -- Published destination row: its four cells as shown, in order (Wishlist
+ -- third). A published row that does not show all four fails here; it never
+ -- falls back to the legacy caption, a tooltip or row metadata.
+ local row=NexusEditorFrame._destinationRow
+ if type(row)=='table' and type(row.cells)=='table' then
+  local shown={}
+  for i=1,4 do
+   local c=row.cells[i]
+   local t=#row.cells==4 and type(c)=='table' and c:IsVisible() and c:GetText()
+   if type(t)~='string' or t=='' then error('actual editor destination cell '..i..' not shown') end
+   shown[i]=t
+  end
+  if not shown[3]:find('Wishlist: ',1,true) then error('actual editor destination row shows no Wishlist cell') end
+  return table.concat(shown,' / ')
+ end
  for _,r in ipairs(NexusEditorFrame.regions)do
   local text=r:GetText()
   if r:IsVisible() and text and text:find('Wishlist: ',1,true) then return text end

@@ -340,6 +340,14 @@ local echoDisplayReuse = nil
 -- The Echo fields the strict check rejected at the last scan: field -> reason.
 -- Current state only (never the last accepted one); see CaptureEchoSnapshot.
 local echoRejected = {}
+-- Presentation only. CaptureEchoSnapshot keeps an unreadable (nil) active
+-- slot as 0, as it always has for automation, so the activeSlot field and
+-- generation cannot show an unknown <-> known change that ReadSlots reports
+-- as activeKnown. known: that knownness at the last capture (nil before the
+-- first); generation: how often it changed between captures. Only
+-- A.PresentationRevisions reads it. Nothing is marked dirty, and the
+-- snapshot, ConsumeDirty and the stats are unchanged.
+local echoKnownness = { known=nil, generation=0 }
 local echoGenerations = {
     slots=0, granted=0, locked=0, discovery=0, activeSlot=0,
 }
@@ -5718,9 +5726,13 @@ local function CaptureEchoSnapshot()
         SlotsFingerprint, rawSlots, maxSlots)
 
     local activeSlot, activeField = 0, nil
+    -- Presentation only (echoKnownness): raw nil stays 0 in the field, but
+    -- only an accepted value that was read is a known active slot (ReadSlots).
+    local activeKnown = false
     if okActive then
         local value = rawActive == nil and 0 or tonumber(rawActive)
         if IntegerAtLeast(value, 0) then activeSlot, activeField = value, value end
+        activeKnown = rawActive ~= nil and activeField ~= nil
     end
     if activeField == nil then
         activeField = Rejected("activeSlot",
@@ -5778,7 +5790,7 @@ local function CaptureEchoSnapshot()
         locked=lockedSig,
         discovery=discoveredSig .. "|" .. disabledSig,
         activeSlot=activeField,
-    }, activeSlot, rejected
+    }, activeSlot, rejected, activeKnown
 end
 
 local function RefreshEchoAssociations()
@@ -5830,7 +5842,8 @@ local function ReconcileEchoState(markDirty, source, display)
         displayPE, displaySvc, displayGUID = PE(), PS(), DisplayReuseGUID()
     end
     echoStatus.scans = echoStatus.scans + 1
-    local ok, snapshot, activeSlot, rejected = pcall(CaptureEchoSnapshot)
+    local ok, snapshot, activeSlot, rejected, activeKnown =
+        pcall(CaptureEchoSnapshot)
     if not ok or type(snapshot) ~= "table" then
         -- An internal error of the capture itself (every field check is
         -- protected): nothing was read, so nothing is claimed either way.
@@ -5838,6 +5851,15 @@ local function ReconcileEchoState(markDirty, source, display)
         EchoReason("failure:" .. tostring(ok and "capture" or snapshot))
         return false, false
     end
+    -- Presentation only (echoKnownness): a change of the active slot's
+    -- knownness since the last capture, which the activeSlot field (raw nil
+    -- kept as 0) cannot show. No dirty mark, field generation, status count
+    -- or result changes here.
+    activeKnown = activeKnown == true
+    if echoKnownness.known ~= nil and echoKnownness.known ~= activeKnown then
+        echoKnownness.generation = echoKnownness.generation + 1
+    end
+    echoKnownness.known = activeKnown
     -- The strict check's current verdict, field by field: rejected fields are
     -- reported as such (failures counts scans that rejected any field).
     echoRejected = {}
@@ -6274,7 +6296,12 @@ function A.PresentationRevisions()
         catalogRevision = revisions.Get(revisions.CATALOG_CHANGED)
             or catalogRevision
     end
-    return echoGenerations.slots, echoGenerations.activeSlot,
+    -- The active value adds the presentation-only knownness count
+    -- (echoKnownness.generation). Both only grow, so the sum changes exactly
+    -- when either does, and it equals the activeSlot generation while the
+    -- knownness has never changed.
+    return echoGenerations.slots,
+        echoGenerations.activeSlot + echoKnownness.generation,
         echoGenerations.granted, ownedProjectionRevision,
         wishlistProjectionRevision, catalogRevision,
         echoGenerations.locked, lockedProjectionRevision,

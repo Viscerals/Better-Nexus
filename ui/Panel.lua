@@ -36,7 +36,27 @@ local renderState = {
     -- conversion (it is not idempotent), for a render of that same model.
     rawText=nil,
     statusPresentation=nil, -- committed, validated localization result only
+    -- Destination character observation (ObserveDestinationCharacter):
+    -- the world-session phase (nil before an entered world, "entered",
+    -- "leaving", "loggedOut") and the latest validated capture in it.
+    -- Memory only; presentation only.
+    destinationWorld=nil,
+    destinationCharacter=nil,
 }
+-- Destination world-session revision: a private monotonic count of
+-- ObserveDestinationCharacter's world invalidations (leave, logout, enter),
+-- published at each one as the view-only scalar M.destinationSessionRevision
+-- (nil before the first, while the count is still 0). Views bind their
+-- observations to the counted session, never to a character name. The
+-- writable public scalar stays for compatibility and diagnostics and cannot
+-- alone show the current session: a view holds an observation only while
+-- that scalar equals this count (read through the pure
+-- M.DestinationSessionCount) and the view's held stamp. The count only grows
+-- and is never reissued, so a restored earlier public value no longer
+-- matches it; equality cannot detect a value written equal to the current
+-- count (0 before the first publication included). Memory only;
+-- presentation only.
+local destinationSessionCounter = 0
 local renderStats = {
     calls=0, layouts=0, skipped=0, statusOnly=0,
     performancePasses=0, noticePasses=0, themeTreeWalks=0,
@@ -68,6 +88,630 @@ StaticPopupDialogs["NEXUS_UPDATE_RELEASES"] = {
 
 local function SafeText(v) return v ~= nil and tostring(v) or "" end
 
+------------------------------------------------------------------------
+-- Destination row: a reusable one-line strip of four disjoint cells, in
+-- UserText.DestinationFields order (character, Saved Build, Wishlist,
+-- state). It words only the descriptor its caller already captured,
+-- through that pure formatter, and changes only its own row and cells: it
+-- reads no game, Store or assignment state, resolves nothing and schedules
+-- nothing. The caller anchors the row (never to one of its cells) and owns
+-- its width and height. The do block keeps these locals out of the main
+-- chunk's scope and out of EnsureFrame.
+--
+-- M.CreateDestinationRow(parent[, firstText]) -> row
+--   row: a new Frame, child of parent, not anchored.
+--   row.cells: the four FontStrings, created once. cells[1] is firstText
+--   when given (it keeps its font); the others are row children in the
+--   LayoutMetrics normal font.
+--   row.hits: one LayoutMetrics.FullTextTooltip hover area per cell,
+--   created once and hidden until the first successful update; then each
+--   shows all DestinationFields tooltip lines, stored by the update in
+--   every cell's _nexusFullText.
+-- M.UpdateDestinationRow(row, descriptor, width, height[, forceFirstText])
+--   -> refit
+--   Sizes the row to width x height (height at least 17 px: one line, no
+--   wrapping) and fits the cells in it, left to right. refit is false for
+--   a settled update (same formatter output, width, height,
+--   LayoutMetrics.RuntimeKey and per-cell GetFont): it calls no cell
+--   setter and measures nothing, except that forceFirstText re-applies the
+--   shown first text with a real cells[1]:SetText. Widget errors are not
+--   caught. The view cache (row._nexusDestinationView) is cleared before
+--   the first widget call and committed only after every cell operation
+--   succeeded, so a failed update is redone in full by the next one.
+--
+-- Fit: each text is measured in its own cell (GetStringWidth). A cell
+-- tries "Label: value", "Label: compact", a short cue with compact (C:,
+-- B:, W:; a state alternative is its own cue), then the cue with minimum
+-- (Wishlist, state); the widest cell steps down first. A state shows one
+-- whole alternative and is never cut. Only names are shortened: the
+-- character and Saved Build compact values and a Wishlist minimum longer
+-- than one character (the formatter's assigned name; its refusal, unknown
+-- and unavailable markers are one character). A Wishlist compact value is
+-- shown whole or replaced by its minimum, unless the name cut below
+-- applies. A name is tried
+-- whole first, with its cue and then without it; only then is it cut. A
+-- cut falls at a UTF-8 character, an escaped pipe pair "||" counting as
+-- one, keeps the leading token (up to 3 characters; a slot token, "#" and
+-- all its digits such as "#123", always whole, never "#" or "#1" of "#12")
+-- and adds "..." when that still fits, else omits the "...", else the cue.
+-- The name cut follows its own rules: when the Wishlist cell would show a
+-- minimum that begins its compact value within the value's leading token
+-- (up to its first space), such as "?" of "?: name", and its shortest cut
+-- fits beside every other cell's whole alternative short of the minima,
+-- that cut is shown instead, such as "W:?: Starter..." for "W:?", and the
+-- other cells show those alternatives. It keeps the cue, the whole token
+-- and at least its next 4 characters (the space and 3 more; trailing
+-- spaces dropped), falls at a UTF-8 character as above, adds "..." and is
+-- the longest such cut that fits the room the other cells leave. A
+-- compact that such a cut would not narrow, or one that its minimum does
+-- not begin, is shown whole or as its minimum; a state and a
+-- one-character marker are never cut.
+-- Below the whole floors (a slot token alone included) the cells stay
+-- disjoint in the row and the client shortens them, the state last; the
+-- tooltip keeps every full line.
+------------------------------------------------------------------------
+do
+    local DEST_MIN_HEIGHT, DEST_GAP, DEST_SLACK, DEST_LEAD = 17, 4, 1, 3
+    local DEST_ELLIPSIS = "..."
+    local DEST_CUES = {character = "C:", savedBuild = "B:", wishlist = "W:", state = ""}
+    -- The value a cell may cut (names only, see above). A Wishlist compact
+    -- is not listed: only the name cut shortens it, and only while its
+    -- minimum is the Wishlist value listed here (see above).
+    local DEST_CLIP = {character = "compact", savedBuild = "compact", wishlist = "minimum"}
+
+    local function DestLayout()
+        local layout = Nexus.LayoutMetrics
+        if type(layout) ~= "table" or type(layout.FontObject) ~= "function"
+            or type(layout.OneLineLabel) ~= "function"
+            or type(layout.FullTextTooltip) ~= "function"
+            or type(layout.RuntimeKey) ~= "function"
+            or type(layout.RuntimeMetrics) ~= "function"
+            or type(layout.ConservativeText) ~= "function" then
+            error("Nexus destination row: Nexus.LayoutMetrics is not loaded", 3)
+        end
+        return layout
+    end
+
+    local function DestFields(descriptor)
+        local userText = Nexus.UserText
+        local formatter = type(userText) == "table" and userText.DestinationFields
+        if type(formatter) ~= "function" then
+            error("Nexus destination row: Nexus.UserText.DestinationFields is not loaded", 3)
+        end
+        local fields, tooltip = formatter(descriptor)
+        if type(fields) ~= "table" or #fields ~= 4 or type(tooltip) ~= "table" then
+            error("Nexus destination row: DestinationFields did not return four cells", 3)
+        end
+        return fields, tooltip
+    end
+
+    local function DestRowParts(row)
+        local cells = type(row) == "table" and row.cells
+        local hits = type(row) == "table" and row.hits
+        if type(cells) ~= "table" or type(hits) ~= "table" or #cells ~= 4 or #hits ~= 4 then
+            error("Nexus.Panel.UpdateDestinationRow: not a row from CreateDestinationRow", 3)
+        end
+        return cells, hits
+    end
+
+    -- Bytes of the display character at index: one UTF-8 character, an
+    -- escaped pipe pair "||", or a lone pipe with the character after it, so
+    -- that a cut never splits a character or an escape.
+    local function DestStep(text, index)
+        local byte = text:byte(index)
+        if byte == 124 then
+            local following = text:byte(index + 1)
+            if following == nil then return 1 end
+            if following == 124 then return 2 end
+            return 1 + DestStep(text, index + 1)
+        end
+        if byte < 0xC0 then return 1 end
+        if byte < 0xE0 then return 2 end
+        if byte < 0xF0 then return 3 end
+        return 4
+    end
+
+    -- The last byte of each display character of text.
+    local function DestUnitEnds(text)
+        local ends, index, length = {}, 1, #text
+        while index <= length do
+            index = math.min(length, index + DestStep(text, index) - 1) + 1
+            ends[#ends + 1] = index - 1
+        end
+        return ends
+    end
+
+    -- The fitted width of text in this cell's own font, measured once per
+    -- update; while the client reports no width, the LayoutMetrics
+    -- conservative character width stands in.
+    local function DestMeasure(cell, text, memo, fallback)
+        local width = memo[text]
+        if width then return width end
+        cell:SetText(text)
+        local measured = tonumber(cell:GetStringWidth())
+        if not measured or measured ~= measured or measured <= 0 or measured >= math.huge then
+            measured = #DestUnitEnds(text) * fallback
+        end
+        width = math.ceil(measured) + DEST_SLACK
+        memo[text] = width
+        return width
+    end
+
+    -- A cell's alternatives, each strictly narrower than the one before.
+    local function DestLadder(cell, field, memo, fallback)
+        local key = field.key
+        local label = SafeText(field.label)
+        local full = label ~= "" and (label .. ": ") or ""
+        local cue = DEST_CUES[key] or (label ~= "" and (label:sub(1, 1) .. ":") or "")
+        local value = SafeText(field.value)
+        local compact = field.compact ~= nil and SafeText(field.compact) or value
+        local wanted = {
+            {text = full .. value},
+            {text = full .. compact},
+            {text = cue .. compact, cue = cue, value = compact, clip = DEST_CLIP[key] == "compact"},
+        }
+        if field.minimum ~= nil then
+            local minimum = SafeText(field.minimum)
+            wanted[4] = {text = cue .. minimum, cue = cue, value = minimum,
+                clip = DEST_CLIP[key] == "minimum"}
+        end
+        local ladder, kept = {}, {}
+        for index = 1, #wanted do
+            local rung = wanted[index]
+            local same = kept[rung.text]
+            if same ~= nil then
+                if same and rung.clip then
+                    same.clip, same.cue, same.value = true, rung.cue, rung.value
+                end
+            else
+                rung.width = DestMeasure(cell, rung.text, memo, fallback)
+                local last = ladder[#ladder]
+                if not last or rung.width < last.width then
+                    ladder[#ladder + 1] = rung
+                    kept[rung.text] = rung
+                else
+                    kept[rung.text] = false
+                end
+            end
+        end
+        return ladder
+    end
+
+    -- A name rung fitted to limit (see the policy above): its text and
+    -- fitted width. The whole value is tried first, with its cue and then
+    -- without it; only a value that does not fit whole is cut. A leading
+    -- slot token ("#" and its digits, then a space or the end, such as
+    -- "#12") is atomic: a cut keeps it whole and shortens only the name
+    -- after it, and a token that does not fit even alone is shown whole
+    -- (the client then shortens the cell).
+    local function DestClip(cell, rung, limit, memo, fallback)
+        local value, cue = rung.value, rung.cue
+        local width = DestMeasure(cell, cue .. value, memo, fallback)
+        if width <= limit then return cue .. value, width end
+        width = DestMeasure(cell, value, memo, fallback)
+        if width <= limit then return value, width end
+        local ends = DestUnitEnds(value)
+        local count, lead, start = #ends, #ends, 1
+        for unit = 1, count do
+            if ends[unit] == start and value:byte(start) == 32 then
+                lead = unit - 1
+                break
+            end
+            start = ends[unit] + 1
+        end
+        -- A slot token has one byte per character: it is the leading token
+        -- exactly when its length is lead.
+        local slot = value:match("^#%d+")
+        local atomic = slot ~= nil and #slot == lead
+        local need = atomic and lead or math.max(1, math.min(DEST_LEAD, lead, count - 1))
+        if need >= count then
+            -- The slot token is the whole value: it is never cut.
+            return value, width
+        end
+        local function Shown(units, withCue, ellipsis)
+            local prefix = value:sub(1, ends[units])
+            if ellipsis then prefix = (prefix:gsub(" +$", "")) .. DEST_ELLIPSIS end
+            return (withCue and cue or "") .. prefix
+        end
+        local function Largest(withCue, ellipsis)
+            local low, high, best = 1, count - 1, 0
+            while low <= high do
+                local middle = math.floor((low + high) / 2)
+                if DestMeasure(cell, Shown(middle, withCue, ellipsis), memo, fallback) <= limit then
+                    best, low = middle, middle + 1
+                else
+                    high = middle - 1
+                end
+            end
+            return best
+        end
+        local units, withCue, ellipsis = Largest(true, true), true, true
+        if units < need then
+            local bare = Largest(true, false)
+            if bare >= need then
+                units, ellipsis = bare, false
+            else
+                local alone = cue ~= "" and Largest(false, false) or bare
+                if atomic and alone < need then
+                    -- Not even the slot token fits alone: it stays whole.
+                    units, withCue, ellipsis = need, false, false
+                elseif alone > bare then
+                    units, withCue, ellipsis = alone, false, false
+                elseif bare >= 1 then
+                    units, ellipsis = bare, false
+                else
+                    units, withCue, ellipsis = 1, false, false
+                end
+            end
+        end
+        local text = Shown(units, withCue, ellipsis)
+        return text, DestMeasure(cell, text, memo, fallback)
+    end
+
+    -- Cell texts, widths and left offsets for a row width. Each cell first
+    -- steps down its own ladder, the widest first. When the narrowest whole
+    -- alternatives short of the minima (a minimum is the Wishlist or state
+    -- cue with minimum) fit together, no cell takes its minimum, so a whole
+    -- compact state such as a captured "first-run target" is not replaced
+    -- by its minimum ("C:1") while it fits beside the other cells' compact
+    -- alternatives; otherwise each ladder runs to its minimum, still the
+    -- widest first. When that discards a name into its minimum (the
+    -- Wishlist "W:?" of a "?: name" compact) and a name cut lets those
+    -- whole alternatives fit together, the cut is shown instead: every
+    -- other cell takes its whole alternative short of the minima again
+    -- (labels yield before a name is cut, and no cell keeps a minimum) and
+    -- the cut takes the room they leave, so a long plan name is shortened,
+    -- not lost, beside a whole captured state. A name cut needs a minimum
+    -- that is a name rung (DEST_CLIP) whose text, with the same cue,
+    -- begins the cue-with-compact text within the value's leading token
+    -- (up to its first space). It keeps that token whole, the space and at
+    -- least DEST_LEAD more characters, cut at a display character
+    -- (DestUnitEnds) with "...", so it shows all the minimum shows plus a
+    -- name prefix; the tooltip keeps the whole name. It is the only cut of
+    -- a Wishlist compact value (the policy above otherwise shows it whole
+    -- or as its minimum); a refusal or other marker that does not begin its
+    -- compact is never cut. A row still too wide then
+    -- reserves every floor before a name is shortened: a cell that is not
+    -- cut (a state, a one-glyph marker such as the refusal "!") keeps its
+    -- whole alternative, and a name keeps at least what DestClip shows at no
+    -- width (its slot token such as "#123" whole, else its leading
+    -- character). Only when those floors do not fit, and only when the
+    -- following together make them fit, optional parts yield in turn, each
+    -- no further than needed: the colon of a cue before a one-glyph
+    -- punctuation marker ("W:!" becomes "W!"), the gaps, then each box's
+    -- slack. The names then share the rest. Every text stays a whole
+    -- formatter alternative, a DestClip cut of a name or a name cut;
+    -- nothing is parsed out of a state, slot token or marker.
+    local function DestFit(layout, cells, fields, width)
+        local gap = math.max(0, math.min(DEST_GAP, math.floor((width - 4) / 3)))
+        local budget = width - 3 * gap
+        local fallback = (layout.ConservativeText((layout.RuntimeMetrics())))
+        local ladders, level, memos, total = {}, {}, {}, 0
+        for index = 1, 4 do
+            memos[index] = {}
+            ladders[index] = DestLadder(cells[index], fields[index], memos[index], fallback)
+            level[index] = 1
+            total = total + ladders[index][1].width
+        end
+        -- Step the widest cell that has a narrower alternative down first
+        -- (on a tie, the later cell), each no further than its stop: while
+        -- the narrowest whole alternatives of all four cells fit together,
+        -- that alternative (the rung before a minimum); otherwise its
+        -- narrowest. A minimum is a cue rung after another cue rung:
+        -- DestLadder gives a cue only to the cue-with-compact and
+        -- cue-with-minimum alternatives and keeps one rung where they are
+        -- the same text.
+        local stops, wholeWidth = {}, 0
+        for index = 1, 4 do
+            local ladder = ladders[index]
+            local stop = #ladder
+            if stop > 1 and ladder[stop - 1].cue ~= nil then stop = stop - 1 end
+            stops[index], wholeWidth = stop, wholeWidth + ladder[stop].width
+        end
+        -- whole: those stops short of the minima, kept for a name cut.
+        local whole = {}
+        if wholeWidth > budget then
+            for index = 1, 4 do
+                whole[index], stops[index] = stops[index], #ladders[index]
+            end
+        end
+        while total > budget do
+            local pick, widest = nil, -1
+            for index = 1, 4 do
+                local rung = ladders[index][level[index]]
+                if level[index] < stops[index] and rung.width >= widest then
+                    pick, widest = index, rung.width
+                end
+            end
+            if not pick then break end
+            local ladder = ladders[pick]
+            total = total - ladder[level[pick]].width + ladder[level[pick] + 1].width
+            level[pick] = level[pick] + 1
+        end
+        local texts, widths = {}, {}
+        for index = 1, 4 do
+            local rung = ladders[index][level[index]]
+            texts[index], widths[index] = rung.text, rung.width
+        end
+        -- A name discarded into its minimum (see above): when its name cut
+        -- at its floor fits beside every other cell's stop short of the
+        -- minima, each cell takes that stop again and each cut takes the
+        -- room the others leave, keeping the floors of the cuts after it:
+        -- its largest cut that fits, never below its floor.
+        if wholeWidth > budget then
+            local cuts, cutting, cutNeed = {}, false, 0
+            local function NameCut(cut, units)
+                return cut.cue .. (cut.value:sub(1, cut.ends[units]):gsub(" +$", ""))
+                    .. DEST_ELLIPSIS
+            end
+            for index = 1, 4 do
+                local ladder = ladders[index]
+                local rung, least = ladder[whole[index]], ladder[#ladder]
+                if level[index] == #ladder and whole[index] < #ladder and least.clip
+                    and not rung.clip and rung.cue == least.cue
+                    and rung.text:sub(1, #least.text) == least.text then
+                    local value = rung.value
+                    local ends = DestUnitEnds(value)
+                    local lead, start = nil, 1
+                    for unit = 1, #ends do
+                        if ends[unit] == start and value:byte(start) == 32 then
+                            lead = unit - 1
+                            break
+                        end
+                        start = ends[unit] + 1
+                    end
+                    local units = lead and lead + 1 + DEST_LEAD
+                    if units and lead >= 1 and units < #ends
+                        and #least.value <= ends[lead] then
+                        local cut = {cue = rung.cue, value = value, ends = ends, units = units}
+                        cut.floor = DestMeasure(cells[index], NameCut(cut, units),
+                            memos[index], fallback)
+                        if cut.floor < rung.width then cuts[index], cutting = cut, true end
+                    end
+                end
+                cutNeed = cutNeed + (cuts[index] and cuts[index].floor or rung.width)
+            end
+            if cutting and cutNeed <= budget then
+                local room = budget - cutNeed
+                total = 0
+                for index = 1, 4 do
+                    local cut = cuts[index]
+                    if cut then
+                        room = room + cut.floor
+                        local low, high, best = cut.units + 1, #cut.ends - 1, cut.units
+                        while low <= high do
+                            local middle = math.floor((low + high) / 2)
+                            if DestMeasure(cells[index], NameCut(cut, middle), memos[index],
+                                fallback) <= room then
+                                best, low = middle, middle + 1
+                            else
+                                high = middle - 1
+                            end
+                        end
+                        texts[index] = NameCut(cut, best)
+                        widths[index] = DestMeasure(cells[index], texts[index],
+                            memos[index], fallback)
+                        room = room - widths[index]
+                    else
+                        local rung = ladders[index][whole[index]]
+                        texts[index], widths[index] = rung.text, rung.width
+                    end
+                    total = total + widths[index]
+                end
+            end
+        end
+        -- Still too wide: every cell is at its narrowest alternative. Each
+        -- floor is reserved before a name is shortened (see above).
+        local slackYields = false
+        if total > budget then
+            local open, isOpen, floors, need = {}, {}, {}, 0
+            for index = 1, 4 do
+                local rung = ladders[index][level[index]]
+                if rung.clip and #DestUnitEnds(rung.value) >= 2 then
+                    open[#open + 1] = index
+                    isOpen[index] = true
+                    local _, least = DestClip(cells[index], rung, 0, memos[index], fallback)
+                    floors[index] = least
+                else
+                    floors[index] = widths[index]
+                end
+                need = need + floors[index]
+            end
+            -- Optional parts yield only when the floors do not fit and they
+            -- together make them fit, each no further than needed.
+            if need > budget then
+                local marks, saving, room = {}, 0, 0
+                for index = 1, 4 do
+                    local rung = ladders[index][level[index]]
+                    local cue, value, least = rung.cue, rung.value, floors[index]
+                    if not isOpen[index] and type(cue) == "string" and cue:sub(-1) == ":"
+                        and type(value) == "string" and value:find("^%p$") then
+                        local text = cue:sub(1, -2) .. value
+                        local narrow = DestMeasure(cells[index], text, memos[index], fallback)
+                        if narrow < least then
+                            marks[#marks + 1] = {index = index, text = text, width = narrow}
+                            saving, least = saving + least - narrow, narrow
+                        end
+                    end
+                    room = room + math.min(DEST_SLACK, least - 1)
+                end
+                if need - saving - room <= budget + 3 * gap then
+                    for position = 1, #marks do
+                        if need <= budget then break end
+                        local mark = marks[position]
+                        need = need - floors[mark.index] + mark.width
+                        floors[mark.index] = mark.width
+                        texts[mark.index], widths[mark.index] = mark.text, mark.width
+                    end
+                    if need > budget then
+                        local less = math.min(gap, math.ceil((need - budget) / 3))
+                        gap, budget = gap - less, budget + 3 * less
+                    end
+                    slackYields = need > budget
+                end
+            end
+            -- The names share the rest, the shortest first, each shortened
+            -- only when it exceeds its share; a share never takes the floors
+            -- kept for the names after it.
+            local remaining, reserved = budget, 0
+            for index = 1, 4 do
+                if isOpen[index] then
+                    reserved = reserved + floors[index]
+                else
+                    remaining = remaining - widths[index]
+                end
+            end
+            table.sort(open, function(a, b)
+                if widths[a] ~= widths[b] then return widths[a] < widths[b] end
+                return a < b
+            end)
+            for position = 1, #open do
+                local index = open[position]
+                reserved = reserved - floors[index]
+                local share = math.min(math.floor(remaining / (#open - position + 1)),
+                    remaining - reserved)
+                if widths[index] > share then
+                    texts[index], widths[index] = DestClip(cells[index],
+                        ladders[index][level[index]], share, memos[index], fallback)
+                end
+                remaining = remaining - widths[index]
+            end
+        end
+        local used = 0
+        for index = 1, 4 do used = used + widths[index] end
+        -- The last optional part: each box's slack, character first.
+        if slackYields then
+            for index = 1, 4 do
+                if used <= budget then break end
+                local cut = math.min(used - budget, DEST_SLACK, widths[index] - 1)
+                widths[index], used = widths[index] - cut, used - cut
+            end
+        end
+        -- Below the floors: narrow the boxes (character first, state last)
+        -- so that the cells stay disjoint inside the row.
+        for index = 1, 4 do
+            if used <= budget then break end
+            local cut = math.min(used - budget, widths[index] - 1)
+            widths[index], used = widths[index] - cut, used - cut
+        end
+        local offsets, x = {}, 0
+        for index = 1, 4 do
+            offsets[index] = x
+            x = x + widths[index] + gap
+        end
+        return texts, widths, offsets
+    end
+
+    local function DestPart(parts, value)
+        if value == nil then
+            parts[#parts + 1] = "~"
+        else
+            value = tostring(value)
+            parts[#parts + 1] = #value .. ":" .. value
+        end
+    end
+
+    -- Everything the row shows or discloses, from the formatter's output.
+    local function DestSemanticKey(fields, tooltip)
+        local parts = {}
+        for index = 1, #fields do
+            local field = fields[index]
+            DestPart(parts, field.key)
+            DestPart(parts, field.label)
+            DestPart(parts, field.value)
+            DestPart(parts, field.compact)
+            DestPart(parts, field.minimum)
+        end
+        DestPart(parts, #tooltip)
+        for index = 1, #tooltip do DestPart(parts, tooltip[index]) end
+        return table.concat(parts, "/")
+    end
+
+    -- The row geometry and effective fonts: LayoutMetrics.RuntimeKey (point
+    -- size, UI scale and revision) and each cell's own font path, size and
+    -- flags, which tell apart faces of the same size.
+    local function DestGeometryKey(layout, cells, width, height)
+        local parts = {}
+        DestPart(parts, layout.RuntimeKey("NexusDestinationRow", width, height))
+        for index = 1, #cells do
+            local path, size, flags = cells[index]:GetFont()
+            DestPart(parts, path)
+            DestPart(parts, size)
+            DestPart(parts, flags)
+        end
+        return table.concat(parts, "/")
+    end
+
+    function M.CreateDestinationRow(parent, firstText)
+        if firstText ~= nil and (type(firstText) ~= "table"
+            or type(firstText.SetText) ~= "function") then
+            error("Nexus.Panel.CreateDestinationRow: firstText must be a FontString", 2)
+        end
+        local layout = DestLayout()
+        local row = CreateFrame("Frame", nil, parent)
+        local cells, hits = {}, {}
+        for index = 1, 4 do
+            local cell = index == 1 and firstText or nil
+            if not cell then
+                cell = row:CreateFontString(nil, "OVERLAY")
+                cell:SetFontObject(layout.FontObject("normal"))
+                cell:SetJustifyH("LEFT")
+            end
+            local hit = layout.FullTextTooltip(cell, row)
+            hit:Hide()
+            cells[index], hits[index] = cell, hit
+        end
+        row.cells, row.hits = cells, hits
+        return row
+    end
+
+    function M.UpdateDestinationRow(row, descriptor, width, height, forceFirstText)
+        local cells, hits = DestRowParts(row)
+        width = tonumber(width)
+        if not width or width ~= width or width == math.huge or width == -math.huge then
+            error("Nexus.Panel.UpdateDestinationRow: width must be a finite number", 2)
+        end
+        width = math.max(4, math.floor(width))
+        height = tonumber(height)
+        if not height or height ~= height or height == math.huge then
+            height = DEST_MIN_HEIGHT
+        end
+        height = math.max(DEST_MIN_HEIGHT, math.floor(height))
+        local layout = DestLayout()
+        local fields, tooltip = DestFields(descriptor)
+        local semantic = DestSemanticKey(fields, tooltip)
+        local geometry = DestGeometryKey(layout, cells, width, height)
+        local view = row._nexusDestinationView
+        if view and view.semantic == semantic and view.geometry == geometry then
+            if forceFirstText then
+                row._nexusDestinationView = nil
+                cells[1]:SetText(view.texts[1])
+                row._nexusDestinationView = view
+            end
+            return false
+        end
+        row._nexusDestinationView = nil
+        local texts, widths, offsets = DestFit(layout, cells, fields, width)
+        local full = table.concat(tooltip, "\n")
+        row:SetWidth(width)
+        row:SetHeight(height)
+        for index = 1, 4 do
+            local cell = cells[index]
+            cell:SetText(texts[index])
+            cell:ClearAllPoints()
+            cell:SetPoint("LEFT", row, "LEFT", offsets[index], 0)
+            cell:SetWidth(widths[index])
+            cell:SetJustifyH("LEFT")
+            layout.OneLineLabel(cell, nil, height)
+            cell._nexusFullText = full
+        end
+        for index = 1, 4 do hits[index]:Show() end
+        row._nexusDestinationView = {semantic = semantic, geometry = geometry,
+            texts = texts, widths = widths, offsets = offsets}
+        return true
+    end
+end
+
 -- M4 (UX-04): the destination this panel's run belongs to, as lines, from the
 -- facts the shown model already carries: the verified active Saved Build
 -- (progress.activeSlot / activeSlotName), the run's Wishlist and the saved
@@ -91,12 +735,19 @@ function M.DestinationFacts(model)
     local assignment = type(model.assignment) == "table" and model.assignment or {}
     local slot = tonumber(pr.activeSlot) or 0
     local state = assignment.state
-    local d = {wishlist = pr.wishlistName or assignment.name}
+    -- A Community Build preview names the previewed build in
+    -- progress.wishlistName. Then only the actual assignment's name is this
+    -- destination's Wishlist (unknown without one), and the preview is said
+    -- as one (d.preview, presentation only).
+    local preview = pr.isCommunityPreview and true or false
+    local d = {wishlist = (not preview and pr.wishlistName) or assignment.name}
+    if preview then d.preview = true end
     -- The HUD always shows the logged-in character's run (J3: the destination
-    -- names its character). A client read at hover time; no service or state.
-    if type(UnitName) == "function" then
-        local ok, name = pcall(UnitName, "player")
-        if ok and type(name) == "string" and name ~= "" then d.character = name end
+    -- names its character): the name Main captured into this model
+    -- (model.character), else nil, said as not known. No client read, and no
+    -- earlier name stands in.
+    if type(model.character) == "string" and model.character ~= "" then
+        d.character = model.character
     end
     -- The adapter's own first-run facts (GameAdapter A.Wishlist: its first-run
     -- return and its unavailable first-run mirror), copied by Main into the
@@ -126,9 +777,11 @@ function M.DestinationFacts(model)
         -- without the verified field. Which Saved Build, and whether it is
         -- active, is not in this model, so neither is claimed (review B1).
         d.kind, d.unconfirmed = "savedBuild", true
-    elseif state == "unavailable" or pr.wishlistName then
+    elseif state == "unavailable" or (not preview and pr.wishlistName) then
         -- The model does not say whether this plan is the first-run target
-        -- or a Saved Build's: neither is claimed.
+        -- or a Saved Build's: neither is claimed. A Community Build
+        -- preview's title names the previewed build, never this
+        -- destination's plan, so it alone claims nothing.
         d.kind = "unconfirmed"
     else
         d.kind = "none"
@@ -169,6 +822,63 @@ local function OrbFacts(runtime)
     if type(reason) == "string" and reason ~= "" and #reason <= 4096 then orb.reason = reason end
     if type(operation) == "string" and operation ~= "" and #operation <= 512 then orb.operation = operation end
     return orb, true
+end
+
+-- View observation of the character Main's existing capture validated, for
+-- the destination strip. event: "PLAYER_LEAVING_WORLD" / "PLAYER_LOGOUT"
+-- clear and block the cache; "PLAYER_ENTERING_WORLD" clears it and admits a
+-- later capture; "capture" stores that capture (nil included) only inside an
+-- entered world. Memory only: no read, no model, Store or assignment change.
+function M.ObserveDestinationCharacter(character, event)
+    if event == "PLAYER_LEAVING_WORLD" or event == "PLAYER_LOGOUT"
+        or event == "PLAYER_ENTERING_WORLD" then
+        -- Each existing world invalidation starts a new view session
+        -- revision: the private count is first moved past any larger valid
+        -- public value, so that value is never reissued, then advanced and
+        -- published. No other read; a capture leaves it unchanged.
+        local published = M.destinationSessionRevision
+        if type(published) == "number" and published > destinationSessionCounter
+            and published < 4503599627370496
+            and published == math.floor(published) then
+            destinationSessionCounter = published
+        end
+        destinationSessionCounter = destinationSessionCounter + 1
+        M.destinationSessionRevision = destinationSessionCounter
+    end
+    if event == "PLAYER_LEAVING_WORLD" then
+        renderState.destinationWorld, renderState.destinationCharacter = "leaving", nil
+    elseif event == "PLAYER_LOGOUT" then
+        renderState.destinationWorld, renderState.destinationCharacter = "loggedOut", nil
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        renderState.destinationWorld, renderState.destinationCharacter = "entered", nil
+    elseif event == "capture" and renderState.destinationWorld == "entered" then
+        renderState.destinationCharacter =
+            (type(character) == "string" and character ~= "") and character or nil
+    end
+end
+
+-- The raw private destination world-session count, read only: one value,
+-- 0 before the first publication (while M.destinationSessionRevision is
+-- nil), else the value last published to that scalar. It validates,
+-- captures, writes and advances nothing and reads nothing else. Views hold
+-- an observation only while the public scalar equals this count and their
+-- held stamp, so a public value that differs, such as a restored earlier
+-- one, is rejected; equality cannot detect a value written equal to it.
+-- Memory only; presentation only.
+function M.DestinationSessionCount()
+    return destinationSessionCounter
+end
+
+-- The latest validated capture in the current world session, else nil.
+-- Pure: it initializes, reads and updates nothing else, and no earlier
+-- model or saved name stands in.
+function M.CachedDestinationCharacter()
+    local character = renderState.destinationCharacter
+    if renderState.destinationWorld == "entered"
+        and type(character) == "string" and character ~= "" then
+        return character
+    end
+    return nil
 end
 
 -- M7 (UX setup checklist and status): the current facts the checklist words
@@ -265,6 +975,11 @@ end
 
 local function ModelSignatures(model)
     local source = type(model.progress) == "table" and model.progress or {}
+    -- The destination descriptor, projected once for this candidate (pure,
+    -- from the model's own fields). Its signature covers everything the
+    -- destination row shows (a renamed slot, the current character, the
+    -- actual assignment, Preview); ApplyModel words this same table.
+    local destination = M.DestinationFacts(model)
     local layoutKey = "legacy"
     if Nexus.LayoutMetrics and Nexus.LayoutMetrics.RuntimeKey then
         local ok, key = pcall(Nexus.LayoutMetrics.RuntimeKey,"panel",272,0)
@@ -307,6 +1022,8 @@ local function ModelSignatures(model)
             charges=model.charges, chargeLine=model._nexusChargeLine,
             -- The inline Auto line (M.AutoNoteFor) is roll content too.
             autoNote=model.autoNote,
+            -- The destination row's whole descriptor, Preview included.
+            destination=destination,
         }),
         performance = Signature({
             performance=type(model.progress) == "table" and model.progress.performance or nil,
@@ -315,7 +1032,23 @@ local function ModelSignatures(model)
         notice = Signature(model.updateNotice),
         status = Signature(model.status),
         auto = Signature(model.auto),
+        destination = destination,
     }
+end
+
+-- The destination row cells' effective font path, size and flags, as a
+-- layout signature part ("none" before the row exists). A same-size
+-- replacement face is not in LayoutMetrics.RuntimeKey. Reads fonts only.
+function M.DestinationRowFonts()
+    local row = frame and frame._destinationRow
+    local cells = type(row) == "table" and row.cells or nil
+    if type(cells) ~= "table" then return "none" end
+    local parts = {}
+    for index = 1, #cells do
+        local path, size, flags = cells[index]:GetFont()
+        parts[#parts + 1] = Signature(path) .. Signature(size) .. Signature(flags)
+    end
+    return table.concat(parts, "/")
 end
 
 -- Keep the roll block's space through an ordinary gap between Echo choices.
@@ -810,6 +1543,13 @@ local function EnsureFrame()
     buildHeaderText:SetSize(244, 17)
     buildHeaderText:SetJustifyH("CENTER")
     buildHeaderText:SetTextColor(0.45, 0.84, 1)
+    -- The destination row (character, Saved Build, Wishlist, state) replaces
+    -- the single Wishlist heading, which is its first cell. It is anchored
+    -- here once, independently of its cells, in the header's own space
+    -- (x 40, clear of the menu, at the header's top); ApplyModel sizes and
+    -- fits it after every other header and layout operation.
+    frame._destinationRow = M.CreateDestinationRow(frame, buildHeaderText)
+    frame._destinationRow:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
 
     switchBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame._switchBtn = switchBtn
@@ -2219,7 +2959,8 @@ local function ApplyModel(model, signatures, roll)
     end
     LayoutFooter(showAutoControl, complete and not noBuild)
 
-    frame._buildHeaderText:SetText(name and ("|cff7fd5ff" .. ShortName(name, 29) .. "|r" .. (pr.isCommunityPreview and " |cff888888[Preview]|r" or "")) or "|cff7fd5ffNexus|r")
+    -- The heading is the destination row's first cell: it is worded and
+    -- fitted at the end of this pass (UpdateDestinationRow), not here.
     frame._switchBtn:SetText("My Builds")
 
     SetVisible(frame._rollArea, rollBlock)
@@ -2324,10 +3065,6 @@ local function ApplyModel(model, signatures, roll)
         frame._switchBtn:ClearAllPoints()
         frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -7)
         frame._switchBtn:SetSize(68, 19)
-        frame._buildHeaderText:ClearAllPoints()
-        frame._buildHeaderText:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
-        frame._buildHeaderText:SetPoint("RIGHT", frame._switchBtn, "LEFT", -5, 0)
-        frame._buildHeaderText:SetJustifyH("CENTER")
     end
 
     if noBuild then
@@ -2381,10 +3118,6 @@ local function ApplyModel(model, signatures, roll)
         frame._switchBtn:ClearAllPoints()
         frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -7)
         frame._switchBtn:SetSize(68, 19)
-        frame._buildHeaderText:ClearAllPoints()
-        frame._buildHeaderText:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
-        frame._buildHeaderText:SetPoint("RIGHT", frame._switchBtn, "LEFT", -5, 0)
-        frame._buildHeaderText:SetJustifyH("CENTER")
         SetVisible(setLabelText, false)
         SetVisible(lkPersonalLabel, showPerformance)
         SetVisible(dummyGlobalValue, true)
@@ -2550,6 +3283,17 @@ local function ApplyModel(model, signatures, roll)
         frame._nexusHudTreeStyled = true
         renderStats.themeTreeWalks = renderStats.themeTreeWalks + 1
     end
+    -- The destination row, last: after every competing header and layout
+    -- operation and the one-time theme pass, so its cells' fonts are final.
+    -- The header's space on the 272 px HUD is 151 px in every mode: from
+    -- x 40 to the 5 px gap before My Builds (TOPRIGHT -8, 68 px) at x 191.
+    -- A changed layout re-applies the first cell's text for real.
+    M.UpdateDestinationRow(frame._destinationRow,
+        signatures.destination or M.DestinationFacts(model), 151, 17, true)
+    -- The settled layout key records the fonts the cells now have, so the
+    -- next identical render is settled; it is committed only on success.
+    signatures.layout = (signatures.modelLayout or signatures.layout)
+        .. "|fonts:" .. M.DestinationRowFonts()
     return true
 end
 
@@ -2628,6 +3372,11 @@ function M.Render(model)
         .. (roll.cardRows and "cards" or "none")
     renderStats.calls = renderStats.calls + 1
     EnsureFrame()
+    -- The destination cells' effective fonts are part of the layout key. A
+    -- full pass replaces this with the fonts it leaves (ApplyModel); a failed
+    -- one commits nothing.
+    signatures.modelLayout = signatures.layout
+    signatures.layout = signatures.modelLayout .. "|fonts:" .. M.DestinationRowFonts()
 
     if Nexus.OrbPanel then Nexus.OrbPanel.AttachMainPanel(frame)end
 

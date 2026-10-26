@@ -47,6 +47,19 @@ local function Equal(left, right, leftSeen, rightSeen)
     return true
 end
 
+-- Display only: a character name the caller already read. Only a nonempty
+-- string other than the client's Unknown placeholder is kept; anything else
+-- is nil (not known). It is never identity, owner or Store authority.
+local function DisplayCharacter(value)
+    if type(value) ~= "string" or value == "" or value == "Unknown" then
+        return nil
+    end
+    if type(UNKNOWNOBJECT) == "string" and value == UNKNOWNOBJECT then
+        return nil
+    end
+    return value
+end
+
 local function ActiveSlotRow(slots)
     if not slots or slots.activeSlot == 0 then return nil end
     local row = slots.bySlot[slots.activeSlot]
@@ -366,6 +379,9 @@ function ViewModel.New(options)
         end
         out.status = snapshot.status
         out.assignment = snapshot.assignment
+        -- Set on every rebuild, nil when not known: neither a base field nor
+        -- an earlier character stands in for the current one.
+        out.character = DisplayCharacter(snapshot.character)
         if out.level == nil then out.level = snapshot.level or 0 end
         local notice = snapshot.updateNotice
         if notice then

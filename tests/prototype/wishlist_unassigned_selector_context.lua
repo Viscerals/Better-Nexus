@@ -83,6 +83,20 @@ end
 -- The editor's context line: the text the editor anchors directly under its
 -- title (found by that anchor, not by its words).
 local function ContextLine()
+ -- Published destination row: its four cells as shown, in order. A published
+ -- row that does not show all four reads as no line (never a tooltip or row
+ -- metadata); the legacy anchored line is read only when no row is published.
+ local row=NexusEditorFrame and NexusEditorFrame._destinationRow
+ if type(row)=='table' and type(row.cells)=='table' then
+  local shown={}
+  for i=1,4 do
+   local c=row.cells[i]
+   local t=#row.cells==4 and type(c)=='table' and c:IsVisible() and c:GetText()
+   if type(t)~='string' or t=='' then return '' end
+   shown[i]=V.Plain(t)
+  end
+  return table.concat(shown,' / ')
+ end
  for _,r in ipairs(NexusEditorFrame and NexusEditorFrame.regions or {}) do
   local at=r.points and r.points[1]
   if r.kind=='FontString' and at and at[1]=='TOP' and type(at[2])=='table'

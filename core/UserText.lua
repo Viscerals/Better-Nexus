@@ -212,6 +212,153 @@ function T.SavedBuildLabel(slot, name, maxChars)
     return shown and ("Saved Build '" .. shown .. "'") or nil
 end
 
+-- Shared wording of the destination descriptor documented below, used by
+-- both DestinationLines and DestinationFields so that they cannot disagree.
+-- Pure: these only word the facts they are given.
+local SAVED_BUILD_STATE_WORDS = {
+    unavailable = "not available right now",
+    empty = "empty: it holds no Echoes, so assigning to it is refused",
+    active = "active in the game",
+    inactive = "not active in the game",
+    unconfirmed = "not confirmed as the active Saved Build",
+}
+-- The other destinations: their Saved Build cell and destination words.
+local DESTINATION_WORDS = {
+    firstRun = {build = "none in use", state = "first-run target (no Saved Build in use)"},
+    restoring = {build = "not known yet", state = "not known yet (the saved assignment is being restored)"},
+    unknown = {build = "not loaded yet", state = "Saved Build data is not loaded yet"},
+    unconfirmed = {build = "not confirmed right now", state = "not confirmed right now"},
+    none = {build = "none captured", state = "none captured"},
+}
+local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true, restoring = true}
+
+-- Compact alternatives (DestinationFields only). Display metadata: the value
+-- and tooltip stay the authoritative disclosure and grant no assignment.
+-- compact is a complete shorter value (a bare name stays whole); the state
+-- and Wishlist cells' minimum is their shortest atomic alternative, for a
+-- cell too narrow for compact. Both are chosen from the descriptor codes,
+-- never cut from or parsed out of the worded value, and a state label is
+-- shown whole. A Wishlist meaning word precedes its name, so a shortened name
+-- never reads as assigned; only an assigned Wishlist shows its name alone.
+-- A Wishlist minimum is that assigned name, else its meaning marker alone.
+-- Compressed markers (each disclosed in full by the tooltip):
+--   "?"        not known or not confirmed (never unassigned, first-run or active)
+--   "#2 Name"  Saved Build slot 2, then its name
+--   "On"/"Off" the Saved Build is / is not active in the game
+--   "N/A"      unavailable right now
+--   "Empty"    the Saved Build holds no Echoes, so any assignment is refused
+--   "1st"      first-run target (no Saved Build in use)
+--   "Wait"     the saved assignment is being restored
+--   "None"     nothing captured
+--   "P"        Preview (d.preview): a Community Build preview is shown
+-- One-glyph marks, for a captured or Preview state (state) and for a
+-- Wishlist minimum without a shown name (Wishlist); "?" keeps the meaning
+-- above:
+--   "+"  state: active in the game      Wishlist: assigned
+--   "-"  state: not active in the game  Wishlist: none assigned
+--   "x"  state and Wishlist: unavailable right now
+--   "~"  state and Wishlist: the saved assignment is being restored
+--   "0"  state: empty, the Saved Build holds no Echoes
+--   "1"  state: first-run target (no Saved Build in use)
+--   "!"  Wishlist: refused, the Saved Build is explicitly empty (no Echoes)
+--   "_"  state: nothing captured ("none"), in a Preview minimum only
+-- A captured state minimum is "C:" then its state record's mark, 3 glyphs
+-- ("C:+", "C:0", "C:?", ...): the capture and each state stay visible, and
+-- being captured is not evidence of the current assignment. A Preview
+-- state minimum is its own atomic alternative, at most 3 glyphs: "P",
+-- then "C" when captured, then that mark ("P+", "P1", "PC0", "PC?", ...),
+-- so Preview, the capture and each state stay visible. A "none"
+-- destination is never captured; its only mark is "_", in that Preview
+-- minimum ("P_"). No mark is a pipe or a control character; each is
+-- chosen from the descriptor codes, never cut from or parsed out of the
+-- worded value.
+local SAVED_BUILD_STATE_COMPACT = {
+    unavailable = {compact = "Unavailable", minimum = "N/A", mark = "x"},
+    empty = {compact = "Empty", minimum = "Empty", mark = "0"},
+    active = {compact = "Active", minimum = "On", mark = "+"},
+    inactive = {compact = "Inactive", minimum = "Off", mark = "-"},
+    unconfirmed = {compact = "Unconfirmed", minimum = "?", mark = "?"},
+    notStated = {compact = "Not known", minimum = "?", mark = "?"},
+}
+local DESTINATION_COMPACT = {
+    firstRun = {build = "None", compact = "First run", minimum = "1st", mark = "1"},
+    restoring = {build = "?", compact = "Restoring", minimum = "Wait", mark = "~"},
+    unknown = {build = "?", compact = "Not loaded", minimum = "?", mark = "?"},
+    unconfirmed = {build = "?", compact = "Unconfirmed", minimum = "?", mark = "?"},
+    none = {build = "?", compact = "None", minimum = "None"},
+}
+-- The one-glyph minimum mark of a stated Wishlist assignment state; an
+-- assigned Wishlist with a name shows that name instead (see
+-- DestinationFields). Refused is "!" and not known is "?" (see above).
+local WISHLIST_MINIMUM = {
+    assigned = "+", unassigned = "-", unavailable = "x", restoring = "~",
+}
+-- A stated Wishlist assignment state in compact words.
+local function WishlistCompact(wishlist, state)
+    if state == "assigned" then
+        return wishlist or "Assigned"
+    elseif state == "unassigned" then
+        return "None"
+    elseif state == "unavailable" then
+        return wishlist and ("N/A: " .. wishlist) or "N/A"
+    elseif state == "restoring" then
+        return "Restoring"
+    end
+    return wishlist and ("?: " .. wishlist) or "?"
+end
+
+-- A fixed phrase with its first letter raised when asked (ASCII words only,
+-- never a name).
+local function Lead(text, capital)
+    return capital and (text:sub(1, 1):upper() .. text:sub(2)) or text
+end
+
+-- The descriptor's facts as codes and display-safe names. The Saved Build
+-- state keeps one order: unavailable, empty, active, not active,
+-- unconfirmed, else not stated.
+local function DestinationParts(d)
+    local p = {character = T.SafeName(d.character)}
+    if d.kind == "savedBuild" then
+        p.kind = "savedBuild"
+        p.label = T.SavedBuildLabel(d.slot, d.name)
+        if d.unavailable then
+            p.state = "unavailable"
+        elseif d.empty then
+            p.state = "empty"
+        elseif d.active == true then
+            p.state = "active"
+        elseif d.active == false then
+            p.state = "inactive"
+        elseif d.unconfirmed then
+            p.state = "unconfirmed"
+        end
+    elseif d.kind == "firstRun" or d.kind == "unconfirmed" then
+        p.kind = d.kind
+    elseif d.kind == "unknown" then
+        p.kind = d.reason == "restoring" and "restoring" or "unknown"
+    else
+        p.kind = "none"
+    end
+    p.wishlist = T.SafeName(d.wishlist)
+    return p
+end
+
+-- The Wishlist words for one assignment state, or the name alone when no
+-- known state is given (nil when there is neither).
+local function WishlistWords(wishlist, state, capital)
+    if state == "assigned" then
+        return wishlist and (wishlist .. " (assigned)") or Lead("assigned", capital)
+    elseif state == "unassigned" then
+        return Lead("none assigned", capital)
+    elseif state == "unavailable" then
+        return wishlist and (wishlist .. " - unavailable right now")
+            or Lead("unavailable right now", capital)
+    elseif state == "restoring" then
+        return Lead("restoring the saved assignment", capital)
+    end
+    return wishlist
+end
+
 -- The captured destination of a view, confirmation or result, as lines.
 -- d.kind: "savedBuild", "firstRun", "unknown" (Saved Build data not loaded;
 -- d.reason "restoring": the saved assignment is being restored),
@@ -225,51 +372,145 @@ end
 -- d.wishlistState ("assigned", "unassigned", "unavailable", "restoring" or
 -- nil when unknown). The destination is always the one the caller captured;
 -- this function never looks up a currently active slot.
+-- d.captured is read only by DestinationFields (below), never here.
 function T.DestinationLines(d)
     d = type(d) == "table" and d or {}
     local lines = {}
-    local character = T.SafeName(d.character)
-    if character then lines[#lines + 1] = "Character: " .. character end
-    if d.kind == "savedBuild" then
-        local label = T.SavedBuildLabel(d.slot, d.name) or "the selected Saved Build"
-        local state
-        if d.unavailable then
-            state = "not available right now"
-        elseif d.empty then
-            state = "empty: it holds no Echoes, so assigning to it is refused"
-        elseif d.active == true then
-            state = "active in the game"
-        elseif d.active == false then
-            state = "not active in the game"
-        elseif d.unconfirmed then
-            state = "not confirmed as the active Saved Build"
-        end
-        lines[#lines + 1] = "Destination: " .. label .. (state and (" - " .. state) or "")
-    elseif d.kind == "firstRun" then
-        lines[#lines + 1] = "Destination: first-run target (no Saved Build in use)"
-    elseif d.kind == "unknown" then
-        lines[#lines + 1] = d.reason == "restoring"
-            and "Destination: not known yet (the saved assignment is being restored)"
-            or "Destination: Saved Build data is not loaded yet"
-    elseif d.kind == "unconfirmed" then
-        lines[#lines + 1] = "Destination: not confirmed right now"
+    local p = DestinationParts(d)
+    if p.character then lines[#lines + 1] = "Character: " .. p.character end
+    if p.kind == "savedBuild" then
+        local state = SAVED_BUILD_STATE_WORDS[p.state]
+        lines[#lines + 1] = "Destination: " .. (p.label or "the selected Saved Build")
+            .. (state and (" - " .. state) or "")
     else
-        lines[#lines + 1] = "Destination: none captured"
+        lines[#lines + 1] = "Destination: " .. DESTINATION_WORDS[p.kind].state
     end
-    local wishlist = T.SafeName(d.wishlist)
-    local state = d.wishlistState
-    if state == "assigned" then
-        lines[#lines + 1] = "Wishlist: " .. (wishlist and (wishlist .. " (assigned)") or "assigned")
-    elseif state == "unassigned" then
-        lines[#lines + 1] = "Wishlist: none assigned"
-    elseif state == "unavailable" then
-        lines[#lines + 1] = "Wishlist: " .. (wishlist and (wishlist .. " - ") or "") .. "unavailable right now"
-    elseif state == "restoring" then
-        lines[#lines + 1] = "Wishlist: restoring the saved assignment"
-    elseif wishlist then
-        lines[#lines + 1] = "Wishlist: " .. wishlist
-    end
+    local wishlist = WishlistWords(p.wishlist, d.wishlistState)
+    if wishlist then lines[#lines + 1] = "Wishlist: " .. wishlist end
     return lines
+end
+
+-- The same descriptor as four cells for a one-line strip, always in this
+-- order: character, savedBuild, wishlist, state. Each record is
+-- {key, label, value}; the second result is the complete tooltip, one
+-- labeled line per cell (and a note when captured). Every cell has a value:
+-- an unknown is "not known", never unassigned, first-run or active, and a
+-- Wishlist name alone is never called assigned. An empty Saved Build has no
+-- valid assignment, whatever Wishlist state is passed.
+-- d.captured == true (explicit only; never inferred, for example from a
+-- missing active slot): the caller shows a destination it captured earlier,
+-- with d.wishlist the captured Wishlist name when it has one. That states
+-- only that it was captured, not that it is assigned now: unless
+-- d.wishlistState states the assignment, the state says it is not checked.
+-- Value contract: each value is the complete display-safe text (whole
+-- SafeName output, in which a literal pipe is already the escaped pair
+-- "||"). A later fitting step shows it as it is, or shortens it only at a
+-- UTF-8 character boundary that does not split an escaped pipe pair; it
+-- never sanitizes or escapes it again, and the tooltip keeps the whole text.
+-- Each record also has compact, a complete shorter value, and the state and
+-- Wishlist records have minimum, their shortest atomic alternative (see the
+-- compact markers above).
+function T.DestinationFields(d)
+    d = type(d) == "table" and d or {}
+    local p = DestinationParts(d)
+    local captured = d.captured == true and p.kind ~= "none"
+    local build, stateWords, buildCompact, stateShort
+    if p.kind == "savedBuild" then
+        local name, slot = T.SafeName(d.name), Whole(d.slot)
+        if slot and slot < 1 then slot = nil end
+        if name and slot then
+            build = name .. " (slot " .. slot .. ")"
+            buildCompact = "#" .. slot .. " " .. name
+        elseif slot then
+            build = "Slot " .. slot
+            buildCompact = "#" .. slot
+        else
+            build = name or Lead("the selected Saved Build", true)
+            buildCompact = name or "Selected"
+        end
+        stateWords = SAVED_BUILD_STATE_WORDS[p.state] or "active state not known"
+        stateShort = SAVED_BUILD_STATE_COMPACT[p.state] or SAVED_BUILD_STATE_COMPACT.notStated
+    else
+        build = Lead(DESTINATION_WORDS[p.kind].build, true)
+        stateWords = DESTINATION_WORDS[p.kind].state
+        buildCompact = DESTINATION_COMPACT[p.kind].build
+        stateShort = DESTINATION_COMPACT[p.kind]
+    end
+    local noAssignment = p.kind == "savedBuild" and d.empty and true or false
+    local stated = WISHLIST_STATES[d.wishlistState] == true
+    -- minimum: the refusal, stated or unknown marker alone (unknown is "?",
+    -- never unassigned); only a stated assigned Wishlist keeps its
+    -- display-safe name, which is never cut or sanitized again here.
+    local wishlist, wishlistCompact, wishlistMinimum
+    if noAssignment then
+        local words = "no valid assignment (the Saved Build holds no Echoes)"
+        wishlist = p.wishlist and (p.wishlist .. " - " .. words) or Lead(words, true)
+        wishlistCompact = p.wishlist and ("Refused: " .. p.wishlist) or "Refused"
+        wishlistMinimum = "!"
+    elseif stated then
+        wishlist = WishlistWords(p.wishlist, d.wishlistState, true)
+        wishlistCompact = WishlistCompact(p.wishlist, d.wishlistState)
+        wishlistMinimum = d.wishlistState == "assigned" and p.wishlist
+            or WISHLIST_MINIMUM[d.wishlistState]
+    elseif p.wishlist then
+        wishlist = p.wishlist .. (captured and " (captured)" or " (assignment not known)")
+        wishlistCompact = "?: " .. p.wishlist
+        wishlistMinimum = "?"
+    else
+        wishlist = "Not known"
+        wishlistCompact = "?"
+        wishlistMinimum = "?"
+    end
+    local state, stateCompact, stateMinimum
+    if captured then
+        state = "Captured; " .. stateWords
+            .. ((noAssignment or stated) and "" or "; assignment not checked")
+        -- "C:" keeps the capture visible; the state record's one-glyph mark
+        -- keeps each state distinct, 3 glyphs in all (see the markers above).
+        -- A captured first-run plan keeps its whole "first-run target" label
+        -- (T.Terms.firstRun) in compact; its minimum stays "C:1".
+        stateCompact = p.kind == "firstRun" and "Captured: first-run target"
+            or ("Captured: " .. stateShort.compact)
+        stateMinimum = "C:" .. stateShort.mark
+    else
+        state = Lead(stateWords, true)
+        stateCompact, stateMinimum = stateShort.compact, stateShort.minimum
+    end
+    -- d.preview == true (explicit only): the view shows a Community Build
+    -- preview, not this destination's plan. Presentation only: the full and
+    -- compact state keep the underlying state whole after a Preview
+    -- designation, so the preview stays visible at every width and is
+    -- never called assigned; the other facts are worded as given. The
+    -- minimum is its own atomic alternative (see the markers above), chosen
+    -- from the codes alone: "P", then "C" when captured, then the state
+    -- record's mark, or "_" for a "none" destination (never captured).
+    local preview = d.preview == true
+    if preview then
+        state = "Preview; " .. state
+        stateCompact = "Preview: " .. stateCompact
+        stateMinimum = (captured and "PC" or "P")
+            .. (p.kind == "none" and "_" or stateShort.mark)
+    end
+    local fields = {
+        {key = "character", label = "Character", value = p.character or "Not known",
+            compact = p.character or "?"},
+        {key = "savedBuild", label = "Saved Build", value = build, compact = buildCompact},
+        {key = "wishlist", label = "Wishlist", value = wishlist, compact = wishlistCompact,
+            minimum = wishlistMinimum},
+        {key = "state", label = "State", value = state, compact = stateCompact,
+            minimum = stateMinimum},
+    }
+    local tooltip = {}
+    for index = 1, #fields do
+        tooltip[index] = fields[index].label .. ": " .. fields[index].value
+    end
+    if captured then
+        tooltip[#tooltip + 1] = "Captured: shown as captured earlier; being captured is not evidence of the current assignment."
+    end
+    if preview then
+        tooltip[#tooltip + 1] = "Preview: a Community Build preview is shown; it is not this destination's assignment."
+    end
+    return fields, tooltip
 end
 
 -- M7: the setup checklist, worded from current facts only (Panel.SetupFacts).

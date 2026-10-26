@@ -189,6 +189,11 @@ function Controller.New(options)
         pendingSeeded = false,
         editingContext = nil,
         createTargetContext = nil,
+        -- Display-only origin of a draft with neither context above, set
+        -- where that draft begins ("reset", "copy", "firstRun", "unknown").
+        -- Read only by M.DestinationPresentation; never a destination,
+        -- default or Save authority.
+        destinationOrigin = nil,
         awaitingWishlist = nil,
         scrollOffset = 0,
         pickOffset = 0,
@@ -729,6 +734,132 @@ function Controller.New(options)
     function M.EditingContext() return CopyRecord(state.editingContext) end
     function M.IsEditing() return state.editingContext ~= nil end
     function M.CreateTargetContext() return CopyRecord(state.createTargetContext) end
+    -- A passive destination descriptor (the UserText DestinationFields d
+    -- table) for the editor's destination strip. It reads only the captured
+    -- contexts and the display-only origin, plus the three facts its caller
+    -- passes: the Slots observation the renderer already made, the
+    -- character the HUD already cached for this world session, and
+    -- observedSelected, the scalar the renderer's own one
+    -- SelectedSavedBuild(slots) call gave for those same slots, before any
+    -- editor override (an observed nil is passed as 0). A nil
+    -- observedSelected was not observed: it is never "no target". A
+    -- selected Saved Build is the current role only, never a capture, this
+    -- draft's destination or a target to adopt. It calls no getter,
+    -- adapter, Store or service and changes nothing; Save still uses
+    -- SaveDestination/TryApply, never this. A captured Saved Build is never
+    -- retargeted to the active one, a captured Wishlist name is never called
+    -- assigned, and a missing row or unknown stays unknown.
+    function M.DestinationPresentation(slots, character, observedSelected)
+        local d = {}
+        if type(character) == "string" and character ~= "" then
+            d.character = character
+        end
+        local context, target = state.editingContext, state.createTargetContext
+        local slot, name
+        if context then
+            d.origin = "opened"
+            -- The Wishlist this editor opened, as captured: its assignment
+            -- now is not stated (wishlistState stays nil).
+            d.wishlist = context.name
+            slot, name = tonumber(context.loadoutSlot), context.loadoutName
+            if not slot then
+                if context.destination == "first" then
+                    d.kind, d.captured = "firstRun", true
+                else
+                    d.kind, d.reason = "none", "unboundPlan"
+                end
+                return d
+            end
+        elseif type(target) == "table" and tonumber(target.loadoutSlot) then
+            d.origin = "newDraft"
+            slot, name = tonumber(target.loadoutSlot), target.loadoutName
+        else
+            local origin = state.destinationOrigin
+            d.origin = origin or "none"
+            if origin == "firstRun" or origin == "unknown" then
+                -- That begin captured nothing, so its origin is only a
+                -- begin-time hint: this pure strip states what the supplied
+                -- facts show now. It needs a slots table whose activeKnown
+                -- is not false (an absent flag passes) and takes the maximum
+                -- as tonumber(slots.maxSlots), else a default of 5. Then
+                -- observedSelected, the native active slot and that maximum
+                -- must pass the finite, whole, range and agreement checks
+                -- below. An observedSelected of 0 with a native active slot
+                -- of 0, or one above that maximum, shows the current first
+                -- run. A selected row with #echoes > 0 shows no destination,
+                -- regardless of roleSourceValid, and is never adopted; an
+                -- empty one shows the current first run only when ReadSlots
+                -- marked its source valid (roleSourceValid == true). All
+                -- other cases stay unknown.
+                -- That conservative unknown asserts no opposite target and
+                -- does not redefine the confirmations, FirstRunOwnsSave or
+                -- TryApply, which remain separate, unchanged authority.
+                local kind, reason = "unknown", "notLoaded"
+                local selected = observedSelected
+                if type(slots) == "table" and slots.activeKnown ~= false
+                    and type(selected) == "number" and selected >= 0
+                    and selected < math.huge
+                    and selected == math.floor(selected) then
+                    local maxSlots = tonumber(slots.maxSlots) or 5
+                    local native = tonumber(slots.activeSlot)
+                    -- Current facts prove nothing unless the native active
+                    -- slot is a finite whole number from 0 and the declared
+                    -- maximum a finite whole number from 1: a missing,
+                    -- infinite, NaN, fractional or negative active slot, or
+                    -- a declared maximum below 1, stays unknown.
+                    local valid = native ~= nil and native >= 0
+                        and native < math.huge and native == math.floor(native)
+                        and maxSlots >= 1 and maxSlots < math.huge
+                        and maxSlots == math.floor(maxSlots)
+                    -- A native active Saved Build is the selected one
+                    -- (SelectedSavedBuild); a scalar that differs proves
+                    -- nothing, so a missing row stays unknown.
+                    local agrees = valid and not (native and native >= 1
+                        and native <= maxSlots and native == math.floor(native)
+                        and selected ~= native)
+                    local rows = slots.bySlot
+                    local row = agrees and selected >= 1 and selected <= maxSlots
+                        and type(rows) == "table" and rows[selected] or nil
+                    local echoes = type(row) == "table" and row.echoes or nil
+                    if agrees and selected == 0 then
+                        kind, reason = "firstRun", nil
+                    elseif type(echoes) == "table" then
+                        if #echoes > 0 then
+                            kind, reason = "none", "noDestination"
+                        elseif row.roleSourceValid == true then
+                            -- An empty list proves first run only from a
+                            -- source ReadSlots marked valid; a malformed,
+                            -- missing or sparse one stays unknown.
+                            kind, reason = "firstRun", nil
+                        end
+                    end
+                end
+                d.kind, d.reason = kind, reason
+            elseif origin == "copy" then
+                d.kind, d.reason = "none", "unboundPlan"
+            else
+                d.kind, d.reason = "none", "noDestination"
+            end
+            return d
+        end
+        d.kind, d.slot, d.captured = "savedBuild", slot, true
+        -- Only the supplied row of that same captured slot: its name when
+        -- none was captured, and whether it is empty now. A missing row
+        -- claims nothing.
+        local rows = type(slots) == "table" and slots.bySlot or nil
+        local row = type(rows) == "table" and rows[slot] or nil
+        name = tostring(name or "")
+        if name == "" and type(row) == "table" then name = tostring(row.name or "") end
+        if name ~= "" then d.name = name end
+        -- Empty only from a source list ReadSlots marked valid
+        -- (roleSourceValid, as IsKnownEmptyLoadout): a malformed, missing
+        -- or sparse list projected to no Echoes is not known to be empty.
+        if type(row) == "table" and type(row.echoes) == "table"
+            and row.roleSourceValid == true and #row.echoes == 0 then
+            d.empty = true
+        end
+        return d
+    end
     function M.CandidateContext()
         local context = state.candidateContext
         return context and {
@@ -1112,6 +1243,7 @@ function Controller.New(options)
         NewDraftIdentity()
         state.editingContext = nil
         state.createTargetContext = nil
+        state.destinationOrigin = "reset"
         -- Assignment actions as this new draft begins (see TryApply).
         state.draftActions = Adapter and Adapter.AssignmentActionSnapshot
             and Adapter.AssignmentActionSnapshot() or nil
@@ -1158,6 +1290,7 @@ function Controller.New(options)
                 return nil, reason
             end
             M.ResetNewWishlistDraft()
+            state.destinationOrigin = "copy"
             state.pendingSeeded = true
             state.pending = prepared.pending
             state.pendingLock = prepared.pendingLock
@@ -1177,6 +1310,7 @@ function Controller.New(options)
             return DraftModel.TrimName(current.title)
         end
         M.ResetNewWishlistDraft()
+        state.destinationOrigin = "copy"
         state.pendingSeeded = true
         M.LoadPendingEchoes(type(candidate) == "table" and candidate.echoes or {})
         return type(candidate) == "table" and DraftModel.TrimName(candidate.title) or ""
@@ -1323,6 +1457,28 @@ function Controller.New(options)
             if name == "" then name = "Saved Build " .. tostring(active) end
             state.createTargetContext = {loadoutSlot = active, loadoutName = name}
         end
+        -- Display-only origin, from the slots this begin already read: slot
+        -- data not loaded is unknown, and so is a Saved Build those slots
+        -- positively identify (the selected one, else the native active slot
+        -- when it is a whole number in 1..declared) whose row is absent:
+        -- missing data is no first-run proof. Otherwise no populated Saved
+        -- Build was selected, the first-run case of the Journal's rule. No
+        -- branch or destination changes here.
+        if not state.createTargetContext then
+            local origin = "firstRun"
+            if type(slots) ~= "table" or slots.activeKnown == false then
+                origin = "unknown"
+            else
+                local native = tonumber(slots.activeSlot)
+                local slot = (active >= 1 and active <= maxSlots) and active
+                    or (native and native >= 1 and native <= maxSlots
+                        and native == math.floor(native)) and native or nil
+                local rows = slots.bySlot
+                local row = slot and type(rows) == "table" and rows[slot] or nil
+                if slot and type(row) ~= "table" then origin = "unknown" end
+            end
+            state.destinationOrigin = origin
+        end
     end
 
     -- Preparing is read-only, including an existing save confirmation. The
@@ -1376,6 +1532,22 @@ function Controller.New(options)
             return M.BeginWishlist(firstRun, nil), "wishlist", false
         end
         M.ResetNewWishlistDraft()
+        -- Display-only origin, from the slots this begin already read, by
+        -- the same predicate as BeginNewWishlist (a selected slot cannot
+        -- reach here, so only the native active slot can identify one).
+        local origin = "firstRun"
+        if type(slots) ~= "table" or slots.activeKnown == false then
+            origin = "unknown"
+        else
+            local native = tonumber(slots.activeSlot)
+            local slot = (active >= 1 and active <= maxSlots) and active
+                or (native and native >= 1 and native <= maxSlots
+                    and native == math.floor(native)) and native or nil
+            local rows = slots.bySlot
+            local row = slot and type(rows) == "table" and rows[slot] or nil
+            if slot and type(row) ~= "table" then origin = "unknown" end
+        end
+        state.destinationOrigin = origin
         return true, "new", false
     end
 

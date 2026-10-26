@@ -71,9 +71,37 @@ function Renderer.New(options)
     local autoLockCheck
     local displayPopup, displayCheck, displayLockBtn
     local refreshCache = {known=false}
-    -- Renderer reads only controller-published projections. The controller
-    -- remains the sole owner of Adapter access, associations, uploads, Store
-    -- writes, preferences, retries, and mutable draft/session state.
+    -- Renderer reads controller-published projections (View below), with one
+    -- narrow, authorized display-fact exception for the destination row. It
+    -- reads three approved cached Panel view facts: the current-session
+    -- character (Nexus.Panel.CachedDestinationCharacter()), the public
+    -- world-session revision (Nexus.Panel.destinationSessionRevision) and
+    -- the private session count (Nexus.Panel.DestinationSessionCount()).
+    -- The row widget holds the cold refresh's existing Slots and
+    -- SelectedSavedBuild observation with a session stamp. The revision
+    -- counts only as a finite nonnegative whole number equal to the private
+    -- count: the cold refresh binds its new stamp to that count, and
+    -- M.Refresh keeps the observation only while the stamp equals both,
+    -- passing Controller.DestinationPresentation the character and that
+    -- observation only while it is held. A missing count accessor fails
+    -- closed (nothing is held); a rolled-back revision is rejected once the
+    -- count has advanced, even when it equals the old stamp. Restoring the
+    -- revision never reacquires cleared facts; only the next natural cold
+    -- observation can. Apart from the pure count accessor, these checks
+    -- force no read or refresh and add no extra backend or character read,
+    -- event, timer, getter work or action. These are display facts only,
+    -- never draft, target or Save authority, and the Panel keeps owning the
+    -- character, revision and count. Nexus.Panel stays a hard dependency of
+    -- that row: EnsureFrame creates it through
+    -- Nexus.Panel.CreateDestinationRow and both refresh paths dereference
+    -- Nexus.Panel directly, so an unavailable Panel is outside this module's
+    -- contract and raises an error instead of skipping the row. Only the
+    -- missing count accessor is the guarded fail-closed case. The controller
+    -- remains the sole owner of gameplay, Adapter access, associations,
+    -- uploads, Save and assignment, Store
+    -- writes, preferences, retries, and mutable draft authority; the
+    -- renderer owns its transient presentation caches as before, the held
+    -- observation among them.
     local View = {
         Catalog = function() return Controller.CatalogProjection() end,
         Owned = function() return Controller.OwnedProjection() end,
@@ -1271,11 +1299,14 @@ local function EnsureFrame()
     titleText:SetPoint("TOP", 0, -14)
     titleText:SetText("Nexus Wishlist Editor")
 
+    -- The existing 900x18 context row under the title is the destination
+    -- row: editContextText is its first visible cell (character), and the
+    -- row, not that cell, is anchored below the title. M.Refresh fills it.
     editContextText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    editContextText:SetPoint("TOP", titleText, "BOTTOM", 0, -4)
-    editContextText:SetSize(900, 18)
-    editContextText:SetJustifyH("CENTER")
-    editContextText:SetText("Creating a new wishlist")
+    editContextText:SetJustifyH("LEFT")
+    frame._destinationRow = Nexus.Panel.CreateDestinationRow(frame, editContextText)
+    frame._destinationRow:SetPoint("TOP", titleText, "BOTTOM", 0, -4)
+    frame._destinationRow:SetSize(900, 18)
 
     wishlistNameLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     wishlistNameLabel:SetPoint("TOPLEFT", 34, -96)
@@ -2162,35 +2193,27 @@ local function RefreshView(catalogRevision)
         end
     end
 
-    if titleText and editContextText then
-        if editingContext then
-            titleText:SetText("Edit Wishlist")
-            local buildLabel = DisplayUntrusted(
-                    editingContext.loadoutName, 1024, false)
-                or (editingContext.loadoutSlot and ("Saved Build " .. tostring(editingContext.loadoutSlot)))
-                or "None"
-            -- The opened first-run plan has no Saved Build of its own; its
-            -- save updates the first-run target (controller destination).
-            if editingContext.destination == "first" and not editingContext.loadoutSlot then
-                buildLabel = buildLabel .. " (first-run target)"
-            end
-            local displayWishlistName = DisplayUntrusted(
-                editingContext.name, 1024, false) or "Wishlist"
-            editContextText:SetText("Wishlist: |cff7fd5ff" .. displayWishlistName
-                .. "|r   •   Saved Build: |cffffffff" .. buildLabel .. "|r")
-        else
-            titleText:SetText("Create New Wishlist")
-            if createTargetContext then
-                editContextText:SetText("New destination for |cffffffff"
-                    .. (DisplayUntrusted(createTargetContext.loadoutName,
-                        1024, false) or "Active Saved Build")
-                    .. "|r — it will be assigned after a successful save")
-            else
-                editContextText:SetText("Create a new destination wishlist for your first run")
-            end
-        end
+    -- The context line under the title is the destination row (its first
+    -- cell is editContextText); M.Refresh words it from the controller's
+    -- captured descriptor. Only the title is set here.
+    if titleText then
+        titleText:SetText(editingContext and "Edit Wishlist" or "Create New Wishlist")
     end
 
+    -- The destination row's view observation: this refresh's one existing
+    -- Slots read below and the result of its one existing SelectedSavedBuild
+    -- before the editing/create overrides (nil as 0; nil itself, i.e.
+    -- unobserved, without a Slots table whose active slot is known). It is
+    -- cleared first, then held only when the Panel's public revision is a
+    -- finite nonnegative whole number equal to its private count
+    -- (DestinationSessionCount()), with the new held stamp bound to that
+    -- count; else none (nil, never an earlier stale read or another
+    -- session's), as with a missing accessor or a rolled-back revision.
+    if frame._destinationRow then
+        frame._destinationRow._nexusEditorSlots = nil
+        frame._destinationRow._nexusEditorSelected = nil
+        frame._destinationRow._nexusEditorSession = nil
+    end
     if loadoutSwitchBtn and not pendingLoadoutOpen then
         local slots = View and View.Slots and View.Slots()
         local active = slots and tonumber(slots.activeSlot)
@@ -2200,6 +2223,22 @@ local function RefreshView(catalogRevision)
         -- "(active)" state below). An edited Wishlist that no Saved Build has
         -- selects none.
         local selected = View.SelectedSavedBuild(slots)
+        -- Held as the observed current role only: never captured draft,
+        -- target or Save authority.
+        if frame._destinationRow then
+            local destinationRow, panel = frame._destinationRow, Nexus.Panel
+            local session = panel.destinationSessionRevision
+            if type(session) == "number" and session >= 0
+                and session < math.huge and session == math.floor(session)
+                and type(panel.DestinationSessionCount) == "function"
+                and panel.DestinationSessionCount() == session then
+                destinationRow._nexusEditorSlots = slots
+                destinationRow._nexusEditorSelected =
+                    (type(slots) == "table" and slots.activeKnown ~= false)
+                    and (selected or 0) or nil
+                destinationRow._nexusEditorSession = session
+            end
+        end
         if editingContext then
             selected = tonumber(editingContext.loadoutSlot)
         elseif createTargetContext then
@@ -2544,6 +2583,43 @@ end
         end
         RefreshTimerStatus()
         RefreshTheme()
+        -- Row-only update, warm or cold, after the one-time theme pass so it
+        -- measures final fonts. Pure: the captured descriptor from the held
+        -- Slots and selected-role observation (nil when none) and the
+        -- session's cached character; a settled update is a no-op in the
+        -- helper. The held observation counts only in the world session it
+        -- was made in: it is kept only while the public revision is a finite
+        -- nonnegative whole number, DestinationSessionCount() returns that
+        -- value and the held stamp equals both, with a held Slots table.
+        -- Otherwise it is dropped, as for a missing accessor, a changed,
+        -- missing or malformed revision, or a rolled-back one once the count
+        -- has advanced, even when it equals the old stamp. Restoring the
+        -- revision never reacquires it; it stays unknown until the next
+        -- natural cold observation. Apart from the pure
+        -- DestinationSessionCount() call, no read or refresh is forced, and no
+        -- extra backend or character read, event, timer, getter work or
+        -- action is added for it here.
+        local destinationRow = frame and frame._destinationRow
+        if destinationRow then
+            local panel = Nexus.Panel
+            local session = panel.destinationSessionRevision
+            if not (type(session) == "number" and session >= 0
+                and session < math.huge and session == math.floor(session)
+                and type(panel.DestinationSessionCount) == "function"
+                and panel.DestinationSessionCount() == session
+                and destinationRow._nexusEditorSession == session
+                and type(destinationRow._nexusEditorSlots) == "table") then
+                destinationRow._nexusEditorSlots = nil
+                destinationRow._nexusEditorSelected = nil
+                destinationRow._nexusEditorSession = nil
+            end
+            panel.UpdateDestinationRow(destinationRow,
+                Controller.DestinationPresentation(
+                    destinationRow._nexusEditorSlots,
+                    panel.CachedDestinationCharacter(),
+                    destinationRow._nexusEditorSelected),
+                900, 18)
+        end
         return result
     end
 
