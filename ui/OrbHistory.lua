@@ -31,16 +31,18 @@ M.QUALITY_COLORS = {
 local UNKNOWN_COLOR = { 0.68, 0.68, 0.70 }
 
 -- One recorded runtime state, one plain label. "Confirmed" is the only label
--- that claims a replacement happened.
+-- that claims a replacement happened. `status` is the same state's kind in
+-- the shared status vocabulary (Readout.StatusParts, issue #163), whose word
+-- is this label; it adds no state.
 local RESULTS = {
-    ["confirmed"] = { label = "Confirmed", confirmed = true },
-    ["selected"] = { label = "Awaiting result", pending = true },
-    ["offered"] = { label = "Waiting for choice", pending = true },
-    ["requested"] = { label = "Waiting for offer", pending = true },
-    ["submitted"] = { label = "Unconfirmed", pending = true },
-    ["not sent"] = { label = "Not sent", refused = true },
-    ["unknown"] = { label = "Unconfirmed", unresolved = true },
-    ["paused"] = { label = "Paused", pending = true },
+    ["confirmed"] = { label = "Confirmed", confirmed = true, status = "confirmed" },
+    ["selected"] = { label = "Awaiting result", pending = true, status = "awaiting" },
+    ["offered"] = { label = "Waiting for choice", pending = true, status = "choice" },
+    ["requested"] = { label = "Waiting for offer", pending = true, status = "offer" },
+    ["submitted"] = { label = "Unconfirmed", pending = true, status = "unconfirmed" },
+    ["not sent"] = { label = "Not sent", refused = true, status = "notSent" },
+    ["unknown"] = { label = "Unconfirmed", unresolved = true, status = "unconfirmed" },
+    ["paused"] = { label = "Paused", pending = true, status = "paused" },
 }
 M.RESULTS = RESULTS
 
@@ -220,9 +222,9 @@ local function resultOf(entry)
     if mapped then
         return { label = mapped.label, confirmed = mapped.confirmed == true,
             pending = mapped.pending == true, refused = mapped.refused == true,
-            unresolved = mapped.unresolved == true, state = state }
+            unresolved = mapped.unresolved == true, state = state, status = mapped.status }
     end
-    return { label = "Unconfirmed", unresolved = true,
+    return { label = "Unconfirmed", unresolved = true, status = "unconfirmed",
         state = state and tostring(state) or "not recorded" }
 end
 M.Result = resultOf

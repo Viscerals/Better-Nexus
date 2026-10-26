@@ -312,6 +312,14 @@ C.scenario('C6 a paused Orb run: the shared checklist shows its current reason; 
   'C6: oracle self-check (not product evidence): it accepts the reason as recorded and rejects the e8e74693 omission line')
  h.OrbPlan(PLAN)
  C.setup(M.Start(3)==true and h.Count('orb-spend')==1,'C6: fixture: a real run of 3 starts and submits one spend')
+ local offerView=M.ReasonView()
+ C.setup(offerView.observed==true and offerView.run==true and offerView.state=='WAIT_OFFER' and offerView.pending==true,
+  'C6: fixture: the real Orb owner is waiting for its offer after the submitted spend',Serialize(offerView))
+ local offerHover=Nexus.Panel.OrbHubLine()
+ C.expect(Has(offerHover,'Waiting for the Orb offer') and not Has(offerHover,'Awaiting result'),
+  'C6: the real pending-offer hover does not claim it is already awaiting a result',offerHover)
+ C.guard(Nexus.OrbHistory.RUN_STATES[offerView.state]~=nil,
+  'C6: the real owner\'s pending-offer state has a recorded UI label',offerView.state)
  C.setup(M.Pause()==true,'C6: fixture: the run is explicitly paused with that spend pending')
  C.setup(Nexus.StartupStatus().coreReady==true,'C6: fixture: local start-up is ready')
  local hasView=type(M.ReasonView)=='function'
@@ -400,6 +408,10 @@ C.scenario('C7 an Orb owner not read this session is not known (a saved receipt 
  C.expect(view.observed==true and view.run==true and view.state=='RECOVERY' and view.restored==true and view.pending==true
   and view.running==false and view.reason==RECOVERY_REASON and view.operation==nil,
   'C7: the view carries the recorded recovery reason and no operation name (none is recorded for a restored receipt)',Serialize(view))
+ local restoredHover=Nexus.Panel.OrbHubLine()
+ C.expect(Has(restoredHover,'Earlier Orb action unresolved') and Has(restoredHover,'Unconfirmed')
+   and not Has(restoredHover,'result'),
+  'C7: a real restored pre-offer receipt is not described as a result',restoredHover)
  before,frame=Effects(h),_G.NexusOrbRuntime
  counts,line,base=Measure(ConsumerPath)
  print('OBSERVED','C7 recovery line='..line..' counts='..Serialize(counts))

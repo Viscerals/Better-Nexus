@@ -24,7 +24,7 @@ local dummyLabel, dummyValue, dummyGlobal, dummyGlobalValue, dummyHit
 local lkLabel, lkPersonalLabel, lkValue, lkGlobal, lkGlobalValue, lkHit
 local completeBadge, completeSubtext
 local setupText, setupHint, setupGetStartedBtn, setupImportBtn
-local autoBtn, buildsBtn, leaderboardBtn, menuBtn, versionText, worldStatusBox, worldStatusText, worldStatusAsh, worldStatusGain, worldStatusHit, bestDpsText, bestDpsHit
+local autoBtn, planBtn, exploreBtn, menuBtn, versionText, worldStatusBox, worldStatusText, worldStatusAsh, worldStatusGain, worldStatusHit, bestDpsText, bestDpsHit
 local showPerformance = false
 local renderState = {
     committed=false,applying=false,signatures=nil,hadFailure=false,
@@ -1373,8 +1373,8 @@ function M.ApplyOwnedFonts()
         }) do SetOwnedFont(widget, normal) end
         SetOwnedFont(setupText, large)
         for _, widget in ipairs({
-            switchBtn,setupGetStartedBtn,setupImportBtn,autoBtn,buildsBtn,
-            leaderboardBtn,menuBtn,
+            switchBtn,setupGetStartedBtn,setupImportBtn,autoBtn,planBtn,
+            exploreBtn,menuBtn,frame._orbsHubBtn,
         }) do SetOwnedButtonFont(widget, normal) end
         SetOwnedButtonFont(frame._orbsBtn, small)
         SetOwnedButtonFont(frame._orbMiniBtn, small)
@@ -1583,20 +1583,8 @@ local function EnsureFrame()
     switchBtn:SetSize(90, 19)
     switchBtn:SetPoint("TOPLEFT", 10, -26)
     switchBtn:SetText((Nexus.Localization.Text("panel.button.my_builds")))
-    switchBtn:SetScript("OnClick", function()
-        CloseOtherNexusWindows()
-        if Nexus.JournalTab and Nexus.JournalTab.OpenBuilds then
-            Nexus.JournalTab.OpenBuilds()
-        else
-            -- The journal's Show(tab) is a dot-call whose argument is a tab
-            -- index; no tab is established here, so none is passed (the
-            -- journal opens its current tab).
-            local pe = _G["ProjectEbonhold"]
-            if pe and pe.EchoJournal and pe.EchoJournal.Show then
-                pcall(pe.EchoJournal.Show)
-            end
-        end
-    end)
+    -- The game's own page (M.OpenMyBuilds), also offered by the Plan hub.
+    switchBtn:SetScript("OnClick", function() M.OpenMyBuilds() end)
     switchBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         -- Issue #143: while the client shortens this button's one-line label
@@ -2040,30 +2028,8 @@ local function EnsureFrame()
     setupGetStartedBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     setupGetStartedBtn:SetSize(126, 24)
     setupGetStartedBtn:SetText((Nexus.Localization.Text("panel.button.assign_wishlist")))
-    setupGetStartedBtn:SetScript("OnClick", function()
-        local journal = Nexus.JournalTab
-        if journal and journal.OpenBuilds then
-            -- The present helper is the route: the Echo Journal with the
-            -- Wishlist chooser opened for the Saved Build the Journal targets
-            -- (nothing is assigned until one is chosen). It closes the other
-            -- Nexus windows only once the game's Character Progression entry
-            -- is there, so a refusal loses nothing and is said here.
-            local opened, why = journal.OpenBuilds(true, CloseOtherNexusWindows)
-            if opened == false and why == "unavailable" then
-                print("|cffff6060Nexus:|r Could not find the game's Character Progression button, so nothing "
-                    .. "was opened or assigned. Open Character Progression → Echoes yourself and use the Nexus "
-                    .. "Wishlist selector at its top.")
-            end
-        else
-            CloseOtherNexusWindows()
-            -- Show(tab) is a dot-call taking a tab index; no tab is passed
-            -- (the journal opens its current tab).
-            local pe = _G["ProjectEbonhold"]
-            if pe and pe.EchoJournal and pe.EchoJournal.Show then
-                pcall(pe.EchoJournal.Show)
-            end
-        end
-    end)
+    -- The assignment route (M.OpenAssignment), also offered by the Plan hub.
+    setupGetStartedBtn:SetScript("OnClick", function() M.OpenAssignment() end)
     setupGetStartedBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         -- Issue #143: the complete label first while it is shortened (see My Builds).
@@ -2173,38 +2139,35 @@ local function EnsureFrame()
     end)
     autoBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    buildsBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    buildsBtn:SetSize(104, 22)
-    buildsBtn:SetText("Build Library")
-    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(buildsBtn,"Build Library") end
-    buildsBtn:SetScript("OnClick", function()
-        CloseOtherNexusWindows()
-        if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end
-    end)
-    buildsBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Build Library", 1, 1, 1)
-        -- M4 (UX-15): "My Builds" is the game's page; the library scope is Mine.
-        GameTooltip:AddLine("Browse shared community builds, and under Mine your Saved Builds and shared listings.", 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
-    end)
-    buildsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- Footer hubs (issue #163, UI review P3): Plan, Explore and Orbs. Plan
+    -- and Explore open a native dropdown of existing routes (M.ShowHub);
+    -- Orbs opens the Orb window, as the ... menu item does. A hub only opens
+    -- windows: it assigns, saves, shares, spends and enables nothing. Their
+    -- scripts reach this file through M, not new upvalues (see menuBtn).
+    planBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    planBtn:SetSize(54, 22)
+    planBtn:SetText("Plan")
+    planBtn:SetScript("OnClick", function(self) M.ShowHub("plan", self) end)
+    planBtn:SetScript("OnEnter", function(self) M.ShowHubTooltip("plan", self) end)
+    planBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    leaderboardBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    leaderboardBtn:SetSize(104, 22)
-    leaderboardBtn:SetText("Leaderboard")
-    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(leaderboardBtn,"Leaderboard") end
-    leaderboardBtn:SetScript("OnClick", function()
-        CloseOtherNexusWindows()
-        if Nexus.Leaderboard then Nexus.Leaderboard.Show() end
-    end)
-    leaderboardBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Leaderboard", 1, 1, 1)
-        GameTooltip:AddLine("Compare Training Dummy and Lich King records.", 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
-    end)
-    leaderboardBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- Explore holds the shared views: its label is greyed while shared data
+    -- loads (LoadingStatus), as the Build Library button's was.
+    exploreBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    exploreBtn:SetSize(62, 22)
+    exploreBtn:SetText("Explore")
+    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(exploreBtn,"Explore") end
+    exploreBtn:SetScript("OnClick", function(self) M.ShowHub("explore", self) end)
+    exploreBtn:SetScript("OnEnter", function(self) M.ShowHubTooltip("explore", self) end)
+    exploreBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local orbsHub = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    orbsHub:SetSize(52, 22)
+    orbsHub:SetText("Orbs")
+    orbsHub:SetScript("OnClick", function(self) M.ShowHub("orbs", self) end)
+    orbsHub:SetScript("OnEnter", function(self) M.ShowHubTooltip("orbs", self) end)
+    orbsHub:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    frame._orbsHubBtn = orbsHub
 
     -- Compact settings control. Navigation stays visible in the footer while
     -- infrequent tools live behind this single unobtrusive button.
@@ -2214,139 +2177,19 @@ local function EnsureFrame()
     menuBtn:SetText("...")
     frame._menuBtn = menuBtn
     menuBtn:SetFrameLevel(frame:GetFrameLevel() + 8)
+    -- Its items are built by M.MoreMenuItems when it opens.
     menuBtn:SetScript("OnClick", function(self)
         if type(EasyMenu) ~= "function" then return end
         if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
         NexusDB = NexusDB or {}
-        local function MenuAction(fn)
-            return function()
-                if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
-                fn()
-            end
-        end
-        local items = {
-            { text = "Help / Getting Started", notCheckable = true,
-              func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("start") end end) },
-            -- Information only: reopens the first-launch guide (QuickStart
-            -- ShowSetup); it records nothing and never turns Auto ON.
-            { text = "Setup / Welcome", notCheckable = true,
-              func = MenuAction(function()
-                  local quick = Nexus.QuickStart
-                  local shown, why
-                  if quick and quick.ShowSetup then shown, why = quick.ShowSetup() end
-                  if not shown then
-                      print("|cffffd200Nexus:|r " .. (why == "warning-open"
-                          and "Answer the open Auto warning first (Yes or No); Setup / Welcome opens after it."
-                          or "Setup / Welcome is not available right now."))
-                  end
-              end) },
-            -- Read-only: what Nexus can read now about setup and status
-            -- (QuickStart.ShowChecklist); it completes nothing for you.
-            { text = "Setup checklist and status", notCheckable = true,
-              func = MenuAction(function()
-                  if Nexus.QuickStart and Nexus.QuickStart.ShowChecklist then Nexus.QuickStart.ShowChecklist() end
-              end) },
-            { text = "Orbs / Lost Memories", notCheckable = true,
-              func = MenuAction(function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end) },
-            -- What Auto may do, with each permission's current value; only
-            -- the existing setters change one (M.AutomationMenuItems).
-            { text = "Automation settings", notCheckable = true, hasArrow = true,
-              menuList = M.AutomationMenuItems(MenuAction) },
-            -- Issue #123: the Nexus-only language chooser (M.LanguageMenuItems).
-            -- Building and showing it reads only; a row click is the one place
-            -- a choice is submitted, through the lifecycle callback.
-            { text = M.LanguageMenuLabel(), notCheckable = true, hasArrow = true,
-              menuList = M.LanguageMenuItems(MenuAction) },
-            {
-                -- Opens the style and colour choices as their own menu.
-                text = "Appearance: " .. ((Nexus.Theme and Nexus.Theme.Summary)
-                    and Nexus.Theme.Summary() or "default") .. "...",
-                notCheckable = true,
-                func = MenuAction(function()
-                    if Nexus.Theme and Nexus.Theme.ShowMenu then Nexus.Theme.ShowMenu(self) end
-                end),
-            },
-            {
-                -- Never disabled: the Releases page and the installed build are
-                -- available with no report, no peer and no Community catalog.
-                text = (Nexus.Updates and Nexus.Updates.Status)
-                    and Nexus.Updates.Status().menu or "Open Releases page",
-                notCheckable = true,
-                func = MenuAction(function() M.ShowUpdateStatus() end),
-            },
-            {
-                text = (Nexus.Updates and Nexus.Updates.Preference
-                    and Nexus.Updates.Preference() == "stable")
-                    and "Update notices: stable only (click for stable + test)"
-                    or "Update notices: stable + test builds (click for stable only)",
-                notCheckable = true,
-                func = MenuAction(function()
-                    if Nexus.Updates and Nexus.Updates.SetPreference then
-                        Nexus.Updates.SetPreference(
-                            Nexus.Updates.Preference() == "stable" and "test" or "stable")
-                    end
-                end),
-            },
-            {
-                text = (Nexus.Updates and Nexus.Updates.IsEnabled
-                    and Nexus.Updates.IsEnabled())
-                    and "Disable Update Notices" or "Enable Update Notices",
-                notCheckable = true,
-                func = MenuAction(function()
-                    if Nexus.Updates and Nexus.Updates.SetEnabled then
-                        Nexus.Updates.SetEnabled(not Nexus.Updates.IsEnabled())
-                    end
-                end),
-            },
-            {
-                text = showPerformance and "Hide DPS records" or "Show DPS records",
-                notCheckable = true,
-                func = MenuAction(function()
-                    showPerformance = not showPerformance
-                    M.SavedLayoutRoot().uiShowPerformance = showPerformance
-                    if M.Refresh then M.Refresh() end
-                end),
-            },
-            {
-                text = "Wishlist Editor",
-                notCheckable = true,
-                func = MenuAction(function() CloseOtherNexusWindows(); if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end),
-            },
-            {
-                text = (Nexus.ServerStatus and Nexus.ServerStatus.IsUsingNexusHud and Nexus.ServerStatus.IsUsingNexusHud())
-                    and "Use Server Difficulty / Soul Ash HUD" or "Use Nexus Difficulty / Soul Ash HUD",
-                notCheckable = true,
-                disabled = not (Nexus.ServerStatus and Nexus.ServerStatus.IsDetected and Nexus.ServerStatus.IsDetected()),
-                func = MenuAction(function()
-                    if Nexus.ServerStatus then
-                        Nexus.ServerStatus.SetMode(Nexus.ServerStatus.IsUsingNexusHud() and "server" or "nexus")
-                    end
-                end),
-            },
-            {
-                text = "Reset Panel Position",
-                notCheckable = true,
-                func = MenuAction(function()
-                    local saved = M.SavedLayoutRoot()
-                    saved.panelX, saved.panelY = nil, nil
-                    frame:ClearAllPoints()
-                    frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
-                end),
-            },
-            {
-                text = "Hide Nexus Panel",
-                notCheckable = true,
-                func = MenuAction(function() M.Hide() end),
-            },
-        }
         M._moreMenu = M._moreMenu or CreateFrame("Frame", "NexusPanelMoreMenu", UIParent, "UIDropDownMenuTemplate")
-        EasyMenu(items, M._moreMenu, self, 0, 0, "MENU")
+        EasyMenu(M.MoreMenuItems(self), M._moreMenu, self, 0, 0, "MENU")
     end)
     menuBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
         -- M4 (UX-15, M3 NB9): one name for this button everywhere.
         GameTooltip:AddLine("Menu and status", 1, 1, 1)
-        GameTooltip:AddLine("Performance display, wishlist tools, HUD mode, appearance, and panel settings.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("Help and setup, settings, notices, logs and panel actions. Plan, Explore and Orbs are on the footer.", 0.8, 0.8, 0.8, true)
         -- model.status (Main.lua's statusLine, including "error (see /nexus
         -- err)") was set on every render but never read anywhere in this file --
         -- surfaced here so a real error is visible without knowing the slash
@@ -2422,10 +2265,355 @@ local function EnsureFrame()
     if Nexus.Theme and Nexus.Theme.StyleWindow then Nexus.Theme.StyleWindow(frame, 0.94) end
 
     frame._footerButtons = {
-        auto=autoBtn,builds=buildsBtn,leaderboard=leaderboardBtn,
+        auto=autoBtn,plan=planBtn,explore=exploreBtn,orbs=orbsHub,
     }
     M.ApplyOwnedFonts()
     return frame
+end
+
+------------------------------------------------------------------------
+-- Navigation routes and menus (issue #163, UI review P2-P4). Each entry
+-- opens an existing window through its existing route; none assigns, saves,
+-- shares, removes, spends, loads a Saved Build or turns Auto ON. Building or
+-- showing a menu, a hub tooltip or a status line only reads.
+------------------------------------------------------------------------
+
+-- The game's own My Builds page (the header button and the Plan hub).
+function M.OpenMyBuilds()
+    CloseOtherNexusWindows()
+    if Nexus.JournalTab and Nexus.JournalTab.OpenBuilds then
+        Nexus.JournalTab.OpenBuilds()
+    else
+        -- The journal's Show(tab) is a dot-call whose argument is a tab
+        -- index; no tab is established here, so none is passed (the
+        -- journal opens its current tab).
+        local pe = _G["ProjectEbonhold"]
+        if pe and pe.EchoJournal and pe.EchoJournal.Show then
+            pcall(pe.EchoJournal.Show)
+        end
+    end
+end
+
+-- Assign Wishlist (the setup view's button and the Plan hub).
+function M.OpenAssignment()
+    local journal = Nexus.JournalTab
+    if journal and journal.OpenBuilds then
+        -- The present helper is the route: the Echo Journal with the
+        -- Wishlist chooser opened for the Saved Build the Journal targets
+        -- (nothing is assigned until one is chosen). It closes the other
+        -- Nexus windows only once the game's Character Progression entry
+        -- is there, so a refusal loses nothing and is said here.
+        local opened, why = journal.OpenBuilds(true, CloseOtherNexusWindows)
+        if opened == false and why == "unavailable" then
+            print("|cffff6060Nexus:|r Could not find the game's Character Progression button, so nothing "
+                .. "was opened or assigned. Open Character Progression → Echoes yourself and use the Nexus "
+                .. "Wishlist selector at its top.")
+        end
+    else
+        CloseOtherNexusWindows()
+        -- Show(tab) is a dot-call taking a tab index; no tab is passed
+        -- (the journal opens its current tab).
+        local pe = _G["ProjectEbonhold"]
+        if pe and pe.EchoJournal and pe.EchoJournal.Show then
+            pcall(pe.EchoJournal.Show)
+        end
+    end
+end
+
+local function OpenEditor()
+    CloseOtherNexusWindows()
+    if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end
+end
+
+local function OpenBuildLibrary()
+    CloseOtherNexusWindows()
+    if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end
+end
+
+local function OpenLeaderboard()
+    CloseOtherNexusWindows()
+    if Nexus.Leaderboard then Nexus.Leaderboard.Show() end
+end
+
+-- A menu click closes the menu first.
+local function MenuAction(fn)
+    return function()
+        if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
+        fn()
+    end
+end
+
+local function MenuTitle(text) return {text = text, isTitle = true, notCheckable = true} end
+local function MenuNote(text) return {text = text, notCheckable = true, disabled = true} end
+
+local function Say(kind, detail)
+    local readout = Nexus.Readout
+    if readout and type(readout.StatusText) == "function" then return readout.StatusText(kind, detail) end
+    return tostring(detail or kind)
+end
+
+-- The shared data's state in the status vocabulary, from the start-up
+-- snapshot the loading panel reads (Nexus.StartupStatus). Local Wishlist
+-- tools are said ready only when that snapshot says so. Read only.
+function M.SharedDataLine()
+    local ok, status = false, nil
+    if type(Nexus.StartupStatus) == "function" then ok, status = pcall(Nexus.StartupStatus) end
+    if not ok or type(status) ~= "table" then return Say("unknown", "shared builds and records") end
+    if status.state == "ready" then return Say("ready", "shared builds and records") end
+    if status.state == "failed" then
+        return Say("unavailable", "shared builds and records (see /nexus status)")
+    end
+    return Say("loading", "shared builds and records; " .. (status.coreReady == true
+        and "your Wishlists work now" or "Wishlist tools unlock after saved data is checked"))
+end
+
+-- The Orb run for the Orbs hub, from the passive reason view the setup
+-- checklist reads (OrbFacts), and only once local start-up is ready. An
+-- unread state is unknown, not "no run"; a pending offer is not a result,
+-- and one restored after a reload is unconfirmed, never spent or confirmed.
+function M.OrbHubLine()
+    local okReady, ready = false, nil
+    if type(Nexus.StartupStatus) == "function" then okReady, ready = pcall(Nexus.StartupStatus) end
+    local runtime = Nexus.OrbRuntime
+    if not (okReady and type(ready) == "table" and ready.coreReady == true and runtime) then
+        return Say("unknown", "the Orb run is not read yet")
+    end
+    local okOrb, orb, observed = pcall(OrbFacts, runtime)
+    if not okOrb or orb == nil then
+        return Say("unknown", observed == false and "the Orb state has not been read this session"
+            or "the Orb run cannot be read now")
+    end
+    if orb == false then return "Orb run: none approved" end
+    local history = Nexus.OrbHistory
+    local states = history and type(history.RUN_STATES) == "table" and history.RUN_STATES or {}
+    local stateText = orb.state and (states[orb.state] or ("state " .. orb.state .. " is not described here"))
+        or "state not recorded"
+    -- A restored receipt can precede the offer, selection and result. Do not
+    -- call it a previous result merely because recovery is active.
+    if orb.state == "RECOVERY" and orb.pending and orb.restored then
+        stateText = "Earlier Orb action unresolved"
+    end
+    local text = "Orb run: " .. stateText
+    if orb.pending and orb.restored then
+        text = text .. "; " .. Say("unconfirmed", "the action from before reload")
+    elseif orb.pending and orb.state == "WAIT_RESULT" then
+        text = text .. "; " .. Say("awaiting")
+    elseif orb.pending and orb.state ~= "WAIT_OFFER" then
+        text = text .. "; an action may still settle"
+    end
+    return text
+end
+
+local HIDE_NOTE = "Hiding does not turn Nexus off or change Auto; type "
+    .. "/nexus panel or click the Nexus minimap button to show it again."
+local HIDE_TOOLTIP = "Hide the Nexus panel. " .. HIDE_NOTE
+
+-- The ... menu, grouped (UI review P2): help and setup, settings, notices,
+-- logs, the items that moved to the footer hubs (kept here under their old
+-- labels) and the panel's own actions. Earlier routes keep their destinations;
+-- Hide also confirms the action in chat. `anchor` is the menu button.
+function M.MoreMenuItems(anchor)
+    local items = {}
+    local function Add(item) items[#items + 1] = item end
+    Add(MenuTitle("Help and setup"))
+    Add({ text = "Help / Getting Started", notCheckable = true,
+        func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("start") end end) })
+    -- Information only: reopens the first-launch guide (QuickStart
+    -- ShowSetup); it records nothing and never turns Auto ON.
+    Add({ text = "Setup / Welcome", notCheckable = true,
+        func = MenuAction(function()
+            local quick = Nexus.QuickStart
+            local shown, why
+            if quick and quick.ShowSetup then shown, why = quick.ShowSetup() end
+            if not shown then
+                print("|cffffd200Nexus:|r " .. (why == "warning-open"
+                    and "Answer the open Auto warning first (Yes or No); Setup / Welcome opens after it."
+                    or "Setup / Welcome is not available right now."))
+            end
+        end) })
+    -- Read-only: what Nexus can read now about setup and status
+    -- (QuickStart.ShowChecklist); it completes nothing for you.
+    Add({ text = "Setup checklist and status", notCheckable = true,
+        func = MenuAction(function()
+            if Nexus.QuickStart and Nexus.QuickStart.ShowChecklist then Nexus.QuickStart.ShowChecklist() end
+        end) })
+    -- The page /nexus report opens. Opening it reads; only its own Prepare
+    -- report file writes, to the separate support storage.
+    Add({ text = "Support report...", notCheckable = true,
+        func = MenuAction(function()
+            if Nexus.SupportReportUI and Nexus.SupportReportUI.Show then
+                Nexus.SupportReportUI.Show()
+            else
+                print("|cffff6060Nexus:|r the support report view is not loaded.")
+            end
+        end) })
+
+    Add(MenuTitle("Settings"))
+    -- What Auto may do, with each permission's current value; only the
+    -- existing setters change one (M.AutomationMenuItems).
+    Add({ text = "Automation settings", notCheckable = true, hasArrow = true,
+        menuList = M.AutomationMenuItems(MenuAction) })
+    -- Issue #123: the Nexus-only language chooser (M.LanguageMenuItems).
+    -- Building and showing it reads only; a row click is the one place a
+    -- choice is submitted, through the lifecycle callback.
+    Add({ text = M.LanguageMenuLabel(), notCheckable = true, hasArrow = true,
+        menuList = M.LanguageMenuItems(MenuAction) })
+    -- Opens the style and colour choices as their own menu.
+    Add({ text = "Appearance: " .. ((Nexus.Theme and Nexus.Theme.Summary)
+            and Nexus.Theme.Summary() or "default") .. "...",
+        notCheckable = true,
+        func = MenuAction(function()
+            if Nexus.Theme and Nexus.Theme.ShowMenu then Nexus.Theme.ShowMenu(anchor) end
+        end) })
+    Add({ text = showPerformance and "Hide DPS records" or "Show DPS records",
+        notCheckable = true,
+        func = MenuAction(function()
+            showPerformance = not showPerformance
+            M.SavedLayoutRoot().uiShowPerformance = showPerformance
+            if M.Refresh then M.Refresh() end
+        end) })
+    Add({ text = (Nexus.ServerStatus and Nexus.ServerStatus.IsUsingNexusHud and Nexus.ServerStatus.IsUsingNexusHud())
+            and "Use Server Difficulty / Soul Ash HUD" or "Use Nexus Difficulty / Soul Ash HUD",
+        notCheckable = true,
+        disabled = not (Nexus.ServerStatus and Nexus.ServerStatus.IsDetected and Nexus.ServerStatus.IsDetected()),
+        func = MenuAction(function()
+            if Nexus.ServerStatus then
+                Nexus.ServerStatus.SetMode(Nexus.ServerStatus.IsUsingNexusHud() and "server" or "nexus")
+            end
+        end) })
+
+    Add(MenuTitle("Notices"))
+    -- Never disabled: the Releases page and the installed build are
+    -- available with no report, no peer and no Community catalog.
+    Add({ text = (Nexus.Updates and Nexus.Updates.Status)
+            and Nexus.Updates.Status().menu or "Open Releases page",
+        notCheckable = true,
+        func = MenuAction(function() M.ShowUpdateStatus() end) })
+    Add({ text = (Nexus.Updates and Nexus.Updates.Preference
+            and Nexus.Updates.Preference() == "stable")
+            and "Update notices: stable only (click for stable + test)"
+            or "Update notices: stable + test builds (click for stable only)",
+        notCheckable = true,
+        func = MenuAction(function()
+            if Nexus.Updates and Nexus.Updates.SetPreference then
+                Nexus.Updates.SetPreference(
+                    Nexus.Updates.Preference() == "stable" and "test" or "stable")
+            end
+        end) })
+    Add({ text = (Nexus.Updates and Nexus.Updates.IsEnabled
+            and Nexus.Updates.IsEnabled())
+            and "Disable Update Notices" or "Enable Update Notices",
+        notCheckable = true,
+        func = MenuAction(function()
+            if Nexus.Updates and Nexus.Updates.SetEnabled then
+                Nexus.Updates.SetEnabled(not Nexus.Updates.IsEnabled())
+            end
+        end) })
+
+    Add(MenuTitle("Logs"))
+    -- The viewer /nexus log opens; opening it changes nothing.
+    Add({ text = "Log viewer...", notCheckable = true,
+        func = MenuAction(function() if Nexus.LogViewer and Nexus.LogViewer.Show then Nexus.LogViewer.Show() end end) })
+
+    -- Their old labels stay here for this release; the footer hubs open the
+    -- same windows.
+    Add(MenuTitle("Also on the panel footer"))
+    Add({ text = "Orbs / Lost Memories", notCheckable = true,
+        tooltipTitle = "Orbs / Lost Memories", tooltipText = "Also Orbs on the panel footer.",
+        func = MenuAction(function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end) })
+    Add({ text = "Wishlist Editor", notCheckable = true,
+        tooltipTitle = "Wishlist Editor", tooltipText = "Also under Plan on the panel footer.",
+        func = MenuAction(OpenEditor) })
+
+    Add(MenuTitle("Panel"))
+    Add({ text = "Reset Panel Position", notCheckable = true,
+        func = MenuAction(function()
+            local saved = M.SavedLayoutRoot()
+            saved.panelX, saved.panelY = nil, nil
+            frame:ClearAllPoints()
+            frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
+        end) })
+    -- Hiding is not pausing: it says how the panel comes back.
+    Add({ text = "Hide Nexus Panel", notCheckable = true,
+        tooltipTitle = "Hide Nexus Panel", tooltipText = HIDE_TOOLTIP,
+        func = MenuAction(function()
+            M.Hide()
+            print("|cffffd200Nexus:|r The Nexus panel is hidden. " .. HIDE_NOTE)
+        end) })
+    return items
+end
+
+-- The Plan and Explore hub menus. Each consequence note is a visible row:
+-- the 3.3.5 dropdown shows item tooltips only with beginner tips on.
+function M.HubMenuItems(kind)
+    local L = Nexus.Localization
+    local function Text(key) return L and type(L.Text) == "function" and (L.Text(key)) or nil end
+    local items = {}
+    local function Add(item) items[#items + 1] = item end
+    if kind == "plan" then
+        Add(MenuTitle("Plan"))
+        Add({ text = "Wishlist Editor", notCheckable = true, tooltipTitle = "Wishlist Editor",
+            tooltipText = Text("panel.tooltip.create_wishlist_draft"), func = MenuAction(OpenEditor) })
+        Add({ text = "Assign Wishlist...", notCheckable = true, tooltipTitle = Text("panel.tooltip.assignment_heading"),
+            tooltipText = Text("panel.tooltip.assignment_chooser"), func = MenuAction(M.OpenAssignment) })
+        Add({ text = "My Builds (game page)", notCheckable = true, tooltipTitle = Text("panel.tooltip.open_my_builds"),
+            tooltipText = Text("panel.tooltip.my_builds_destination"), func = MenuAction(M.OpenMyBuilds) })
+        Add(MenuNote("Opening a window saves, assigns and loads nothing."))
+    elseif kind == "explore" then
+        Add(MenuTitle("Explore"))
+        Add({ text = "Build Library", notCheckable = true, tooltipTitle = "Build Library",
+            tooltipText = "Shared builds, and under Mine your Saved Builds and shared listings.",
+            func = MenuAction(OpenBuildLibrary) })
+        Add({ text = "Leaderboard", notCheckable = true, tooltipTitle = "Leaderboard",
+            tooltipText = "Training Dummy and Lich King records.", func = MenuAction(OpenLeaderboard) })
+        Add(MenuNote(M.SharedDataLine()))
+        Add(MenuNote("Best known: shared records this client holds, not a complete or server-wide ranking."))
+    end
+    return items
+end
+
+-- The lines of a hub's hover, title first. Reads only.
+function M.HubTooltipLines(kind)
+    if kind == "plan" then
+        return {"Plan", "Wishlist Editor, Assign Wishlist and the game's My Builds page.",
+            "Opening a window saves, assigns and loads nothing; each window's own buttons say what they change."}
+    elseif kind == "explore" then
+        return {"Explore", "Build Library: shared builds, and under Mine your Saved Builds and shared listings.",
+            "Leaderboard: Training Dummy and Lich King records.", M.SharedDataLine(),
+            "Best known: shared records this client holds, not a complete or server-wide ranking."}
+    elseif kind == "orbs" then
+        return {"Orbs / Lost Memories", "Opens the Orb window to inspect it. It starts or spends nothing.",
+            M.OrbHubLine(),
+            "Closing the Orb window or its mini panel only hides it; an approved run continues. Use Pause or Stop."}
+    end
+    return {}
+end
+
+function M.ShowHubTooltip(kind, owner)
+    if not GameTooltip then return end
+    GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+    for index, line in ipairs(M.HubTooltipLines(kind)) do
+        if index == 1 then GameTooltip:AddLine(line, 1, 1, 1)
+        else GameTooltip:AddLine(line, 0.85, 0.85, 0.85, true) end
+    end
+    GameTooltip:Show()
+end
+
+-- A hub click: Orbs opens the Orb window (passive, as Open Orbs...); Plan
+-- and Explore open their menu in the stock dropdown.
+function M.ShowHub(kind, anchor)
+    if kind == "orbs" then
+        if not (Nexus.OrbPanel and Nexus.OrbPanel.Show) then return false end
+        if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
+        Nexus.OrbPanel.Show()
+        return true
+    end
+    if kind ~= "plan" and kind ~= "explore" then return false end
+    if type(EasyMenu) ~= "function" then return false end
+    if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
+    M._hubMenu = M._hubMenu or CreateFrame("Frame", "NexusPanelHubMenu", UIParent, "UIDropDownMenuTemplate")
+    EasyMenu(M.HubMenuItems(kind), M._hubMenu, anchor or "cursor", 0, 0, "MENU")
+    return true
 end
 
 local function EnsureMinimapButton()
@@ -2927,14 +3115,21 @@ local function LayoutServerStatus(completed)
     end
 end
 
-local function LayoutFooter(showAuto, completed)
+-- The footer: the Auto state control apart on the left, then the Plan,
+-- Explore and Orbs hubs (issue #163 P3). The wider gap after Auto keeps the
+-- one state control apart from navigation; Auto keeps its place and size.
+-- Without Auto the three hubs share the row. Widths are the offline model's
+-- (272 px HUD); native label fit at large font scales is not measured.
+local function LayoutFooter(showAuto)
     menuBtn:Show()
     menuBtn:ClearAllPoints()
     menuBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", 7, -6)
 
+    local orbsHub = frame._orbsHubBtn
     autoBtn:ClearAllPoints()
-    buildsBtn:ClearAllPoints()
-    leaderboardBtn:ClearAllPoints()
+    planBtn:ClearAllPoints()
+    exploreBtn:ClearAllPoints()
+    orbsHub:ClearAllPoints()
 
     if showAuto then
         autoBtn:Show()
@@ -2942,31 +3137,25 @@ local function LayoutFooter(showAuto, completed)
         autoBtn:SetSize(72, 22)
         AUTO_LABEL.Fit() -- cached; refits only when the font or width changed
 
-        buildsBtn:SetPoint("LEFT", autoBtn, "RIGHT", 4, 0)
-        buildsBtn:SetSize(84, 22)
-
-        leaderboardBtn:SetPoint("LEFT", buildsBtn, "RIGHT", 4, 0)
-        leaderboardBtn:SetSize(84, 22)
+        planBtn:SetPoint("LEFT", autoBtn, "RIGHT", 10, 0)
+        planBtn:SetSize(54, 22)
+        exploreBtn:SetPoint("LEFT", planBtn, "RIGHT", 3, 0)
+        exploreBtn:SetSize(62, 22)
+        orbsHub:SetPoint("LEFT", exploreBtn, "RIGHT", 3, 0)
+        orbsHub:SetSize(52, 22)
     else
         autoBtn:Hide()
-
-        -- At level 80 / completed build, records are the primary destination.
-        -- Builds remains equally accessible without hiding either behind a menu.
-        if completed then
-            leaderboardBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, 7)
-            leaderboardBtn:SetSize(96, 20)
-            buildsBtn:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -10, 7)
-            buildsBtn:SetSize(96, 20)
-        else
-            buildsBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, 7)
-            buildsBtn:SetSize(96, 20)
-            leaderboardBtn:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -10, 7)
-            leaderboardBtn:SetSize(96, 20)
-        end
+        planBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, 7)
+        planBtn:SetSize(80, 20)
+        exploreBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 96, 7)
+        exploreBtn:SetSize(80, 20)
+        orbsHub:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -10, 7)
+        orbsHub:SetSize(80, 20)
     end
 
-    buildsBtn:Show()
-    leaderboardBtn:Show()
+    planBtn:Show()
+    exploreBtn:Show()
+    orbsHub:Show()
 end
 
 local function PlacePanelRect(widget, x, y, width, height, relative)
@@ -3246,7 +3435,7 @@ local function ApplyModel(model, signatures, roll)
             responsiveLayout = frame._responsiveLayout
         end
     end
-    LayoutFooter(showAutoControl, complete and not noBuild)
+    LayoutFooter(showAutoControl)
 
     -- The heading is the destination row's first cell: it is worded and
     -- fitted at the end of this pass (UpdateDestinationRow), not here.

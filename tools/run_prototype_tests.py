@@ -355,6 +355,8 @@ NAMES += ['flexible_plan_persistence_chooser']
 NAMES += ['guided_setup_flow','guided_setup_readback']
 # First entry routing: a healthy first use is the guided setup coach; Help's primary Setup / Welcome opens it; declines, read-only and refusals stay honest (EXPECT fails at f67ba51e by design).
 NAMES += ['guided_first_entry']
+# Issue #163 UI review prototype: shared status vocabulary and grouped navigation with existing labels.
+NAMES += ['ui_review_navigation']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

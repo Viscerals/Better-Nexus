@@ -2183,7 +2183,7 @@ function M.WrittenNotice(meta)
     local id = type(meta) == "table" and meta.id or "?"
     return "Report " .. safeText(id, 48) .. " is prepared in memory. WoW writes the "
         .. "file when you reload, log out, or exit normally. It is not yet "
-        .. "verified on disk."
+        .. "verified on disk. Nexus does not reload or log out for you."
 end
 
 function M.FilePathHint()

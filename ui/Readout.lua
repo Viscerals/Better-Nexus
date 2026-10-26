@@ -169,6 +169,61 @@ function M.ChargesLegend()
     }
 end
 
+-- One status vocabulary for every surface (issue #163, UI review P1): a
+-- glyph and a word per state, so no state is told by colour alone. The words
+-- of the Orb states are the Orb history's own labels (OrbHistory.RESULTS).
+-- Glyphs are ASCII on purpose: which other symbols the client fonts draw is
+-- not established, and "?" (unknown) and "~" (estimated) are the marks
+-- ChargesLine already uses. A kind names what the caller read; this table
+-- never decides it, and an unlisted kind is said as unknown, never as a
+-- success or as zero.
+local STATUS = {
+    confirmed   = {glyph = "+",   word = "Confirmed"},
+    awaiting    = {glyph = "...", word = "Awaiting result"},
+    choice      = {glyph = ">",   word = "Waiting for choice"},
+    offer       = {glyph = "...", word = "Waiting for offer"},
+    paused      = {glyph = "=",   word = "Paused"},
+    unconfirmed = {glyph = "?",   word = "Unconfirmed"},
+    notSent     = {glyph = "-",   word = "Not sent"},
+    sent        = {glyph = "->",  word = "Sent, not confirmed"},
+    stored      = {glyph = "*",   word = "Stored on this client"},
+    refused     = {glyph = "x",   word = "Refused"},
+    unavailable = {glyph = "!",   word = "Unavailable"},
+    estimated   = {glyph = "~",   word = "Estimated"},
+    stale       = {glyph = "?",   word = "Stale"},
+    loading     = {glyph = "...", word = "Loading"},
+    ready       = {glyph = "+",   word = "Ready"},
+    unknown     = {glyph = "?",   word = "Unknown"},
+}
+M.STATUS_KINDS = {"confirmed", "awaiting", "choice", "offer", "paused", "unconfirmed", "notSent",
+    "sent", "stored", "refused", "unavailable", "estimated", "stale", "loading", "ready", "unknown"}
+
+-- {kind, glyph, word} for a kind (a new table; changing it changes nothing
+-- here). An unlisted kind is "unknown". (M.Status above is the panel's
+-- status sentence, a different builder.)
+function M.StatusParts(kind)
+    local entry = type(kind) == "string" and STATUS[kind] or nil
+    if not entry then kind, entry = "unknown", STATUS.unknown end
+    return {kind = kind, glyph = entry.glyph, word = entry.word}
+end
+
+-- "<glyph> <word>", or "<glyph> <word>: <detail>" with a nonempty detail.
+function M.StatusText(kind, detail)
+    local s = M.StatusParts(kind)
+    local text = s.glyph .. " " .. s.word
+    if detail ~= nil and tostring(detail) ~= "" then text = text .. ": " .. tostring(detail) end
+    return text
+end
+
+-- A count as shown: a whole number, "~N" when the caller says it is
+-- estimated, and "?" when it is missing, not a number, negative or infinite.
+-- Unknown is never 0 (the ChargesLine rule).
+function M.CountText(value, estimated)
+    value = tonumber(value)
+    if value == nil or value ~= value or value < 0 or value >= math.huge then return "?" end
+    return (estimated and "~" or "") .. tostring(Round(value))
+end
+
 -- Plain words for why a selected Auto is not acting (the runtime's
 -- AutoAllowed and effective-state reasons). Anything else keeps the
 -- player wording of UserText. Text only; it changes no gate.

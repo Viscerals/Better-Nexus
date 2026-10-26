@@ -12,6 +12,13 @@ Build Progress page have a **Help** button that opens a Help page (the Build
 Library and Leaderboard close themselves first); it assigns, saves and sends
 nothing.
 
+The panel footer holds **Auto** on its own, then three hubs: **Plan** (Wishlist
+Editor, Assign Wishlist..., the game's My Builds page), **Explore** (Build
+Library, Leaderboard) and **Orbs** (the Orb window). A hub only opens windows;
+it assigns, saves, shares and spends nothing. The **...** menu is grouped into
+help and setup, settings, notices, logs and panel actions; its older entries
+keep their names.
+
 ## Install and roll back
 
 Close WoW. Back up `Interface/AddOns/Nexus` and your matching `WTF` folder
@@ -243,8 +250,8 @@ Orbs refine rolled Echoes toward the assigned Wishlist, one Orb per replacement.
 They cannot create or replace locked slots; a run stops when rolled targets are
 complete. Opening the window, **Open Orbs...**, Help and **Max** spend nothing.
 
-1. Open `/nexus orbs`, **Orbs / Lost Memories** in the **...** menu, or
-   **Open Orbs...** on the panel (shown with Orb guidance). Check the assigned Wishlist, missing copies and
+1. Open `/nexus orbs`, **Orbs** on the panel footer, **Orbs / Lost Memories**
+   in the **...** menu, or **Open Orbs...** on the panel (shown with Orb guidance). Check the assigned Wishlist, missing copies and
    the confirmed Orb balance. Loading is never a zero balance.
 2. Set the maximum. Until you type an amount it follows your confirmed balance,
    up to 1000. Typing stops that; **Max** returns to following the balance. A
@@ -292,8 +299,8 @@ When it is blocked:
 
 ## Shared builds, DPS and Sync
 
-1. Click **Build Library**. The scope button switches between **All Shared** and
-   **My Builds**.
+1. Click **Explore** on the panel footer, then **Build Library**. The scope
+   button switches between **All Shared** and **My Builds**.
 2. **Require both DPS records** — checked: only builds with both a Training Dummy
    and a Lich King record this client holds. Unchecked: no such requirement;
    other filters still apply. A record is availability, not build quality,
