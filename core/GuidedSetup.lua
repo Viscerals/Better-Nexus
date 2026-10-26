@@ -206,6 +206,30 @@ function G.ArmAssign()
 end
 function G.Disarm() G.State().request = nil end
 
+-- Guide-private operation origins. A real assignment operation the player
+-- starts (a chooser row click, before any confirmation or role choice) gets an
+-- opaque token bound to the request armed at that moment, with its context,
+-- destination and Wishlist key. Only this file reads a token: an unknown,
+-- foreign or missing one binds nothing. Session memory only; nothing is saved.
+local origins = setmetatable({}, {__mode = 'k'})
+local claims = setmetatable({}, {__mode = 'k'})
+
+-- The token for an operation starting now, or nil when no request for this
+-- destination is armed. It reads guide state only and changes nothing in the
+-- game; the caller carries it unchanged to every result of that operation.
+function G.BeginAssign(destination, key)
+    local s = S
+    if not s then return nil end
+    G.Recheck()
+    local req, dest = s.request, Dest(destination)
+    if not (req and dest and req.destination == dest) then return nil end
+    local token = {}
+    origins[token] = {request = req, destination = dest,
+        key = type(key) == 'string' and key ~= '' and key or nil,
+        owner = s.context.owner, epoch = s.context.epoch, session = s.context.session}
+    return token
+end
+
 -- The receipt seam. Called by real outcome sites only; it records and reads.
 function G.Note(kind, fields)
     fields = type(fields) == 'table' and fields or {}
@@ -220,6 +244,14 @@ function G.Note(kind, fields)
             local a = Nexus.GameAdapter
             local ok, token = Try(a and a.AssignmentActionToken, r.destination)
             r.token = ok and token or nil
+        end
+        -- The operation's own origin, as this guide issued it: the receipt
+        -- belongs to that request only while its context, destination and
+        -- Wishlist key are the ones the operation began with.
+        local o = origins[fields.guide]
+        if o and o.destination == r.destination and o.owner == r.owner and o.epoch == r.epoch
+            and o.session == r.session and (o.key == nil or r.key == nil or o.key == r.key) then
+            claims[r] = o.request
         end
     elseif kind == 'save' then
         r.saveKind, r.written, r.token = fields.kind, Dest(fields.written), fields.token
@@ -261,11 +293,17 @@ function G.AssignStatus()
     local s = G.State(); G.Recheck()
     local w, f = s.wishlist, G.TargetFacts()
     if not (w and f) then return {state = 'none'} end
-    local read, req, receipt = f.read, s.request, nil
+    local read, req, receipt, foreign = f.read, s.request, nil, nil
     if req then
         for i = #receipts, 1, -1 do
             local r = receipts[i]
-            if r.kind == 'assign' and r.serial > req.serial and r.destination == f.destination then receipt = r; break end
+            -- Only a result of an operation that began under this very request
+            -- (G.BeginAssign) is its own; another operation's later report is
+            -- never adopted as this request's result.
+            if r.kind == 'assign' and r.serial > req.serial and r.destination == f.destination then
+                if claims[r] == req then receipt = r; break end
+                if r.ok and not foreign then foreign = r end
+            end
         end
     end
     local saved = w.receipt
@@ -287,6 +325,9 @@ function G.AssignStatus()
         return out
     end
     if read.state == 'assigned' and read.key == w.key then return {state = 'observed', readName = read.name} end
+    -- A write another operation reported after this request is not its
+    -- result, and what it did to this target is not known here.
+    if foreign then return {state = 'unknown', readName = read.name} end
     if req then return {state = req.baseAction ~= read.action and 'changed' or 'pending'} end
     return {state = 'ready'}
 end

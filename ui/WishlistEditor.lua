@@ -518,7 +518,7 @@ function RolePicker.Accept()
         if state.activeSlot==0 then ok,err=Adapter.SetFirstRunWishlist(resolved.slot,resolved)
         else ok,err=Adapter.SetLoadoutWishlist(state.activeSlot,resolved.slot,resolved) end
         GuideNote("assign",{origin="rolepicker",destination=state.activeSlot==0 and "first" or state.activeSlot,
-            ok=ok==true,reason=err,key=resolved.key,slot=resolved.slot,name=resolved.name})
+            ok=ok==true,reason=err,key=resolved.key,slot=resolved.slot,name=resolved.name,guide=state.guide})
         if not ok then
             RolePicker.Message("Roles saved, but assignment did not complete: " .. tostring(err or "unavailable"))
             return false
@@ -613,7 +613,7 @@ function RolePicker.Ensure()
         local pending=RolePicker.state
         if pending and pending.assign then
             GuideNote("assign",{origin="rolepicker",destination=pending.activeSlot==0 and "first" or pending.activeSlot,
-                ok=false,cancelled=true,reason="cancelled"})
+                ok=false,cancelled=true,reason="cancelled",guide=pending.guide})
         end
         RolePicker.Hide()
     end)
@@ -651,7 +651,7 @@ function RolePicker.Begin(entries,context)
     -- No modal frame is constructed on the normal automatic-current-lock path.
     local state={kind=context.kind,name=context.name,rows=rows,page=1,
         class=context.class,loadoutSlot=context.loadoutSlot,
-        assign=context.assign,activeSlot=context.activeSlot}
+        assign=context.assign,activeSlot=context.activeSlot,guide=context.guide}
     if context.candidate then
         state.candidate={slot=context.candidate.slot,name=context.candidate.name,
             key=context.candidate.key,lockEvidenceStatus="unavailable",echoes={},
@@ -689,12 +689,14 @@ function M.UnresolvedRoleHint()
         and "choose locked targets" or "use current locks"
 end
 
-function M.ResolveAndAssignWishlist(candidate, activeSlot)
+function M.ResolveAndAssignWishlist(candidate, activeSlot, guide)
+    -- guide (optional, passive): the guided setup origin its caller took as
+    -- the player started this operation; it is only carried to the result.
     local resolved,status,_,why=Adapter.ResolveWishlistEvidence(candidate)
     if status=="evidence-pending" then
         return RolePicker.Begin(resolved.echoes,{kind="existing",name=resolved.name,
             candidate=resolved,loadoutSlot=tonumber(activeSlot),assign=true,
-            activeSlot=tonumber(activeSlot) or 0})
+            activeSlot=tonumber(activeSlot) or 0,guide=guide})
     end
     if status~="actionable" then return false,why end
     local first=tonumber(activeSlot)==0
@@ -702,7 +704,7 @@ function M.ResolveAndAssignWishlist(candidate, activeSlot)
     if first then ok,err=Adapter.SetFirstRunWishlist(resolved.slot,resolved)
     else ok,err=Adapter.SetLoadoutWishlist(activeSlot,resolved.slot,resolved) end
     GuideNote("assign",{origin="editor",destination=first and "first" or activeSlot,ok=ok==true,
-        reason=err,key=resolved.key,slot=resolved.slot,name=resolved.name})
+        reason=err,key=resolved.key,slot=resolved.slot,name=resolved.name,guide=guide})
     return ok,err
 end
 

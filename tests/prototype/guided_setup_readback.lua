@@ -219,4 +219,133 @@ C.scenario('R8 import is a draft; a real Create is saved and verified; partial a
  C.expect(G.State().wishlist==nil and G.Summary().wishlist=='uncertain','R8c: an unconfirmed upload is not done',G.Summary().wishlist)
 end)
 
+-- R9-R15 (operation origin): an outcome is a guide request's own only when its
+-- real operation began under that request. Real coach Show and chooser action,
+-- real Journal rows, the real role picker and the real Auto-ON confirmation; a
+-- request is re-armed while an older operation still waits. EXPECT: an older
+-- or originless operation never verifies the newer request (it fails on the
+-- base source after healthy SETUP). GUARD: the real write still happens once,
+-- and an unchanged request still verifies. No new helper is required.
+do
+ local CONSENT='NEXUS_ASSIGN_WISHLIST_AUTO_ON'
+ -- The real coach: Show, then its own chooser action, which arms a request.
+ local function Route(tag)
+  local before=G.State().request
+  local shown=Nexus.GuidedSetupUI.Show()==true
+  Nexus.GuidedSetupUI.RouteChooser()
+  local now=G.State().request
+  return C.setup(shown and now~=nil and now~=before,tag..': fixture: the real coach Show and chooser action armed a new request'),now
+ end
+ local function Waiting() return _G.NexusWishlistRolePicker~=nil and NexusWishlistRolePicker:IsShown() end
+ local function Confirm()
+  if not (_G.NexusWishlistRoleUseOwned and _G.NexusWishlistRoleConfirm) then return false end
+  NexusWishlistRoleUseOwned:Click();NexusWishlistRoleConfirm:Click();return true
+ end
+ local function Cancel()
+  if not _G.NexusWishlistRoleCancel then return false end
+  NexusWishlistRoleCancel:Click();return true
+ end
+ local function Evidence(tag)
+  Boot({evidence=true})
+  Nexus.Store.Settings().useCurrentLocksForUntagged=false
+  C.setup(Cand(101)~=nil and Cand(101).lockEvidenceStatus=='unavailable',tag..': fixture: an 85-copy plan without lock evidence')
+  return Core(tag) and C.setup(Coach(101,1),tag..': fixture: Evidence Plan and Saved Build A chosen in the coach')
+ end
+ local function AutoOn(tag)
+  SlashCmdList.NEXUS('auto');H.Advance(.2,.1)
+  return C.setup(Nexus.RecomputeStats().autoEnabled==true,tag..': fixture: Auto is ON before the choice')
+ end
+ -- One real chooser row while Auto is ON: its confirmation shown, nothing written.
+ local function Ask(tag,name)
+  H.popup=nil
+  local listed=Choose(name)
+  local p=H.popup
+  local ok=C.setup(listed and p~=nil and p.which==CONSENT and Writes()==0,
+   tag..': fixture: the real chooser asks first while Auto is ON; nothing written',Writes())
+  return ok and p or nil
+ end
+ local function Agree(p) StaticPopupDialogs[p.which].OnAccept(p.frame,p.data) end
+
+ C.scenario('R9 an old delayed role choice confirmed after the coach re-armed is not verified for the new request',function()
+  if not Evidence('R9') then return end
+  if not Route('R9 request one') then return end
+  if not C.setup(Choose('Evidence Plan') and Waiting(),'R9: fixture: the request-one role choice waits') then return end
+  if not (Route('R9 request two') and C.setup(Waiting(),'R9: fixture: the old role choice still waits under request two')) then return end
+  C.guard(Writes()==0,'R9: nothing was written before the role choice',Writes())
+  if not Confirm() then return end
+  C.guard(writes.SetLoadoutWishlist==1 and Stored(1) and Stored(1).name=='Evidence Plan','R9: the old role choice really assigned Saved Build A once')
+  C.expect(St()~='verified','R9: the request-one role result is NOT verified for request two',St())
+  C.expect(G.Summary().complete==false,'R9: core setup is not reported complete from that older operation',St())
+ end)
+
+ C.scenario('R10 the same delayed role choice under its own unchanged request is verified',function()
+  if not Evidence('R10') then return end
+  local armed,req=Route('R10')
+  if not (armed and C.setup(Choose('Evidence Plan') and Waiting(),'R10: fixture: the role choice waits')) then return end
+  C.guard(St()=='pending' and Writes()==0,'R10: while it waits nothing is complete or written',St())
+  if not Confirm() then return end
+  C.guard(writes.SetLoadoutWishlist==1 and Stored(1) and Stored(1).name=='Evidence Plan','R10: the role choice assigned Saved Build A once')
+  C.guard(G.State().request==req and St()=='verified','R10: the unchanged request is verified by its own delayed result and read back',St())
+ end)
+
+ C.scenario('R11 an old Auto-ON confirmation accepted after the coach re-armed is not verified for the new request',function()
+  Boot()
+  if not (Core('R11') and AutoOn('R11') and C.setup(Coach(107,2),'R11: fixture: W-Free and Fire PvE chosen in the coach')) then return end
+  if not Route('R11 request one') then return end
+  local p=Ask('R11','W-Free')
+  if not (p and Route('R11 request two')) then return end
+  Agree(p)
+  C.guard(writes.SetLoadoutWishlist==1 and Stored(2) and Stored(2).name=='W-Free','R11: the old confirmation, accepted, really assigned Fire PvE once')
+  C.expect(St()~='verified','R11: the request-one confirmation is NOT verified for request two',St())
+  C.expect(G.Summary().complete==false,'R11: core setup is not reported complete from that older operation',St())
+ end)
+
+ C.scenario('R12 the same Auto-ON confirmation under its own unchanged request is verified',function()
+  Boot()
+  if not (Core('R12') and AutoOn('R12') and C.setup(Coach(107,2),'R12: fixture: W-Free and Fire PvE chosen in the coach')) then return end
+  if not Route('R12') then return end
+  local p=Ask('R12','W-Free')
+  if not p then return end
+  C.guard(St()=='pending','R12: a waiting confirmation is pending, not complete',St())
+  Agree(p)
+  C.guard(writes.SetLoadoutWishlist==1 and Stored(2) and Stored(2).name=='W-Free','R12: the accepted confirmation assigned Fire PvE once')
+  C.guard(St()=='verified','R12: the unchanged request is verified by its own confirmed result and read back',St())
+ end)
+
+ C.scenario('R13 a matching immediate choice is verified; a later write reported without the origin the guide issued is not',function()
+  Boot()
+  if not (Core('R13') and C.setup(Coach(107,2),'R13: fixture: W-Free and Fire PvE chosen in the coach')) then return end
+  if not (Route('R13') and C.setup(Choose('W-Free'),'R13: fixture: the chooser lists W-Free')) then return end
+  C.guard(Writes()==1 and St()=='verified','R13: the matching immediate choice is verified by its own receipt and read back',St())
+  local key=G.State().wishlist.key
+  for i,case in ipairs({{'missing'},{'unissued',{}},{'text','journal'}}) do
+   if not Route('R13 '..case[1]) then return end
+   C.setup(A.SetLoadoutWishlist(2,107)==true and writes.SetLoadoutWishlist==i+1,'R13: fixture: another route writes Fire PvE again ('..case[1]..')')
+   G.Note('assign',{destination=2,ok=true,key=key,origin='journal',guide=case[2]})
+   C.expect(St()~='verified','R13: a result reported with a '..case[1]..' operation origin is NOT verified',St())
+  end
+ end)
+
+ C.scenario('R14 a role choice started before any request is not verified for a request armed later',function()
+  if not Evidence('R14') then return end
+  if not C.setup(G.State().request==nil and Choose('Evidence Plan') and Waiting(),'R14: fixture: a role choice started with no request armed') then return end
+  if not (Route('R14') and C.setup(Waiting(),'R14: fixture: the role choice still waits after the coach armed its request')) then return end
+  if not Confirm() then return end
+  C.guard(writes.SetLoadoutWishlist==1 and Stored(1) and Stored(1).name=='Evidence Plan','R14: the role choice really assigned Saved Build A once')
+  C.expect(St()~='verified','R14: a result of an operation started with no request is NOT verified',St())
+ end)
+
+ C.scenario('R15 a role choice Cancel reports only for the request it began under',function()
+  if not Evidence('R15') then return end
+  if not (Route('R15 own') and C.setup(Choose('Evidence Plan') and Waiting(),'R15: fixture: the role choice waits under its own request')) then return end
+  if not Cancel() then return end
+  C.guard(St()=='cancelled' and Writes()==0,'R15: its own Cancel is its own request outcome; nothing written',St())
+  if not C.setup(Coach(101,1),'R15: fixture: the coach choices are made again') then return end
+  if not (Route('R15 request one') and C.setup(Choose('Evidence Plan') and Waiting(),'R15: fixture: the request-one role choice waits')) then return end
+  if not (Route('R15 request two') and Cancel()) then return end
+  C.guard(Writes()==0,'R15: Cancel wrote nothing',Writes())
+  C.expect(St()~='cancelled','R15: the request-one Cancel is NOT reported as request two cancelled',St())
+ end)
+end
+
 C.finish('(receipts bound to context and read back; unknown, refused, partial, stale and observed are not completion)')

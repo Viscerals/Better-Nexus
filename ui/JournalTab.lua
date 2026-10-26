@@ -179,14 +179,26 @@ end
 -- Guided setup receipt (core/GuidedSetup.lua): reports the outcome of an
 -- assignment the player chose in this chooser. It records only; it writes,
 -- requests and changes nothing, and a missing guide changes nothing.
-local function GuideAssign(numbered, active, ok, reason, snapshot)
+local function GuideAssign(numbered, active, ok, reason, snapshot, origin)
     local guide = Nexus.GuidedSetup
     if not (guide and type(guide.Note) == "function") then return end
     pcall(guide.Note, "assign", {origin = "journal",
         destination = numbered and tonumber(active) or "first", ok = ok == true, reason = reason,
         key = type(snapshot) == "table" and snapshot.key or nil,
         slot = type(snapshot) == "table" and snapshot.slot or nil,
-        name = type(snapshot) == "table" and snapshot.name or nil})
+        name = type(snapshot) == "table" and snapshot.name or nil, guide = origin})
+end
+
+-- The guide request this chooser operation began under: an opaque token the
+-- guide issues as the player clicks, before any confirmation or role choice
+-- (nil when none is armed for this target), carried unchanged to every result
+-- of that operation. It reads guide state only and changes nothing here.
+local function GuideOrigin(numbered, active, snapshot)
+    local guide = Nexus.GuidedSetup
+    if not (guide and type(guide.BeginAssign) == "function") then return nil end
+    local ok, origin = pcall(guide.BeginAssign, numbered and tonumber(active) or "first",
+        type(snapshot) == "table" and snapshot.key or nil)
+    return ok and origin or nil
 end
 
 ------------------------------------------------------------------------
@@ -1381,6 +1393,9 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 local shownName = M.SafeName(cName, "Unnamed Wishlist")
                 local target = numbered and ("Saved Build '" .. M.SafeName(loadoutName, tostring(active)) .. "'")
                     or "the first-run target"
+                -- The guide request this operation began under, taken now, before
+                -- any confirmation or role choice, and carried to every result.
+                local origin = GuideOrigin(numbered, active, cSnapshot)
                 if cSnapshot.lockEvidenceStatus=="unavailable" and Nexus.WishlistEditor
                     and Nexus.WishlistEditor.ResolveAndAssignWishlist then
                     -- A Wishlist without lock evidence: its role choice (the
@@ -1389,9 +1404,9 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     -- confirmation; Cancel writes neither.
                     local asked, why = M.AssignWithConsent(shownName, target, numbered and not emptySlot, function()
                         HideWishlistPicker()
-                        Nexus.WishlistEditor.ResolveAndAssignWishlist(cSnapshot,tonumber(active) or 0)
+                        Nexus.WishlistEditor.ResolveAndAssignWishlist(cSnapshot,tonumber(active) or 0,origin)
                     end)
-                    if asked == nil then GuideAssign(numbered, active, false, why, cSnapshot) end
+                    if asked == nil then GuideAssign(numbered, active, false, why, cSnapshot, origin) end
                     return
                 end
                 -- The captured target, candidate and empty-slot refusal as
@@ -1406,11 +1421,11 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                         ok, err = false, "first-run association unavailable"
                     end
                     if not ok then
-                        GuideAssign(numbered, active, false, err, cSnapshot)
+                        GuideAssign(numbered, active, false, err, cSnapshot, origin)
                         print("|cffff6060Nexus:|r " .. tostring(err or "could not select wishlist"))
                         return
                     end
-                    GuideAssign(numbered, active, true, nil, cSnapshot)
+                    GuideAssign(numbered, active, true, nil, cSnapshot, origin)
                     HideWishlistPicker()
                     M.RefreshAssociations()
                     if Nexus.Panel and Nexus.Panel.Refresh then pcall(Nexus.Panel.Refresh) end
@@ -1418,7 +1433,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     print("|cff4dff80Nexus:|r '" .. shownName .. "' is now the Wishlist for " .. target
                         .. ". No Saved Build was changed or activated.")
                 end)
-                if asked == nil then GuideAssign(numbered, active, false, why, cSnapshot) end
+                if asked == nil then GuideAssign(numbered, active, false, why, cSnapshot, origin) end
             end
             local function OpenWishlistEditorOnly()
                 HideWishlistPicker()
