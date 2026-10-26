@@ -2449,6 +2449,14 @@ function M.MoreMenuItems(anchor)
         end) })
 
     Add(MenuTitle("Settings"))
+    Add({ text = "Open Settings...", notCheckable = true,
+        tooltipTitle = "Nexus Settings",
+        tooltipText = "Open the grouped settings window. Opening it changes no preferences.",
+        func = MenuAction(function()
+            if Nexus.SettingsWindow and Nexus.SettingsWindow.Show then
+                Nexus.SettingsWindow.Show()
+            end
+        end) })
     -- What Auto may do, with each permission's current value; only the
     -- existing setters change one (M.AutomationMenuItems).
     Add({ text = "Automation settings", notCheckable = true, hasArrow = true,
@@ -2609,6 +2617,14 @@ function M.ShowHub(kind, anchor)
         return true
     end
     if kind ~= "plan" and kind ~= "explore" then return false end
+    -- The full UI keeps the existing controllers and their guarded actions,
+    -- but opens their real workspace surface directly from the footer.
+    local workspaces = Nexus.FullUIWorkspaces
+    if workspaces then
+        if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
+        if kind == "plan" then return workspaces.ShowPlan() == true end
+        return workspaces.ShowExplore() == true
+    end
     if type(EasyMenu) ~= "function" then return false end
     if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
     M._hubMenu = M._hubMenu or CreateFrame("Frame", "NexusPanelHubMenu", UIParent, "UIDropDownMenuTemplate")

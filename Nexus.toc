@@ -83,6 +83,7 @@ ui\ServerStatus.lua
 ui\CallboardStatus.lua
 ui\LoadingStatus.lua
 ui\Panel.lua
+ui\SettingsWindow.lua
 ui\JournalTab.lua
 ui\LogViewer.lua
 ui\WishlistRenderer.lua
@@ -94,6 +95,7 @@ ui\GuidedSetup.lua
 ui\CommunityRenderer.lua
 ui\CommunityBuilds.lua
 ui\Leaderboard.lua
+ui\FullUIWorkspaces.lua
 ui\Nameplate.lua
 ui\Changelog.lua
 core\AutomationRuntime.lua

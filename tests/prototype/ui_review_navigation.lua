@@ -26,6 +26,12 @@ local function Effects()
   'assignments='..F.Serialize(type(state.loadoutWishlists)=='table' and state.loadoutWishlists or {}),
   'auto='..tostring(Nexus.RecomputeStats().autoEnabled==true)},' ')
 end
+local function GameplayEffects()
+ local state=Nexus.Store and Nexus.Store.State and Nexus.Store.State() or {}
+ return table.concat({'actions='..#H.actions,'sent='..#H.sent,
+  'assignments='..F.Serialize(type(state.loadoutWishlists)=='table' and state.loadoutWishlists or {}),
+  'auto='..tostring(Nexus.RecomputeStats().autoEnabled==true)},' ')
+end
 local function Capture(fn)
  local captured
  local easy,close=EasyMenu,CloseDropDownMenus
@@ -231,18 +237,18 @@ C.scenario('V3 the footer: Auto apart, then Plan, Explore and Orbs inside the 27
  C.setup(P.Render(Model())==true,'V3: fixture: back to the build in progress')
 end)
 
-C.scenario('V4 the hubs open existing routes only; their menus and hovers say so',function()
+C.scenario('V4 the hubs open real workspaces; retained routes and hovers say what they do',function()
  local f=NexusPanel
  local hubs=f._footerButtons or {}
  if not (hubs.plan and hubs.explore and hubs.orbs) then C.expect(false,'V4: the hubs exist');return end
  local before=Effects()
- local plan=Capture(function() hubs.plan:Click() end)
+ local plan=P.HubMenuItems('plan')
  print('OBSERVED','V4 plan='..Texts(plan))
  local editor,assign,builds=Item(plan,'Wishlist Editor'),Item(plan,'Assign Wishlist...'),Item(plan,'My Builds (game page)')
  local note=Item(plan,'Opening a window saves, assigns and loads nothing.')
  C.expect(editor and assign and builds and type(editor.func)=='function' and type(assign.func)=='function'
   and type(builds.func)=='function' and note and note.disabled==true,'V4: Plan lists the editor, assignment and My Builds with a visible no-change note',Texts(plan))
- local explore=Capture(function() hubs.explore:Click() end)
+ local explore=P.HubMenuItems('explore')
  print('OBSERVED','V4 explore='..Texts(explore))
  local library,board=Item(explore,'Build Library'),Item(explore,'Leaderboard')
  C.setup(Nexus.StartupStatus().state=='ready','V4: fixture: shared start-up finished',Nexus.StartupStatus().state)
@@ -250,7 +256,7 @@ C.scenario('V4 the hubs open existing routes only; their menus and hovers say so
  C.expect(library and board and type(library.func)=='function' and type(board.func)=='function'
   and shared and shared.disabled==true,'V4: Explore lists the Build Library and Leaderboard and the shared data state',Texts(explore))
  C.expect(#Prefixed(explore,'Best known: ')==1,'V4: Explore says what best known means')
- C.guard(Effects()==before,'V4: opening the hub menus keeps measured actions, sends, saved data, assignments and Auto unchanged',Effects())
+ C.guard(Effects()==before,'V4: assembling retained hub routes keeps measured actions, sends, saved data, assignments and Auto unchanged',Effects())
  if editor then
   C.expect(Spy(Nexus.WishlistEditor,'Show',function() editor.func() end).n==1,'V4: Plan > Wishlist Editor opens the editor')
  end
@@ -272,13 +278,22 @@ C.scenario('V4 the hubs open existing routes only; their menus and hovers say so
  local header=f._switchBtn
  C.guard(Spy(Nexus.JournalTab,'OpenBuilds',function() header:Click() end).args.n==0,'V4: the header My Builds button keeps its route')
  C.guard(Effects()==before,'V4: every routed entry keeps measured actions, sends, saved data, assignments and Auto unchanged',Effects())
+ local beforeNav=GameplayEffects()
+ hubs.plan:Click()
+ C.expect(_G.NexusEditorFrame and _G.NexusEditorFrame:IsShown(),
+  'V4: the Plan hub opens the real Wishlist workspace')
+ hubs.explore:Click()
+ C.expect(_G.NexusCommunityBuildsFrame and _G.NexusCommunityBuildsFrame:IsShown(),
+  'V4: the Explore hub opens the real Build Library workspace')
+ C.guard(GameplayEffects()==beforeNav,
+  'V4: workspace navigation leaves actions, sends, assignments and Auto unchanged',GameplayEffects())
  local realClose,closed=CloseDropDownMenus,0
  CloseDropDownMenus=function() closed=closed+1 end
  local opened,openError=pcall(function() hubs.orbs:Click() end)
  CloseDropDownMenus=realClose
  C.expect(opened and NexusOrbPanel and NexusOrbPanel:IsShown(),'V4: Orbs opens the Orb window directly',openError)
  C.expect(closed==1,'V4: opening Orbs closes any Plan or Explore dropdown',closed)
- C.guard(Effects()==before,'V4: opening the Orb window keeps measured actions, sends, saved data, assignments and Auto unchanged',Effects())
+ C.guard(GameplayEffects()==beforeNav,'V4: opening the Orb window keeps actions, sends, assignments and Auto unchanged',GameplayEffects())
  if NexusOrbPanel then NexusOrbPanel:Hide() end
  for kind,button in pairs({plan=hubs.plan,explore=hubs.explore,orbs=hubs.orbs}) do
   local lines,ok,err=V.TooltipLines(button:GetScript('OnEnter'),button)
@@ -287,7 +302,7 @@ C.scenario('V4 the hubs open existing routes only; their menus and hovers say so
    orbs='an approved run continues'})[kind]
   C.expect(ok and tip:find(want,1,true)~=nil,'V4: the '..kind..' hover says '..want,tostring(err)..' '..tip)
  end
- C.guard(Effects()==before,'V4: hovering the hubs keeps measured actions, sends, saved data, assignments and Auto unchanged',Effects())
+ C.guard(GameplayEffects()==beforeNav,'V4: hovering the hubs keeps actions, sends, assignments and Auto unchanged',GameplayEffects())
 end)
 
 C.scenario('V5 the hub status lines say only what their passive sources report',function()

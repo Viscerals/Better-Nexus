@@ -9,6 +9,9 @@ local function check(ok,message) assert(ok,message);checks=checks+1 end
 local U=Nexus.FullUIWorkspaces
 check(U and type(U.ShowPlan)=='function' and type(U.ShowExplore)=='function',
  'the workspace API is loaded')
+local toc=assert(io.open('Nexus.toc','rb')):read('*a')
+check(toc:find('ui\\FullUIWorkspaces.lua',1,true)~=nil,
+ 'the runtime TOC loads the workspace controller')
 local beforeActions,beforeSends=#H.actions,#H.sent
 local state=Nexus.Store.State()
 local assignments=F.Serialize(state.loadoutWishlists or {})
@@ -54,6 +57,12 @@ check(plan:IsShown() and not records:IsShown(),
  'returning to Plan restores the real Wishlist editor')
 plan:Hide()
 check(not plan:IsShown(),'close still closes the workspace window')
+check(Nexus.Panel.ShowHub('plan')==true and plan:IsShown(),
+ 'the panel Plan hub opens the actual Plan workspace')
+plan:Hide()
+check(Nexus.Panel.ShowHub('explore')==true and builds:IsShown(),
+ 'the panel Explore hub opens the actual Explore workspace')
+builds:Hide()
 local oldWidth,oldHeight=UIParent:GetWidth(),UIParent:GetHeight()
 UIParent:SetSize(800,600)
 check(U.ShowExplore()==true,'Explore reports a visible destination to its panel caller')

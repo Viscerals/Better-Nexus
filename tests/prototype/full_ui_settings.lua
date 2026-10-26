@@ -4,6 +4,17 @@ local H=F.Boot(F.Database(),function(h) F.OrbService(h) end)
 dofile('ui/SettingsWindow.lua') -- integration TOC wiring is owned by the coordinator
 local settings=assert(Nexus.SettingsWindow,'Settings module exists')
 local function check(ok,why) assert(ok,why) end
+local toc=assert(io.open('Nexus.toc','rb')):read('*a')
+check(toc:find('ui\\SettingsWindow.lua',1,true)~=nil,
+    'the runtime TOC loads Settings')
+local settingsMenu
+for _,item in ipairs(Nexus.Panel.MoreMenuItems()) do
+    if item.text=='Open Settings...' then settingsMenu=item end
+end
+check(settingsMenu and type(settingsMenu.func)=='function',
+    'the panel Manage menu reaches Settings')
+settingsMenu.func()
+check(settings.IsShown(),'the panel opens the actual Settings window')
 local baseline=F.Serialize(NexusDB)
 local actions=#H.actions
 local sends=#H.sent
