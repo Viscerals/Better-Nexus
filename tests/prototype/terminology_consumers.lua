@@ -544,7 +544,10 @@ do
   local items;EasyMenu=function(list)items=list end
   NexusPanel._menuBtn:Click()
   local found,rows=nil,0
-  for _,item in ipairs(items or {})do
+  local manage
+  for _,item in ipairs(items or {})do if item.text=='Manage' then manage=item end end
+  check(manage and manage.hasArrow and type(manage.menuList)=='table','the ... menu exposes a nested Manage list')
+  for _,item in ipairs(manage.menuList)do
    if type(item.text)=='string' and item.text:find('^Language')then found=found or item;rows=rows+1 end
   end
   return found,rows
@@ -1500,7 +1503,7 @@ do
    assert(Nexus.Panel.Render(Setup()))
    local layout=NexusPanel._responsiveLayout
    local assign,create=Child(P.assign),Child(P.create)
-   check(NexusPanel:GetWidth()==272 and layout.boxes.setupAssign.w==146 and assign:GetWidth()==146 and assign:GetHeight()==layout.boxes.setupAssign.h
+   check(NexusPanel:GetWidth()==420 and layout.boxes.setupAssign.w==146 and assign:GetWidth()==146 and assign:GetHeight()==layout.boxes.setupAssign.h
     and create:GetWidth()==146 and create:GetHeight()==layout.boxes.setupCreate.h and assign:GetText()==CAND['panel.button.assign_wishlist']
     and create:GetText()==CAND['panel.button.create_wishlist'],tag..': the setup buttons keep their fixed boxes and the selected text')
    local tips=Tips(CANDT)
@@ -1513,9 +1516,11 @@ do
    layout=NexusPanel._responsiveLayout
    local box,panel=layout.boxes,{0,0,NexusPanel:GetWidth(),NexusPanel:GetHeight()}
    local switch=NexusPanel._switchBtn
-   check(NexusPanel:GetWidth()==272 and switch:GetWidth()==68 and switch:GetHeight()==19 and switch:GetText()==CAND['panel.button.my_builds'],tag..': My Builds keeps its 68x19 box and the selected text')
-   Bounded(switch,CAND['panel.button.my_builds'],true,tag..': panel.button.my_builds')
-   Hover(switch,WithLabel(CANDT,tips,'switch'),tag..': the actual My Builds hover recovers the complete label, then its consequence and destination lines')
+   check(NexusPanel:GetWidth()==420 and switch:GetWidth()==106 and switch:GetHeight()==22 and switch:GetText()==CAND['panel.button.my_builds'],tag..': My Builds has a readable 106x22 header box and keeps the selected text')
+   local shortSwitch=G.Length(G.Visible(CAND['panel.button.my_builds']))*G.model.char>switch:GetWidth()-12
+   Bounded(switch,CAND['panel.button.my_builds'],shortSwitch,tag..': panel.button.my_builds')
+   Hover(switch,shortSwitch and WithLabel(CANDT,tips,'switch') or tips.switch,
+    tag..': the actual My Builds hover keeps its consequence and destination lines, recovering the complete label when shortened')
    for _,h in ipairs({{Region(P.progress),box.progressHeader,'panel.heading.progress',NexusPanel._progressLabelHit},
     {Region(P.still),box.needed,'panel.heading.still_needed',NexusPanel._needLabelHit},
     {Region(P.extra),box.shed,'panel.heading.extra_copies',NexusPanel._shedLabelHit},
@@ -1572,7 +1577,8 @@ do
    and w[1]:GetScript('OnEnter')==w[5] and w[1]:GetScript('OnLeave')==w[6]
  end
  check(reused,'#143 candidate: repeated layouts, hovers and reopen keep each mapped button with its one FontString, the same regions and children and its own registered OnEnter and OnLeave; no label, frame or hook is added')
- Bounded(NexusPanel._switchBtn,CAND['panel.button.my_builds'],true,'#143 candidate after reuse: panel.button.my_builds')
+ local shortSwitch=G.Length(G.Visible(CAND['panel.button.my_builds']))*G.model.char>NexusPanel._switchBtn:GetWidth()-12
+ Bounded(NexusPanel._switchBtn,CAND['panel.button.my_builds'],shortSwitch,'#143 candidate after reuse: panel.button.my_builds')
  Hover(NexusPanel._switchBtn,WithLabel(CANDT,Tips(CANDT),'switch'),'#143 candidate after reuse: the actual My Builds hover gives the complete label once, then its own lines')
  for _,w in ipairs({{NexusPanel._switchBtn,'panel.button.my_builds'},{Region(P.progress),'panel.heading.progress'},
   {Region(P.still),'panel.heading.still_needed'},{Region(P.extra),'panel.heading.extra_copies'},{NexusPanel.toLockLabel,'panel.heading.locked_targets'},
@@ -1609,11 +1615,11 @@ do
   and after.byReason.missing_candidate>diagnostics.byReason.missing_candidate,'#143 fallback: only missing-candidate fallbacks, never a raw key, blank or unavailable status')
  -- Fitting-English control at every font model and both UI scales, with
  -- literal expectations from the visible characters at each model width
- -- against the 56 px and 134 px label bounds: My Builds (9) and the setup
- -- labels (15) fit the default face and 0.75; with the 16 px face only My
- -- Builds is shortened; at 2.0 all three are. A label that fits adds no
+ -- against the 94 px and 134 px label bounds: My Builds (9) and the setup
+ -- labels (15) fit the default face and 0.75; at 16 px My Builds still fits
+ -- its wider header button; at 2.0 all three are shortened. A label that fits adds no
  -- hover line; a shortened one adds only its complete label, first.
- local FITS={{G.MODELS.default,true,true},{G.MODELS.px16,false,true},{G.MODELS.small,true,true},{G.MODELS.double,false,false}}
+ local FITS={{G.MODELS.default,true,true},{G.MODELS.px16,true,true},{G.MODELS.small,true,true},{G.MODELS.double,false,false}}
  local scaled=rawget(UIParent,'GetEffectiveScale')
  for _,fit in ipairs(FITS)do
   for _,ui in ipairs({1,0.64})do
@@ -1669,7 +1675,11 @@ do
  NexusPanel._menuBtn:Click()
  EasyMenu=easy
  local language,found,stale
- for _,item in ipairs(items or {})do if type(item.text)=='string' and item.text:find('^Language')then language=item end end
+ local manage
+ for _,item in ipairs(items or {})do if item.text=='Manage' then manage=item end end
+ for _,item in ipairs(manage and manage.menuList or {})do
+  if type(item.text)=='string' and item.text:find('^Language')then language=item end
+ end
  for _,row in ipairs(language and language.menuList or {})do
   if row.text==SCOPE and row.disabled==true and row.notCheckable==true then found=true end
   if tostring(row.text):find('six messages',1,true)then stale=true end

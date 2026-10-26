@@ -406,7 +406,7 @@ function M.Panel(spec)
         key=key,small=small,normal=normal,large=large,gap=gap,
     }
     local cursor = 6
-    local headerHeight = math.max(26, large + 8)
+    local headerHeight = math.max(82, large * 3 + 14)
     Add(layout,"header",8,cursor,width-16,headerHeight)
     cursor = cursor + headerHeight + gap
 

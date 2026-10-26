@@ -130,8 +130,11 @@ C.setup(P.Render(Model())==true and NexusPanel and NexusPanel:IsShown(),'fixture
 C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler',function()
  local before=Effects()
  local menu=NexusPanel._menuBtn
- local items=Capture(function() menu:GetScript('OnClick')(menu) end)
- C.setup(type(items)=='table' and #items>0,'V2: fixture: the ... menu opens',Texts(items))
+ local top=Capture(function() menu:GetScript('OnClick')(menu) end)
+ local manage=Item(top,'Manage')
+ C.setup(manage and manage.hasArrow and type(manage.menuList)=='table',
+  'V2: the compact ... menu opens a nested Manage list',Texts(top))
+ local items=manage and manage.menuList or {}
  print('OBSERVED','V2 menu='..Texts(items))
  local missing={}
  for _,label in ipairs({'Help / Getting Started','Setup / Welcome','Setup checklist and status','Orbs / Lost Memories',
@@ -147,7 +150,7 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
  if not (Item(items,'Use Server Difficulty / Soul Ash HUD') or Item(items,'Use Nexus Difficulty / Soul Ash HUD')) then
   missing[#missing+1]='HUD mode'
  end
- C.guard(#missing==0,'V2: every earlier entry is still one click away under its own label',table.concat(missing,', '))
+ C.guard(#missing==0,'V2: every earlier entry remains reachable under its own label in Manage',table.concat(missing,', '))
  local order,last,unordered={'Help and setup','Settings','Notices','Logs','Also on the panel footer','Panel'},0,{}
  for _,title in ipairs(order) do
   local at
@@ -203,7 +206,7 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
  end
 end)
 
-C.scenario('V3 the footer: Auto apart, then Plan, Explore and Orbs inside the 272 px HUD',function()
+C.scenario('V3 header Auto and separate Plan, Explore and Orbs footer inside the 420 px Play panel',function()
  C.setup(P.Render(Model())==true,'V3: fixture: a build in progress with Auto shown')
  local f=NexusPanel
  local hubs=f._footerButtons or {}
@@ -219,22 +222,68 @@ C.scenario('V3 the footer: Auto apart, then Plan, Explore and Orbs inside the 27
   end
  end
  C.expect(#peers==0,'V3: Build Library and Leaderboard are no longer footer peers (Explore holds them)',table.concat(peers,', '))
- C.guard(f:GetWidth()==272,'V3: the HUD keeps its 272 px width',f:GetWidth())
+ C.guard(f:GetWidth()==420,'V3: the Play panel uses its 420 px context width',f:GetWidth())
  local a,p,e,o=Rect(hubs.auto),Rect(hubs.plan),Rect(hubs.explore),Rect(hubs.orbs)
  C.setup(a and p and e and o,'V3: fixture: every footer control resolves its anchors')
  if not (a and p and e and o) then return end
  print('OBSERVED','V3 auto='..G.Text(a)..' plan='..G.Text(p)..' explore='..G.Text(e)..' orbs='..G.Text(o))
- C.guard(hubs.auto:IsShown() and a[1]==8 and a[3]-a[1]==72,'V3: Auto keeps its place and size',G.Text(a))
- C.expect(p[1]-a[3]>=10 and e[1]-p[3]>=3 and o[1]-e[3]>=3,'V3: Auto stands apart from the hubs, which do not touch',
+ C.guard(hubs.auto:IsShown() and a[2]<=10 and a[3]-a[1]==84,'V3: Auto is a separate header control',G.Text(a))
+ C.expect(a[4]<p[2] and e[1]-p[3]>=10 and o[1]-e[3]>=10,'V3: header Auto stands apart from footer navigation',
   G.Text(a)..' '..G.Text(p)..' '..G.Text(e)..' '..G.Text(o))
- C.expect(o[3]<=272-8 and G.Apart(a,p) and G.Apart(p,e) and G.Apart(e,o),'V3: all four stay inside the HUD margin, apart',G.Text(o))
+ C.expect(o[3]<=420-8 and G.Apart(a,p) and G.Apart(p,e) and G.Apart(e,o),'V3: all four stay inside the panel margin, apart',G.Text(o))
  C.setup(P.Render(Model({noBuild=true}))==true,'V3: fixture: the setup view (no build) renders')
  a,p,e,o=Rect(hubs.auto),Rect(hubs.plan),Rect(hubs.explore),Rect(hubs.orbs)
  C.guard(not hubs.auto:IsShown(),'V3: without a build the Auto control stays hidden, as before')
  C.expect(hubs.plan:IsShown() and hubs.explore:IsShown() and hubs.orbs:IsShown() and p and e and o
-  and p[1]>=8 and o[3]<=272-8 and G.Apart(p,e) and G.Apart(e,o),'V3: the three hubs share the row without Auto',
+  and p[1]>=8 and o[3]<=420-8 and G.Apart(p,e) and G.Apart(e,o),'V3: the three hubs share the row without Auto',
   p and e and o and (G.Text(p)..' '..G.Text(e)..' '..G.Text(o)) or 'unplaced')
  C.setup(P.Render(Model())==true,'V3: fixture: back to the build in progress')
+end)
+
+C.scenario('V3a readable context rows and guarded header routes at enlarged text',function()
+ local before=GameplayEffects()
+ local large={name='125 percent text',char=7,line=17,size=15}
+ G.UseFont(large)
+ local long=string.rep('LongName',8)
+ local model=Model()
+ model.character='TestCharacter'
+ model.progress.activeSlot=2
+ model.progress.activeSlotName=long
+ model.progress.wishlistName=long
+ model.assignment={state='ready',name=long}
+ C.setup(P.Render(model)==true,'V3a: a long named, assigned Saved Build renders')
+ local f=NexusPanel
+ local title,build,wishlist=f._contextTitle,f._contextBuild,f._contextWishlist
+ local change=f._contextChange
+ C.expect(f:GetWidth()==420 and title and build and wishlist and change,
+  'V3a: the 420 px Play header has three named rows and a Change action')
+ local text=V.Plain(build:GetText() or '')..' '..V.Plain(wishlist:GetText() or '')
+ C.expect(V.Plain(title:GetText() or ''):find('TestCharacter',1,true)~=nil
+  and text:find('Build:',1,true) and text:find('Wishlist:',1,true),
+  'V3a: character, Build and Wishlist have separate readable labels',text)
+ local box={0,0,f:GetWidth(),f:GetHeight()}
+ for _,pair in ipairs({{title,f._autoBtn},{build,f._switchBtn},{wishlist,change}}) do
+  local left,right=Rect(pair[1]),Rect(pair[2])
+  C.expect(left and right and G.Inside(left,box) and G.Inside(right,box) and G.Apart(left,right),
+   'V3a: enlarged header label and control remain within the panel and do not overlap',
+   left and right and (G.Text(left)..' '..G.Text(right)) or 'unplaced')
+ end
+ C.expect(build.wordWrap~=true and wishlist.wordWrap~=true and build:GetHeight()==20
+  and wishlist:GetHeight()==20 and Nexus.LayoutMetrics.Shortened(build)
+  and Nexus.LayoutMetrics.Shortened(wishlist),
+  'V3a: 64-character names remain one line and expose complete text on hover',
+  'build='..tostring(build.wordWrap)..'/'..build:GetHeight()..'/'..build:GetStringWidth()..'/'..build:GetWidth()
+   ..' wishlist='..tostring(wishlist.wordWrap)..'/'..wishlist:GetHeight()..'/'..wishlist:GetStringWidth()..'/'..wishlist:GetWidth())
+ for _,hit in ipairs({f._contextBuildHit,f._contextWishlistHit}) do
+  local lines,ok=V.TooltipLines(hit:GetScript('OnEnter'),hit)
+  C.expect(ok and table.concat(lines,'\n'):find(long,1,true)~=nil,
+   'V3a: the full 64-character name remains available in the header tooltip')
+ end
+ local plan=Spy(Nexus.FullUIWorkspaces,'ShowPlan',function() change:Click() end)
+ C.expect(plan.n==1,'V3a: Change opens Plan without silently assigning a Wishlist')
+ C.guard(GameplayEffects()==before,'V3a: header navigation and hover do not automate, spend or send')
+ G.UseFont(G.MODELS.default)
+ C.setup(P.Render(Model())==true,'V3a: normal face and model restored for later navigation tests')
 end)
 
 C.scenario('V4 the hubs open real workspaces; retained routes and hovers say what they do',function()

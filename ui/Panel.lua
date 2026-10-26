@@ -712,6 +712,93 @@ do
     end
 end
 
+-- The compact four-cell destination row remains an internal formatter and
+-- diagnostic source. The Play header gives its two actionable facts one row
+-- each instead of trying to fit four cells beside a 68px button.
+function M.CreateContextHeader(parent)
+    local function Line(y, font)
+        local label = parent:CreateFontString(nil, "OVERLAY", font)
+        label:SetPoint("TOPLEFT", parent, "TOPLEFT", y == 8 and 44 or 12, -y)
+        label:SetJustifyH("LEFT")
+        label:SetSize(280, 20)
+        label:SetWordWrap(false)
+        local hit = CreateFrame("Frame", nil, parent)
+        hit:SetPoint("TOPLEFT", label, "TOPLEFT", 0, 0)
+        hit:SetPoint("BOTTOMRIGHT", label, "BOTTOMRIGHT", 0, 0)
+        hit:SetScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(self._nexusFull or "Context unavailable", 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        hit:SetScript("OnLeave", function()
+            if GameTooltip then GameTooltip:Hide() end
+        end)
+        return label, hit
+    end
+    parent._contextTitle, parent._contextTitleHit = Line(8, "GameFontNormal")
+    parent._contextBuild, parent._contextBuildHit = Line(32, "GameFontNormal")
+    parent._contextWishlist, parent._contextWishlistHit = Line(57, "GameFontNormal")
+    parent._contextAutoState = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    parent._contextAutoState:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -46, -9)
+    parent._contextAutoState:SetSize(86, 18)
+    parent._contextAutoState:SetJustifyH("RIGHT")
+    parent._contextChange = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    parent._contextChange:SetText("Change")
+    parent._contextChange:SetScript("OnClick", function(self)
+        M.ShowHub("plan", self)
+    end)
+    parent._contextChange:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Change Wishlist", 1, 1, 1)
+        GameTooltip:AddLine("Open Plan to choose or edit a Wishlist. Opening it does not save, assign, turn on Auto or spend an Orb.", .8, .8, .8, true)
+        GameTooltip:Show()
+    end)
+    parent._contextChange:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+function M.UpdateContextHeader(model)
+    if not (frame and frame._contextTitle) then return false end
+    local fields, tooltip = Nexus.UserText.DestinationFields(M.DestinationFacts(model))
+    local width = math.max(240, tonumber(frame:GetWidth()) or 420)
+    local labelWidth = math.max(100, width - 134)
+    local lines = {
+        {frame._contextTitle, frame._contextTitleHit, "Nexus  -  " .. fields[1].value},
+        {frame._contextBuild, frame._contextBuildHit, "Build: " .. fields[2].value},
+        {frame._contextWishlist, frame._contextWishlistHit, "Wishlist: " .. fields[3].value},
+    }
+    for index = 1, #lines do
+        local line = lines[index]
+        line[1]:SetWidth(index == 1 and math.max(100, width - 175) or labelWidth)
+        line[1]:SetText(line[3])
+        line[2]._nexusFull = index == 1
+            and (tooltip[1] .. "\n" .. tooltip[4]) or tooltip[index]
+        if Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
+            Nexus.LayoutMetrics.OneLineLabel(line[1], nil, 20)
+        end
+    end
+    frame._switchBtn:ClearAllPoints()
+    frame._switchBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -30)
+    frame._switchBtn:SetSize(106, 22)
+    frame._contextChange:ClearAllPoints()
+    frame._contextChange:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -55)
+    frame._contextChange:SetSize(106, 22)
+    local switchLabel = frame._switchBtn:GetFontString()
+    if switchLabel and Nexus.LayoutMetrics and Nexus.LayoutMetrics.OneLineLabel then
+        switchLabel:SetWidth(94)
+        Nexus.LayoutMetrics.OneLineLabel(switchLabel, nil, 22)
+    end
+    local state = frame._contextAutoState
+    if frame._autoBtn:IsShown() then
+        state:Hide()
+    else
+        state:SetText(model.auto == nil and "Auto unknown"
+            or (model.auto and "Auto ON" or "Auto OFF"))
+        state:Show()
+    end
+    return true
+end
+
 -- M4 (UX-04): the destination this panel's run belongs to, as lines, from the
 -- facts the shown model already carries: the verified active Saved Build
 -- (progress.activeSlot / activeSlotName), the run's Wishlist and the saved
@@ -1541,7 +1628,7 @@ local function EnsureFrame()
     if frame then return frame end
 
     frame = CreateFrame("Frame", "NexusPanel", UIParent)
-    frame:SetSize(272, 210)
+    frame:SetSize(420, 210)
     frame:SetClampedToScreen(true)
     local savedLayout = M.SavedLayoutRoot()
     if tonumber(savedLayout.panelX) and tonumber(savedLayout.panelY) then
@@ -1577,6 +1664,8 @@ local function EnsureFrame()
     -- fits it after every other header and layout operation.
     frame._destinationRow = M.CreateDestinationRow(frame, buildHeaderText)
     frame._destinationRow:SetPoint("TOPLEFT", frame, "TOPLEFT", 40, -8)
+    frame._destinationRow:Hide()
+    buildHeaderText:Hide() -- first cell belongs to frame, unlike the row's other cells
 
     switchBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame._switchBtn = switchBtn
@@ -1609,6 +1698,7 @@ local function EnsureFrame()
         GameTooltip:Show()
     end)
     switchBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    M.CreateContextHeader(frame)
 
     -- Clickable compact replacement for Project Ebonhold's difficulty / Soul
     -- Ash HUD. In-progress builds use a slim header treatment. Completed builds
@@ -2466,10 +2556,9 @@ local HIDE_NOTE = "Hiding does not turn Nexus off or change Auto; type "
     .. "/nexus panel or click the Nexus minimap button to show it again."
 local HIDE_TOOLTIP = "Hide the Nexus panel. " .. HIDE_NOTE
 
--- The ... menu, grouped (UI review P2): help and setup, settings, notices,
--- logs, the items that moved to the footer hubs (kept here under their old
--- labels) and the panel's own actions. Earlier routes keep their destinations;
--- Hide also confirms the action in chat. `anchor` is the menu button.
+-- The ... menu's Manage submenu retains all established routes and owners.
+-- Its top level stays short in the compact panel; opening either level only
+-- reads current labels and never changes a setting or starts automation.
 function M.MoreMenuItems(anchor)
     local items = {}
     local function Add(item) items[#items + 1] = item end
@@ -2606,7 +2695,11 @@ function M.MoreMenuItems(anchor)
             M.Hide()
             print("|cffffd200Nexus:|r The Nexus panel is hidden. " .. HIDE_NOTE)
         end) })
-    return items
+    return { MenuTitle("Nexus"),
+        { text = "Manage", notCheckable = true, hasArrow = true,
+            tooltipTitle = "Manage Nexus",
+            tooltipText = "Setup, settings, notices, logs and panel actions. Opening this menu changes nothing.",
+            menuList = items } }
 end
 
 -- The Plan and Explore hub menus. Each consequence note is a visible row:
@@ -3189,11 +3282,8 @@ local function LayoutServerStatus(completed)
     end
 end
 
--- The footer: the Auto state control apart on the left, then the Plan,
--- Explore and Orbs hubs (issue #163 P3). The wider gap after Auto keeps the
--- one state control apart from navigation; Auto keeps its place and size.
--- Without Auto the three hubs share the row. Widths are the offline model's
--- (272 px HUD); native label fit at large font scales is not measured.
+-- Auto keeps its existing consentful click handler, now in the header. The
+-- footer contains navigation only; moving between hubs never toggles Auto.
 local function LayoutFooter(showAuto)
     menuBtn:Show()
     menuBtn:ClearAllPoints()
@@ -3207,25 +3297,16 @@ local function LayoutFooter(showAuto)
 
     if showAuto then
         autoBtn:Show()
-        autoBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 8, 7)
-        autoBtn:SetSize(72, 22)
-        AUTO_LABEL.Fit() -- cached; refits only when the font or width changed
-
-        planBtn:SetPoint("LEFT", autoBtn, "RIGHT", 10, 0)
-        planBtn:SetSize(54, 22)
-        exploreBtn:SetPoint("LEFT", planBtn, "RIGHT", 3, 0)
-        exploreBtn:SetSize(62, 22)
-        orbsHub:SetPoint("LEFT", exploreBtn, "RIGHT", 3, 0)
-        orbsHub:SetSize(52, 22)
-    else
-        autoBtn:Hide()
-        planBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, 7)
-        planBtn:SetSize(80, 20)
-        exploreBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 96, 7)
-        exploreBtn:SetSize(80, 20)
-        orbsHub:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -10, 7)
-        orbsHub:SetSize(80, 20)
-    end
+        autoBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -47, -7)
+        autoBtn:SetSize(84, 22)
+        AUTO_LABEL.Fit()
+    else autoBtn:Hide() end
+    planBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, 7)
+    planBtn:SetSize(126, 22)
+    exploreBtn:SetPoint("LEFT", planBtn, "RIGHT", 10, 0)
+    exploreBtn:SetSize(126, 22)
+    orbsHub:SetPoint("LEFT", exploreBtn, "RIGHT", 10, 0)
+    orbsHub:SetSize(126, 22)
 
     planBtn:Show()
     exploreBtn:Show()
@@ -3478,7 +3559,7 @@ local function ApplyModel(model, signatures, roll)
             pcall(Nexus.LayoutMetrics.RuntimeMetrics)
         if metricsOk then
             local layoutOk, candidate = pcall(Nexus.LayoutMetrics.Panel,{
-                width=272,fontScale=fontScale,uiScale=uiScale,
+                width=420,fontScale=fontScale,uiScale=uiScale,
                 revision=revision,activeRoll=rollBlock,
                 statusVisible=statusVisible,noBuild=noBuild,
                 complete=complete,showPerformance=showPerformance,
@@ -3901,6 +3982,7 @@ local function ApplyCandidate(model, signatures, roll)
     if not frame.toLockLabel then CreateToLockWidgets(frame) end
     M.ApplyOwnedFonts()
     local applied = ApplyModel(model, signatures, roll)
+    if applied then M.UpdateContextHeader(model) end
     if applied and Nexus.LayoutMetrics and Nexus.LayoutMetrics.FitToScreen then
         -- The HUD can grow taller than the viewport with large fonts, an
         -- observed Callboard and optional sections. Refit on settled renders

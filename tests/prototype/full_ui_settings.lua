@@ -8,7 +8,11 @@ check(toc:find('ui\\SettingsWindow.lua',1,true)~=nil,
     'the runtime TOC loads Settings')
 local settingsMenu
 for _,item in ipairs(Nexus.Panel.MoreMenuItems()) do
-    if item.text=='Open Settings...' then settingsMenu=item end
+    if item.text=='Manage' and type(item.menuList)=='table' then
+        for _,entry in ipairs(item.menuList) do
+            if entry.text=='Open Settings...' then settingsMenu=entry end
+        end
+    end
 end
 check(settingsMenu and type(settingsMenu.func)=='function',
     'the panel Manage menu reaches Settings')
