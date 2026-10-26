@@ -1191,6 +1191,17 @@ r2case('E actual versioned maximal automatic receipt',function()
  print('OBSERVED maximal versioned entry edges='..edges..' bytes='..bytes..' depth='..depth)
 end)
 -- Current owner cancellation and owed-offer orders use real callback/event paths.
+-- A classified entry then holds Resume until the actual post-entry settle
+-- deadline; the deadline alone reactivates nothing.
+local function settling(why)
+ return type(why)=='string' and (why:find('just loaded',1,true) or why:find('loading screen',1,true))~=nil
+end
+local function sameReceipt(a,b)
+ if type(a)~='table' or type(b)~='table' then return false end
+ for _,k in ipairs({'removed','chargesBefore','logSerial','beforeStamp','spendConfirmed','spent','limit',
+  'offerKey','selectedKey','selectionAttempted'})do if a[k]~=b[k] then return false end end
+ return R.Same(a.before,b.before)
+end
 for _,cancel in ipairs({'Pause','Stop'})do for _,fault in ipairs({'missing_send','throw'})do
  r2case('pre-admission '..cancel..' then '..fault,function()
   local H,M,A,O=fresh();local server=R.Server(H);local queries=0
@@ -1202,11 +1213,25 @@ for _,cancel in ipairs({'Pause','Stop'})do for _,fault in ipairs({'missing_send'
   local expected=cancel=='Stop' and 'STOPPED' or 'PAUSED';local status=M.Status()
   assert(queries==1 and status.recoveries==0 and R.Saved(),'SETUP one pre-admission request failed after explicit cancellation')
   check(status.state==expected and not status.running,'EXPECT failed callback preserves explicit '..cancel..' state')
+  local receipt,requests=H.Clone(R.Saved()),server.requests
   H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD')
   check(M.Status().state==expected and not M.Status().running,'GUARD lifecycle cannot reopen cancelled owner')
   check(H.Count('orb-spend')==1 and H.Count('take')==0 and not R.SavedRow('orbRecoveryArchive'),'GUARD cancelled failed query adds no gameplay action/archive')
-  if cancel=='Pause'then check(M.Status().canResume and M.Resume(),'EXPECT explicit Pause before admission retains guarded Resume')
+  if cancel=='Pause'then
+   local offered=M.Status().canResume;local resumed,why=M.Resume()
+   check(not offered and resumed~=true and settling(why),'EXPECT explicit Pause refuses Resume during the post-entry settle: '..tostring(why))
   else check(not M.Resume(),'GUARD stopped query owner never offers Resume')end
+  check(sameReceipt(R.Saved(),receipt),'GUARD the transition retains the original pending receipt')
+  H.Advance(3.1)
+  local after=M.Status()
+  check(after.state==expected and not after.running and after.recoveries==0 and queries==1 and server.requests==requests
+   and H.Count('orb-spend')==1 and H.Count('take')==0 and sameReceipt(R.Saved(),receipt) and not R.SavedRow('orbRecoveryArchive'),
+   'GUARD settle expiry alone reactivates nothing and adds no query, admission, spend, choice or archive')
+  if cancel=='Pause'then
+   check(after.canResume and M.Resume(),'EXPECT explicit Pause before admission retains guarded Resume after the actual settle deadline')
+   check(H.Count('orb-spend')==1 and H.Count('take')==0 and sameReceipt(R.Saved(),receipt),
+    'GUARD explicit Resume continues the original receipt without a new spend or choice')
+  else check(not after.canResume and not M.Resume(),'GUARD Stop stays non-resumable after the settle deadline')end
  end)
 end end
 for _,event in ipairs({'PLAYER_ENTERING_WORLD','PLAYER_LOGOUT'})do
@@ -1349,14 +1374,27 @@ r2case('new Confirm carries the remaining classified loading window',function()
  assert(not R.Saved() and not M.Status(false).running,'SETUP previous approved run completed and released its receipt')
  assert(A.SetLoadoutWishlistIdentity(1,'Two observed copies',{{spellId=410002,quality=2,stacks=2}}))
  H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD')
- local spends,takes=H.Count('orb-spend'),H.Count('take');assert(M.Start(3))
- check(H.Count('orb-spend')==spends and not R.Saved(),
-  'EXPECT new approval cannot discard the still-active three-second loading window')
+ local spends,takes=H.Count('orb-spend'),H.Count('take');local settled=M.RunnerView().state
+ assert(settled=='COMPLETE','SETUP completed old run stays settled through the classified transition')
+ local function unapproved()
+  local view=M.RunnerView()
+  return not view.running and not view.pending and view.state==settled and not R.Saved()
+   and H.Count('orb-spend')==spends and H.Count('take')==takes
+ end
+ local ok,why=M.Start(3)
+ check(ok~=true and settling(why) and unapproved(),
+  'EXPECT a fresh Confirm during the classified settle is refused as unapproved work without a receipt: '..tostring(why))
  H.Advance(2.5)
- check(H.Count('orb-spend')==spends and H.Count('take')==takes,'GUARD remaining loading time submits nothing')
+ ok,why=M.Start(3)
+ check(ok~=true and settling(why) and unapproved(),
+  'GUARD the remaining loading window still refuses a fresh Start and submits nothing: '..tostring(why))
  H.Advance(.75)
- check(H.Count('orb-spend')==spends+1 and R.Saved() and H.Count('take')==takes,
-  'EXPECT the original window expiry permits one freshly guarded new spend')
+ check(unapproved(),'GUARD original window expiry never activates a previously refused Start')
+ ok,why=M.Start(3)
+ check(ok==true and H.Count('orb-spend')==spends+1 and R.Saved() and H.Count('take')==takes,
+  'EXPECT one later explicit Start after the original window deadline submits one freshly guarded spend: '..tostring(why))
+ H.Advance(1)
+ check(H.Count('orb-spend')==spends+1 and H.Count('take')==takes,'GUARD the single eligible Start submits no further spend')
 end)
 if #r2fail>0 then error(table.concat(r2fail,'\n'),0) end
 print('PASS bounded Orb transition and missed-result recovery checks='..checks)

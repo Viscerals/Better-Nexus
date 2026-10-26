@@ -770,47 +770,88 @@ do
  print('PASS R6b4 exact pre-host containment and no invented exposure/progress or automatic selection')
 end
 
--- R6b5: an inert loading hold must exist before the lazy full receipt owner.
--- Its observations must not be relabeled as retained receipt lifecycle epochs.
+-- R6b5: the passive startup lifecycle observer precedes any receipt owner.
+-- Its epochs are actual events, never relabeled as retained receipt epochs.
+-- A fresh Start during the post-entry settle is refused, unapproved work; an
+-- existing approval keeps only its authorization in WAIT_WORLD; deliberate
+-- Pause/Stop stay authoritative; only a later explicit action submits once.
 do
  local S=dofile('tests/prototype/orb_loadout_hold_support.lua');local failures={}
  local function expect(v,msg)if not v then failures[#failures+1]=msg end end
  for _,mode in ipairs({'cold','warm','pause','stop','expired'})do
   local H,M,A,O=S.Fresh()
+  local approved=mode=='pause'or mode=='stop'
+  local function receipt()
+   local state=Nexus.Store.State();return state and state.orbRefinement and state.orbRefinement.pending
+  end
   if mode=='warm'then
    H.OrbPlan();H.Approve(1,false);H.Offer();H.Result(410002,2);M.Stop()
    H.OrbPlan({{spellId=410004,quality=3,stacks=1}})
+  elseif approved then
+   -- Real-origin existing approval: an explicit run settles one actual result
+   -- and is READY, without a receipt, for its next approved Orb at loading.
+   H.OrbPlan({{spellId=410002,quality=2,stacks=2}});H.Approve(3,false);H.Offer();H.Result(410002,2)
+   local ready=M.RunnerView()
+   assert(ready.running and ready.state=='READY' and not ready.pending and receipt()==nil
+    and H.Count('orb-spend')==1 and H.Count('take')==1,'SETUP '..mode..' existing approval settled one actual result and holds no receipt')
   else H.OrbPlan({{spellId=410002,quality=2,stacks=1}})end
-  local before=M.BoundaryDiagnostics();local actions=H.Count('orb-spend')
-  assert(before.lifecycleObserved==(mode=='warm'),'SETUP lazy owner versus warm receipt owner')
-  H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD');H.Advance(.5)
+  local before=M.BoundaryDiagnostics();local actions,takes=H.Count('orb-spend'),H.Count('take')
+  assert(before.lifecycleObserved==true and not before.receiptPresent,'SETUP passive startup observer precedes any current receipt')
+  if not approved then
+   local idle=M.RunnerView()
+   assert(not idle.running and not idle.pending and receipt()==nil,'SETUP '..mode..' holds no approved run before loading')
+  end
+  H.Fire('PLAYER_LEAVING_WORLD');H.Fire('PLAYER_ENTERING_WORLD')
   local observed=M.BoundaryDiagnostics()
-  assert(observed.lifecycleObserved==(mode=='warm'),'SETUP passive hold does not activate full receipt owner')
-  if mode~='warm'then assert(observed.epoch==0,'SETUP no fabricated full-owner epoch')end
+  assert(observed.lifecycleObserved==true and observed.phase=='r' and observed.epoch==(before.epoch+2)%65536,
+   'SETUP exactly one actual observed epoch per leave/enter; none fabricated')
+  assert(not observed.receiptPresent and #observed.receiptJournal==0,'SETUP passive lifecycle facts are not relabeled as receipt epochs')
+  H.Advance(.5)
   if mode=='expired'then H.Advance(3)end
-  assert(M.Start(1),'SETUP R6 retains explicit approval rather than changing Start acceptance')
-  print('SETUP R6b5 '..mode..' actual loading event and explicit approval PASS')
-  if mode=='expired'then
-   expect(H.Count('orb-spend')==actions+1,'expired cold hold permits one explicitly approved host submission')
-  else
-   expect(H.Count('orb-spend')==actions,'no host submission at half-second after '..mode..' entry')
-   if mode=='pause'then assert(M.Pause())elseif mode=='stop'then assert(M.Stop())end
+  local function unapproved()
+   local view=M.RunnerView()
+   return not view.running and not view.pending and receipt()==nil
+    and H.Count('orb-spend')==actions and H.Count('take')==takes
+  end
+  if approved then
+   local held=M.RunnerView()
+   expect(held.running and held.state=='WAIT_WORLD' and not held.pending and receipt()==nil
+    and H.Count('orb-spend')==actions and H.Count('take')==takes,
+    'existing approval keeps only its authorization in WAIT_WORLD; no host submission at half-second after '..mode..' entry')
+   if mode=='pause'then assert(M.Pause())else assert(M.Stop())end
+   print('SETUP R6b5 '..mode..' actual loading event and retained approval PASS')
    H.Advance(2)
    expect(H.Count('orb-spend')==actions,'no host submission before three-second '..mode..' hold expires')
    H.Advance(.6)
-   if mode=='pause'or mode=='stop'then
-    expect(H.Count('orb-spend')==actions,'loading hold expiry does not undo deliberate '..mode)
-    if mode=='pause'then
-     expect(M.Resume()==true and H.Count('orb-spend')==actions+1,'only explicit Resume restarts paused approval')
-    else expect(not M.Resume(),'Stop does not become resumable when loading hold expires')end
-   else
-    expect(H.Count('orb-spend')==actions+1,'same explicit '..mode..' approval submits once after hold')
-   end
+   expect(H.Count('orb-spend')==actions and H.Count('take')==takes and receipt()==nil,'loading hold expiry does not undo deliberate '..mode)
+   if mode=='pause'then
+    expect(M.RunnerView().state=='PAUSED' and not M.RunnerView().running,'explicit Pause remains in force after the hold expires')
+    expect(M.Resume()==true and H.Count('orb-spend')==actions+1,'only explicit Resume restarts paused approval')
+   else expect(not M.Resume() and H.Count('orb-spend')==actions,'Stop does not become resumable when loading hold expires')end
+  elseif mode=='expired'then
+   expect(unapproved(),'loading hold expiry alone creates no approval, receipt or host submission')
+   print('SETUP R6b5 expired actual loading event PASS')
+   local ok,why=M.Start(1)
+   expect(ok==true and H.Count('orb-spend')==actions+1,'expired cold hold permits one explicitly approved host submission: '..tostring(why))
+  else
+   local ok,why=M.Start(1)
+   expect(ok~=true and type(why)=='string' and why:find('just loaded',1,true)~=nil,
+    'fresh '..mode..' Start is refused during the post-entry settle: '..tostring(why))
+   expect(unapproved(),'refused '..mode..' Start is not approved work and manufactures no receipt or host submission')
+   print('SETUP R6b5 '..mode..' actual loading event and refused fresh Start PASS')
+   H.Advance(2)
+   expect(unapproved(),'no host submission before three-second '..mode..' hold expires')
+   H.Advance(.6)
+   expect(unapproved(),'loading hold expiry never activates the refused '..mode..' Start')
+   ok,why=M.Start(1)
+   expect(ok==true and H.Count('orb-spend')==actions+1,'one later explicit '..mode..' Start after the hold submits once: '..tostring(why))
   end
+  local submitted=H.Count('orb-spend');H.Advance(1)
+  expect(H.Count('orb-spend')==submitted,'no further host submission follows the single eligible '..mode..' action')
   M.Stop()
  end
- if #failures>0 then error(table.concat(failures,'\n'),0)end
- print('PASS R6b5 cold and warm loading hold, truthful lazy receipt epochs, expiry and deliberate Pause/Stop')
+ if #failures>0 then error(table.concat(failures,'\n'),0) end
+ print('PASS R6b5 passive startup epochs, refused fresh Start, retained WAIT_WORLD approval, expiry and deliberate Pause/Stop')
 end
 
 -- R6c1: independent review reproductions use the real saved/read/annotation
