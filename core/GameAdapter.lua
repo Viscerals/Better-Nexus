@@ -346,10 +346,13 @@ local echoRejected = {}
 -- as activeKnown. known: that knownness at the last capture (nil before the
 -- first); generation: how often it changed between captures. Only
 -- A.PresentationRevisions reads it. Nothing is marked dirty, and the
--- snapshot, ConsumeDirty and the stats are unchanged.
-local echoKnownness = { known=nil, generation=0 }
+-- snapshot, ConsumeDirty and the stats are unchanged. It is held as
+-- echoGenerations.knownness, not as its own main-chunk local (this chunk is at
+-- the Lua 5.1 limit of 200 active locals). It is not one of ECHO_FIELDS, and
+-- echoGenerations is only read field by field, so nothing walks or exports it.
 local echoGenerations = {
     slots=0, granted=0, locked=0, discovery=0, activeSlot=0,
+    knownness = { known=nil, generation=0 },
 }
 local echoStatus = {
     slotRequests=0, notifications=0, reconciliations=0, scans=0, cacheHits=0,
@@ -5856,10 +5859,11 @@ local function ReconcileEchoState(markDirty, source, display)
     -- kept as 0) cannot show. No dirty mark, field generation, status count
     -- or result changes here.
     activeKnown = activeKnown == true
-    if echoKnownness.known ~= nil and echoKnownness.known ~= activeKnown then
-        echoKnownness.generation = echoKnownness.generation + 1
+    local knownness = echoGenerations.knownness
+    if knownness.known ~= nil and knownness.known ~= activeKnown then
+        knownness.generation = knownness.generation + 1
     end
-    echoKnownness.known = activeKnown
+    knownness.known = activeKnown
     -- The strict check's current verdict, field by field: rejected fields are
     -- reported as such (failures counts scans that rejected any field).
     echoRejected = {}
@@ -6301,7 +6305,7 @@ function A.PresentationRevisions()
     -- when either does, and it equals the activeSlot generation while the
     -- knownness has never changed.
     return echoGenerations.slots,
-        echoGenerations.activeSlot + echoKnownness.generation,
+        echoGenerations.activeSlot + echoGenerations.knownness.generation,
         echoGenerations.granted, ownedProjectionRevision,
         wishlistProjectionRevision, catalogRevision,
         echoGenerations.locked, lockedProjectionRevision,
