@@ -2,7 +2,6 @@
 -- must not commit a Wishlist, assign a Saved Build, request Sync, or spend.
 local F=dofile('tests/prototype/format5_support.lua')
 local H=F.Boot(F.Database(),function(h) F.OrbService(h) end)
-dofile('ui/FullUIWorkspaces.lua') -- coordinator wires this file into the TOC
 local G=dofile('tests/prototype/layout_geometry_support.lua')
 local checks=0
 local function check(ok,message) assert(ok,message);checks=checks+1 end

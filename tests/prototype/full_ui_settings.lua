@@ -1,7 +1,6 @@
 -- Issue #163: real Settings routes retain the owners' consent and write seams.
 local F=dofile('tests/prototype/format5_support.lua')
 local H=F.Boot(F.Database(),function(h) F.OrbService(h) end)
-dofile('ui/SettingsWindow.lua') -- integration TOC wiring is owned by the coordinator
 local settings=assert(Nexus.SettingsWindow,'Settings module exists')
 local function check(ok,why) assert(ok,why) end
 local toc=assert(io.open('Nexus.toc','rb')):read('*a')
