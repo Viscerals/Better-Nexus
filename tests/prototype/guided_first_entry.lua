@@ -248,6 +248,72 @@ C.scenario('E10 canceling first-use Wishlist import returns to the same coach',f
  Quiet('E10',b)
 end)
 
+C.scenario('E11 canceling the import naming dialog also returns to the first-use coach',function()
+ if not FirstBoot('E11') then return end
+ NexusOverwriteWarning.yes:Click()
+ if not C.setup(Coach(),'E11: fixture: first-use coach open') then return end
+ local new=CoachOption('I am new');if new then new:Click() end
+ local import=CoachButton('Import a code')
+ if not C.setup(import~=nil,'E11: fixture: import action on Wishlist step') then return end
+ import:Click()
+ local paste=H.popup and H.popup.frame
+ if not C.setup(paste and H.popup.which=='NEXUS_IMPORT_WISHLIST',
+  'E11: fixture: initial import popup open') then return end
+ local code=Nexus.Codec.EncodeEBH1({{spellId=201175,quality=0,stacks=1,locked=false}},'MAGE','Starter')
+ paste.editBox:SetText(code)
+ StaticPopupDialogs.NEXUS_IMPORT_WISHLIST.OnAccept(paste)
+ local naming=H.popup and H.popup.frame
+ local dialog=StaticPopupDialogs.NEXUS_NAME_IMPORTED_WISHLIST
+ if not C.setup(H.popup and H.popup.which=='NEXUS_NAME_IMPORTED_WISHLIST' and dialog,
+  'E11: fixture: a valid code opened the naming popup') then return end
+ if dialog.OnCancel then dialog.OnCancel(naming) end
+ C.expect(Coach() and Step()=='wishlist' and Seen()==nil and Nexus.GuidedSetup.State().awaitSave==nil,
+  'E11: canceling the naming popup returns the unfinished coach with no pending save')
+ import=CoachButton('Import a code')
+ if import then import:Click() end
+ if H.popup and H.popup.which=='NEXUS_IMPORT_WISHLIST' then
+  H.popup.frame.editBox:SetText(code)
+  StaticPopupDialogs.NEXUS_IMPORT_WISHLIST.OnAccept(H.popup.frame)
+ end
+ if C.setup(H.popup and H.popup.which=='NEXUS_NAME_IMPORTED_WISHLIST',
+  'E11: fixture: naming popup reopened after a second valid code') then
+  dialog.EditBoxOnEscapePressed(H.popup.frame.editBox)
+  C.expect(Coach() and Seen()==nil and Nexus.GuidedSetup.State().awaitSave==nil,
+   'E11: naming Escape also returns the unfinished coach without acknowledgement')
+ end
+end)
+
+C.scenario('E12 malformed import code returns to the first-use coach',function()
+ if not FirstBoot('E12') then return end
+ NexusOverwriteWarning.yes:Click()
+ local new=CoachOption('I am new');if new then new:Click() end
+ local import=CoachButton('Import a code')
+ if not C.setup(import~=nil,'E12: fixture: import action on Wishlist step') then return end
+ import:Click()
+ if not C.setup(H.popup and H.popup.which=='NEXUS_IMPORT_WISHLIST',
+  'E12: fixture: initial import popup open') then return end
+ H.popup.frame.editBox:SetText('not an EBH1 code')
+ StaticPopupDialogs.NEXUS_IMPORT_WISHLIST.OnAccept(H.popup.frame)
+ C.expect(Coach() and Seen()==nil and Nexus.GuidedSetup.State().awaitSave==nil,
+  'E12: refused code returns the same unfinished coach without pending save')
+end)
+
+C.scenario('E13 closing an imported draft returns to the same unfinished coach',function()
+ if not FirstBoot('E13') then return end
+ NexusOverwriteWarning.yes:Click()
+ local new=CoachOption('I am new');if new then new:Click() end
+ local import=CoachButton('Import a code')
+ if not C.setup(import~=nil,'E13: fixture: import action on Wishlist step') then return end
+ import:Click()
+ local code=Nexus.Codec.EncodeEBH1({{spellId=201175,quality=0,stacks=1,locked=false}},'MAGE','Starter')
+ Nexus.WishlistEditor.ImportEBH1String(code,'Starter')
+ if not C.setup(NexusEditorFrame and NexusEditorFrame:IsShown() and not Coach(),
+  'E13: fixture: a valid import opened an unsaved draft editor') then return end
+ NexusEditorFrame:Hide()
+ C.expect(Coach() and Seen()==nil and Nexus.GuidedSetup.State().awaitSave==nil,
+  'E13: abandoning the imported draft returns the coach without claiming a save or dismissal')
+end)
+
 C.scenario('E5 an open Auto warning refuses Setup / Welcome truthfully; nothing is queued; an explicit retry opens the coach',function()
  if not FirstBoot('E5') then return end
  NexusOverwriteWarning.yes:Click()

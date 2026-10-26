@@ -340,6 +340,20 @@ function U.RouteEnded(kind)
     U.Render()
 end
 
+-- Imported plans can open the editor after a second naming/role dialog.
+-- Watch that same editor once, and use the currently active route on close.
+function U.WatchEditor(kind)
+    local f, editorFrame = frame, _G.NexusEditorFrame
+    if not f or f.waitingKind ~= kind then return end
+    if not editorFrame or not editorFrame:IsShown() then U.RouteEnded(kind); return end
+    if type(editorFrame.HookScript) == 'function' and not editorFrame._NexusGuideOnHide then
+        editorFrame._NexusGuideOnHide = true
+        editorFrame:HookScript('OnHide', function()
+            if frame and frame.waitingKind then U.RouteEnded(frame.waitingKind) end
+        end)
+    end
+end
+
 -- Opens the editor or the import dialog; the guide steps aside and returns
 -- when the editor reports a save or the route is canceled. Opening a draft
 -- completes nothing.
@@ -357,12 +371,7 @@ function U.RouteEditor(kind)
         StaticPopup_Show('NEXUS_IMPORT_WISHLIST')
     else
         editor.NewWishlist()
-        local editorFrame = _G.NexusEditorFrame
-        if editorFrame and type(editorFrame.HookScript) == 'function' and not editorFrame._NexusGuideOnHide then
-            editorFrame._NexusGuideOnHide = true
-            editorFrame:HookScript('OnHide', function() U.RouteEnded('new') end)
-        end
-        if not editorFrame or not editorFrame:IsShown() then U.RouteEnded('new') end
+        U.WatchEditor('new')
     end
 end
 

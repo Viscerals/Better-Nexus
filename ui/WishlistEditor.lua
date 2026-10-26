@@ -317,15 +317,24 @@ local function RefuseExplicitCopy(dialog, reason)
     print("|cffff6060Nexus:|r " .. text)
 end
 
+local function EndGuidedImport()
+    if Nexus.GuidedSetupUI and Nexus.GuidedSetupUI.RouteEnded then
+        Nexus.GuidedSetupUI.RouteEnded('import')
+    end
+end
+
 local function LoadImportedWishlist(parsed, chosenName)
     if parsed and parsed.needsRoleSelection then
-        return RolePicker.Begin(parsed.entries,{kind="import",name=TrimWishlistName(chosenName),class=parsed.class})
+        local opened = RolePicker.Begin(parsed.entries,{kind="import",name=TrimWishlistName(chosenName),class=parsed.class})
+        if not opened then EndGuidedImport() end
+        return opened
     end
     local ok, name, count, why =
         wishlistController.LoadImported(parsed, chosenName)
     if not ok then
         print("|cffff6060Nexus:|r couldn't import that EBH1 string: "
             .. tostring(why or "the Echo roles could not be represented exactly") .. ".")
+        EndGuidedImport()
         return false
     end
     SyncFulfilledDraftTargets()
@@ -334,6 +343,9 @@ local function LoadImportedWishlist(parsed, chosenName)
     renderer.Prepare({attach=true, style=true, close=true})
     renderer.SetNameText(name)
     renderer.ShowFrame()
+    if Nexus.GuidedSetupUI and Nexus.GuidedSetupUI.WatchEditor then
+        Nexus.GuidedSetupUI.WatchEditor('import')
+    end
     M.Refresh()
     local displayName = DisplayUntrusted(name, 1024, false) or "Wishlist"
     print(string.format(
@@ -350,11 +362,13 @@ end
 -- Missing/mismatched evidence leaves a cancelable explicit fallback draft.
 RolePicker = { visibleRows=10 }
 
-function RolePicker.Hide()
+function RolePicker.Hide(continuing)
     local restore = RolePicker.state and RolePicker.state.restoreEditor
+    local wasImport = RolePicker.state and RolePicker.state.kind == "import"
     RolePicker.state=nil
     if RolePicker.frame then RolePicker.frame:Hide() end
     if restore and wishlistRenderer then wishlistRenderer.ShowFrame() end
+    if wasImport and not continuing then EndGuidedImport() end
 end
 
 function RolePicker.Count()
@@ -484,7 +498,7 @@ function RolePicker.Accept()
     if not prepared then RolePicker.Message(why or "These targets are not representable.");return false end
     if state.kind=="import" then
         local name,class=state.name,state.class
-        RolePicker.Hide()
+        RolePicker.Hide(true)
         return LoadImportedWishlist({entries=echoes,name=name,class=class},name)
     end
     if state.assign then
@@ -548,8 +562,10 @@ function RolePicker.Ensure()
     f:SetClampedToScreen(true);f:EnableMouse(true);f:SetToplevel(true)
     f:SetScript("OnHide",function()
         local restore=RolePicker.state and RolePicker.state.restoreEditor
+        local wasImport=RolePicker.state and RolePicker.state.kind=="import"
         RolePicker.state=nil
         if restore and wishlistRenderer then wishlistRenderer.ShowFrame() end
+        if wasImport then EndGuidedImport() end
     end)
     UISpecialFrames[#UISpecialFrames+1]="NexusWishlistRolePicker"
     local p=f
@@ -754,11 +770,13 @@ function M.ImportEBH1String(text, chosenName)
     local Codec = Nexus and Nexus.Codec
     if not (Codec and Codec.DecodeEBH1) then
         print("|cffff6060Nexus:|r import codec unavailable")
+        EndGuidedImport()
         return
     end
     local parsed = Codec.DecodeEBH1(text, true)
     if not parsed or #parsed.entries == 0 then
         print("|cffff6060Nexus:|r couldn't parse that as an EBH1 string.")
+        EndGuidedImport()
         return
     end
 
@@ -830,14 +848,19 @@ StaticPopupDialogs["NEXUS_NAME_IMPORTED_WISHLIST"] = {
         end
         if name == "" then
             print("|cffff6060Nexus:|r Enter a name for the imported wishlist.")
+            EndGuidedImport()
             return
         end
         LoadImportedWishlist(parsed, name)
     end,
+    OnCancel = function(self)
+        if self and self.Hide then self:Hide() end
+        EndGuidedImport()
+    end,
     EditBoxOnEnterPressed = function(self)
         self:GetParent().button1:Click()
     end,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide(); EndGuidedImport() end,
     timeout = 0, whileDead = true, hideOnEscape = true,
 }
 
@@ -861,18 +884,14 @@ StaticPopupDialogs["NEXUS_IMPORT_WISHLIST"] = {
     end,
     OnCancel = function(self)
         if self and self.Hide then self:Hide() end
-        if Nexus.GuidedSetupUI and Nexus.GuidedSetupUI.RouteEnded then
-            Nexus.GuidedSetupUI.RouteEnded('import')
-        end
+        EndGuidedImport()
     end,
     EditBoxOnEnterPressed = function(self)
         self:GetParent().button1:Click()
     end,
     EditBoxOnEscapePressed = function(self)
         self:GetParent():Hide()
-        if Nexus.GuidedSetupUI and Nexus.GuidedSetupUI.RouteEnded then
-            Nexus.GuidedSetupUI.RouteEnded('import')
-        end
+        EndGuidedImport()
     end,
     timeout = 0, whileDead = true, hideOnEscape = true,
 }
