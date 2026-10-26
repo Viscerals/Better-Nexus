@@ -3610,6 +3610,11 @@ local LANGUAGE_REASONS = {
 }
 local LANGUAGE_SCOPE = "Only selected main-panel labels and tooltips, status messages and the compact charge-count row are translated; other Nexus text stays English. Translations are drafts pending fluent and native review."
 local LANGUAGE_RELOAD = "A new choice applies after you reload the interface or log in again."
+-- Issue #141: Automatic is a preference shown beside the installed packs,
+-- never one of them. This build reads no game language and has no evidenced
+-- client code for any pack, so Automatic shows English; the menu says so and
+-- never claims that a client locale is known.
+local LANGUAGE_AUTOMATIC = "Automatic shows English in this build: Nexus does not read the game's language, and no game language is mapped to a Nexus language."
 
 local function LanguageName(status, id)
     for _, row in ipairs(type(status) == "table" and type(status.languages) == "table"
@@ -3619,6 +3624,11 @@ local function LanguageName(status, id)
         end
     end
     return "English"
+end
+
+-- Issue #141: "Automatic (<the language it shows>)". Never a client locale.
+local function AutomaticName(status, id)
+    return "Automatic (" .. LanguageName(status, id) .. ")"
 end
 
 -- The chooser's facts (see above). Reads only.
@@ -3638,6 +3648,16 @@ function M.LanguageStatus()
         local ok, id = pcall(localization.ActiveLanguage)
         if ok and type(id) == "string" then status.active, status.saved = id, id end
     end
+    -- Issue #141: the Automatic value and what it shows; the saved
+    -- preference itself is not known here.
+    local automatic = localization and localization.AUTOMATIC_PREFERENCE
+    if type(automatic) == "string" then
+        status.automaticPreference, status.automaticLanguage = automatic, "enUS"
+        if type(localization.EffectiveLanguage) == "function" then
+            local ok, id = pcall(localization.EffectiveLanguage, automatic)
+            if ok and type(id) == "string" then status.automaticLanguage = id end
+        end
+    end
     return status
 end
 
@@ -3645,8 +3665,10 @@ end
 function M.LanguageMenuLabel()
     local ok, status = pcall(M.LanguageStatus)
     if not ok or type(status) ~= "table" then return "Language" end
-    return "Language: " .. LanguageName(status, status.active)
-        .. (status.pending and " (new choice after reload)" or "")
+    local name = status.activeAutomatic and AutomaticName(status, status.active)
+        or LanguageName(status, status.active)
+    return "Language: " .. name
+        .. ((status.pending or status.preferencePending) and " (new choice after reload)" or "")
 end
 
 -- The submenu rows. `action` wraps a click (the menu's MenuAction).
@@ -3654,20 +3676,41 @@ function M.LanguageMenuItems(action)
     local status = M.LanguageStatus()
     local refusal = status.refusal
     local items = {{text = "Nexus language", isTitle = true, notCheckable = true}}
+    -- Issue #141: Automatic first, as a preference beside the packs (never
+    -- one of them). Checked marks the saved preference; "- active" the
+    -- language this session shows; "- in use" an Automatic session start.
+    -- A refused Automatic row carries no click.
+    local automatic = type(status.automaticPreference) == "string"
+        and status.automaticPreference or nil
+    local pending = status.preferencePending or status.pending
+    if automatic then
+        local label = AutomaticName(status, status.automaticLanguage)
+        if status.activeAutomatic then label = label .. " - in use" end
+        if pending and status.automatic then
+            label = label .. " - saved, applies after reload"
+        end
+        items[#items + 1] = {text = label, checked = status.automatic == true,
+            disabled = refusal ~= nil,
+            func = refusal == nil and action(function() M.ChooseLanguage(automatic) end) or nil}
+    end
     for _, row in ipairs(type(status.languages) == "table" and status.languages or {}) do
         if type(row) == "table" and type(row.id) == "string" and type(row.name) == "string" then
             local id, label = row.id, row.name
             if id == status.active then label = label .. " - active" end
-            if status.pending and id == status.saved then
+            if pending and status.automatic ~= true and not status.savedUnsupported
+                and id == status.saved then
                 label = label .. " - saved, applies after reload"
             end
-            items[#items + 1] = {text = label, checked = id == status.saved,
+            items[#items + 1] = {text = label, checked = status.automatic ~= true and id == status.saved,
                 disabled = refusal ~= nil,
                 func = action(function() M.ChooseLanguage(id) end)}
         end
     end
     items[#items + 1] = {text = LANGUAGE_RELOAD, notCheckable = true, disabled = true}
     items[#items + 1] = {text = LANGUAGE_SCOPE, notCheckable = true, disabled = true}
+    if automatic then
+        items[#items + 1] = {text = LANGUAGE_AUTOMATIC, notCheckable = true, disabled = true}
+    end
     if status.savedUnsupported then
         items[#items + 1] = {text = "The saved language is not offered by this build; English is shown.",
             notCheckable = true, disabled = true}
@@ -3686,15 +3729,23 @@ end
 -- What a choice did, in words. Reads only.
 function M.LanguageResultText(result, id)
     local state = type(result) == "table" and result.state or nil
-    local name = LanguageName(M.LanguageStatus(), type(result) == "table" and result.id or id)
+    local status = M.LanguageStatus()
+    local automatic = type(result) == "table" and result.automatic == true
+    local name = automatic and AutomaticName(status, result.resolved)
+        or LanguageName(status, type(result) == "table" and result.id or id)
+    local note = automatic and (" " .. LANGUAGE_AUTOMATIC) or ""
     if state == "saved" then
         if result.pending then
-            return "Nexus language saved: " .. name .. ". " .. LANGUAGE_RELOAD .. " " .. LANGUAGE_SCOPE
+            return "Nexus language saved: " .. name .. ". " .. LANGUAGE_RELOAD .. " " .. LANGUAGE_SCOPE .. note
+        elseif result.preferencePending then
+            return "Nexus language saved: " .. name .. ". The language shown does not change; "
+                .. "the saved choice is used from your next interface reload or login." .. note
         end
-        return "Nexus language saved: " .. name .. ". It is already the active language."
+        return "Nexus language saved: " .. name .. ". "
+            .. (automatic and "It is already this session's choice." or "It is already the active language.") .. note
     elseif state == "unchanged" then
         return "Nexus language is already set to " .. name .. "; nothing was changed."
-            .. (result.pending and (" " .. LANGUAGE_RELOAD) or "")
+            .. (result.pending and (" " .. LANGUAGE_RELOAD) or "") .. note
     elseif state == "session" then
         return "The language choice was not saved: only this session's settings took it, and it "
             .. "would not last through the reload it needs. Nothing changes now."
