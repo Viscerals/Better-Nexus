@@ -2278,8 +2278,34 @@ end
 -- showing a menu, a hub tooltip or a status line only reads.
 ------------------------------------------------------------------------
 
+local function ProtectVisiblePlanRoute()
+    local plan = _G.NexusEditorFrame
+    if not (plan and plan.IsShown and plan:IsShown()) then return true, false end
+    local editor = Nexus.WishlistEditor
+    if not (editor and type(editor.SuspendForWorkspace) == "function") then
+        print("|cffffd200Nexus:|r Plan draft protection is unavailable. Finish or close Plan first.")
+        return false, false
+    end
+    local allowed, reason = editor.SuspendForWorkspace()
+    if not allowed then
+        print("|cffffd200Nexus:|r " .. tostring(reason or "Finish or cancel the open Plan action first."))
+        return false, false
+    end
+    return true, true
+end
+
+local function CancelUnusedPlanSuspend(suspended)
+    local plan = _G.NexusEditorFrame
+    if suspended and plan and plan.IsShown and plan:IsShown()
+        and Nexus.WishlistEditor and Nexus.WishlistEditor.CancelWorkspaceSuspend then
+        Nexus.WishlistEditor.CancelWorkspaceSuspend()
+    end
+end
+
 -- The game's own My Builds page (the header button and the Plan hub).
 function M.OpenMyBuilds()
+    local allowed, suspended = ProtectVisiblePlanRoute()
+    if not allowed then return false end
     if Nexus.JournalTab and Nexus.JournalTab.OpenBuilds then
         -- Only dismiss the workspace after the live Character Progression
         -- entry has been found. A missing game button must not discard an
@@ -2289,6 +2315,7 @@ function M.OpenMyBuilds()
             print("|cffff6060Nexus:|r Could not find the game's Character Progression button. "
                 .. "Plan remains open; open Character Progression -> Echoes manually when available.")
         end
+        CancelUnusedPlanSuspend(suspended)
         return opened
     else
         -- The journal's Show(tab) is a dot-call whose argument is a tab
@@ -2298,14 +2325,18 @@ function M.OpenMyBuilds()
         if pe and pe.EchoJournal and pe.EchoJournal.Show then
             local ok = pcall(pe.EchoJournal.Show)
             if ok then CloseOtherNexusWindows() end
+            CancelUnusedPlanSuspend(suspended)
             return ok
         end
+        CancelUnusedPlanSuspend(suspended)
         return false
     end
 end
 
 -- Assign Wishlist (the setup view's button and the Plan hub).
 function M.OpenAssignment()
+    local allowed, suspended = ProtectVisiblePlanRoute()
+    if not allowed then return false end
     local journal = Nexus.JournalTab
     if journal and journal.OpenBuilds then
         -- The present helper is the route: the Echo Journal with the
@@ -2319,14 +2350,20 @@ function M.OpenAssignment()
                 .. "was opened or assigned. Open Character Progression → Echoes yourself and use the Nexus "
                 .. "Wishlist selector at its top.")
         end
+        CancelUnusedPlanSuspend(suspended)
+        return opened
     else
-        CloseOtherNexusWindows()
         -- Show(tab) is a dot-call taking a tab index; no tab is passed
         -- (the journal opens its current tab).
         local pe = _G["ProjectEbonhold"]
         if pe and pe.EchoJournal and pe.EchoJournal.Show then
-            pcall(pe.EchoJournal.Show)
+            local ok = pcall(pe.EchoJournal.Show)
+            if ok then CloseOtherNexusWindows() end
+            CancelUnusedPlanSuspend(suspended)
+            return ok
         end
+        CancelUnusedPlanSuspend(suspended)
+        return false
     end
 end
 

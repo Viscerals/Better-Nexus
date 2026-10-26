@@ -290,10 +290,15 @@ function H.OpenAssignment()
     if type(journal.CanOpenBuilds)=="function" and not journal.CanOpenBuilds() then
         return Refuse("The game's Character Progression button was not found. Nothing was opened or assigned.")
     end
+    -- Use the same guarded route as the panel. A visible Plan may hold an
+    -- unsaved draft or an open Save confirmation; Help must not hide it and
+    -- bypass the workspace suspension check before opening the game page.
+    local panel=Nexus.Panel
+    if not (panel and type(panel.OpenAssignment)=="function") then
+        return Refuse("The guarded assignment route is not available. Nothing was opened or assigned.")
+    end
+    if panel.OpenAssignment()==false then return false end
     if frame then frame:Hide() end
-    local editor=_G.NexusEditorFrame
-    if editor and editor.IsShown and editor:IsShown() then editor:Hide() end
-    journal.OpenBuilds(true)
     return true
 end
 -- Setup checklist: the read-only checklist and status (QuickStart). It reads
