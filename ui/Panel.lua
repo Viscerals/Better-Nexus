@@ -2294,11 +2294,22 @@ local function ProtectVisiblePlanRoute()
     return true, true
 end
 
-local function CancelUnusedPlanSuspend(suspended)
+local function FinishPlanRoute(suspended, opened)
+    if not suspended then return end
     local plan = _G.NexusEditorFrame
-    if suspended and plan and plan.IsShown and plan:IsShown()
-        and Nexus.WishlistEditor and Nexus.WishlistEditor.CancelWorkspaceSuspend then
-        Nexus.WishlistEditor.CancelWorkspaceSuspend()
+    local editor = Nexus.WishlistEditor
+    if plan and plan.IsShown and plan:IsShown()
+        and editor and editor.CancelWorkspaceSuspend then
+        editor.CancelWorkspaceSuspend()
+    elseif opened == false and editor and editor.ResumeWorkspaceDraft then
+        -- The game button can disappear or refuse its click after the
+        -- availability precheck has run the close callback. Restore Plan on
+        -- that refusal; its suspended draft is still bound to the context.
+        local restored, reason = editor.ResumeWorkspaceDraft()
+        if not restored then
+            print("|cffffd200Nexus:|r Plan did not reopen after the game page refused. "
+                .. tostring(reason or "Open Plan to resume the draft."))
+        end
     end
 end
 
@@ -2315,7 +2326,7 @@ function M.OpenMyBuilds()
             print("|cffff6060Nexus:|r Could not find the game's Character Progression button. "
                 .. "Plan remains open; open Character Progression -> Echoes manually when available.")
         end
-        CancelUnusedPlanSuspend(suspended)
+        FinishPlanRoute(suspended, opened)
         return opened
     else
         -- The journal's Show(tab) is a dot-call whose argument is a tab
@@ -2325,10 +2336,10 @@ function M.OpenMyBuilds()
         if pe and pe.EchoJournal and pe.EchoJournal.Show then
             local ok = pcall(pe.EchoJournal.Show)
             if ok then CloseOtherNexusWindows() end
-            CancelUnusedPlanSuspend(suspended)
+            FinishPlanRoute(suspended, ok)
             return ok
         end
-        CancelUnusedPlanSuspend(suspended)
+        FinishPlanRoute(suspended, false)
         return false
     end
 end
@@ -2350,7 +2361,7 @@ function M.OpenAssignment()
                 .. "was opened or assigned. Open Character Progression → Echoes yourself and use the Nexus "
                 .. "Wishlist selector at its top.")
         end
-        CancelUnusedPlanSuspend(suspended)
+        FinishPlanRoute(suspended, opened)
         return opened
     else
         -- Show(tab) is a dot-call taking a tab index; no tab is passed
@@ -2359,10 +2370,10 @@ function M.OpenAssignment()
         if pe and pe.EchoJournal and pe.EchoJournal.Show then
             local ok = pcall(pe.EchoJournal.Show)
             if ok then CloseOtherNexusWindows() end
-            CancelUnusedPlanSuspend(suspended)
+            FinishPlanRoute(suspended, ok)
             return ok
         end
-        CancelUnusedPlanSuspend(suspended)
+        FinishPlanRoute(suspended, false)
         return false
     end
 end

@@ -32,16 +32,44 @@ check(Nexus.FullUIWorkspaces.ShowPlan()==true and plan:IsShown()
     and name:GetText()=='Unsaved header route draft',
     'returning from direct My Builds restores unsaved Plan text')
 
+name:SetText('Unsaved failed-click draft')
+journal.OpenBuilds=function(_,beforeOpen)
+    if beforeOpen then beforeOpen() end
+    return false,'click-failed'
+end
+panel.OpenMyBuilds()
+check(suspended==2 and plan:IsShown()
+    and name:GetText()=='Unsaved failed-click draft',
+    'a game button click failure restores the visible Plan and its draft')
+journal.OpenBuilds=function(_,beforeOpen)
+    if beforeOpen then beforeOpen() end
+    return true
+end
+
 name:SetText('Unsaved assignment route draft')
 panel.OpenAssignment()
-check(suspended==2,'direct assignment route suspends the visible Plan draft')
+check(suspended==3,'direct assignment route suspends the visible Plan draft')
 check(Nexus.FullUIWorkspaces.ShowPlan()==true and plan:IsShown()
     and name:GetText()=='Unsaved assignment route draft',
     'returning from direct assignment restores unsaved Plan text')
 
+name:SetText('Unsaved failed assignment draft')
+journal.OpenBuilds=function(_,beforeOpen)
+    if beforeOpen then beforeOpen() end
+    return false,'click-failed'
+end
+panel.OpenAssignment()
+check(suspended==4 and plan:IsShown()
+    and name:GetText()=='Unsaved failed assignment draft',
+    'a failed assignment page click restores the visible Plan and draft')
+journal.OpenBuilds=function(_,beforeOpen)
+    if beforeOpen then beforeOpen() end
+    return true
+end
+
 name:SetText('Unsaved Help route draft')
 check(Nexus.Help.OpenAssignment()==true,'Help exposes its existing assignment route')
-check(suspended==3,'Help assignment uses the same Plan draft guard')
+check(suspended==5,'Help assignment uses the same Plan draft guard')
 check(Nexus.FullUIWorkspaces.ShowPlan()==true and plan:IsShown()
     and name:GetText()=='Unsaved Help route draft',
     'returning from Help assignment restores unsaved Plan text')
