@@ -909,9 +909,12 @@ do
   return {status='STORE_PENDING',recommendation='',cards={},auto=false,level=40,version=Nexus.VERSION,
    progress={},assignment={state='unassigned'}}
  end
+ -- M7: Main captures the character into model.character. This synthetic
+ -- active model supplies that captured fact, which the My Builds hover
+ -- words as its Character line (Tips).
  local function Active()
   return {status='STORE_PENDING',recommendation='Take',cards={{text='Fixture card'}},auto=false,level=40,
-   version=Nexus.VERSION,charges={banish=0,freeze=7},
+   version=Nexus.VERSION,charges={banish=0,freeze=7},character='PrototypeTester',
    progress={wishlistName='Fixture plan',total=12,owned=3,activeSlot=1,unknownTomes={},
     missing={'Echo 1 (Rare:x2)','Echo 2'},shed={'Echo 3'},toLock={'Echo 80','Gl\195\164nzend Echo'}}}
  end
@@ -1116,6 +1119,54 @@ do
  local navEnglish=Navigate()
  check(same(navEnglish,NAV),'GUARD #143 English: the existing navigation callbacks reach the same destinations once each, with the same signatures')
  check(same(Effects(),effects),'GUARD #143 English: renders, hovers and navigation change no saved root, setting, language, action, send, chat, popup, consent or Auto')
+ -- M7 missing-fact control: the My Builds hover words only the character
+ -- Main captured into the model (model.character). Contrasting synthetic
+ -- sources are set first: a counting live UnitName with another name, a
+ -- stale previous model name committed by a real render and shown by the
+ -- actual hover, and the Panel destination cache holding a third name. A
+ -- model without the fact then keeps every other line unchanged, shows no
+ -- Character line and no stale, cached or live name, and its hovers make no
+ -- UnitName read. Hooks are restored on every path; nothing native is claimed.
+ do
+  local before=Effects()
+  local tips=Tips(ENT)
+  check(#tips.switch==6 and same(tips.switch[4],{'Character: PrototypeTester',0.85,0.85,0.85,true}),'SETUP #143 missing character: the positive My Builds expectation holds the captured character row fourth')
+  local without={tips.switch[1],tips.switch[2],tips.switch[3],tips.switch[5],tips.switch[6]}
+  local stale={tips.switch[1],tips.switch[2],tips.switch[3],{'Character: StaleModelName',0.85,0.85,0.85,true},tips.switch[5],tips.switch[6]}
+  local P,switch=Nexus.Panel,NexusPanel._switchBtn
+  local liveName,prior,reads=UnitName,P.CachedDestinationCharacter(),0
+  local ok,err=pcall(function()
+   UnitName=function()reads=reads+1;return 'LiveFallbackName','Ebonhold' end
+   P.ObserveDestinationCharacter('CachedFixtureName','capture')
+   check(P.CachedDestinationCharacter()=='CachedFixtureName' and UnitName('player')=='LiveFallbackName','SETUP #143 missing character: a contrasting live UnitName and a cached destination name are available')
+   local named=Active();named.character='StaleModelName'
+   assert(P.Render(named))
+   check(P._lastModel.character=='StaleModelName','SETUP #143 missing character: a real render commits a stale previous model name')
+   Hover(switch,stale,'SETUP #143 missing character: the actual My Builds hover shows the stale previous model name before the control')
+   local missing=Active();missing.character=nil
+   assert(P.Render(missing))
+   check(missing.character==nil and P._lastModel.character==nil,'#143 missing character: the committed model holds no character; none is manufactured from the stale model, the cache or UnitName')
+   reads=0
+   Hover(switch,without,'#143 missing character: the actual My Builds hover keeps its consequence, destination and Wishlist lines in order, colour and wrap, with no Character line')
+   local lines=Tooltip(switch,false)
+   local leaked
+   for _,line in ipairs(lines)do
+    local text=tostring(line[1])
+    if text:find('^Character') then leaked=text end
+    for _,name in ipairs({'PrototypeTester','LiveFallbackName','StaleModelName','CachedFixtureName'})do
+     if text:find(name,1,true) then leaked=text end
+    end
+   end
+   check(#lines==#without and leaked==nil and reads==0,'#143 missing character: the emitted hover lines name no character (live, stale, cached or captured) and the hovers made no UnitName read ('..tostring(leaked)..', '..reads..' reads)')
+  end)
+  UnitName=liveName
+  P.ObserveDestinationCharacter(prior,'capture')
+  if not ok then error(err,0) end
+  check(UnitName==liveName and P.CachedDestinationCharacter()==prior,'#143 missing character: the live UnitName and the destination cache are restored')
+  assert(P.Render(Active()))
+  Hover(switch,tips.switch,'#143 missing character: after the control the captured character row is shown again')
+  check(same(Effects(),before),'#143 missing character: renders and hovers change no saved root, setting, language, action, send, chat, popup, consent or Auto')
+ end
  -- Candidate: frFR holds distinct long accented candidates for all 21 meanings.
  Boot('frFR','candidate')
  local LZ=Nexus.Localization
