@@ -105,6 +105,9 @@ local function Boot(opt)
   if opt.before then opt.before(h) end
  end)
  if _G.NexusQuickStart and _G.NexusQuickStart:IsShown() then _G.NexusQuickStart:Hide();H.Advance(.2) end
+ -- First use now opens the guided coach instead of the legacy Welcome.
+ -- Keep this Orb-only navigation comparison clear of that overlay.
+ if _G.NexusGuidedSetup and _G.NexusGuidedSetup:IsShown() then _G.NexusGuidedSetup:Hide();H.Advance(.2) end
  if opt.plan~=false then
   check(Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Synthetic Plan',opt.rows or Plan(),opt.design or {})==true,'fixture: plan set')
  end

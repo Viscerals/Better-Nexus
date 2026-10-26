@@ -1,10 +1,10 @@
 -- F-S4-4 (P3), regression-first: the HUD comes back when the last Nexus popup
--- closes, also when the first-run QuickStart outlives an attached window. An
+-- closes, also when the first-run guided coach outlives an attached window. An
 -- attached window (here the Wishlist editor) suppresses the HUD while shown
 -- and restores it on hide unless another Nexus window is shown
--- (ui/Panel.lua AttachMenuFrame/RestoreHudAfterMenus). QuickStart counts as
--- such a window but is never attached, so when the editor closes first the
--- restore is skipped, and QuickStart's own close never retries it: the HUD
+-- (ui/Panel.lua AttachMenuFrame/RestoreHudAfterMenus). The first-use coach
+-- counts as such a window but is never attached, so when the editor closes first the
+-- restore is skipped, and the coach's own close must retry it: the HUD
 -- stays hidden for the session (wanted, committed, suppressed), and neither
 -- Panel.Show nor /nexus panel brings it back.
 -- Healthy behaviour (EXPECT, fails at the baseline): with the editor closed
@@ -94,13 +94,20 @@ local function Reset(tag)
  return C.setup(x.wanted and x.shown and not x.menuSuppressed,tag..': fixture: the HUD is shown and wanted again',FactText())
 end
 
-C.scenario('Q1 the editor closes first, QuickStart last',function()
+C.scenario('Q1 the editor closes first, the first-use coach last',function()
  if not OpenEditor('Q1') then return end
- C.setup(Nexus.QuickStart.ShowIfFirstTime()==false and NexusQuickStart:IsShown(),
-  'Q1: fixture: the real first-run gate shows QuickStart over the editor')
+ local offered=Nexus.QuickStart.ShowIfFirstTime()
+ local coach=_G.NexusGuidedSetup
+ C.setup(offered==false and coach and coach:IsShown(),
+  'Q1: fixture: the real first-run gate shows the guided coach over the editor')
  editor:Hide()
  print('OBSERVED','Q1 after the editor closed',FactText())
- if not CloseQuickStart('Q1') then return end
+ local close=coach and V.Frame(H,function(x)
+  return x:GetParent()==coach and x:GetText()=='Close' and x:GetScript('OnClick')~=nil
+ end) or nil
+ if not C.setup(close~=nil,'Q1: fixture: the first-use coach offers deliberate Close') then return end
+ close:Click();H.Advance(.5)
+ C.setup(not coach:IsShown(),'Q1: fixture: Close dismissed the last first-use window')
  print('OBSERVED','Q1 after Close',FactText())
  local x=Facts()
  C.expect(x.wanted and x.committed and x.shown and not x.menuSuppressed,

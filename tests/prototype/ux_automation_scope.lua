@@ -26,7 +26,7 @@ local E1={{spellId=201172,quality=0,stacks=1}}
 
 local function Reset()
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
- NexusHelpWindow=nil;NexusQuickStart=nil;NexusPanel=nil;NexusEditorFrame=nil
+ NexusHelpWindow=nil;NexusQuickStart=nil;NexusGuidedSetup=nil;NexusGuidedSetupEscape=nil;NexusPanel=nil;NexusEditorFrame=nil
  ProjectEbonholdEchoJournal=nil;EchoJournalMicroButton=nil;NexusOverwriteWarning=nil
  NexusActiveWishlistSelector=nil;NexusWishlistOnlyPicker=nil;NexusLoadoutAssociationPanel=nil
 end
@@ -281,24 +281,34 @@ C.scenario('P9 M2 N4: the replay\'s routes wait for start-up as Help\'s do; the 
  C.guard(#H.sent==sent and #H.actions==actions,'P9: nothing is performed or sent')
 end)
 
-C.scenario('P10 M2 N5: Setup / Welcome keeps an open first-time Welcome first-time; closing it records it',function()
+C.scenario('P10 M2 N5: secondary Welcome does not dismiss the primary first-use coach',function()
  Reset()
  local F=dofile('tests/prototype/format5_support.lua')
  H=F.Boot(F.Database())
  for _=1,40 do
-  if NexusQuickStart and NexusQuickStart:IsShown() then break end
+  if NexusGuidedSetup and NexusGuidedSetup:IsShown() then break end
   if Nexus.RequestRecompute then Nexus.RequestRecompute() end
   H.Advance(.05,.05)
  end
  local function Title() return NexusQuickStart and NexusQuickStart.title and V.Plain(NexusQuickStart.title:GetText() or '') or '' end
- C.setup(NexusQuickStart and NexusQuickStart:IsShown() and Title()=='Welcome to Nexus','P10: fixture: the first-time Welcome is open',Title())
+ local coach=NexusGuidedSetup
+ C.setup(coach and coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
+  'P10: fixture: the first-time guided coach is open')
  local sent,actions=#H.sent,#H.actions
  local shown=Nexus.QuickStart.ShowSetup()
- C.expect(shown and NexusQuickStart:IsShown() and Title()=='Welcome to Nexus',
-  'P10: Setup / Welcome leaves the open first-time Welcome as it is',Title())
- local dismiss=WelcomeDismissal('P10: the first-time Welcome')
+ C.expect(shown and NexusQuickStart:IsShown() and Title()=='Nexus setup (information only)'
+  and coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
+  'P10: secondary Setup / Welcome does not dismiss the first-use coach',Title())
+ local dismiss=WelcomeDismissal('P10: the informational Welcome')
  if dismiss then dismiss:Click() end
- C.expect(rawget(NexusDB,'hasSeenQuickStart')==true,'P10: closing it records the first-time acknowledgement')
+ C.guard(coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
+  'P10: closing the informational Welcome records no first-use acknowledgement')
+ local coachClose=ChildButton(coach,'Close')
+ if coachClose then coachClose:Click() end
+ C.expect(not coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==true,
+  'P10: the first-use coach records acknowledgement only on its deliberate Close',
+  'button='..tostring(coachClose~=nil)..' durable='..tostring(Nexus.QuickStart.CanRecordSeen())
+   ..' seen='..tostring(rawget(NexusDB,'hasSeenQuickStart')))
  C.guard(#H.sent==sent and #H.actions==actions and not Auto(),'P10: nothing is performed, sent or enabled')
 end)
 

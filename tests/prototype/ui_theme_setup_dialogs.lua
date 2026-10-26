@@ -28,7 +28,9 @@ local theme=Nexus.Theme
 check(theme.Current().style=='vista' and theme.Current().palette=='amethyst',
     'unset settings display default Vista/Amethyst')
 local saved=F.Serialize(NexusDB.settings)
-Nexus.QuickStart.ShowIfFirstTime()
+-- This is the secondary information-only Welcome's palette test; healthy
+-- first use now routes to the guided coach, tested in guided_first_entry.
+Nexus.QuickStart.Show()
 local welcome=assert(NexusQuickStart,'Welcome window created')
 Nexus.WishlistEditor.ToggleDisplayPopup()
 local display=assert(NexusDisplayPopup,'Display Settings created')

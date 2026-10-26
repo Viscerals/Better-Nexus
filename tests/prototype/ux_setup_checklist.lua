@@ -46,6 +46,7 @@ local function Boot(active)
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil
  ProjectEbonholdEchoJournal=nil;EchoJournalMicroButton=nil
  NexusEditorFrame=nil;NexusWishlistNameInput=nil;NexusPanel=nil;NexusHelpWindow=nil;NexusSetupChecklist=nil
+ NexusQuickStart=nil;NexusQuickStartEscape=nil;NexusGuidedSetup=nil;NexusGuidedSetupEscape=nil
  H=dofile('tests/prototype/harness.lua')
  H.playerLevel=80
  wipe(H.db)
@@ -275,7 +276,8 @@ C.scenario('K6 its buttons and routes only navigate',function()
   'K6: opening it from Help or the menu changes nothing',Describe(Effects()))
 end)
 
--- Continuation 48 (UX-18, approved "Escape closes Welcome"). FrameXML's Escape
+-- Continuation 48 (UX-18, approved "Escape closes Welcome"). The first-use
+-- window is now the guided coach; the informational Welcome stays secondary. FrameXML's Escape
 -- handler (UIParent CloseSpecialWindows) hides each shown frame named in
 -- UISpecialFrames and reports whether one was; it is modeled here, in this
 -- test, with the real QuickStart frames and registrations. This is not a
@@ -299,30 +301,30 @@ local function Quiet(before)
   and not Nexus.OrbRuntime.Status().running
 end
 
-C.scenario('K7 Escape closes the first-time Welcome as Close does; an ordinary hide still records nothing',function()
+C.scenario('K7 Escape closes the first-use coach as Close does; an ordinary hide still records nothing',function()
  Boot(2)
- C.setup(Seen()==nil,'K7: fixture: the Welcome has not been acknowledged',tostring(Seen()))
+ C.setup(Seen()==nil,'K7: fixture: first use has not been acknowledged',tostring(Seen()))
  Nexus.QuickStart.ShowIfFirstTime()
- local w=Welcome()
- C.setup(w~=nil and w:IsShown() and V.Plain(w.title:GetText() or '')=='Welcome to Nexus','K7: fixture: the first-time Welcome is shown')
+ local w=_G.NexusGuidedSetup
+ C.setup(w~=nil and w:IsShown(),'K7: fixture: the first-time coach is shown')
  if not (w and w:IsShown()) then return end
  local before=Effects()
  -- An ordinary hide, as the HUD's CloseOtherNexusWindows does.
  w:Hide()
  C.guard(Seen()==nil,'K7: an ordinary hide records no acknowledgement')
  local idle=Escape()
- C.guard(not idle.NexusQuickStartEscape and not idle.NexusQuickStart and not w:IsShown() and Seen()==nil,
-  'K7: an Escape while the Welcome is closed takes no Welcome entry and records nothing')
+ C.guard(not idle.NexusGuidedSetupEscape and not idle.NexusGuidedSetup and not w:IsShown() and Seen()==nil,
+  'K7: an Escape while the coach is closed takes no coach entry and records nothing')
  Nexus.QuickStart.ShowIfFirstTime()
- C.guard(w:IsShown(),'K7: after an ordinary hide the first-time Welcome is offered again')
+ C.guard(w:IsShown(),'K7: after an ordinary hide the first-time coach is offered again')
  Nexus.QuickStart.ShowIfFirstTime()
  local registered=0
- for _,name in ipairs(UISpecialFrames) do if name=='NexusQuickStartEscape' then registered=registered+1 end end
- C.expect(registered==1,'K7: the Welcome is reachable by Escape, registered once',registered)
+ for _,name in ipairs(UISpecialFrames) do if name=='NexusGuidedSetupEscape' then registered=registered+1 end end
+ C.expect(registered==1,'K7: the coach is reachable by Escape, registered once',registered)
  local closed=Escape()
- C.expect(closed.NexusQuickStartEscape==true and not w:IsShown(),'K7: Escape closes the first-time Welcome')
+ C.expect(closed.NexusGuidedSetupEscape==true and not w:IsShown(),'K7: Escape closes the first-time coach')
  local settled=Nexus.QuickStart.ShowIfFirstTime()
- C.expect(not w:IsShown(),'K7: after Escape the Welcome is not offered again this session',tostring(settled))
+ C.expect(not w:IsShown(),'K7: after Escape the coach is not offered again this session',tostring(settled))
  local durable=Nexus.QuickStart.CanRecordSeen()
  C.expect((durable and Seen()==true and settled==true) or (not durable and Seen()==nil),
   'K7: the acknowledgement follows Close\'s policy (recorded only when it can be saved)',
@@ -330,9 +332,10 @@ C.scenario('K7 Escape closes the first-time Welcome as Close does; an ordinary h
  C.guard(Quiet(before),'K7: closing the Welcome assigns, acts, sends, turns Auto ON and starts nothing',Describe(Effects()))
 end)
 
-C.scenario('K8 Escape closes the informational Setup / Welcome with no write; the first-time Welcome stays offered',function()
+C.scenario('K8 Escape closes informational Setup / Welcome with no write; first-use coach stays offered',function()
  Boot(2)
  C.setup(Seen()==nil,'K8: fixture: the Welcome has not been acknowledged',tostring(Seen()))
+ if Nexus.GuidedSetupUI then Nexus.GuidedSetupUI.Hide() end
  local shown,why=Nexus.QuickStart.ShowSetup()
  local w=Welcome()
  C.setup(shown==true and w~=nil and w:IsShown() and V.Plain(w.title:GetText() or '')=='Nexus setup (information only)',
@@ -343,8 +346,8 @@ C.scenario('K8 Escape closes the informational Setup / Welcome with no write; th
  C.expect(closed.NexusQuickStartEscape==true and not w:IsShown(),'K8: Escape closes the informational replay')
  C.guard(Seen()==nil and Quiet(before),'K8: closing the replay writes no acknowledgement and acts on nothing',Describe(Effects()))
  Nexus.QuickStart.ShowIfFirstTime()
- C.guard(w:IsShown() and V.Plain(w.title:GetText() or '')=='Welcome to Nexus',
-  'K8: the first-time Welcome is still offered afterwards: the replay dismissed nothing')
+ C.guard(_G.NexusGuidedSetup and NexusGuidedSetup:IsShown() and not w:IsShown(),
+  'K8: the first-use coach is still offered afterwards: informational replay dismissed nothing')
 end)
 
 -- Continuation 50 (review36 M7R-01): a passive ancestor hide (the UI hidden,
@@ -386,38 +389,39 @@ local function AncestorShow(ancestor,subtree)
  end
 end
 
-C.scenario('K9 a passive ancestor hide neither closes nor acknowledges the first-time Welcome; Escape still does',function()
+C.scenario('K9 a passive ancestor hide neither closes nor acknowledges the first-use coach; Escape still does',function()
  Boot(2)
  C.setup(Seen()==nil,'K9: fixture: the Welcome has not been acknowledged',tostring(Seen()))
  Nexus.QuickStart.ShowIfFirstTime()
- local w,esc=Welcome(),_G.NexusQuickStartEscape
- C.setup(w~=nil and esc~=nil and w:IsVisible() and esc:IsShown() and V.Plain(w.title:GetText() or '')=='Welcome to Nexus',
-  'K9: fixture: the first-time Welcome and its Escape entry are shown')
+ local w,esc=_G.NexusGuidedSetup,_G.NexusGuidedSetupEscape
+ C.setup(w~=nil and esc~=nil and w:IsVisible() and esc:IsShown(),
+  'K9: fixture: the first-time coach and its Escape entry are shown')
  if not (w and esc and w:IsVisible()) then return end
  -- An unrelated key reaches no QuickStart code: neither frame handles keys.
  C.guard(not w.scripts.OnKeyDown and not w.scripts.OnKeyUp and not w.scripts.OnChar
   and not esc.scripts.OnKeyDown and not esc.scripts.OnKeyUp and not esc.scripts.OnChar,
-  'K9: no key handler on the Welcome or its Escape entry, so an unrelated key acknowledges nothing')
+  'K9: no key handler on the coach or its Escape entry, so an unrelated key acknowledges nothing')
  local before=Effects()
  local fired=AncestorHide(UIParent,w)
  C.setup(fired>=2 and not w:IsVisible(),'K9: fixture (SYNTHETIC propagation): the UI root is hidden and the Welcome subtree got its OnHide',fired)
- C.expect(w:IsShown() and Seen()==nil,'K9: the passive hide neither closes the Welcome nor records an acknowledgement',
+ C.expect(w:IsShown() and Seen()==nil,'K9: the passive hide neither closes the coach nor records an acknowledgement',
   'shown='..tostring(w:IsShown())..' seen='..tostring(Seen()))
  AncestorShow(UIParent,w)
- C.expect(w:IsVisible() and esc:IsShown(),'K9: when the UI is shown again the Welcome and its Escape entry are back')
+ C.expect(w:IsVisible() and esc:IsShown(),'K9: when the UI is shown again the coach and its Escape entry are back')
  Nexus.QuickStart.ShowIfFirstTime()
- C.expect(w:IsShown() and Seen()==nil,'K9: it is still the unacknowledged first-time Welcome')
+ C.expect(w:IsShown() and Seen()==nil,'K9: it is still the unacknowledged first-time coach')
  local closed=Escape()
  local durable=Nexus.QuickStart.CanRecordSeen()
- C.expect(closed.NexusQuickStartEscape==true and not w:IsShown() and ((durable and Seen()==true) or (not durable and Seen()==nil)),
+ C.expect(closed.NexusGuidedSetupEscape==true and not w:IsShown() and ((durable and Seen()==true) or (not durable and Seen()==nil)),
   'K9: an explicit Escape afterwards still closes it with Close\'s acknowledgement policy',
-  'closed='..tostring(closed.NexusQuickStartEscape)..' durable='..tostring(durable)..' seen='..tostring(Seen()))
+  'closed='..tostring(closed.NexusGuidedSetupEscape)..' durable='..tostring(durable)..' seen='..tostring(Seen()))
  C.guard(Quiet(before),'K9: nothing assigns, acts, sends, turns Auto ON or starts',Describe(Effects()))
 end)
 
 C.scenario('K10 a passive ancestor hide leaves the informational replay open and unwritten',function()
  Boot(2)
  C.setup(Seen()==nil,'K10: fixture: the Welcome has not been acknowledged',tostring(Seen()))
+ if Nexus.GuidedSetupUI then Nexus.GuidedSetupUI.Hide() end
  local shown,why=Nexus.QuickStart.ShowSetup()
  local w=Welcome()
  C.setup(shown==true and w~=nil and w:IsVisible() and V.Plain(w.title:GetText() or '')=='Nexus setup (information only)',
