@@ -279,6 +279,30 @@ C.scenario('V3a readable context rows and guarded header routes at enlarged text
   C.expect(ok and table.concat(lines,'\n'):find(long,1,true)~=nil,
    'V3a: the full 64-character name remains available in the header tooltip')
  end
+ -- The generic harness does not model native mouse hit testing or font
+ -- objects. Observe the factory and one-shot ownership calls at those seams
+ -- instead of treating a direct OnEnter call as proof of native hover.
+ local methods=G.RegionMethods()
+ local oldMouse=methods.EnableMouse
+ methods.EnableMouse=function(self,on) self._testMouseEnabled=on==true end
+ local probe=CreateFrame('Frame',nil,UIParent)
+ P.CreateContextHeader(probe)
+ methods.EnableMouse=oldMouse
+ C.expect(probe._contextTitleHit._testMouseEnabled and probe._contextBuildHit._testMouseEnabled
+  and probe._contextWishlistHit._testMouseEnabled,
+  'V3a: each context tooltip hit frame explicitly enables mouse input')
+ local oldFont,oldNormal=methods.SetFontObject,methods.SetNormalFontObject
+ methods.SetFontObject=function(self,font) self._testFontObject=font end
+ methods.SetNormalFontObject=function(self,font) self._testNormalFontObject=font end
+ f._nexusOwnedFonts=false
+ P.ApplyOwnedFonts()
+ methods.SetFontObject,methods.SetNormalFontObject=oldFont,oldNormal
+ C.expect(title._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
+  and build._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
+  and wishlist._testFontObject==Nexus.LayoutMetrics.FontObject('normal')
+  and f._contextAutoState._testFontObject==Nexus.LayoutMetrics.FontObject('small')
+  and change._testNormalFontObject==Nexus.LayoutMetrics.FontObject('normal'),
+  'V3a: context and Change text join Nexus owned-font scaling at 125 percent')
  local plan=Spy(Nexus.FullUIWorkspaces,'ShowPlan',function() change:Click() end)
  C.expect(plan.n==1,'V3a: Change opens Plan without silently assigning a Wishlist')
  C.guard(GameplayEffects()==before,'V3a: header navigation and hover do not automate, spend or send')

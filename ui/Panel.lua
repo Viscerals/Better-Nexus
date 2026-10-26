@@ -725,6 +725,7 @@ function M.CreateContextHeader(parent)
         local hit = CreateFrame("Frame", nil, parent)
         hit:SetPoint("TOPLEFT", label, "TOPLEFT", 0, 0)
         hit:SetPoint("BOTTOMRIGHT", label, "BOTTOMRIGHT", 0, 0)
+        hit:EnableMouse(true)
         hit:SetScript("OnEnter", function(self)
             if not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -1457,11 +1458,13 @@ function M.ApplyOwnedFonts()
         for _, widget in ipairs({
             buildHeaderText,worldStatusText,worldStatusAsh,progressValue,
             dummyValue,dummyGlobalValue,lkValue,lkGlobalValue,completeBadge,
+            frame._contextTitle,frame._contextBuild,frame._contextWishlist,
         }) do SetOwnedFont(widget, normal) end
+        SetOwnedFont(frame._contextAutoState, small)
         SetOwnedFont(setupText, large)
         for _, widget in ipairs({
             switchBtn,setupGetStartedBtn,setupImportBtn,autoBtn,planBtn,
-            exploreBtn,menuBtn,frame._orbsHubBtn,
+            exploreBtn,menuBtn,frame._orbsHubBtn,frame._contextChange,
         }) do SetOwnedButtonFont(widget, normal) end
         SetOwnedButtonFont(frame._orbsBtn, small)
         SetOwnedButtonFont(frame._orbMiniBtn, small)
