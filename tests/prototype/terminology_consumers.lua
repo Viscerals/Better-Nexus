@@ -588,7 +588,10 @@ do
   check(Nexus.Readout.ChargesLine({banish=0,freeze=7})==CHARGES[id] and Nexus.Readout.ChargesLine({banish=0,freeze=7,trustworthy=false})==CHARGES[id]..' ~',label..': the real Readout charge row of the active language; known 0 is 0 and unknown is ?')
   check(Nexus.Localization.Format('readout.charge_counts',slots,{})=='B:0 R:? F:7',label..': an explicit {} pack still gives the English row')
  end
- -- A. English default: an absent preference, nothing added at start-up; menu reads write nothing.
+ -- A. Automatic default (issue #141): an absent preference, nothing added at
+ -- start-up; the actual menu checks Automatic and shows English; reads and
+ -- an Automatic click write nothing. Then explicit English, its no-op
+ -- control, and Automatic again through the same private writer.
  H=F.Boot(F.Database({version=2}))
  check(Nexus.StartupStatus().coreReady==true and Nexus.MainInternals.SavedRootReadOnlyV1()==nil,'fixture: a writable saved root started')
  check(rawget(NexusDB.settings,'uiLanguage')==nil,'English default: start-up adds no language preference')
@@ -605,13 +608,41 @@ do
   check(not text:find(id,1,true) and not menu.text:find(id,1,true),'no internal language ID is shown: '..id)
  end
  check(text:find('reload',1,true) and not text:lower():find('fully',1,true) and not text:find('Changes unavailable',1,true),'the reload requirement, no full-support claim, no refusal')
- check(Row(menu,'enUS').checked==true and Row(menu,'enUS').text:find('active',1,true),'English is the active and saved choice')
+ local function Auto(m)
+  for _,row in ipairs(m and m.menuList or {})do
+   if type(row.text)=='string' and row.text:sub(1,11)=='Automatic (' and not row.notCheckable then return row end
+  end
+ end
+ check(Auto(menu) and Auto(menu).checked==true and Auto(menu).text:find('English',1,true) and not Auto(menu).disabled and Row(menu,'enUS').checked~=true and Row(menu,'enUS').text:find('active',1,true) and rawget(NexusDB.settings,'uiLanguage')==nil,'EXPECT #141: the actual ... menu checks Automatic (showing English) as the default preference while no preference is saved; English is the active language, not a saved manual choice')
+ check(text:find('Nexus does not read the game',1,true) and not text:find('English is shown',1,true),'the menu says Automatic reads no game language, without the unsupported-value notice')
  NexusPanel._menuBtn.scripts.OnEnter(NexusPanel._menuBtn);NexusPanel._menuBtn.scripts.OnLeave(NexusPanel._menuBtn)
  local status=Nexus.Panel.LanguageStatus()
  check(status.active=='enUS' and status.saved=='enUS' and status.pending==false and status.refusal==nil,'status: English active, nothing pending, changes available')
  check(writes.n==0 and F.Serialize(NexusDB.settings)==settings0 and Effects()==effects and #H.chat==chat0,'opening, hovering, closing and status reads write and print nothing')
+ check(status.automatic==true and status.activeAutomatic==true and status.preferencePending==false and status.savedUnsupported==false and status.automaticLanguage=='enUS','status: Automatic is the saved and the session preference, and it shows English')
+ Auto(menu).func()
+ check(writes.n==0 and F.Serialize(NexusDB.settings)==settings0 and rawget(NexusDB.settings,'uiLanguage')==nil and Effects()==effects,'choosing Automatic while no preference is saved is a truthful no-op: no write and no field added')
+ -- An explicit English choice is a manual preference, saved once through the
+ -- exact private writer though English already shows. Its repeat is the
+ -- original manual-English no-op control.
  Row(menu,'enUS').func()
- check(writes.n==0 and F.Serialize(NexusDB.settings)==settings0,'choosing English while English is the default writes nothing')
+ status=Nexus.Panel.LanguageStatus()
+ check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='enUS' and Effects()==effects,'an explicit English choice while Automatic is the default writes the manual enUS preference once, with no game action, send, popup, Auto or client option change')
+ check(status.active=='enUS' and status.saved=='enUS' and status.pending==false and status.automatic==false and status.activeAutomatic==true and status.preferencePending==true,'status: manual English is saved and pending as a preference; the session keeps its Automatic start; the shown language does not change')
+ menu=LanguageMenu()
+ check(Row(menu,'enUS').checked==true and Auto(menu).checked~=true and Row(menu,'enUS').text:find('saved, applies after reload',1,true) and Auto(menu).text:find('in use',1,true) and menu.text:find('after reload',1,true),'the menu tells the saved manual English from the Automatic session')
+ local manualSettings=F.Serialize(NexusDB.settings)
+ Row(menu,'enUS').func()
+ check(writes.n==1 and F.Serialize(NexusDB.settings)==manualSettings,'choosing English while English is the saved manual preference writes nothing')
+ menu=LanguageMenu();Auto(menu).func()
+ status=Nexus.Panel.LanguageStatus()
+ check(writes.n==2 and rawget(NexusDB.settings,'uiLanguage')=='automatic','choosing Automatic over the manual English saves the Automatic value through the same owned writer')
+ check(status.automatic==true and status.saved=='enUS' and status.pending==false and status.preferencePending==false and status.savedUnsupported==false,'status: the saved Automatic value is the session preference again and is not unsupported')
+ menu=LanguageMenu()
+ check(Auto(menu).checked==true and Row(menu,'enUS').checked~=true and not Auto(menu).text:find('saved, applies',1,true) and not MenuText(menu):find('English is shown',1,true),'the menu checks Automatic again')
+ Auto(menu).func()
+ check(writes.n==2 and rawget(NexusDB.settings,'uiLanguage')=='automatic' and Effects()==effects,'choosing the saved Automatic again is a no-op; no choice caused a game action, send, popup, Auto or client option change')
+ writes.n=0 -- the frFR scenario below counts its own writes on this same writer
  -- B. An explicit supported change writes only settings.uiLanguage; the
  -- active language stays until a reload.
  local settingsTable,before=NexusDB.settings,RootWithout()
@@ -715,12 +746,126 @@ do
   local status=Nexus.Panel.LanguageStatus()
   check(status.saved==saved and status.pending==(prior~=false) and status.sessionOnly==true and status.active=='enUS','session result: status describes the durable choice, not the detached projection')
   menu=LanguageMenu()
-  check(Row(menu,saved).checked==true and Row(menu,'ruRU').checked==false and not Row(menu,'ruRU').text:find('saved',1,true),'session result: reopening the real menu does not label the session choice saved')
+  check((prior and Row(menu,prior).checked==true and Auto(menu).checked~=true or not prior and Auto(menu).checked==true and Row(menu,'enUS').checked~=true) and Row(menu,'ruRU').checked==false and not Row(menu,'ruRU').text:find('saved',1,true),'session result: reopening the real menu checks the durable preference (Automatic while none was saved), never the session choice')
   check(MenuText(menu):find('The last choice was not saved',1,true) and (not prior or Row(menu,prior).text:find('saved, applies after reload',1,true)),'session result: truthful notice preserves any earlier durable pending choice')
   check(writes.n==calls+1 and F.Serialize(NexusDB)==frozen,'session result: repeated status/menu reads invoke no writer')
   H=F.Reload();CountWriter()
   Expect(saved,'session choice discarded after reload')
   check(Nexus.Panel.LanguageStatus().pending==false and writes.n==0 and F.Serialize(NexusDB)==frozen,'reload: only the original saved choice survives, with no write')
+ end
+ -- G. Issue #141: Automatic through real row clicks, the exact private
+ -- writer and serialized synthetic reloads (F.Reload: an offline module
+ -- reload, not a client reload). Before each boot a mock client fact says
+ -- frFR (GetLocale); Nexus never uses it and Automatic stays English. This
+ -- proves the offline preference and menu behaviour only, not native
+ -- automatic-language integration. Nothing here asks for a reload.
+ do
+  local reloads,realReload=0,ReloadUI
+  ReloadUI=function()reloads=reloads+1 end
+  local function ClientFact()GetLocale=function()return 'frFR' end end
+  H=F.Boot(F.Database({version=2}),ClientFact);CountWriter()
+  check(GetLocale()=='frFR' and rawget(NexusDB.settings,'uiLanguage')==nil,'SETUP #141: no saved preference, and a mock client fact that suggests frFR')
+  Expect('enUS','Automatic beside a mock frFR client fact')
+  check(select(3,Nexus.Localization.ActiveLanguage())==true,'the session started on Automatic')
+  Nexus.Panel.Show();local menu=LanguageMenu()
+  NexusPanel._menuBtn.scripts.OnEnter(NexusPanel._menuBtn);NexusPanel._menuBtn.scripts.OnLeave(NexusPanel._menuBtn)
+  menu=LanguageMenu()
+  check(writes.n==0 and rawget(NexusDB.settings,'uiLanguage')==nil,'opening, hovering and closing the menu without a click (cancel) write nothing')
+  local effects=Effects()
+  Row(menu,'deDE').func()
+  local status=Nexus.Panel.LanguageStatus()
+  check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='deDE' and status.automatic==false and status.pending==true and status.preferencePending==true and status.active=='enUS' and Effects()==effects,'a manual deDE choice is saved while the mock client fact suggests frFR; English stays active')
+  H=F.Reload(ClientFact);CountWriter()
+  Expect('deDE','manual deDE after reload; the mock frFR client fact is not used')
+  status=Nexus.Panel.LanguageStatus()
+  check(status.automatic==false and status.activeAutomatic==false and status.pending==false and status.preferencePending==false and writes.n==0,'after reload manual deDE is the session preference')
+  Nexus.Panel.Show();menu=LanguageMenu()
+  check(Row(menu,'deDE').checked==true and Auto(menu).checked~=true and Nexus.Panel.LanguageMenuLabel()=='Language: Deutsch','the menu checks the manual deDE')
+  effects=Effects()
+  Auto(menu).func()
+  status=Nexus.Panel.LanguageStatus()
+  check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='automatic' and Effects()==effects,'manual deDE -> Automatic: one durable write of the Automatic value')
+  check(status.automatic==true and status.saved=='enUS' and status.active=='deDE' and status.pending==true and status.preferencePending==true,'status: Automatic is saved and pending; deDE is still the active language, never called Automatic')
+  Nexus.Panel.Hide();Nexus.Panel.Show();menu=LanguageMenu()
+  check(Auto(menu).checked==true and Auto(menu).text:find('saved, applies after reload',1,true) and not Auto(menu).text:find('in use',1,true) and Row(menu,'deDE').text:find('active',1,true) and Row(menu,'deDE').checked~=true and Nexus.Panel.LanguageMenuLabel()=='Language: Deutsch (new choice after reload)','reopened: the pending Automatic preference beside the active deDE')
+  Expect('deDE','Automatic pending, reopened panel')
+  check(Nexus.Localization.InitializeActiveLanguage('automatic')=='deDE','a later initialization does not switch the session')
+  H=F.Reload(ClientFact);CountWriter()
+  Expect('enUS','saved Automatic after reload; the mock frFR client fact is not used')
+  status=Nexus.Panel.LanguageStatus()
+  check(rawget(NexusDB.settings,'uiLanguage')=='automatic' and status.automatic==true and status.activeAutomatic==true and status.pending==false and status.preferencePending==false and status.savedUnsupported==false and writes.n==0,'after reload Automatic is the session preference, kept as saved, with no write')
+  check(Nexus.Panel.LanguageMenuLabel()=='Language: Automatic (English)','the menu label names Automatic and the English it shows')
+  Nexus.Panel.Show();menu=LanguageMenu();Auto(menu).func()
+  check(writes.n==0,'choosing the saved Automatic again writes nothing')
+  Row(menu,'enUS').func()
+  check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='enUS','Automatic -> explicit English saves the manual enUS value though both show English')
+  H=F.Reload(ClientFact);CountWriter()
+  Expect('enUS','explicit English after reload')
+  status=Nexus.Panel.LanguageStatus()
+  check(rawget(NexusDB.settings,'uiLanguage')=='enUS' and status.automatic==false and status.activeAutomatic==false and status.preferencePending==false and select(3,Nexus.Localization.ActiveLanguage())==false,'explicit English survives the reload as a manual preference, apart from Automatic')
+  Nexus.Panel.Show();menu=LanguageMenu()
+  check(Row(menu,'enUS').checked==true and Auto(menu).checked~=true and Nexus.Panel.LanguageMenuLabel()=='Language: English','the menu checks the manual English, not Automatic')
+  H.Fire('PLAYER_ENTERING_WORLD');H.Advance(3,.05)
+  Expect('enUS','explicit English after another world entry')
+  check(writes.n==0 and rawget(NexusDB.settings,'uiLanguage')=='enUS','world entry writes nothing and never turns a manual English into Automatic')
+  -- Unsupported saved values stay exactly as saved and are never Automatic,
+  -- until an explicit Automatic choice replaces one through the same writer.
+  for _,raw in ipairs({'xxXX',42,'AUTOMATIC',{keep='raw'}})do
+   NexusDB.settings.uiLanguage=raw
+   H=F.Reload(ClientFact);CountWriter()
+   local label='unsupported '..F.Serialize(raw)
+   Expect('enUS',label)
+   status=Nexus.Panel.LanguageStatus()
+   check(F.Serialize(rawget(NexusDB.settings,'uiLanguage'))==F.Serialize(raw) and status.savedUnsupported==true and status.automatic==false and status.activeAutomatic==false and writes.n==0,label..': kept exactly as saved, not Automatic, English shown, no write')
+   Nexus.Panel.Show();menu=LanguageMenu()
+   check(Auto(menu).checked~=true and MenuText(menu):find('English is shown',1,true),label..': the menu never calls it Automatic and says English is shown')
+  end
+  Auto(menu).func()
+  status=Nexus.Panel.LanguageStatus()
+  check(writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='automatic' and status.savedUnsupported==false and status.automatic==true and status.pending==false,'an explicit Automatic choice replaces the unsupported value through the same owned durable write')
+  -- An Automatic choice keeps the session-only, read-only, drift, owner and
+  -- invalid-input refusals of every other choice.
+  H=F.Boot(F.Database({version=2,mutate=function(d)d.settings.uiLanguage='frFR' end}),ClientFact);CountWriter()
+  Expect('frFR','manual frFR beside a mock frFR client fact')
+  local owner=Nexus.MainInternals.StoreAuthorityOwner;local original=owner.UpdateSettingsV1
+  local mode,frozen
+  owner.UpdateSettingsV1=function(key,value)
+   NexusDB.settingsVersion=6 -- authority drift at the actual writer boundary
+   frozen=F.Serialize(NexusDB)
+   local result=original(key,value);mode=result and result.mode
+   return result
+  end
+  Nexus.Panel.Show();menu=LanguageMenu();Auto(menu).func()
+  owner.UpdateSettingsV1=original
+  status=Nexus.Panel.LanguageStatus()
+  check(mode=='session' and writes.n==1 and Nexus.Store.Settings().uiLanguage=='automatic' and rawget(NexusDB.settings,'uiLanguage')=='frFR' and F.Serialize(NexusDB)==frozen,'a session-only Automatic result changes only the detached projection; the saved manual frFR stays')
+  check(status.sessionOnly==true and status.automatic==false and status.saved=='frFR' and status.active=='frFR' and status.refusal=='read-only','status keeps the durable manual frFR and says the Automatic choice was not saved')
+  menu=LanguageMenu()
+  check(Row(menu,'frFR').checked==true and Auto(menu).checked~=true and Auto(menu).disabled==true and Auto(menu).func==nil and not Auto(menu).text:find('saved',1,true) and MenuText(menu):find('The last choice was not saved',1,true),'the menu never labels the session-only Automatic saved, and a refused Automatic row cannot submit')
+  local r=Nexus.Panel.ChooseLanguage('automatic')
+  check(r.state=='refused' and r.reason=='read-only' and writes.n==1 and F.Serialize(NexusDB)==frozen,'the read-only root refuses an Automatic choice before the writer')
+  H=F.Reload(ClientFact);CountWriter()
+  Expect('frFR','the session-only Automatic choice is discarded after reload')
+  H=F.Boot(F.Database({version=2,mutate=function(d)d.settings.uiLanguage='enUS' end}),ClientFact);CountWriter()
+  local internals=Nexus.MainInternals;local realOwner,foreign=internals.StoreAuthorityOwner,0
+  internals.StoreAuthorityOwner={owner={},UpdateSettingsV1=function()foreign=foreign+1;return {mode='durable'}end}
+  r=Nexus.Panel.ChooseLanguage('automatic')
+  internals.StoreAuthorityOwner=realOwner
+  check(r.state=='refused' and r.reason=='authority' and foreign==0 and writes.n==0,'another Store owner: an Automatic choice is refused and its writer never called')
+  local current=NexusDB;NexusDB=F.Database({version=2});local other=F.Serialize(NexusDB)
+  r=Nexus.Panel.ChooseLanguage('automatic')
+  local otherAfter=F.Serialize(NexusDB);NexusDB=current
+  check(r.state=='refused' and r.reason=='drift' and writes.n==0 and otherAfter==other and rawget(NexusDB.settings,'uiLanguage')=='enUS','a replaced saved root: an Automatic choice is refused, neither root written')
+  for i,bad in ipairs({'Automatic','AUTOMATIC','auto','',42,true,{}})do
+   r=Nexus.Panel.ChooseLanguage(bad)
+   check(r.state=='refused' and r.reason=='invalid' and writes.n==0,'a near-miss of the Automatic value is not a choice #'..i)
+  end
+  r=Nexus.Panel.ChooseLanguage('automatic')
+  check(r.state=='saved' and r.automatic==true and r.resolved=='enUS' and r.pending==false and r.preferencePending==true and writes.n==1 and rawget(NexusDB.settings,'uiLanguage')=='automatic','control: with the authority current the Automatic choice is saved; English is already shown, and the preference applies after a reload')
+  local said=Nexus.Panel.LanguageResultText(r)
+  check(said:find('Automatic (English)',1,true) and said:find('does not read the game',1,true) and said:find('next interface reload or login',1,true),'the result names Automatic and the English it shows, without claiming a game language')
+  check(reloads==0,'no choice, read or reopen asked for a reload')
+  ReloadUI=realReload
  end
  -- F. Early start-up, authority drift and a Store the session was not initialized with.
  do

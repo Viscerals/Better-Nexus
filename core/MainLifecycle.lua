@@ -462,10 +462,22 @@ function Lifecycle.New(options)
     -- the UI, refreshes a view early, or reads or changes the game's own
     -- language. ui/Panel.lua gets only the read-status and set-choice
     -- callbacks below (Panel.Init); the Store's private writer stays here.
+    -- Issue #141: an absent preference, or exactly the Automatic value
+    -- (Localization.AUTOMATIC_PREFERENCE), means Automatic, and start-up
+    -- never adds the field. Automatic and each manual ID (English included)
+    -- are distinct saved choices: choosing Automatic over a manual or
+    -- unsupported value saves the Automatic value through the same private
+    -- writer; choosing the saved preference again writes nothing. The status
+    -- reports the saved preference, the preference this session started
+    -- with and the active language apart; nothing here switches the session
+    -- or reads a client language.
     local languageInitialized = false
     local languageSessionOnly = nil
     local languageSettings = nil
     local languageSavedSettings = nil
+    -- Issue #141: the saved preference this session started with:
+    -- "automatic", an offered ID, or false (unsupported); nil before start.
+    local languageStartPreference = nil
     local LANGUAGE_READY = {STORE_READY=true, STORE_MUTATION_BUILD_PENDING=true,
         STORE_MUTATION_FINAL_COMMIT_PENDING=true}
 
@@ -495,6 +507,29 @@ function Lifecycle.New(options)
         return nil
     end
 
+    -- Issue #141: the saved value of the Automatic preference, or nil
+    -- without the seam. Reads one field.
+    local function AutomaticPreference()
+        local localization = Nexus.Localization
+        local value = type(localization) == "table"
+            and rawget(localization, "AUTOMATIC_PREFERENCE") or nil
+        return type(value) == "string" and value or nil
+    end
+
+    -- What a saved value means: "automatic" (absent, or exactly the
+    -- Automatic value), the offered language ID it names (a manual choice),
+    -- or false (unsupported: shown as English and kept as saved). Reads
+    -- only; never an alias.
+    local function LanguagePreference(raw)
+        if raw == nil then return "automatic" end
+        local automatic = AutomaticPreference()
+        if automatic ~= nil and raw == automatic then return "automatic" end
+        if type(raw) == "string" and LocalizationValue("EffectiveLanguage", raw) == raw then
+            return raw
+        end
+        return false
+    end
+
     local function InitializeLanguage(Store)
         if languageInitialized then return end
         languageInitialized = true
@@ -505,6 +540,7 @@ function Lifecycle.New(options)
         if type(saved) == "table" and getmetatable(saved) == nil then
             languageSavedSettings = saved
         end
+        languageStartPreference = LanguagePreference(SavedLanguage())
         local localization = Nexus.Localization
         local initialize = type(localization) == "table"
             and rawget(localization, "InitializeActiveLanguage") or nil
@@ -558,32 +594,53 @@ function Lifecycle.New(options)
     -- The chooser's facts. Reads only; never calls the writer.
     local function LanguageStatus()
         local raw = SavedLanguage()
+        local preference = LanguagePreference(raw)
+        local automatic = AutomaticPreference()
         local active = LocalizationValue("ActiveLanguage")
         local saved = LocalizationValue("EffectiveLanguage", raw)
+        local shown = automatic and LocalizationValue("EffectiveLanguage", automatic) or nil
         local languages = LocalizationValue("Languages")
         active = type(active) == "string" and active or "enUS"
         saved = type(saved) == "string" and saved or "enUS"
+        -- preference: the saved choice ("automatic", an ID, or false for an
+        -- unsupported value); activeAutomatic: this session started on
+        -- Automatic; pending: the saved choice shows another language;
+        -- preferencePending: the saved choice is not the one this session
+        -- started with. A pending choice is never called active.
         return {active=active, saved=saved, pending=saved ~= active,
-            savedUnsupported=raw ~= nil and raw ~= saved,
+            preference=preference, automatic=preference == "automatic",
+            activeAutomatic=languageStartPreference == "automatic",
+            preferencePending=preference ~= languageStartPreference,
+            automaticPreference=automatic,
+            automaticLanguage=type(shown) == "string" and shown or "enUS",
+            savedUnsupported=raw ~= nil and preference == false,
             sessionOnly=languageSessionOnly ~= nil, refusal=LanguageRefusal(),
             languages=type(languages) == "table" and languages or {}}
     end
 
     -- One explicit choice from the chooser, with the authority checked again
-    -- here. The exact stored ID, or English while none is stored, is a no-op:
-    -- no write. Only {mode="durable"} from the writer is reported as saved;
-    -- anything else is reported as it is. The active language never changes
-    -- here.
+    -- here: an offered ID (a manual choice, English included) or the
+    -- Automatic value. A choice that is already the saved preference is a
+    -- no-op: no write (Automatic while none is saved included; English while
+    -- none is saved is a manual choice and is written). Only
+    -- {mode="durable"} from the writer is reported as saved; anything else is
+    -- reported as it is. The active language never changes here.
     local function ChooseLanguage(id)
-        if type(id) ~= "string" or LocalizationValue("EffectiveLanguage", id) ~= id then
-            return {state="refused", reason="invalid"}
+        local automatic = AutomaticPreference()
+        local choice = automatic ~= nil and id == automatic and "automatic" or nil
+        if choice == nil and type(id) == "string"
+            and LocalizationValue("EffectiveLanguage", id) == id then
+            choice = id
         end
+        if choice == nil then return {state="refused", reason="invalid"} end
         local refusal = LanguageRefusal()
         if refusal then return {state="refused", reason=refusal} end
         local active = LocalizationValue("ActiveLanguage")
-        local raw = SavedLanguage()
-        if raw == id or (raw == nil and id == "enUS") then
-            return {state="unchanged", id=id, pending=id ~= active}
+        local isAutomatic = choice == "automatic"
+        local resolved = isAutomatic and LocalizationValue("EffectiveLanguage", id) or id
+        if LanguagePreference(SavedLanguage()) == choice then
+            return {state="unchanged", id=id, automatic=isAutomatic, resolved=resolved,
+                pending=resolved ~= active}
         end
         local owner = Nexus.MainInternals.StoreAuthorityOwner
         local ok, result, why = pcall(owner.UpdateSettingsV1, "uiLanguage", id)
@@ -592,9 +649,13 @@ function Lifecycle.New(options)
             return {state="refused", reason="failed"}
         end
         if type(result) == "table" and result.mode == "durable" then
-            if SavedLanguage() ~= id then return {state="unconfirmed", id=id} end
+            if SavedLanguage() ~= id then
+                return {state="unconfirmed", id=id, automatic=isAutomatic}
+            end
             languageSessionOnly = nil
-            return {state="saved", id=id, pending=id ~= active}
+            return {state="saved", id=id, automatic=isAutomatic, resolved=resolved,
+                pending=resolved ~= active,
+                preferencePending=choice ~= languageStartPreference}
         elseif type(result) == "table" and result.mode == "session" then
             languageSessionOnly = id
             return {state="session", id=id}

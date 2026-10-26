@@ -391,6 +391,9 @@ L.Resolve = Resolve
 local DEFAULT_LANGUAGE = "enUS"
 local ENGLISH_NAME = "English"
 L.DEFAULT_LANGUAGE = DEFAULT_LANGUAGE
+-- Issue #141: the saved value of the Automatic preference, read from the
+-- profile below. It is never a language ID and never a pack.
+local AUTOMATIC = "automatic"
 local languageIds = {DEFAULT_LANGUAGE}
 local packs = {}
 local packLoad = {present = false, adopted = 0, refused = 0, rows = {}}
@@ -411,6 +414,16 @@ do
             end
         end
     end
+    -- Issue #141: the profile's Automatic value (uiLanguages.automatic)
+    -- when it is a short lower-case word, so it can never match a language
+    -- ID; "automatic" otherwise.
+    local automatic = type(enum) == "table" and getmetatable(enum) == nil
+        and rawget(enum, "automatic") or nil
+    if type(automatic) == "string" and #automatic <= 32
+        and automatic:find("^[a-z]+$") then
+        AUTOMATIC = automatic
+    end
+    L.AUTOMATIC_PREFERENCE = AUTOMATIC
     local source = Nexus.LocalizationPacks
     if type(source) == "table" and getmetatable(source) == nil then
         packLoad.present = true
@@ -457,7 +470,10 @@ do
 end
 
 -- The session's active language (see "Active language" above).
-local active = {id = DEFAULT_LANGUAGE, entries = nil, initialized = false}
+-- Issue #141: `automatic` is true when this session started on the
+-- Automatic preference (an absent or Automatic saved value).
+local active = {id = DEFAULT_LANGUAGE, entries = nil, initialized = false,
+    automatic = false}
 
 local function Available(id)
     return id == DEFAULT_LANGUAGE or (type(id) == "string" and packs[id] ~= nil)
@@ -608,24 +624,65 @@ function L.IsLanguage(id)
     return false
 end
 
+-- Issue #141: the Automatic preference. It is a preference, not a language:
+-- Languages and IsLanguage never list it, and DEFAULT_LANGUAGE stays the
+-- English fallback. A saved preference is Automatic when it is absent (nil)
+-- or exactly the Automatic value (L.AUTOMATIC_PREFERENCE). Nothing else is
+-- an alias of it.
+function L.IsAutomaticPreference(value)
+    return value == nil or value == AUTOMATIC
+end
+
+-- The pure Automatic resolver. Automatic may select an installed optional
+-- pack only for an evidenced raw client code or alias. This build holds no
+-- such evidence (no client code or alias is cited to an authorized versioned
+-- reference) and reads no client locale, game API or saved data, so
+-- production calls pass nothing and get English. `raw` and `mappings` exist
+-- for deterministic synthetic tests only; injected facts prove this pure
+-- function, not native automatic-language integration. A mapping is read
+-- with getmetatable/rawget only (a table with a metatable is refused unread,
+-- so no metamethod runs) and is never kept. Unknown or malformed input, no
+-- mapping, and a target that is not an adopted pack (unsupported, missing
+-- or refused) or is the English base give English. Never raises.
+local function ResolveAutomatic(raw, mappings)
+    if type(raw) ~= "string" or #raw < 1 or #raw > 32 then return DEFAULT_LANGUAGE end
+    if type(mappings) ~= "table" or getmetatable(mappings) ~= nil then
+        return DEFAULT_LANGUAGE
+    end
+    local target = rawget(mappings, raw)
+    if type(target) == "string" and target ~= DEFAULT_LANGUAGE and packs[target] ~= nil then
+        return target
+    end
+    return DEFAULT_LANGUAGE
+end
+L.ResolveAutomaticLanguage = ResolveAutomatic
+
 -- The language a saved preference shows: the ID itself when it is the
--- default or an adopted pack, English otherwise. Pure: the saved value is
--- never rewritten.
+-- default or an adopted pack, what Automatic resolves to (with this build's
+-- evidence: English) for the Automatic preference, English otherwise. Pure:
+-- the saved value is never rewritten.
 function L.EffectiveLanguage(id)
+    if id == nil or id == AUTOMATIC then return ResolveAutomatic() end
     if Available(id) then return id end
     return DEFAULT_LANGUAGE
 end
 
--- The active language ID, and whether it was initialized this session.
+-- The active language ID, whether it was initialized this session, and
+-- whether this session started on the Automatic preference.
 function L.ActiveLanguage()
-    return active.id, active.initialized
+    return active.id, active.initialized, active.automatic
 end
 
 -- Once per Lua session (see "Active language" above). Returns the active ID
--- and whether this call set it; a later call changes nothing.
+-- and whether this call set it; a later call changes nothing. An absent or
+-- Automatic preference starts Automatic, resolved without evidence: English.
 function L.InitializeActiveLanguage(id)
     if active.initialized then return active.id, false end
     active.initialized = true
+    if id == nil or id == AUTOMATIC then
+        active.automatic = true
+        id = ResolveAutomatic()
+    end
     if id ~= DEFAULT_LANGUAGE and Available(id) then
         active.id, active.entries = id, packs[id].entries
     end

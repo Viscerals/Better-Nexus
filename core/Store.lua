@@ -451,10 +451,18 @@ function ReadOnlyRoot.Valid(key, value)
         -- enum in data/DefaultProfile.lua (uiLanguages) is adopted into the
         -- detached view; any other value stays in the saved root as it is,
         -- and the session shows English.
+        -- Issue #141: the Automatic value (uiLanguages.automatic) is adopted
+        -- too; it is a preference, not a language ID.
         local profile = Nexus.DefaultProfile
-        local enum = profile and type(profile.uiLanguages) == "table"
-            and profile.uiLanguages.ids or nil
-        if type(value) ~= "string" or type(enum) ~= "table" then return false end
+        local languages = profile and type(profile.uiLanguages) == "table"
+            and profile.uiLanguages or nil
+        local enum = languages and languages.ids or nil
+        if type(value) ~= "string" then return false end
+        if languages and type(languages.automatic) == "string"
+            and value == languages.automatic then
+            return true
+        end
+        if type(enum) ~= "table" then return false end
         for _, id in ipairs(enum) do
             if id == value then return true end
         end

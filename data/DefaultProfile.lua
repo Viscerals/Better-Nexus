@@ -77,11 +77,18 @@ DefaultProfile.defaultSettings = {
 -- data/LocalizationPacks.lua). They are not game client locales, GetLocale()
 -- results or aliases, and the game's own language is never read or changed.
 -- The preference is deliberately not in defaultSettings: an absent field
--- means the default, so start-up never adds it to an existing profile, and
--- only an explicit durable choice from the panel writes it. Any other saved
--- value is shown as English and is kept exactly as saved.
+-- means Automatic (issue #141), so start-up never adds it to an existing
+-- profile, and only an explicit durable choice from the panel writes it.
+-- Automatic is a preference, not an eighth ID: `automatic` is the value an
+-- explicit Automatic choice saves over a manual or unsupported one, so the
+-- saved data keeps Automatic and a manual English choice apart. Automatic
+-- may select a pack only for an evidenced raw client code or alias; this
+-- build has no such evidence and reads no client locale, so Automatic shows
+-- English. `default` stays the English fallback. Any other saved value is
+-- shown as English and is kept exactly as saved.
 DefaultProfile.uiLanguages = {
     default = "enUS",
+    automatic = "automatic",
     ids = { "enUS", "frFR", "deDE", "esES", "plPL", "ptBR", "ruRU" },
 }
 

@@ -559,6 +559,8 @@ do
  check(type(enum)=='table' and enum.default=='enUS' and type(enum.ids)=='table' and #enum.ids==#IDS,'the preference enum is declared with its English default')
  for i,id in ipairs(IDS)do check(enum.ids[i]==id,'preference enum ID '..i..' is '..id)end
  check(Nexus.DefaultProfile.defaultSettings.uiLanguage==nil,'the preference is not a filled default, so start-up never adds it')
+ check(enum.automatic=='automatic' and L.AUTOMATIC_PREFERENCE==enum.automatic and not L.IsLanguage(enum.automatic) and L.EffectiveLanguage(enum.automatic)=='enUS','Issue #141: the Automatic preference value is declared beside the seven unchanged IDs; it is not a language ID and shows English')
+ check(L.ActiveLanguage()=='enUS' and select(3,L.ActiveLanguage())==true,'Issue #141: the harness boot with no saved preference started on Automatic, which shows English')
  local langs=L.Languages()
  check(#langs==#IDS,'English and the six packs are offered')
  for i,id in ipairs(IDS)do
@@ -850,6 +852,68 @@ do
  local noEnum=reloadPacks(realPacks)
  Nexus.DefaultProfile.uiLanguages=profileEnum
  check(noEnum and #noEnum.Languages()==1 and noEnum.InitializeActiveLanguage('frFR')=='enUS','without the enum only English is offered')
+ -- Issue #141: the Automatic preference and the pure Automatic resolver.
+ -- The raw codes below ('xxTest' and others) are SYNTHETIC test values, not
+ -- evidenced client codes or aliases: injection proves the pure resolver
+ -- only, never native automatic-language integration. Production holds no
+ -- mapping, so Automatic resolves English. A mock client locale (frFR) and
+ -- build are counted to show that no Localization call reads them.
+ do
+  local clientReads,getLocale,getBuild=0,GetLocale,GetBuildInfo
+  GetLocale=function()clientReads=clientReads+1;return 'frFR' end
+  GetBuildInfo=function(...)clientReads=clientReads+1;return getBuild(...)end
+  local touched1=touched
+  local ok,err=pcall(function()
+   local m=assert(reloadPacks(realPacks),'loader with the real packs for the Automatic checks');checks=checks+1
+   local R=m.ResolveAutomaticLanguage
+   check(type(R)=='function' and m.AUTOMATIC_PREFERENCE=='automatic' and R()=='enUS' and m.EffectiveLanguage(nil)=='enUS' and m.EffectiveLanguage('automatic')=='enUS','production Automatic holds no evidence and resolves English')
+   check(m.IsAutomaticPreference(nil) and m.IsAutomaticPreference('automatic') and not m.IsAutomaticPreference('enUS') and not m.IsAutomaticPreference('Automatic') and not m.IsAutomaticPreference('') and not m.IsAutomaticPreference(42),'only an absent value or the exact Automatic value is the Automatic preference')
+   check(not m.IsLanguage('automatic') and #m.Languages()==#IDS,'Automatic is not offered as a pack')
+   local map={xxTest='frFR',xxRuss='ruRU',xxBase='enUS',xxGB='enGB',xxAuto='automatic',xxNum=7,xxTab={},[string.rep('y',32)]='plPL',[string.rep('x',33)]='frFR'}
+   check(R('xxTest',map)=='frFR' and R('xxRuss',map)=='ruRU' and R(string.rep('y',32),map)=='plPL','SYNTHETIC: an injected mapping to an installed pack selects it')
+   local cases={{nil,map},{'xxUnknown',map},{'xxBase',map},{'xxGB',map},{'xxAuto',map},{'xxNum',map},{'xxTab',map},
+    {42,map},{true,map},{{},map},{'',map},{string.rep('x',33),map},{'xxTest',nil},{'xxTest','frFR'},{'xxTest',7},
+    {'xxTest',function()return 'frFR' end}}
+   for i,case in ipairs(cases)do
+    local okR,got=pcall(R,case[1],case[2])
+    check(okR and got=='enUS','unknown, malformed, unmapped or unsupported Automatic input resolves English #'..i)
+   end
+   local reads=0
+   local throwing=setmetatable({},{__index=function()reads=reads+1;error('mapping __index')end})
+   local proxied=setmetatable({xxTest='frFR'},{__index=function()reads=reads+1;return 'frFR' end})
+   local guarded=setmetatable({xxTest='frFR'},{__metatable=false})
+   for i,mapping in ipairs({throwing,proxied,guarded,trap})do
+    local okR,got=pcall(R,'xxTest',mapping)
+    check(okR and got=='enUS','a mapping table with a metatable is refused unread #'..i)
+   end
+   check(reads==0 and touched==touched1,'no mapping metamethod runs')
+   local fmA=assert(reloadPacks(fixture),'loader with the fixture packs for the Automatic checks');checks=checks+1
+   check(fmA.ResolveAutomaticLanguage('xxDe',{xxDe='deDE'})=='enUS' and fmA.ResolveAutomaticLanguage('xxRu',{xxRu='ruRU'})=='enUS' and fmA.ResolveAutomaticLanguage('xxEs',{xxEs='esES'})=='enUS' and fmA.ResolveAutomaticLanguage('xxFr',{xxFr='frFR'})=='frFR','SYNTHETIC: a mapping to a refused or absent pack resolves English; one to an adopted pack selects it')
+   local noneA=assert(reloadPacks(nil),'loader without pack data for the Automatic checks');checks=checks+1
+   check(noneA.ResolveAutomaticLanguage('xxTest',map)=='enUS','without pack data no mapping selects a pack')
+   map.xxTest='deDE'
+   check(R('xxTest',map)=='deDE' and R()=='enUS' and m.EffectiveLanguage('automatic')=='enUS','an injected mapping is read only during its call: it is never kept, and production still has none')
+   check(m.ActiveLanguage()=='enUS' and select(2,m.ActiveLanguage())==false,'the pure resolver initializes nothing')
+   local id,set=m.InitializeActiveLanguage('automatic')
+   check(id=='enUS' and set==true and select(3,m.ActiveLanguage())==true and m.Text(K)==E,'the saved Automatic value initializes Automatic, which shows English')
+   id,set=m.InitializeActiveLanguage('frFR')
+   check(id=='enUS' and set==false and select(3,m.ActiveLanguage())==true and m.Text(K)==E,'a later initialization never switches an Automatic session')
+   local absentA=assert(reloadPacks(realPacks));checks=checks+1
+   check(absentA.InitializeActiveLanguage(nil)=='enUS' and select(3,absentA.ActiveLanguage())==true,'an absent preference initializes Automatic')
+   local manualA=assert(reloadPacks(realPacks));checks=checks+1
+   check(manualA.ResolveAutomaticLanguage('xxTest',{xxTest='frFR'})=='frFR' and manualA.InitializeActiveLanguage('deDE')=='deDE' and select(3,manualA.ActiveLanguage())==false and manualA.Text(K)==packData.deDE.entries[K],'manual precedence: an explicit deDE preference is used whatever an injected mapping says')
+   local englishA=assert(reloadPacks(realPacks));checks=checks+1
+   check(englishA.InitializeActiveLanguage('enUS')=='enUS' and select(3,englishA.ActiveLanguage())==false and englishA.Text(K)==E,'an explicit English preference is manual, not Automatic, though both show English')
+   for i,raw in ipairs({'Automatic','AUTOMATIC','auto',''})do
+    local mod=assert(reloadPacks(realPacks));checks=checks+1
+    check(mod.InitializeActiveLanguage(raw)=='enUS' and select(3,mod.ActiveLanguage())==false and mod.EffectiveLanguage(raw)=='enUS','a near-miss of the Automatic value is an unsupported preference, never an alias #'..i)
+   end
+  end)
+  GetLocale,GetBuildInfo=getLocale,getBuild
+  if not ok then error(err,0) end
+  check(clientReads==0,'the Automatic resolver, loader and initialization read no client locale or build')
+  check(Nexus.Localization==real and Nexus.LocalizationPacks==realPacks,'real seam and packs restored after the Automatic checks')
+ end
  check(Nexus.Localization==real and Nexus.LocalizationPacks==realPacks and L.ActiveLanguage()=='enUS' and L.Text(K)==E,'the real seam, data and active language are untouched by the loader checks')
 end
 check(#H.actions==before.actions and #H.sent==before.sent and H.popup==before.popup and #H.chat==before.chat,'synchronous seam calls cause no observed action, send, StaticPopup or chat')
