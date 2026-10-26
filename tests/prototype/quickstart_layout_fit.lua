@@ -17,7 +17,7 @@ local BODY="Already have a Saved Build? Assign the Wishlist you want it to follo
 local HINT="Reopen Help any time with /nexus help. Automation and Orb spending require separate explicit controls."
 local SUBTITLE="Plan your Echoes, then choose what to automate."
 local BUTTONS={'Set up current build','Import / Create Wishlist','Browse Community builds',
- 'Open Leaderboard','Help / Getting Started','Orbs / Lost Memories','Close'}
+ 'Open Leaderboard','Help / Getting Started','Orbs / Lost Memories','Guided setup (step by step)','Close'}
 local MODELS={{name='default',char=5.5,line=12},{name='conservative',char=7.0,line=17}}
 
 -- Label cases at the declared models of layout_geometry_support (default,
@@ -141,7 +141,7 @@ check(body and body==qs.body,'Quick Start body text is exactly the #89 text')
 check(hint,'Quick Start hint text unchanged')
 check(subtitle,'Quick Start subtitle text unchanged')
 local count=0;for _ in pairs(buttons)do count=count+1 end
-check(count==#BUTTONS,'Quick Start keeps its seven buttons')
+check(count==#BUTTONS,'Quick Start has exactly eight buttons')
 -- The Welcome dismissal must read exactly "Close" (a label EXPECT). Only after
 -- that failed EXPECT does the real legacy "Later" stand in as baseline control,
 -- so the unchanged guards still run; each Close check is then marked dependent.
@@ -181,7 +181,7 @@ local function apart(a,b,label)
  check(a[3]<=b[1] or b[3]<=a[1] or a[4]<=b[2] or b[4]<=a[2],label..' do not overlap')
 end
 local order={'Set up current build','Import / Create Wishlist','Browse Community builds','Open Leaderboard',
- 'Help / Getting Started','Orbs / Lost Memories','Close'}
+ 'Help / Getting Started','Orbs / Lost Memories','Guided setup (step by step)','Close'}
 for _,label in ipairs(order)do
  local b=buttons[label];inside('button "'..label..'"',place(b,b:GetWidth(),b:GetHeight()))
 end
@@ -472,7 +472,7 @@ do
  local closeDep,sync=closeNamed and '' or ' [depends on the failed Close caption EXPECT]',rawget(qsOrig,'sync')
  check(dismissal and dismissal:GetScript('OnClick') and hintText and sync,'fault cases: the Welcome has its dismissal, hint and Sync line'..closeDep)
  local others={hintText,sync}
- for _,caption in ipairs({'Set up current build','Import / Create Wishlist','Browse Community builds','Open Leaderboard','Help / Getting Started','Orbs / Lost Memories'})do
+ for _,caption in ipairs({'Set up current build','Import / Create Wishlist','Browse Community builds','Open Leaderboard','Help / Getting Started','Orbs / Lost Memories','Guided setup (step by step)'})do
   local b=byCaption[caption];check(b and b~=dismissal,'fault cases: the Welcome keeps "'..caption..'"');others[#others+1]=b
  end
  local dw,dh,qw,qh,rawWidth0=dismissal:GetWidth(),dismissal:GetHeight(),qsOrig:GetWidth(),qsOrig:GetHeight(),rawget(dismissal,'GetTextWidth')

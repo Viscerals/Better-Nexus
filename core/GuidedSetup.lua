@@ -235,7 +235,7 @@ function G.Note(kind, fields)
                 s.wishlist = {key = r.key, name = r.name or '', source = 'saved', receipt = r}
                 s.draft, s.saveSeen, s.awaitSave, s.request = nil, nil, nil, nil
                 if s.target then s.target.confirmedAction = nil end
-            else s.saveSeen = r end
+            else s.saveSeen, s.draft = r, nil end
         end
     end
     Changed(r)
