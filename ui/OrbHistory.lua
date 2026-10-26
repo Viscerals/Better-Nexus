@@ -42,7 +42,11 @@ local RESULTS = {
     -- receipt, even when a later offer eventually appears.
     ["requested"] = { label = "Request prepared", pending = true, status = "requested" },
     ["submitted"] = { label = "Unconfirmed", pending = true, status = "unconfirmed" },
-    ["not sent"] = { label = "Not sent", refused = true, status = "notSent" },
+    -- The runtime also writes this state after a HOST_FALSE spend refusal,
+    -- which can follow a host call. RunLog does not retain boundaryStatus;
+    -- the generic presentation cannot assert that nothing was sent.
+    ["not sent"] = { label = "Spend not confirmed", unresolved = true,
+        status = "spendUnconfirmed" },
     ["unknown"] = { label = "Unconfirmed", unresolved = true, status = "unconfirmed" },
     ["paused"] = { label = "Paused", pending = true, status = "paused" },
 }
@@ -221,11 +225,13 @@ end
 local function resultOf(entry)
     local state = entry and entry.state
     -- A malformed/incomplete record must not display a confirmed replacement
-    -- without the identity that the runtime normally saves with that state.
-    if state == "confirmed" and not (type(entry.obtained) == "string"
-        and entry.obtained ~= "") then
-        return {label = "Unconfirmed", unresolved = true, status = "unconfirmed",
-            state = state}
+    -- without the same parseable identity M.Echo uses for that replacement.
+    if state == "confirmed" then
+        local spellId, quality = M.Identity(entry.obtained)
+        if not spellId or quality == nil then
+            return {label = "Unconfirmed", unresolved = true, status = "unconfirmed",
+                state = state}
+        end
     end
     local mapped = state and RESULTS[state]
     if mapped then
@@ -247,7 +253,7 @@ M.Result = resultOf
 function M.Timeline(entry)
     if type(entry) ~= "table" then return {} end
     local stages = {{kind = "stored", text = "Operation recorded on this client."}}
-    if entry.sourceKey and entry.state ~= "not sent" then
+    if entry.sourceKey then
         stages[#stages + 1] = {kind = "requested",
             text = "Orb request prepared; a send receipt is not recorded."}
     end
@@ -262,9 +268,9 @@ function M.Timeline(entry)
     if result.confirmed then
         stages[#stages + 1] = {kind = "confirmed",
             text = "Replacement confirmed from the recorded result."}
-    elseif result.refused then
-        stages[#stages + 1] = {kind = "notSent",
-            text = "Action not sent according to the recorded result."}
+    elseif entry.state == "not sent" then
+        stages[#stages + 1] = {kind = "spendUnconfirmed",
+            text = "Spend not confirmed from this record; a host call may have occurred."}
     else
         stages[#stages + 1] = {kind = "unconfirmed",
             text = "Result not confirmed; the current outcome remains unconfirmed."}

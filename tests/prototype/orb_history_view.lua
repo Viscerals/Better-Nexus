@@ -60,6 +60,16 @@ local pending={serial=3,ordinal=3,at=130,state='selected',sourceKey='410001:1',
 local refused={serial=4,ordinal=4,at=140,state='not sent',sourceKey='410003:0',
  sourceName='Disposable B',sourceQuality=0,
  reason='The receipt could not be saved; no Orb was requested.'}
+-- OrbRuntime also writes the same state after B.Spend returns REJECTED from
+-- HOST_FALSE, which may follow the ConfirmSpend host call. RunLog does not
+-- retain boundaryStatus, so its presentation must not claim "not sent".
+local hostFalse={serial=10,ordinal=10,at=141,state='not sent',sourceKey='410003:0',
+ sourceName='Disposable B',sourceQuality=0,
+ reason='The game refused the Orb spend after the host call.'}
+check(V.Result(hostFalse).status=='spendUnconfirmed'
+ and V.Result(hostFalse).label=='Spend not confirmed'
+ and V.Timeline(hostFalse)[#V.Timeline(hostFalse)].text:find('host call may have occurred',1,true),
+ 'HOST_FALSE without a saved typed boundary is not portrayed as no send')
 local unknown={serial=5,ordinal=5,at=150,state='unknown',sourceKey='410007:2',
  sourceName='Locked',sourceQuality=2,reason='The spend outcome remains unknown.'}
 local bare={serial=6,ordinal=6,at=160,state='requested',sourceKey='999999:9'}
@@ -85,9 +95,9 @@ check(rows[3].result.label=='Awaiting result' and rows[3].result.pending==true,
 check(rows[3].replacement.proposed==true and rows[3].replacement.label:find('(proposed)',1,true),
  'and its replacement is labelled proposed: '..rows[3].replacement.label)
 check(rows[3].replacement.confirmed~=true,'a proposed replacement is never marked confirmed')
-check(rows[4].result.label=='Not sent' and rows[4].result.refused==true,
- 'a refusal stays in the history: '..rows[4].result.label)
-check(rows[4].replacement.label=='No replacement','and claims no replacement: '..rows[4].replacement.label)
+check(rows[4].result.label=='Spend not confirmed' and rows[4].result.unresolved==true,
+ 'a refusal stays in the history without claiming no host call: '..rows[4].result.label)
+check(rows[4].replacement.label=='Not recorded','and claims no recorded replacement: '..rows[4].replacement.label)
 check(rows[5].result.label=='Unconfirmed' and rows[5].result.unresolved==true,
  'an unknown outcome is unconfirmed, not a success: '..rows[5].result.label)
 check(rows[6].reason.label=='Reason unavailable','an unrecorded reason says so: '..rows[6].reason.label)
@@ -132,9 +142,9 @@ check(proposedLine[#proposedLine].kind=='unconfirmed'
  and proposedLine[#proposedLine].text:find('not confirmed',1,true),
  'a selected entry never claims a sent choice or obtained result')
 local refusedLine=V.Timeline(refused)
-check(refusedLine[#refusedLine].kind=='notSent'
- and refusedLine[#refusedLine].text:find('not sent',1,true),
- 'a local refusal remains not sent')
+check(refusedLine[#refusedLine].kind=='spendUnconfirmed'
+ and refusedLine[#refusedLine].text:find('host call may have occurred',1,true),
+ 'an untyped refusal cannot establish whether a host call was sent')
 local unknownLine=V.Timeline(unknown)
 check(unknownLine[#unknownLine].kind=='unconfirmed'
  and unknownLine[#unknownLine].text:find('unconfirmed',1,true),
@@ -146,6 +156,17 @@ local incomplete={serial=7,ordinal=7,state='confirmed',sourceKey='410001:1'}
 check(V.Result(incomplete).status=='unconfirmed'
  and V.Timeline(incomplete)[#V.Timeline(incomplete)].kind=='unconfirmed',
  'an incomplete confirmed-state record without obtained identity is unconfirmed')
+local malformedObtained={serial=9,ordinal=9,state='confirmed',sourceKey='410001:1',
+ offered={{spellId=410002,quality=2,name='Desired A'}},
+ selectedKey='410002:2',obtained='garbage'}
+local malformedRow=V.Rows(view({malformedObtained}),nil)[1]
+check(V.Identity(malformedObtained.obtained)==nil
+ and malformedRow.replacement.confirmed~=true
+ and malformedRow.result.status=='unconfirmed'
+ and V.Offers(malformedObtained,nil)[1].confirmed~=true
+ and V.Details(malformedObtained,nil,100).received==nil
+ and V.Timeline(malformedObtained)[#V.Timeline(malformedObtained)].kind=='unconfirmed',
+ 'a nonempty but unparseable obtained field cannot confirm an Echo or timeline stage')
 local disputed={serial=8,ordinal=8,state='unknown',sourceKey='410001:1',
  offered={{spellId=410002,quality=2,name='Desired A'}},
  selectedKey='410002:2',obtained='410002:2'}
@@ -167,7 +188,7 @@ for _,entry in ipairs(full.entries)do
  check(technical:find('\n'..entry.ordinal..'. ',1,true)~=nil,
   'the technical report contains operation '..entry.ordinal)
 end
-check(readable:find('Confirmed.',1,true) and readable:find('Not sent.',1,true)
+check(readable:find('Confirmed.',1,true) and readable:find('Spend not confirmed.',1,true)
  and readable:find('Awaiting result.',1,true),
  'the readable report distinguishes confirmed, pending and not-sent operations')
 check(readable:find('410002:2',1,true)==nil,'the readable report keeps raw keys out')
@@ -370,7 +391,7 @@ log.rows[1]:GetScript('OnLeave')(log.rows[1])
 check(log.rows[2].result:GetText()=='... Awaiting\nresult','a pending row says so: '..log.rows[2].result:GetText())
 check(log.rows[2].replacement:GetText():find('proposed',1,true)~=nil,
  'and marks its replacement as proposed: '..log.rows[2].replacement:GetText())
-check(log.rows[3].result:GetText()=='- Not sent','a refusal is visible: '..log.rows[3].result:GetText())
+check(log.rows[3].result:GetText()=='? Spend\nnot confirmed','an unconfirmed spend is visible: '..log.rows[3].result:GetText())
 check(log.rows[4].source:GetText():find('Unknown Echo (777777)',1,true)~=nil,
  'an unresolvable name keeps its id: '..log.rows[4].source:GetText())
 -- A selected choice that was never confirmed is marked selected, not received.
@@ -395,7 +416,7 @@ check(#copied>500,'the whole run is offered for copying: '..#copied..' character
 for index=1,15 do
  check(copied:find('\n'..index..'. ',1,true)~=nil,'the copied report contains operation '..index)
 end
-check(copied:find('Awaiting result.',1,true) and copied:find('Not sent.',1,true)
+check(copied:find('Awaiting result.',1,true) and copied:find('Spend not confirmed.',1,true)
  and copied:find('Confirmed.',1,true),'and distinguishes pending, not-sent and confirmed')
 check(copied:find('410002:2',1,true)==nil,'the readable report keeps raw keys out')
 -- This client answers 1 or nil, never a boolean, so the handler must not

@@ -185,6 +185,7 @@ local STATUS = {
     offer       = {glyph = "...", word = "Waiting for offer"},
     paused      = {glyph = "=",   word = "Paused"},
     unconfirmed = {glyph = "?",   word = "Unconfirmed"},
+    spendUnconfirmed = {glyph = "?", word = "Spend not confirmed"},
     notSent     = {glyph = "-",   word = "Not sent"},
     sent        = {glyph = "->",  word = "Sent, not confirmed"},
     stored      = {glyph = "*",   word = "Stored on this client"},
@@ -196,7 +197,7 @@ local STATUS = {
     ready       = {glyph = "+",   word = "Ready"},
     unknown     = {glyph = "?",   word = "Unknown"},
 }
-M.STATUS_KINDS = {"confirmed", "requested", "awaiting", "choice", "offer", "paused", "unconfirmed", "notSent",
+M.STATUS_KINDS = {"confirmed", "requested", "awaiting", "choice", "offer", "paused", "unconfirmed", "spendUnconfirmed", "notSent",
     "sent", "stored", "refused", "unavailable", "estimated", "stale", "loading", "ready", "unknown"}
 
 -- {kind, glyph, word} for a kind (a new table; changing it changes nothing
