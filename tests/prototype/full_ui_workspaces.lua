@@ -62,6 +62,13 @@ plan:Hide()
 check(Nexus.Panel.ShowHub('explore')==true and builds:IsShown(),
  'the panel Explore hub opens the actual Explore workspace')
 builds:Hide()
+check(U.ShowPlan()==true and plan:IsShown(),'Plan can reopen before a game-page route')
+local realCanOpen=Nexus.JournalTab.CanOpenBuilds
+Nexus.JournalTab.CanOpenBuilds=function() return false end
+Nexus.Panel.OpenMyBuilds()
+check(plan:IsShown(),'unavailable game My Builds keeps the Plan workspace visible')
+Nexus.JournalTab.CanOpenBuilds=realCanOpen
+plan:Hide()
 local oldWidth,oldHeight=UIParent:GetWidth(),UIParent:GetHeight()
 UIParent:SetSize(800,600)
 check(U.ShowExplore()==true,'Explore reports a visible destination to its panel caller')

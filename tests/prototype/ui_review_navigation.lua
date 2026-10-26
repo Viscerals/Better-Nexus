@@ -267,7 +267,8 @@ C.scenario('V4 the hubs open real workspaces; retained routes and hovers say wha
  end
  if builds then
   local spy=Spy(Nexus.JournalTab,'OpenBuilds',function() builds.func() end)
-  C.expect(spy.n==1 and spy.args.n==0,'V4: Plan > My Builds opens the game page (the header button route)',spy.n)
+  C.expect(spy.n==1 and spy.args.n==2 and spy.args[1]==false and type(spy.args[2])=='function',
+   'V4: Plan > My Builds checks the game route before dismissing Nexus windows',spy.n)
  end
  if library then
   C.expect(Spy(Nexus.CommunityBuilds,'Show',function() library.func() end).n==1,'V4: Explore > Build Library opens the library')
@@ -276,7 +277,10 @@ C.scenario('V4 the hubs open real workspaces; retained routes and hovers say wha
   C.expect(Spy(Nexus.Leaderboard,'Show',function() board.func() end).n==1,'V4: Explore > Leaderboard opens the leaderboard')
  end
  local header=f._switchBtn
- C.guard(Spy(Nexus.JournalTab,'OpenBuilds',function() header:Click() end).args.n==0,'V4: the header My Builds button keeps its route')
+ local headerRoute=Spy(Nexus.JournalTab,'OpenBuilds',function() header:Click() end)
+ C.guard(headerRoute.n==1 and headerRoute.args.n==2 and headerRoute.args[1]==false
+  and type(headerRoute.args[2])=='function',
+  'V4: the header My Builds button keeps its guarded game route')
  C.guard(Effects()==before,'V4: every routed entry keeps measured actions, sends, saved data, assignments and Auto unchanged',Effects())
  local beforeNav=GameplayEffects()
  hubs.plan:Click()

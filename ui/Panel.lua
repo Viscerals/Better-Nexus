@@ -2280,17 +2280,27 @@ end
 
 -- The game's own My Builds page (the header button and the Plan hub).
 function M.OpenMyBuilds()
-    CloseOtherNexusWindows()
     if Nexus.JournalTab and Nexus.JournalTab.OpenBuilds then
-        Nexus.JournalTab.OpenBuilds()
+        -- Only dismiss the workspace after the live Character Progression
+        -- entry has been found. A missing game button must not discard an
+        -- unsaved Plan draft just because My Builds was requested.
+        local opened, why = Nexus.JournalTab.OpenBuilds(false, CloseOtherNexusWindows)
+        if opened == false and why == "unavailable" then
+            print("|cffff6060Nexus:|r Could not find the game's Character Progression button. "
+                .. "Plan remains open; open Character Progression -> Echoes manually when available.")
+        end
+        return opened
     else
         -- The journal's Show(tab) is a dot-call whose argument is a tab
         -- index; no tab is established here, so none is passed (the
         -- journal opens its current tab).
         local pe = _G["ProjectEbonhold"]
         if pe and pe.EchoJournal and pe.EchoJournal.Show then
-            pcall(pe.EchoJournal.Show)
+            local ok = pcall(pe.EchoJournal.Show)
+            if ok then CloseOtherNexusWindows() end
+            return ok
         end
+        return false
     end
 end
 
