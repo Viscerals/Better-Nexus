@@ -2586,7 +2586,8 @@ end
         -- missing or malformed revision, or a rolled-back one once the count
         -- has advanced, even when it equals the old stamp. Restoring the
         -- revision never reacquires it; it stays unknown until the next
-        -- natural cold observation. No read or refresh is forced, and no
+        -- natural cold observation. Apart from the pure
+        -- DestinationSessionCount() call, no read or refresh is forced, and no
         -- extra backend or character read, event, timer, getter work or
         -- action is added for it here.
         local destinationRow = frame and frame._destinationRow

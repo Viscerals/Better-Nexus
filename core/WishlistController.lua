@@ -694,15 +694,18 @@ function Controller.New(options)
             if origin == "firstRun" or origin == "unknown" then
                 -- That begin captured nothing, so its origin is only a
                 -- begin-time hint: this pure strip states what the supplied
-                -- facts show now and conservatively requires them to be
-                -- valid and observed. It shows the current first run for a
-                -- known native active slot of 0, or one above a valid finite
-                -- positive whole maximum, with no Saved Build selected, or
-                -- for a selected row whose list is empty from a source
-                -- ReadSlots marked valid (roleSourceValid). A populated
-                -- selected row shows no destination and is never adopted.
-                -- Malformed, missing or sparse empty lists, a missing row
-                -- and unobserved, invalid or conflicting facts stay unknown.
+                -- facts show now. It needs a slots table whose activeKnown
+                -- is not false (an absent flag passes) and takes the maximum
+                -- as tonumber(slots.maxSlots), else a default of 5. Then
+                -- observedSelected, the native active slot and that maximum
+                -- must pass the finite, whole, range and agreement checks
+                -- below. An observedSelected of 0 with a native active slot
+                -- of 0, or one above that maximum, shows the current first
+                -- run. A selected row with #echoes > 0 shows no destination,
+                -- regardless of roleSourceValid, and is never adopted; an
+                -- empty one shows the current first run only when ReadSlots
+                -- marked its source valid (roleSourceValid == true). All
+                -- other cases stay unknown.
                 -- That conservative unknown asserts no opposite target and
                 -- does not redefine the confirmations, FirstRunOwnsSave or
                 -- TryApply, which remain separate, unchanged authority.
