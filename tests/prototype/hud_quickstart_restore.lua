@@ -1,28 +1,12 @@
--- F-S4-4 (P3), regression-first: the HUD comes back when the last Nexus popup
--- closes, also when the first-run guided coach outlives an attached window. An
--- attached window (here the Wishlist editor) suppresses the HUD while shown
--- and restores it on hide unless another Nexus window is shown
--- (ui/Panel.lua AttachMenuFrame/RestoreHudAfterMenus). The first-use coach
--- counts as such a window but is never attached, so when the editor closes first the
--- restore is skipped, and the coach's own close must retry it: the HUD
--- stays hidden for the session (wanted, committed, suppressed), and neither
--- Panel.Show nor /nexus panel brings it back.
--- Healthy behaviour (EXPECT, fails at the baseline): with the editor closed
--- first and QuickStart dismissed last ("Close"), the wanted and committed HUD
--- is shown again; Panel.Show and two /nexus panel toggles leave it shown; a
--- player who had hidden the HUD keeps it hidden after the popups close, and
--- their next /nexus panel shows it.
--- Unchanged (GUARD, holds at the baseline): in the reversed order (QuickStart
--- dismissed first) the HUD stays hidden while the editor, another attached
--- window, is still open, and returns when it closes; a hidden (unwanted) HUD
--- stays hidden when the popups close; QuickStart alone does not hide the HUD;
--- the panel stays ready and committed and the stock HUD handoff facts are
--- unchanged; no game action.
--- Real TOC boot, runtime, Panel, minimap button, editor, QuickStart controls
--- and /nexus panel; artificial Saved Build. The first popup is shown through
--- the real first-run gate (ShowIfFirstTime) instead of the native start-up
--- race; later ones through the public QuickStart.Show. This revives no
--- retracted tester report.
+-- F-S4-4 (P3) HUD restoration regression. The attached Wishlist editor
+-- suppresses the HUD while shown. Current Panel excludes the unattached
+-- informational Welcome and first-use coach from its menu-suppression test,
+-- so closing the editor restores a wanted HUD even if either remains open.
+-- Q1 and Q1b check that immediate restoration and that later Close keeps it;
+-- reversed order, a deliberately hidden HUD, and /nexus panel are also
+-- guarded. This is the current invariant, not a claim that the old failing
+-- first-run QuickStart sequence still exists. Real TOC boot and controls,
+-- synthetic Saved Build, offline only; no native popup timing claim.
 local F=dofile('tests/prototype/format5_support.lua')
 local V=dofile('tests/prototype/view_regression_support.lua')
 local printable=V.printable
@@ -94,20 +78,16 @@ local function Reset(tag)
  return C.setup(x.wanted and x.shown and not x.menuSuppressed,tag..': fixture: the HUD is shown and wanted again',FactText())
 end
 
-C.scenario('Q1 the editor closes first, the first-use coach last',function()
+C.scenario('Q1 the editor closes first, secondary QuickStart last',function()
  if not OpenEditor('Q1') then return end
- local offered=Nexus.QuickStart.ShowIfFirstTime()
- local coach=_G.NexusGuidedSetup
- C.setup(offered==false and coach and coach:IsShown(),
-  'Q1: fixture: the real first-run gate shows the guided coach over the editor')
+ Nexus.QuickStart.ShowSetup() -- informational secondary Welcome; does not acknowledge first use
+ C.setup(NexusQuickStart and NexusQuickStart:IsShown(),
+  'Q1: fixture: the secondary Welcome is shown over the editor')
  editor:Hide()
  print('OBSERVED','Q1 after the editor closed',FactText())
- local close=coach and V.Frame(H,function(x)
-  return x:GetParent()==coach and x:GetText()=='Close' and x:GetScript('OnClick')~=nil
- end) or nil
- if not C.setup(close~=nil,'Q1: fixture: the first-use coach offers deliberate Close') then return end
- close:Click();H.Advance(.5)
- C.setup(not coach:IsShown(),'Q1: fixture: Close dismissed the last first-use window')
+ C.expect(Facts().wanted and Facts().shown and not Facts().menuSuppressed,
+  'Q1: the unattached informational Welcome does not prevent immediate HUD restoration',FactText())
+ if not CloseQuickStart('Q1') then return end
  print('OBSERVED','Q1 after Close',FactText())
  local x=Facts()
  C.expect(x.wanted and x.committed and x.shown and not x.menuSuppressed,
@@ -117,6 +97,25 @@ C.scenario('Q1 the editor closes first, the first-use coach last',function()
  SlashCmdList.NEXUS('panel');SlashCmdList.NEXUS('panel')
  C.expect(Facts().wanted and Facts().shown,'Q1: two /nexus panel toggles leave the wanted HUD shown',FactText())
  C.guard(Facts().ready and Facts().committed,'Q1: the panel stays ready and committed',FactText())
+end)
+
+C.scenario('Q1b the first-use coach leaves the HUD restored when the editor closes',function()
+ if not Reset('Q1b') or not OpenEditor('Q1b') then return end
+ local offered=Nexus.QuickStart.ShowIfFirstTime()
+ local coach=_G.NexusGuidedSetup
+ if not C.setup(offered==false and coach and coach:IsShown(),
+  'Q1b: fixture: the first-use coach opens over the editor',
+  'offered='..tostring(offered)..' shown='..tostring(coach and coach:IsShown())
+   ..' seen='..tostring(rawget(NexusDB,'hasSeenQuickStart'))) then return end
+ editor:Hide();H.Advance(.2)
+ C.guard(Facts().wanted and Facts().shown and not Facts().menuSuppressed,
+  'Q1b: the unattached coach does not hold the HUD suppressed after editor close',FactText())
+ local close=V.Frame(H,function(x)
+  return x:GetParent()==coach and x:GetText()=='Close' and x:GetScript('OnClick')~=nil
+ end)
+ if close then close:Click() end
+ C.expect(close~=nil and not coach:IsShown() and Facts().shown,
+  'Q1b: deliberate coach Close preserves the already restored HUD',FactText())
 end)
 
 C.scenario('G1 reversed order: QuickStart first, the editor last',function()
