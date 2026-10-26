@@ -507,4 +507,86 @@ C.scenario('P16 UX-10 Help lists the Automation scope and the tome paragraph; th
  C.guard(Same(Counters(),before) and Settings()==settings and not Auto(),'P16: reading Help acts, requests, sends and changes nothing')
 end)
 
+-- P17 (J4, issue #131): one boot composes the journey from the shared origins
+-- of ux_manual_recommendation R1 (its boards and marked Needed card), this
+-- file's passive reads (P1, P11, P12) and P15's real Auto warning, then the
+-- real explicit Yes, with hud_roll_footprint's runtime Take observed only by the
+-- harness action log (synthetic; no native action). GUARD: the composition is
+-- not claimed to fail on an earlier cut. Its discriminators: No keeps the next
+-- board manual, only the later Yes enables Auto, and the first action then
+-- targets the board shown at acceptance, never the earlier board's target.
+-- Native input and server effects are NOT_RUN.
+C.scenario('P17 J4 a manual Needed card, passive reads and No keep Auto OFF; only a later explicit Yes acts, on the current board',function()
+ BootPlan()
+ local prefs=type(NexusDB)=='table' and rawget(NexusDB,'overwriteWarnings') or nil
+ if type(prefs)=='table' then prefs.auto=nil end
+ C.setup(not Auto(),'P17: fixture: Auto is OFF and the Auto warning is not suppressed')
+ -- The one card the runtime marked as its Take target (its own model), or nil.
+ local function Highlighted()
+  local m=Nexus.Panel._lastModel
+  local cards=type(m)=='table' and type(m.cards)=='table' and m.cards or {}
+  local n,at=0,nil
+  for i=1,3 do if type(cards[i])=='table' and cards[i].highlight==true then n=n+1;at=i end end
+  return n==1 and at or nil
+ end
+ -- The shown card rows that carry the manual marker.
+ local function Marked()
+  local n,at=0,nil
+  for i,line in ipairs(CardRows()) do if line:find('^>> ') then n=n+1;at=i end end
+  return n,at
+ end
+ local acts=#H.actions
+ Offer({{spellId=200001,quality=1},{spellId=200050,quality=2},{spellId=200051,quality=3}})
+ C.setup(Highlighted()==1,'P17: fixture: the runtime marks card 1, a Needed Echo, as its Take target')
+ local n,at=Marked()
+ local body=Body()
+ print('OBSERVED','P17 manual body='..body)
+ C.guard(n==1 and at==1 and body:find('Echo 1 (Uncommon)',1,true)~=nil and #H.actions==acts and not Auto(),
+  'P17: Auto OFF marks and names the one Needed card; nothing is performed',body)
+ local before,settings,seen=Counters(),Settings(),rawget(NexusDB,'hasSeenQuickStart')
+ local tip=AutoTooltip()
+ Nexus.Help.Show('rolling');Nexus.Help.Hide()
+ local shown=Nexus.QuickStart.ShowSetup()
+ C.setup(shown,'P17: fixture: the replay opens')
+ local dismiss=WelcomeDismissal('P17: the replay')
+ if dismiss then dismiss:Click() end
+ local sub=MenuItem(OpenMoreMenu(),'Automation settings')
+ C.setup(sub~=nil and type(sub.menuList)=='table','P17: fixture: the ... menu offers Automation settings')
+ C.guard(tip:find('Auto: OFF',1,true)~=nil,'P17: the Auto hover discloses the current scope with Auto OFF',tip)
+ C.guard(Same(Counters(),before) and Settings()==settings and rawget(NexusDB,'hasSeenQuickStart')==seen and not Auto(),
+  'P17: the hover, Help, Setup / Welcome and Automation settings act, request, send and change nothing',Show(Counters()))
+ n,at=Marked()
+ C.guard(n==1 and at==1 and Highlighted()==1,'P17: the manual recommendation still marks the current Needed card')
+ NexusPanel._autoBtn:Click()
+ local f=NexusOverwriteWarning
+ C.setup(f~=nil and f:IsShown(),'P17: fixture: the Auto click opens the Auto warning')
+ if not (f and f:IsShown()) then return end
+ C.guard(not Auto() and Same(Counters(),before),'P17: opening the warning enables and performs nothing',Show(Counters()))
+ f.no:Click()
+ C.guard(not Auto() and not f:IsShown(),'P17: No keeps Auto OFF')
+ Offer({{spellId=200060,quality=1},{spellId=200061,quality=2},{spellId=200003,quality=3}})
+ C.setup(Highlighted()==3,'P17: fixture: the Take target of the next board is card 3')
+ n,at=Marked()
+ C.guard(not Auto() and #H.actions==acts and n==1 and at==3,
+  'P17: after No the next board is still a manual recommendation on its own Needed card; nothing is performed',table.concat(CardRows(),' | '))
+ NexusPanel._autoBtn:Click()
+ C.setup(f:IsShown() and f.yes:IsEnabled() and not Auto(),'P17: fixture: the Auto warning asks again; No saved no suppression')
+ if not f:IsShown() then return end
+ C.guard(#H.actions==acts,'P17: asking again performs nothing')
+ f.yes:Click()
+ local saved=type(NexusDB)=='table' and rawget(NexusDB,'overwriteWarnings') or nil
+ C.guard(Auto() and #H.actions==acts and (type(saved)~='table' or rawget(saved,'auto')==nil),
+  'P17: the explicit Yes turns Auto ON, saves no suppression with the opt-out unticked, and has performed nothing yet')
+ Nexus.RequestRecompute()
+ for _=1,40 do
+  if #H.actions>acts then break end
+  H.Advance(.1)
+ end
+ local new={}
+ for i=acts+1,#H.actions do new[#new+1]=tostring(H.actions[i][1])..':'..tostring(H.actions[i][2]) end
+ print('OBSERVED','P17 actions after Yes='..table.concat(new,','))
+ C.guard(#new==1 and new[1]=='take:200003' and Auto(),
+  'P17: with Auto ON the runtime takes the Needed Echo of the board shown at acceptance, not the earlier target',table.concat(new,','))
+end)
+
 C.finish('(Automation scope and hold reasons in plain words; passive reads; setter-only permissions; settings submenu; inline reason; warning/Help scope and tomes; M2 notes)')
