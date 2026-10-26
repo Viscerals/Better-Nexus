@@ -8,7 +8,7 @@ local TEXT_TAIL = "Choose No to keep Auto OFF. Opening this warning does not ena
 local TEXT = TEXT_HEAD .. TEXT_TAIL
 -- The first-launch warning's answers are Continue / Close (BindAnswers), so its
 -- closing choice names Close. The Auto warning and any other kind keep TEXT_TAIL.
-local ONBOARDING_TEXT = TEXT_HEAD .. "Choose Close to keep Auto OFF. Opening this warning does not enable Auto."
+local ONBOARDING_TEXT = TEXT_HEAD .. "Continue may open the guided setup if this is your first use. Close opens information-only setup. Neither turns Auto on."
 
 -- The Auto warning (kind "auto") also lists what Auto may do, from the
 -- current permissions (Readout.AutomationScopeLines, read only), and what it

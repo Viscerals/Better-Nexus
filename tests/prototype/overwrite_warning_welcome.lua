@@ -12,13 +12,13 @@ assert(not NexusQuickStart or not NexusQuickStart:IsShown(),'welcome waits for r
 -- exact literals. Welcome buttons are found by their existing caption only.
 local V=dofile('tests/prototype/view_regression_support.lua')
 local C=V.Checker('overwrite_warning_welcome')
-local ONBOARDING_FOOTER='Choose Close to keep Auto OFF. Opening this warning does not enable Auto.'
+local ONBOARDING_FOOTER='Continue may open the guided setup if this is your first use. Close opens information-only setup. Neither turns Auto on.'
 local AUTO_FOOTER='Choose No to keep Auto OFF. Opening this warning does not enable Auto.'
 local function Ends(win,tail)local text=tostring(win.body and win.body:GetText() or '');return text:sub(-#tail)==tail end
 local function Captions(win,where)
  C.expect(win.yes:GetText()=='Continue \226\128\148 Auto stays OFF',where..': onboarding Yes reads Continue - Auto stays OFF',win.yes:GetText())
  C.expect(win.no:GetText()=='Close',where..': onboarding No reads Close',win.no:GetText())
- C.expect(Ends(win,ONBOARDING_FOOTER),where..': onboarding footer is exact Choose Close')
+ C.expect(Ends(win,ONBOARDING_FOOTER),where..': onboarding footer explains both safe routes')
 end
 local function Child(parent,label)
  for _,c in ipairs(parent.children)do if c:IsObjectType('Button') and c:GetText()==label then return c end end
