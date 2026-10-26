@@ -176,6 +176,19 @@ function M.AssignWithConsent(wishlistName, targetLabel, numbered, assign)
     return true
 end
 
+-- Guided setup receipt (core/GuidedSetup.lua): reports the outcome of an
+-- assignment the player chose in this chooser. It records only; it writes,
+-- requests and changes nothing, and a missing guide changes nothing.
+local function GuideAssign(numbered, active, ok, reason, snapshot)
+    local guide = Nexus.GuidedSetup
+    if not (guide and type(guide.Note) == "function") then return end
+    pcall(guide.Note, "assign", {origin = "journal",
+        destination = numbered and tonumber(active) or "first", ok = ok == true, reason = reason,
+        key = type(snapshot) == "table" and snapshot.key or nil,
+        slot = type(snapshot) == "table" and snapshot.slot or nil,
+        name = type(snapshot) == "table" and snapshot.name or nil})
+end
+
 ------------------------------------------------------------------------
 -- Text lines
 ------------------------------------------------------------------------
@@ -1374,15 +1387,16 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     -- current-lock default or the role picker) and the
                     -- assignment it ends in wait for the same Auto-ON
                     -- confirmation; Cancel writes neither.
-                    M.AssignWithConsent(shownName, target, numbered and not emptySlot, function()
+                    local asked, why = M.AssignWithConsent(shownName, target, numbered and not emptySlot, function()
                         HideWishlistPicker()
                         Nexus.WishlistEditor.ResolveAndAssignWishlist(cSnapshot,tonumber(active) or 0)
                     end)
+                    if asked == nil then GuideAssign(numbered, active, false, why, cSnapshot) end
                     return
                 end
                 -- The captured target, candidate and empty-slot refusal as
                 -- before; Auto selected asks first (M.AssignWithConsent).
-                M.AssignWithConsent(shownName, target, numbered and not emptySlot, function()
+                local asked, why = M.AssignWithConsent(shownName, target, numbered and not emptySlot, function()
                     local ok, err
                     if numbered then
                         ok, err = A.SetLoadoutWishlist(active, cSlot, cSnapshot)
@@ -1392,9 +1406,11 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                         ok, err = false, "first-run association unavailable"
                     end
                     if not ok then
+                        GuideAssign(numbered, active, false, err, cSnapshot)
                         print("|cffff6060Nexus:|r " .. tostring(err or "could not select wishlist"))
                         return
                     end
+                    GuideAssign(numbered, active, true, nil, cSnapshot)
                     HideWishlistPicker()
                     M.RefreshAssociations()
                     if Nexus.Panel and Nexus.Panel.Refresh then pcall(Nexus.Panel.Refresh) end
@@ -1402,6 +1418,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     print("|cff4dff80Nexus:|r '" .. shownName .. "' is now the Wishlist for " .. target
                         .. ". No Saved Build was changed or activated.")
                 end)
+                if asked == nil then GuideAssign(numbered, active, false, why, cSnapshot) end
             end
             local function OpenWishlistEditorOnly()
                 HideWishlistPicker()

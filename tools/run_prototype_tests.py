@@ -351,6 +351,8 @@ NAMES += ['flexible_plan_persistence_store']
 NAMES += ['flexible_plan_persistence_retention']
 # #151: chooser SavePool/LoadPool/PersistenceState, owned Load/Clear consent and the visible Save pool/Load saved controls over the real facade (EXPECT fails at 4c92d3f by design).
 NAMES += ['flexible_plan_persistence_chooser']
+# Issue #131: guided setup coach flow/navigation and receipt/read-back evidence (EXPECT fails at 2b287ef8 by design).
+NAMES += ['guided_setup_flow','guided_setup_readback']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

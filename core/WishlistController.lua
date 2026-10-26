@@ -2575,7 +2575,10 @@ function Controller.New(options)
     -- request, a slot name or the generic saved line. It is bound to the
     -- editing and create contexts and the Store owner of the attempt.
     local function NewSaveResult(kind, reason, name, destination)
-        return {kind = kind, reason = reason, name = tostring(name or ""),
+        -- A per-editor counter that versions each recorded result for the
+        -- read-only receipt below (M.SaveReceipt); it decides nothing.
+        state.saveSerial = (state.saveSerial or 0) + 1
+        return {serial = state.saveSerial, kind = kind, reason = reason, name = tostring(name or ""),
             destination = destination,
             editingContext = state.editingContext,
             createTargetContext = state.createTargetContext,
@@ -2618,6 +2621,9 @@ function Controller.New(options)
                 trace.settled == true, uncertain)
         end
         result.copies = DraftModel.EchoListTotal(echoes or {})
+        -- The content identity of the uploaded rows, for the receipt only.
+        result.key = Adapter and type(Adapter.WishlistKey) == "function"
+            and Adapter.WishlistKey(echoes or {}) or nil
         if not called then
             -- Recorded as far as it got before the error is raised again:
             -- uploaded and then stopped, possibly sent, or nothing sent.
@@ -2693,6 +2699,20 @@ function Controller.New(options)
             if typed ~= result.name and typed ~= result.requestedName then return false end
         end
         return true
+    end
+
+    -- Guided setup receipt (read-only): what the last recorded save did,
+    -- with its version, content key, written destination and the token that
+    -- write installed. A result that no longer describes this editor is not
+    -- returned; unlike M.SaveResult nothing is retired here.
+    function M.SaveReceipt()
+        local result = state.saveResult
+        if not result or not SaveResultCurrent(result, nil) then return nil end
+        return {serial = result.serial, kind = result.kind, reason = result.reason,
+            name = result.name, key = result.key, written = result.written,
+            token = result.token, epoch = result.epoch, intent = result.intent,
+            create = result.create, copies = result.copies,
+            destination = CopyRecord(result.destination)}
     end
 
     local ASSIGN_NOW_KINDS = {unassigned = true, kept = true}

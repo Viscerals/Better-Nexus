@@ -223,7 +223,8 @@ local function EnsureFrame()
     -- font needs 5 and 2. tests/prototype/quickstart_layout_fit.lua models both.
     -- The Sync line below the buttons (4 lines at that font, 3 at the
     -- default) adds 80 px; tests/prototype/ux_sync_disclosure.lua models it.
-    frame:SetSize(420, 440)
+    -- 36 px above the earlier 440 for the Guided setup row.
+    frame:SetSize(420, 476)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 55)
     frame:SetFrameStrata("DIALOG")
     frame:EnableMouse(true)
@@ -317,9 +318,22 @@ local function EnsureFrame()
     local orbs = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     orbs:SetSize(174,26);orbs:SetPoint("TOPRIGHT",-24,-250);orbs:SetText("Orbs / Lost Memories")
     orbs:SetScript("OnClick",function() Finish();if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end)
+    -- Guided setup: the step-by-step coach (ui/GuidedSetup.lua). Like the
+    -- other entry buttons it only navigates: it records no setup fact,
+    -- grants no consent and never turns Auto ON. The Sync line moves down.
+    local guide = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    guide:SetSize(372, 26)
+    guide:SetPoint("TOPLEFT", 24, -284)
+    guide:SetText("Guided setup (step by step)")
+    guide:SetScript("OnClick", function()
+        Finish()
+        CloseOtherSetupWindows()
+        if Nexus.GuidedSetupUI then Nexus.GuidedSetupUI.Show() end
+    end)
+    frame.guide = guide
     local sync = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     frame.sync = sync
-    sync:SetPoint("TOPLEFT", 24, -284)
+    sync:SetPoint("TOPLEFT", 24, -318)
     sync:SetSize(372, 72)
     sync:SetJustifyH("LEFT")
     sync:SetJustifyV("TOP")

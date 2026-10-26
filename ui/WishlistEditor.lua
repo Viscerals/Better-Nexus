@@ -202,12 +202,30 @@ local function RendererInstance()
         "Wishlist renderer unavailable")
 end
 
+-- Guided setup receipts (core/GuidedSetup.lua): passive reports of real
+-- outcomes of this editor. They record only; nothing here writes, uploads
+-- or assigns, and a missing guide changes nothing.
+local guideSeen = 0
+local function GuideNote(kind, fields)
+    local guide = Nexus.GuidedSetup
+    if guide and type(guide.Note) == "function" then pcall(guide.Note, kind, fields) end
+end
+local function GuideSave()
+    local read = wishlistController.SaveReceipt
+    local receipt = type(read) == "function" and read() or nil
+    if type(receipt) == "table" and (tonumber(receipt.serial) or 0) > guideSeen then
+        guideSeen = receipt.serial
+        GuideNote("save", receipt)
+    end
+end
+
 function M._PumpApplyRetry()
     local ok = wishlistController.PumpApplyRetry()
     SyncFulfilledDraftTargets()
     if ok and wishlistRenderer then wishlistRenderer.SetApplySaved() end
     -- A finished retry (not an idle pump) shows its result at once.
     if ok ~= nil and wishlistRenderer then wishlistRenderer.RenderSaveResult() end
+    if ok ~= nil then GuideSave() end
 end
 
 function M.IsApplyPending()
@@ -219,6 +237,7 @@ local function AcceptApply(data)
     SyncFulfilledDraftTargets()
     if ok and wishlistRenderer then wishlistRenderer.SetApplySaved() end
     if wishlistRenderer then wishlistRenderer.RenderSaveResult() end
+    GuideSave()
     return ok, err
 end
 
@@ -320,6 +339,8 @@ local function LoadImportedWishlist(parsed, chosenName)
     print(string.format(
         "|cff4dff80Nexus:|r imported %d Echo entr%s as new wishlist '%s'. Review this draft; Create & assign saves it and assigns it to the loadout shown by the editor, Create unassigned saves it without an assignment.",
         count, count == 1 and "y" or "ies", displayName))
+    -- An opened draft, not a saved plan.
+    GuideNote("draft", {origin = "import", name = name})
     return true
 end
 
@@ -496,6 +517,8 @@ function RolePicker.Accept()
         local ok,err
         if state.activeSlot==0 then ok,err=Adapter.SetFirstRunWishlist(resolved.slot,resolved)
         else ok,err=Adapter.SetLoadoutWishlist(state.activeSlot,resolved.slot,resolved) end
+        GuideNote("assign",{origin="rolepicker",destination=state.activeSlot==0 and "first" or state.activeSlot,
+            ok=ok==true,reason=err,key=resolved.key,slot=resolved.slot,name=resolved.name})
         if not ok then
             RolePicker.Message("Roles saved, but assignment did not complete: " .. tostring(err or "unavailable"))
             return false
@@ -586,7 +609,14 @@ function RolePicker.Ensure()
     f.message=label("GameFontHighlightSmall",20,-430,570)
     f.message:SetHeight(44);f.message:SetJustifyV("TOP")
     f.confirm=button("NexusWishlistRoleConfirm","Confirm locked targets & edit",210,-476,278,RolePicker.Accept)
-    f.cancel=button("NexusWishlistRoleCancel","Cancel",498,-476,90,RolePicker.Hide)
+    f.cancel=button("NexusWishlistRoleCancel","Cancel",498,-476,90,function()
+        local pending=RolePicker.state
+        if pending and pending.assign then
+            GuideNote("assign",{origin="rolepicker",destination=pending.activeSlot==0 and "first" or pending.activeSlot,
+                ok=false,cancelled=true,reason="cancelled"})
+        end
+        RolePicker.Hide()
+    end)
     f:Hide()
     return f
 end
@@ -667,8 +697,13 @@ function M.ResolveAndAssignWishlist(candidate, activeSlot)
             activeSlot=tonumber(activeSlot) or 0})
     end
     if status~="actionable" then return false,why end
-    if tonumber(activeSlot)==0 then return Adapter.SetFirstRunWishlist(resolved.slot,resolved) end
-    return Adapter.SetLoadoutWishlist(activeSlot,resolved.slot,resolved)
+    local first=tonumber(activeSlot)==0
+    local ok,err
+    if first then ok,err=Adapter.SetFirstRunWishlist(resolved.slot,resolved)
+    else ok,err=Adapter.SetLoadoutWishlist(activeSlot,resolved.slot,resolved) end
+    GuideNote("assign",{origin="editor",destination=first and "first" or activeSlot,ok=ok==true,
+        reason=err,key=resolved.key,slot=resolved.slot,name=resolved.name})
+    return ok,err
 end
 
 -- The editor's Wishlist candidates (when nothing is tracked) assign the clicked

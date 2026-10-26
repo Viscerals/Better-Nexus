@@ -7,6 +7,8 @@ local HELP_LEVEL=40
 local pages={
  {id="start",title="Getting started",text=[[Start here: the page buttons above open any page directly. Setup / Welcome reopens the first-launch guide; it is information only, saves nothing and never turns Auto ON. Assign Wishlist... opens the Echo Journal with its Wishlist chooser for the Saved Build the Journal shows; nothing is assigned until you choose a Wishlist there.
 
+Guided setup (the Guided setup button in Setup / Welcome) goes one step at a time: choose or create a Wishlist, choose the Saved Build that should follow it, assign it in the Echo Journal chooser, try a SIMULATED recommendation and decide about Auto. A step is done only after Nexus reads the result back; a skipped, pending or unknown step is not done. Opening, navigating or closing the guide assigns, saves, shares, spends and turns on nothing.
+
 Setup checklist (also in the ... menu) shows what Nexus can read now: start-up, the Saved Build Nexus would act on, its assigned Wishlist, Auto, Sync and any Orb run. A step is done only when that is true now; unknown or still loading is never shown as done, and closing the Welcome is not a setup step. Its buttons only open the same windows as here.
 
 This is an experimental build. Back up your Nexus folder and WTF with WoW closed before testing. Reading this guide never spends, assigns, activates, or sends a Sync request.
@@ -302,6 +304,22 @@ function H.OpenChecklist()
     end
     if frame then frame:Hide() end
     quick.ShowChecklist()
+    return true
+end
+-- Guided setup: the step-by-step coach (ui/GuidedSetup.lua). It waits for
+-- an open Auto warning and changes nothing by opening.
+function H.OpenGuide()
+    local ui=Nexus.GuidedSetupUI
+    if not (ui and type(ui.Show)=="function") then
+        return Refuse("Guided setup is not available.")
+    end
+    local shown,why=ui.Show()
+    if not shown then
+        return Refuse(why=="warning-open"
+            and "Answer the open Auto warning first (Yes or No); Guided setup opens after it."
+            or "Guided setup is not available right now.")
+    end
+    if frame then frame:Hide() end
     return true
 end
 -- Wishlist Editor: the editor as /nexus editor opens it.

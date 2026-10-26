@@ -69,6 +69,7 @@ core\CommunityController.lua
 core\GameAdapter.lua
 core\OrbAdapter.lua
 core\OrbRuntime.lua
+core\GuidedSetup.lua
 ui\VirtualList.lua
 ui\Theme.lua
 ui\OverwriteWarning.lua
@@ -89,6 +90,7 @@ ui\FlexiblePlanChooser.lua
 ui\WishlistEditor.lua
 ui\WishlistOverlay.lua
 ui\QuickStart.lua
+ui\GuidedSetup.lua
 ui\CommunityRenderer.lua
 ui\CommunityBuilds.lua
 ui\Leaderboard.lua
