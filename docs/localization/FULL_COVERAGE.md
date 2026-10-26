@@ -14,8 +14,9 @@ It accepts no issue: not #139, not #147 and no later gate.
 - English UI keys, catalog and locale entries, and window-family adoption are
   incomplete. Fluent reviewers are UNASSIGNED and native evidence is NOT_RUN
   for every language.
-- The six current English keys ([KEY_CONTEXT.json](KEY_CONTEXT.json)) and the
-  three inherited draft translations per pack at the pin are not complete
+- The six English keys at the source pin (before the later technical slice
+  recorded in [KEY_CONTEXT.json](KEY_CONTEXT.json)) and the three inherited
+  draft translations per pack at that pin are not complete
   localization. A separate owner is adding the three missing existing keys to
   each of the six packs (18 draft entries, no new English key). Those entries
   remain draft until human review. Per-pack counts are derived from catalog
@@ -28,7 +29,7 @@ It accepts no issue: not #139, not #147 and no later gate.
 | Part | This contract | Separate next task |
 |---|---|---|
 | Release languages | `RELEASE_LANGUAGES.json`: product choices, client evidence, review and session states, and the `entryReview` declaration contract with no declaration recorded | none in this slice |
-| Keys and context | `KEY_CONTEXT.json`: six keys, byte limits, grammar, families | none in this slice |
+| Keys and context | `KEY_CONTEXT.json`: one row per current English key, byte limits, grammar, families | none in this slice |
 | Validator | `tools/l10n_catalog.py`, status `IMPLEMENTED_DRAFT_REVIEW_PENDING`: syntax parser, pure schema API `validate_catalog_data`, pure coverage report API `catalog_report` on exact in-memory bytes, and the read-only confined-root command line around `catalog_report` (B3b); scoped static-catalog validation IMPLEMENTED_DRAFT (not whole #147) | independent review |
 | Tests | `tools/tests/test_l10n_catalog.py`: assertions on these public documents, public parser, schema and report API tests, and subprocess tests of the command line on the repository and on temporary public-only roots | independent review; host validation against the final source pin |
 | Required CI | registered in source (`REGISTERED_IN_PYTHON_TESTS`): `tools/tests/test_l10n_catalog.py` is the second entry of `PYTHON_TESTS` in `tools/run_prototype_tests.py`, run by `tools/ci_check.py` as its own process | independent review; host and hosted-CI validation against the final source pin |

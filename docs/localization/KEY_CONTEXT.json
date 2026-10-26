@@ -365,7 +365,7 @@
     {"lead": "#143 preparation", "keys": 21, "pin": "as stated in that preparation record; not restated here", "isCurrentSemanticInventory": false}
   ],
   "packCoverage": {
-    "countRule": "Translated, missing, invalid and obsolete entry counts per pack are derived by tools/l10n_catalog.py from the actual data/LocalizationEnglish.lua and data/LocalizationPacks.lua bytes and this key context; this document hardcodes no universal key or entry count, and fallback English or an autonym never counts as a translation. A count observed at a named technical pin is not future cardinality or fluent acceptance.",
+    "countRule": "Per-pack entry counts and categories are derived by tools/l10n_catalog.py catalog_report from the actual bytes of data/LocalizationEnglish.lua, data/LocalizationPacks.lua, this KEY_CONTEXT.json and RELEASE_LANGUAGES.json (including its entryReview declarations); this document hardcodes no universal key or entry count, and fallback English or an autonym never counts as a translation. A count observed at a named technical pin is not future cardinality or fluent acceptance.",
     "baselineObservation": {
       "pin": "5c77eec5b791f64468576e37a70b3855375b7fcb",
       "appliesTo": ["frFR", "deDE", "esES", "plPL", "ptBR", "ruRU"],

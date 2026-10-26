@@ -1092,9 +1092,10 @@ class CatalogParserGrammar(unittest.TestCase):
 # B2 schema API (Refs #147): public tests of validate_catalog_data and
 # CatalogValidationError. The cases were written against the six-key English
 # base and its metadata. Their fixtures are independent of the implementation:
-# the exact bytes of the four inputs in this checkout, the literal English and
-# pack tables of the B1 section, the loaded JSON documents and the literal
-# scalar and template cases below. Each case changes one thing in memory and
+# rebuilt historical six-key English, pack and context inputs from the B1
+# literals and historical_context(), plus the actual release bytes and the
+# literal scalar and template cases below. Actual current checkout inputs are
+# exercised separately. Each case changes one thing in memory and
 # passes exact bytes to the real schema API; the expectations are independent
 # literals, not the implementation's tables. No Lua is executed and main() is
 # not invoked here. Coverage counts and evidence (B3a) and the command line
@@ -2344,8 +2345,10 @@ class CatalogCoverageReport(unittest.TestCase):
 
 # B3b command line (Refs #147): public subprocess tests of
 #     python tools/l10n_catalog.py [--root DIR] [--require-complete]
-# Each temporary root holds only copies of the public catalog inputs, changed
-# where a case says so, and a minimal Nexus.toc. Root files are input data:
+# Temporary roots hold rebuilt historical six-key English, pack and context
+# fixtures plus actual release bytes, changed only where a case says so, and
+# a minimal Nexus.toc. Real-repository-root cases use actual current inputs.
+# Root files are input data:
 # nothing in a root is imported or run. The command-line children of cli_run
 # run the tool as a script with bytecode writing enabled, and no parser or API
 # is mocked there. The isolated -I -B children of cli_fault_run, used only by
