@@ -1185,7 +1185,7 @@ local function EnsureFrame()
     frame:SetScript("OnDragStart",function(self) self:StartMoving() end); frame:SetScript("OnDragStop",function(self) self:StopMovingOrSizing() end); frame:Hide()
     pcall(function() frame:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=12,top=12,bottom=11}}) end)
     pcall(function() frame:SetBackdropColor(0.16,0.165,0.175,0.90) end)
-    local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); title:SetPoint("TOP",0,-14); title:SetText("Nexus — Leaderboard")
+    local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); title:SetPoint("TOP",0,-14); title:SetText("Explore / Leaderboard")
     local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",-6,-6)
     local builds=MakeNavButton(frame,"Builds",88); builds:SetPoint("TOPLEFT",18,-12); builds:SetScript("OnClick",function() M.Hide(); if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end end)
     local board=MakeNavButton(frame,"Leaderboard",102); board:SetPoint("LEFT",builds,"RIGHT",4,0); board:SetText("|cffffd200Leaderboard|r"); board:Disable()
@@ -1194,6 +1194,11 @@ local function EnsureFrame()
     -- Leaderboard). Like the other navigation buttons it replaces this window,
     -- whose layer is above Help's; it opens a page only.
     frame._helpNav=MakeNavButton(frame,"Help",56); frame._helpNav:SetPoint("LEFT",wish,"RIGHT",4,0); frame._helpNav:SetScript("OnClick",function() M.Hide(); if Nexus.Help then Nexus.Help.Show("sharing") end end)
+    if Nexus.FullUIWorkspaces then
+        Nexus.FullUIWorkspaces.BindTabs(frame, "records", {
+            plan = wish, builds = builds, records = board,
+        }, function() if classMenu then classMenu:Hide() end end)
+    end
 
     searchBox=CreateFrame("EditBox","NexusLeaderboardSearch",frame,"InputBoxTemplate"); searchBox:SetSize(265,22); searchBox:SetPoint("TOPLEFT",18,-50); searchBox:SetAutoFocus(false); searchBox:SetScript("OnTextChanged",RefreshInteractive)
     local ph=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); ph:SetPoint("LEFT",searchBox,"LEFT",6,0); ph:SetText("Search player or build...")

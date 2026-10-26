@@ -1297,7 +1297,7 @@ local function EnsureFrame()
 
     titleText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     titleText:SetPoint("TOP", 0, -14)
-    titleText:SetText("Nexus Wishlist Editor")
+    titleText:SetText("Plan / Wishlist Editor")
 
     -- The existing 900x18 context row under the title is the destination
     -- row: editContextText is its first visible cell (character), and the
@@ -1396,6 +1396,17 @@ local function EnsureFrame()
     frame._helpNav:SetScript("OnClick", function()
         if Nexus.Help then Nexus.Help.Show("wishlists") end
     end)
+    if Nexus.FullUIWorkspaces then
+        Nexus.FullUIWorkspaces.BindTabs(frame, "plan", {
+            plan = wishNav, builds = buildsNav, records = boardNav,
+        })
+        -- LoadingStatus can repaint these labels after construction. Keep its
+        -- guarded buttons and pending-state tooltips, with the workspace names.
+        if Nexus.LoadingStatus then
+            Nexus.LoadingStatus.BindSharedButton(buildsNav, "Explore")
+            Nexus.LoadingStatus.BindSharedButton(boardNav, "Records")
+        end
+    end
 
     loadoutSwitchBtn = CreateFrame("Button", nil, frame)
     loadoutSwitchBtn:SetSize(230, 22)
@@ -2197,7 +2208,8 @@ local function RefreshView(catalogRevision)
     -- cell is editContextText); M.Refresh words it from the controller's
     -- captured descriptor. Only the title is set here.
     if titleText then
-        titleText:SetText(editingContext and "Edit Wishlist" or "Create New Wishlist")
+        titleText:SetText(editingContext and "Plan / Edit Wishlist"
+            or "Plan / Create Wishlist")
     end
 
     -- The destination row's view observation: this refresh's one existing

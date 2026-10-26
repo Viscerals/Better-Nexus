@@ -358,6 +358,7 @@ NAMES += ['guided_setup_flow','guided_setup_readback']
 NAMES += ['guided_first_entry']
 # Issue #163 UI review prototype: shared status vocabulary and grouped navigation with existing labels.
 NAMES += ['ui_review_navigation']
+NAMES += ['full_ui_workspaces']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

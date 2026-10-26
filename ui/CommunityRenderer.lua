@@ -3266,7 +3266,7 @@ local function EnsureFrame()
     titleText:SetPoint("TOP",0,-12)
     titleText:SetJustifyH("CENTER")
     frame._titleText = titleText
-    titleText:SetText("Nexus  —  Build Library")
+    titleText:SetText("Explore / Build Library")
 
     local closeBtn = CreateFrame("Button",nil,frame,"UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT",-6,-6)
@@ -3445,6 +3445,11 @@ local function EnsureFrame()
         frame:Hide()
         if Nexus.Help then Nexus.Help.Show("sharing") end
     end)
+    if Nexus.FullUIWorkspaces then
+        Nexus.FullUIWorkspaces.BindTabs(frame, "builds", {
+            plan = wishlistBtn, builds = buildsTab, records = leaderboardBtn,
+        }, CloseDropdowns)
+    end
 
     -- Browse toolbar ----------------------------------------------------
     local browseLabel = frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
