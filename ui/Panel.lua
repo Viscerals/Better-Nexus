@@ -3826,7 +3826,14 @@ end
 local function ApplyCandidate(model, signatures, roll)
     if not frame.toLockLabel then CreateToLockWidgets(frame) end
     M.ApplyOwnedFonts()
-    return ApplyModel(model, signatures, roll)
+    local applied = ApplyModel(model, signatures, roll)
+    if applied and Nexus.LayoutMetrics and Nexus.LayoutMetrics.FitToScreen then
+        -- The HUD can grow taller than the viewport with large fonts, an
+        -- observed Callboard and optional sections. Refit on settled renders
+        -- too: a viewport resize need not change the model's layout key.
+        Nexus.LayoutMetrics.FitToScreen(frame)
+    end
+    return applied
 end
 
 -- Panel is the one owner of the user-text presentation of a model's status
