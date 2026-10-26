@@ -232,9 +232,25 @@ C.scenario('F6 Step 5 option captions fit their rows at 420 px and 125% text',fu
  Boot()
  L.UseFont({name='125%',char=8.75,line=15,size=15})
  if not Open('F6') then return end
+ local g=Guide()
+ -- Model the UIPanelButtonTemplate's reusable FontString, which the plain
+ -- harness does not create. Keep its original one-line geometry for the
+ -- return trip from Step 5 to a different multi-option step.
+ local captions={}
+ local setText=L.RegionMethods().SetText
+ for i,b in ipairs(g.options) do
+  local caption=b:CreateFontString()
+  caption:SetSize(b:GetWidth()-24,14)
+  caption:SetText(b:GetText())
+  caption.wordWrap=false
+  caption.SetWordWrap=function(self,enabled) self.wordWrap=enabled==true end
+  caption.GetWordWrap=function(self) return self.wordWrap end
+  b.GetFontString=function() return caption end
+  b.SetText=function(self,label) setText(self,label);caption:SetText(label) end
+  captions[i]={font=caption,width=caption:GetWidth(),height=caption:GetHeight(),wrap=caption:GetWordWrap()}
+ end
  Press(Opt('Just explore'))
  C.setup(Step()=='manual','F6: fixture: the rendered coach is on Step 5')
- local g=Guide()
  local function checkRows(tag)
   local root=L.Rect(g,g)
   local previous=nil
@@ -259,6 +275,24 @@ C.scenario('F6 Step 5 option captions fit their rows at 420 px and 125% text',fu
  C.expect(g.options[1].full==('[SIMULATED] '..cards[1]),'F6: full localized option remains available on hover')
  checkRows('long localized Step 5 copy')
  cards[1]=original
+ Press(Btn('Back'))
+ C.setup(Step()=='welcome','F6: Back returns from the simulated lesson to Welcome')
+ Press(Opt('I already have'))
+ C.setup(Step()=='wishlist' and g.options[1]:IsShown() and g.options[2]:IsShown(),
+  'F6: another multi-option step reuses the simulated lesson buttons')
+ for i=1,2 do
+  local b,originalCaption=g.options[i],captions[i]
+  local caption=originalCaption.font
+  C.expect(b:GetHeight()==22 and caption:GetWidth()==originalCaption.width
+   and caption:GetHeight()==originalCaption.height and caption:GetWordWrap()==originalCaption.wrap,
+   'F6: reused option '..i..' restores its original one-line caption geometry',
+   'button='..b:GetHeight()..' caption='..caption:GetWidth()..'x'..caption:GetHeight()
+    ..' wrap='..tostring(caption:GetWordWrap()))
+  C.expect(caption:GetHeight()<=b:GetHeight()-8 and L.Inside(L.Rect(b,g),L.Rect(g,g)),
+   'F6: returned option '..i..' caption stays within its row and the coach')
+ end
+ C.expect(L.Apart(L.Rect(g.options[1],g),L.Rect(g.options[2],g)),
+  'F6: the returned multi-option rows do not overlap')
 end)
 
 C.finish('(guided coach: one step at a time; navigation changes nothing; verified only after read back)')

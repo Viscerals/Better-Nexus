@@ -80,6 +80,14 @@ local function FitManualOption(b)
     local width = math.max(1, b:GetWidth() - 16)
     local font = type(b.GetFontString) == 'function' and b:GetFontString() or nil
     if font then
+        if not b._normalOptionFont then
+            local wrap = false
+            if type(font.GetWordWrap) == 'function' then
+                local ok, value = pcall(font.GetWordWrap, font)
+                if ok then wrap = value == true end
+            end
+            b._normalOptionFont = {width = font:GetWidth(), height = font:GetHeight(), wrap = wrap}
+        end
         font:SetWidth(width)
         font:SetWordWrap(true)
         font:SetHeight(0)
@@ -98,6 +106,16 @@ local function FitManualOption(b)
     local height = math.min(BLOCK_MAX, math.max(22, math.ceil(measured + 8)))
     b:SetHeight(height)
     if font then font:SetHeight(height - 8) end
+end
+
+local function ResetManualOption(b)
+    local normal = b._normalOptionFont
+    if not normal then return end
+    local font = type(b.GetFontString) == 'function' and b:GetFontString() or nil
+    if not font then return end
+    if normal.width then font:SetWidth(normal.width) end
+    if normal.height then font:SetHeight(normal.height) end
+    if type(font.SetWordWrap) == 'function' then font:SetWordWrap(normal.wrap) end
 end
 
 local function Ensure()
@@ -343,6 +361,7 @@ function U.Render()
     if note then extra = extra and (extra .. '\n' .. note) or note end
     f.extra:SetText(extra or '')
     for i, btn in ipairs(f.options) do
+        if id ~= 'manual' then ResetManualOption(btn) end
         SetButton(btn, (v.options or {})[i])
         btn:SetHeight(22)
         if id == 'manual' and btn:IsShown() then FitManualOption(btn) end
