@@ -56,6 +56,12 @@ end
 check(Nexus.WishlistEditor.DebugDraftState().pending>0,
  'the synthetic Plan fixture has a real unsaved Echo draft')
 local beforeDraft=F.Serialize(Nexus.WishlistEditor.DebugDraftState())
+Nexus.Panel.OpenAssignment=function() return false,'native assignment unavailable' end
+local refusedRoute,routeReason=U.OpenPlanAction('assignment')
+check(refusedRoute==false and routeReason=='native assignment unavailable'
+ and plan:IsShown() and F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft,
+ 'a refused native Plan action reports failure and keeps the unsaved draft')
+Nexus.Panel.OpenAssignment=originalAssign
 local realCommunityShow=Nexus.CommunityBuilds.Show
 Nexus.CommunityBuilds.Show=function() return false,'pending' end
 plan._workspaceTabs.builds:GetScript('OnClick')(plan._workspaceTabs.builds)
@@ -135,8 +141,39 @@ check(retryGuard==false and retryReason:find('pending Save',1,true)
  and plan:IsShown(),
  'a confirmed Save retry blocks tab leave rather than cancelling it')
 Nexus.WishlistEditor.IsApplyPending=normalApply
+Nexus.WishlistEditor.OpenFlexiblePlanChooser()
+check(NexusFlexiblePlanChooser and NexusFlexiblePlanChooser:IsShown(),
+ 'the real Flexible Plan chooser remains independently visible on UIParent')
+local chooserLeave,chooserReason=U.NavigateFrom(plan,'builds')
+check(chooserLeave==false and chooserReason:find('Plan alternatives',1,true)
+ and plan:IsShown() and NexusFlexiblePlanChooser:IsShown()
+ and F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft,
+ 'leaving Plan with its independent chooser open refuses without losing the draft')
+NexusFlexiblePlanHide:Click()
+local originalDecode=Nexus.Codec.DecodeEBH1
+Nexus.Codec.DecodeEBH1=function() return {entries={{spellId=200001,quality=1,stacks=1}},name=''} end
+Nexus.WishlistEditor.ImportEBH1String('synthetic EBH1')
+Nexus.Codec.DecodeEBH1=originalDecode
+check(H.popup and H.popup.which=='NEXUS_NAME_IMPORTED_WISHLIST',
+ 'the real nameless import path leaves a deferred name confirmation')
+local importPopup=H.popup
+local importLeave,importReason=U.NavigateFrom(plan,'builds')
+check(importLeave==false and importReason:find('import',1,true)
+ and plan:IsShown() and H.popup==importPopup
+ and F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft,
+ 'leaving Plan with the imported-name confirmation open refuses without replacing the draft')
+StaticPopup_Hide('NEXUS_NAME_IMPORTED_WISHLIST')
 plan._workspaceTabs.builds:GetScript('OnClick')(plan._workspaceTabs.builds)
 check(builds:IsShown() and not plan:IsShown(),'after guard clears, tab leave opens Explore')
+local hiddenChooser,hiddenReason=Nexus.WishlistEditor.OpenFlexiblePlanChooser()
+check(hiddenChooser==false and hiddenReason=='Plan draft suspended'
+ and not NexusFlexiblePlanChooser:IsShown()
+ and F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft,
+ 'a hidden Plan draft cannot open a later chooser over Explore')
+StaticPopupDialogs.NEXUS_NAME_IMPORTED_WISHLIST.OnAccept(importPopup.frame,importPopup.data)
+check(F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft
+ and not plan:IsShown(),
+ 'a delayed import confirmation cannot replace the suspended draft')
 local replacement,replacementReason=Nexus.WishlistEditor.NewWishlist()
 check(replacement==false and replacementReason=='Plan draft suspended'
  and F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft,

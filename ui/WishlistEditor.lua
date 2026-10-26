@@ -332,6 +332,9 @@ local function EndGuidedImport()
 end
 
 local function LoadImportedWishlist(parsed, chosenName)
+    -- A naming popup can outlive the editor window. A delayed Accept must
+    -- never replace a Plan draft protected by workspace navigation.
+    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
     if parsed and parsed.needsRoleSelection then
         local opened = RolePicker.Begin(parsed.entries,{kind="import",name=TrimWishlistName(chosenName),class=parsed.class})
         if not opened then EndGuidedImport() end
@@ -979,6 +982,7 @@ StaticPopupDialogs["NEXUS_FLEXIBLE_PLAN_REPLACE"] = {
 }
 
 function M.OpenFlexiblePlanChooser()
+    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
     if not flexiblePlanChooser then
         flexiblePlanChooser = Nexus.FlexiblePlanChooser.New({
             catalog=wishlistController.CatalogProjection,
@@ -987,6 +991,7 @@ function M.OpenFlexiblePlanChooser()
             persistence=(Nexus.FlexiblePlanStore and Nexus.FlexiblePlanStore.New
                 and Nexus.FlexiblePlanStore.New({store=Nexus.Store})) or nil,
             openDraft=function(draft, alternatives, planCurrent, installed, refuse)
+                if workspaceResume then return refuse("EDITOR_CHANGED") end
                 local renderer = RendererInstance()
                 local name = renderer.NameText()
                 local intent, why = wishlistController.PrepareNewExactDraft(draft, alternatives)
@@ -1010,6 +1015,9 @@ function M.OpenFlexiblePlanChooser()
                     -- refused request therefore cannot install when the former name,
                     -- count or context is restored and its old callback is replayed.
                     flexiblePlanRequest = nil
+                    -- A native popup may deliver Accept after its Plan window was
+                    -- suspended. Do not reveal the chooser over another workspace.
+                    if workspaceResume then return refuse("EDITOR_CHANGED") end
                     local current, countReason = planCurrent()
                     if not current then return RevealRefusal(countReason or "PLAN_CHANGED") end
                     if renderer.NameText() ~= name then return RevealRefusal("EDITOR_CHANGED") end
@@ -1145,6 +1153,14 @@ function M.SuspendForWorkspace()
     local confirmation = SaveConfirmationOpen()
     if confirmation or M.IsApplyPending() then
         return false, "finish or cancel the pending Save before leaving Plan"
+    end
+    local chooser = _G.NexusFlexiblePlanChooser
+    if flexiblePlanRequest or (chooser and chooser.IsShown and chooser:IsShown()) then
+        return false, "close Plan alternatives or finish its replacement before leaving Plan"
+    end
+    if type(StaticPopup_Visible) == "function"
+        and StaticPopup_Visible("NEXUS_NAME_IMPORTED_WISHLIST") then
+        return false, "finish or cancel the imported Wishlist name before leaving Plan"
     end
     local context = WorkspaceContext()
     if not context then return false, "Saved Build context is not known" end

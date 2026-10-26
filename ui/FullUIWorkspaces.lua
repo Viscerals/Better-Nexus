@@ -120,11 +120,12 @@ function M.OpenPlanAction(kind)
         local allowed, reason = editor.SuspendForWorkspace()
         if not allowed then return false, reason end
     end
-    panel[route]()
+    local opened, reason = panel[route]()
     if plan and plan.IsShown and plan:IsShown()
         and editor and type(editor.CancelWorkspaceSuspend) == "function" then
         editor.CancelWorkspaceSuspend()
     end
+    if opened == false then return false, reason or "Plan action refused" end
     return true
 end
 
