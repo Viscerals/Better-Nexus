@@ -359,6 +359,8 @@ NAMES += ['guided_first_entry']
 # Issue #163 UI review prototype: shared status vocabulary and grouped navigation with existing labels.
 NAMES += ['ui_review_navigation']
 NAMES += ['full_ui_workspaces']
+# Issue #163: dedicated Settings window delegates to guarded owners; navigation reads only.
+NAMES += ['full_ui_settings']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
