@@ -1492,6 +1492,29 @@ local function EnsureFrame()
         HideWishlistSwitchMenu()
         newWishlist()
     end)
+    -- Plan's deliberate game routes remain visible alongside the editor.
+    -- The assignment chooser makes no choice on opening, and navigation is
+    -- refused while a Save confirmation/retry could be cancelled by OnHide.
+    frame._workspaceAssignBtn = CreateFrame("Button", nil, frame,
+        "UIPanelButtonTemplate")
+    frame._workspaceAssignBtn:SetSize(94, 22)
+    frame._workspaceAssignBtn:SetPoint("LEFT", frame._manageBtn, "RIGHT", 4, 0)
+    frame._workspaceAssignBtn:SetText("Assign...")
+    frame._workspaceAssignBtn:SetScript("OnClick", function()
+        if Nexus.FullUIWorkspaces then
+            local ok, reason = Nexus.FullUIWorkspaces.OpenPlanAction("assignment")
+            if not ok then print("|cffffd200Nexus:|r " .. tostring(reason)) end
+        end
+    end)
+    frame._workspaceAssignBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Assign Wishlist", 1, .82, .2)
+        GameTooltip:AddLine("Open the game's Wishlist chooser for the Saved Build it shows. Nothing is assigned until you choose a Wishlist there.", .8, .8, .8, true)
+        GameTooltip:Show()
+    end)
+    frame._workspaceAssignBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
 
     -- Locked Echoes strip: one slot per occupied locked record the game
     -- reports (RefreshView shows at least the six authored target cells, and
@@ -1636,25 +1659,29 @@ local function EnsureFrame()
         requestRefresh()
     end)
 
-    -- Opens Nexus Builds directly -- our own working community-sharing
-    -- system (core/Sync.lua), not a best-effort guess at the game's own
-    -- UI. That guess-based version is retired now that we have a real one.
-    local communityBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    communityBtn:SetSize(140, 22)
-    communityBtn:SetPoint("TOPRIGHT", -34, -126)
-    communityBtn:SetText("Build Library")
-    communityBtn:SetScript("OnClick", function()
-        Controller.OpenCommunity()
+    -- The native My Builds route is distinct from the Nexus Build Library
+    -- (the Explore tab above). It used to be hidden here, which made the
+    -- Plan footer's promise unreachable inside the real workspace.
+    frame._workspaceMyBuildsBtn = CreateFrame("Button", nil, frame,
+        "UIPanelButtonTemplate")
+    frame._workspaceMyBuildsBtn:SetSize(140, 22)
+    frame._workspaceMyBuildsBtn:SetPoint("TOPRIGHT", -34, -126)
+    frame._workspaceMyBuildsBtn:SetText("My Builds (game)")
+    frame._workspaceMyBuildsBtn:SetScript("OnClick", function()
+        if Nexus.FullUIWorkspaces then
+            local ok, reason = Nexus.FullUIWorkspaces.OpenPlanAction("mybuilds")
+            if not ok then print("|cffffd200Nexus:|r " .. tostring(reason)) end
+        end
     end)
-    communityBtn:SetScript("OnEnter", function(self)
+    frame._workspaceMyBuildsBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Browse and post shared wishlists", 1, 1, 1)
-        GameTooltip:AddLine("Opens Build Library -- see what other players running", 0.8, 0.8, 0.8, true)
-        GameTooltip:AddLine("Nexus have posted, or share your own.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine("My Builds (game page)", 1, .82, .2)
+        GameTooltip:AddLine("Open Ebonhold's Character Progression page. This does not activate a Saved Build or assign a Wishlist.", .8, .8, .8, true)
         GameTooltip:Show()
     end)
-    communityBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    communityBtn:Hide()
+    frame._workspaceMyBuildsBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
 
     local header = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     header:SetPoint("TOPLEFT", 34, -158)

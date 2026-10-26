@@ -49,7 +49,18 @@ end
 local function Open(owner, frameName, unavailable)
     if not (owner and type(owner.Show) == "function") then return false, unavailable end
     local ok, reason = owner.Show()
-    if ok == false then return false, reason end
+    if ok == false then
+        -- CommunityBuilds.WaitForStartup opens its own guarded loading window
+        -- and closes all other Nexus windows before it returns "pending".
+        -- Report that visible transition truthfully to our callers. Its
+        -- enabled "Use local Wishlists" control returns to Plan when the
+        -- local store is ready; a close button also remains available.
+        local loading = _G.NexusSharedStartupFrame
+        if reason == "pending" and loading and loading.IsShown and loading:IsShown() then
+            return true, "loading"
+        end
+        return false, reason
+    end
     local frame = _G[frameName]
     if frame and frame.IsShown and frame:IsShown() then return true end
     return false, reason or "workspace did not open"
@@ -60,11 +71,28 @@ function M.ShowPlan()
 end
 
 function M.ShowExplore(view)
-    if view == "records" then
-        return Open(Nexus.Leaderboard, "NexusLeaderboardFrame", "leaderboard unavailable")
+    local plan = _G.NexusEditorFrame
+    if plan and plan.IsShown and plan:IsShown() then
+        local editor = Nexus.WishlistEditor
+        if not (editor and type(editor.SuspendForWorkspace) == "function") then
+            return false, "Plan draft protection is unavailable"
+        end
+        local allowed, reason = editor.SuspendForWorkspace()
+        if not allowed then return false, reason end
     end
-    if view ~= nil and view ~= "builds" then return false, "unknown Explore view" end
-    return Open(Nexus.CommunityBuilds, "NexusCommunityBuildsFrame", "build library unavailable")
+    local ok, reason
+    if view == "records" then
+        ok, reason = Open(Nexus.Leaderboard, "NexusLeaderboardFrame", "leaderboard unavailable")
+    elseif view ~= nil and view ~= "builds" then
+        ok, reason = false, "unknown Explore view"
+    else
+        ok, reason = Open(Nexus.CommunityBuilds, "NexusCommunityBuildsFrame", "build library unavailable")
+    end
+    if not ok and plan and plan:IsShown() and Nexus.WishlistEditor
+        and type(Nexus.WishlistEditor.CancelWorkspaceSuspend) == "function" then
+        Nexus.WishlistEditor.CancelWorkspaceSuspend()
+    end
+    return ok, reason
 end
 
 function M.Show(kind)
@@ -74,10 +102,37 @@ function M.Show(kind)
     return false, "unknown workspace"
 end
 
--- Request the destination before dismissing the current surface. An inbound
--- Community/Leaderboard view can be pending while shared data starts; that
--- must not strand the player with every window closed. Each destination still
--- owns its filters, scroll position and confirmation behavior.
+-- The Plan actions retain the Panel's existing guarded game routes. Opening
+-- the Journal is navigation; choosing a Wishlist there remains a separate
+-- explicit assignment. A failed native open keeps the editor and draft.
+function M.OpenPlanAction(kind)
+    local panel = Nexus.Panel
+    local route = kind == "assignment" and "OpenAssignment"
+        or kind == "mybuilds" and "OpenMyBuilds" or nil
+    if not (route and panel and type(panel[route]) == "function") then
+        return false, "Plan action unavailable"
+    end
+    local editor, plan = Nexus.WishlistEditor, _G.NexusEditorFrame
+    if plan and plan.IsShown and plan:IsShown() then
+        if not (editor and type(editor.SuspendForWorkspace) == "function") then
+            return false, "Plan draft protection is unavailable"
+        end
+        local allowed, reason = editor.SuspendForWorkspace()
+        if not allowed then return false, reason end
+    end
+    panel[route]()
+    if plan and plan.IsShown and plan:IsShown()
+        and editor and type(editor.CancelWorkspaceSuspend) == "function" then
+        editor.CancelWorkspaceSuspend()
+    end
+    return true
+end
+
+-- Ask the destination owner to navigate. A shared-data view can replace this
+-- window with its own visible loading surface; that is a valid transition,
+-- not proof the shared view opened. If no destination or loading surface opens,
+-- the current window remains. Each destination still owns its filters,
+-- scroll position and confirmation behavior.
 function M.NavigateFrom(source, kind, beforeLeave)
     local names = {
         plan = "NexusEditorFrame",
@@ -87,7 +142,13 @@ function M.NavigateFrom(source, kind, beforeLeave)
     if not names[kind] then return false, "unknown workspace" end
     if type(beforeLeave) == "function" then beforeLeave() end
     local ok, reason = M.Show(kind)
-    if ok == false then return false, reason end
+    if ok == false then
+        if type(print) == "function" then
+            print("|cffffd200Nexus:|r " .. tostring(reason or "workspace unavailable"))
+        end
+        return false, reason
+    end
+    if reason == "loading" then return true, reason end
     local destination = _G[names[kind]]
     if not (destination and destination.IsShown and destination:IsShown()) then
         return false, reason or "workspace did not open"

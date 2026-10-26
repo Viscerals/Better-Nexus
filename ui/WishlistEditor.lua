@@ -128,6 +128,14 @@ local serverHideHooks = {}
 local wishlistController
 local flexiblePlanChooser
 local flexiblePlanRequest
+-- A workspace tab change is navigation, not a new editor open. Keep this
+-- controller draft only for the same character and selected Saved Build.
+local workspaceResume
+local function RefuseSuspendedDraftReplacement()
+    if not workspaceResume then return false end
+    print("|cffffd200Nexus:|r An unsaved Plan draft is open in another workspace. Return to Plan before replacing it.")
+    return true
+end
 
 local function SyncFulfilledDraftTargets()
     M._fulfilledDraftTargets =
@@ -767,6 +775,7 @@ function M.ConfirmCandidateAssignment(candidate, perform)
 end
 
 function M.ImportEBH1String(text, chosenName)
+    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
     local Codec = Nexus and Nexus.Codec
     if not (Codec and Codec.DecodeEBH1) then
         print("|cffff6060Nexus:|r import codec unavailable")
@@ -1032,12 +1041,14 @@ function M.OpenFlexiblePlanChooser()
 end
 
 function M.OpenForCandidate(candidate)
+    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
     RolePicker.Hide()
     local name, reason = wishlistController.BeginCandidate(candidate)
     if name == nil then
         SyncFulfilledDraftTargets()
         return false, reason
     end
+    workspaceResume = nil -- an accepted explicit Copy replaces the old draft
     SyncFulfilledDraftTargets()
     local renderer = RendererInstance()
     renderer.Prepare()
@@ -1050,6 +1061,7 @@ function M.OpenForCandidate(candidate)
 end
 
 function M.OpenForWishlist(wishlist, loadoutSlot)
+    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
     -- The record the player selected (a Journal row, an assignment, a confirmed
     -- role choice): its name and content as the server slot showed them when it
     -- was built. Taken before any resolution, so the controller compares the
@@ -1070,6 +1082,7 @@ function M.OpenForWishlist(wishlist, loadoutSlot)
         SyncFulfilledDraftTargets()
         return false
     end
+    workspaceResume = nil -- an accepted explicit open chooses a new draft
     SyncFulfilledDraftTargets()
     local renderer = RendererInstance()
     -- This can be the first editor entry after reload. Install the same menu
@@ -1083,6 +1096,8 @@ function M.OpenForWishlist(wishlist, loadoutSlot)
 end
 
 function M.NewWishlist()
+    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
+    workspaceResume = nil
     RolePicker.Hide()
     HideServerEchoUI()
     wishlistController.BeginNewWishlist()
@@ -1094,7 +1109,86 @@ function M.NewWishlist()
     M.Refresh()
 end
 
+local function WorkspaceContext()
+    local guid = type(UnitGUID) == "function" and UnitGUID("player") or nil
+    local slots = Adapter and type(Adapter.Slots) == "function" and Adapter.Slots() or nil
+    if type(guid) ~= "string" or guid == ""
+        or type(slots) ~= "table" or slots.activeKnown == false then
+        return nil
+    end
+    return {
+        guid = guid,
+        nativeSlot = tonumber(slots.activeSlot) or 0,
+        selectedSavedBuild = wishlistController.SelectedSavedBuild(slots) or 0,
+        maxSlots = tonumber(slots.maxSlots) or 0,
+    }
+end
+
+local function SameWorkspaceContext(left, right)
+    return left and right and left.guid == right.guid
+        and left.nativeSlot == right.nativeSlot
+        and left.selectedSavedBuild == right.selectedSavedBuild
+        and left.maxSlots == right.maxSlots
+end
+
+local function SaveConfirmationOpen()
+    -- StaticPopup_Visible is part of the native FrameXML. Minimal offline
+    -- hosts that omit it also omit real interactive popup visibility.
+    if type(StaticPopup_Visible) ~= "function" then return false end
+    return StaticPopup_Visible("WISHLISTREALIZER_UPDATE_WISHLIST")
+        or StaticPopup_Visible("WISHLISTREALIZER_CREATE_WISHLIST")
+end
+
+function M.SuspendForWorkspace()
+    local renderer = RendererInstance()
+    if not renderer.IsShown() then return false, "Plan is not open" end
+    local confirmation = SaveConfirmationOpen()
+    if confirmation or M.IsApplyPending() then
+        return false, "finish or cancel the pending Save before leaving Plan"
+    end
+    local context = WorkspaceContext()
+    if not context then return false, "Saved Build context is not known" end
+    workspaceResume = context
+    return true
+end
+
+function M.CancelWorkspaceSuspend()
+    workspaceResume = nil
+end
+
+StaticPopupDialogs["NEXUS_WORKSPACE_CONTEXT_CHANGED"] = {
+    text = "The character or selected Saved Build changed while your Plan draft was hidden. Discard that unsaved draft and open Plan for the current context?",
+    button1 = "Discard draft",
+    button2 = "Keep draft",
+    OnAccept = function()
+        workspaceResume = nil
+        M.Show()
+    end,
+}
+
+function M.ResumeWorkspaceDraft()
+    if not workspaceResume then return false, "no workspace draft" end
+    if not SameWorkspaceContext(workspaceResume, WorkspaceContext()) then
+        if type(StaticPopup_Show) == "function"
+            and not (type(StaticPopup_Visible) == "function"
+                and StaticPopup_Visible("NEXUS_WORKSPACE_CONTEXT_CHANGED")) then
+            StaticPopup_Show("NEXUS_WORKSPACE_CONTEXT_CHANGED")
+        end
+        return false, "context changed; choose whether to discard the draft"
+    end
+    if M.IsApplyPending() then
+        return false, "a Save is pending; return after it settles"
+    end
+    local renderer = RendererInstance()
+    renderer.Prepare({attach=true, style=true, close=true})
+    renderer.ShowFrame()
+    M.Refresh()
+    workspaceResume = nil
+    return true
+end
+
 function M.Show()
+    if workspaceResume then return M.ResumeWorkspaceDraft() end
     local slots=Adapter and Adapter.Slots and Adapter.Slots()
     -- The selected Saved Build, never a native Wishlist index: an association
     -- stored under one stays stored but is not opened as a loadout here.

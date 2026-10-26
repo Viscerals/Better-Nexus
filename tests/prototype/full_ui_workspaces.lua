@@ -6,6 +6,10 @@ local G=dofile('tests/prototype/layout_geometry_support.lua')
 local checks=0
 local function check(ok,message) assert(ok,message);checks=checks+1 end
 local U=Nexus.FullUIWorkspaces
+local realPopupVisible=StaticPopup_Visible
+StaticPopup_Visible=function(which)
+ return H.popup and H.popup.which==which or false
+end
 check(U and type(U.ShowPlan)=='function' and type(U.ShowExplore)=='function',
  'the workspace API is loaded')
 local toc=assert(io.open('Nexus.toc','rb')):read('*a')
@@ -26,12 +30,57 @@ check(plan._workspaceTabs and plan._workspaceTabs.plan and plan._workspaceTabs.b
  and plan._workspaceTabs.records,'Plan exposes all three workspace tabs')
 check(plan._workspaceTabs.plan:GetText():find('Plan',1,true)~=nil,
  'active Plan tab names the workspace')
+local assign,mine=plan._workspaceAssignBtn,plan._workspaceMyBuildsBtn
+check(assign and assign:IsShown() and mine and mine:IsShown(),
+ 'real Plan exposes deliberate Assign Wishlist and game My Builds controls')
+check(G.Apart(G.Rect(assign,plan),G.Rect(plan._manageBtn,plan))
+ and G.Inside(G.Rect(assign,plan),G.Rect(plan,plan))
+ and G.Inside(G.Rect(mine,plan),G.Rect(plan,plan)),
+ 'Plan actions fit separately from Manage inside the editor')
+local originalAssign,originalMine=Nexus.Panel.OpenAssignment,Nexus.Panel.OpenMyBuilds
+local assignmentOpens,gameBuildOpens=0,0
+Nexus.Panel.OpenAssignment=function() assignmentOpens=assignmentOpens+1 end
+Nexus.Panel.OpenMyBuilds=function() gameBuildOpens=gameBuildOpens+1 end
+assign:GetScript('OnClick')(assign)
+mine:GetScript('OnClick')(mine)
+check(assignmentOpens==1 and gameBuildOpens==1 and plan:IsShown(),
+ 'Plan actions route to the guarded Panel owners without making a choice')
+Nexus.Panel.OpenAssignment,Nexus.Panel.OpenMyBuilds=originalAssign,originalMine
+local draftName='Unsent Plan tab draft'
+NexusWishlistNameInput:SetText(draftName)
+for _,f in ipairs(H.frames) do
+ if f.kind=='Button' and f:IsVisible() and f.status and f.data and f.data.spellId then
+  f:Click();break
+ end
+end
+check(Nexus.WishlistEditor.DebugDraftState().pending>0,
+ 'the synthetic Plan fixture has a real unsaved Echo draft')
+local beforeDraft=F.Serialize(Nexus.WishlistEditor.DebugDraftState())
 local realCommunityShow=Nexus.CommunityBuilds.Show
 Nexus.CommunityBuilds.Show=function() return false,'pending' end
 plan._workspaceTabs.builds:GetScript('OnClick')(plan._workspaceTabs.builds)
 check(plan:IsShown() and not _G.NexusCommunityBuildsFrame,
  'pending Explore load leaves Plan visible instead of stranding the player')
 Nexus.CommunityBuilds.Show=realCommunityShow
+local realStartup=Nexus.StartupStatus
+Nexus.StartupStatus=function()
+ return {state='pending',coreReady=true,phase='catalog'}
+end
+local loading,loadingReason=U.NavigateFrom(plan,'builds')
+check(loading==true and loadingReason=='loading'
+ and _G.NexusSharedStartupFrame and NexusSharedStartupFrame:IsShown()
+ and not plan:IsShown(),
+ 'real Community startup gate changes to a visible loading surface, not a hidden failure')
+check(_G.NexusSharedLoadingWishlists and NexusSharedLoadingWishlists:IsEnabled(),
+ 'loading surface offers a usable return to local Plan')
+NexusSharedLoadingWishlists:GetScript('OnClick')(NexusSharedLoadingWishlists)
+check(plan:IsShown() and not NexusSharedStartupFrame:IsShown(),
+ 'return from the real Community loading surface restores Plan')
+check(NexusWishlistNameInput:GetText()==draftName,
+ 'return from loading does not reset the unsaved Plan draft')
+check(F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft,
+ 'return from loading retains pending Echo and scroll state')
+Nexus.StartupStatus=realStartup
 plan._workspaceTabs.builds:GetScript('OnClick')(plan._workspaceTabs.builds)
 local builds=_G.NexusCommunityBuildsFrame
 check(builds and builds:IsShown() and not plan:IsShown(),
@@ -50,10 +99,74 @@ check(builds:IsShown() and not records:IsShown(),
  'Records can return to the Build Library tab')
 check(search and search:GetText()==longSearch,
  'a long Build Library search is preserved across Explore tabs')
+Nexus.StartupStatus=function()
+ return {state='pending',coreReady=true,phase='catalog'}
+end
+local pendingRecords,pendingReason=U.NavigateFrom(builds,'records')
+check(pendingRecords==true and pendingReason=='loading'
+ and NexusSharedStartupFrame:IsShown() and not builds:IsShown(),
+ 'real Leaderboard startup gate also presents the visible loading surface')
+NexusSharedLoadingWishlists:GetScript('OnClick')(NexusSharedLoadingWishlists)
+check(plan:IsShown() and not NexusSharedStartupFrame:IsShown(),
+ 'Leaderboard loading surface can return to local Plan')
+Nexus.StartupStatus=realStartup
+plan._workspaceTabs.builds:GetScript('OnClick')(plan._workspaceTabs.builds)
 builds._workspaceTabs.records:GetScript('OnClick')(builds._workspaceTabs.records)
 records._workspaceTabs.plan:GetScript('OnClick')(records._workspaceTabs.plan)
 check(plan:IsShown() and not records:IsShown(),
  'returning to Plan restores the real Wishlist editor')
+check(NexusWishlistNameInput:GetText()==draftName,
+ 'Plan/Explore/Records round trip keeps unsaved draft text')
+check(F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft,
+ 'Plan/Explore/Records round trip keeps the unsaved Echo draft and scroll state')
+local normalVisible=StaticPopup_Visible
+StaticPopup_Visible=function(which)
+ return which=='WISHLISTREALIZER_CREATE_WISHLIST'
+end
+local guarded,guardReason=U.NavigateFrom(plan,'builds')
+check(guarded==false and guardReason:find('pending Save',1,true)
+ and plan:IsShown() and F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft,
+ 'an open Save confirmation blocks tab leave without changing the draft')
+StaticPopup_Visible=normalVisible
+local normalApply=Nexus.WishlistEditor.IsApplyPending
+Nexus.WishlistEditor.IsApplyPending=function() return true end
+local retryGuard,retryReason=U.NavigateFrom(plan,'builds')
+check(retryGuard==false and retryReason:find('pending Save',1,true)
+ and plan:IsShown(),
+ 'a confirmed Save retry blocks tab leave rather than cancelling it')
+Nexus.WishlistEditor.IsApplyPending=normalApply
+plan._workspaceTabs.builds:GetScript('OnClick')(plan._workspaceTabs.builds)
+check(builds:IsShown() and not plan:IsShown(),'after guard clears, tab leave opens Explore')
+local replacement,replacementReason=Nexus.WishlistEditor.NewWishlist()
+check(replacement==false and replacementReason=='Plan draft suspended'
+ and F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft,
+ 'an unrelated New Wishlist request cannot silently replace the hidden draft')
+local normalGuid=UnitGUID
+UnitGUID=function() return '0xOTHERCHARACTER' end
+local mismatch,mismatchReason=U.ShowPlan()
+check(mismatch==false and mismatchReason:find('context changed',1,true)
+ and builds:IsShown() and H.popup
+ and H.popup.which=='NEXUS_WORKSPACE_CONTEXT_CHANGED',
+ 'a character switch asks before discarding the hidden draft')
+check(F.Serialize(Nexus.WishlistEditor.DebugDraftState())==beforeDraft,
+ 'context mismatch leaves the original unsaved Echo draft intact')
+UnitGUID=normalGuid
+StaticPopup_Hide('NEXUS_WORKSPACE_CONTEXT_CHANGED')
+check(U.ShowPlan()==true and plan:IsShown() and not builds:IsShown(),
+ 'returning to original character restores the suspended draft')
+plan._workspaceTabs.builds:GetScript('OnClick')(plan._workspaceTabs.builds)
+local adapter=Nexus.GameAdapter
+local selectedSavedBuild=adapter.SelectedSavedBuild
+adapter.SelectedSavedBuild=function() return 2 end
+local changedBuild,buildReason=U.ShowPlan()
+check(changedBuild==false and buildReason:find('context changed',1,true)
+ and builds:IsShown() and H.popup
+ and H.popup.which=='NEXUS_WORKSPACE_CONTEXT_CHANGED',
+ 'a changed selected Saved Build also asks before discarding the draft')
+adapter.SelectedSavedBuild=selectedSavedBuild
+StaticPopup_Hide('NEXUS_WORKSPACE_CONTEXT_CHANGED')
+check(U.ShowPlan()==true and plan:IsShown(),
+ 'returning to the original Saved Build restores the same draft')
 plan:Hide()
 check(not plan:IsShown(),'close still closes the workspace window')
 check(Nexus.Panel.ShowHub('plan')==true and plan:IsShown(),
@@ -85,4 +198,5 @@ check(F.Serialize(Nexus.Store.State().loadoutWishlists or {})==assignments and
  Nexus.RecomputeStats().autoEnabled==auto,
  'navigation does not change Wishlist assignment or enable Auto')
 Nexus.Sync.RequestSync=sync
+StaticPopup_Visible=realPopupVisible
 print('full_ui_workspaces '..checks..' checks passed')
