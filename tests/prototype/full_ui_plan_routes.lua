@@ -89,6 +89,16 @@ check(Nexus.Help.OpenEditor()==true and plan:IsShown()
     and F.Serialize(editor.DebugDraftState())==beforeHelpEditor,
     'Help returning to an already visible Plan does not reset its unsaved draft')
 
+plan:Hide()
+Nexus.Help.Show('start')
+local help=assert(_G.NexusHelpWindow)
+check(help:IsShown(),'Help is visible before a refused editor route')
+local realShow=editor.Show
+editor.Show=function() return false,'editor unavailable' end
+check(Nexus.Help.OpenEditor()==false and help:IsShown() and not plan:IsShown(),
+    'a refused cold editor open keeps Help visible and reports failure')
+editor.Show=realShow
+
 editor.SuspendForWorkspace=originalSuspend
 journal.CanOpenBuilds=originalCan
 journal.OpenBuilds=originalOpen

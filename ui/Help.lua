@@ -348,7 +348,11 @@ function H.OpenEditor()
         if frame then frame:Hide() end
         return true
     end
+    local opened=editor.Show()
+    local editorFrame=_G.NexusEditorFrame
+    if opened==false or not (editorFrame and editorFrame.IsShown and editorFrame:IsShown()) then
+        return Refuse("The Wishlist Editor did not open. Help remains here; try again after start-up finishes.")
+    end
     if frame then frame:Hide() end
-    editor.Show()
     return true
 end
