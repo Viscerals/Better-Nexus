@@ -382,6 +382,8 @@ local function PanelKey(spec)
         spec.orbButton and 1 or 0,tonumber(spec.guidanceRows) or 0,
         spec.cardRows and 1 or 0,
         spec.callboard and 1 or 0,
+        spec.planDetails and 1 or 0,spec.orbLine and 1 or 0,
+        tonumber(spec.autoScopeRows) or 0,
     }, "|")
 end
 
@@ -410,7 +412,14 @@ function M.Panel(spec)
     Add(layout,"header",8,cursor,width-16,headerHeight)
     cursor = cursor + headerHeight + gap
 
-    if spec.statusVisible then
+    -- The Play panel (Claude Design full UI, "Main panel (Play)") of a build
+    -- in progress: the current offer first, then a compact plan progress,
+    -- the Difficulty / Soul Ash line, the DPS rows and the Orb run line. The
+    -- Difficulty / Soul Ash card stays at the top of the setup and completed
+    -- views, where the design shows no Play summary.
+    local play = not spec.noBuild and not spec.complete
+    layout.play = play
+    if spec.statusVisible and not play then
         local height = math.max(52, normal + small * 2 + gap * 2)
         Add(layout,"status",10,cursor,width-20,height)
         cursor = cursor + height + gap
@@ -459,6 +468,16 @@ function M.Panel(spec)
         end
         Add(layout,"roll",10,cursor,width-20,height)
         cursor = cursor + height + gap
+        -- The Auto scope line under the offer (the design's Auto ON note):
+        -- its own rows of the conservative model below the roll box, so the
+        -- whole line shows beside a recommendation too and never only on the
+        -- Auto button's hover. The caller counts the rows at width-24.
+        local scopeRows = tonumber(spec.autoScopeRows) or 0
+        if scopeRows > 0 then
+            local _, line = M.ConservativeText(scale)
+            Add(layout,"autoScope",12,cursor,width-24,scopeRows * line)
+            cursor = cursor + scopeRows * line + gap
+        end
     end
     layout.contentTop = cursor
 
@@ -485,25 +504,53 @@ function M.Panel(spec)
             cursor = cursor + height + gap
         end
     else
-        Add(layout,"progressHeader",12,cursor,width-24,small)
-        cursor = cursor + small + math.max(3,math.floor(gap/2))
+        -- Compact plan progress: one heading row (the heading and Details),
+        -- the run's count with its whole unit on its own full-width row (the
+        -- design's heading row wraps), a bar, then two rows of two counts.
+        -- The Echo names behind the counts (the Still needed, Extra copies
+        -- and To lock lists) are laid out only while Details is open.
+        local rowGap = math.max(2,math.floor(gap/3))
+        local char = M.ConservativeText(scale)
+        local detailsW = math.min(width-24, math.ceil(12 * char) + 20)
+        local rowH = math.max(normal, small + 6)
+        layout.planDetailsW = detailsW
+        Add(layout,"progressHeader",12,cursor,math.max(1,width-24-detailsW-gap),rowH)
+        Add(layout,"planDetails",width-12-detailsW,cursor,detailsW,rowH)
+        cursor = cursor + rowH + rowGap
+        -- "12 / 79 rolled copies this run" and "79 / 79 rolled, 1 still to
+        -- lock" are 30-31 characters: about 330 px of the 396 px row at font
+        -- scale 1.25 in the 0.70 em model of the 12 px normal font. A model
+        -- figure, not a native measurement.
         Add(layout,"progressValue",12,cursor,width-24,normal)
-        cursor = cursor + normal + gap
-        if (tonumber(spec.unknownTomes) or 0) > 0 then
-            Add(layout,"tomes",12,cursor,width-24,small)
-            cursor = cursor + small + gap
-        end
+        cursor = cursor + normal + rowGap
+        local barH = math.max(5, math.ceil(small / 2))
+        Add(layout,"planBar",12,cursor,width-24,barH)
+        cursor = cursor + barH + rowGap + 1
         local columnGap = 12
         local columnWidth = math.floor((width - 24 - columnGap) / 2)
-        local columnHeight = small * 4 + math.max(3,math.floor(gap/2))
-        Add(layout,"needed",12,cursor,columnWidth,columnHeight)
-        Add(layout,"shed",12+columnWidth+columnGap,cursor,
-            width-24-columnWidth-columnGap,columnHeight)
-        cursor = cursor + columnHeight + gap
-        if (tonumber(spec.toLockCount) or 0) > 0 then
-            local height = small * 3 + math.max(3,math.floor(gap/2))
-            Add(layout,"toLock",12,cursor,width-24,height)
-            cursor = cursor + height + gap
+        local rightX, rightW = 12+columnWidth+columnGap, width-24-columnWidth-columnGap
+        Add(layout,"planNeeded",12,cursor,columnWidth,small)
+        Add(layout,"planTomes",rightX,cursor,rightW,small)
+        cursor = cursor + small + rowGap
+        Add(layout,"planExtra",12,cursor,columnWidth,small)
+        Add(layout,"planLocked",rightX,cursor,rightW,small)
+        cursor = cursor + small + gap
+        if spec.planDetails then
+            local columnHeight = small * 4 + math.max(3,math.floor(gap/2))
+            Add(layout,"needed",12,cursor,columnWidth,columnHeight)
+            Add(layout,"shed",rightX,cursor,rightW,columnHeight)
+            cursor = cursor + columnHeight + gap
+            if (tonumber(spec.toLockCount) or 0) > 0 then
+                local height = small * 3 + math.max(3,math.floor(gap/2))
+                Add(layout,"toLock",12,cursor,width-24,height)
+                cursor = cursor + height + gap
+            end
+        end
+        if spec.statusVisible then
+            -- Difficulty and Soul Ash on one line (the design's inline row);
+            -- the full values stay on its hover.
+            Add(layout,"serverLine",12,cursor,width-24,small + 4)
+            cursor = cursor + small + 4 + gap
         end
         if spec.showPerformance then
             local height = small * 5 + gap * 4
@@ -513,14 +560,37 @@ function M.Panel(spec)
     end
 
     if not spec.noBuild then
+        -- Your record, then the best known record for the same Echoes, then
+        -- what best known means: two rows and their note, never a rank.
+        local rowGap = math.max(2,math.floor(gap/3))
         Add(layout,"bestDps",12,cursor,width-24,small)
+        cursor = cursor + small + rowGap
+        Add(layout,"bestKnown",12,cursor,width-24,small)
+        cursor = cursor + small + rowGap
+        Add(layout,"recordNote",12,cursor,width-24,small)
         cursor = cursor + small + gap
+        if spec.orbLine then
+            -- One line of Orb run status with Open; the Orb window owns the
+            -- run's controls.
+            local _, line = M.ConservativeText(scale)
+            local h = math.max(small + 6, line)
+            local char = M.ConservativeText(scale)
+            local openW = math.min(width-24, math.ceil(6 * char) + 20)
+            layout.orbLineOpenW = openW
+            Add(layout,"orbLine",12,cursor,width-24-openW-gap,h)
+            Add(layout,"orbLineOpen",width-12-openW,cursor,openW,h)
+            cursor = cursor + h + gap
+        end
     end
     layout.contentBottom = cursor
     local footerHeight = math.max(22, normal + 7)
     local reduction = spec.statusVisible and 0 or 59
     local legacyMinimum
-    if spec.noBuild then
+    if play then
+        -- The compact Play panel is as tall as its content: no minimum from
+        -- the former fixed progress columns.
+        legacyMinimum = 0
+    elseif spec.noBuild then
         legacyMinimum = (spec.activeRoll and 428 or 278) - reduction
     elseif spec.complete then
         if spec.showPerformance then
@@ -533,11 +603,7 @@ function M.Panel(spec)
     else
         legacyMinimum = (spec.activeRoll and 388 or 267) - reduction
     end
-    if not spec.noBuild and not spec.complete
-        and (tonumber(spec.toLockCount) or 0) > 0 then
-        legacyMinimum = legacyMinimum + 34
-    end
-    if spec.callboard then
+    if not play and spec.callboard then
         legacyMinimum = legacyMinimum + 50
     end
     local footerY = math.max(cursor + gap,

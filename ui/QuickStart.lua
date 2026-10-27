@@ -142,10 +142,10 @@ end
 local UNSAVED_NOTICE = {
     welcome = "The Welcome is closed, but this cannot be saved right now "
         .. "(saved data is still loading or is read-only). If it cannot be saved this session, "
-        .. "the Welcome is offered again next time. Setup / Welcome in the ... menu reopens it.",
+        .. "the Welcome is offered again next time. Setup information (read only) in the ... menu under Manage shows it again.",
     coach = "Guided setup is closed, but this cannot be saved right now "
         .. "(saved data is still loading or is read-only). If it cannot be saved this session, "
-        .. "Guided setup is offered again next time. Setup / Welcome in Help reopens it.",
+        .. "Guided setup is offered again next time. Setup / Welcome in Help or in the ... menu under Manage reopens it.",
 }
 local function Dismiss(kind)
     dismissedThisSession = true
@@ -410,8 +410,9 @@ function M.Show()
     NormalTexts(EnsureFrame()):Show()
 end
 
--- Setup / Welcome replay (the ... menu; Help's own Setup / Welcome button opens
--- the guided setup coach instead). A secondary route. Information only, and not
+-- The informational replay (the ... menu's "Setup information (read only)"
+-- and Help.OpenSetup; Setup / Welcome in Help and in the ... menu opens the
+-- guided setup coach instead). A secondary route. Information only, and not
 -- the warning's consent: it opens after the warning was answered Yes or No,
 -- after the first-time window was seen, and while saved data is read-only or
 -- loading. It records no acknowledgement, writes no saved data, enables

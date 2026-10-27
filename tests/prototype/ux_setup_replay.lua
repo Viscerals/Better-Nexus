@@ -291,21 +291,38 @@ C.scenario('S2 Close (X) during the delay opens the informational Welcome; the P
  C.setup(menu~=nil,'S2: fixture: the Nexus panel menu button exists')
  if menu then menu:Click() end
  EasyMenu=realMenu
- local setup,help
+ local setup,info,help
  for _,item in ipairs(items or {}) do
   if item.text=='Manage' and item.hasArrow then
    for _,entry in ipairs(item.menuList or {}) do
     if entry.text=='Setup / Welcome' then setup=entry end
+    if entry.text=='Setup information (read only)' then info=entry end
     if entry.text=='Help / Getting Started' then help=entry end
    end
   end
  end
  C.setup(help~=nil,'S2: fixture: the menu lists Help / Getting Started')
  C.expect(setup~=nil and type(setup.func)=='function','S2: the ... menu offers Setup / Welcome')
+ C.expect(info~=nil and type(info.func)=='function','S2: the ... menu keeps the informational setup as a secondary entry')
  local savedBefore=Saved()
+ -- The original guided design: "Reopen: Nexus menu > Setup / Welcome" opens
+ -- the step-by-step coach, as Help's Setup / Welcome does.
  if setup then
   setup.func()
-  C.expect(Shown() and Title():find('information only',1,true)~=nil,'S2: the menu item opens the informational setup',Title())
+  local coach=NexusGuidedSetup
+  C.expect(coach~=nil and coach:IsShown() and not Shown(),
+   'S2: the menu Setup / Welcome opens the guided setup coach, not the information-only Welcome',Title())
+  local close
+  for _,c in ipairs(coach and coach.children or {}) do
+   if c.kind=='Button' and c:IsShown() and c:GetText()=='X' and type(c.tip)=='string' and c.tip:find('^Close') then close=c end
+  end
+  if close then close:Click() end
+  C.expect(not (coach and coach:IsShown()) and Seen()==nil and Saved()==savedBefore and not Auto(),
+   'S2: opening and closing it records nothing, writes nothing and keeps Auto OFF')
+ end
+ if info then
+  info.func()
+  C.expect(Shown() and Title():find('information only',1,true)~=nil,'S2: the secondary entry opens the informational setup',Title())
   if Shown() then Dismiss('S2: the menu replay') end
   C.expect(Seen()==nil and Saved()==savedBefore,'S2: and records nothing')
  end
@@ -343,10 +360,12 @@ C.scenario('S3 Yes after reading: the first-time Welcome, then the replay and no
  C.expect(coach~=nil and coach:IsShown() and not Shown(),'S3: Yes resumes first use as the guided setup coach; no first-time Welcome beside it')
  C.guard(NexusDB.overwriteWarnings==nil and Seen()==nil,'S3: unchecked Yes saves neither acknowledgement')
  local coachClose
+ -- The design's close control: a visible "X" whose hover names Close.
  for _,c in ipairs(coach and coach.children or {}) do
-  if c.kind=='Button' and c:IsShown() and c:GetText()=='Close' then coachClose=c end
+  if c.kind=='Button' and c:IsShown() and c:GetText()=='X'
+   and type(c.tip)=='string' and c.tip:find('^Close') then coachClose=c end
  end
- C.expect(coachClose~=nil,'S3: the first-use coach offers Close')
+ C.expect(coachClose~=nil,'S3: the first-use coach offers Close (its X control)')
  if coachClose then coachClose:Click() end
  C.expect(Seen()==true and not (coach and coach:IsShown()) and not Shown(),'S3: the coach Close records the first-time acknowledgement through the durable owner')
  local savedBefore=Saved()

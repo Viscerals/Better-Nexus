@@ -62,7 +62,9 @@ local warningShown=NexusOverwriteWarning and NexusOverwriteWarning:IsShown() or 
 local warningOpen=warning.IsOpen()
 local before={actions=#H.actions,sent=#H.sent,chat=#H.chat,popup=H.popup,auto=Nexus.RecomputeStats().autoEnabled}
 local d0=L.Diagnostics()
-check(d0.base.present and d0.base.accepted==27 and d0.base.formatted==1 and d0.base.rejected==0 and not d0.base.oversized,'English base loaded whole at boot: twenty-six static texts and one template')
+-- Issue #165 added one reviewed static meaning (panel.button.options, the HUD
+-- Options label), so the whole base is now 27 static texts and one template.
+check(d0.base.present and d0.base.accepted==28 and d0.base.formatted==1 and d0.base.rejected==0 and not d0.base.oversized,'English base loaded whole at boot: twenty-seven static texts and one template')
 check(d0.misses==0,'English boot resolved without any fallback')
 local keys=L.Keys()
 -- Issues #143/#148: the 21 static ui/Panel.lua meanings with their exact
@@ -98,12 +100,22 @@ for i=1,#keys do
  if i>1 then sorted=sorted and keys[i-1]<keys[i] end
 end
 check(#panelCohort==21 and panelSeen==21,'SETUP the Panel cohort names 21 distinct keys')
-check(#keys==27 and panelListed==21 and sorted and keys[22]=='readout.charge_counts' and keys[23]=='reason.list_preparing' and keys[24]=='reason.save_in_progress' and keys[25]=='reason.saved_data_reading' and keys[26]=='reason.wait_pending_pick_count' and keys[27]=='reason.wait_three_choices','base holds exactly the 27 reviewed keys, sorted: the 21 Panel meanings, then the inherited six')
+local optionsListed=false
+for i=1,#keys do if keys[i]=='panel.button.options' then optionsListed=true end end
+check(#keys==28 and panelListed==21 and optionsListed and sorted and keys[23]=='readout.charge_counts' and keys[24]=='reason.list_preparing' and keys[25]=='reason.save_in_progress' and keys[26]=='reason.saved_data_reading' and keys[27]=='reason.wait_pending_pick_count' and keys[28]=='reason.wait_three_choices','base holds exactly the 28 reviewed keys, sorted: the 21 Panel meanings and the #165 Options label, then the inherited six')
+-- The #165 Options label: reviewed English static text that resolves from the
+-- base with no fallback. The six packs do not carry it yet, so with a pack
+-- active it is an intentional, counted missing_candidate fallback to this
+-- exact English (never a guessed draft).
+do
+ local ot,os,ow=L.Text('panel.button.options')
+ check(L.Has('panel.button.options') and L.Kind('panel.button.options')=='text' and ot=='Options' and os=='base' and ow==nil,'the #165 Options label is reviewed English static text resolved from the base')
+end
 check(L.Kind('readout.charge_counts')=='format' and L.Kind('reason.wait_three_choices')=='text' and L.Kind('reason.not_reviewed')==nil,'the formatted meaning is distinguished from static text')
 local env={};local chunk=setfenv and setfenv(assert(loadfile('data/LocalizationEnglish.lua')),env) or assert(loadfile('data/LocalizationEnglish.lua','t',env));chunk()
 local data=env.Nexus and env.Nexus.LocalizationEnglish
 local function count(t)local n=0;for _ in pairs(t)do n=n+1 end;return n end
-check(count(env)==1 and count(env.Nexus)==1 and type(data)=='table' and getmetatable(data)==nil and count(data)==27,'English data file sets one plain table and calls nothing')
+check(count(env)==1 and count(env.Nexus)==1 and type(data)=='table' and getmetatable(data)==nil and count(data)==28 and data['panel.button.options']=='Options','English data file sets one plain table and calls nothing')
 local cohort={
  {'ROOT_MUTATION_PENDING','reason.save_in_progress','Saving is still in progress; wait for its final result'},
  {'CURSOR_REQUIRED','reason.list_preparing','This list is still being prepared'},
@@ -330,7 +342,7 @@ do
  for _=1,3 do record.Text('reason.counter_9')end
  local rd=record.Diagnostics()
  check(#rd.keys==8 and rd.keysNotKept==3 and rd.misses==11 and rd.byReason.unknown_key==11,'GUARD unkept ninth key counts every occurrence without retention')
- check(#L.Keys()==27 and Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'GUARD real 27-key English seam restored after boundary fixtures')
+ check(#L.Keys()==28 and Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'GUARD real 28-key English seam restored after boundary fixtures')
 end
 local partial=assert(reload({['reason.save_in_progress']='Saving is still in progress; wait for its final result',['Bad Key']='Bad',['reason.blank']='  ',['reason.number']=5}))
 local pd=partial.Diagnostics().base
@@ -393,7 +405,7 @@ do
   local value,source,why=accepting.Resolve(key)
   check(accepting.Has(key) and value==validBase[key] and source=='base' and why==nil,'scalar base text resolves with its exact bytes: '..key)
  end
- check(#L.Keys()==27 and L.Has(K) and L.Resolve(K)==E,'the real English base is unchanged by the loader checks')
+ check(#L.Keys()==28 and L.Has(K) and L.Resolve(K)==E,'the real English base is unchanged by the loader checks')
 end
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'real seam and data restored after the loader checks')
 -- Issue #142 first cohort: the named-template formatter. Failure cases run on
@@ -412,7 +424,7 @@ do
   return text
  end
  local fd=F.Diagnostics().base
- check(fd.accepted==27 and fd.formatted==1 and fd.rejected==0 and F.Has(CK) and F.Kind(CK)=='format','the formatted meaning is admitted and listed')
+ check(fd.accepted==28 and fd.formatted==1 and fd.rejected==0 and F.Has(CK) and F.Kind(CK)=='format','the formatted meaning is admitted and listed')
  local misses0=L.Diagnostics().misses
  fmt(L,A3(kn(2),kn(1),kn(0)),nil,'B:2 R:1 F:0','base',nil,'all-known counts')
  fmt(L,A3(un(),kn(0),un()),nil,'B:? R:0 F:?','base',nil,'explicit unknown is ? and known zero is 0')

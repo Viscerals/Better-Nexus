@@ -67,7 +67,10 @@ local function Host(panel,mode)
  dofile('ui/ServerStatus.lua')
  Nexus.ServerStatus.Init()
  local scanner=assert(frames.NexusServerStatusScanner,'the scanner is created')
- return root,Nexus.ServerStatus,function() scanner.scripts.OnUpdate(scanner,1.0) end
+ -- The fourth value is a world entry (the scanner's own event); callers
+ -- that do not need it ignore it.
+ return root,Nexus.ServerStatus,function() scanner.scripts.OnUpdate(scanner,1.0) end,
+  function() scanner.scripts.OnEvent(scanner,'PLAYER_ENTERING_WORLD') end
 end
 
 local function Panel(facts) return {VisibilityFacts=function() return facts end} end
@@ -121,15 +124,17 @@ do
  check(status.VisibilityFacts().replacing==true,'the state says it is replacing')
 end
 
--- 4. Ready, but not on screen right now. A player who hid the Nexus panel,
--- and a dialog that suppresses it, are deliberate states -- NOT a missing
--- replacement -- so the stock widget stays replaced.
+-- 4. Ready, but not on screen right now. A dialog that suppresses the panel
+-- is a passing state, NOT a missing replacement, so the stock widget stays
+-- replaced. Issue #164 reverses the earlier rule for a panel the PLAYER hid:
+-- that is the player turning the Nexus HUD away, so it replaces nothing and
+-- the game's own widget keeps its place (this check used to expect hidden).
 do
  local root,_,tick=Host(Panel({exists=true,shown=false,wanted=false,
   ready=true,committed=true}),'nexus')
  tick()
- check(root.shown==false,
-  'a panel the player hid themselves is still the replacement; the stock widget does not come back behind their back')
+ check(root.shown==true and root.hideCalls==0,
+  '#164: a panel the player hid is not a replacement; the stock widget keeps its place and is never hidden for it')
 end
 do
  local root,_,tick=Host(Panel({exists=true,shown=false,wanted=true,
@@ -355,6 +360,239 @@ do
  check(NexusDB.soulAshHudMode=='server','the preference is what was stored')
 end
 
+-- 7b. Issue #164: the player hides and shows a ready Nexus panel. A hidden
+-- panel replaces nothing, so the widget this module hid comes back at once
+-- (PanelVisibilityChanged, no scan needed), exactly once, with only Show:
+-- its alpha, mouse and anchors are the game's and are never written. Showing
+-- the panel again replaces it again. Repeated toggles never orphan it.
+do
+ local facts={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ local root,status,tick=Host({VisibilityFacts=function() return facts end},'nexus')
+ for _=1,4 do tick() end
+ check(root.shown==false and root.hideCalls==1,'fixture: the ready, wanted panel replaces the widget')
+ for round=1,5 do
+  facts={exists=true,shown=false,wanted=false,ready=true,committed=true}
+  check(status.PanelVisibilityChanged()==true,'the owner reports the widget it decided for')
+  check(root.shown==true and root.showCalls==round,
+   '#164 round '..round..': hiding the panel gives the widget back at once, once: '..root.showCalls)
+  tick();tick()
+  check(root.shown==true and root.showCalls==round,
+   'and later scans neither hide it nor show it again')
+  check(status.VisibilityFacts().replacing==false,'the state says nothing replaces it')
+  facts={exists=true,shown=true,wanted=true,ready=true,committed=true}
+  status.PanelVisibilityChanged()
+  check(root.shown==false and root.hideCalls==round+1,
+   'showing the panel replaces the widget again at once')
+ end
+ check(root.alpha==nil and root.mouse==nil,
+  'no alpha or mouse state was ever written to the stock widget: '..tostring(root.alpha)..'/'..tostring(root.mouse))
+ check(root.hookInstalls==1,'and one OnShow hook stands across every toggle: '..root.hookInstalls)
+end
+
+-- 7c. Issue #164: a mid-render instant of a HIDDEN panel is still hidden: the
+-- widget comes back and is not taken away when the render commits.
+do
+ local facts={exists=true,shown=false,wanted=false,ready=true,committed=true}
+ local root,_,tick=Host({VisibilityFacts=function() return facts end},'nexus')
+ tick()
+ check(root.shown==true and root.hideCalls==0,'fixture: a hidden panel leaves the widget alone')
+ facts={exists=true,shown=false,wanted=false,ready=false,committed=true}
+ tick()
+ facts={exists=true,shown=false,wanted=false,ready=true,committed=true}
+ tick()
+ check(root.shown==true and root.hideCalls==0 and root.showCalls==0,
+  'a hidden panel rendering again never hides the widget and never forces it')
+end
+
+-- 7d. Issue #164: mode changes in both panel states. Server mode gives back
+-- only the widget this module hid, once; a widget the game hid stays hidden
+-- and is not re-shown every second.
+do
+ local facts={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ local root,status,tick=Host({VisibilityFacts=function() return facts end},'server')
+ root:Hide()
+ for _=1,5 do tick() end
+ check(root.shown==false and root.showCalls==0,
+  'in server mode a widget the game hid is left hidden: no recurring Show')
+ root:Show()
+ -- Visible panel: nexus then server.
+ status.SetMode('nexus')
+ check(root.shown==false,'visible panel: the Nexus HUD replaces the widget')
+ status.SetMode('server')
+ check(root.shown==true and root.showCalls==2,'visible panel: the server HUD gives it back once')
+ tick();tick()
+ check(root.showCalls==2,'and does not force it again')
+ -- Hidden panel: nexus then server.
+ facts={exists=true,shown=false,wanted=false,ready=true,committed=true}
+ status.SetMode('nexus')
+ check(root.shown==true,'hidden panel: choosing the Nexus HUD does not take the widget away')
+ tick()
+ check(root.shown==true and root.hideCalls==2,'and no scan does either: '..root.hideCalls)
+ status.SetMode('server')
+ check(root.shown==true and root.showCalls==2,'hidden panel: the server HUD leaves a shown widget alone')
+ -- Shown again in Nexus mode: replaced again.
+ facts={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ status.SetMode('nexus')
+ check(root.shown==false,'showing the panel in Nexus mode replaces the widget again')
+end
+
+-- 7e. Issue #164: a game-recreated stock widget while the panel is hidden is
+-- left alone; once shown, the panel replaces the new one and gives back the
+-- new one, never the old.
+do
+ local facts={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ local root,status,tick=Host({VisibilityFacts=function() return facts end},'nexus')
+ tick()
+ check(root.shown==false,'fixture: the first widget is replaced')
+ facts={exists=true,shown=false,wanted=false,ready=true,committed=true}
+ status.PanelVisibilityChanged()
+ check(root.shown==true,'fixture: hiding the panel gives the first widget back')
+ local rebuilt=StockFrame()
+ ProjectEbonholdPlayerRunFrame=rebuilt
+ status.Rescan();tick()
+ check(rebuilt.shown==true and rebuilt.hideCalls==0 and rebuilt.showCalls==0,
+  'a rebuilt widget is left exactly as the game made it while the panel is hidden')
+ facts={exists=true,shown=true,wanted=true,ready=true,committed=true}
+ status.PanelVisibilityChanged()
+ check(rebuilt.shown==false,'showing the panel replaces the rebuilt widget')
+ local oldShows=root.showCalls
+ facts={exists=true,shown=false,wanted=false,ready=true,committed=true}
+ status.PanelVisibilityChanged()
+ check(rebuilt.shown==true and rebuilt.showCalls==1,'and hiding it gives the rebuilt widget back')
+ check(root.showCalls==oldShows,'the old widget object is not touched on its behalf')
+end
+
+-- 7f-7k. Issue #164 give-back readback. A Show that returns is not proof the
+-- game's widget is on screen: only IsShown reading true ends this module's
+-- claim. A no-op, raising or unreadable Show leaves a truthful pending or
+-- unknown state, retried only at a lifecycle point (mode change, panel
+-- hide/show, rescan, first scan after a world entry), never every second,
+-- and the widget is never hidden, moved or written to satisfy the check.
+local READY={exists=true,shown=true,wanted=true,ready=true,committed=true}
+local HIDDEN={exists=true,shown=false,wanted=false,ready=true,committed=true}
+-- A Show that returns normally and changes nothing (another addon's wrapper).
+local function NoOpShow(root)
+ root.noOps=0
+ root.Show=function(self) self.noOps=self.noOps+1 end
+end
+-- 7f. Attached (Nexus HUD): a no-op Show while the player hides the panel.
+do
+ local facts=READY
+ local root,status,tick,world=Host({VisibilityFacts=function() return facts end},'nexus')
+ for _=1,3 do tick() end
+ check(root.shown==false and root.hideCalls==1,'fixture: the ready panel replaces the widget')
+ local realShow=root.Show
+ NoOpShow(root)
+ facts=HIDDEN
+ status.PanelVisibilityChanged()
+ local f=status.VisibilityFacts()
+ check(root.noOps==1 and root.shown==false,'7f: hiding the panel asks for the widget once; the no-op Show changed nothing')
+ check(f.restore=='pending' and f.hiddenByNexus==true and f.stockShown==false and f.replacing==false,
+  '7f: the state is truthful: still hidden by Nexus, give-back pending, not replacing ('..tostring(f.restore)..')')
+ for _=1,6 do tick() end
+ check(root.noOps==1 and root.hideCalls==1,'7f: scans only read it back; no Show every second and no hide')
+ check(status.VisibilityFacts().restore=='pending','7f: still pending after the scans')
+ status.Rescan()
+ check(root.noOps==2,'7f: a rescan is a lifecycle point and retries the Show once')
+ world();tick();tick()
+ check(root.noOps==3,'7f: the first scan after a world entry retries once; the next scan does not')
+ -- The game shows its own widget later: on screen again, and no longer ours.
+ realShow(root)
+ local after=status.VisibilityFacts()
+ check(root.shown==true and after.restore==nil and after.hiddenByNexus==false,
+  '7f: once the widget reads back shown the claim ends')
+ local shows=root.showCalls
+ tick();tick()
+ check(root.showCalls==shows and root.noOps==3 and root.hideCalls==1,'7f: and nothing is forced afterwards')
+ root.Show=realShow
+ root:Hide()
+ tick();tick()
+ check(root.shown==false and root.showCalls==shows,'7f: a player hide after that is theirs')
+ check(root.noOps==3 and status.VisibilityFacts().hiddenByNexus==false,'7f: and is never claimed or undone')
+ check(root.alpha==nil and root.mouse==nil,'7f: no alpha or mouse was written to the widget')
+end
+-- 7g. A pending give-back is dropped when the panel replaces the widget again.
+do
+ local facts=READY
+ local root,status,tick=Host({VisibilityFacts=function() return facts end},'nexus')
+ tick()
+ NoOpShow(root)
+ facts=HIDDEN;status.PanelVisibilityChanged()
+ check(status.VisibilityFacts().restore=='pending','fixture: 7g give-back pending')
+ facts=READY;status.PanelVisibilityChanged()
+ local f=status.VisibilityFacts()
+ check(root.shown==false and root.hideCalls==1 and f.restore==nil and f.hiddenByNexus==true and f.replacing==true,
+  '7g: showing the panel again keeps the still-hidden widget replaced, with no extra hide and no pending give-back')
+ facts=HIDDEN;status.PanelVisibilityChanged()
+ check(root.noOps==2 and status.VisibilityFacts().restore=='pending','7g: the next hide asks again, once')
+end
+-- 7h. A Show that runs on a widget that cannot report IsShown: unknown, never
+-- "restored", and not retried blindly.
+do
+ local facts=READY
+ local root,status,tick=Host({VisibilityFacts=function() return facts end},'nexus')
+ tick()
+ check(root.shown==false,'fixture: 7h replaced')
+ root.IsShown=nil
+ facts=HIDDEN;status.PanelVisibilityChanged()
+ local f=status.VisibilityFacts()
+ check(root.showCalls==1 and f.restore=='unknown' and f.stockShown==nil and f.hiddenByNexus==false,
+  '7h: Show ran once; with no readback the give-back is reported unknown and the claim ends ('..tostring(f.restore)..')')
+ for _=1,4 do tick() end
+ status.Rescan()
+ check(root.showCalls==1,'7h: an unknown give-back is not repeated by scans or lifecycle points')
+end
+-- 7i. A raising Show: pending until a lifecycle retry succeeds.
+do
+ local facts=READY
+ local root,status,tick=Host({VisibilityFacts=function() return facts end},'nexus')
+ tick()
+ local realShow,raised=root.Show,0
+ root.Show=function() raised=raised+1;error('this widget refuses to show') end
+ facts=HIDDEN;status.PanelVisibilityChanged()
+ check(raised==1 and root.shown==false and status.VisibilityFacts().restore=='pending',
+  '7i: a raising Show leaves the widget ours and the give-back pending')
+ tick();tick()
+ check(raised==1,'7i: and scans do not retry it')
+ root.Show=realShow
+ status.Rescan()
+ local f=status.VisibilityFacts()
+ check(root.shown==true and root.showCalls==1 and f.restore==nil and f.hiddenByNexus==false,
+  '7i: the lifecycle retry gives it back and the readback confirms it')
+end
+-- 7j. Detached (server HUD) mode changes with a no-op Show.
+do
+ local root,status,tick=Host({VisibilityFacts=function() return READY end},'nexus')
+ tick()
+ NoOpShow(root)
+ status.SetMode('server')
+ check(root.noOps==1 and root.shown==false and status.VisibilityFacts().restore=='pending'
+  and NexusDB.soulAshHudMode=='server','7j: choosing the server HUD asks once; the no-op leaves it pending')
+ tick();tick();tick()
+ check(root.noOps==1,'7j: no Show every second in server mode')
+ status.SetMode('server')
+ check(root.noOps==2,'7j: the mode setter is a lifecycle point and retries once')
+ status.SetMode('nexus')
+ local f=status.VisibilityFacts()
+ check(root.hideCalls==1 and f.restore==nil and f.replacing==true and f.hiddenByNexus==true,
+  '7j: back to the Nexus HUD the still-hidden widget is replaced without another hide')
+end
+-- 7k. A prehidden widget, and a reload (a fresh module) over one: never
+-- claimed, never shown by Nexus.
+for _,start in ipairs({'nexus','server'}) do
+ local facts=READY
+ local root,status,tick=Host({VisibilityFacts=function() return facts end},start)
+ root:Hide()
+ local hides=root.hideCalls
+ tick();tick()
+ facts=HIDDEN;status.PanelVisibilityChanged()
+ status.SetMode(start=='nexus' and 'server' or 'nexus');status.SetMode(start)
+ tick()
+ local f=status.VisibilityFacts()
+ check(root.shown==false and root.showCalls==0 and root.hideCalls==hides and f.hiddenByNexus==false and f.restore==nil,
+  '7k '..start..': a widget hidden before Nexus (or before a reload) is never claimed, hidden again or shown')
+end
+
 ProjectEbonholdPlayerRunFrame=nil
 
 ----------------------------------------------------------------------------
@@ -385,14 +623,18 @@ check(stock:IsShown()==false,
  'and only then does the stock widget stand aside for it')
 check(#H.actions==0,'no gameplay or server action was taken by any of this')
 
--- 9. Explicit user hide/show of the replacement.
+-- 9. Explicit user hide/show of the replacement. Issue #164 reverses the
+-- earlier rule here: a player who hid the Nexus HUD has turned it away, so the
+-- game's own Difficulty/Soul Ash widget comes back with that hide (this check
+-- used to expect the widget to stay hidden).
 Nexus.Panel.Hide()
+check(stock:IsShown()==true,'#164: hiding the Nexus panel gives the stock widget back at once')
 H.Advance(1.2)
 check(Nexus.Panel.VisibilityFacts().ready==true,'hiding the panel does not unmake its render')
-check(stock:IsShown()==false,
- 'so a player who hid the Nexus HUD does not get the stock widget back without asking for it')
+check(stock:IsShown()==true,
+ '#164: and a hidden Nexus panel is not a replacement, so the stock widget stays on screen')
 Nexus.Panel.Show();H.Advance(.4)
-check(stock:IsShown()==false,'and showing it again changes nothing for the stock widget')
+check(stock:IsShown()==false,'showing the Nexus panel again replaces the stock widget again')
 
 -- 10. Dialogs: one, then two, then none.
 -- A first-run session really does open the quick-start window. It is not an

@@ -136,7 +136,7 @@ def assert_no_true(test, document):
 # They are historical, synthetic fixture expectations of the six-key base
 # pin: six independently literal English meanings, including the typed
 # charge template, and 18 inherited draft pack entries (three per pack) with
-# the six autonyms. They are not facts of the current 27-key catalog. The
+# the six autonyms. They are not facts of the current 28-key catalog. The
 # helpers below build a coherent six-key historical fixture from those
 # literals and the unchanged six key-context rows, for the existing negative
 # and partial-data controls. The actual current source is checked separately
@@ -144,8 +144,9 @@ def assert_no_true(test, document):
 # called only while a test runs, after this module has defined every name
 # they use. No Lua, Git or network is used.
 
-# The 21 static ui/Panel.lua meanings of the current source, from the scoped
-# key and meaning requirements: (key, kind, exact English, producer code).
+# The 21 static ui/Panel.lua meanings bound at the historical technical
+# reference below and still current, from the scoped key and meaning
+# requirements: (key, kind, exact English, producer code).
 CURRENT_PANEL_KEYS = [
     ("panel.button.my_builds", "text", "My Builds", None),
     ("panel.tooltip.open_my_builds", "text", "Open My Builds", None),
@@ -181,17 +182,34 @@ CURRENT_PANEL_KEYS = [
     ("panel.heading.still_needed", "text", "STILL NEEDED", None),
     ("panel.heading.extra_copies", "text", "EXTRA COPIES", None),
 ]
-# The current-source oracle: the six historical rows, then the 21 panel rows.
-CURRENT_KEYS = EXPECTED_KEYS + CURRENT_PANEL_KEYS
+# Issue #165: the HUD Options button label, an independent literal. The
+# "! " trusted-notice mark is added by ui/Panel.lua and is never part of
+# this text. No optional pack holds an entry for it.
+CURRENT_OPTIONS_KEYS = [("panel.button.options", "text", "Options", None)]
+# The 27 keys observed at the historical technical reference: the six
+# historical rows, then the 21 panel rows. Its observed counts stay 27.
+HISTORICAL_TECHNICAL_KEYS = EXPECTED_KEYS + CURRENT_PANEL_KEYS
+# The current-source oracle: those 27 rows, then the Options row.
+CURRENT_KEYS = HISTORICAL_TECHNICAL_KEYS + CURRENT_OPTIONS_KEYS
+# The keys each current optional pack holds as draft entries, and the
+# current English keys that no pack holds.
+CURRENT_PACK_KEYS = [row[0] for row in HISTORICAL_TECHNICAL_KEYS]
+CURRENT_ENGLISH_ONLY_KEYS = [row[0] for row in CURRENT_OPTIONS_KEYS]
 HISTORICAL_HUD_ADOPTED_KEYS = ["readout.charge_counts"]
-CURRENT_HUD_ADOPTED_KEYS = HISTORICAL_HUD_ADOPTED_KEYS + [row[0] for row in CURRENT_PANEL_KEYS]
+CURRENT_HUD_ADOPTED_KEYS = (HISTORICAL_HUD_ADOPTED_KEYS + [row[0] for row in CURRENT_PANEL_KEYS]
+                            + CURRENT_ENGLISH_ONLY_KEYS)
 
 # KEY_CONTEXT.json keeps its immutable historical55d7350 technical observation.
-# The current data reference is ac2cdf5: English and decoded pack values
-# are unchanged; leading pack comments changed the canonical pack bytes.
-# Historical/current (SHA-256, length) tables below refer to named Git
-# blobs with LF line ends, never to raw Windows CRLF inputs. The real
-# parser/schema/report APIs still receive and hash original physical bytes.
+# The last committed data reference is ac2cdf5: English and decoded pack
+# values are unchanged from 55d7350; leading pack comments changed the
+# canonical pack bytes. The current packs file is still that ac2cdf5 blob.
+# The current English file is not: issue #165 added panel.button.options in
+# an uncommitted working copy that no commit, tree or Git blob holds yet, so
+# none is claimed for it. Historical and reference (SHA-256, length) tables
+# below refer to named Git blobs with LF line ends, never to raw Windows CRLF
+# inputs; only WORKING_COPY_PHYSICAL_INPUTS holds physical bytes, and says
+# so. The real parser/schema/report APIs still receive and hash original
+# physical bytes.
 HISTORICAL_TECHNICAL_REFERENCE = {"head": "55d7350c0d5c60fc5bf39385f48027cd62498c71",
                                   "tree": "9a7c51f0683a53adae1aecd833b1f13a590e2595"}
 CURRENT_TECHNICAL_REFERENCE = {"head": "ac2cdf5f4924c74f1e744990b2e0bb0405cd1c88",
@@ -202,11 +220,21 @@ HISTORICAL_REFERENCE_INPUTS = {
     "data/LocalizationPacks.lua":
         ("3680a57743479df42854027ad3ad35d0df2407c0e957d993a3a4c3a57159676e", 21041),
 }
+# The English blob at ac2cdf5 (the same as at 55d7350), superseded by the
+# working copy; the current English bytes must no longer be this blob.
+REFERENCE_ENGLISH_INPUT = ("2325010efc6c052628d70402542dcb9805e89135b72756442841ece97fccb2fc",
+                           3744)
 CURRENT_REFERENCE_INPUTS = {
-    "data/LocalizationEnglish.lua":
-        ("2325010efc6c052628d70402542dcb9805e89135b72756442841ece97fccb2fc", 3744),
     "data/LocalizationPacks.lua":
         ("5c8d10bb711474a0374a0ad851e4f3608ede2389fb58fd01b34ad3c4cda3de95", 21168),
+}
+# Working-copy identity, not a Git blob: the physical (CRLF) bytes of the
+# uncommitted issue #165 English source as recorded in its frozen
+# MANIFEST_FINAL.json. Replace it with the canonical LF blob identity of the
+# commit that first holds this source.
+WORKING_COPY_PHYSICAL_INPUTS = {
+    "data/LocalizationEnglish.lua":
+        ("755f2f5d434a23bbff28ad01f23711e14601e1a4c8df5ee99269038ee13b5cf8", 3970),
 }
 CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "PENDING",
                              "m7Span": "PENDING", "fullUiCoverage": "PENDING",
@@ -216,9 +244,11 @@ CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "P
 
 def current_english_oracle():
     """The current English table from the independent literals, in source
-    order: the six historical meanings, then the 21 panel meanings."""
+    order: the six historical meanings, the 21 panel meanings, then the
+    Options label."""
     table = {key: english for key, _, english, _ in CURRENT_KEYS}
-    if len(table) != len(CURRENT_KEYS) or len(CURRENT_PANEL_KEYS) != 21:
+    if (len(table) != len(CURRENT_KEYS) or len(CURRENT_PANEL_KEYS) != 21
+            or len(CURRENT_OPTIONS_KEYS) != 1):
         raise AssertionError("the current key oracle repeats or lacks a key")
     if {key: table[key] for key in CATALOG_CURRENT_ENGLISH} != CATALOG_CURRENT_ENGLISH:
         raise AssertionError("the two historical English literal tables disagree")
@@ -236,12 +266,20 @@ def canonical_git_lf(data):
 
 
 def assert_current_reference_bytes(test, relative, physical):
-    """Compare the physical bytes of relative, as canonical Git LF bytes,
-    with the supplied reference hash and length; return the canonical bytes.
-    A physical CRLF hash is never claimed to equal the reference hash."""
+    """Compare the physical bytes of relative with their current identity and
+    return the canonical bytes. A file the reference commit still holds is
+    compared, as canonical Git LF bytes, with its reference hash and length; a
+    physical CRLF hash is never claimed to equal it. A working-copy file is
+    compared as physical bytes with its recorded working-copy identity, and
+    its canonical bytes must not be the superseded reference English blob."""
     canonical = canonical_git_lf(physical)
-    test.assertEqual((hashlib.sha256(canonical).hexdigest(), len(canonical)),
-                     CURRENT_REFERENCE_INPUTS[relative], relative)
+    digest = (hashlib.sha256(canonical).hexdigest(), len(canonical))
+    if relative in CURRENT_REFERENCE_INPUTS:
+        test.assertEqual(digest, CURRENT_REFERENCE_INPUTS[relative], relative)
+    else:
+        test.assertEqual((hashlib.sha256(bytes(physical)).hexdigest(), len(physical)),
+                         WORKING_COPY_PHYSICAL_INPUTS[relative], relative)
+        test.assertNotEqual(digest, REFERENCE_ENGLISH_INPUT, relative)
     return canonical
 
 
@@ -474,20 +512,26 @@ class KeyContextContract(unittest.TestCase):
             "zero": "0 is a known count, not unknown",
         })
 
-    def test_current_keys_are_six_historical_rows_then_21_panel_rows(self):
+    def test_current_keys_are_six_historical_rows_21_panel_rows_then_options(self):
         rows = [(r["key"], r["kind"], r["english"], r.get("producerCode"))
                 for r in self.doc["keys"]]
         self.assertEqual(rows[:len(EXPECTED_KEYS)], EXPECTED_KEYS)
-        self.assertEqual(rows[len(EXPECTED_KEYS):], CURRENT_PANEL_KEYS)
+        self.assertEqual(rows[len(EXPECTED_KEYS):len(HISTORICAL_TECHNICAL_KEYS)],
+                         CURRENT_PANEL_KEYS)
+        self.assertEqual(rows[len(HISTORICAL_TECHNICAL_KEYS):], CURRENT_OPTIONS_KEYS)
         self.assertEqual(rows, CURRENT_KEYS)
         self.assertEqual(list(current_english_oracle()), [row[0] for row in rows])
-        for name, _, _, _ in CURRENT_PANEL_KEYS:
+        for name, _, _, _ in CURRENT_PANEL_KEYS + CURRENT_OPTIONS_KEYS:
             self.assertEqual(self.keys[name]["placeholders"], [], name)
             self.assertNotIn("resultLimitBytes", self.keys[name], name)
+        for name, _, english, _ in CURRENT_OPTIONS_KEYS:
+            self.assertNotIn("!", english, name)
         adoption = self.doc["currentAdoption"]
         self.assertEqual(adoption["keys"], [row[0] for row in CURRENT_KEYS])
         self.assertEqual(adoption["allWindowSemanticCoverage"], "PENDING")
         self.assertIn(HISTORICAL_TECHNICAL_REFERENCE["head"], adoption["scope"])
+        self.assertNotIn(CURRENT_TECHNICAL_REFERENCE["head"], adoption["scope"])
+        self.assertIn("uncommitted working copy", adoption["scope"])
         self.assertIn("pending", adoption["scope"])
 
     def test_placeholders_are_typed_and_exact(self):
@@ -529,6 +573,13 @@ class KeyContextContract(unittest.TestCase):
             self.assertIn(fragment, localization)
         readout = read_text("ui/Readout.lua")
         self.assertIn('localization.Format("readout.charge_counts",', readout)
+        for name, _, text, _ in CURRENT_OPTIONS_KEYS:
+            self.assertIn('["%s"] = "%s",' % (name, text), english)
+        # The "! " notice mark stays code-owned in ui/Panel.lua, outside the text.
+        panel = read_text("ui/Panel.lua")
+        for fragment in ('L.Text("panel.button.options")', 'L.Resolve("panel.button.options")',
+                         'notice and ("! " .. label) or label'):
+            self.assertIn(fragment, panel)
 
     def test_fifteen_window_families_pending(self):
         families = self.doc["windowFamilies"]
@@ -583,12 +634,15 @@ class KeyContextContract(unittest.TestCase):
         self.assertIn("not final composition", observation["nature"])
         self.assertEqual(observation["inputSha256"],
                          {path: digest for path, (digest, _) in HISTORICAL_REFERENCE_INPUTS.items()})
-        kinds = [row[1] for row in CURRENT_KEYS]
-        self.assertEqual(observation["observedEnglishKeys"], len(CURRENT_KEYS))
+        # The observation stays at its own 27 keys; it is not the current count.
+        kinds = [row[1] for row in HISTORICAL_TECHNICAL_KEYS]
+        self.assertEqual(observation["observedEnglishKeys"], len(HISTORICAL_TECHNICAL_KEYS))
+        self.assertNotEqual(observation["observedEnglishKeys"], len(CURRENT_KEYS))
         self.assertEqual(observation["observedEnglishKinds"],
                          {"text": kinds.count("text"), "format": kinds.count("format")})
         self.assertEqual(observation["appliesTo"], PACK_IDS)
-        self.assertEqual(observation["observedDraftEntriesPerPack"], len(CURRENT_KEYS))
+        self.assertEqual(observation["observedDraftEntriesPerPack"],
+                         len(HISTORICAL_TECHNICAL_KEYS))
         self.assertEqual(observation["reviewState"],
                          "draft_unreviewed; per-language human review pending")
         self.assertIn("not future cardinality", observation["observationScope"])
@@ -962,7 +1016,8 @@ class CatalogParserGrammar(unittest.TestCase):
         packs = self.catalog.parse_packs(data)
         self.assertIs(type(packs), dict)
         self.assertEqual(list(packs), ["frFR", "deDE", "esES", "plPL", "ptBR", "ruRU"])
-        keys = {row[0] for row in CURRENT_KEYS}
+        # Every current English key but the English-only Options label.
+        keys = set(CURRENT_PACK_KEYS)
         autonyms = {row[0]: row[3] for row in EXPECTED_PRODUCTS[1:]}
         for pack_id, pack in packs.items():
             with self.subTest(pack_id):
@@ -1289,7 +1344,8 @@ class CatalogSchemaApi(unittest.TestCase):
         self.assertEqual(list(current["packs"]), PACK_IDS)
         for pack_id, pack in current["packs"].items():
             with self.subTest(pack_id):
-                self.assertEqual(set(pack["entries"]), set(oracle))
+                self.assertEqual(set(pack["entries"]), set(CURRENT_PACK_KEYS))
+                self.assertLess(set(pack["entries"]), set(oracle))
                 self.assertEqual(pack["name"], CATALOG_CURRENT_PACKS[pack_id]["name"])
                 for key, text in CATALOG_CURRENT_PACKS[pack_id]["entries"].items():
                     self.assertEqual(pack["entries"][key], text, key)
@@ -2952,12 +3008,14 @@ class CatalogCommandLine(unittest.TestCase):
 
 # Actual current source (Refs #139, #143, #147, #148): public schema, report
 # and command-line tests on the unmodified physical bytes of the actual
-# 27-key catalog inputs, kept apart from the historical six-key fixture
+# 28-key catalog inputs, kept apart from the historical six-key fixture
 # above. Keys, English meanings, autonyms and the 18 inherited translations
 # are the independent literals near the top of this file; the remaining 144
 # draft pack entries (18 earlier missing-key entries plus 126 panel entries)
 # are bound by the canonical reference hash only, are not restated and claim
-# no fluent, human or native acceptance. Every count comes
+# no fluent, human or native acceptance. The issue #165 Options label has no
+# pack entry: it is missing from every pack, and its English fallback is not
+# a translation. Every count comes
 # from the real APIs. No Lua, Git or network is used, and nothing is written
 # outside a temporary directory.
 
@@ -2981,6 +3039,7 @@ class CatalogCurrentSource(unittest.TestCase):
     def test_actual_source_validates_and_every_pack_reports_every_english_key(self):
         oracle = current_english_oracle()
         keys = sorted(oracle)
+        present, missing = sorted(CURRENT_PACK_KEYS), sorted(CURRENT_ENGLISH_ONLY_KEYS)
         result = self.catalog.validate_catalog_data(*self.arguments())
         self.assertEqual(sorted(result), ["english", "keyContext", "packs", "release"])
         self.assertEqual(result["english"], oracle)
@@ -2996,23 +3055,25 @@ class CatalogCurrentSource(unittest.TestCase):
                 self.assertEqual(list(row["counts"]), list(REPORT_CATEGORIES))
                 for category in REPORT_CATEGORIES:
                     self.assertEqual(row["counts"][category], len(row["keys"][category]), category)
-                self.assertEqual((row["denominator"], row["entriesPresent"]), (len(keys), len(keys)))
+                self.assertEqual((row["denominator"], row["entriesPresent"]),
+                                 (len(keys), len(present)))
                 self.assertEqual(row["reconciliation"],
                                  {"denominator": len(keys), "inDenominatorTotal": len(keys)})
-                self.assertEqual(row["keys"]["draft_unreviewed"], keys)
+                self.assertEqual(row["keys"]["draft_unreviewed"], present)
+                self.assertEqual(row["keys"]["missing"], missing)
                 for category in REPORT_CATEGORIES:
-                    if category != "draft_unreviewed":
+                    if category not in ("draft_unreviewed", "missing"):
                         self.assertEqual(row["keys"][category], [], category)
                 self.assertEqual(row["declarationsApplied"], 0)
-        codes = report_codes(report)
-        self.assertNotIn("entries-missing", codes)
+        self.assertEqual([(r["subject"], r["keys"]) for r in report_reasons(report, "entries-missing")],
+                         [(pack_id, missing) for pack_id in PACK_IDS])
         self.assertEqual([r["subject"] for r in report_reasons(report, "entries-draft-unreviewed")],
                          PACK_IDS)
         self.assertEqual((report["evidence"]["declarationCount"],
                           report["evidence"]["qualifiedDeclarations"]), (0, 0))
         self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
 
-    def test_actual_hud_adopts_22_keys_and_every_other_gate_stays_pending(self):
+    def test_actual_hud_adopts_23_keys_and_every_other_gate_stays_pending(self):
         report = self.catalog.catalog_report(*self.arguments())
         families = report["families"]
         self.assertEqual([(f["name"], f["proposedKeyFamily"], f["issue"], f["paths"])
@@ -3073,6 +3134,10 @@ class CatalogCurrentSource(unittest.TestCase):
                     canonical = assert_current_reference_bytes(self, name, data)
                     reference = CURRENT_REFERENCE_INPUTS[name][0]
                     self.assertEqual(row["sha256"] == reference, canonical == data)
+                elif name in WORKING_COPY_PHYSICAL_INPUTS:
+                    assert_current_reference_bytes(self, name, data)
+                    self.assertEqual((row["sha256"], row["byteLength"]),
+                                     WORKING_COPY_PHYSICAL_INPUTS[name])
         self.assertNotIn("complete", first)
         self.assertEqual({family["state"] for family in first["families"]}, {"INCOMPLETE"})
         self.assertEqual(first["completeness"]["state"], "INCOMPLETE")
@@ -3081,7 +3146,7 @@ class CatalogCurrentSource(unittest.TestCase):
         for claim in ("release_ready", "releaseready", "release-ready", "100%"):
             self.assertNotIn(claim, lowered)
 
-    def test_actual_data_and_27_key_context_drift_is_rejected(self):
+    def test_actual_data_and_28_key_context_drift_is_rejected(self):
         english = self.catalog.parse_english(self.raw["english"])
         packs = self.catalog.parse_packs(self.raw["packs"])
 
@@ -3093,6 +3158,8 @@ class CatalogCurrentSource(unittest.TestCase):
         drifted["panel.heading.progress"] = "Progress"
         removed = dict(english)
         removed.pop("panel.heading.extra_copies")
+        marked = dict(english)
+        marked["panel.button.options"] = "! Options"
         orphan = copy.deepcopy(packs)
         orphan["frFR"]["entries"]["panel.tooltip.not_in_english"] = "Orphelin"
         cases = (
@@ -3104,6 +3171,11 @@ class CatalogCurrentSource(unittest.TestCase):
                 lambda c: c["keys"].remove(schema_row(c, "panel.heading.extra_copies")))},
              "context-key-mismatch"),
             ("English key removed", {"english": removed}, "context-key-mismatch"),
+            ("Options context row omitted", {"context": context_with(
+                lambda c: c["keys"].remove(schema_row(c, "panel.button.options")))},
+             "context-key-mismatch"),
+            ("Options English with the notice mark", {"english": marked},
+             "context-english-mismatch"),
             ("panel key declared as format", {"context": context_with(
                 lambda c: schema_row(c, "panel.button.my_builds").update({"kind": "format"}))},
              "context-kind"),
@@ -3143,6 +3215,7 @@ class CatalogCurrentSource(unittest.TestCase):
         report = self.catalog.catalog_report(*self.arguments(english, packs, context))
         actual = sorted(current_english_oracle())
         keys = sorted(actual + [extra])
+        present = sorted(CURRENT_PACK_KEYS)
         self.assertEqual(report["englishBaseline"]["keyCount"], len(CURRENT_KEYS) + 1)
         self.assertEqual(report["denominator"]["englishKeys"], len(keys))
         for row in report["products"]:
@@ -3150,9 +3223,9 @@ class CatalogCurrentSource(unittest.TestCase):
                 self.assertEqual((row["denominator"], row["reconciliation"]["inDenominatorTotal"]),
                                  (len(keys), len(keys)))
                 if row["productId"] == "frFR":
-                    draft, missing = keys, []
+                    draft, missing = sorted(present + [extra]), sorted(CURRENT_ENGLISH_ONLY_KEYS)
                 else:
-                    draft, missing = actual, [extra]
+                    draft, missing = present, sorted(CURRENT_ENGLISH_ONLY_KEYS + [extra])
                 self.assertEqual(row["keys"]["draft_unreviewed"], draft)
                 self.assertEqual(row["keys"]["missing"], missing)
         self.assertEqual(report["families"][0]["adoptedKeys"], CURRENT_HUD_ADOPTED_KEYS + [extra])
@@ -3175,7 +3248,8 @@ class CatalogCurrentSource(unittest.TestCase):
         self.assertEqual(list(elsewhere.iterdir()), [])
         self.assertEqual(runs[0].stdout, runs[1].stdout)
         expected = self.catalog.catalog_report(*before[:4])
-        count = len(CURRENT_KEYS)
+        count, present = len(CURRENT_KEYS), len(CURRENT_PACK_KEYS)
+        missing = len(PACK_IDS) * len(CURRENT_ENGLISH_ONLY_KEYS)
         for index, (run, code) in enumerate(zip(runs, (0, 0, 1))):
             with self.subTest(run=index):
                 self.assertEqual(run.returncode, code, run.stderr[:500])
@@ -3192,10 +3266,10 @@ class CatalogCurrentSource(unittest.TestCase):
                 technical = record["technicalCatalog"]
                 self.assertEqual((technical["validity"], technical["englishKeys"],
                                   technical["missingEntries"], technical["entryPresence"]),
-                                 ("VALID", count, 0, "EVERY_CURRENT_ENGLISH_KEY_PRESENT"))
+                                 ("VALID", count, missing, "PARTIAL"))
                 self.assertEqual([(row["productId"], row["denominator"], row["entriesPresent"])
                                   for row in technical["products"]],
-                                 [(pack_id, count, count) for pack_id in PACK_IDS])
+                                 [(pack_id, count, present) for pack_id in PACK_IDS])
                 readiness = record["externalReadiness"]
                 self.assertEqual((readiness["state"], readiness["externalAcceptance"],
                                   readiness["reportCompletenessState"]),

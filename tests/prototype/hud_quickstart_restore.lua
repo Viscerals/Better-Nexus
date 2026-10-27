@@ -110,8 +110,10 @@ C.scenario('Q1b the first-use coach leaves the HUD restored when the editor clos
  editor:Hide();H.Advance(.2)
  C.guard(Facts().wanted and Facts().shown and not Facts().menuSuppressed,
   'Q1b: the unattached coach does not hold the HUD suppressed after editor close',FactText())
+ -- The design's close control: a visible "X" whose hover names Close.
  local close=V.Frame(H,function(x)
-  return x:GetParent()==coach and x:GetText()=='Close' and x:GetScript('OnClick')~=nil
+  return x:GetParent()==coach and x:GetText()=='X' and type(x.tip)=='string'
+   and x.tip:find('^Close')~=nil and x:GetScript('OnClick')~=nil
  end)
  if close then close:Click() end
  C.expect(close~=nil and not coach:IsShown() and Facts().shown,

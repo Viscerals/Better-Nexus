@@ -1008,10 +1008,12 @@ local function HasVisibleText(root, wanted)
                     end
                 end
             end
-        end
-        if f.GetChildren then
-            local kids = { f:GetChildren() }
-            for i = 1, #kids do Walk(kids[i], depth + 1) end
+            -- Nothing inside a hidden frame is visible, even a child that is
+            -- itself shown (a journal page hidden by another tab).
+            if f.GetChildren then
+                local kids = { f:GetChildren() }
+                for i = 1, #kids do Walk(kids[i], depth + 1) end
+            end
         end
     end
     Walk(root, 0)
@@ -1878,6 +1880,36 @@ function M.CanOpenBuilds()
     return ok and button ~= nil
 end
 
+-- The Echoes page as the player sees it, read-only. Ancestor-aware: an
+-- embedded journal whose host window is closed is not visible.
+local function EchoesPageVisible()
+    local journal = _G["ProjectEbonholdEchoJournal"]
+    if not (journal and journal.IsVisible) then return false end
+    local ok, visible = pcall(journal.IsVisible, journal)
+    return ok and visible == true
+end
+
+-- My Builds as the player sees it, read-only: the Echoes page visible with the
+-- stock Loadouts section shown (IsLoadoutsVisible) and not covered by the
+-- Nexus Progress page.
+local function MyBuildsVisible()
+    if not EchoesPageVisible() then return false end
+    if installed and panel and panel:IsShown() then return false end
+    local ok, seen = pcall(IsLoadoutsVisible, _G["ProjectEbonholdEchoJournal"])
+    return ok and seen == true
+end
+
+-- The journal's own Loadouts tab, clicked when the visible Echoes page shows
+-- another of its pages. A tab click selects that page; it does not toggle the
+-- window. A hidden or missing tab is never clicked.
+local function SelectLoadoutsTab()
+    local ok, tab = pcall(FindLoadoutsTab, _G["ProjectEbonholdEchoJournal"])
+    if not (ok and tab and type(tab.Click) == "function" and tab.IsVisible) then return false end
+    local okVisible, visible = pcall(tab.IsVisible, tab)
+    if not (okVisible and visible) then return false end
+    return (pcall(tab.Click, tab))
+end
+
 local function ClickCurrentEchoesMicroButton()
     -- The server update moved Echoes into Character Progression. Calling the
     -- legacy ProjectEbonhold.EchoJournal.Show() still opens the retired
@@ -1943,20 +1975,33 @@ local CHOOSER_COACH = "The Echoes page is open. Click the Nexus Wishlist selecto
 -- HUD's Assign Wishlist closes its other windows). It runs only when the
 -- game's Character Progression entry is there; otherwise nothing runs and
 -- false, "unavailable" is returned, so the caller says why and loses nothing.
-function M.OpenBuilds(openChooser, beforeOpen)
+-- The open is idempotent: the game's button toggles the page, so it is
+-- clicked only while the Echoes page is not visible; an open page is kept
+-- and never clicked closed. Without `openChooser` the destination is My
+-- Builds: another journal page gives way to its own Loadouts tab (one click
+-- per open), and `onSettled` (optional) is called once with true when My
+-- Builds is seen (MyBuildsVisible), or with false when the last settle still
+-- does not see it. It is told nothing else, and nothing is sent or assigned.
+function M.OpenBuilds(openChooser, beforeOpen, onSettled)
     if type(beforeOpen) == "function" then
         if not M.CanOpenBuilds() then return false, "unavailable" end
         beforeOpen()
     end
     EnsureAssociationScanner()
 
-    local opened = ClickCurrentEchoesMicroButton()
-    if not opened then
+    if not EchoesPageVisible() and not ClickCurrentEchoesMicroButton() then
         print("|cffff6060Nexus:|r Could not find the server Character Progression button. Open Character Progression → Echoes manually.")
         return false
     end
 
     local chooserPending = openChooser == true
+    local buildsPending, tabTried = openChooser ~= true, false
+    local settled = openChooser ~= true and type(onSettled) == "function" and onSettled or nil
+    local function report(seen)
+        local fn = settled
+        settled = nil
+        if fn then pcall(fn, seen) end
+    end
     -- Let the server finish constructing/selecting its new Echoes page before
     -- attaching Nexus beside the live loadout dropdown.
     local function finish(last)
@@ -1967,15 +2012,29 @@ function M.OpenBuilds(openChooser, beforeOpen)
                 DeselectOurTab(false)
             end
             RefreshAssociationRows()
+            if buildsPending then
+                if not tabTried and EchoesPageVisible() and not MyBuildsVisible() then
+                    tabTried = true
+                    SelectLoadoutsTab()
+                end
+                if MyBuildsVisible() then
+                    buildsPending = false
+                    report(true)
+                elseif last then
+                    buildsPending = false
+                    report(false)
+                end
+            end
             if chooserPending then
                 if OpenChooserNow() then
                     chooserPending = false
                 elseif last then
                     chooserPending = false
                     -- Truthful about the page: "open" only when Nexus sees its
-                    -- strip there. The game's button toggles the page, so one
-                    -- that was already open can close again (native behaviour,
-                    -- not observed offline); then no claim is made.
+                    -- strip there. An open page is not clicked, but a host
+                    -- window open on another of its pages may still close on
+                    -- the click (native behaviour, not observed offline); then
+                    -- no claim is made.
                     local strip = associationPanel
                     local shown = strip and strip.IsVisible and strip:IsVisible()
                     print("|cffffd200Nexus:|r " .. (shown and CHOOSER_COACH
@@ -1986,6 +2045,8 @@ function M.OpenBuilds(openChooser, beforeOpen)
                 end
             end
         end)
+        -- A failed read is not a sighting.
+        if last then report(false) end
     end
     local timers = C_Timer and C_Timer.After
     finish(not timers)

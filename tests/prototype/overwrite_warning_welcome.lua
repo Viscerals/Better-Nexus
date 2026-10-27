@@ -49,8 +49,12 @@ assert(coach and coach:IsShown() and not (NexusQuickStart and NexusQuickStart:Is
 assert(not Nexus.RecomputeStats().autoEnabled and #H.actions==actions,'reading enables no automation/action')
 assert(NexusDB.overwriteWarnings==nil and not NexusDB.hasSeenQuickStart,'unchecked warning is not either saved acknowledgment')
 local coachClose
-for _,c in ipairs(coach.children)do if c:IsObjectType('Button') and c:IsShown() and c:GetText()=='Close' then coachClose=c end end
-assert(coachClose,'the first-use coach offers Close')
+-- The design's close control: a visible "X" whose hover names Close.
+for _,c in ipairs(coach.children)do
+ if c:IsObjectType('Button') and c:IsShown() and c:GetText()=='X'
+  and type(c.tip)=='string' and c.tip:find('^Close') then coachClose=c end
+end
+assert(coachClose,'the first-use coach offers Close (its X control)')
 coachClose:Click()
 assert(NexusDB.hasSeenQuickStart and not coach:IsShown(),'the first-use coach Close keeps the existing first-time acknowledgement policy')
 local F=dofile('tests/prototype/format5_support.lua')

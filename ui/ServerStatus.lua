@@ -20,6 +20,18 @@ local hookedFrames = setmetatable({}, { __mode = "k" })
 -- give back, and client frames survive a zone change -- but a different frame
 -- object is not the one we hid and is never given back on its behalf.
 local suppressedFrame = nil
+-- Issue #164 give-back readback. A Show that returns is not proof that the
+-- widget is on screen: another addon can wrap Show, or the game can refuse
+-- it. `restorePending` is the widget we hid whose give-back has not read back
+-- as shown: it stays ours (suppressedFrame), is re-read on every scan, and
+-- its Show is retried only at an explicit lifecycle point (a mode change, a
+-- panel hide/show, a rescan, or the first scan after a world entry), never
+-- every second. `restoreUnknown` is a widget whose Show ran but which cannot
+-- report IsShown: no readback can ever confirm it, so the claim ends and the
+-- fact stays unknown, never "restored".
+local restorePending = nil
+local restoreUnknown = nil
+local retryAfterWorld = false
 local cachedSummary = { mode = nil, tier = nil, ash = nil, gain = nil, intensity = nil, intensityLevel = nil, raw = "" }
 local cachedSignature = ""
 
@@ -268,11 +280,15 @@ local function SavedModeIsNexus()
     return saved ~= "server"
 end
 
--- Can the Nexus HUD actually display right now? Asked of the panel owner,
--- which is the only place that knows whether a render has committed. A panel
--- that is merely hidden -- by the player, or by an open dialog -- is still
--- able to display and still counts as the replacement; a panel that has never
--- committed, has failed, or was never loaded does not.
+-- Is the Nexus HUD standing in for the stock widget right now? Asked of the
+-- panel owner, which is the only place that knows whether a render has
+-- committed and whether the player wants the panel. A panel suppressed by an
+-- open dialog is still able to display, is still wanted, and still counts as
+-- the replacement. Issue #164: a panel the PLAYER hid (`wanted` false, a
+-- saved choice) is not replacing anything, so the game's own widget keeps its
+-- place; a panel that has never committed, has failed, or was never loaded
+-- does not count either. An owner that does not report `wanted` is treated
+-- as wanting the panel, as before.
 --
 -- Protected, and false when unknown: if this owner cannot get an answer, the
 -- stock widget keeps its place rather than being hidden on an assumption.
@@ -288,7 +304,7 @@ local function PanelFacts()
             -- knowable, and that is enough to prove it is displaying.
             if type(panel.IsShown) == "function" then
                 local shown = panel.IsShown() == true
-                return {ready = shown, committed = shown}
+                return {ready = shown, committed = shown, wanted = true}
             end
             return nil
         end
@@ -299,7 +315,8 @@ local function PanelFacts()
         -- every later field read outside this pcall, which is how the same
         -- hazard came back once already: the rule is not "protect the call",
         -- it is "never let a foreign table out of here".
-        return {ready = raw.ready == true, committed = raw.committed == true}
+        return {ready = raw.ready == true, committed = raw.committed == true,
+            wanted = raw.wanted ~= false}
     end)
     if not ok then return nil end
     return facts
@@ -307,17 +324,18 @@ end
 
 local function ReplacementAvailable()
     local facts = PanelFacts()
-    return facts ~= nil and facts.ready == true
+    return facts ~= nil and facts.ready == true and facts.wanted == true
 end
 
 -- Whether the replacement is positively GONE, which is a stronger statement
 -- than "not available right now". A panel part-way through applying a render
 -- is briefly unavailable while its committed model still stands; treating
 -- that instant as gone would hand the stock widget back and take it away
--- again on the next scan.
+-- again on the next scan. A panel the player hid is gone as a replacement at
+-- once (issue #164), whatever its render state.
 local function ReplacementGone()
     local facts = PanelFacts()
-    return facts == nil or facts.committed ~= true
+    return facts == nil or facts.committed ~= true or facts.wanted == false
 end
 
 -- Whether the stock widget should be standing aside for the Nexus HUD. Both
@@ -329,29 +347,63 @@ end
 
 -- Returns whether the frame really did what was asked. A widget with no Hide,
 -- or one whose Hide raises, has NOT been taken away by us, and claiming it
--- would later "give back" something we never had.
+-- would later "give back" something we never had. Only what this module
+-- changed is put back: it takes the widget away with Hide alone, so it gives
+-- it back with Show alone. Its alpha, mouse and anchors were never touched
+-- and are not rewritten to a guessed default (issue #164: the stock widget
+-- returns exactly where and as the game left it).
 local function SetShown(frame, shown)
     if not frame then return false end
     if shown then
-        local done = false
-        if type(frame.Show) == "function" then done = pcall(frame.Show, frame) end
-        if type(frame.SetAlpha) == "function" then pcall(frame.SetAlpha, frame, 1) end
-        if type(frame.EnableMouse) == "function" then pcall(frame.EnableMouse, frame, true) end
-        return done
+        if type(frame.Show) ~= "function" then return false end
+        return pcall(frame.Show, frame)
     end
     if type(frame.Hide) ~= "function" then return false end
     return pcall(frame.Hide, frame)
 end
 
-local function ApplyVisibility()
+-- The widget's own shown flag: true, false, or nil when it cannot say.
+local function ReadShown(frame)
+    if not frame or type(frame.IsShown) ~= "function" then return nil end
+    local ok, value = pcall(frame.IsShown, frame)
+    if not ok then return nil end
+    return value and true or false
+end
+
+-- Gives back the widget this module hid, with Show alone (when `attempt`),
+-- and then reads it back. "restored": it reports itself shown; the claim
+-- ends. "unknown": Show ran but the widget cannot report IsShown; the claim
+-- ends (no readback could ever confirm a retry) and the state stays unknown.
+-- "pending": Show is missing, raised or did nothing visible; the widget is
+-- still hidden because of us, so the claim is kept for a later readback or
+-- lifecycle retry. Nothing else about the widget is touched.
+local function GiveBack(frame, attempt)
+    local ran = false
+    if attempt then ran = SetShown(frame, true) == true end
+    local shown = ReadShown(frame)
+    if shown == true then
+        suppressedFrame, restorePending, restoreUnknown = nil, nil, nil
+        return "restored"
+    end
+    if shown == nil and ran then
+        suppressedFrame, restorePending, restoreUnknown = nil, nil, frame
+        return "unknown"
+    end
+    suppressedFrame, restorePending, restoreUnknown = frame, frame, nil
+    return "pending"
+end
+
+-- `retry`: an explicit lifecycle point may repeat a pending give-back's Show.
+local function ApplyVisibility(retry)
     if not rootFrame then return end
 
     -- Four states. The stock widget is hidden only while a replacement is
-    -- really taking its place; it is shown because the player asked for it;
-    -- it is GIVEN BACK when this module hid it for a replacement that can no
-    -- longer display; and otherwise it is left exactly as it is. That last
-    -- case matters: forcing it to show every second would fight the game and
-    -- would override a player who closed it themselves.
+    -- really taking its place; it is GIVEN BACK, once, when this module hid
+    -- it and the player chose the server HUD; it is given back, once, when
+    -- this module hid it for a replacement that can no longer display or
+    -- that the player hid; and otherwise it is left exactly as it is. That
+    -- last case matters: forcing it to show every second would fight the
+    -- game and would override a player who closed it themselves.
     if ReplacingServerHud() then
         -- The confirmed Project Ebonhold root is the complete stock widget.
         -- Hide/show it as one unit; never touch unrelated global addon frames.
@@ -365,29 +417,51 @@ local function ApplyVisibility()
         -- displaying, and on every later scan the widget is hidden BECAUSE
         -- WE HID IT; re-asking would make the module forget its own hide one
         -- second after making it, and the give-back would never fire again.
+        --
+        -- Nor is a hidden widget hidden again. A widget we already took away
+        -- is re-hidden only when it reports itself shown; the OnShow hook
+        -- below owns the game showing it again, so a widget that cannot say
+        -- (unknown state) is left to that hook rather than written every
+        -- second. One that was already hidden when the replacement arrived
+        -- has nothing to take away and is not touched; an unknown state there
+        -- is hidden and claimed, as before.
+        local wasShown = ReadShown(rootFrame)
+        -- Standing aside again: a give-back still pending is no longer
+        -- wanted (the widget is meant to be hidden now), and an unknown one
+        -- is superseded by this decision.
+        restorePending, restoreUnknown = nil, nil
         if suppressedFrame ~= rootFrame then
-            local wasShown = nil
-            if type(rootFrame.IsShown) == "function" then
-                local okShown, value = pcall(rootFrame.IsShown, rootFrame)
-                if okShown then wasShown = value and true or false end
+            if wasShown == false then
+                suppressedFrame = nil
+            else
+                local hid = SetShown(rootFrame, false)
+                suppressedFrame = hid and rootFrame or nil
             end
-            local hid = SetShown(rootFrame, false)
-            suppressedFrame = (hid and wasShown ~= false) and rootFrame or nil
-        else
+        elseif wasShown == true then
             SetShown(rootFrame, false)
         end
     elseif not UsingNexusHud() then
-        SetShown(rootFrame, true)
-        suppressedFrame = nil
+        -- The player chose the server HUD. The widget this module hid comes
+        -- back once; one the game or the player hid stays theirs. It is not
+        -- re-shown every second (issue #164: no recurring Show fighting the
+        -- server's own state). The give-back is read back: only a widget
+        -- that reports itself shown ends our claim (GiveBack); a pending one
+        -- is re-read each scan and its Show is repeated only at a lifecycle
+        -- point.
+        if suppressedFrame == rootFrame then
+            GiveBack(rootFrame, restorePending ~= rootFrame or retry == true)
+        else
+            suppressedFrame, restorePending = nil, nil
+        end
     elseif suppressedFrame == rootFrame and ReplacementGone() then
         -- We took THIS widget away for a replacement, and the replacement is
-        -- gone: a committed render failed, or the panel stopped being able to
-        -- display. Give it back ONCE and stop claiming it, so nothing is
-        -- forced every second and a later hide is not fought. A different
-        -- widget object -- after a zone change, or a rebuild by the game --
-        -- is not one we hid, so it is left alone.
-        SetShown(rootFrame, true)
-        suppressedFrame = nil
+        -- gone: a committed render failed, the panel stopped being able to
+        -- display, or the player hid it. Give it back ONCE and stop claiming
+        -- it once it reads back shown, so nothing is forced every second and
+        -- a later hide is not fought. A different widget object -- after a
+        -- zone change, or a rebuild by the game -- is not one we hid, so it
+        -- is left alone.
+        GiveBack(rootFrame, restorePending ~= rootFrame or retry == true)
     end
 
     local hookTarget = rootFrame
@@ -403,6 +477,11 @@ local function ApplyVisibility()
             if ReplacingServerHud() then
                 local hid = SetShown(self, false)
                 if hid and self == rootFrame then suppressedFrame = self end
+            elseif self == restorePending and self == suppressedFrame
+                and ReadShown(self) == true then
+                -- A pending give-back the game completed itself: it is on
+                -- screen again, and no longer ours.
+                suppressedFrame, restorePending = nil, nil
             end
         end)
     end
@@ -417,6 +496,9 @@ function M.Init()
     scanner:RegisterEvent("PLAYER_ENTERING_WORLD")
     scanner:SetScript("OnEvent", function()
         rootFrame = nil
+        -- A world entry is a lifecycle point: the first scan after it may
+        -- repeat a pending give-back once (ApplyVisibility's retry).
+        retryAfterWorld = true
     end)
     scanner:SetScript("OnUpdate", function(_, dt)
         elapsed = elapsed + (tonumber(dt) or 0)
@@ -424,7 +506,9 @@ function M.Init()
         elapsed = 0
 
         if not rootFrame then FindFrames() end
-        ApplyVisibility()
+        local retry = retryAfterWorld
+        retryAfterWorld = false
+        ApplyVisibility(retry)
         local summary = ParseSummary(GetAllSourceTexts(), NamedSoulAsh())
         local selectedDifficulty = GetSelectedDifficultySummary()
         if selectedDifficulty and selectedDifficulty.tier then
@@ -484,6 +568,15 @@ function M.VisibilityFacts()
     end
     local nexusMode = SavedModeIsNexus()
     local available = ReplacementAvailable()
+    -- Issue #164: whether this module still holds the current widget hidden,
+    -- and a give-back that has not read back as shown ("pending") or could
+    -- not be read back at all ("unknown"). nil: no give-back is outstanding.
+    local restore = nil
+    if detected and restorePending == rootFrame then
+        restore = "pending"
+    elseif detected and restoreUnknown == rootFrame then
+        restore = "unknown"
+    end
     return {
         mode = nexusMode and "nexus" or "server",
         detected = detected,
@@ -491,13 +584,26 @@ function M.VisibilityFacts()
         stockAlpha = alpha,
         replacementAvailable = available,
         replacing = nexusMode and available or false,
+        hiddenByNexus = detected and suppressedFrame == rootFrame or false,
+        restore = restore,
     }
 end
 
 function M.SetMode(mode)
     ModeRoot().soulAshHudMode = mode == "server" and "server" or "nexus"
-    ApplyVisibility()
+    ApplyVisibility(true)
     if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
+end
+
+-- Issue #164: the panel owner says the player hid or showed the Nexus panel.
+-- The scanner's own decision, made now rather than on its next one-second
+-- pass: the widget stands aside for a panel that is wanted and can display,
+-- and the one this module hid comes back at once when it is not. Nothing is
+-- rescanned, requested or sent; the difficulty itself is never touched.
+function M.PanelVisibilityChanged()
+    if not rootFrame then FindFrames() end
+    ApplyVisibility(true)
+    return rootFrame ~= nil
 end
 
 -- #32: no stock click handler is found by searching. Project Ebonhold creates
@@ -574,7 +680,7 @@ function M.Rescan()
     rootFrame = nil
     cachedSignature = ""
     local found = FindFrames()
-    ApplyVisibility()
+    ApplyVisibility(true)
     return found
 end
 

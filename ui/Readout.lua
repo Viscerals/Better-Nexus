@@ -91,15 +91,71 @@ function M.MarkedCard(cards)
     return found
 end
 
--- "Name (Quality)" from a CardLine text; nil when the line carries no known
--- quality, since the name then cannot be told from its annotation.
-function M.CardTarget(text)
-    text = tostring(text or ""):gsub("^%[Guaranteed offer%] ", "")
-    local first, last
+-- The quality token CardLine wrote: CardLine puts " (Quality)" directly after
+-- the whole name and only an annotation after it, so the token is the LAST
+-- known " (Quality)" in the line, never the first. A name that itself holds
+-- " (Rare)" or similar keeps it ("Shard (Rare)" of Epic quality is
+-- "Shard (Rare) (Epic)": name "Shard (Rare)", quality Epic). Residual
+-- limits, stated rather than guessed around: the annotation words
+-- (UserText.Annotation of the policy's annotation) are not expected to hold a
+-- quality token, and from the text alone a card whose quality is unknown and
+-- whose name ends in such a token reads as that quality. Callers that hold the
+-- card's own facts (the HUD model's cards: CardFacts) pass them instead, and
+-- then no quality is read from the text (LineFacts).
+-- -> start, end, quality name; nil when the line has no known quality.
+local function QualityToken(body, only)
+    local first, last, quality
     for _, q in pairs(QUALITY_NAMES) do
-        local s, e = text:find(" (" .. q .. ")", 1, true)
-        if s and (not first or s < first) then first, last = s, e end
+        local token = " (" .. q .. ")"
+        local from = 1
+        while not only or q == only do
+            local s, e = body:find(token, from, true)
+            if not s then break end
+            if not first or s > first then first, last, quality = s, e, q end
+            from = s + 1
+        end
     end
+    return first, last, quality
+end
+M.QualityToken = QualityToken
+
+-- The facts a CardLine is written from, for a display model to carry beside
+-- its text: the whole name it prints and the card's own quality (nil when
+-- unknown, as CardLine then prints none).
+function M.CardFacts(card)
+    if type(card) ~= "table" then return nil end
+    return {name = NameOf(card), quality = QUALITY_NAMES[card.quality] and card.quality or nil}
+end
+
+-- A CardLine body (without the guarantee prefix) split with the card's own
+-- facts (CardFacts): the whole name, the quality name or nil when unknown, and
+-- the rest after them. A quality is never taken from the text: an unknown one
+-- stays unknown whatever the name holds. When the body does not begin with
+-- those facts, a known quality is found as its own last token, and an unknown
+-- one leaves the whole body as the name.
+local function LineFacts(body, facts)
+    local name = facts.name ~= nil and tostring(facts.name) or "?"
+    local quality = QUALITY_NAMES[facts.quality]
+    local lead = name .. (quality and (" (" .. quality .. ")") or "")
+    if body:sub(1, #lead) == lead and (#body == #lead or body:sub(#lead + 1, #lead + 1) == " ") then
+        return name, quality, body:sub(#lead + 1)
+    end
+    if not quality then return body, nil, "" end
+    local first, last = QualityToken(body, quality)
+    if not first or first <= 1 then return body, quality, "" end
+    return body:sub(1, first - 1), quality, body:sub(last + 1)
+end
+
+-- "Name (Quality)" from a CardLine text; nil when the line carries no known
+-- quality, since the name then cannot be told from its annotation. With the
+-- card's own facts (CardFacts), nil when they hold no quality.
+function M.CardTarget(text, facts)
+    text = tostring(text or ""):gsub("^%[Guaranteed offer%] ", "")
+    if type(facts) == "table" then
+        local name, quality = LineFacts(text, facts)
+        return quality and (name .. " (" .. quality .. ")") or nil
+    end
+    local first, last = QualityToken(text)
     if not first or first <= 1 then return nil end
     return text:sub(1, last)
 end
@@ -107,14 +163,113 @@ end
 -- An unstepped recommendation with its definite target named:
 -- "<reason>: <Name (Quality)>". A stepped plan (numbered lines) already
 -- names each step and is returned unchanged, as is a line with no target.
-function M.RecommendationWithTarget(recommendation, cardText)
+-- `facts` (optional): the card's own CardFacts, as CardTarget.
+function M.RecommendationWithTarget(recommendation, cardText, facts)
     local text = tostring(recommendation or "")
     if text:find("^%d+%. ") or text:find("\n%d+%. ") then return text end
-    local target = M.CardTarget(cardText)
+    local target = M.CardTarget(cardText, facts)
     if not target then return text end
     if text == "" then return "Take: " .. target end
     return text .. ": " .. target
 end
+
+-- One offer card of the Play panel (Claude Design full UI, "Main panel
+-- (Play)": the current offer first, three cards side by side). Without
+-- `facts` (below) they are read from its CardLine text only (the CardTarget
+-- rule): the name before the trailing quality token (QualityToken: the last
+-- known " (Quality)"), that quality, and the annotation after it. A line
+-- without a known quality keeps its whole text as the name and says the
+-- quality is unknown, never blank. `marked` is Readout.MarkedCard's answer for
+-- this card and `auto` the panel's Auto selection. The marked card is the
+-- Wishlist pick with Auto OFF; with Auto ON it is the recommendation only,
+-- since whether Auto takes it depends on its permissions and holds, which a
+-- card does not know. `shown` is the tag line the card shows: the tag, except
+-- that an unmarked guaranteed card names itself the current "[Guaranteed
+-- offer]" (CardLine's own words) before its annotation, so a current offer is
+-- never read as the predicted guaranteed queue (QueueLines). The guarantee is
+-- said once: on that tag line, or, for a marked card whose tag line is the
+-- pick, beside its quality ("Uncommon - guaranteed"). `facts` (optional):
+-- the card's own CardFacts, which the HUD model carries beside the text; with
+-- them the name is the whole name and the quality is the card's own, never
+-- read from the text, so an unknown quality stays unknown even when the name
+-- ends in " (Rare)" (LineFacts). Text only; it decides and chooses nothing.
+-- -> {name, quality, tag, shown, full, marked, guaranteed}
+M.OFFER_PICK_TAG = "> Wishlist pick"
+M.OFFER_RECOMMENDED_TAG = "> Recommended"
+M.OFFER_GUARANTEED_TAG = "[Guaranteed offer]"
+function M.OfferCard(text, marked, auto, facts)
+    local full = tostring(text or "")
+    local body, guaranteed = full, false
+    if body:find("^%[Guaranteed offer%] ") then
+        guaranteed = true
+        body = body:sub(#"[Guaranteed offer] " + 1)
+    end
+    local name, quality, rest
+    if type(facts) == "table" then
+        name, quality, rest = LineFacts(body, facts)
+    else
+        local first, last, q = QualityToken(body)
+        if first and first > 1 then
+            name, quality, rest = body:sub(1, first - 1), q, body:sub(last + 1)
+        end
+    end
+    local card = {full = full, marked = marked == true, guaranteed = guaranteed}
+    local note
+    if quality then
+        card.name = name
+        note = rest:gsub("^%s+", ""):gsub("%s+$", "")
+        if note == "" then note = nil end
+        card.quality = quality .. ((guaranteed and card.marked) and " - guaranteed" or "")
+    elseif name then
+        -- The card's own facts hold no quality: the whole name, and what
+        -- follows it is its annotation.
+        card.name = name
+        note = rest:gsub("^%s+", ""):gsub("%s+$", "")
+        if note == "" then note = nil end
+        card.quality = "? Quality unknown"
+    else
+        card.name = body
+        card.quality = "? Quality unknown"
+    end
+    if card.marked then
+        card.tag = auto == false and M.OFFER_PICK_TAG or M.OFFER_RECOMMENDED_TAG
+        card.shown = card.tag
+    else
+        card.tag = note or ""
+        card.shown = guaranteed and (M.OFFER_GUARANTEED_TAG .. (note and (" " .. note) or "")) or card.tag
+    end
+    return card
+end
+
+-- The offer heading: whose choice the current offer is. Auto unknown says
+-- only "Current offer".
+function M.OfferHeading(auto)
+    if auto == false then return "Current offer - you choose" end
+    if auto == true then return "Current offer - Auto ON" end
+    return "Current offer"
+end
+
+-- The heading's forms, longest first, for a row that cannot hold the full
+-- one: each still says whose choice the offer is ("you choose" or "Auto ON").
+function M.OfferHeadingForms(auto)
+    if auto == false then return {M.OfferHeading(false), "Offer - you choose", "You choose"} end
+    if auto == true then return {M.OfferHeading(true), "Offer - Auto ON", "Auto ON"} end
+    return {M.OfferHeading(nil), "Offer"}
+end
+
+-- The waiting state (design "Waiting for Echo data"): the runtime's
+-- "unsynced" hold. Nothing is chosen while it lasts, and it is never "0
+-- offers". The short form is the heading.
+M.WAITING_OFFER_HEADING = "... Waiting for offer data"
+M.WAITING_OFFER_NOTE = "... Waiting for current Echo data. Recommendations and automatic choices resume once "
+    .. "the offer is read. Nothing is chosen meanwhile."
+function M.WaitingForOffer(reason) return reason == "unsynced" end
+
+-- The Auto ON line under the offer (design "Auto ON, active"), from the
+-- permissions AutomationScopeLines lists: choosing is Auto's, saving needs its
+-- own permission, and Saved Builds and Orb runs are never Auto's.
+M.AUTO_ON_NOTE = "Auto may choose offers and, if its save permission is on, save a better finished run over "
+    .. "this Saved Build. It never loads a build or starts Orbs."
 
 -- Compact charges for the roll heading, "B:2 R:1 F:0". A count the game has
 -- not reported (charges.arrived == false, or no number) is "?", never 0;
@@ -274,6 +429,7 @@ end
 -- The inline line for a selected Auto that is not acting: the plain reason
 -- and, when there is one, what helps.
 function M.AutoHoldNote(reason)
+    if M.WaitingForOffer(reason) then return M.WAITING_OFFER_NOTE end
     local hint = M.AutoHelpHint(reason)
     return "Paused: " .. M.AutoHoldText(reason) .. (hint and (" " .. hint) or "")
 end

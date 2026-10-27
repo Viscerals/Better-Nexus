@@ -12,10 +12,14 @@ local function Shown() local w=Window();return w~=nil and w:IsShown() end
 -- the guided setup coach; the first-time Welcome stays the first-use window
 -- otherwise, and its deliberate secondary presentation (QuickStart.Show).
 local function Coach() local g=NexusGuidedSetup;return g~=nil and g:IsShown() end
+-- The coach's close control follows the design: a visible "X" whose hover
+-- names Close (UserText.Guide.buttons). It is found by that caption and that
+-- hover together, so another "X" cannot stand in for it.
 local function CoachClose()
  local g=NexusGuidedSetup
  for _,c in ipairs(g and g.children or {})do
-  if c.kind=='Button' and c:IsShown() and c:GetText()=='Close' then return c end
+  if c.kind=='Button' and c:IsShown() and c:GetText()=='X'
+   and type(c.tip)=='string' and c.tip:find('^Close') then return c end
  end
 end
 -- The exact "Close" caption of the Welcome dismiss control is a collected

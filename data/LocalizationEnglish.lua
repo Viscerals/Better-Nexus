@@ -16,7 +16,9 @@
 -- exact English bytes of the current Panel literals: My Builds navigation,
 -- first-run Assign/Create Wishlist navigation, the progress, still-needed,
 -- extra-copies and locked-target headings and the complete locked-target
--- hover. The base is now 27 entries: 26 static texts and the one template.
+-- hover. Issue #165: the HUD Options button label (ui/Panel.lua adds the
+-- trusted-notice "! " itself; it is never part of this text). The base is
+-- now 28 entries: 27 static texts and the one template.
 -- This data alone does not prove that any consumer shows these keys.
 
 Nexus = Nexus or {}
@@ -48,4 +50,5 @@ Nexus.LocalizationEnglish = {
     ["panel.heading.progress"] = "PROGRESS",
     ["panel.heading.still_needed"] = "STILL NEEDED",
     ["panel.heading.extra_copies"] = "EXTRA COPIES",
+    ["panel.button.options"] = "Options",
 }

@@ -623,11 +623,15 @@ do
  assert(l.state=='rejected' and Nexus.RecomputeStats().actionLifecycle.confirmed==0,'the refused Take stays refused: '..tostring(l.state)..'/'..tostring(l.reason))
 end
 -- 22. The Auto labels fit the button's text budget: the widest label is
--- measured with the button's own font object against 84 px minus a 6 px
--- inset per side, across the LayoutMetrics font-scale range 0.75-2. When the
--- owned normal size does not fit, only the button's own font object is made
--- smaller (never below 9); the shared normal font, the 84x22 header size and
--- anchor stay unchanged, and all three button states use the fitted font.
+-- measured with the button's own font object against the button's width
+-- minus a 6 px inset per side, across the LayoutMetrics font-scale range
+-- 0.75-2. When the owned normal size does not fit, only the button's own
+-- font object is made smaller (never below 9); the shared normal font and
+-- the header slot stay unchanged, and all three button states use the fitted
+-- font. The slot is the approved original-design header's (#163/#165: title,
+-- Auto, Options and Close on header line 1, Panel.HeaderSlots), which
+-- replaced the former fixed 84x22 TOPRIGHT -47/-7 place; the budget must be
+-- the width of that slot, never a constant of the old one.
 -- The measurement here is SIMULATED: the harness has no font renderer, so the
 -- doubles below model 0.55 em per visible character. Native pixel fit is not
 -- tested. (Last scenario: its CreateFont double is removed at the end.)
@@ -659,9 +663,13 @@ do
   H.Offer(i%2==1 and OTHER or WANT);H.Advance(1) -- a new board: a render runs the footer layout
   assert(Nexus.Panel.RenderStats().calls>renders,'scale '..scale..': reached: the panel rendered again')
   local fit=btn._nexusFit
-  assert(fit and fit.budget==72 and fit.baseSize==12*scale,'scale '..scale..': measured against the current owned size, budget 84-2x6')
+  local slots=Nexus.Panel.HeaderSlots()
+  assert(type(slots)=='table' and tonumber(slots.autoWidth) and tonumber(slots.height),'scale '..scale..': the header names the Auto slot')
+  local budget=slots.autoWidth-12
+  assert(fit and fit.budget==budget and fit.baseSize==12*scale,
+   'scale '..scale..': measured against the current owned size, budget = Auto slot width '..tostring(slots.autoWidth)..' - 2x6, got '..tostring(fit and fit.budget))
   assert(fit.fits and fit.width<=fit.budget,'scale '..scale..': the widest label fits: '..fit.width..' of '..fit.budget)
-  if 8*12*scale*0.55<=72 then
+  if 8*12*scale*0.55<=budget then
    assert(fit.size==12*scale,'scale '..scale..': no reduction when the owned size fits: '..tostring(fit.size))
   else
    assert(fit.size<12*scale and fit.size>=9,'scale '..scale..': only the button font is made smaller: '..tostring(fit.size))
@@ -669,8 +677,10 @@ do
   assert(own.size==fit.size and base.size==12*scale,'scale '..scale..': the shared normal font is unchanged')
   assert(btn.normalFont==own and btn.highlightFont==own and btn.disabledFont==own,'scale '..scale..': all three states use the fitted font')
   local point,rel,relPoint,x,y=btn:GetPoint(1)
-  assert(btn:GetWidth()==84 and btn:GetHeight()==22 and point=='TOPRIGHT' and x==-47 and y==-7,
-   'scale '..scale..': size and header anchor unchanged')
+  assert(btn:GetWidth()==slots.autoWidth and btn:GetHeight()==slots.height and point=='TOPRIGHT'
+   and rel==NexusPanel and relPoint=='TOPRIGHT' and x==-slots.auto and y==-slots.top,
+   'scale '..scale..': Auto keeps its header slot: '..tostring(btn:GetWidth())..'x'..tostring(btn:GetHeight())
+   ..' '..tostring(point)..' '..tostring(x)..'/'..tostring(y))
  end
  CreateFont=nil
 end

@@ -177,6 +177,32 @@ C.scenario('R6 owner, session, Wishlist and target changes invalidate evidence',
  C.expect(G.State().request==nil and St()~='verified','R6: changing the target drops the request',St())
 end)
 
+-- R6b: Keep Auto records the mode read in one owner and world session. A
+-- character or session change drops it, so the Auto step needs a new choice in
+-- the new context; the guide reads Auto only and never changes it.
+C.scenario('R6b an earlier Keep Auto choice does not carry into another owner or session',function()
+ Boot()
+ if not Core('R6b') then return end
+ local function AutoStep() G.Replay();G.SetPath('explore');G.State().index=G.INDEX.auto end
+ local before=Nexus.RecomputeStats().autoEnabled
+ AutoStep()
+ C.setup(not G.CanNext(),'R6b: fixture: the Auto step waits for a choice')
+ G.KeepAuto()
+ C.expect(G.CanNext() and G.State().autoKept~=nil,'R6b: Keep Auto continues in its own context')
+ local store,key=Nexus.Store,Nexus.Store.CurrentOwnerKey
+ store.CurrentOwnerKey=function() return 'someone-else@elsewhere' end
+ C.expect(not G.CanNext() and G.State().autoKept==nil,'R6b: an owner change drops the earlier Keep Auto choice')
+ C.expect(G.Summary().autoKept==nil,'R6b: the summary does not report the old owner choice')
+ G.KeepAuto()
+ C.expect(G.CanNext(),'R6b: a fresh choice for the new owner continues')
+ store.CurrentOwnerKey=key
+ C.expect(not G.CanNext() and G.State().autoKept==nil,'R6b: returning to the first owner needs its choice again')
+ G.KeepAuto()
+ Nexus.Panel.ObserveDestinationCharacter(nil,'PLAYER_ENTERING_WORLD')
+ C.expect(not G.CanNext() and G.State().autoKept==nil,'R6b: a new world session drops the earlier Keep Auto choice')
+ C.guard(Nexus.RecomputeStats().autoEnabled==before and Writes()==0,'R6b: Auto and saved assignments are unchanged by the guide')
+end)
+
 C.scenario('R7 delayed locked-role choice: pending until its own receipt and read back',function()
  Boot({evidence=true})
  Nexus.Store.Settings().useCurrentLocksForUntagged=false

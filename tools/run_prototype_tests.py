@@ -356,12 +356,20 @@ NAMES += ['flexible_plan_persistence_chooser']
 NAMES += ['guided_setup_flow','guided_setup_readback']
 # First entry routing: a healthy first use is the guided setup coach; Help's primary Setup / Welcome opens it; declines, read-only and refusals stay honest (EXPECT fails at f67ba51e by design).
 NAMES += ['guided_first_entry']
+# Issue #131: the guide's place kept per character across an offline reload; every outcome read again; read-only, foreign and loading kept session-only (EXPECT fails at dfcca312 by design; native reload NOT_RUN).
+NAMES += ['guided_setup_resume']
 # Issue #163 UI review prototype: shared status vocabulary and grouped navigation with existing labels.
 NAMES += ['ui_review_navigation']
 NAMES += ['full_ui_workspaces']
 # Issue #163: dedicated Settings window delegates to guarded owners; navigation reads only.
 NAMES += ['full_ui_settings']
 NAMES += ['full_ui_plan_routes']
+# Issue #163 Play panel (Claude Design full UI): offer cards, the offer heading, the waiting state and the Auto ON line; cards never choose (EXPECT fails before the change by design).
+NAMES += ['play_offer_cards']
+# Issue #163 Play panel summary (Claude Design full UI): compact plan progress with Details, the Difficulty / Soul Ash line, your vs best known DPS rows and the Orb run line (EXPECT fails before the change by design).
+NAMES += ['play_panel_summary']
+# Issue #165: the header Options button: its localized label with the code-owned trusted-notice "!", its hover, header line 1 geometry at 420 and 640 px and 125% text in both Difficulty / Soul Ash HUD modes, and its read-only menu route (synthetic fixtures; native glyph widths NOT_RUN).
+NAMES += ['panel_options_label']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
@@ -374,6 +382,14 @@ PYTHON_TEST_TIMEOUT_SECONDS=DEFAULT_TIMEOUT_SECONDS
 
 def timeout_for(name:str)->int:
     return TEST_TIMEOUT_SECONDS.get(name,DEFAULT_TIMEOUT_SECONDS)
+
+# Captured output as text. On a timeout, TimeoutExpired carries what was read so far: None when
+# nothing was, and on POSIX raw bytes even with text=True. Reporting it must not raise or print a
+# bytes repr; the row's status stays TIMEOUT.
+def output_text(value)->str:
+    if value is None: return ''
+    if isinstance(value,bytes): return value.decode('utf-8',errors='replace')
+    return str(value)
 
 def main() -> int:
     ap=argparse.ArgumentParser()
@@ -404,8 +420,8 @@ def main() -> int:
                  'seconds':round(time.monotonic()-start,6),'timeout_seconds':timeout,'stdout':p.stdout,'stderr':p.stderr}
         except subprocess.TimeoutExpired as exc:
             row={'test':name,'status':'TIMEOUT','seconds':round(time.monotonic()-start,6),'timeout_seconds':timeout,
-                 'stdout':str(exc.stdout or ''),'stderr':str(exc.stderr or '')}
-        results.append(row);print(name,row['status']);print(row.get('stdout','').rstrip());print(row.get('stderr','').rstrip())
+                 'stdout':output_text(exc.stdout),'stderr':output_text(exc.stderr)}
+        results.append(row);print(name,row['status']);print(output_text(row.get('stdout')).rstrip());print(output_text(row.get('stderr')).rstrip())
     runtime_files=[]
     for line in (ROOT/'Nexus.toc').read_text().splitlines():
         if line.strip() and not line.startswith('#'):

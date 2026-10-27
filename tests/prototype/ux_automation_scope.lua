@@ -119,7 +119,9 @@ local function WelcomeDismissal(where)
  return later
 end
 local function Offer(cards) H.Board(cards);H.Notify();H.Advance(1.2) end
--- The HUD's card rows as shown.
+-- The HUD's card rows as shown. The Play offer cards (Claude Design full UI)
+-- replace the shown rows with the same current choices: each shown card is
+-- read as its visible name, quality and tag lines, in that order.
 local function CardRows()
  local f=NexusPanel
  local cards={}
@@ -128,8 +130,34 @@ local function CardRows()
    if r.kind=='FontString' and r~=f._rollStatus and r~=f._rollRec and r~=f._chargesText
     and r:IsShown() and V.Plain(r:GetText() or '')~='' then cards[#cards+1]=V.Plain(r:GetText()) end
   end
+  for _,card in ipairs(f._offerCards or {}) do
+   if card:IsShown() then
+    local parts={}
+    for _,key in ipairs({'name','quality','tag'}) do
+     local text=V.Plain(card[key]:GetText() or '')
+     if text~='' then parts[#parts+1]=text end
+    end
+    if #parts>0 then cards[#cards+1]=table.concat(parts,' ') end
+   end
+  end
  end
  return cards
+end
+-- A shown row or card that carries the manual (Auto OFF) Take marker: the
+-- row's ">> " prefix, or the card's visible Wishlist pick tag, its last line.
+local function ManualMarker(line)
+ local tag=Nexus.Readout and Nexus.Readout.OFFER_PICK_TAG
+ return line:find('^>> ')~=nil or (type(tag)=='string' and line:sub(-#tag)==tag)
+end
+-- The first-use coach's close control, as the design shows it: a visible "X"
+-- whose hover names Close (quickstart_seen_guard's lookup), so another "X"
+-- cannot stand in for it.
+local function CoachClose(coach)
+ for _,c in ipairs(coach and coach.children or {}) do
+  if c.kind=='Button' and c:IsShown() and c:GetText()=='X'
+   and type(c.tip)=='string' and c.tip:find('^Close') then return c end
+ end
+ return nil
 end
 
 C.scenario('P1 the Auto hover states the scope in plain words; hovering acts, requests and writes nothing',function()
@@ -303,7 +331,7 @@ C.scenario('P10 M2 N5: secondary Welcome does not dismiss the primary first-use 
  if dismiss then dismiss:Click() end
  C.guard(coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==nil,
   'P10: closing the informational Welcome records no first-use acknowledgement')
- local coachClose=ChildButton(coach,'Close')
+ local coachClose=CoachClose(coach)
  if coachClose then coachClose:Click() end
  C.expect(not coach:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==true,
   'P10: the first-use coach records acknowledgement only on its deliberate Close',
@@ -544,7 +572,7 @@ C.scenario('P17 J4 a manual Needed card, passive reads and No keep Auto OFF; onl
  -- The shown card rows that carry the manual marker.
  local function Marked()
   local n,at=0,nil
-  for i,line in ipairs(CardRows()) do if line:find('^>> ') then n=n+1;at=i end end
+  for i,line in ipairs(CardRows()) do if ManualMarker(line) then n=n+1;at=i end end
   return n,at
  end
  local acts=#H.actions

@@ -2,20 +2,29 @@
 Nexus=Nexus or {}
 local H={};Nexus.Help=H
 local frame,index= nil,1
+-- Called once when Help closes (Close, Escape or a hide), for a window that
+-- stepped aside for Help (H.Show's onReturn). A route that opens another
+-- window drops it (Leave), so nothing is brought back over that window.
+local returnTo=nil
 -- Keep the complete Help window above the Orb dialog's 30-33 layer band.
 local HELP_LEVEL=40
 local pages={
- {id="start",title="Getting started",text=[[Start here: the page buttons above open any page directly. Setup / Welcome opens Guided setup, the first-launch guide, at the step you left; opening it never turns Auto ON. The information-only Welcome stays in the ... menu as Setup / Welcome. Assign Wishlist... opens the Echo Journal with its Wishlist chooser for the Saved Build the Journal shows; nothing is assigned until you choose a Wishlist there.
+ {id="start",title="Getting started",text=[[Start here: Setup / Welcome opens Guided setup at the step you left. Click it above to begin; that is the first task, and opening it never turns Auto ON. It is also in the Options menu on the Nexus panel (Options > Manage > Setup / Welcome), and /nexus guide opens it too. You do not need the rest of this page to start.
 
-Guided setup (the Guided setup button in Setup / Welcome) goes one step at a time: choose or create a Wishlist, choose the Saved Build that should follow it, assign it in the Echo Journal chooser, try a SIMULATED recommendation and decide about Auto. A step is done only after Nexus reads the result back; a skipped, pending or unknown step is not done. Opening, navigating or closing the guide assigns, saves, shares, spends and turns on nothing. Closing the first-launch guide the first time (Close or Escape) only records that it was seen, when saved data can be written; its steps stay as they are.
+Guided setup goes one step at a time: choose or create a Wishlist, choose the Saved Build that should follow it, assign it in the Echo Journal chooser, try a SIMULATED recommendation and decide about Auto. A step is done only after Nexus reads the result back; a skipped, pending or unknown step is not done. Opening, navigating or closing the guide assigns, shares, spends and turns on nothing. It saves only its own place for this character and, when you first close the first-launch guide (Close or Escape), that it was seen, and only when saved data can be written; its steps stay as they are.
 
-Setup checklist (also in the ... menu) shows what Nexus can read now: start-up, the Saved Build Nexus would act on, its assigned Wishlist, Auto, Sync and any Orb run. A step is done only when that is true now; unknown or still loading is never shown as done, and closing the Welcome is not a setup step. Its buttons only open the same windows as here.
+Other setup routes, when you want them:
+Assign Wishlist... opens the Echo Journal with its Wishlist chooser for the Saved Build the Journal shows; nothing is assigned until you choose a Wishlist there. It is also under Plan on the Nexus panel.
+Setup information (read only), in the Options menu under Manage, is the older information-only overview of these routes; it saves nothing and never turns Auto ON.
+Setup checklist (also in the Options menu) is listed there under Manage as Setup checklist and status. It shows what Nexus can read now: start-up, the Saved Build Nexus would act on, its assigned Wishlist, Auto, Sync and any Orb run. A step is done only when that is true now; unknown or still loading is never shown as done, and closing the Welcome is not a setup step. Its buttons only open the same windows as here.
+
+Reference for later: the page buttons above open any page directly.
 
 This is an experimental build. Back up your Nexus folder and WTF with WoW closed before testing. Reading this guide never spends, assigns, activates, or sends a Sync request.
 
 Before you turn Auto ON: With Auto ON, Nexus may replace that active Saved Build with a better finished run; at level 80 after a finished run, that can happen right after you turn Auto ON or change the assignment. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. It treats the slot as a working copy, not a protected archive. Keep Auto OFF if you want it left unchanged. Auto starts OFF each session.
 
-1. Open the Wishlist Editor: click ... on the Nexus panel, then Wishlist Editor, or type /nexus editor. To use a Wishlist code, click Import and paste it. Import opens a draft.
+1. Open the Wishlist Editor: click Plan on the Nexus panel, then Wishlist Editor (also in the Options menu under Manage), or type /nexus editor. To use a Wishlist code, click Import and paste it. Import opens a draft.
 2. Check exact qualities, copy counts and the planned locked Echo targets.
 3. Click Create & assign for a new or imported plan. It saves the plan and makes it the target of the loadout shown in the editor. Create unassigned saves the plan without a target. For an existing Wishlist, click Save changes. It keeps the Wishlist's current target.
 4. To target another Saved Build: in My Builds, select the intended Saved Build and assign the Wishlist to it (click the Wishlist selector and choose the Wishlist). Assigning only chooses the target; by itself it does not change the Saved Build.
@@ -23,11 +32,13 @@ Before you turn Auto ON: With Auto ON, Nexus may replace that active Saved Build
 
 What Nexus is for: you choose the Echoes you want (a Wishlist). Nexus counts the exact copies still missing and recommends, or with Auto ON performs, Take, Banish, Reroll and Freeze on each Echo choice to work toward them.
 
+More detail, when you need it:
+
 Saving and loading Saved Builds: in the game's own build window, loading a Saved Build makes it your current loadout. Saving writes your current Echoes into the slot you selected and REPLACES what that slot held. Check the selected slot before you save; Nexus cannot undo a save or bring back the old contents. Nexus never loads a Saved Build for you. Its only save is the automatic save with Auto ON, described above. Creating or importing a Wishlist saves only a plan. Assigning a Wishlist by itself changes no Saved Build.
 
 Words: A Wishlist is a desired plan, not proof that you own its Echoes. Saved Builds are server slots. Active Loadout is the selected server loadout. Nexus treats no future random Echo roll as guaranteed.
 
-Counts: planned copies (the plan), rolled copies this run, the Wishlist's copies in a Saved Build and locked targets are different counts, and Echo families represented counts a family once. Unavailable is not 0, and a plan is not a finished build. Best known: the best shared DPS record this client holds for the exact same Echoes; it is not a complete or server-wide ranking. My Builds is the game's page of your Saved Builds; in Build Library, the Mine scope lists your Saved Builds and shared listings. Menu and status: the ... button on the Nexus panel.]]},
+Counts: planned copies (the plan), rolled copies this run, the Wishlist's copies in a Saved Build and locked targets are different counts, and Echo families represented counts a family once. Unavailable is not 0, and a plan is not a finished build. Best known: the best shared DPS record this client holds for the exact same Echoes; it is not a complete or server-wide ranking. My Builds is the game's page of your Saved Builds; in Build Library, the Mine scope lists your Saved Builds and shared listings. Options: the Options button on the Nexus panel header opens its menu, with Manage; point at it for the current status.]]},
  {id="wishlists",title="Wishlists and locked targets",text=[[Before you edit: a plan holds up to 79 rolled copies and 6 locked Echo copies (85 total). Counts are copies, not names or rows. Each quality is a different target; a lower-quality copy does not count for a higher-quality target.
 
 1. Open the Wishlist Editor (/nexus editor). Import opens a draft; nothing is kept until you click Create & assign or Create unassigned (new plan) or Save changes (existing Wishlist).
@@ -44,12 +55,12 @@ Nexus-only locked-role markers should be imported in Nexus, not assumed compatib
 
 Better means Wishlist progress, not Orb investment or keeping every individual Echo. Example: a run that loses 1 requested copy but gains 3 other requested copies is +2 overall. It can replace the Saved Build even when the lost Echo is one you value or obtained with Orbs. The save itself spends no Orbs, and it does not mean that Echo was judged worthless. Nexus cannot undo a completed save or bring back that Echo or the Orbs spent on it; Unassign does not restore a Saved Build. Keep Auto OFF if you want the current Saved Build left untouched. Auto starts OFF each session.
 
-What Auto may do: with Auto ON, Nexus acts only within these permissions. Take needed Echoes (autoPick), Banish (autoBanish), Reroll (autoReroll), Freeze (autoFreeze), turning tomes off and on (autoDisable) and the automatic save over the active Saved Build (autoSave) are on by default. Locking Wishlist Echoes into locked slots (autoLockEchoes) is off by default; it is its own option in the Wishlist Editor. Nexus never activates or loads a Saved Build (the saved autoActivate value is not used by any action), and Auto never starts an Orb run. To see each current value, click ... on the Nexus panel, then Automation settings; Reroll and Freeze can be changed there or with the commands below. The Auto warning lists the same permissions.
+What Auto may do: with Auto ON, Nexus acts only within these permissions. Take needed Echoes (autoPick), Banish (autoBanish), Reroll (autoReroll), Freeze (autoFreeze), turning tomes off and on (autoDisable) and the automatic save over the active Saved Build (autoSave) are on by default. Locking Wishlist Echoes into locked slots (autoLockEchoes) is off by default; it is its own option in the Wishlist Editor. Nexus never activates or loads a Saved Build (the saved autoActivate value is not used by any action), and Auto never starts an Orb run. To see each current value, click Options on the Nexus panel, then Manage, then Automation settings; Reroll and Freeze can be changed there or with the commands below. The Auto warning lists the same permissions.
 
 Tomes: with Auto ON and the tome permission (autoDisable) on, once the game's tome data is ready Nexus turns off Echo tomes your Wishlist does not use and turns back on tomes it needs, one change about every half second. It never turns off a tome you opted out of. Nexus does not turn tomes back on when you turn Auto OFF, log out or change the Wishlist: it turns back on only tomes a Wishlist needs (or that you opted out of), and only while Auto is ON. The tome list in the Echo Journal shows their state.
 
 1. Click Auto OFF on the Nexus panel to turn Auto ON. Auto is a permission for your enabled automatic actions. Auto OFF does not turn Nexus off, stop build sharing, or hide the panel.
-2. Choose actions: ... > Automation settings, or /nexus reroll on|off and /nexus freeze on|off. They change those permissions, not the Auto button. Each one only allows or forbids that action; it does not choose another strategy. When an action is off, Nexus skips that step and uses the next rule below.
+2. Choose actions: Options > Manage > Automation settings, or /nexus reroll on|off and /nexus freeze on|off. They change those permissions, not the Auto button. Each one only allows or forbids that action; it does not choose another strategy. When an action is off, Nexus skips that step and uses the next rule below.
 3. Watch the panel. It shows what Nexus recommends now; with Auto ON, Nexus performs it.
 
 EXPERIMENTAL STRATEGY (the default in this build). The released strategy stays available as a rollback. On an ordinary Echo choice the experimental strategy keeps every permission, charge, pending-action and Orb rule and changes these steps:
@@ -69,7 +80,7 @@ Nexus does not keep rerolls back for later in a run. These rules are not a guara
 
 Reading the panel: Needed, Target already met, Not on Wishlist and Different quality from target describe the current choice. Frozen offer is a card kept by Freeze. Priority numbers in advanced diagnostics are not DPS or percentages. EXTRA COPIES are rolled copies above exact Wishlist targets. Target 2/current 5 means 3 extras. This display deletes nothing. [Guaranteed offer] means the server marks this offer guaranteed. Overlay: [X] meets the requested copy count; [~] some; [ ] none. These symbols are not network or loading states.
 
-When it is blocked: "Waiting for the game to confirm the last Echo action." means an action was sent and has no confirmed result yet. Do not choose again or reload; wait. "Auto waiting" means Auto stays ON and holds its actions for such a result, or for an action the game still shows pending. "Auto rechecking" means it also asks the game again for your granted Echoes, at a slow pace and only while that could settle the wait; a request is not an answer and nothing is resent. The game gives Nexus no receipt for an Echo selection. If the matching grant never appears, or another selection of the same Echo makes it impossible to tell which one was granted, Nexus keeps waiting until a new run. Turning Auto off and on does not end that wait. A reload ends Nexus's tracking of it without learning or cancelling the result. Point at the Auto button to see what Auto is doing now and why. "No Echo choice is showing." means only that no choice is on screen now. It does not mean the run is finished, and it is not a reason to retry. "Auto ON — paused" means Auto stays ON but is not acting; the line below it says why and what helps (the ... button's Status line has it too). When an Auto click leaves Auto OFF, the same place says why. Waiting for current Echo data means automatic choices wait for ownership confirmation; it is not Sync status. Ordinary rolling stays paused during active or unknown Orb offers.]]},
+When it is blocked: "Waiting for the game to confirm the last Echo action." means an action was sent and has no confirmed result yet. Do not choose again or reload; wait. "Auto waiting" means Auto stays ON and holds its actions for such a result, or for an action the game still shows pending. "Auto rechecking" means it also asks the game again for your granted Echoes, at a slow pace and only while that could settle the wait; a request is not an answer and nothing is resent. The game gives Nexus no receipt for an Echo selection. If the matching grant never appears, or another selection of the same Echo makes it impossible to tell which one was granted, Nexus keeps waiting until a new run. Turning Auto off and on does not end that wait. A reload ends Nexus's tracking of it without learning or cancelling the result. Point at the Auto button to see what Auto is doing now and why. "No Echo choice is showing." means only that no choice is on screen now. It does not mean the run is finished, and it is not a reason to retry. "Auto ON — paused" means Auto stays ON but is not acting; the line below it says why and what helps (the Status line of the Options button's hover has it too). When an Auto click leaves Auto OFF, the same place says why. Waiting for current Echo data means automatic choices wait for ownership confirmation; it is not Sync status. Ordinary rolling stays paused during active or unknown Orb offers.]]},
  {id="sharing",title="Shared builds and DPS",text=[[1. Click Explore on the Nexus panel, then Build Library. Use the scope buttons to switch between All Shared and Mine (your Saved Builds and shared listings; not the game's My Builds page). If the Build Library is taller than your screen (for example with large text), its content scrolls: use the bar at its right edge, or the mouse wheel over the window outside the build list and the build details, which scroll on their own.
 2. Require both DPS records: when checked, only builds with both a Training Dummy and a Lich King record that this client holds are listed. When unchecked, that requirement is off; other filters still apply. A record shows what this client holds. It is not build quality, outside verification, or finished Sync. While a filter change is applied, the list says Updating results...
 3. Copy into Editor creates a draft; it does not activate, spend or share. Your own Share actions need your click: on your own Saved Build, Share Build... at the right asks you to confirm first, and the Share Build form shares when you press its Share Build button. With Sync set to Automatic, an eligible new character best for Training Dummy or Lich King may send without a click: a DPS record with your ordinary and any locked Echoes and player info, plus a separate automatic "Record Loadout" summary without the Echo list. That DPS record carries its Echo list. The DPS record does not need a request or that summary: receivers may create a viewable, copyable page from the record alone. An oversized summary is refused separately; it does not stop an otherwise admitted DPS record. Manual and Off refuse both automatic sends. Sending is not delivery: Nexus cannot confirm that anyone receives or keeps what it sent. A shared build cannot be recalled: players who receive it keep their copy. Sharing is separate from saving a Wishlist or a server Saved Build.
@@ -94,7 +105,7 @@ When a newer best replaces an automatic Record Loadout page, Nexus removes the o
 Sync words: queued means waiting to send. Sent means it left this client; receipt is not confirmed. Received means it arrived here. Stored means this client kept it after its checks. A listed build or record is one this client stored; it does not show which other players have it.]]},
  {id="orbs",title="Orbs / Lost Memories",text=[[Before you start: Orb mode refines existing rolled Echoes toward the assigned Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace locked Echo slots, and it stops when rolled targets are complete. Opening the window, Open Orbs..., Help and Max spend nothing.
 
-1. Open /nexus orbs, Orbs on the Nexus panel, Orbs / Lost Memories in the ... menu, or Open Orbs... (shown with Orb guidance). Check the assigned Wishlist, missing rolled copies and the confirmed Orb balance. Loading or unavailable data is not a zero balance.
+1. Open /nexus orbs, Orbs on the Nexus panel, Orbs / Lost Memories in the Options menu under Manage, or Open Orbs... (shown with Orb guidance). Check the assigned Wishlist, missing rolled copies and the confirmed Orb balance. Loading or unavailable data is not a zero balance.
 2. Set the maximum. Until you type an amount, it follows your confirmed Orb balance, up to 1000. Typing an amount stops that; Max returns to following the balance. A typed amount must be a whole number from 1 to 10,000. A maximum saved by an earlier version is kept.
 3. Click Start. Start approves the maximum shown and automatic use of eligible surplus copies, including safe recycling. Starting disables ordinary Automation; it does not automatically re-enable it. Locked and required copies stay protected. The approved maximum does not change during the run. If unconfirmed history exists, the same Start area shows its count and late-result risk; Start accepts current Echoes as this run's baseline without settling old actions. Reload requires a new deliberate review.
 4. Watch the run. It continues after each confirmed result; actual owned Echoes decide completion. Start permits at most two recovery checks within the same maximum; a check that is admitted and then refused still uses one. Unknown spend exposure stays counted. A classified loading screen holds actions, restarts the pending timer on entry and allows a three-second settling opportunity. Stop and Pause stay authoritative. No safe source still ends the run. Orbs used counts spent Orbs against the approved maximum; pending means an Orb was requested and its spend is not confirmed yet. If a record saved by an earlier version has no approved maximum, the Orb windows say the maximum was not recorded instead of naming one.
@@ -129,10 +140,11 @@ If reporting fails: if the window says "Not prepared", or logs are unavailable, 
 
 Loading: the loading panel shows the current step and elapsed time; a percentage is for that step only. /nexus loading reopens it. A gray Explore control means shared views are loading or unavailable; check its tooltip or /nexus loading for the current status.
 
-Turning things off: Hide Nexus Panel (... menu) or /nexus panel only hides the panel. Auto OFF only stops automatic actions. Neither turns Nexus off. To turn Nexus off, only when no action is active or pending: log out to character selection, click AddOns, untick Nexus, and log in again.
+Turning things off: Hide Nexus Panel (Options > Manage) or /nexus panel only hides the panel. Auto OFF only stops automatic actions. Neither turns Nexus off. To turn Nexus off, only when no action is active or pending: log out to character selection, click AddOns, untick Nexus, and log in again.
 
 Commands:
-/nexus help - this guide, also during loading
+/nexus help or /nexus tutorial - this guide, also during loading
+/nexus guide - Guided setup, one step at a time; opening it changes nothing
 /nexus report - support report
 /nexus editor - edit Wishlists
 /nexus orbs - open Orb mode without spending
@@ -149,7 +161,7 @@ Local roll record: Nexus records its rolling decisions automatically, on this co
 
 More diagnostics: /nexus log opens the log viewer. Prepare full diagnostic report builds a paged report. Select this page and copy pages in order; it does not put every page on the clipboard.
 
-Updates: update notices come from release information shipped inside this package; the ... button then shows !. Another player's client can report a newer test build; Nexus shows that only as an UNVERIFIED hint. No notice does not mean your build is the latest. Nexus never downloads or installs.]]},
+Updates: update notices come from release information shipped inside this package; the Options button then reads ! Options. Another player's client can report a newer test build; Nexus shows that only as an UNVERIFIED hint. No notice does not mean your build is the latest. Nexus never downloads or installs.]]},
  {id="about",title="About and advanced details",text=[[Ordinary rolling and Orb decisions come from EchoWeaver, the rolling engine that Nexus maintains itself. Orb decisions use EchoWeaver's source, target and fallback rules with Nexus's exact-quality, locked-role, approval, budget and confirmation safeguards.
 
 EchoWeaver has no runtime dependency on another addon. Source and reuse notices are in THIRD_PARTY.md. Neither algorithm is claimed mathematically optimal or universally safe without matching client evidence.
@@ -163,12 +175,92 @@ Advanced commands are troubleshooting tools, not generic fixes. Do not experimen
 Known legacy compatibility and incomplete native validation remain disclosed. Offline tests are not native verification. Back up saved data and test voluntarily.]]},
 }
 H.Pages=pages
+-- Short task topics (the full-UI design's Help: Getting started, Wishlists vs
+-- Saved Builds, Auto, Sync, Orbs, Support), one per page: a few lines and one
+-- Open action to the real screen (H.OpenTopic). Each page's text stays below
+-- its topic as the complete reference, with every warning, permission and
+-- recovery step. Opening a screen assigns, spends, sends and turns on nothing.
+local topics={
+ start={title="Getting started",open="Open Setup guide",route=function() return H.OpenGuide() end,lines={
+  "Setup guide takes you one step at a time: choose a Wishlist, pick the Saved Build that follows it, assign it, then read a recommendation.",
+  "Opening, moving through or closing the guide assigns, spends, sends and turns on nothing. Skipped, unknown and unconfirmed steps are never counted as done."}},
+ wishlists={title="Wishlists vs Saved Builds",open="Open Wishlist Editor",route=function() return H.OpenEditor() end,lines={
+  "A Wishlist is the plan: the Echoes you want. A Saved Build is a server slot the game loads; each one follows one Wishlist.",
+  "Create or import a Wishlist in the editor. A draft is kept only when you save it there, and assigning by itself changes no Saved Build."}},
+ rolling={title="Auto",open="Open Automation settings",route=function() return H.OpenSettings("automation") end,lines={
+  "Auto OFF: Nexus only recommends. Auto ON: it may Take, Banish, Reroll and Freeze for you, and may replace your active Saved Build with a better finished run.",
+  "Auto starts OFF each session. Turn it ON only with the Auto button on the Nexus panel, after its warning. Automation settings shows each permission."}},
+ sharing={title="Sync",open="Open Sync settings",route=function() return H.OpenSettings("sync") end,lines={
+  "Your Sync mode decides what Nexus may send: Automatic may send without a click, Manual sends only what you start, Off sends nothing.",
+  "Sharing a build is always its own confirmed action. Sent is not delivered, and a shared build cannot be recalled."}},
+ orbs={title="Orbs",open="Open Orbs / Lost Memories",route=function() return H.OpenOrbs() end,lines={
+  "Orb mode refines rolled Echoes toward the assigned Wishlist, one Orb per replacement, within the maximum you approve with Start.",
+  "Opening the window, Help and Max spend nothing. Closing the window does not stop a run: use Pause or Stop."}},
+ troubleshooting={title="Support",open="Open Support report",route=function() return H.OpenSupport() end,lines={
+  "Something wrong? Type /nexus report before any reload, then Copy summary. Do not reload, reset or clear data to recreate it.",
+  "Prepare report file keeps the report on this computer; send that file privately, never in public. Nothing is uploaded."}},
+ about={title="About Nexus",open="Open Log viewer",route=function() return H.OpenLogs() end,lines={
+  "Where the rolling engine comes from, compatibility notes and the advanced commands.",
+  "Advanced commands are troubleshooting tools, not generic fixes. Opening the Log viewer shows what Nexus recorded and changes nothing by itself."}},
+}
+H.Topics=topics
+local REFERENCE="Reference: every detail, warning and recovery step for this topic (scroll)."
 -- Short labels of the direct page buttons, by page id.
 local TAB_LABELS={start="Start",wishlists="Wishlists",rolling="Auto",sharing="Sharing",orbs="Orbs",
  troubleshooting="Problems",about="About"}
+-- The topic card above the reference: its title and Open action on one row,
+-- its lines under them (wrapped to the text they need at the current font),
+-- then the Reference label and the scrolling page text below the card.
+local TOPIC_TOP,REFERENCE_BOTTOM,REFERENCE_MIN=-110,-485,120
+-- The lines may grow until the reference keeps its minimum scroll height
+-- above the bottom buttons; beyond that the card keeps its whole text on hover.
+local TOPIC_TEXT_MAX=(TOPIC_TOP-60)-REFERENCE_BOTTOM-REFERENCE_MIN
+-- The client's wrapped height, never below the conservative text model at the
+-- current font scale (as the guided setup coach measures its rows): one
+-- reading of GetStringHeight is not trusted to have wrapped yet.
+local function topicHeight(fs,text,width)
+    local metrics=Nexus.LayoutMetrics
+    if not (metrics and metrics.WrapHeight) then fs:SetSize(width,56);return 56 end
+    local h=metrics.WrapHeight(fs,width,28)
+    if metrics.TextRows and metrics.ConservativeText then
+        local scale=metrics.RuntimeMetrics and metrics.RuntimeMetrics() or 1
+        local _,line=metrics.ConservativeText(scale)
+        h=math.max(h,metrics.TextRows(text,width,scale)*line)
+    end
+    h=math.min(math.ceil(h),TOPIC_TEXT_MAX)
+    fs:SetHeight(h)
+    return h
+end
+local function layoutTopic(p)
+    local t=topics[p.id] or {}
+    local metrics=Nexus.LayoutMetrics
+    frame.topicOpen:SetText(t.open or "")
+    local bw=200
+    if metrics and metrics.FitButtonWidth then bw=metrics.FitButtonWidth(frame.topicOpen,150,300) or bw
+    else frame.topicOpen:SetWidth(bw) end
+    -- One action for every topic, always shown (no hidden Help control).
+    if t.route then frame.topicOpen:Enable() else frame.topicOpen:Disable() end
+    frame.topicOpen:ClearAllPoints();frame.topicOpen:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-25,TOPIC_TOP-4)
+    frame.topicTitle:SetText(t.title or p.title)
+    frame.topicTitle:ClearAllPoints();frame.topicTitle:SetPoint("TOPLEFT",frame,"TOPLEFT",28,TOPIC_TOP-8)
+    frame.topicTitle:SetSize(math.max(120,600-bw-12),16)
+    local lines=table.concat(t.lines or {},"\n")
+    frame.topicText:SetText(lines)
+    frame.topicText:ClearAllPoints();frame.topicText:SetPoint("TOPLEFT",frame,"TOPLEFT",28,TOPIC_TOP-32)
+    local th=topicHeight(frame.topicText,lines,600)
+    local bottom=TOPIC_TOP-32-th-6
+    frame.topicFill:ClearAllPoints();frame.topicFill:SetPoint("TOPLEFT",frame,"TOPLEFT",20,TOPIC_TOP)
+    frame.topicFill:SetSize(615,TOPIC_TOP-bottom)
+    frame.reference:ClearAllPoints();frame.reference:SetPoint("TOPLEFT",frame,"TOPLEFT",20,bottom-5)
+    frame.reference:SetSize(615,13)
+    local top=bottom-22
+    frame.scroll:ClearAllPoints();frame.scroll:SetPoint("TOPLEFT",frame,"TOPLEFT",20,top)
+    frame.scroll:SetSize(595,math.max(REFERENCE_MIN,top-REFERENCE_BOTTOM))
+end
 local function refresh()
     local p=pages[index];frame.title:SetText("Nexus Help - "..p.title);frame.body:SetText(p.text)
     frame.page:SetText("Page "..index.." / "..#pages)
+    layoutTopic(p)
     -- The current page's button is the disabled one; a page change clears an
     -- earlier route note.
     for i,t in ipairs(frame.tabs or {}) do if i==index then t:Disable() else t:Enable() end end
@@ -193,9 +285,10 @@ local function ensure()
     frame:SetBackdropColor(.035,.04,.05,1)
     frame.title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge");frame.title:SetPoint("TOPLEFT",20,-20)
     local scroll=CreateFrame("ScrollFrame","NexusHelpScroll",frame,"UIPanelScrollFrameTemplate")
-    -- Below the page buttons, the setup row and its one-line route note.
-    scroll:SetPoint("TOPLEFT",20,-108);scroll:SetSize(595,362)
-    scroll:SetFrameLevel(HELP_LEVEL+1)
+    -- Below the page buttons, the setup row, its one-line route note and the
+    -- page's topic card (layoutTopic places it under the card).
+    scroll:SetPoint("TOPLEFT",20,-218);scroll:SetSize(595,267)
+    scroll:SetFrameLevel(HELP_LEVEL+1);frame.scroll=scroll
     local child=CreateFrame("Frame",nil,scroll);child:SetSize(590,650);scroll:SetScrollChild(child);frame.content=child
     child:SetPoint("TOPLEFT",scroll,"TOPLEFT",0,0);child:SetFrameLevel(HELP_LEVEL+2)
     frame.body=child:CreateFontString(nil,"OVERLAY","GameFontHighlight");frame.body:SetPoint("TOPLEFT",0,0)
@@ -233,14 +326,37 @@ local function ensure()
     frame.checklist=action(488,140,"Setup checklist",function()H.OpenChecklist()end)
     frame.note=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall");frame.note:SetPoint("TOPLEFT",20,-93)
     frame.note:SetSize(615,13);frame.note:SetJustifyH("LEFT");frame.note:SetText("")
+    -- The page's topic card (topics above): its title, lines and one Open
+    -- action (H.OpenTopic), made once; layoutTopic fills and places it. The
+    -- one action serves every page, so no Help control is ever left hidden.
+    frame.topicFill=frame:CreateTexture(nil,"BORDER");frame.topicFill:SetTexture("Interface\\Buttons\\WHITE8X8")
+    frame.topicFill:SetVertexColor(.09,.1,.14,.85)
+    frame.topicTitle=frame:CreateFontString(nil,"OVERLAY","GameFontNormal");frame.topicTitle:SetJustifyH("LEFT")
+    frame.topicText=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    frame.topicText:SetJustifyH("LEFT");frame.topicText:SetJustifyV("TOP");frame.topicText:SetWordWrap(true)
+    -- At the largest text a capped card keeps its whole lines on hover.
+    if Nexus.LayoutMetrics and Nexus.LayoutMetrics.FullTextTooltip then
+        frame.topicHit=Nexus.LayoutMetrics.FullTextTooltip(frame.topicText,frame)
+    end
+    frame.topicOpen=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");frame.topicOpen:SetSize(200,22)
+    frame.topicOpen:SetFrameLevel(HELP_LEVEL+2)
+    frame.topicOpen:SetScript("OnClick",function() H.OpenTopic(pages[index].id) end)
+    frame.reference=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
+    frame.reference:SetJustifyH("LEFT");frame.reference:SetText(REFERENCE)
     -- Register the completed window once, including its owned navigation
     -- controls. Palette changes then repaint the same frame through Theme.
     if Nexus.Theme and Nexus.Theme.StyleWindow then Nexus.Theme.StyleWindow(frame,0.94) end
     if Nexus.Theme and Nexus.Theme.StyleTree then Nexus.Theme.StyleTree(frame) end
+    frame:HookScript("OnHide",function()
+        local back=returnTo;returnTo=nil
+        if back then pcall(back) end
+    end)
     frame:Hide();UISpecialFrames=UISpecialFrames or {};UISpecialFrames[#UISpecialFrames+1]="NexusHelpWindow"
 end
-function H.Show(id)
+-- onReturn (optional): see returnTo above. Without it a pending return stays.
+function H.Show(id,onReturn)
     ensure();if id then for i,p in ipairs(pages) do if p.id==id then index=i end end end
+    if type(onReturn)=="function" then returnTo=onReturn end
     frame:Show();refresh();return frame
 end
 function H.Hide()if frame then frame:Hide()end end
@@ -259,6 +375,11 @@ local function Refuse(text)
     print("|cffffd200Nexus:|r "..text)
     return false, text
 end
+-- A route that opened its window takes Help's place (see returnTo).
+local function Leave()
+    returnTo=nil
+    if frame then frame:Hide() end
+end
 -- The informational replay (QuickStart.ShowSetup): a secondary route kept for
 -- its existing callers. Help's own Setup / Welcome button opens Guided setup
 -- (H.OpenGuide).
@@ -273,7 +394,7 @@ function H.OpenSetup()
             and "Setup / Welcome did not open. Answer the open warning (Yes or No), then open it again."
             or "Setup / Welcome is not available right now.")
     end
-    if frame then frame:Hide() end
+    Leave()
     return true
 end
 -- Assign Wishlist...: the Echo Journal with its Wishlist chooser
@@ -298,7 +419,7 @@ function H.OpenAssignment()
         return Refuse("The guarded assignment route is not available. Nothing was opened or assigned.")
     end
     if panel.OpenAssignment()==false then return false end
-    if frame then frame:Hide() end
+    Leave()
     return true
 end
 -- Setup checklist: the read-only checklist and status (QuickStart). It reads
@@ -309,7 +430,7 @@ function H.OpenChecklist()
     if not (quick and type(quick.ShowChecklist)=="function") then
         return Refuse("The setup checklist is not available.")
     end
-    if frame then frame:Hide() end
+    Leave()
     quick.ShowChecklist()
     return true
 end
@@ -328,7 +449,7 @@ function H.OpenGuide()
             and "Guided setup did not open. Answer the open warning (Yes or No), then open Guided setup again."
             or "Guided setup is not available right now.")
     end
-    if frame then frame:Hide() end
+    Leave()
     return true
 end
 -- Wishlist Editor: the editor as /nexus editor opens it.
@@ -345,7 +466,7 @@ function H.OpenEditor()
     -- reveal the existing frame instead.
     local plan=_G.NexusEditorFrame
     if plan and plan.IsShown and plan:IsShown() then
-        if frame then frame:Hide() end
+        Leave()
         return true
     end
     local opened=editor.Show()
@@ -353,6 +474,63 @@ function H.OpenEditor()
     if opened==false or not (editorFrame and editorFrame.IsShown and editorFrame:IsShown()) then
         return Refuse("The Wishlist Editor did not open. Help remains here; try again after start-up finishes.")
     end
-    if frame then frame:Hide() end
+    Leave()
+    return true
+end
+-- A topic's one Open action (topics above): the real screen for that topic,
+-- through the same guarded route as elsewhere.
+function H.OpenTopic(id)
+    local t=topics[id]
+    if not (t and type(t.route)=="function") then
+        return Refuse("This topic has no screen to open. Nothing was opened.")
+    end
+    return t.route()
+end
+-- Automation or Sync settings (ui/SettingsWindow.lua): opening it changes no
+-- preference; each change there is its own existing, guarded control.
+function H.OpenSettings(section)
+    local label=section=="sync" and "Sync settings" or "Automation settings"
+    if not LocalToolsReady() then
+        return Refuse(label.." open after start-up finishes (see the loading panel). Nothing was opened or changed.")
+    end
+    local settings=Nexus.SettingsWindow
+    if not (settings and type(settings.Show)=="function") then
+        return Refuse(label.." are not available. Nothing was opened or changed.")
+    end
+    if settings.Show(section)==false then return Refuse(label.." did not open. Nothing was changed.") end
+    Leave()
+    return true
+end
+-- The Orb window, as /nexus orbs opens it (also during loading). Opening it
+-- spends nothing and starts no run.
+function H.OpenOrbs()
+    local orb=Nexus.OrbPanel
+    if not (orb and type(orb.Show)=="function") then
+        return Refuse("The Orb window is not available. Nothing was spent.")
+    end
+    if orb.Show()==false then return Refuse("The Orb window did not open. Nothing was spent.") end
+    Leave()
+    return true
+end
+-- The support page, as /nexus report opens it (also during loading). It only
+-- reads until you choose Copy summary or Prepare report file there.
+function H.OpenSupport()
+    local ui=Nexus.SupportReportUI
+    if not (ui and type(ui.Show)=="function") then
+        return Refuse("The support report is not available. Type /nexus report.")
+    end
+    if ui.Show()==false then return Refuse("The support report did not open. Type /nexus report.") end
+    Leave()
+    return true
+end
+-- The Log viewer, as /nexus log opens it after start-up.
+function H.OpenLogs()
+    if not LocalToolsReady() then
+        return Refuse("The Log viewer opens after start-up finishes (see the loading panel). Nothing was opened.")
+    end
+    local logs=Nexus.LogViewer
+    if not (logs and type(logs.Show)=="function") then return Refuse("The Log viewer is not available.") end
+    if logs.Show()==false then return Refuse("The Log viewer did not open.") end
+    Leave()
     return true
 end

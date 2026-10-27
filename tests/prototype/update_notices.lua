@@ -127,7 +127,7 @@ for i=1,12 do assert(Deliver(request28,'Crowd'..i))end
 HintOnly('1.20.0-beta.1 test.9028','many agreeing peers')
 assert(Chat('UNVERIFIED')==1,'twelve peers repeating it add no further chat line')
 assert(#Nexus.Updates.PeerObservations()>=13,'every peer is still observed')
-assert(NexusPanel._menuBtn:GetText()~='!','an unverified hint never raises the trusted HUD badge')
+assert(NexusPanel._menuBtn:GetText()=='Options','an unverified hint never raises the trusted HUD badge: '..tostring(NexusPanel._menuBtn:GetText()))
 Nexus.Panel.ShowUpdateStatus()
 assert(popup.url=='https://github.com/Viscerals/Better-Nexus/releases'
  and popup.text:find('Newer public test reported: 1.20.0-beta.1 test.9028',1,true)
@@ -177,7 +177,7 @@ for _,version in ipairs({'1.96.6','999.0.0',FORGED,'2.0.0-beta.1+test.1','1.20.0
   end
  end
  assert(found,'the menu keeps an enabled entry to the manual Releases page')
- assert(NexusPanel._menuBtn:GetText()~='!','no HUD badge for a peer version '..version)
+ assert(NexusPanel._menuBtn:GetText()=='Options','no HUD badge for a peer version '..version..': '..tostring(NexusPanel._menuBtn:GetText()))
 end
 print('PASS 1.96.6, 999.0.0, another lineage and peer stable claims stay silent; a forged same-series test is an unverified hint only')
 
@@ -236,7 +236,7 @@ for _,top in ipairs(items or {})do
   end
  end
 end
-assert(entry and not entry.disabled and NexusPanel._menuBtn:GetText()=='!','menu entry and HUD badge for trusted evidence')
+assert(entry and not entry.disabled and NexusPanel._menuBtn:GetText()=='! Options','menu entry and HUD badge for trusted evidence: '..tostring(NexusPanel._menuBtn:GetText()))
 popup=nil;entry.func()
 assert(popup and popup.url=='https://github.com/Viscerals/Better-Nexus/releases' and popup.text:find('New Nexus test build available: 1.20.0-beta.1 test.9029',1,true))
 print('PASS trusted bundled notice kept; peer versions cannot replace or hide it')

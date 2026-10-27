@@ -38,8 +38,17 @@ function Commands.New(options)
 
     function M.Dispatch(message)
         local early=(message or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-        if early=="loading" or early=="help" or early=="guide" or early=="tutorial" or early=="orbs" then
+        -- tutorial keeps opening Help, as both original designs say (Setup /
+        -- Welcome opens the coach).
+        if early=="loading" or early=="help" or early=="tutorial" or early=="orbs" then
             Invoke(early=="loading" and "loading" or early=="orbs" and "orbs" or "help",nil,early)
+            return
+        end
+        -- guide opens the guided setup coach, not the reference pages. Like
+        -- Help it answers during loading; the coach says itself what is not
+        -- ready yet and opening it changes nothing.
+        if early=="guide" then
+            Invoke("guide",nil,early)
             return
         end
         if early=="update" or early=="updates" or early=="version" then

@@ -236,7 +236,12 @@ do
   ['panel.tooltip.open_wishlist_editor']='Click to open Wishlist Editor',
   ['panel.heading.progress']='PROGRESS',
   ['panel.heading.still_needed']='STILL NEEDED',
-  ['panel.heading.extra_copies']='EXTRA COPIES'}
+  ['panel.heading.extra_copies']='EXTRA COPIES',
+  -- Issue #165: the HUD Options label is a reviewed English key the panel
+  -- looks up on every render. A pack without it records a missing_candidate
+  -- fallback (an intentional, counted English fallback), so a pack that is
+  -- complete must hold it too.
+  ['panel.button.options']='Options'}
  local function exact(text,label)
   local m,shown=Nexus.Panel._lastModel,texts()
   check(m.status==text and m.recommendation==text and shown:find(text,1,true)~=nil,label)
@@ -1125,6 +1130,8 @@ do
  local FILL=string.rep('pr\195\169cis\195\169ment ',12)..'fin'
  local LONGCHARGE='Bannissements:{banish} Relances:{reroll} Gels:{freeze} \226\128\148 '..FILL
  local LONGROW='Bannissements:0 Relances:? Gels:7 \226\128\148 '..FILL
+ -- A short test-only candidate for the #165 Options label (not shipped text).
+ local OPTIONS_CAND='R\195\169glages'
  local function Hooks(mode)
   local hooks={}
   hooks['data\\LocalizationEnglish.lua']=function()
@@ -1142,7 +1149,14 @@ do
     if mode=='candidate' then packs.frFR.entries[row[1]]=CAND[row[1]]
     elseif mode=='fallback' then packs.deDE.entries[row[1]]=i%2==1 and BAD[((i-1)/2)%#BAD+1] or nil end
    end
-   if mode=='candidate' then packs.frFR.entries['readout.charge_counts']=LONGCHARGE end
+   if mode=='candidate' then
+    packs.frFR.entries['readout.charge_counts']=LONGCHARGE
+    -- Issue #165: the HUD Options label is a mapped key the panel resolves on
+    -- every render. The candidate pack must hold it too, or each render
+    -- records an (honest) missing_candidate fallback and the pack is not
+    -- complete for the zero-fallback check below.
+    packs.frFR.entries['panel.button.options']=OPTIONS_CAND
+   end
    Nexus.LocalizationPacks=packs
   end
   return hooks
@@ -1195,6 +1209,12 @@ do
   check(F.fileHooks==nil and Nexus.StartupStatus().coreReady==true and Nexus.Localization.ActiveLanguage()==(language or 'enUS'),'SETUP #143: real TOC boot ready with '..(language or 'enUS')..' active; prior fixture hooks restored')
   Nexus.Panel.Show()
   check(Nexus.LayoutMetrics.RuntimeMetrics()==1,'SETUP #143: the fresh boot measures at runtime font scale 1 (the default font model; no synthetic font object kept from an earlier harness)')
+  -- The compact Play summary (Claude Design full UI) keeps the mapped
+  -- STILL NEEDED, EXTRA COPIES and LOCKED TARGETS rows behind its Details
+  -- control. Open it through the control's own handler (memory only, never
+  -- saved) so these checks read the same rows in their laid-out boxes.
+  if Nexus.Panel._playDetails~=true then Nexus.Panel.TogglePlanDetails() end
+  check(Nexus.Panel._playDetails==true,'SETUP #143: the Play Details rows are open for the mapped headings')
  end
  local P={}
  local function Child(i)return NexusPanel.children[i]end
@@ -1484,6 +1504,11 @@ do
    'SETUP FIXTURE: the real Localization copied the frFR candidate; {} forces English and Resolve stays pure: '..row[1])
  end
  check(LZ.Format('readout.charge_counts',{banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}})==LONGROW,'SETUP FIXTURE: the long valid charge template was copied')
+ do
+  local text,source=LZ.Text('panel.button.options')
+  check(text==OPTIONS_CAND and source=='candidate' and (LZ.Resolve('panel.button.options'))=='Options',
+   'SETUP FIXTURE: the real Localization copied the frFR Options candidate (#165); Resolve stays the English base')
+ end
  effects=Effects();misses=LZ.Diagnostics().misses
  local message,fed=Nexus.UserText.Message,{}
  Nexus.UserText.Message=function(value,...)fed[#fed+1]=value;return message(value,...)end
@@ -1593,6 +1618,9 @@ do
  for _,value in ipairs(fed)do for _,text in pairs(CAND)do if value==text then fedSelected=true end end end
  check(#fed>0 and not fedSelected,'#143 candidate: UserText.Message receives only raw producer text, never a selected Panel text')
  check(LZ.InitializeActiveLanguage('deDE')=='frFR' and LZ.ActiveLanguage()=='frFR','GUARD #143: the fixed session keeps its language')
+ local optionsShown=NexusPanel._menuBtn and NexusPanel._menuBtn:GetText()
+ check(type(optionsShown)=='string' and optionsShown==Nexus.Panel.OptionsText(Nexus.Panel._lastModel and Nexus.Panel._lastModel.updateNotice)
+  and optionsShown:sub(-#OPTIONS_CAND)==OPTIONS_CAND,'#143 candidate: the actual Options control shows the selected #165 label ('..tostring(optionsShown)..')')
  check(LZ.Diagnostics().misses==misses,'#143 candidate: the mapped calls record no fallback')
  check(same(Effects(),effects),'#143 candidate: renders, hovers, reopen and navigation change no saved root, setting, language, action, send, chat, popup, consent or Auto')
  -- Fallback: deDE without valid entries for the 21 meanings shows reviewed English.

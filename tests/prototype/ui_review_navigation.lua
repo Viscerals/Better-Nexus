@@ -20,9 +20,16 @@ local H=F.Boot(F.Database(),function(h) F.OrbService(h) end)
 local R,P=Nexus.Readout,Nexus.Panel
 local bootActions=#H.actions
 
-local function Effects()
+-- `exceptPanelHidden`: the saved data without the one key a player's own hide
+-- or show writes (issue #164), so every other saved field is still compared.
+local function Effects(exceptPanelHidden)
  local state=Nexus.Store and Nexus.Store.State and Nexus.Store.State() or {}
- return table.concat({'actions='..#H.actions,'sent='..#H.sent,'saved='..F.Serialize(NexusDB),
+ local saved=NexusDB
+ if exceptPanelHidden then
+  saved={}
+  for k,v in pairs(NexusDB) do if k~='panelHidden' then saved[k]=v end end
+ end
+ return table.concat({'actions='..#H.actions,'sent='..#H.sent,'saved='..F.Serialize(saved),
   'assignments='..F.Serialize(type(state.loadoutWishlists)=='table' and state.loadoutWishlists or {}),
   'auto='..tostring(Nexus.RecomputeStats().autoEnabled==true)},' ')
 end
@@ -184,6 +191,36 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
   local spy=Spy(Nexus.LogViewer,'Show',function() logs.func() end)
   C.expect(spy.n==1,'V2: Log viewer... opens the existing log viewer (/nexus log)',spy.n)
  end
+ -- The original guided design reopens the coach itself from the menu's
+ -- Setup / Welcome ("Reopen: Nexus menu > Setup / Welcome"), as Help does;
+ -- the information-only Welcome stays reachable as a secondary entry.
+ local setup,info=Item(items,'Setup / Welcome'),Item(items,'Setup information (read only)')
+ C.expect(setup and type(setup.func)=='function' and Under(setup,'Help and setup','Settings'),
+  'V2: Setup / Welcome sits under Help and setup',Texts(items))
+ if setup then
+  local quick=Spy(Nexus.QuickStart,'ShowSetup',function()
+   local spy=Spy(Nexus.GuidedSetupUI,'Show',function() setup.func() end)
+   C.expect(spy.n==1,'V2: Setup / Welcome resumes the coach itself (GuidedSetupUI.Show)',spy.n)
+  end)
+  C.expect(quick.n==0,'V2: it does not open the information-only Welcome instead',quick.n)
+ end
+ C.expect(info and type(info.func)=='function' and Under(info,'Help and setup','Settings'),
+  'V2: the information-only setup stays reachable as a secondary entry',Texts(items))
+ if info then
+  local coach=Spy(Nexus.GuidedSetupUI,'Show',function()
+   local spy=Spy(Nexus.QuickStart,'ShowSetup',function() info.func() end)
+   C.expect(spy.n==1,'V2: Setup information opens the information-only Welcome (QuickStart.ShowSetup)',spy.n)
+  end)
+  C.expect(coach.n==0,'V2: and not the coach',coach.n)
+ end
+ local entries={}
+ for _,item in ipairs(items) do
+  if type(item.text)=='string' and (item.text=='Setup / Welcome' or item.text:find('Setup guide',1,true)) then
+   entries[#entries+1]=item.text
+  end
+ end
+ C.expect(#entries==1,'V2: one guided setup entry under one label; no second Setup / Welcome or Setup guide item',
+  table.concat(entries,', '))
  local editor=Item(items,'Wishlist Editor')
  if editor then
   local spy=Spy(Nexus.WishlistEditor,'Show',function() editor.func() end)
@@ -191,6 +228,10 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
  end
  C.guard(Effects()==before,'V2: the navigation entries act, send and change nothing',Effects())
  if hide then
+  -- Issue #164: Hide Nexus Panel is the player's saved display choice. The
+  -- only saved change it may make is panelHidden=true; Show clears it again.
+  C.setup(NexusDB.panelHidden==nil,'V2: fixture: no hide is saved before Hide Nexus Panel',tostring(NexusDB.panelHidden))
+  local beforeOthers=Effects(true)
   local lines,realPrint={},print
   print=function(...) local t={} for i=1,select('#',...) do t[#t+1]=tostring((select(i,...))) end lines[#lines+1]=table.concat(t,' ') end
   local ok,err=pcall(hide.func)
@@ -200,9 +241,15 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
   C.guard(not NexusPanel:IsShown() and P.VisibilityFacts().wanted==false,'V2: Hide Nexus Panel still hides the panel')
   C.expect(said:find('Hiding does not turn Nexus off or change Auto',1,true)~=nil and said:find('/nexus panel',1,true)~=nil,
    'V2: hiding says it is not turning Nexus off and how to show the panel again',said)
-  C.guard(Effects()==before,'V2: hiding keeps measured actions, sends, saved data, assignments and Auto unchanged',Effects())
+  C.expect(NexusDB.panelHidden==true,'V2: Hide Nexus Panel saves the requested hidden choice (panelHidden=true)',
+   tostring(NexusDB.panelHidden))
+  C.guard(Effects(true)==beforeOthers,
+   'V2: hiding keeps measured actions, sends, assignments, Auto and every saved field but panelHidden unchanged',Effects(true))
   P.Show()
   C.setup(NexusPanel:IsShown(),'V2: fixture: the panel shows again')
+  C.expect(NexusDB.panelHidden==nil and P.VisibilityFacts().wanted==true,
+   'V2: showing the panel clears the saved hide',tostring(NexusDB.panelHidden))
+  C.guard(Effects()==before,'V2: after Show every saved field, action, send, assignment and Auto is as before the menu',Effects())
  end
 end)
 
@@ -439,8 +486,11 @@ C.scenario('V6 Help names the footer routes it describes',function()
  local sharing,orbs,troubleshooting=Body('sharing'),Body('orbs'),Body('troubleshooting')
  NexusHelpWindow:Hide()
  C.expect(sharing:find('Click Explore on the Nexus panel, then Build Library.',1,true)~=nil,'V6: Help sends Build Library readers to Explore')
- C.expect(orbs:find('Open /nexus orbs, Orbs on the Nexus panel, Orbs / Lost Memories in the ... menu',1,true)~=nil,
-  'V6: Help lists the footer Orbs route beside the kept ones')
+ -- The menu is named by its visible Options label and its Manage group
+ -- (issue #165), not the retired ellipsis.
+ C.expect(orbs:find('Open /nexus orbs, Orbs on the Nexus panel, Orbs / Lost Memories in the Options menu under Manage',1,true)~=nil
+   and not orbs:find('in the ... menu',1,true),
+  'V6: Help lists the footer Orbs route beside the kept ones, under the Options menu it names',orbs)
  C.expect(troubleshooting:find('Explore',1,true)~=nil and troubleshooting:find('loading or unavailable',1,true)~=nil
    and not troubleshooting:find('Gray Build Library/Leaderboard tabs',1,true),
   'V6: troubleshooting names the current control and allows loading or failed startup',troubleshooting)

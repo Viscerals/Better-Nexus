@@ -333,8 +333,9 @@ end
 
 local function LoadImportedWishlist(parsed, chosenName)
     -- A naming popup can outlive the editor window. A delayed Accept must
-    -- never replace a Plan draft protected by workspace navigation.
-    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
+    -- never replace a Plan draft protected by workspace navigation; a guided
+    -- import waiting on it comes back unfinished, as for its other refusals.
+    if RefuseSuspendedDraftReplacement() then EndGuidedImport(); return false, "Plan draft suspended" end
     if parsed and parsed.needsRoleSelection then
         local opened = RolePicker.Begin(parsed.entries,{kind="import",name=TrimWishlistName(chosenName),class=parsed.class})
         if not opened then EndGuidedImport() end
@@ -778,7 +779,7 @@ function M.ConfirmCandidateAssignment(candidate, perform)
 end
 
 function M.ImportEBH1String(text, chosenName)
-    if RefuseSuspendedDraftReplacement() then return false, "Plan draft suspended" end
+    if RefuseSuspendedDraftReplacement() then EndGuidedImport(); return false, "Plan draft suspended" end
     local Codec = Nexus and Nexus.Codec
     if not (Codec and Codec.DecodeEBH1) then
         print("|cffff6060Nexus:|r import codec unavailable")
@@ -803,6 +804,45 @@ function M.ImportEBH1String(text, chosenName)
         or "Imported Wishlist"
     StaticPopup_Show("NEXUS_NAME_IMPORTED_WISHLIST",
         displaySuggested, nil, parsed)
+end
+
+-- The import field's own limit, for another field that takes the same code
+-- (the guided setup's paste field).
+M.IMPORT_MAX_LETTERS = IMPORT_MAX_LETTERS
+
+-- A read-only check of a pasted EBH1 code through the same decoder the import
+-- uses (ImportEBH1String). It reads the text and nothing else: no draft, no
+-- popup, no save, no assignment and no receipt. A code that fills the field's
+-- whole limit may have been cut by it, so it is refused as possibly cut off.
+-- The decoder checks the code's form and envelope only; the editor checks its
+-- Echoes again when the draft is opened. Returns {state=...}:
+--   "empty"       nothing was pasted
+--   "unavailable" the decoder is not loaded
+--   "rejected"    reason "long" (limit = the field's letters) or "invalid"
+--   "accepted"    name (trimmed, or nil), entries, rolled and locked copies,
+--                 needsRoles (more than 79 rolled copies: the editor asks for
+--                 locked targets first) and suspended (an unsaved Plan draft in
+--                 another workspace refuses the import until it is resolved)
+function M.CheckImportCode(text)
+    if type(text) ~= "string" or not text:find("%S") then return {state = "empty"} end
+    if #(text:gsub("[\128-\191]", "")) >= IMPORT_MAX_LETTERS then
+        return {state = "rejected", reason = "long", limit = IMPORT_MAX_LETTERS}
+    end
+    local Codec = Nexus and Nexus.Codec
+    if not (Codec and type(Codec.DecodeEBH1) == "function") then return {state = "unavailable"} end
+    local ok, parsed = pcall(Codec.DecodeEBH1, text, true)
+    if not ok or type(parsed) ~= "table" or type(parsed.entries) ~= "table" or #parsed.entries == 0 then
+        return {state = "rejected", reason = "invalid"}
+    end
+    local rolled, locked = 0, 0
+    for _, e in ipairs(parsed.entries) do
+        local copies = tonumber(e.stacks) or 0
+        if e.locked then locked = locked + copies else rolled = rolled + copies end
+    end
+    local name = TrimWishlistName(parsed.name)
+    return {state = "accepted", name = name ~= "" and name or nil, entries = #parsed.entries,
+        rolled = rolled, locked = locked, needsRoles = parsed.needsRoleSelection == true,
+        suspended = workspaceResume ~= nil}
 end
 
 StaticPopupDialogs["NEXUS_EXPORT_WISHLIST"] = {

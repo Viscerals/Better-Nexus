@@ -1544,6 +1544,35 @@ local function miniMissingLine(v)
     shown=shown..tail
     return shown,full..". "..target
 end
+-- The Nexus panel's one-line Orb run status (Claude Design full UI, "Main
+-- panel (Play)": "Orb run", its usage, what awaits a result, Open). From the
+-- same compact read as the mini panel (miniView): the run's state, Orbs used
+-- of the approved maximum, and a requested Orb or an unsettled result named as
+-- a wait, never as spent. Returns shown, full (the hover), or nil while no run
+-- is known: none approved this session, local saved data still loading or no
+-- runtime. A read that fails or is malformed says so. Reads only; it pumps,
+-- starts, resumes and spends nothing.
+function UI.PanelRunLine()
+    local okView,v=pcall(miniView)
+    if not okView or type(v)~="table" then v={kind="error"} end
+    if v.kind=="none" or v.kind=="loading" or v.kind=="missing" then return nil end
+    if v.kind~="run" then return "Orb run: "..MINI_UNREAD_TEXT,"Orb run: "..MINI_UNREAD_TEXT end
+    local state,usage=miniStateText(v),miniUsage(v):gsub("^Orbs used: ","Used ")
+    local wait
+    if v.reserved==nil or v.pending==nil or v.uncertain==nil or v.unconfirmedResults==nil
+        or v.historyKnown~=true or v.uncertain>0 or v.unconfirmedResults>0 then
+        wait="? spend not confirmed"
+    elseif v.reserved>0 then
+        wait="... "..miniNumber(v.reserved).." awaiting result"
+    elseif v.pending then
+        wait="... result not settled"
+    end
+    local shown="Orb run: "..state.."; "..usage..(wait and ("; "..wait) or "")
+    local full="Orb run: "..state..". "..miniUsage(v)..". "..miniPending(v)..". "..miniMissing(v).."."
+    local reason=v.reason and truthful(v.reason) or nil
+    if type(reason)=="string" and reason~="" then full=full.." "..reason end
+    return (shown:gsub("|","||")),(full:gsub("|","||"))
+end
 local function miniKey(v)
     return table.concat({v.kind,tostring(v.state),tostring(v.running),tostring(v.pending),tostring(v.canResume),
         tostring(v.recoveryPhase),tostring(v.recoveryKind),tostring(v.target and v.target.kind)},"|")

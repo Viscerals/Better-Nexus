@@ -126,8 +126,16 @@ end)
 C.scenario('X5 the Help text names the new routes and wording, and keeps its earlier statements',function()
  local pages={}
  for _,p in ipairs(Nexus.Help.Pages) do pages[p.id]=p.text end
- C.expect(Has(pages.start,'Setup checklist (also in the ... menu)') and Has(pages.start,'closing the Welcome is not a setup step'),
+ -- The original-design coach entry comes first; the menu is named by its
+ -- visible Options label (issue #165), never a bare ellipsis.
+ C.expect((pages.start or ''):find('Start here: Setup / Welcome opens Guided setup at the step you left',1,true)==1
+  and Has(pages.start,'(Options > Manage > Setup / Welcome)') and not Has(pages.start,'... menu'),
+  'X5: Getting started opens with the Guided setup entry and names its Options menu route',pages.start)
+ C.expect(Has(pages.start,'Setup checklist (also in the Options menu)') and Has(pages.start,'closing the Welcome is not a setup step'),
   'X5: Getting started names the checklist and what it is not',pages.start)
+ C.expect(Has(pages.start,'A step is done only after Nexus reads the result back; a skipped, pending or unknown step is not done.')
+  and Has(pages.start,'Opening, navigating or closing the guide assigns, shares, spends and turns on nothing.'),
+  'X5: opening or closing the guide is not a verified step; only a read back result completes one',pages.start)
  C.expect(Has(pages.orbs,'labelled Paused') and Has(pages.orbs,'until it settles or you continue past it'),'X5: the Orbs page names restored PAUSED and the Continue exit')
  C.expect(Has(pages.orbs,'the window says the target is back') and Has(pages.orbs,'the maximum was not recorded'),'X5: it names a returned target and an unrecorded maximum')
  C.expect(Has(pages.orbs,'the header says the current state and the last recorded one'),'X5: it names live and recorded history state')

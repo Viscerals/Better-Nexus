@@ -1,18 +1,94 @@
 -- Nexus: ui/GuidedSetup.lua
--- The guided setup coach window over core/GuidedSetup.lua (issue #131): one
--- step at a time, each with its purpose, one main action that opens an
--- existing window (Wishlist Editor, import dialog, Echo Journal chooser,
--- Nexus panel, Help) and the result Nexus actually read back. Navigation
--- (Next, Back, Skip, Close, Escape, Help, replay) only moves the guide; it
--- assigns, saves, sends, spends and toggles nothing. The window reads state
+-- The guided setup coach window over core/GuidedSetup.lua (issue #131), laid
+-- out after the Claude Design guided-setup artifact in its two presentations.
+-- Where the visible UI is wide enough (the design's 960 px, 1100 px at
+-- enlarged text) it is the design's desktop window: 900 px, a header (title,
+-- character, Help, close), the checklist as side navigation on the left, one
+-- step card at a time beside it, Help as a side panel on the right, and a
+-- footer across the window. Otherwise it is the 420 px compact window: the
+-- same header, a step line with a segmented rail and a collapsible checklist,
+-- the step card, inline Help and the footer. Header texts, the step line,
+-- status chips and footer buttons take the room their text needs at the
+-- current font scale (footer buttons wrap to a further row, never shrink).
+-- The footer has Back, the gate hint, Skip for now and Continue. Each step says
+-- what it is for, offers one main action that opens an existing window
+-- (Wishlist Editor, Echo Journal chooser, Nexus panel, Orb window, Help) and
+-- shows the result Nexus actually read back. A pasted Wishlist code is checked
+-- in the Wishlist step itself (the design's paste field, Check code and inline
+-- outcome) by the editor's read-only WishlistEditor.CheckImportCode; only the
+-- later Open it as a draft hands that same code to the editor's own import
+-- (naming, draft, then the player's save). Navigation (Continue, Back, Skip,
+-- checklist, Close, Escape, Help, replay) and Check code only move or read;
+-- they assign, save, send, spend and toggle nothing. The window reads state
 -- only when shown, on a click or when a real outcome reports a receipt.
+--
+-- Adaptations of the HTML design, each an unmeasured choice, not a measured
+-- client limit: the rotated diamond is a small square (a solid texture is not
+-- drawn rotated here), the dashed simulated-preview border is a solid tinted
+-- frame, the header gradient is left to the player's Theme appearance (which
+-- owns this window's backdrop) and the stock game fonts stand in for the web
+-- fonts. The design's Window switch is a demo control, so the presentation
+-- follows the visible UI width (WideFits) instead of a player toggle, and the
+-- design's em widths are fixed pixels at the stock font. The design's
+-- two-row paste textarea is a one-line field (a 3.3.5a multi-line EditBox
+-- needs its own scroll frame, and a code is one unbroken token), and its
+-- Sample buttons are demo controls, not offered. Native pixels,
+-- native font measurement and the real-client wide/compact comparison are
+-- NOT RUN. Status glyphs are printable ASCII beside a word (the shared
+-- Readout rule), never Unicode symbols that the client may not draw.
+--
+-- The footer follows the design's three treatments. Continue is the one
+-- filled action (amber fill, light gold edge, dark label; while it waits, the
+-- design's dark fill, grey edge and grey label), Skip for now is an
+-- underlined text action with no fill or edge, and Back is the window's
+-- secondary button, the themed look of Help and Close. Continue and Skip
+-- are drawn here and kept out of the Theme, whose buttons share one look and
+-- repaint their label on enable. Their colours are the design's own, fixed,
+-- never from the palette. Client limits, not choices: the stock 3.3.5a fonts
+-- have one weight, so Continue's bold label is a 1 px shadow in the label's
+-- colour; a FontString has no underline, so Skip's is a 1 px texture under
+-- its text; buttons take no keyboard focus, so the design's focus outline
+-- has no counterpart, and a hover highlight is given instead. Adaptations:
+-- Continue keeps the 22 px row height (the design pads it a little taller)
+-- and its wider side padding is a fixed 10 px. A step card's one main action
+-- (Try again, Replace and continue, the Wishlist chooser and its again, Check
+-- again where the design fills it, Keep or Leave Auto) is the design's same
+-- filled action, drawn as Continue is, at the 22 px row and without the
+-- extra padding; the card's other actions (Choose another, Review, the links
+-- to earlier steps, Help, replay) stay the themed secondary button. Native
+-- pixels and font rendering of all of this are NOT RUN.
 Nexus = Nexus or {}
 local U = {}
 Nexus.GuidedSetupUI = U
 local frame, note
-local W, TEXT_W, ROWS, BLOCK_MAX = 420, 372, 11, 160
+-- W, PAD and CW are the window width, the step card's left edge and its
+-- width for the presentation being rendered (U.Render sets them); EDGE is the
+-- window's own margin for the header and footer.
+local COMPACT_W, EDGE = 420, 16
+local W, PAD = COMPACT_W, EDGE
+local CW = W - 2 * PAD
+-- The design's desktop window: its width, the side navigation (13em) and the
+-- Help side panel (15em) at the stock font, and the visible UI width it needs
+-- at normal and enlarged text (the design's 960 px and 1100 px).
+local WIDE = {w = 900, nav = 208, aside = 232, need = 960, needLarge = 1100}
+local GAP, MIN_H, BLOCK_MAX = 8, 360, 220
+local WHITE = 'Interface\\Buttons\\WHITE8X8'
 local HELP = {welcome = 'start', wishlist = 'wishlists', target = 'wishlists', assign = 'wishlists',
     manual = 'rolling', auto = 'rolling', summary = 'start'}
+-- Fixed status colours (never from the palette); each kind also has a glyph
+-- and a word in the copy.
+local COLOR = {['not'] = {0.62, 0.6, 0.58}, waiting = {0.95, 0.8, 0.38}, checking = {0.58, 0.76, 1},
+    verified = {0.46, 0.86, 0.52}, skipped = {0.72, 0.7, 0.68}, unavailable = {0.82, 0.64, 1},
+    stale = {0.5, 0.86, 0.9}, rejected = {1, 0.52, 0.42}}
+local GOLD, TEXT, MUTED = {1, 0.78, 0.36}, {0.92, 0.9, 0.86}, {0.74, 0.7, 0.66}
+local HELP_BLUE = {0.6, 0.72, 0.95}
+-- Session-only view state: the help card, the checklist, Auto's explainer,
+-- the open optional lesson, the presentation last rendered and the Wishlist
+-- step's paste field (open, its text, the last check's result and the text
+-- that check read). Never saved; a pasted code is never imported by typing.
+local view = {help = false, checklist = false, autoMore = false, lesson = nil, review = false, wide = false,
+    import = {open = false, text = '', result = nil, checked = nil}}
+local function ResetImport() view.import = {open = false, text = '', result = nil, checked = nil} end
 
 local function Core() return Nexus.GuidedSetup end
 local function Copy() local t = Nexus.UserText; return t and t.Guide or {} end
@@ -24,104 +100,890 @@ local function Safe(v)
     local t = Nexus.UserText
     return t and t.SafeName and t.SafeName(v) or nil
 end
-local function Q(v) return string.char(39) .. (Safe(v) or '?') .. string.char(39) end
+local function Name(v) return Safe(v) or '?' end
 local function Ready()
     if type(Nexus.StartupStatus) ~= 'function' then return false end
     local ok, s = pcall(Nexus.StartupStatus)
     return ok and type(s) == 'table' and s.coreReady == true
 end
 local function TargetLabel(dest, name)
-    local t = Nexus.UserText
-    if dest == 'first' then return (Copy().target or {}).first or 'the first-run target' end
-    return t and t.SavedBuildLabel and t.SavedBuildLabel(dest, name) or ('Saved Build ' .. tostring(dest))
+    local c = Copy().target or {}
+    if dest == 'first' then return c.first or 'First-run target' end
+    local n = Safe(name)
+    if n and n ~= '' then return Fmt(c.slot, dest, n) end
+    return Fmt(c.slotUnnamed, dest)
+end
+local function Say(line)
+    local chat = _G.DEFAULT_CHAT_FRAME
+    if chat and type(chat.AddMessage) == 'function' then pcall(chat.AddMessage, chat, line, 1, 0.82, 0.4) end
 end
 
-local function NewText(template)
-    local fs = frame:CreateFontString(nil, 'OVERLAY', template or 'GameFontHighlightSmall')
-    fs:SetJustifyH('LEFT')
-    fs:SetJustifyV('TOP')
-    fs:SetWidth(TEXT_W)
-    return fs
+------------------------------------------------------------------------
+-- Pools. Every region is a direct child of the coach so the Theme, the
+-- Escape child and the tests see one tree; a render hides the pools and
+-- places what the step needs from the top down.
+------------------------------------------------------------------------
+local pools, order = {}, {}
+
+local function Take(kind, make)
+    local p = pools[kind]
+    if not p then p = {used = 0}; pools[kind] = p end
+    p.used = p.used + 1
+    local item = p[p.used]
+    if not item then item = make(); p[p.used] = item end
+    return item
 end
 
-local function NewButton(width, height)
-    local b = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
-    b:SetSize(width, height or 22)
+local function Release()
+    for _, p in pairs(pools) do
+        for i = 1, #p do
+            local item = p[i]
+            if item.Hide then item:Hide() end
+            if item._nexusHit then item._nexusHit:Hide() end
+            if item.parts then for _, t in ipairs(item.parts) do t:Hide() end end
+            if item.extra then for _, r in ipairs(item.extra) do r:Hide() end end
+        end
+        p.used = 0
+    end
+    order = {}
+end
+
+local function Tex(layer)
+    local t = frame:CreateTexture(nil, layer or 'BORDER')
+    t:SetTexture(WHITE)
+    t:Hide()
+    return t
+end
+
+local function Paint(t, c, a) t:SetVertexColor(c[1], c[2], c[3], a or 1) end
+
+-- A flat rectangle (fill and four 1 px edges) behind texts; buttons draw
+-- above it as child frames.
+local function Box(x, y, w, h, edge, fill, fillAlpha)
+    local b = Take('box', function()
+        return {parts = {Tex('BORDER'), Tex('ARTWORK'), Tex('ARTWORK'), Tex('ARTWORK'), Tex('ARTWORK')}}
+    end)
+    local f, top, bottom, left, right = b.parts[1], b.parts[2], b.parts[3], b.parts[4], b.parts[5]
+    f:ClearAllPoints(); f:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y); f:SetSize(w, h)
+    Paint(f, fill or {0.1, 0.08, 0.06}, fillAlpha or 0.85); f:Show()
+    local edges = {{top, x, y, w, 1}, {bottom, x, y - h + 1, w, 1}, {left, x, y, 1, h}, {right, x + w - 1, y, 1, h}}
+    for _, e in ipairs(edges) do
+        local t = e[1]
+        t:ClearAllPoints(); t:SetPoint('TOPLEFT', frame, 'TOPLEFT', e[2], e[3]); t:SetSize(e[4], e[5])
+        if edge then Paint(t, edge, 0.95); t:Show() else t:Hide() end
+    end
+    return b
+end
+
+local function Fill(x, y, w, h, c, a)
+    local t = Take('fill', function() return Tex('ARTWORK') end)
+    t:ClearAllPoints(); t:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y); t:SetSize(w, h)
+    Paint(t, c, a); t:Show()
+    return t
+end
+
+local FONTS = {title = 'GameFontNormalLarge', head = 'GameFontNormal', body = 'GameFontHighlightSmall',
+    small = 'GameFontNormalSmall', muted = 'GameFontDisableSmall', strong = 'GameFontHighlight'}
+
+-- A wrapped text block: fixed width, the height its text needs (capped; the
+-- complete text is then on hover). Returns the height used.
+local function Text(str, x, y, w, kind, color, justify)
+    if str == nil or str == '' then return 0 end
+    local fs = Take('text_' .. kind, function()
+        local t = frame:CreateFontString(nil, 'OVERLAY', FONTS[kind] or FONTS.body)
+        t:SetJustifyV('TOP')
+        local metrics = Nexus.LayoutMetrics
+        if metrics and type(metrics.FullTextTooltip) == 'function' then t._nexusHit = metrics.FullTextTooltip(t, frame) end
+        return t
+    end)
+    fs:SetJustifyH(justify or 'LEFT')
+    fs:SetText(str)
+    fs:ClearAllPoints()
+    fs:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y)
+    if color then fs:SetTextColor(color[1], color[2], color[3]) end
+    fs:Show()
+    if fs._nexusHit then fs._nexusHit:Show() end
+    local metrics, h = Nexus.LayoutMetrics, 14
+    if metrics and type(metrics.WrapHeight) == 'function' then h = metrics.WrapHeight(fs, w, 12, BLOCK_MAX)
+    else fs:SetWidth(w); fs:SetHeight(h) end
+    order[#order + 1] = fs
+    return h
+end
+
+local function Tooltip(self)
+    if not (GameTooltip and self.full) then return end
+    GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+    GameTooltip:AddLine(self.full, 1, 1, 1, true)
+    if self.tip then GameTooltip:AddLine(self.tip, 0.8, 0.8, 0.8, true) end
+    GameTooltip:Show()
+end
+
+-- Click, hover and leave scripts shared by every coach button.
+local function Wire(b)
     b:SetScript('OnClick', function(self)
         if not self.act then return end
         self.act()
         if frame:IsShown() then U.Render() end
     end)
     -- The complete label (a long or localized name) is always reachable here.
-    b:SetScript('OnEnter', function(self)
-        if not (GameTooltip and self.full) then return end
-        GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
-        GameTooltip:AddLine(self.full, 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
+    b:SetScript('OnEnter', Tooltip)
     b:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+end
+
+local function NewButton()
+    local b = CreateFrame('Button', nil, frame, 'UIPanelButtonTemplate')
+    b:SetSize(100, 22)
+    Wire(b)
+    local theme = Nexus.Theme
+    if theme and theme.StyleButton then theme.StyleButton(b) end
     b:Hide()
     return b
 end
 
-local function SetButton(b, spec)
-    if type(spec) ~= 'table' then b.act, b.full = nil, nil; b:Hide(); return end
+-- The footer's own looks (file header), converted from the design's oklch
+-- values: Continue usable (on) and waiting (off), and Skip for now (link).
+-- A step card's main action is the design's same fill, edge and label.
+local FOOT = {
+    on = {fill = {0.8, 0.45, 0.16}, edge = {0.91, 0.63, 0.3}, text = {0.06, 0.04, 0.03}},
+    off = {fill = {0.06, 0.04, 0.03}, edge = {0.21, 0.17, 0.15}, text = {0.47, 0.44, 0.42}},
+    link = {text = {0.77, 0.74, 0.71}, hover = {1, 0.84, 0.57}},
+}
+
+-- A footer action outside the Theme: 'primary' (Continue, and a step card's
+-- main action) draws a fill, four 1 px edges and a hover highlight; 'link'
+-- (Skip for now) draws only an underline, brighter on hover. FooterPaint
+-- colours it for its state.
+local function FooterAction(look)
+    local b = CreateFrame('Button', nil, frame)
+    b:SetSize(100, 22)
+    Wire(b)
+    local theme = Nexus.Theme
+    if theme and theme.Exempt then theme.Exempt(b) else b._nexusThemeExempt = true end
+    b.look = look
+    b.label = b:CreateFontString(nil, 'OVERLAY', 'GameFontNormal')
+    b.label:SetPoint('CENTER', b, 'CENTER', 0, 0)
+    b:SetFontString(b.label)
+    local function Part(layer)
+        local t = b:CreateTexture(nil, layer)
+        t:SetTexture(WHITE)
+        return t
+    end
+    if look == 'primary' then
+        b.fill = Part('BACKGROUND'); b.fill:SetAllPoints(b)
+        b.edges = {}
+        local sides = {{'TOPLEFT', 'TOPRIGHT'}, {'BOTTOMLEFT', 'BOTTOMRIGHT'}, {'TOPLEFT', 'BOTTOMLEFT'}, {'TOPRIGHT', 'BOTTOMRIGHT'}}
+        for i, side in ipairs(sides) do
+            local e = Part('BORDER')
+            e:SetPoint(side[1], b, side[1], 0, 0); e:SetPoint(side[2], b, side[2], 0, 0)
+            if i <= 2 then e:SetHeight(1) else e:SetWidth(1) end
+            b.edges[i] = e
+        end
+        local hover = Part('HIGHLIGHT'); hover:SetAllPoints(b)
+        hover:SetVertexColor(1, 1, 1, 0.12)
+    else
+        -- About the design's 3 px underline offset below the text's baseline.
+        b.underline = Part('ARTWORK'); b.underline:SetHeight(1)
+        b.underline:SetPoint('BOTTOM', b, 'BOTTOM', 0, 4)
+        Paint(b.underline, FOOT.link.text)
+        b.underlineHover = Part('HIGHLIGHT'); b.underlineHover:SetHeight(1)
+        b.underlineHover:SetPoint('BOTTOM', b, 'BOTTOM', 0, 4)
+        Paint(b.underlineHover, FOOT.link.hover)
+    end
+    b:Hide()
+    return b
+end
+
+-- Colours a footer action for its state; b.painted names what was drawn.
+local function FooterPaint(b, enabled)
+    local c = b.look == 'link' and FOOT.link or (enabled and FOOT.on or FOOT.off)
+    b.label:SetTextColor(c.text[1], c.text[2], c.text[3])
+    if b.look ~= 'primary' then b.painted = 'link'; return end
+    Paint(b.fill, c.fill)
+    for _, e in ipairs(b.edges) do Paint(e, c.edge) end
+    -- One font weight: a shadow one pixel to the right in the label's own
+    -- colour thickens its strokes in place of the design's bold.
+    b.label:SetShadowColor(c.text[1], c.text[2], c.text[3], 1)
+    b.label:SetShadowOffset(1, 0)
+    b.painted = enabled and 'primary' or 'waiting'
+end
+
+local function Arm(b, spec)
     b:SetText(spec.label or '')
-    b.full, b.act = spec.label, spec.act
+    b.full, b.tip, b.act = spec.label, spec.tip, spec.act
     if spec.enabled == false then b:Disable() else b:Enable() end
+    if b.look then FooterPaint(b, spec.enabled ~= false); b:Show(); return end
+    local font = type(b.GetFontString) == 'function' and b:GetFontString() or nil
+    local color = spec.primary and GOLD or TEXT
+    if font and font.SetTextColor then font:SetTextColor(color[1], color[2], color[3]) end
     b:Show()
 end
 
--- The simulated offer labels can wrap at the coach's narrow width. Measure
--- their actual button text after setting a fixed text width, then reserve that
--- height in the option stack. The full label stays available on hover when a
--- particularly long translation reaches the row cap.
-local function FitManualOption(b)
-    local width = math.max(1, b:GetWidth() - 16)
-    local font = type(b.GetFontString) == 'function' and b:GetFontString() or nil
-    if font then
-        if not b._normalOptionFont then
-            local wrap = false
-            if type(font.GetWordWrap) == 'function' then
-                local ok, value = pcall(font.GetWordWrap, font)
-                if ok then wrap = value == true end
-            end
-            b._normalOptionFont = {width = font:GetWidth(), height = font:GetHeight(), wrap = wrap}
-        end
-        font:SetWidth(width)
-        font:SetWordWrap(true)
-        font:SetHeight(0)
-    end
-    local measured = 0
-    if font and type(font.GetStringHeight) == 'function' then
-        local ok, height = pcall(font.GetStringHeight, font)
-        if ok and type(height) == 'number' and height > 0 and height < math.huge then measured = height end
-    end
+local function NewPrimary() return FooterAction('primary') end
+
+-- One action button sized to its label (capped to the row; hover shows all).
+-- A primary spec is the filled action from its own pool; any other is the
+-- themed secondary button.
+local function Action(spec, x, y, maxW)
+    local b = spec.primary and Take('primary', NewPrimary) or Take('action', NewButton)
+    b:SetHeight(22)
+    Arm(b, spec)
     local metrics = Nexus.LayoutMetrics
+    local w = metrics and metrics.FitButtonWidth and metrics.FitButtonWidth(b, spec.min or 70, maxW or CW) or 120
+    b:SetWidth(w)
+    b:ClearAllPoints()
+    b:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y)
+    return b, w
+end
+
+-- A row of actions that wraps to further lines inside width w. Returns height.
+local function Actions(specs, x, y, w)
+    local cx, cy, used = x, y, 0
+    for _, spec in ipairs(specs) do
+        if spec then
+            local b, bw = Action(spec, cx, cy, w)
+            if cx > x and cx + bw > x + w then
+                cx, cy = x, cy - 26
+                b:ClearAllPoints(); b:SetPoint('TOPLEFT', frame, 'TOPLEFT', cx, cy)
+            end
+            cx = cx + bw + 6
+            used = y - cy + 22
+        end
+    end
+    return used
+end
+
+-- A choice row: a radio box (when given), its title as the button text and a
+-- wrapped description under it. Long names wrap; the full title is on hover.
+local function NewRow()
+    local b = NewButton()
+    b.desc = b:CreateFontString(nil, 'OVERLAY', FONTS.body)
+    b.desc:SetJustifyH('LEFT'); b.desc:SetJustifyV('TOP')
+    b.radio = b:CreateTexture(nil, 'OVERLAY'); b.radio:SetTexture(WHITE)
+    b.radioIn = b:CreateTexture(nil, 'OVERLAY'); b.radioIn:SetTexture(WHITE)
+    b.radioHole = b:CreateTexture(nil, 'OVERLAY'); b.radioHole:SetTexture(WHITE)
+    b.extra = {b.desc, b.radio, b.radioIn, b.radioHole}
+    return b
+end
+
+local function Measure(font, str, w)
+    local metrics = Nexus.LayoutMetrics
+    local measured = 0
+    if font then
+        font:SetWidth(w)
+        if type(font.SetWordWrap) == 'function' then font:SetWordWrap(true) end
+        font:SetHeight(0)
+        if type(font.GetStringHeight) == 'function' then
+            local ok, h = pcall(font.GetStringHeight, font)
+            if ok and type(h) == 'number' and h > 0 and h < math.huge then measured = h end
+        end
+    end
     if metrics and type(metrics.TextRows) == 'function' and type(metrics.ConservativeText) == 'function' then
         local scale = type(metrics.RuntimeMetrics) == 'function' and metrics.RuntimeMetrics() or 1
         local _, line = metrics.ConservativeText(scale)
-        measured = math.max(measured, metrics.TextRows(b:GetText(), width, scale) * line)
+        measured = math.max(measured, metrics.TextRows(str, w, scale) * line)
     end
-    local height = math.min(BLOCK_MAX, math.max(22, math.ceil(measured + 8)))
-    b:SetHeight(height)
-    if font then font:SetHeight(height - 8) end
+    return math.ceil(measured > 0 and measured or 14)
 end
 
-local function ResetManualOption(b)
-    local normal = b._normalOptionFont
-    if not normal then return end
+local function Row(spec, x, y, w)
+    local b = Take('row', NewRow)
+    Arm(b, spec)
+    local inset = spec.radio ~= nil and 28 or 10
+    local tw = math.max(40, w - inset - 8)
     local font = type(b.GetFontString) == 'function' and b:GetFontString() or nil
-    if not font then return end
-    if normal.width then font:SetWidth(normal.width) end
-    if normal.height then font:SetHeight(normal.height) end
-    if type(font.SetWordWrap) == 'function' then font:SetWordWrap(normal.wrap) end
+    local th = math.min(BLOCK_MAX, Measure(font, spec.label or '', tw))
+    if font then
+        font:ClearAllPoints()
+        font:SetPoint('TOPLEFT', b, 'TOPLEFT', inset, -6)
+        font:SetJustifyH('LEFT')
+        font:SetHeight(th)
+    end
+    local dh = 0
+    local desc = spec.desc or ''
+    b.desc:SetText(desc)
+    if desc ~= '' then
+        b.desc:ClearAllPoints()
+        b.desc:SetPoint('TOPLEFT', b, 'TOPLEFT', inset, -8 - th)
+        b.desc:SetTextColor(MUTED[1], MUTED[2], MUTED[3])
+        local metrics = Nexus.LayoutMetrics
+        if metrics and type(metrics.WrapHeight) == 'function' then dh = metrics.WrapHeight(b.desc, tw, 12, BLOCK_MAX)
+        else b.desc:SetWidth(tw); b.desc:SetHeight(14); dh = 14 end
+        b.desc:Show()
+        order[#order + 1] = b.desc
+    end
+    local h = math.max(spec.radio ~= nil and 30 or 26, th + dh + (dh > 0 and 14 or 12))
+    b:SetSize(w, h)
+    b:ClearAllPoints()
+    b:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y)
+    if spec.radio ~= nil then
+        -- A filled square inside a ring reads as chosen without colour.
+        b.radio:ClearAllPoints(); b.radio:SetPoint('TOPLEFT', b, 'TOPLEFT', 9, -8); b.radio:SetSize(12, 12)
+        Paint(b.radio, spec.radio and GOLD or MUTED); b.radio:Show()
+        b.radioHole:ClearAllPoints(); b.radioHole:SetPoint('TOPLEFT', b, 'TOPLEFT', 11, -10); b.radioHole:SetSize(8, 8)
+        Paint(b.radioHole, {0.08, 0.06, 0.05}); b.radioHole:Show()
+        b.radioIn:ClearAllPoints(); b.radioIn:SetPoint('TOPLEFT', b, 'TOPLEFT', 12, -11); b.radioIn:SetSize(6, 6)
+        Paint(b.radioIn, GOLD)
+        if spec.radio then b.radioIn:Show() else b.radioIn:Hide() end
+    end
+    local theme = Nexus.Theme
+    if theme and theme.SetSelected then theme.SetSelected(b, spec.radio == true or spec.selected == true) end
+    return h
+end
+
+-- A status chip: glyph and word in a bordered box (never colour alone). Its
+-- width is the whole text in the conservative text model at the current font
+-- scale, up to maxW; a longer word wraps and the box grows to hold it.
+-- Returns its width and height.
+local function Chip(kind, word, x, y, right, maxW)
+    local c = Copy().status or {}
+    local st = c[kind] or c['not'] or {glyph = '?', word = '?'}
+    local str = (st.glyph or '?') .. ' ' .. (word or st.word or '')
+    local metrics = Nexus.LayoutMetrics
+    local char = metrics and metrics.ConservativeText and metrics.ConservativeText(metrics.RuntimeMetrics and metrics.RuntimeMetrics() or 1) or 7
+    local length = #(str:gsub('[\128-\191]', ''))
+    local w = math.max(24, math.min(maxW or CW, math.ceil(length * char) + 12))
+    if right then x = x - w end
+    local h = math.max(18, Text(str, x + 6, y - 3, w - 8, 'small', COLOR[kind] or MUTED) + 6)
+    Box(x, y, w, h, COLOR[kind] or MUTED, {0.08, 0.06, 0.05}, 0.6)
+    return w, h
+end
+
+-- The design's desktop window where the visible UI holds it (with the same
+-- margin LayoutMetrics.FitToScreen keeps), else the compact window. An
+-- implausibly small or unreadable UI size keeps the compact window.
+local function WideFits()
+    if not UIParent then return false end
+    local okW, screenW = pcall(UIParent.GetWidth, UIParent)
+    local okH, screenH = pcall(UIParent.GetHeight, UIParent)
+    screenW, screenH = okW and tonumber(screenW) or nil, okH and tonumber(screenH) or nil
+    if not (screenW and screenH) or screenH < 480 then return false end
+    local metrics = Nexus.LayoutMetrics
+    local scale = metrics and type(metrics.RuntimeMetrics) == 'function' and metrics.RuntimeMetrics() or 1
+    return screenW >= ((tonumber(scale) or 1) >= 1.2 and WIDE.needLarge or WIDE.need)
+end
+
+------------------------------------------------------------------------
+-- Step status (one vocabulary for the rail, checklist, chip and summary).
+------------------------------------------------------------------------
+local function StepStatus(g, s, ctx, id)
+    local wd = Copy().words or {}
+    local w = g.StepId() == id and 'waiting' or 'not'
+    if id == 'welcome' then
+        if s.path then return 'verified', wd.chosen end
+        return w
+    elseif id == 'wishlist' then
+        if s.wishlist then return 'verified', wd.chosen end
+        if s.draft then return 'waiting', wd.draft end
+        local seen = s.saveSeen and s.saveSeen.saveKind
+        if seen == 'uncertain' then return 'unavailable' end
+        if seen then return 'rejected' end
+        if s.skipped.wishlist then return 'skipped' end
+        return w
+    elseif id == 'target' then
+        if ctx.facts and ctx.facts.canContinue then return 'verified', wd.chosen end
+        -- Chosen, but the chooser cannot reach it yet (an empty slot, or a
+        -- Saved Build that is not active): it still needs the player.
+        if ctx.facts and (ctx.facts.ready or ctx.facts.empty) then return 'waiting' end
+        if s.skipped.target then return 'skipped' end
+        if g.StepId() == 'target' and not ctx.targets then return 'unavailable' end
+        return w
+    elseif id == 'assign' then
+        local st = ctx.assign.state
+        if st == 'verified' then return 'verified' end
+        if st == 'observed' then return 'verified', wd.linked end
+        if s.skipped.assign and (st == 'none' or st == 'ready' or st == 'pending') then return 'skipped' end
+        if st == 'pending' then return 'waiting' end
+        if st == 'none' or st == 'ready' then return w end
+        if st == 'refused' then return 'rejected' end
+        if st == 'cancelled' then return 'rejected', wd.cancelled end
+        if st == 'unknown' then return 'unavailable' end
+        return 'stale'
+    elseif id == 'manual' then
+        if s.manualAck then return 'verified', wd.tried end
+        if s.skipped.manual then return 'skipped' end
+        return w
+    elseif id == 'auto' then
+        if s.autoKept == 'unknown' then return 'stale', wd.leftUnknown end
+        if s.autoKept then return 'verified', s.autoKept == 'on' and wd.leftOn or wd.leftOff end
+        if ctx.auto == 'unknown' then return 'stale', wd.modeUnknown end
+        if s.skipped.auto then return 'skipped' end
+        return w
+    end
+    return w, g.StepId() == 'summary' and wd.review or wd.summary
+end
+
+------------------------------------------------------------------------
+-- Step bodies. Each returns the y below its last element.
+------------------------------------------------------------------------
+local VIEW = {}
+
+local function Notes(y, extra)
+    for _, line in ipairs(extra or {}) do
+        if line and line ~= '' then y = y - Text(line, PAD, y, CW, 'body', GOLD) - GAP end
+    end
+    return y
+end
+
+function VIEW.welcome(g, s, ctx, c, y)
+    local t = c.welcome or {}
+    y = y - Text(s.replay and t.titleReplay or t.title, PAD, y, CW, 'title', GOLD) - GAP
+    y = y - Text(s.replay and t.bodyReplay or t.body, PAD, y, CW, 'body', TEXT) - GAP
+    for _, p in ipairs(t.paths or {}) do
+        local id = p.id
+        y = y - Row({label = p.title, desc = p.desc, radio = s.path == id,
+            act = function() note = nil; g.SetPath(id) end}, PAD, y, CW) - 4
+    end
+    y = y - 4
+    return y - Text(c.safety, PAD, y, CW, 'muted', MUTED) - GAP
+end
+
+-- The last check's outcome: edge and fill colours, its head line and the
+-- lines under it. Accepted reads the code only; it is never a chosen or
+-- saved Wishlist.
+local function ImportOutcome(r, t)
+    if r.state == 'accepted' then
+        local lines = {t.importOkBody}
+        if r.needsRoles then lines[#lines + 1] = t.importRoles end
+        if r.suspended then lines[#lines + 1] = t.importSuspended end
+        return COLOR.verified, {0.07, 0.13, 0.08},
+            Fmt(t.importOk, r.name and Name(r.name) or t.importUnnamed, r.entries or 0, r.rolled or 0, r.locked or 0), lines
+    elseif r.state == 'rejected' then
+        return COLOR.rejected, {0.16, 0.07, 0.06}, t.importBad,
+            {r.reason == 'long' and Fmt(t.importLong, r.limit or 0) or t.importBadBody}
+    end
+    return COLOR.unavailable, {0.13, 0.1, 0.16}, r.state == 'empty' and t.importEmpty or t.importUnavailable, {}
+end
+
+-- The design's paste field, Check code and inline outcome. Check code is the
+-- filled action until a code reads as one; then Open it as a draft is. Once
+-- a draft or a save of this step is reported, its own status line (below the
+-- choices) speaks instead of the check.
+local function ImportPanel(s, c, y)
+    local t, b, imp = c.wishlist or {}, c.buttons or {}, view.import
+    local x, w = PAD + 8, CW - 16
+    y = y - Text(t.importLabel, x, y, w, 'small', MUTED) - 4
+    local box = frame.importBox
+    if box:GetText() ~= imp.text then box._nexusSyncing = true; box:SetText(imp.text); box._nexusSyncing = nil end
+    box:ClearAllPoints(); box:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y); box:SetSize(w, 24)
+    box:Show()
+    y = y - 24 - 6
+    local r = imp.result
+    local accepted = r and r.state == 'accepted'
+    y = y - Actions({{label = b.checkCode, primary = not accepted, act = function() note = nil; U.CheckImport() end},
+        accepted and {label = b.openDraft, primary = true, enabled = not r.suspended, act = function() U.RouteImport() end}},
+        x, y, w) - 6
+    if r and not (s.draft or (s.wishlist and s.wishlist.source == 'saved')) then
+        local edge, fill, head, lines = ImportOutcome(r, t)
+        local top, h = y, 6
+        h = h + Text(head, x + 8, y - h, w - 16, 'head', edge) + 3
+        for _, line in ipairs(lines) do h = h + Text(line, x + 8, y - h, w - 16, 'body', TEXT) + 3 end
+        Box(x, top, w, h + 4, edge, fill)
+        y = y - h - 4 - 6
+    end
+    return y - 4
+end
+
+function VIEW.wishlist(g, s, ctx, c, y)
+    local t, n = c.wishlist or {}, c.notes or {}
+    local imp = view.import
+    y = y - Text(t.title, PAD, y, CW, 'title', GOLD) - GAP
+    -- Wishlist versus Saved Build: two concept cards side by side.
+    local half = math.floor((CW - 1) / 2)
+    local function Card(x, head, body)
+        local h1 = Text(head, x + 8, y - 6, half - 16, 'head', GOLD)
+        local h2 = Text(body, x + 8, y - 10 - h1, half - 16, 'body', TEXT)
+        return h1 + h2 + 16
+    end
+    local hA = Card(PAD, t.conceptWish, t.conceptWishBody)
+    local hB = Card(PAD + half + 1, t.conceptBuild, t.conceptBuildBody)
+    local ch = math.max(hA, hB)
+    Box(PAD, y, half, ch, {0.42, 0.3, 0.18}, {0.12, 0.09, 0.07})
+    Box(PAD + half + 1, y, half, ch, {0.42, 0.3, 0.18}, {0.12, 0.09, 0.07})
+    y = y - ch - GAP
+    local list = g.WishlistOptions()
+    local w = s.wishlist
+    local more
+    for i, cand in ipairs(list or {}) do
+        if i > 8 then more = t.more; break end
+        -- One choice at a time: while the paste field is the chosen way, a
+        -- listed Wishlist shows unchosen (Continue waits on the code; Render).
+        local mine = w and w.key == cand.key and not imp.open
+        y = y - Row({label = Name(cand.name), radio = mine and true or false,
+            desc = cand.lockEvidenceStatus == 'unavailable' and t.needsRoles or t.yours,
+            act = function()
+                imp.open = false
+                local ok, why = g.ChooseWishlist(cand); note = (not ok) and n[why] or nil
+            end}, PAD, y, CW) - 4
+    end
+    y = y - Row({label = t.importTitle, desc = t.importDesc, radio = imp.open,
+        act = function() imp.open = true; note = nil end}, PAD, y, CW) - 4
+    if imp.open then y = ImportPanel(s, c, y) end
+    y = y - Row({label = t.createTitle, desc = t.createDesc, radio = false,
+        act = function() imp.open = false; U.RouteEditor('new') end}, PAD, y, CW) - GAP
+    local status, color
+    -- A listed choice set aside for the paste field is not shown as chosen.
+    local shown = w and not (imp.open and w.source ~= 'saved') and w or nil
+    if shown then status, color = Fmt(w.source == 'saved' and t.saved or t.chosen, Name(w.name)), COLOR.verified
+    elseif s.draft then status, color = t.draft, COLOR.waiting
+    elseif s.saveSeen then status, color = t[s.saveSeen.saveKind] or t.notSaved, COLOR.rejected end
+    if status then
+        local kind = shown and 'verified' or (s.draft and 'waiting') or 'rejected'
+        local glyph = ((c.status or {})[kind] or {}).glyph or ''
+        y = y - Text(glyph .. ' ' .. status, PAD, y, CW, 'body', color) - GAP
+    end
+    if not list then more = t.notLoaded elseif #list == 0 then more = t.none end
+    return Notes(y, {more})
+end
+
+function VIEW.target(g, s, ctx, c, y)
+    local t, b, n = c.target or {}, c.buttons or {}, c.notes or {}
+    y = y - Text(t.title, PAD, y, CW, 'title', GOLD) - GAP
+    local opts = ctx.targets
+    if not opts then
+        local top = y
+        local h = Text(t.unavailable, PAD + 8, y - 8, CW - 16, 'head', COLOR.unavailable)
+        h = h + Text(t.unavailableBody, PAD + 8, y - 12 - h, CW - 16, 'body', TEXT)
+        local ah = Actions({{label = b.retry, primary = true, act = function() note = nil end}}, PAD + 8, y - 18 - h, CW - 16)
+        Box(PAD, top, CW, h + ah + 26, COLOR.unavailable, {0.13, 0.1, 0.16})
+        return y - h - ah - 26 - GAP
+    end
+    y = y - Text(t.read, PAD, y, CW, 'muted', MUTED) - GAP
+    for _, o in ipairs(opts) do
+        local dest = o.destination
+        local desc
+        if o.blocked then desc = t[o.blocked] or o.blocked
+        elseif o.empty then desc = t.emptyOffer or t.empty
+        elseif dest == 'first' then desc = t.firstDesc
+        else
+            local r = g.ReadAssignment(dest)
+            desc = (r.state == 'assigned' or r.state == 'roles') and Fmt(t.follows, Name(r.name))
+                or (r.state == 'none' and t.followsNone) or t.followsUnknown
+        end
+        if o.selected then desc = (t.active or '') .. ' - ' .. (desc or '') end
+        local mine = s.target and s.target.destination == dest
+        y = y - Row({label = TargetLabel(dest, o.name), desc = desc, radio = mine and true or false, enabled = not o.blocked,
+            act = function() local ok, why = g.ChooseTarget(dest); note = (not ok) and n[why] or nil end}, PAD, y, CW) - 4
+    end
+    y = y - 4
+    local f = ctx.facts
+    if f then
+        local label = TargetLabel(f.destination, f.name)
+        local wish = s.wishlist and Name(s.wishlist.name) or nil
+        local lines = {}
+        if f.empty then lines = {Fmt(t.cEmpty, label), t.cEmptySave, t.cReturn}
+        elseif f.read.state == 'unknown' then lines = {t.cUnknown}
+        elseif f.already then lines = {Fmt(t.cAlready, label, Name(f.read.name)), t.cAlready2}
+        elseif f.replaces then
+            lines = {Fmt(t.cReplace, label, Name(f.read.name), wish or '?'), Fmt(t.cKept, Name(f.read.name)), t.cEchoes}
+            if f.destination == opts.journal then lines[#lines + 1] = t.cActive end
+            if ctx.auto == 'on' then lines[#lines + 1] = t.cAutoOn end
+            if f.confirmed then lines[#lines + 1] = t.accepted end
+        else lines = {t.cNew, t.cEchoes} end
+        -- The route (core TargetFacts): a ready Saved Build the Echo Journal
+        -- chooser does not assign to now keeps Continue waiting, and says
+        -- what the player does in the game to get there. Nothing here saves,
+        -- loads or activates a slot.
+        local needsBuilds = false
+        if not f.empty and f.read.state ~= 'unknown' and not f.already then
+            if f.route == 'select' then
+                lines[#lines + 1] = Fmt(t.cSelect, label)
+                lines[#lines + 1] = t.cSelectHow
+                lines[#lines + 1] = t.cReturn
+                needsBuilds = true
+            elseif f.route == 'first' then
+                lines[#lines + 1] = t.cFirst
+            end
+        end
+        if f.empty then needsBuilds = true end
+        local top, h = y, 8
+        h = h + Text(Fmt(t.ifAssign, wish or Name(nil)), PAD + 8, y - h, CW - 16, 'head', GOLD) + 4
+        for _, line in ipairs(lines) do
+            h = h + Text('- ' .. line, PAD + 8, y - h, CW - 16, 'body', TEXT) + 3
+        end
+        if f.replaces and not f.confirmed then
+            h = h + 4 + Actions({{label = b.cancel, act = function() g.CancelReplace() end},
+                {label = b.replace, primary = true, act = function() g.ConfirmReplace() end}}, PAD + 8, y - h - 4, CW - 16)
+        elseif needsBuilds then
+            -- The game's own My Builds page, as the panel's My Builds button
+            -- opens it; the coach steps aside and is reopened by the player.
+            h = h + 4 + Actions({{label = b.openBuilds, primary = true, act = function() U.RouteBuilds() end}},
+                PAD + 8, y - h - 4, CW - 16)
+        end
+        Box(PAD, top, CW, h + 8, {0.7, 0.42, 0.18}, {0.14, 0.1, 0.07})
+        y = y - h - 8 - GAP
+    end
+    return y
+end
+
+function VIEW.assign(g, s, ctx, c, y)
+    local t, b, sb = c.assign or {}, c.buttons or {}, c.target or {}
+    y = y - Text(t.title, PAD, y, CW, 'title', GOLD) - GAP
+    local f, st = ctx.facts, ctx.assign
+    -- A target that is not ready (its read back unknown, or a replacement not
+    -- accepted) takes no new assignment. An assignment already made whose
+    -- result is unknown or stale (core AssignStatus: only with a receipt) is
+    -- still shown as that result, with Check again only; the target before
+    -- any assignment stays the prerequisite card.
+    local result = st.state == 'unknown' or st.state == 'stale'
+    if not (s.wishlist and f and (f.ready or result)) then
+        local top = y
+        local h = Text(t.missing, PAD + 8, y - 8, CW - 16, 'body', TEXT)
+        local links = {}
+        if not s.wishlist then links[#links + 1] = {label = b.goWishlist, act = function() g.GoTo('wishlist') end} end
+        if not (f and f.ready) then links[#links + 1] = {label = b.goTarget, act = function() g.GoTo('target') end} end
+        local ah = Actions(links, PAD + 8, y - 14 - h, CW - 16)
+        Box(PAD, top, CW, h + ah + 22, {0.42, 0.34, 0.26}, {0.1, 0.08, 0.06})
+        return y - h - ah - 22 - GAP
+    end
+    local dest, wish = TargetLabel(f.destination, f.name), Name(s.wishlist.name)
+    -- The pairing being assigned, with its one-line consequence (unknown
+    -- while the slot cannot be read, never guessed).
+    local short = f.read.state == 'unknown' and sb.cUnknown or f.already and sb.shortAlready
+        or f.replaces and Fmt(sb.shortReplace, Name(f.read.name)) or sb.shortNew
+    local top, h = y, 6
+    h = h + Text(wish .. '  ->  ' .. dest, PAD + 8, y - h, CW - 16, 'head', GOLD) + 2
+    h = h + Text(short, PAD + 8, y - h, CW - 16, 'body', MUTED) + 6
+    Box(PAD, top, CW, h, {0.42, 0.32, 0.22}, {0.12, 0.09, 0.07})
+    y = y - h - GAP
+    local open = {label = b.open, primary = true, act = function() U.RouteChooser() end}
+    local again = {label = b.openAgain, primary = true, act = function() U.RouteChooser() end}
+    local check = {label = b.check, act = function() note = nil end}
+    -- With no answer, or a slot changed after the check, the design's one
+    -- action is the filled Check again: it reads the slot again and arms,
+    -- opens and assigns nothing. The chooser stays on the ready, waiting and
+    -- declined cards (guarded by ArmAssign); Skip for now is in the footer.
+    local checkFirst = {label = b.check, primary = true, act = check.act}
+    local function Result(edge, fill, head, body, actions)
+        local rt, rh = y, 8
+        rh = rh + Text(head, PAD + 8, y - rh, CW - 16, 'head', edge) + 3
+        if body and body ~= '' then rh = rh + Text(body, PAD + 8, y - rh, CW - 16, 'body', TEXT) + 4 end
+        if actions then rh = rh + 4 + Actions(actions, PAD + 8, y - rh - 4, CW - 16) end
+        Box(PAD, rt, CW, rh + 8, edge, fill)
+        y = y - rh - 8 - GAP
+    end
+    local state = st.state
+    if state == 'ready' then
+        y = y - Actions({open}, PAD, y, CW) - 6
+        y = y - Text(Fmt(t.openNote, wish), PAD, y, CW, 'body', MUTED) - GAP
+    elseif state == 'pending' then
+        Result(COLOR.waiting, {0.12, 0.1, 0.06}, Fmt(t.waiting, wish), nil, {check, again})
+    elseif state == 'verified' then
+        local rt, rh = y, 6
+        Text(t.verified, PAD + 8, y - rh, CW / 2, 'head', COLOR.verified)
+        rh = rh + Text(t.readback, PAD + CW / 2, y - rh - 2, CW / 2 - 8, 'small', HELP_BLUE, 'RIGHT') + 8
+        local req = s.request
+        local rows = {{t.evCharacter, ctx.character}, {t.evBuild, dest}, {t.evWishlist, wish},
+            {t.evRequest, st.origin == 'save' and t.evSave or Fmt(t.evRequestValue, req and req.serial or 0)},
+            {t.evRead, t.evReadValue}}
+        for _, r in ipairs(rows) do
+            Fill(PAD + 1, y - rh + 2, CW - 2, 1, COLOR.verified, 0.25)
+            local kh = Text(r[1], PAD + 8, y - rh - 2, 100, 'body', MUTED)
+            local vh = Text(r[2], PAD + 112, y - rh - 2, CW - 150, 'body', TEXT)
+            Text('+', PAD + CW - 20, y - rh - 2, 12, 'body', COLOR.verified)
+            rh = rh + math.max(kh, vh) + 6
+        end
+        Box(PAD, rt, CW, rh + 4, COLOR.verified, {0.07, 0.13, 0.08})
+        y = y - rh - 4 - GAP
+    elseif state == 'observed' then
+        Result(COLOR.verified, {0.07, 0.13, 0.08}, t.observed, Fmt(t.observedBody, dest, wish), {check})
+    elseif state == 'refused' then
+        Result(COLOR.rejected, {0.16, 0.07, 0.06}, t.rejected, Fmt(t.rejectedBody, Name(st.reason)), {again})
+    elseif state == 'cancelled' then
+        Result(COLOR.rejected, {0.16, 0.07, 0.06}, t.cancelled, t.cancelledBody, {again})
+    elseif state == 'unknown' then
+        Result(COLOR.unavailable, {0.13, 0.1, 0.16}, t.unavailable, t.unavailableBody, {checkFirst})
+    else
+        local body = Fmt((t.staleBody or {})[state] or (t.staleBody or {}).stale, dest,
+            Name(state == 'other' and st.name or st.readName))
+        local recheck = state == 'stale' or state == 'changed'
+        Result(COLOR.stale, {0.06, 0.13, 0.14}, t.stale, body, recheck and {checkFirst} or {check, again})
+    end
+    return y
+end
+
+function VIEW.manual(g, s, ctx, c, y)
+    local m = c.sim or {}
+    y = y - Text(m.title, PAD, y, CW, 'title', GOLD) - GAP
+    y = y - Text(m.body, PAD, y, CW, 'body', TEXT) - GAP
+    local top = y
+    -- The simulated preview: a labelled frame that stays visible.
+    Fill(PAD + 1, y - 1, CW - 2, 18, {0.18, 0.26, 0.42}, 0.95)
+    Text(m.banner, PAD + 8, y - 4, CW - 16, 'small', {0.92, 0.95, 1})
+    local iy = y - 26
+    local cards = m.cards or {}
+    local cw = math.floor((CW - 16 - 2 * 6) / 3)
+    local tallest = 0
+    for i, card in ipairs(cards) do
+        local idx = i
+        local h = Row({label = card.name, desc = (card.desc or '') .. (i == g.SIM_ANSWER and ('\n' .. (m.mark or '')) or ''),
+            selected = s.manualPick == i, act = function() g.SimPick(idx) end}, PAD + 8 + (i - 1) * (cw + 6), iy, cw)
+        tallest = math.max(tallest, h)
+    end
+    iy = iy - tallest - GAP
+    iy = iy - Text(m.why, PAD + 8, iy, CW - 16, 'body', TEXT) - 4
+    if s.manualPick then
+        local name = (cards[s.manualPick] or {}).name or '?'
+        local msg = Fmt(m.picked, name) .. (s.manualPick == g.SIM_ANSWER and (m.match or '') or (m.differ or ''))
+        if ctx.auto == 'on' then msg = msg .. (m.autoOn or '') end
+        iy = iy - Text(msg, PAD + 8, iy, CW - 16, 'body', HELP_BLUE) - 4
+    end
+    Box(PAD, top, CW, top - iy + 4, {0.4, 0.52, 0.8}, {0.07, 0.09, 0.14})
+    return iy - 4 - GAP
+end
+
+function VIEW.auto(g, s, ctx, c, y)
+    local a, b = c.auto or {}, c.buttons or {}
+    y = y - Text(a.title, PAD, y, CW, 'title', GOLD) - GAP
+    local mode = ctx.auto
+    local unknown = mode == 'unknown'
+    local top, h = y, 8
+    local dot = unknown and COLOR.stale or mode == 'on' and {1, 0.5, 0.3} or {0.62, 0.6, 0.58}
+    Fill(PAD + 10, y - 12, 10, 10, dot, 1)
+    h = h + Text(unknown and a.modeUnknown or (mode == 'on' and a.modeOn or a.modeOff), PAD + 28, y - h, CW - 36, 'head', TEXT) + 2
+    h = h + Text(unknown and a.subUnknown or a.subRead, PAD + 28, y - h, CW - 36, 'body', MUTED) + 8
+    Box(PAD, top, CW, h, {0.42, 0.34, 0.26}, {0.12, 0.09, 0.07})
+    y = y - h - GAP
+    y = y - Text(a.lead, PAD, y, CW, 'body', TEXT) - GAP
+    y = y - Actions({{label = view.autoMore and b.autoLess or b.autoMore,
+        act = function() view.autoMore = not view.autoMore end}}, PAD, y, CW) - 4
+    if view.autoMore then
+        local mh = Text(a.moreOn, PAD + 10, y, CW - 10, 'body', TEXT) + 3
+        mh = mh + Text(a.moreOff, PAD + 10, y - mh, CW - 10, 'body', TEXT)
+        Fill(PAD, y, 2, mh, GOLD, 0.6)
+        y = y - mh - GAP
+    end
+    if s.autoKept then
+        local kept = s.autoKept == 'unknown' and a.keptUnknown or s.autoKept == 'on' and a.keptOn or a.keptOff
+        local kt = y
+        local kh = Text(kept, PAD + 8, y - 6, CW - 16, 'body', TEXT) + 12
+        Box(PAD, kt, CW, kh, COLOR.verified, {0.07, 0.13, 0.08})
+        y = y - kh - GAP
+    end
+    if view.review then y = y - Text(a.reviewNote, PAD, y, CW, 'body', HELP_BLUE) - GAP end
+    local keep = {label = unknown and b.leave or Fmt(b.keep, mode == 'on' and 'ON' or 'OFF'), primary = true,
+        act = function() g.KeepAuto(); g.Next() end}
+    local review = unknown and {label = b.reread, act = function() view.review = false end}
+        or {label = b.review, act = function()
+            view.review = true
+            if Nexus.Panel and Nexus.Panel.Show then Nexus.Panel.Show() end
+        end}
+    y = y - Actions({keep, review}, PAD, y, CW) - GAP
+    return y
+end
+
+function VIEW.summary(g, s, ctx, c, y)
+    local fin, b = c.finish or {}, c.buttons or {}
+    local sm = ctx.summary
+    local explore = s.path == 'explore'
+    local title, sub
+    if explore then title, sub = fin.titleExplore, fin.subExplore
+    elseif sm.complete then title, sub = fin.titleDone, fin.subDone
+    elseif sm.trueNow then title, sub = fin.titleDone, fin.subTrue
+    else
+        title = Fmt(fin.titleOpen, sm.open, sm.open == 1 and '' or 's')
+        sub = ctx.kept == 'saved' and fin.subOpen or fin.subOpenSession or fin.subOpen
+    end
+    y = y - Text(title, PAD, y, CW, 'title', GOLD) - GAP
+    y = y - Text(sub, PAD, y, CW, 'body', TEXT) - GAP
+    local f, st = ctx.facts, ctx.assign
+    local wishName = s.wishlist and Name(s.wishlist.name) or '?'
+    local destName = f and TargetLabel(f.destination, f.name) or '?'
+    local function Detail(id, kind)
+        if explore and (id == 'wishlist' or id == 'target' or id == 'assign') then return fin.explore end
+        if id == 'wishlist' then
+            if s.wishlist then return Fmt(fin.wishDone, wishName) end
+            if sm.wishlist == 'draft' then return fin.wishDraft end
+            if sm.wishlist == 'partial' then return fin.wishPartial end
+            if sm.wishlist == 'uncertain' then return fin.wishUncertain end
+            return kind == 'skipped' and fin.wishSkipped or fin.wishNot
+        elseif id == 'target' then
+            if f and f.ready then return destName end
+            return kind == 'skipped' and fin.targetSkipped or fin.targetNot
+        elseif id == 'assign' then
+            if st.state == 'verified' then return Fmt(fin.assignDone, destName, wishName) end
+            if st.state == 'observed' then return Fmt(fin.assignTrue, destName, wishName) end
+            if kind == 'skipped' then return fin.assignSkipped end
+            if st.state == 'pending' then return fin.assignWaiting end
+            if kind == 'rejected' then return fin.assignRejected end
+            if kind == 'unavailable' then return fin.assignUnknown end
+            if kind == 'stale' then return fin.assignStale end
+            return fin.assignNot
+        elseif id == 'manual' then
+            if s.manualAck then return fin.manualDone end
+            return kind == 'skipped' and fin.manualSkipped or fin.manualNot
+        elseif id == 'auto' then
+            if ctx.auto == 'unknown' then return fin.autoUnknown end
+            return Fmt(fin.autoMode, ctx.auto == 'on' and 'ON' or 'OFF')
+        end
+    end
+    local rowsTop = y
+    for _, id in ipairs({'wishlist', 'target', 'assign', 'manual', 'auto'}) do
+        local inPath = not explore or id == 'manual' or id == 'auto'
+        local kind, word = StepStatus(g, s, ctx, id)
+        if not inPath then kind, word = 'not', nil end
+        if kind == 'waiting' and g.StepId() ~= id and id ~= 'assign' then kind = 'not' end
+        if id == 'auto' and not s.autoKept and kind ~= 'stale' and kind ~= 'skipped' then
+            kind, word = 'not', Fmt(fin.autoNotReviewed, ctx.auto == 'on' and 'ON' or 'OFF')
+        end
+        local rt = y
+        local half = math.floor(CW / 2)
+        local cw, chh = Chip(kind, word, PAD + CW - 6, y - 6, true, half)
+        -- Go to step sits under the chip at the width its label needs; the
+        -- row's words keep the rest of the row.
+        local side, bh = cw, 0
+        if inPath and kind ~= 'verified' and not (id == 'auto' and s.autoKept) then
+            local target = id
+            local go, gw = Action({label = b.goStep, act = function() g.GoTo(target) end}, PAD, y - 10 - chh, half)
+            go:ClearAllPoints()
+            go:SetPoint('TOPLEFT', frame, 'TOPLEFT', PAD + CW - 6 - gw, y - 10 - chh)
+            side, bh = math.max(cw, gw), 4 + 22
+        end
+        local lh = Text((fin.rows or {})[id] or id, PAD + 8, y - 6, CW - side - 24, 'head', TEXT)
+        lh = lh + Text(Detail(id, kind), PAD + 8, y - 8 - lh, CW - side - 24, 'body', MUTED) + 2
+        local rh = math.max(lh, chh + bh + 4, 22) + 8
+        Fill(PAD + 1, y - rh, CW - 2, 1, {0.3, 0.24, 0.18}, 1)
+        y = rt - rh
+    end
+    local sh = Text(fin.sent, PAD + 8, y - 6, CW - 16, 'muted', MUTED) + 12
+    Box(PAD, rowsTop, CW, rowsTop - y + sh, {0.4, 0.32, 0.22}, {0.1, 0.08, 0.06}, 0.5)
+    y = y - sh - GAP
+    -- Optional lessons: separate, never blocking setup.
+    y = y - Text((fin.more or '') .. ' ' .. (fin.moreSub or ''), PAD, y, CW, 'body', TEXT) - 6
+    for _, l in ipairs(fin.lessons or {}) do
+        local id, open = l.id, view.lesson == l.id
+        y = y - Row({label = l.title .. '  -  ' .. (open and b.hide or b.read),
+            act = function() view.lesson = (view.lesson == id) and nil or id end}, PAD, y, CW) - 4
+        if open then
+            for _, line in ipairs(l.lines or {}) do y = y - Text(line, PAD + 10, y, CW - 10, 'body', TEXT) - 3 end
+            y = y - 3 - Actions({{label = l.open, act = function() U.Lesson(id) end}}, PAD + 10, y - 3, CW - 10) - GAP
+        end
+    end
+    y = y - Actions({{label = b.replay, act = function() note = nil; view.lesson = nil; ResetImport(); g.Replay() end}}, PAD, y - 2, CW) - GAP
+    return y
+end
+
+------------------------------------------------------------------------
+-- Window.
+------------------------------------------------------------------------
+local function Character()
+    local c = Copy()
+    local okN, name, realm = pcall(function() return UnitName('player') end)
+    if not okN or not name or name == '' then return c.charUnknown end
+    if not realm or realm == '' then
+        local okR, r = pcall(function() return GetRealmName and GetRealmName() end)
+        realm = okR and r or nil
+    end
+    local okL, level = pcall(function() return UnitLevel and UnitLevel('player') end)
+    local parts = {Name(name)}
+    if realm and realm ~= '' then parts[#parts + 1] = Name(realm) end
+    if okL and tonumber(level) and tonumber(level) > 0 then parts[#parts + 1] = 'Level ' .. tostring(level) end
+    return table.concat(parts, ' - ')
 end
 
 local function Ensure()
     if frame then return frame end
     frame = CreateFrame('Frame', 'NexusGuidedSetup', UIParent)
-    frame:SetSize(W, 300)
+    frame:SetSize(W, MIN_H)
     frame:SetPoint('CENTER', UIParent, 'CENTER', 0, 40)
     frame:SetFrameStrata('DIALOG')
     frame:SetClampedToScreen(true)
@@ -132,51 +994,96 @@ local function Ensure()
     frame:SetScript('OnDragStop', function(self) self:StopMovingOrSizing() end)
     frame:Hide()
     pcall(function()
-        frame:SetBackdrop({bgFile = 'Interface\\Buttons\\WHITE8X8',
-            edgeFile = 'Interface\\Tooltips\\UI-Tooltip-Border', edgeSize = 14,
+        frame:SetBackdrop({bgFile = WHITE, edgeFile = 'Interface\\Tooltips\\UI-Tooltip-Border', edgeSize = 14,
             insets = {left = 4, right = 4, top = 4, bottom = 4}})
         frame:SetBackdropColor(0.06, 0.045, 0.035, 0.97)
         frame:SetBackdropBorderColor(0.75, 0.42, 0.18, 0.95)
     end)
-    frame.title = frame:CreateFontString(nil, 'OVERLAY', 'GameFontNormalLarge')
-    frame.title:SetPoint('TOP', frame, 'TOP', 0, -14)
-    frame.title:SetSize(TEXT_W, 20)
-    frame.step = NewText('GameFontNormalSmall')
-    frame.purpose = NewText('GameFontHighlightSmall')
-    frame.status = NewText('GameFontHighlightSmall')
-    frame.extra = NewText('GameFontHighlightSmall')
-    frame.options = {}
-    for i = 1, ROWS do frame.options[i] = NewButton(TEXT_W, 22) end
-    frame.primary, frame.secondary = NewButton(180, 24), NewButton(186, 24)
-    frame.back, frame.skip, frame.next = NewButton(70), NewButton(70), NewButton(90)
-    frame.help, frame.close = NewButton(56), NewButton(62)
-    frame.back:SetPoint('BOTTOMLEFT', frame, 'BOTTOMLEFT', 24, 18)
-    frame.skip:SetPoint('BOTTOMLEFT', frame, 'BOTTOMLEFT', 100, 18)
-    frame.next:SetPoint('BOTTOMLEFT', frame, 'BOTTOMLEFT', 176, 18)
-    frame.help:SetPoint('BOTTOMLEFT', frame, 'BOTTOMLEFT', 272, 18)
-    frame.close:SetPoint('BOTTOMLEFT', frame, 'BOTTOMLEFT', 334, 18)
+    -- Fixed header: the diamond mark (a square: no rotation on 3.3.5a), the
+    -- title, the character line, Help and close.
+    frame.mark = Tex('ARTWORK')
+    frame.mark:SetPoint('TOPLEFT', frame, 'TOPLEFT', PAD, -16); frame.mark:SetSize(12, 12)
+    Paint(frame.mark, {0.82, 0.42, 0.16}); frame.mark:Show()
+    frame.title = frame:CreateFontString(nil, 'OVERLAY', FONTS.title)
+    frame.title:SetPoint('TOPLEFT', frame, 'TOPLEFT', PAD + 20, -12)
+    frame.title:SetJustifyH('LEFT')
+    frame.title:SetSize(CW - 130, 20)
+    -- The character line wraps (the design's overflow-wrap); Render sizes the
+    -- header to the title and this line at the current font.
+    frame.char = frame:CreateFontString(nil, 'OVERLAY', FONTS.muted)
+    frame.char:SetPoint('TOPLEFT', frame, 'TOPLEFT', PAD + 20, -32)
+    frame.char:SetJustifyH('LEFT')
+    frame.char:SetJustifyV('TOP')
+    frame.char:SetSize(CW - 120, 14)
     local metrics = Nexus.LayoutMetrics
-    if metrics and type(metrics.FullTextTooltip) == 'function' then
-        for _, fs in ipairs({frame.purpose, frame.status, frame.extra}) do metrics.FullTextTooltip(fs, frame) end
-    end
+    if metrics and metrics.FullTextTooltip then frame.char._hit = metrics.FullTextTooltip(frame.char, frame) end
+    frame.headLine = Tex('ARTWORK')
+    frame.headLine:SetPoint('TOPLEFT', frame, 'TOPLEFT', 6, -52); frame.headLine:SetSize(W - 12, 1)
+    Paint(frame.headLine, {0.45, 0.3, 0.16}); frame.headLine:Show()
+    frame.help, frame.close = NewButton(), NewButton()
+    frame.close:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -12, -14)
+    frame.help:SetPoint('TOPRIGHT', frame, 'TOPRIGHT', -46, -14)
+    frame.checklist = NewButton()
+    -- Back is a themed secondary button; Skip for now and Continue keep the
+    -- design's own looks (FooterAction), which the tree walk below leaves alone.
+    frame.back, frame.skip, frame.next = NewButton(), FooterAction('link'), FooterAction('primary')
+    frame.footLine = Tex('ARTWORK')
     local theme = Nexus.Theme
     if theme then
         if theme.StyleWindow then theme.StyleWindow(frame, 0.97) end
         if theme.StyleTree then theme.StyleTree(frame) end
-        if theme.StyleLabel then theme.StyleLabel(frame.title, 'accent'); theme.StyleLabel(frame.step, 'muted') end
+        if theme.StyleLabel then theme.StyleLabel(frame.title, 'accent'); theme.StyleLabel(frame.char, 'muted') end
     end
-    -- Escape closes the coach exactly as Close does (U.Close). As for the
-    -- Welcome (ui/QuickStart.lua), the coach itself is not listed in
-    -- UISpecialFrames: a route that steps aside, a warning or another window
-    -- hides it without closing it, and a first-use dismissal must not be taken
-    -- from such a hide. This invisible child is listed instead. It is shown
-    -- exactly while the coach is, and its own hide closes the coach only while
-    -- the coach is still visible; an explicit hide of the coach hides it first,
-    -- so that closes nothing. Offline model only; native NOT_RUN.
+    -- The Wishlist step's paste field (ImportPanel). It holds the import
+    -- dialog's own limit, takes the keyboard only when clicked, and Enter
+    -- checks; Escape gives the keyboard back. Typing only keeps the text in
+    -- this session's view; a changed text drops the earlier check, which
+    -- belongs to the exact text it read.
+    local box = CreateFrame('EditBox', nil, frame)
+    box:SetAutoFocus(false)
+    box:SetFontObject(ChatFontNormal)
+    box:SetTextInsets(6, 6, 0, 0)
+    local editor = Nexus.WishlistEditor
+    box:SetMaxLetters(tonumber(editor and editor.IMPORT_MAX_LETTERS) or 4096)
+    pcall(function()
+        box:SetBackdrop({bgFile = WHITE, edgeFile = WHITE, edgeSize = 1, insets = {left = 1, right = 1, top = 1, bottom = 1}})
+        box:SetBackdropColor(0.05, 0.04, 0.03, 1)
+        box:SetBackdropBorderColor(0.42, 0.3, 0.18, 1)
+    end)
+    box:SetScript('OnTextChanged', function(self)
+        if self._nexusSyncing then return end
+        local text, imp = tostring(self:GetText() or ''), view.import
+        if text == imp.text then return end
+        imp.text = text
+        if imp.result then imp.result, imp.checked = nil, nil; if frame:IsShown() then U.Render() end end
+    end)
+    box:SetScript('OnEnterPressed', function(self)
+        self:ClearFocus(); note = nil; U.CheckImport()
+        if frame:IsShown() then U.Render() end
+    end)
+    box:SetScript('OnEscapePressed', function(self) self:ClearFocus() end)
+    if theme and theme.Exempt then theme.Exempt(box) else box._nexusThemeExempt = true end
+    box:Hide()
+    frame.importBox = box
+    -- Escape closes the topmost layer: the help card first, then the coach
+    -- exactly as Close does (U.Close). As for the Welcome
+    -- (ui/QuickStart.lua), the coach itself is not listed in UISpecialFrames:
+    -- a route that steps aside, a warning or another window hides it without
+    -- closing it, and a first-use dismissal must not be taken from such a
+    -- hide. This invisible child is listed instead. It is shown exactly while
+    -- the coach is, and its own hide closes the coach only while the coach is
+    -- still visible; an explicit hide of the coach hides it first, so that
+    -- closes nothing. Offline model only; native NOT_RUN.
     local escape = CreateFrame('Frame', 'NexusGuidedSetupEscape', frame)
-    escape:SetScript('OnHide', function() if frame and frame:IsVisible() then U.Close() end end)
+    escape:SetScript('OnHide', function(self)
+        if not (frame and frame:IsVisible()) then return end
+        if view.help then view.help = false; self:Show(); U.Render(); return end
+        U.Close()
+    end)
     frame:HookScript('OnShow', function() escape:Show() end)
-    frame:HookScript('OnHide', function() escape:Hide() end)
+    -- Any hide also ends a pending Open My Builds (U.RouteBuilds): its late
+    -- answer belongs to the coach session it was asked from.
+    frame:HookScript('OnHide', function() escape:Hide(); box:ClearFocus(); frame.buildsRoute = nil end)
     escape:Hide()
     UISpecialFrames = UISpecialFrames or {}
     UISpecialFrames[#UISpecialFrames + 1] = 'NexusGuidedSetupEscape'
@@ -185,203 +1092,254 @@ local function Ensure()
     return frame
 end
 
--- Each block takes the height its wrapped text needs (capped; the complete
--- text is then on hover), so 125% text and long names never clip.
-local function Place(fs, y, gap)
-    local text = fs:GetText()
-    fs:ClearAllPoints()
-    fs:SetPoint('TOPLEFT', frame, 'TOPLEFT', 24, y)
-    if text == nil or text == '' then fs:SetHeight(1); fs:Hide(); return y end
-    fs:Show()
-    local metrics, height = Nexus.LayoutMetrics, 42
-    if metrics and type(metrics.WrapHeight) == 'function' then
-        height = metrics.WrapHeight(fs, TEXT_W, 12, BLOCK_MAX)
-    else fs:SetWidth(TEXT_W); fs:SetHeight(height) end
-    return y - height - (gap or 6)
-end
-
-local function Layout()
-    local y = -40
-    y = Place(frame.step, y, 4)
-    y = Place(frame.purpose, y, 8)
-    y = Place(frame.status, y, 8)
-    for _, b in ipairs(frame.options) do
-        if b:IsShown() then
-            b:ClearAllPoints()
-            b:SetPoint('TOPLEFT', frame, 'TOPLEFT', 24, y)
-            y = y - b:GetHeight() - 4
-        end
-    end
-    if frame.options[1]:IsShown() then y = y - 4 end
-    y = Place(frame.extra, y, 8)
-    frame.primary:ClearAllPoints()
-    frame.primary:SetPoint('TOPLEFT', frame, 'TOPLEFT', 24, y)
-    frame.secondary:ClearAllPoints()
-    frame.secondary:SetPoint('TOPLEFT', frame, 'TOPLEFT', 210, y)
-    if frame.primary:IsShown() or frame.secondary:IsShown() then y = y - 30 end
-    frame:SetHeight(math.max(240, math.ceil(-y + 50)))
+local function Place(b, spec, x, y, w)
+    Arm(b, spec)
+    b:SetHeight(22)
     local metrics = Nexus.LayoutMetrics
-    if metrics and type(metrics.FitToScreen) == 'function' then metrics.FitToScreen(frame) end
+    if w then b:SetWidth(w) elseif metrics and metrics.FitButtonWidth then metrics.FitButtonWidth(b, 60, 160) end
+    b:ClearAllPoints()
+    if x and y then b:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y) end
 end
 
-local VIEW = {}
-
-function VIEW.welcome(g, s, c)
-    local p, v = c.paths or {}, {options = {}}
-    for _, id in ipairs({'new', 'existing', 'explore'}) do
-        v.options[#v.options + 1] = {label = (s.path == id and '> ' or '') .. (p[id] or id),
-            act = function() note = nil; g.SetPath(id) end}
-    end
-    return v
+-- The step's help: the inline card of the compact window or the desktop
+-- window's side panel, at x/y with width w. Returns its height.
+local function HelpBlock(x, y, w, c, b, label, id)
+    local h, hh, closeW = c.help or {}, 8, 28
+    hh = hh + Text(Fmt(h.title, label), x + 8, y - hh, w - 22 - closeW, 'head', HELP_BLUE) + 4
+    Action({label = b.helpClose, act = function() view.help = false end}, x + w - 6 - closeW, y - 6, closeW)
+    for _, line in ipairs((h.lines or {})[id] or {}) do hh = hh + Text(line, x + 8, y - hh, w - 16, 'body', TEXT) + 3 end
+    hh = hh + Text(h.full, x + 8, y - hh - 2, w - 16, 'muted', MUTED) + 6
+    hh = hh + Actions({{label = b.fullHelp, act = function() U.OpenHelp(HELP[id]) end}},
+        x + 8, y - hh, w - 16) + 8
+    Box(x, y, w, hh, HELP_BLUE, {0.08, 0.1, 0.16})
+    return hh
 end
 
-function VIEW.wishlist(g, s, c)
-    local t, b, n = c.wishlist or {}, c.buttons or {}, c.notes or {}
-    local v = {options = {}}
-    local list = g.WishlistOptions()
-    for i, cand in ipairs(list or {}) do
-        if i > 8 then v.extra = n.more; break end
-        local w = s.wishlist
-        local mine = w and w.source == 'existing' and w.key == cand.key and w.slot == tonumber(cand.slot)
-        v.options[#v.options + 1] = {label = (mine and '> ' or '') .. Q(cand.name)
-            .. (cand.lockEvidenceStatus == 'unavailable' and (t.rolesShort or '') or ''),
-            act = function() local ok, why = g.ChooseWishlist(cand); note = (not ok) and n[why] or nil end}
+-- A footer button sized to its whole label: at least `minimum`, at most the
+-- footer row, so a long or localized label is never cut. Not yet placed.
+local function FooterButton(b, spec, minimum, rowW)
+    Place(b, spec, nil, nil, minimum)
+    local metrics = Nexus.LayoutMetrics
+    if metrics and metrics.FitButtonWidth then metrics.FitButtonWidth(b, minimum, rowW) end
+    local w = b:GetWidth()
+    -- Continue's wider side padding (the design's 1.3em to Back's 1em).
+    if b.look == 'primary' then w = math.min(rowW, w + 10); b:SetWidth(w) end
+    -- Skip's underline spans its text: the client's text width, else the
+    -- label width FitButtonWidth allowed (its 24 px of end caps removed).
+    if b.underline then
+        local ok, tw = pcall(b.GetTextWidth, b)
+        tw = ok and tonumber(tw) or nil
+        if not (tw and tw > 0 and tw < math.huge) then tw = w - 24 end
+        tw = math.max(1, math.min(w - 8, math.ceil(tw)))
+        b.underline:SetWidth(tw); b.underlineHover:SetWidth(tw)
     end
-    if list and #list == 0 then v.extra = n.none end
-    if not list then v.extra = n.notLoaded end
-    local w = s.wishlist
-    if w then
-        v.status = Fmt(w.source == 'saved' and t.saved or t.chosen, Q(w.name)) .. (w.needsRoles and (t.needsRoles or '') or '')
-    elseif s.draft then v.status = t.draft
-    elseif s.saveSeen then v.status = t[s.saveSeen.saveKind] or t.notSaved
-    else v.status = t.none end
-    v.primary = {label = b.create, act = function() U.RouteEditor('new') end}
-    v.secondary = {label = b.import, act = function() U.RouteEditor('import') end}
-    return v
-end
-
-function VIEW.target(g, s, c)
-    local t, b, n, mk = c.target or {}, c.buttons or {}, c.notes or {}, c.marks or {}
-    local opts = g.TargetOptions()
-    if not opts then return {status = t.notLoaded} end
-    local v = {options = {}}
-    for _, o in ipairs(opts) do
-        local label = TargetLabel(o.destination, o.name)
-        if o.blocked then label = label .. ' - ' .. (t[o.blocked] or o.blocked)
-        elseif o.selected then label = label .. (t.selected or '') end
-        local mine = s.target and s.target.destination == o.destination
-        v.options[#v.options + 1] = {label = (mine and '> ' or '') .. label, enabled = not o.blocked,
-            act = function() local ok, why = g.ChooseTarget(o.destination); note = (not ok) and n[why] or nil end}
-    end
-    local f = g.TargetFacts()
-    if not f then v.status = t.none; return v end
-    local label = TargetLabel(f.destination, f.name)
-    v.status = (mk[f.ready and 'done' or 'todo'] or '') .. ' ' .. Fmt(t.chosen, label)
-    if f.read.state == 'unknown' then v.extra = Fmt(t.unknown, label)
-    elseif f.already then v.extra = Fmt(t.already, label, Q(f.read.name))
-    elseif f.replaces then
-        v.extra = Fmt(t.replace, label, Q(f.read.name), Q(s.wishlist and s.wishlist.name))
-        if f.confirmed then v.extra = v.extra .. '\n' .. (t.confirmed or '')
-        else
-            v.primary = {label = b.replace, act = function() g.ConfirmReplace() end}
-            v.secondary = {label = b.cancel, act = function() g.CancelReplace() end}
-        end
-    end
-    return v
-end
-
-function VIEW.assign(g, s, c)
-    local t, b = c.assign or {}, c.buttons or {}
-    local st, f = g.AssignStatus(), g.TargetFacts()
-    local target = f and TargetLabel(f.destination, f.name) or '?'
-    local wish = s.wishlist and Q(s.wishlist.name) or Q(nil)
-    local detail = (st.state == 'refused' and (Safe(tostring(st.reason or '?')) or '?'))
-        or (st.state == 'other' and Q(st.name)) or (st.state == 'mismatch' and Q(st.readName)) or ''
-    local key = (st.state == 'verified' and st.origin == 'save') and 'verifiedSave' or st.state
-    local v = {status = Fmt(t[key] or t.unknown, target, wish, detail)}
-    if st.state ~= 'none' and st.state ~= 'verified' and st.state ~= 'observed' then
-        v.primary = {label = b.open, act = function() U.RouteChooser() end}
-    end
-    if st.state ~= 'none' then v.secondary = {label = b.check, act = function() note = nil end} end
-    return v
-end
-
-function VIEW.manual(g, s, c)
-    local m, b = c.sim or {}, c.buttons or {}
-    local v = {options = {}, status = (m.banner or '') .. '\n' .. (m.plan or '')}
-    for i, card in ipairs(m.cards or {}) do
-        v.options[i] = {label = (s.manualPick == i and '> ' or '') .. '[SIMULATED] ' .. card,
-            act = function() g.SimPick(i) end}
-    end
-    if s.manualPick then
-        v.extra = s.manualPick == g.SIM_ANSWER and (m.right or '') or Fmt(m.wrong, (m.cards or {})[s.manualPick] or '?')
-        if s.manualAck then v.extra = v.extra .. '\n' .. (m.acked or '') end
-    end
-    v.primary = {label = b.ack, enabled = s.manualPick == g.SIM_ANSWER and not s.manualAck,
-        act = function() g.SimAck() end}
-    return v
-end
-
-function VIEW.auto(g, s, c)
-    local a, b = c.auto or {}, c.buttons or {}
-    return {status = a[g.AutoState()] or a.unknown,
-        primary = {label = b.panel, act = function() if Nexus.Panel and Nexus.Panel.Show then Nexus.Panel.Show() end end},
-        secondary = {label = b.autoHelp, act = function() if Nexus.Help then Nexus.Help.Show('rolling') end end}}
-end
-
-function VIEW.summary(g, s, c)
-    local sm, mk, b = c.summary or {}, c.marks or {}, c.buttons or {}
-    local r = g.Summary()
-    local lines = {sm.head or ''}
-    for _, id in ipairs({'wishlist', 'target', 'assign', 'manual', 'auto'}) do
-        lines[#lines + 1] = (mk[r[id]] or ('[' .. tostring(r[id]) .. ']')) .. ' ' .. ((sm.rows or {})[id] or id)
-    end
-    lines[#lines + 1] = (r.complete and sm.complete) or (r.trueNow and sm.trueNow) or sm.notComplete or ''
-    return {status = table.concat(lines, '\n'), extra = sm.optional,
-        options = {{label = b.replay, act = function() note = nil; g.Replay() end}},
-        primary = {label = b.orb, act = function() U.Lesson('orbs') end},
-        secondary = {label = b.share, act = function() U.Lesson('sharing') end}, noNext = true, noSkip = true}
+    return w
 end
 
 function U.Render()
     local f, g = Ensure(), Core()
     if not g then return end
+    -- The kept place is bound (and on first use this session applied) before
+    -- anything is read for this render; its results are all read again below.
+    if type(g.Resume) == 'function' then g.Resume() end
     g.Recheck()
+    Release()
+    f.importBox:Hide()
     local s, c = g.State(), Copy()
     local b = c.buttons or {}
     local id = g.StepId()
+    local ctx = {targets = g.TargetOptions(), facts = g.TargetFacts(), assign = g.AssignStatus(),
+        auto = g.AutoState(), character = Character(),
+        kept = type(g.PlaceKept) == 'function' and g.PlaceKept() or 'session'}
+    ctx.summary = g.Summary()
+    local metrics = Nexus.LayoutMetrics
+    local labels = c.labels or {}
+    local pos, total = g.Position()
+    local path = g.Order()
+
+    -- The presentation (file header), then the step card's left edge and width.
+    view.wide = WideFits()
+    local nav = view.wide and WIDE.nav or 0
+    local aside = (view.wide and view.help) and WIDE.aside or 0
+    W = view.wide and WIDE.w or COMPACT_W
+    PAD = nav + EDGE
+    CW = W - nav - 2 * EDGE - (aside > 0 and (aside + EDGE) or 0)
+    f:SetWidth(W)
+
+    -- Header: the title and the character line wrap left of Help and close,
+    -- and the header is as tall as they are.
+    Place(f.close, {label = b.close, tip = ctx.kept == 'saved' and b.closeTip or b.closeTipSession or b.closeTip,
+        act = function() U.Close() end}, nil, nil, 26)
+    f.close:SetPoint('TOPRIGHT', f, 'TOPRIGHT', -12, -14)
+    Place(f.help, {label = b.help, act = function() view.help = not view.help end}, nil, nil, 52)
+    if metrics and metrics.FitButtonWidth then metrics.FitButtonWidth(f.help, 52, 140) end
+    f.help:SetPoint('TOPRIGHT', f, 'TOPRIGHT', -42, -14)
+    if Nexus.Theme and Nexus.Theme.SetSelected then Nexus.Theme.SetSelected(f.help, view.help) end
+    local headW = math.max(80, W - EDGE - 20 - 42 - f.help:GetWidth() - 8)
     f.title:SetText(c.title or '')
-    f.step:SetText(Fmt(c.stepOf, s.index, #g.STEPS, (c.names or {})[id] or id))
-    f.purpose:SetText((c.purpose or {})[id] or '')
-    local v = VIEW[id](g, s, c) or {}
-    local status = v.status or ''
-    if s.notice then status = ((c.notice or {})[s.notice] or '') .. '\n' .. status end
-    f.status:SetText(status)
-    local extra = v.extra
-    if note then extra = extra and (extra .. '\n' .. note) or note end
-    f.extra:SetText(extra or '')
-    for i, btn in ipairs(f.options) do
-        if id ~= 'manual' then ResetManualOption(btn) end
-        SetButton(btn, (v.options or {})[i])
-        btn:SetHeight(22)
-        if id == 'manual' and btn:IsShown() then FitManualOption(btn) end
+    f.title:ClearAllPoints(); f.title:SetPoint('TOPLEFT', f, 'TOPLEFT', EDGE + 20, -12)
+    local th = 20
+    if metrics and metrics.WrapHeight then th = metrics.WrapHeight(f.title, headW, 20, 60) else f.title:SetSize(headW, 20) end
+    f.char:SetText(Fmt(c.charLine, ctx.character))
+    f.char:ClearAllPoints(); f.char:SetPoint('TOPLEFT', f, 'TOPLEFT', EDGE + 20, -12 - th)
+    local chh = 14
+    if metrics and metrics.WrapHeight then chh = metrics.WrapHeight(f.char, headW, 14, 48) else f.char:SetSize(headW, 14) end
+    local head = math.max(52, 12 + th + chh + 6)
+    f.headLine:ClearAllPoints(); f.headLine:SetPoint('TOPLEFT', f, 'TOPLEFT', 6, -head); f.headLine:SetSize(W - 12, 1)
+    local top = -(head + 8)
+    local y = top
+
+    local navBottom = top
+    if not view.wide then
+        -- Compact: step line, segmented rail and the collapsible checklist.
+        Place(f.checklist, {label = view.checklist and b.checklistHide or b.checklistShow,
+            act = function() view.checklist = not view.checklist end}, nil, nil, 100)
+        if metrics and metrics.FitButtonWidth then metrics.FitButtonWidth(f.checklist, 100, math.floor(CW / 2)) end
+        f.checklist:SetPoint('TOPRIGHT', f, 'TOPLEFT', PAD + CW, y)
+        local stepLine = Fmt(c.kicker, pos, total) .. ' - ' .. (labels[id] or id)
+        local sh = Text(stepLine, PAD, y - 3, CW - f.checklist:GetWidth() - 10, 'body', MUTED)
+        y = y - math.max(28, sh + 8)
+        local segW = math.floor((CW - 3 * (#path - 1)) / #path)
+        for i, step in ipairs(path) do
+            local kind = StepStatus(g, s, ctx, step)
+            local color = kind == 'verified' and COLOR.verified or step == id and GOLD
+                or kind == 'skipped' and {0.45, 0.43, 0.4} or {0.3, 0.24, 0.18}
+            Fill(PAD + (i - 1) * (segW + 3), y, segW, 5, color, 1)
+        end
+        y = y - 5 - GAP
+        if view.checklist then
+            for i, step in ipairs(path) do
+                local kind, word = StepStatus(g, s, ctx, step)
+                local st = (c.status or {})[kind] or {}
+                local target = step
+                y = y - Row({label = (step == 'summary' and tostring(i) or (st.glyph or '?')) .. '  ' .. (labels[step] or step),
+                    desc = word or st.word, selected = step == id,
+                    act = function() note = nil; view.checklist = false; g.GoTo(target) end}, PAD, y, CW) - 2
+            end
+            y = y - GAP
+        end
+    else
+        -- Desktop: the checklist is the side navigation, always shown, one
+        -- row per step of the path with its glyph-and-word status.
+        f.checklist:Hide()
+        local ny = top - Text(c.checklistTitle or 'CHECKLIST', EDGE, top, nav - 2 * EDGE, 'small', MUTED) - 6
+        for i, step in ipairs(path) do
+            local kind, word = StepStatus(g, s, ctx, step)
+            local st = (c.status or {})[kind] or {}
+            local target = step
+            ny = ny - Row({label = (step == 'summary' and tostring(i) or (st.glyph or '?')) .. '  ' .. (labels[step] or step),
+                desc = word or st.word, selected = step == id,
+                act = function() note = nil; g.GoTo(target) end}, 8, ny, nav - 16) - 2
+        end
+        navBottom = ny - GAP
     end
-    SetButton(f.primary, v.primary)
-    SetButton(f.secondary, v.secondary)
-    SetButton(f.back, s.index > 1 and {label = b.back, act = function() note = nil; g.Back() end} or nil)
-    SetButton(f.skip, not v.noSkip and {label = b.skip, act = function() note = nil; g.Skip() end} or nil)
-    SetButton(f.next, not v.noNext and {label = b.next, enabled = g.CanNext(),
-        act = function() note = nil; g.Next() end} or nil)
-    SetButton(f.help, {label = b.help, act = function() if Nexus.Help then Nexus.Help.Show(HELP[id]) end end})
-    SetButton(f.close, {label = b.close, act = function() U.Close() end})
-    Layout()
+
+    -- The help for this step (Escape closes it before the coach): the side
+    -- panel of the desktop window, else the inline card.
+    local asideBottom = top
+    if view.help then
+        if aside > 0 then
+            asideBottom = top - HelpBlock(W - EDGE - aside, top, aside, c, b, labels[id] or id, id) - GAP
+        else
+            y = y - HelpBlock(PAD, y, CW, c, b, labels[id] or id, id) - GAP
+        end
+    end
+
+    -- Kicker and the current step's status chip.
+    local kicker = string.upper(Fmt(c.kicker, pos, total)) .. (id == 'auto' and (c.kickerOptional or '') or '')
+    local kw = Text(kicker, PAD, y - 3, 150, 'small', MUTED)
+    local kind, word = StepStatus(g, s, ctx, id)
+    if id == 'summary' then kind, word = 'not', (c.words or {}).summary end
+    local _, kh = Chip(kind, word, PAD + 156, y, false, CW - 156)
+    y = y - math.max(kw, kh) - GAP
+    if s.notice then y = y - Text('? ' .. ((c.notice or {})[s.notice] or ''), PAD, y, CW, 'body', COLOR.stale) - GAP end
+
+    y = VIEW[id](g, s, ctx, c, y)
+    if note then y = y - Text(note, PAD, y, CW, 'body', GOLD) - GAP end
+
+    -- Footer: Back, the gate hint, Skip for now and Continue. While the paste
+    -- field is the chosen way, Continue waits until a Wishlist from it is
+    -- saved: a checked code or an open draft is not a Wishlist yet.
+    local imp = view.import
+    local importing = id == 'wishlist' and imp.open and not (s.wishlist and s.wishlist.source == 'saved')
+    local canNext = id == 'summary' or (g.CanNext() and not importing)
+    local hint = ''
+    if not canNext then
+        local gt, st = c.gate or {}, ctx.assign.state
+        if id == 'wishlist' then
+            hint = s.draft and gt.wishlistDraft
+                or importing and (imp.result and imp.result.state == 'accepted' and gt.wishlistChecked or gt.wishlistImport)
+                or gt.wishlist
+        elseif id == 'target' then
+            local tf = ctx.facts
+            hint = not ctx.targets and gt.targetUnavailable
+                or (tf and tf.empty) and gt.targetSave
+                or (tf and tf.replaces and not tf.confirmed) and gt.targetReplace
+                or (tf and tf.ready and tf.route == 'select') and gt.targetSelect
+                or (tf and tf.ready and tf.route == 'first') and gt.targetFirst
+                or gt.target
+        elseif id == 'assign' then hint = (st == 'pending' and gt.assignWaiting) or ((st == 'refused' or st == 'cancelled') and gt.assignRejected)
+            or (st == 'unknown' and gt.assignUnknown)
+            or ((st == 'stale' or st == 'changed' or st == 'other' or st == 'mismatch' or st == 'outdated' or st == 'partial') and gt.assignStale)
+            or gt.assign
+        elseif id == 'auto' then hint = ctx.auto == 'unknown' and gt.autoUnknown or gt.auto
+        else hint = gt[id] or '' end
+    end
+    -- Footer across the window: the gate hint, then Continue at the right,
+    -- Skip for now before it and Back at the left; a button that does not fit
+    -- beside the others moves to a further row (never over another, never cut).
+    y = math.min(y, navBottom, asideBottom, -MIN_H + 70)
+    f.footLine:ClearAllPoints(); f.footLine:SetPoint('TOPLEFT', f, 'TOPLEFT', 6, y); f.footLine:SetSize(W - 12, 1)
+    Paint(f.footLine, {0.45, 0.3, 0.16}); f.footLine:Show()
+    if view.wide then Fill(nav, -(head + 2), 1, -y - head - 2, {0.3, 0.24, 0.18}, 1) end
+    y = y - GAP
+    local rowW = W - 2 * EDGE
+    if hint ~= '' then y = y - Text(hint, EDGE, y, rowW, 'body', {1, 0.84, 0.5}, 'RIGHT') - 6 end
+    local right, rowY = EDGE + rowW, y
+    local nw = FooterButton(f.next, {label = id == 'summary' and b.finish or b.next, enabled = canNext, primary = true,
+        act = function()
+            note = nil
+            if id == 'summary' then U.Close('finish') else g.Next() end
+        end}, 60, rowW)
+    f.next:SetPoint('TOPLEFT', f, 'TOPLEFT', right - nw, rowY)
+    local left = right - nw
+    if g.SKIPPABLE[id] and not canNext then
+        local sw = FooterButton(f.skip, {label = b.skip, act = function() note = nil; g.Skip() end}, 60, rowW)
+        if left - 6 - sw >= EDGE then left = left - 6 - sw else rowY, left = rowY - 26, right - sw end
+        f.skip:SetPoint('TOPLEFT', f, 'TOPLEFT', left, rowY)
+    else f.skip:Hide() end
+    if pos > 1 then
+        local bw = FooterButton(f.back, {label = b.back, act = function() note = nil; g.Back() end}, 70, rowW)
+        if EDGE + bw + 6 > left then rowY = rowY - 26 end
+        f.back:SetPoint('TOPLEFT', f, 'TOPLEFT', EDGE, rowY)
+    else f.back:Hide() end
+    y = rowY - 22 - EDGE
+    f:SetHeight(math.max(MIN_H, math.ceil(-y)))
+    if metrics and type(metrics.FitToScreen) == 'function' then metrics.FitToScreen(f) end
 end
+
+-- Visible text in render order (the header first), for readers and tests.
+function U.VisibleText()
+    if not frame then return '' end
+    local out = {frame.title:GetText() or '', frame.char:GetText() or ''}
+    for _, fs in ipairs(order) do out[#out + 1] = fs:GetText() or '' end
+    return table.concat(out, ' | ')
+end
+function U.TextRegions()
+    local out = {}
+    for i, fs in ipairs(order) do out[i] = fs end
+    return out
+end
+
+-- The routes that end through the editor or the import dialog. A coach that
+-- stepped aside for full Help ('help') comes back only through U.HelpEnded.
+local EDITOR_ROUTE = {new = true, import = true}
 
 -- An unsaved route may be canceled without a save receipt. Return to the
 -- same guide step, but never claim the Wishlist was completed.
 function U.RouteEnded(kind)
     local f = frame
-    if not f or not f.waiting or f.waitingKind ~= kind then return end
+    if not f or not f.waiting or f.waitingKind ~= kind or not EDITOR_ROUTE[kind] then return end
     local warning = Nexus.OverwriteWarning
     if warning and type(warning.IsOpen) == 'function' and warning.IsOpen() then return end
     local g = Core()
@@ -393,6 +1351,8 @@ end
 
 -- Imported plans can open the editor after a second naming/role dialog.
 -- Watch that same editor once, and use the currently active route on close.
+-- The hook outlasts its route: a later editor hide while the coach waits for
+-- anything other than an editor route (full Help, the chooser) ends nothing.
 function U.WatchEditor(kind)
     local f, editorFrame = frame, _G.NexusEditorFrame
     if not f or f.waitingKind ~= kind then return end
@@ -400,7 +1360,7 @@ function U.WatchEditor(kind)
     if type(editorFrame.HookScript) == 'function' and not editorFrame._NexusGuideOnHide then
         editorFrame._NexusGuideOnHide = true
         editorFrame:HookScript('OnHide', function()
-            if frame and frame.waitingKind then U.RouteEnded(frame.waitingKind) end
+            if frame and EDITOR_ROUTE[frame.waitingKind] then U.RouteEnded(frame.waitingKind) end
         end)
     end
 end
@@ -423,6 +1383,46 @@ function U.RouteEditor(kind)
     else
         editor.NewWishlist()
         U.WatchEditor('new')
+    end
+end
+
+-- Check code: reads the pasted text through the editor's read-only check
+-- (WishlistEditor.CheckImportCode). It opens, imports, saves and arms nothing,
+-- and its result belongs to the exact text it read.
+function U.CheckImport()
+    local imp, editor = view.import, Nexus.WishlistEditor
+    if frame and frame.importBox then imp.text = tostring(frame.importBox:GetText() or '') end
+    local r
+    if editor and type(editor.CheckImportCode) == 'function' then
+        local ok, got = pcall(editor.CheckImportCode, imp.text)
+        r = ok and type(got) == 'table' and got or nil
+    end
+    imp.result, imp.checked = r or {state = 'unavailable'}, imp.text
+    return imp.result
+end
+
+-- Open it as a draft: the deliberate later action. The same text is read
+-- again and must still be the code that was checked; then the guide steps
+-- aside and hands it to the editor's own import (WishlistEditor
+-- ImportEBH1String: its suspended-draft refusal, naming dialog and draft).
+-- The import route's cancel, refusal or editor close brings the guide back
+-- (U.RouteEnded); only the player's later save there completes this step.
+function U.RouteImport()
+    local g, n, f, imp = Core(), Copy().notes or {}, frame, view.import
+    if not Ready() then note = n.startup; return end
+    local editor = Nexus.WishlistEditor
+    if not (editor and type(editor.ImportEBH1String) == 'function') then note = n.noEditor; return end
+    local r = U.CheckImport()
+    if r.state ~= 'accepted' then note = n.importChanged; return end
+    if r.suspended then note = n.importSuspended; return end
+    local text = imp.checked
+    g.AwaitSave(); note = nil
+    f.waiting, f.waitingKind = true, 'import'
+    f:Hide()
+    local ok, opened = pcall(editor.ImportEBH1String, text)
+    if not ok or opened == false then
+        note = ok and n.importSuspended or n.noEditor
+        U.RouteEnded('import')
     end
 end
 
@@ -450,7 +1450,96 @@ function U.RouteChooser()
     if not opened then g.Disarm(); f.waiting = nil; note = n.unavailable; f:Show() end
 end
 
-function U.Lesson(id) if Nexus.Help and Nexus.Help.Show then Nexus.Help.Show(id) end end
+-- Opens the game's own My Builds page (JournalTab.OpenBuilds(false), the
+-- route of the panel's My Builds button) for a target the Echo Journal
+-- chooser cannot reach now: a Saved Build to make active there, or an empty
+-- slot to save Echoes into there through the game's own confirmation. The
+-- guide arms, saves, loads, activates and assigns nothing. It steps aside
+-- only once the Journal reports My Builds seen (OpenBuilds' onSettled);
+-- when it is not seen, the coach stays with a note saying so. It reads every
+-- slot again when the player reopens it (Setup / Welcome or /nexus guide).
+function U.RouteBuilds()
+    local n, f = Copy().notes or {}, frame
+    if not Ready() then note = n.startup; return end
+    local journal = Nexus.JournalTab
+    if not (journal and type(journal.OpenBuilds) == 'function')
+        or (type(journal.CanOpenBuilds) == 'function' and not journal.CanOpenBuilds()) then
+        note = n.unavailable; return
+    end
+    note = nil
+    -- Only the latest open answers, and only in the coach session it was asked
+    -- from: a hide (Close, Escape, another route) or a reopen (Show,
+    -- ShowFirstUse, Replay) drops it, so a late answer never hides a coach
+    -- shown since, and a coach the player closed meanwhile stays closed.
+    local route = {}
+    f.buildsRoute = route
+    local ok, opened = pcall(journal.OpenBuilds, false, nil, function(seen)
+        if f.buildsRoute ~= route then return end
+        f.buildsRoute = nil
+        if not f:IsShown() then return end
+        if seen then
+            f.waiting, f.waitingKind = true, 'builds'
+            f:Hide()
+        else
+            note = n.buildsUnconfirmed or n.buildsUnavailable or n.unavailable
+            U.Render()
+        end
+    end)
+    if not (ok and opened) then
+        f.buildsRoute = nil
+        f.waiting, f.waitingKind = nil, nil
+        note = n.buildsUnavailable or n.unavailable
+        if not f:IsShown() then f:Show() end
+    end
+end
+
+-- Optional lessons open the existing screens; reading or opening spends and
+-- sends nothing.
+function U.Lesson(id)
+    if id == 'orbs' and Nexus.OrbPanel and Nexus.OrbPanel.Show then Nexus.OrbPanel.Show(); return end
+    U.OpenHelp(id)
+end
+
+-- Full Help is the dense reference window; over the coach it would cover the
+-- step in progress. The coach steps aside for it (a hide that closes nothing,
+-- as for its other routes) and comes back at the same step when Help is
+-- closed (Close or Escape). A route Help opens itself takes over instead;
+-- Help's Setup / Welcome resumes the coach.
+local helpReturn
+function U.OpenHelp(page)
+    local help = Nexus.Help
+    if not (help and type(help.Show) == 'function') then return false end
+    local f = frame
+    if not (f and f:IsShown()) then return pcall(help.Show, page) end
+    -- The step's own help card gives way to full Help; it is not reopened.
+    view.help = false
+    f.waiting, f.waitingKind = true, 'help'
+    f:Hide()
+    local ok = pcall(help.Show, page, function()
+        -- One frame later: the client's Escape hides every listed window in
+        -- one pass, and the coach shown inside that pass would be closed by
+        -- the same key press.
+        if not helpReturn then
+            helpReturn = CreateFrame('Frame')
+            helpReturn:SetScript('OnUpdate', function(self) self:Hide(); U.HelpEnded() end)
+        end
+        helpReturn:Show()
+    end)
+    if not ok then U.HelpEnded() end
+    return ok
+end
+
+-- Brings back a coach that stepped aside for Help, unless it was reopened or
+-- closed meanwhile or a warning waits for its answer.
+function U.HelpEnded()
+    local f = frame
+    if not (f and f.waitingKind == 'help') or f:IsShown() then return end
+    local warning = Nexus.OverwriteWarning
+    if warning and type(warning.IsOpen) == 'function' and warning.IsOpen() then return end
+    f.waiting, f.waitingKind = nil, nil
+    f:Show()
+    U.Render()
+end
 
 -- Resume: the same step, with its context checked again. Never opens over
 -- an Auto warning that waits for its answer, and asks it nothing.
@@ -460,7 +1549,8 @@ function U.Show()
     local f = Ensure()
     -- An ordinary hide does not acknowledge first use. Keep its guarded
     -- callback across a Help reopen so a later deliberate Close can do so.
-    f.waiting, f.waitingKind, note = nil, nil, nil
+    -- A new session: an earlier Open My Builds no longer answers here.
+    f.waiting, f.waitingKind, f.buildsRoute, note = nil, nil, nil, nil
     f:Show()
     U.Render()
     return true
@@ -477,7 +1567,7 @@ function U.ShowFirstUse(onClose)
     local f = Ensure()
     f.firstUse = onClose
     if f.waiting and not f:IsShown() then return true end
-    f.waiting, f.waitingKind, note = nil, nil, nil
+    f.waiting, f.waitingKind, f.buildsRoute, note = nil, nil, nil, nil
     f:Show()
     U.Render()
     return true
@@ -485,23 +1575,59 @@ end
 function U.Replay()
     local g = Core()
     if g then g.Replay() end
+    view.lesson, view.checklist = nil, false
+    ResetImport()
     return U.Show()
 end
 function U.Hide() if frame then frame.waiting, frame.waitingKind = nil, nil; frame:Hide() end end
+
+-- What the chat says on close: where the guide paused, or (from the summary's
+-- Close guide) what is true now. Closing never marks a step done.
+local function CloseLines(reason)
+    local g, c = Core(), Copy()
+    local ch = c.chat or {}
+    if not g then return {} end
+    local id = g.StepId()
+    -- Where it reopens, and whether its place outlasts a reload (PlaceKept).
+    local reopen = (type(g.PlaceKept) == 'function' and g.PlaceKept() == 'saved') and ch.reopen
+        or ch.reopenSession or ch.reopen
+    if reason ~= 'finish' then
+        return {Fmt(ch.paused, (c.labels or {})[id] or id), reopen}
+    end
+    local s, sm = g.State(), g.Summary()
+    if s.path == 'explore' then return {ch.explore} end
+    if sm.complete or sm.trueNow then
+        local f = g.TargetFacts()
+        local auto = sm.auto == 'unknown' and 'unknown' or (sm.auto == 'on' and 'ON' or 'OFF')
+        return {Fmt(ch.complete, f and TargetLabel(f.destination, f.name) or '?', Name(s.wishlist and s.wishlist.name)),
+            Fmt(ch.auto, auto)}
+    end
+    return {Fmt(ch.incomplete, sm.open, sm.open == 1 and '' or 's'), reopen}
+end
+
 -- Close and Escape: the deliberate close. A first-use coach tells its caller
 -- once, after it is hidden; that caller decides what is recorded (only that
 -- first use was seen: guide steps keep their own state).
-function U.Close()
+function U.Close(reason)
     if not frame then return end
     local onClose = frame.firstUse
-    frame.firstUse, frame.waiting, frame.waitingKind = nil, nil, nil
+    local lines = CloseLines(reason)
+    frame.firstUse, frame.waiting, frame.waitingKind, frame.buildsRoute = nil, nil, nil, nil
+    view.help = false
     frame:Hide()
+    for _, line in ipairs(lines) do if line then Say(line) end end
     if type(onClose) == 'function' then pcall(onClose) end
 end
 
+-- A save or assignment receipt brings back a coach that stepped aside for
+-- its own route. One that stepped aside for full Help is not brought back over
+-- Help (or over a window Help opened in its place): the receipt is already
+-- recorded (core/GuidedSetup.lua G.Note), and U.HelpEnded reads it afresh
+-- when Help closes.
 function U.OnChange(receipt)
     if not frame then return end
-    if frame.waiting and type(receipt) == 'table' and (receipt.kind == 'save' or receipt.kind == 'assign') then
+    if frame.waiting and frame.waitingKind ~= 'help' and type(receipt) == 'table'
+        and (receipt.kind == 'save' or receipt.kind == 'assign') then
         local warning = Nexus.OverwriteWarning
         if not (warning and type(warning.IsOpen) == 'function' and warning.IsOpen()) then
             frame.waiting, frame.waitingKind = nil, nil

@@ -3274,6 +3274,9 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
                 action.deltas and action.deltas[i]),
             highlight = (action.type == "take"
                 and board.cards[i].spellId == action.spellId),
+            -- The whole name and own quality the line was written from, so
+            -- the offer cards never read a quality from the text.
+            facts = Readout.CardFacts and Readout.CardFacts(card) or nil,
         }
     end
     local okAuto, autoWhy = MeasurePhase("preauthorize", AutoAllowed)

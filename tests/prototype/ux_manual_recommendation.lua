@@ -35,27 +35,55 @@ local function Boot()
  observer=V.PresentationObserver(H)
 end
 local function Plain(t) return V.Plain(t) end
--- The HUD's roll area as shown: heading, the three card rows (in order),
--- body and the charges line.
+-- The HUD's roll area as the player sees it: heading, the shown choices (in
+-- order), body and the charges line. Only shown widgets count: a hidden card
+-- row keeps its last text but is not on screen. The Play offer cards (Claude
+-- Design full UI) replace the shown rows with the same current choices; each
+-- shown card is read from its visible name, quality and tag lines. A choice
+-- carries the manual (Auto OFF) Take marker when its shown row starts ">> "
+-- or its shown card's tag is the Wishlist pick (ux_automation_scope's
+-- ManualMarker). facts[i] keeps a card's visible lines apart.
 local function View()
  local f=NexusPanel
- local cards={}
+ local cards,marks,facts={},{},{}
+ local tag=Nexus.Readout and Nexus.Readout.OFFER_PICK_TAG
  -- Only what is visible: a hidden roll area shows no card at all.
  if f._rollArea:IsVisible() then
   for _,r in ipairs(f._rollArea.regions or {}) do
-   if r.kind=='FontString' and r~=f._rollStatus and r~=f._rollRec and r~=f._chargesText then
-    cards[#cards+1]=Plain(r:GetText() or '')
+   if r.kind=='FontString' and r~=f._rollStatus and r~=f._rollRec and r~=f._chargesText
+    and r:IsShown() and Plain(r:GetText() or '')~='' then
+    local text=Plain(r:GetText())
+    cards[#cards+1]=text;marks[#cards]=text:find('^>> ')~=nil
+    facts[#cards]={row=text}
+   end
+  end
+  for _,card in ipairs(f._offerCards or {}) do
+   if card:IsShown() then
+    local name,quality,shown=Plain(card.name:GetText() or ''),Plain(card.quality:GetText() or ''),Plain(card.tag:GetText() or '')
+    local parts={}
+    for _,text in ipairs({name,quality,shown}) do if text~='' then parts[#parts+1]=text end end
+    cards[#cards+1]=table.concat(parts,' ')
+    marks[#cards]=type(tag)=='string' and shown==tag
+    facts[#cards]={name=name,quality=quality,tag=shown}
    end
   end
  end
  local charges=f._chargesText
- return {head=Plain(f._rollStatus:GetText() or ''),body=Plain(f._rollRec:GetText() or ''),cards=cards,
-  charges=charges and charges:IsShown() and Plain(charges:GetText() or '') or nil,roll=f._rollArea:IsShown()}
+ return {head=Plain(f._rollStatus:GetText() or ''),body=Plain(f._rollRec:GetText() or ''),cards=cards,marks=marks,
+  facts=facts,charges=charges and charges:IsShown() and Plain(charges:GetText() or '') or nil,roll=f._rollArea:IsShown()}
 end
 local function Marked(v)
  local n,at=0,nil
- for i=1,3 do if (v.cards[i] or ''):find('^>> ') then n=n+1;at=i end end
+ for i=1,3 do if v.marks[i] then n=n+1;at=i end end
  return n,at
+end
+-- A shown choice is this Echo at this quality: its visible card name and
+-- quality lines, or a shown row's "Name (Quality)" text.
+local function Shows(v,i,name,quality)
+ local f=v.facts[i]
+ if not f then return false end
+ if f.row then return f.row:find(name..' ('..quality..')',1,true)~=nil end
+ return f.name==name and f.quality==quality
 end
 local function Offer(cards) H.Board(cards);H.Notify();H.Advance(1.2) end
 local function Acts(kind) local n=0;for _,a in ipairs(H.actions) do if not kind or a[1]==kind then n=n+1 end end;return n end
@@ -80,7 +108,7 @@ C.scenario('R1 Auto OFF, unstepped Take: you choose, one marked card, named targ
  C.expect(v.head:find('Auto OFF',1,true)~=nil and v.head:find('you choose',1,true)~=nil and v.head:find('Slot 1',1,true)~=nil
   and not v.head:find('active',1,true),'R1: the heading says Auto OFF, you choose, and claims no active rolling',v.head)
  local n,at=Marked(v)
- C.expect(n==1 and at==1 and v.cards[1]:find('Echo 1 (Uncommon)',1,true)~=nil,'R1: exactly the chosen card is marked',table.concat(v.cards,' | '))
+ C.expect(n==1 and at==1 and Shows(v,1,'Echo 1','Uncommon'),'R1: exactly the chosen card is marked',table.concat(v.cards,' | '))
  C.expect(v.body:find('Take a needed Echo',1,true)~=nil and v.body:find('Echo 1 (Uncommon)',1,true)~=nil,
   'R1: the unstepped recommendation names its target and keeps its reason',v.body)
  C.guard(Acts()==acts and not Auto(),'R1: Auto OFF performs nothing; the recommendation only shows')
@@ -88,7 +116,7 @@ C.scenario('R1 Auto OFF, unstepped Take: you choose, one marked card, named targ
  Offer({{spellId=200060,quality=1},{spellId=200061,quality=2},{spellId=200003,quality=3}})
  v=View()
  n,at=Marked(v)
- C.expect(n==1 and at==3 and not v.cards[1]:find('^>> '),'R1: the marker follows the new board; none stays on the old position',
+ C.expect(n==1 and at==3 and not v.marks[1] and Shows(v,3,'Echo 3','Epic'),'R1: the marker follows the new board; none stays on the old position',
   table.concat(v.cards,' | '))
  C.expect(v.body:find('Echo 3 (Epic)',1,true)~=nil and not v.body:find('Echo 1',1,true),'R1: the body names the new target only',v.body)
  -- The same Echo offered twice: both are the target; no card is guessed.
@@ -127,7 +155,7 @@ C.scenario('R3 Auto ON unchanged; held Auto is never labelled OFF',function()
  C.setup(Auto(),'R3: fixture: Auto is ON')
  Offer({{spellId=200001,quality=1},{spellId=200050,quality=2},{spellId=200051,quality=3}})
  local v=View()
- C.guard(v.body=='Take a needed Echo' and #v.cards==3 and v.cards[1]:find('Echo 1 ',1,true)==1,
+ C.guard(v.body=='Take a needed Echo' and #v.cards==3 and v.cards[1]:find('Echo 1 ',1,true)==1 and Marked(v)==0,
   'R3: with Auto ON the body and card rows are exactly as before (no marker, no added name)',v.body..' | '..(v.cards[1] or ''))
  C.guard(not v.head:find('Auto OFF',1,true),'R3: the Auto ON heading never says OFF',v.head)
  -- Selected but held: the paused heading, never OFF, no marker.

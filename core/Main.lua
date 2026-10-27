@@ -1439,6 +1439,17 @@ EnsureMainCommands = function()
                 CommandAnchor(settings, argument)
             end,
             help=function() CommandHelp() end,
+            -- /nexus guide: the guided setup coach through Help's own route
+            -- (Help.OpenGuide), which refuses in chat while an Auto warning
+            -- waits. /nexus tutorial and /nexus help open Help's reference
+            -- pages (core/MainCommands.lua dispatches tutorial to help).
+            guide=function()
+                local help = Nexus.Help
+                local opened = help and type(help.OpenGuide) == "function"
+                    and help.OpenGuide() == true
+                Print(opened and "Guided setup opened. Reference pages: /nexus help."
+                    or "Reference pages stay available: /nexus help.")
+            end,
             update=function()
                 local status = Nexus.Updates and Nexus.Updates.Status and Nexus.Updates.Status()
                 if not status then Print("Update status is unavailable."); return end

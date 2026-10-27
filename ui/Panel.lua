@@ -712,13 +712,79 @@ do
     end
 end
 
+------------------------------------------------------------------------
+-- Header line 1, right to left (Claude Design full UI, "Main panel (Play)":
+-- the Auto chip, the More menu, then Close): Close in the corner
+-- (M.EnsureHeaderClose), Options at its left, and the Auto control, or the
+-- Auto state words while it is hidden, at Options' left. The title keeps the
+-- rest of the line (182 px at 420 px). Issue #165: the menu reads Options,
+-- not an ellipsis alone, and "! Options" while a trusted update notice is
+-- shown. Its 80 px label room holds "! Options" on one line at 125% text even
+-- in the LayoutMetrics conservative model (9 x 8.75 px = 78.75 px; "Options"
+-- 61.25 px). Only a larger face or a longer label is shortened; its hover
+-- then names it in full first, and the leading "!" is never the part cut.
+-- The label is the localized "panel.button.options" (M.OptionsLabel); the
+-- "! " is code-owned and added only for the trusted notice the model carries.
+-- Every slot is an offset from the panel's right edge, so a wider panel keeps
+-- the same order. Geometry and words only: placing it opens, sends and
+-- changes nothing.
+------------------------------------------------------------------------
+do
+    local EDGE, TOP, HEIGHT, GAP, CAPS = 10, 7, 22, 4, 12
+    local CLOSE_W, OPTIONS_W, AUTO_W = 28, 92, 84
+    local SLOTS = {top = TOP, height = HEIGHT, gap = GAP, caps = CAPS,
+        options = EDGE + CLOSE_W + GAP, optionsWidth = OPTIONS_W,
+        auto = EDGE + CLOSE_W + GAP + OPTIONS_W + GAP, autoWidth = AUTO_W}
+    -- The width line 1 keeps for its right-hand controls, gap included.
+    SLOTS.reserved = SLOTS.auto + AUTO_W + GAP
+
+    -- The button's own name: the active language's text for the key. Only
+    -- M.OptionsText adds the "!" mark, so a resolved label that already
+    -- begins with one is not shown; the English base is, and a "!" on the
+    -- button keeps meaning a trusted update notice.
+    function M.OptionsLabel()
+        local L = Nexus.Localization
+        local label = L.Text("panel.button.options")
+        if label:find("^%s*!") then label = (L.Resolve("panel.button.options")) end
+        return label
+    end
+
+    function M.OptionsText(notice)
+        local label = M.OptionsLabel()
+        return notice and ("! " .. label) or label
+    end
+
+    -- The line-1 slots (read only; the same table every call).
+    function M.HeaderSlots() return SLOTS end
+
+    -- Places the Options button in its slot with a one-line label bounded
+    -- to the button less its end caps (LayoutMetrics.OneLineLabel, as for
+    -- My Builds). Returns the slots.
+    function M.PlaceOptionsButton()
+        local menu = frame and frame._menuBtn
+        if not menu then return SLOTS end
+        menu:ClearAllPoints()
+        menu:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -SLOTS.options, -TOP)
+        menu:SetSize(OPTIONS_W, HEIGHT)
+        menu:Show()
+        local label = menu:GetFontString()
+        local metrics = Nexus.LayoutMetrics
+        if label and metrics and type(metrics.OneLineLabel) == "function" then
+            label:SetWidth(OPTIONS_W - CAPS)
+            metrics.OneLineLabel(label, nil, HEIGHT)
+        end
+        return SLOTS
+    end
+end
+
 -- The compact four-cell destination row remains an internal formatter and
 -- diagnostic source. The Play header gives its two actionable facts one row
 -- each instead of trying to fit four cells beside a 68px button.
 function M.CreateContextHeader(parent)
+    local slots = M.HeaderSlots()
     local function Line(y, font)
         local label = parent:CreateFontString(nil, "OVERLAY", font)
-        label:SetPoint("TOPLEFT", parent, "TOPLEFT", y == 8 and 44 or 12, -y)
+        label:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -y)
         label:SetJustifyH("LEFT")
         label:SetSize(280, 20)
         label:SetWordWrap(false)
@@ -741,8 +807,9 @@ function M.CreateContextHeader(parent)
     parent._contextBuild, parent._contextBuildHit = Line(32, "GameFontNormal")
     parent._contextWishlist, parent._contextWishlistHit = Line(57, "GameFontNormal")
     parent._contextAutoState = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    parent._contextAutoState:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -46, -9)
-    parent._contextAutoState:SetSize(86, 18)
+    -- The Auto control's slot, used while that control is hidden.
+    parent._contextAutoState:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -slots.auto, -(slots.top + 2))
+    parent._contextAutoState:SetSize(slots.autoWidth, 18)
     parent._contextAutoState:SetJustifyH("RIGHT")
     parent._contextChange = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     parent._contextChange:SetText("Change")
@@ -764,6 +831,10 @@ function M.UpdateContextHeader(model)
     local fields, tooltip = Nexus.UserText.DestinationFields(facts)
     local width = math.max(240, tonumber(frame:GetWidth()) or 420)
     local labelWidth = math.max(100, width - 134)
+    -- The title runs from x 12 to the Auto slot (M.HeaderSlots): 182 px at
+    -- 420 px, more on a wider panel.
+    local slots = M.HeaderSlots()
+    local titleWidth = math.max(100, width - slots.reserved - 12)
     -- Put high-priority state before names: truncation at 420px must not
     -- silently turn a Community preview into an apparent assignment or hide
     -- an empty Saved Build's refusal. The complete facts remain on hover.
@@ -787,7 +858,7 @@ function M.UpdateContextHeader(model)
     }
     for index = 1, #lines do
         local line = lines[index]
-        line[1]:SetWidth(index == 1 and math.max(100, width - 175) or labelWidth)
+        line[1]:SetWidth(index == 1 and titleWidth or labelWidth)
         line[1]:SetText(line[3])
         line[2]._nexusFull = index == 1
             and (tooltip[1] .. "\n" .. tooltip[4]) or tooltip[index]
@@ -806,6 +877,7 @@ function M.UpdateContextHeader(model)
         switchLabel:SetWidth(94)
         Nexus.LayoutMetrics.OneLineLabel(switchLabel, nil, 22)
     end
+    M.EnsureHeaderClose()
     local state = frame._contextAutoState
     if frame._autoBtn:IsShown() then
         state:Hide()
@@ -1123,10 +1195,20 @@ local function ModelSignatures(model)
             -- marker follow the selection; between boards it changes nothing.
             autoOff=model.auto == false and ((type(model.cards) == "table" and #model.cards > 0)
                 or SafeText(model.recommendation) ~= "") or nil,
+            -- The Auto scope row (M.RenderAutoScope) follows a selected Auto
+            -- with roll content; a reserved gap is in the roll suffix.
+            autoOn=model.auto == true and ((type(model.cards) == "table" and #model.cards > 0)
+                or SafeText(model.recommendation) ~= "" or type(model.orbGuidance) == "table"
+                or SafeText(model.autoNote) ~= "") or nil,
             -- The compact charges line follows the charge facts the model carries.
             charges=model.charges, chargeLine=model._nexusChargeLine,
             -- The inline Auto line (M.AutoNoteFor) is roll content too.
             autoNote=model.autoNote,
+            -- The Play summary's rows: Details open (memory only) and whether
+            -- an Orb run line is shown; the line's words refresh on every
+            -- render (M.RefreshOrbLine).
+            playDetails=M._playDetails == true or nil,
+            orbLine=type(model._nexusOrbLine) == "table" or nil,
             -- The destination row's whole descriptor, Preview included.
             destination=destination,
             callboard=Nexus.CallboardStatus and Nexus.CallboardStatus.GetSummary
@@ -1561,8 +1643,63 @@ local function AnyNexusMenuShown()
     return false
 end
 
+-- Issue #164: Hide Nexus Panel is the player's saved choice, kept with the
+-- panel's other presentation keys (PANEL_SAVED_KEYS, M.SavedLayoutRoot, so a
+-- read-only saved root keeps it for this session only). `panelHidden` is true
+-- only while the player has hidden the panel and absent otherwise: a profile
+-- that never hid it carries no new key, and an older build ignores the key
+-- and shows the panel. It is read once per saved root -- never at file load,
+-- because the client replaces NexusDB when the saved data loads -- and
+-- written only by the player's own hide or show (M.Hide, M.Show, M.Toggle).
+-- It is a display choice: no Auto or gameplay setting is read or changed.
+local wantedSource = nil
+local function LoadWantedVisibility()
+    if type(NexusDB) ~= "table" or wantedSource == NexusDB then return end
+    wantedSource = NexusDB
+    panelWantedVisible = M.SavedLayoutRoot().panelHidden ~= true
+end
+
+local function SetWantedVisibility(wanted)
+    panelWantedVisible = wanted and true or false
+    local saved = M.SavedLayoutRoot()
+    if panelWantedVisible then
+        if saved.panelHidden ~= nil then saved.panelHidden = nil end
+    elseif saved.panelHidden ~= true then
+        saved.panelHidden = true
+    end
+    wantedSource = NexusDB
+end
+
+-- The stock Difficulty / Soul Ash owner stands its widget aside only for a
+-- panel that can display AND that the player wants (M.VisibilityFacts). Tell
+-- it at once when the player's choice changes, so the game's own widget comes
+-- back with the hide instead of on its next one-second scan. Protected:
+-- another addon can replace that global.
+local function NotifyStockHud()
+    pcall(function()
+        local status = Nexus.ServerStatus
+        if type(status) == "table" and type(status.PanelVisibilityChanged) == "function" then
+            status.PanelVisibilityChanged()
+        end
+    end)
+end
+
+-- A show the player asks for re-checks the menu suppression against the
+-- windows that really hold it, so a suppression whose window never opened
+-- cannot keep the panel hidden behind that request. A window whose state
+-- cannot be read keeps the suppression.
+local function ReleaseStaleMenuSuppression()
+    if not menuSuppressed or menuTransition or AnyNexusMenuShown() then return end
+    for menuFrame in pairs(attachedMenuFrames) do
+        local ok, shown = pcall(function() return menuFrame:IsShown() end)
+        if not ok or shown then return end
+    end
+    menuSuppressed = false
+end
+
 local function ApplyWantedVisibility()
     if not frame then return false end
+    LoadWantedVisibility()
     if not frame._nexusCallboardCoverage then
         frame._nexusCallboardCoverage = true
         local function publish()
@@ -1587,6 +1724,7 @@ local function ApplyWantedVisibility()
 end
 
 local function RequestDisplayRecovery()
+    LoadWantedVisibility()
     if renderState.committed or not panelWantedVisible or not callbacks
         then
         return false
@@ -1630,12 +1768,13 @@ function M.CloseOtherWindows(exceptName)
     menuTransition = false
 end
 
--- The panel's own saved keys (position, DPS-records toggle, minimap angle)
--- live in the saved root, or for a read-only saved root in the Store owner's
--- session-only table, which starts with copies of the saved values.
+-- The panel's own saved keys (position, DPS-records toggle, minimap angle,
+-- and the player's Hide Nexus Panel choice) live in the saved root, or for a
+-- read-only saved root in the Store owner's session-only table, which starts
+-- with copies of the saved values.
 -- It is a module field rather than a local because EnsureFrame is at the Lua
 -- 5.1 upvalue limit.
-local PANEL_SAVED_KEYS = {"panelX", "panelY", "uiShowPerformance", "minimapAngle"}
+local PANEL_SAVED_KEYS = {"panelX", "panelY", "uiShowPerformance", "minimapAngle", "panelHidden"}
 function M.SavedLayoutRoot()
     NexusDB = NexusDB or {}
     local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
@@ -2251,7 +2390,7 @@ local function EnsureFrame()
 
     -- Footer hubs (issue #163, UI review P3): Plan, Explore and Orbs. Plan
     -- and Explore open a native dropdown of existing routes (M.ShowHub);
-    -- Orbs opens the Orb window, as the ... menu item does. A hub only opens
+    -- Orbs opens the Orb window, as the Options menu item does. A hub only opens
     -- windows: it assigns, saves, shares, spends and enables nothing. Their
     -- scripts reach this file through M, not new upvalues (see menuBtn).
     planBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -2279,13 +2418,13 @@ local function EnsureFrame()
     orbsHub:SetScript("OnLeave", function() GameTooltip:Hide() end)
     frame._orbsHubBtn = orbsHub
 
-    -- Compact settings control. Navigation stays visible in the footer while
-    -- infrequent tools live behind this single unobtrusive button.
+    -- Options (issue #165): the settings and Manage menu, named in words on
+    -- header line 1 beside Close (M.PlaceOptionsButton). Navigation stays
+    -- visible in the footer while infrequent tools live behind this button.
     menuBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    menuBtn:SetSize(30, 20)
-    menuBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", 7, -6)
-    menuBtn:SetText("...")
+    menuBtn:SetText(M.OptionsText(false))
     frame._menuBtn = menuBtn
+    M.PlaceOptionsButton()
     menuBtn:SetFrameLevel(frame:GetFrameLevel() + 8)
     -- Its items are built by M.MoreMenuItems when it opens.
     menuBtn:SetScript("OnClick", function(self)
@@ -2297,8 +2436,16 @@ local function EnsureFrame()
     end)
     menuBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-        -- M4 (UX-15, M3 NB9): one name for this button everywhere.
-        GameTooltip:AddLine("Menu and status", 1, 1, 1)
+        -- While a larger face shortens the Options label, its complete
+        -- label comes first (as My Builds). Through the Nexus global: no
+        -- new upvalue in EnsureFrame.
+        local metrics = Nexus.LayoutMetrics
+        if metrics and metrics.Shortened and metrics.Shortened(self:GetFontString()) then
+            GameTooltip:AddLine(tostring(self:GetText() or ""), 1, 1, 1, true)
+        end
+        -- M4 (UX-15, M3 NB9): one name for this button everywhere: the
+        -- hover is headed by its own label, without the notice mark.
+        GameTooltip:AddLine(M.OptionsLabel(), 1, 1, 1)
         GameTooltip:AddLine("Help and setup, settings, notices, logs and panel actions. Plan, Explore and Orbs are on the footer.", 0.8, 0.8, 0.8, true)
         -- model.status (Main.lua's statusLine, including "error (see /nexus
         -- err)") was set on every render but never read anywhere in this file --
@@ -2576,7 +2723,41 @@ local HIDE_NOTE = "Hiding does not turn Nexus off or change Auto; type "
     .. "/nexus panel or click the Nexus minimap button to show it again."
 local HIDE_TOOLTIP = "Hide the Nexus panel. " .. HIDE_NOTE
 
--- The ... menu's Manage submenu retains all established routes and owners.
+-- The Play header's close control (Claude Design full UI: "... and X" on
+-- header line 1): it hides the panel exactly as Hide Nexus Panel does, and
+-- its hover says that closing is not pausing. Built lazily (EnsureFrame is
+-- at the upvalue ceiling) in the header's free right corner, clear of the
+-- header Auto control.
+function M.EnsureHeaderClose()
+    if not frame then return nil end
+    local close = frame._closeBtn
+    if not close then
+        close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        close:SetText("X")
+        close:SetFrameLevel(frame:GetFrameLevel() + 8)
+        close:SetScript("OnClick", function()
+            M.Hide()
+            print("|cffffd200Nexus:|r The Nexus panel is hidden. " .. HIDE_NOTE)
+        end)
+        close:SetScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+            GameTooltip:AddLine("Close panel", 1, 1, 1)
+            GameTooltip:AddLine(HIDE_NOTE, 0.8, 0.8, 0.8, true)
+            GameTooltip:Show()
+        end)
+        close:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        if Nexus.Theme and Nexus.Theme.StyleButton then pcall(Nexus.Theme.StyleButton, close) end
+        frame._closeBtn = close
+    end
+    close:ClearAllPoints()
+    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -7)
+    close:SetSize(28, 22)
+    close:Show()
+    return close
+end
+
+-- The Options menu's Manage submenu retains all established routes and owners.
 -- Its top level stays short in the compact panel; opening either level only
 -- reads current labels and never changes a setting or starts automation.
 function M.MoreMenuItems(anchor)
@@ -2585,17 +2766,42 @@ function M.MoreMenuItems(anchor)
     Add(MenuTitle("Help and setup"))
     Add({ text = "Help / Getting Started", notCheckable = true,
         func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("start") end end) })
-    -- Information only: reopens the first-launch guide (QuickStart
-    -- ShowSetup); it records nothing and never turns Auto ON.
+    -- Setup / Welcome is the guided setup coach itself, as in Help (the
+    -- original guided design: "Reopen: Nexus menu > Setup / Welcome", and the
+    -- full UI's Help > Setup guide). It resumes at the step it left, with its
+    -- choices read again from what Nexus lists and every result checked again
+    -- (core/GuidedSetup.lua). Opening it assigns, saves, sends, spends and
+    -- changes Auto nothing. Like Help's route it does not open over an Auto
+    -- warning that waits for its answer, says so and queues nothing.
     Add({ text = "Setup / Welcome", notCheckable = true,
+        tooltipTitle = "Setup / Welcome",
+        tooltipText = "Opens the step-by-step setup guide where you left it. Opening it assigns, saves, sends, "
+            .. "spends and changes Auto nothing.",
+        func = MenuAction(function()
+            local ui = Nexus.GuidedSetupUI
+            local shown, why
+            if ui and ui.Show then shown, why = ui.Show() end
+            if not shown then
+                print("|cffffd200Nexus:|r " .. (why == "warning-open"
+                    and "Setup / Welcome did not open. Answer the open Auto warning (Yes or No), then open it again."
+                    or "Setup / Welcome is not available right now."))
+            end
+        end) })
+    -- Secondary reference: the information-only overview of the entry
+    -- routes (QuickStart.ShowSetup). It records nothing and never turns Auto
+    -- ON; its own Guided setup button opens the coach.
+    Add({ text = "Setup information (read only)", notCheckable = true,
+        tooltipTitle = "Setup information",
+        tooltipText = "The information-only overview of the setup routes. It records nothing and never turns "
+            .. "Auto ON. The step-by-step guide is Setup / Welcome.",
         func = MenuAction(function()
             local quick = Nexus.QuickStart
             local shown, why
             if quick and quick.ShowSetup then shown, why = quick.ShowSetup() end
             if not shown then
                 print("|cffffd200Nexus:|r " .. (why == "warning-open"
-                    and "Answer the open Auto warning first (Yes or No); Setup / Welcome opens after it."
-                    or "Setup / Welcome is not available right now."))
+                    and "Setup information did not open. Answer the open Auto warning (Yes or No), then open it again."
+                    or "Setup information is not available right now."))
             end
         end) })
     -- Read-only: what Nexus can read now about setup and status
@@ -2991,6 +3197,682 @@ local function ShowCoreProgress(show)
     end
 end
 
+------------------------------------------------------------------------
+-- Play offer cards (Claude Design full UI, "Main panel (Play)": the current
+-- offer first, as three cards side by side, the Wishlist pick set apart).
+-- Each card shows the name, the quality and a tag from Readout.OfferCard,
+-- with its complete CardLine on hover. The cards take exactly the space
+-- LayoutMetrics.Panel already reserves for the three card rows, so the
+-- panel's geometry contract is unchanged. Display only: a card has a hover
+-- and no click, so it never takes, banishes, rerolls or freezes; choosing
+-- stays in the game's Echo window. Built lazily and reached through M:
+-- EnsureFrame is at the Lua 5.1 upvalue ceiling and ApplyModel close to it.
+-- Without a responsive layout (no LayoutMetrics) the one-line rows stay.
+------------------------------------------------------------------------
+-- Fixed colours (status, never from the palette), the column gap and the
+-- text inset. One table: the main chunk's locals are counted too.
+local OFFER = {edge = {0.32, 0.32, 0.38}, mark = {1, 0.82, 0}, gap = 4, pad = 4}
+
+function M.EnsureOfferCards()
+    if not frame then return nil end
+    if frame._offerCards then return frame._offerCards end
+    local area = frame._rollArea
+    local metrics = Nexus.LayoutMetrics
+    local small = metrics and metrics.FontObject and metrics.FontObject("small") or "GameFontHighlightSmall"
+    local cards = {}
+    for index = 1, 3 do
+        local card = CreateFrame("Frame", nil, area)
+        -- Fixed status colours: no style or palette repaints a card.
+        card._nexusThemeExempt = true
+        card:EnableMouse(true)
+        card.fill = card:CreateTexture(nil, "BACKGROUND")
+        card.fill:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
+        card.fill:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", 0, 0)
+        card.fill:SetTexture(0, 0, 0, 0.35)
+        -- Top, bottom, left and right edges: a border the client draws as
+        -- plain textures (no backdrop edge file at 1-2 px).
+        card.edges = {}
+        for edge = 1, 4 do card.edges[edge] = card:CreateTexture(nil, "BORDER") end
+        for _, key in ipairs({"name", "quality", "tag"}) do
+            local text = card:CreateFontString(nil, "OVERLAY", small)
+            text:SetJustifyH("LEFT")
+            text:SetJustifyV("TOP")
+            text:SetWordWrap(false)
+            card[key] = text
+        end
+        card:SetScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(self._nexusFull or "", 1, 1, 1, true)
+            if self._nexusTag and self._nexusTag ~= "" then
+                GameTooltip:AddLine(self._nexusTag, OFFER.mark[1], OFFER.mark[2], OFFER.mark[3], true)
+            end
+            GameTooltip:AddLine("Choose in the game's Echo window. This card only shows the offer; "
+                .. "pointing at or clicking it chooses nothing.", 0.8, 0.8, 0.8, true)
+            GameTooltip:Show()
+        end)
+        card:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        card:Hide()
+        cards[index] = card
+    end
+    frame._offerCards = cards
+    return cards
+end
+
+local function PaintOfferEdges(card, marked)
+    local c = marked and OFFER.mark or OFFER.edge
+    local size = marked and 2 or 1
+    local e = card.edges
+    e[1]:ClearAllPoints(); e[1]:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
+    e[1]:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, 0); e[1]:SetHeight(size)
+    e[2]:ClearAllPoints(); e[2]:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 0, 0)
+    e[2]:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", 0, 0); e[2]:SetHeight(size)
+    e[3]:ClearAllPoints(); e[3]:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
+    e[3]:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 0, 0); e[3]:SetWidth(size)
+    e[4]:ClearAllPoints(); e[4]:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, 0)
+    e[4]:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", 0, 0); e[4]:SetWidth(size)
+    for edge = 1, 4 do e[edge]:SetTexture(c[1], c[2], c[3], marked and 1 or 0.9) end
+end
+
+-- Content of the three cards from the current model's card lines only:
+-- `lines` the CardLine texts (as the one-line rows show them, without the
+-- ">>" marker), `marked` Readout.MarkedCard's index or nil, `auto` the Auto
+-- selection, `responsive` whether ApplyPanelLayout will place them, `facts`
+-- (optional) the model cards' own Readout.CardFacts by index, so a card's
+-- name and quality are its own and an unknown quality is never read from the
+-- text. Returns whether the cards show; while they do, the one-line rows are
+-- hidden and keep their text. No old card survives a new board.
+function M.RenderOfferCards(lines, marked, auto, responsive, facts)
+    local readout = Nexus.Readout
+    local any = false
+    for index = 1, 3 do
+        if type(lines) == "table" and SafeText(lines[index]) ~= "" then any = true end
+    end
+    local show = any and responsive == true and readout and type(readout.OfferCard) == "function"
+    local cards = (show or (frame and frame._offerCards)) and M.EnsureOfferCards() or nil
+    for index = 1, 3 do
+        local card = cards and cards[index]
+        local line = type(lines) == "table" and SafeText(lines[index]) or ""
+        if card and show and line ~= "" then
+            local own = type(facts) == "table" and type(facts[index]) == "table" and facts[index] or nil
+            local shown = readout.OfferCard(line, marked == index, auto, own)
+            card.name:SetText(shown.name)
+            card.quality:SetText(shown.quality)
+            card.tag:SetText(shown.shown or shown.tag)
+            if shown.marked then
+                card.tag:SetTextColor(OFFER.mark[1], OFFER.mark[2], OFFER.mark[3])
+            else
+                card.tag:SetTextColor(0.75, 0.75, 0.75)
+            end
+            card._nexusFull, card._nexusTag, card._nexusMarked = shown.full, shown.tag, shown.marked
+            PaintOfferEdges(card, shown.marked)
+            card:Show()
+        elseif card then
+            card._nexusFull, card._nexusTag, card._nexusMarked = nil, nil, nil
+            card:Hide()
+        end
+        SetVisible(cardTexts[index], not show)
+    end
+    return show and true or false
+end
+
+-- The measured one-line width of `line` in `text`'s font: the client's
+-- measurement when it reports one, else the conservative text model at the
+-- runtime font scale. Leaves `line` as the text's text.
+function M.LineWidth(text, line)
+    text:SetText(line)
+    local ok, measured = pcall(text.GetStringWidth, text)
+    measured = ok and tonumber(measured) or nil
+    if measured and measured > 0 and measured < math.huge then return measured end
+    local metrics = Nexus.LayoutMetrics
+    local scale = metrics and metrics.RuntimeMetrics and metrics.RuntimeMetrics() or 1
+    local char = metrics and metrics.ConservativeText and metrics.ConservativeText(scale) or 7
+    local visible = tostring(line or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    return #(visible:gsub("[\128-\191]", "")) * char
+end
+
+-- The offer heading (Readout.OfferHeadingForms: whose choice the offer is),
+-- with the established state words and the destination, in the first of its
+-- forms that fits the heading row on one line (its width less the charges,
+-- as ApplyPanelLayout sets it): "Current offer - you choose", then "Offer -
+-- you choose", then "You choose". Every form keeps who chooses, the Auto
+-- state and the destination in the row itself; nothing moves to a hover.
+-- Without a layout the full form stays. Text only.
+function M.SetOfferHeading(text, model, activeSlot, layout)
+    local readout = Nexus.Readout
+    local forms = readout.OfferHeadingForms and readout.OfferHeadingForms(model.auto)
+        or {readout.OfferHeading(model.auto)}
+    local box = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.roll or nil
+    local width = box and (box.w - 4 - (SafeText(model._nexusChargeLine) ~= "" and 76 or 0)) or nil
+    local chosen = ""
+    for _, form in ipairs(forms) do
+        if model.auto == false then
+            chosen = "|cff7fd5ff" .. form .. "|r · Auto OFF" .. (activeSlot > 0 and (" · Slot " .. activeSlot) or " · Preview")
+        elseif activeSlot > 0 then
+            chosen = "|cff4dff80Active:|r " .. form .. " · Slot " .. activeSlot
+        else
+            chosen = "|cff888888" .. form .. "|r · Preview"
+        end
+        if not width or M.LineWidth(text, chosen) <= width then break end
+    end
+    text:SetText(chosen)
+    return chosen
+end
+
+-- Geometry of the cards inside the roll box: the band the card rows hold
+-- (from below the heading, 3 x (small + row gap)), split into three columns.
+-- When a shown card's quality or tag line is wider than its column (enlarged
+-- text, a guaranteed or marked card, a long localized word), the same three
+-- cards are stacked instead, each a full-width row of the same band: the name,
+-- then its quality and its tag at their whole widths (only a tag wider than
+-- half the row, or a quality then left without room, is shortened, complete
+-- on the card's hover), the name
+-- in the rest (shortened there, complete on the hover and named in the
+-- recommendation). The band, the roll box and the panel keep their size.
+-- Returns "columns" or "rows".
+function M.PlaceOfferCards(layout, box, inset)
+    local cards = frame and frame._offerCards
+    if not (cards and layout and box) then return nil end
+    local top = 1 + layout.small + math.max(3, math.floor(layout.gap / 2))
+    local rowGap = math.max(2, math.floor(layout.gap / 3))
+    local height = 3 * (layout.small + rowGap) - rowGap
+    local width = box.w - inset * 2
+    local column = math.max(1, math.floor((width - 2 * OFFER.gap) / 3))
+    local textWidth = math.max(1, column - OFFER.pad * 2)
+    local stacked = false
+    for index = 1, 3 do
+        local card = cards[index]
+        if card:IsShown() then
+            for _, key in ipairs({"quality", "tag"}) do
+                local line = card[key]:GetText() or ""
+                if line ~= "" and M.LineWidth(card[key], line) > textWidth then stacked = true end
+            end
+        end
+    end
+    for index = 1, 3 do
+        local card = cards[index]
+        card:ClearAllPoints()
+        if stacked then
+            card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset, -(top + (index - 1) * (layout.small + rowGap)))
+            card:SetSize(width, layout.small)
+            -- The status words first: the tag up to half the row, the quality
+            -- up to what leaves the name a sixth of it; the name takes the rest.
+            local inner = math.max(1, width - OFFER.pad * 2)
+            local tag, quality = card.tag:GetText() or "", card.quality:GetText() or ""
+            local tagW = tag ~= "" and math.min(math.floor(inner / 2), math.ceil(M.LineWidth(card.tag, tag))) or 0
+            local room = inner - tagW - 2 * OFFER.gap - math.floor(inner / 6)
+            local qualityW = quality ~= "" and math.max(1, math.min(room, math.ceil(M.LineWidth(card.quality, quality)))) or 0
+            local nameW = math.max(1, inner - tagW - qualityW - (tagW > 0 and OFFER.gap or 0) - (qualityW > 0 and OFFER.gap or 0))
+            local x = OFFER.pad
+            for _, part in ipairs({{card.name, nameW}, {card.quality, qualityW}, {card.tag, tagW}}) do
+                local text = part[1]
+                text:ClearAllPoints()
+                text:SetPoint("TOPLEFT", card, "TOPLEFT", x, 0)
+                text:SetSize(math.max(1, part[2]), layout.small)
+                if part[2] > 0 then x = x + part[2] + OFFER.gap end
+            end
+            card._nexusLayout = "rows"
+        else
+            card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset + (index - 1) * (column + OFFER.gap), -top)
+            card:SetSize(column, height)
+            local lineTop = math.max(1, math.floor((height - 3 * layout.small) / 2))
+            for row, key in ipairs({"name", "quality", "tag"}) do
+                local text = card[key]
+                text:ClearAllPoints()
+                text:SetPoint("TOPLEFT", card, "TOPLEFT", OFFER.pad, -(lineTop + (row - 1) * layout.small))
+                text:SetSize(textWidth, layout.small)
+            end
+            card._nexusLayout = "columns"
+        end
+    end
+    return stacked and "rows" or "columns"
+end
+
+------------------------------------------------------------------------
+-- The Play summary below the offer (Claude Design full UI, "Main panel
+-- (Play)"): a compact plan progress (the run's count, a bar, four counts and
+-- Details for the Echo names behind them), the Difficulty / Soul Ash line,
+-- your DPS record beside the best known record for the same Echoes with what
+-- best known means, and one line of Orb run status with Open. Every value is
+-- read from the model this panel already shows (and, for the Orb line, the
+-- Orb window's own compact read); an unknown is "?", never 0. Details only
+-- changes what this panel shows (memory only, never saved); Open only opens
+-- the Orb window. Built lazily and reached through M: EnsureFrame and
+-- ApplyModel are at the Lua 5.1 upvalue ceiling. Without a responsive layout
+-- (no LayoutMetrics) the former rows stay.
+------------------------------------------------------------------------
+-- Fixed colours (status, never from the palette). One table: the main
+-- chunk's locals are counted too.
+local PLAY = {bar = {1, 0.5, 0.2}, track = {0.12, 0.12, 0.15}, label = "|cffa8a8b0", value = "|cffffffff",
+    wait = "|cff8fc8ff", muted = "|cff888888"}
+
+local function PlayWhole(value)
+    value = tonumber(value)
+    if value == nil or value ~= value or value < 0 or value >= math.huge then return nil end
+    return math.floor(value + 0.5)
+end
+
+-- "4,812": a whole DPS with thousands separators; nil when not a record.
+local function PlayDps(record)
+    local dps = type(record) == "table" and PlayWhole(record.dps) or nil
+    if not dps or dps <= 0 then return nil end
+    local text = tostring(dps)
+    while true do
+        local grouped, n = text:gsub("^(%d+)(%d%d%d)", "%1,%2")
+        text = grouped
+        if n == 0 then break end
+    end
+    return text
+end
+
+-- "<label>  <value>" in the two status colours.
+local function PlayPair(label, value)
+    return PLAY.label .. label .. "|r  " .. PLAY.value .. value .. "|r"
+end
+
+-- Anchor a hit frame over a text (two points, so offline geometry sees it).
+local function PlayCover(hit, text)
+    hit:ClearAllPoints()
+    hit:SetPoint("TOPLEFT", text, "TOPLEFT", 0, 0)
+    hit:SetPoint("BOTTOMRIGHT", text, "BOTTOMRIGHT", 0, 0)
+end
+
+function M.EnsurePlayWidgets()
+    if not frame then return nil end
+    if frame._play then return frame._play end
+    local metrics = Nexus.LayoutMetrics
+    local small = metrics and metrics.FontObject and metrics.FontObject("small") or "GameFontHighlightSmall"
+    local p = {}
+    local function Line(justify)
+        local text = frame:CreateFontString(nil, "OVERLAY", small)
+        text:SetJustifyH(justify or "LEFT")
+        text:SetJustifyV("MIDDLE")
+        text:SetWordWrap(false)
+        text:Hide()
+        return text
+    end
+    local function Hover(text, onEnter, onMouseUp)
+        local hit = CreateFrame("Frame", nil, frame)
+        hit:EnableMouse(true)
+        PlayCover(hit, text)
+        hit:SetScript("OnEnter", onEnter)
+        hit:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        if onMouseUp then hit:SetScript("OnMouseUp", onMouseUp) end
+        hit:Hide()
+        return hit
+    end
+    -- An existing hover of the former rows, shown over its count instead.
+    local function Delegate(owner)
+        return function(self)
+            local enter = owner and owner:GetScript("OnEnter")
+            if enter then enter(self) end
+        end
+    end
+    local function OpenEditor() if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end
+    local theme = Nexus.Theme
+
+    -- Details: shows or hides the Echo names behind the counts.
+    p.details = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    p.details:SetScript("OnClick", function() M.TogglePlanDetails() end)
+    p.details:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(M._playDetails and "Hide details" or "Details", 1, 1, 1)
+        GameTooltip:AddLine("Shows or hides the Echo names behind these counts: still needed, extra copies and "
+            .. "locked targets to lock. It changes only what this panel shows.", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    p.details:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    p.details:Hide()
+    -- The bar: a track and the share of planned rolled copies this run has.
+    p.track = frame:CreateTexture(nil, "ARTWORK")
+    p.track:SetTexture(PLAY.track[1], PLAY.track[2], PLAY.track[3], 0.95)
+    p.track:Hide()
+    p.fill = frame:CreateTexture(nil, "OVERLAY")
+    p.fill:SetTexture(PLAY.bar[1], PLAY.bar[2], PLAY.bar[3], 1)
+    p.fill:Hide()
+    -- The four counts; each keeps the hover (and click) of its former row.
+    p.needed, p.tomes, p.extra, p.locked = Line(), Line(), Line(), Line()
+    p.neededHit = Hover(p.needed, Delegate(needHit), OpenEditor)
+    p.tomesHit = Hover(p.tomes, Delegate(tomesHit))
+    p.extraHit = Hover(p.extra, Delegate(shedHit))
+    p.lockedHit = Hover(p.locked, function(self)
+        local hit = frame.toLockHit
+        local enter = hit and hit:GetScript("OnEnter")
+        if enter then enter(self) end
+    end, OpenEditor)
+    -- Difficulty and Soul Ash on one line, with the card's hover and click.
+    p.server = Line()
+    p.serverHit = CreateFrame("Button", nil, frame)
+    p.serverHit:EnableMouse(true)
+    PlayCover(p.serverHit, p.server)
+    p.serverHit:SetScript("OnClick", function()
+        if Nexus.ServerStatus and Nexus.ServerStatus.OpenHardcoreMenu then Nexus.ServerStatus.OpenHardcoreMenu() end
+    end)
+    p.serverHit:SetScript("OnEnter", Delegate(worldStatusHit))
+    p.serverHit:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    p.serverHit:Hide()
+    -- Your record (its label is the former best-DPS line, which keeps its
+    -- hover) and the best known record for these Echoes, then the note.
+    p.yoursValue = Line("RIGHT")
+    p.bestLabel, p.bestValue = Line(), Line("RIGHT")
+    p.note = Line()
+    p.bestHit = Hover(p.bestLabel, function(self)
+        if not GameTooltip then return end
+        local model = type(M._lastModel) == "table" and M._lastModel or {}
+        local pr = type(model.progress) == "table" and model.progress or {}
+        local perf = type(pr.performance) == "table" and pr.performance or {}
+        local text = Nexus.UserText
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine((text and text.BEST_KNOWN or "Best known") .. " - same Echoes", 1, 1, 1)
+        for _, category in ipairs({{"dummy", "Training Dummy"}, {"lk", "Lich King"}}) do
+            local row = type(perf[category[1]]) == "table" and perf[category[1]].global or nil
+            local dps = PlayDps(row)
+            GameTooltip:AddLine(category[2] .. ": " .. (dps and (dps .. " DPS") or "no shared record known"),
+                0.85, 0.85, 0.85, true)
+        end
+        if text and text.RECORD_SCOPE then GameTooltip:AddLine(text.RECORD_SCOPE, 0.45, 0.75, 1, true) end
+        GameTooltip:Show()
+    end)
+    -- One line of Orb run status and Open (the Orb window).
+    p.orb = Line()
+    p.orbHit = Hover(p.orb, function(self)
+        if not (GameTooltip and self._nexusFull) then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(self._nexusFull, 1, 1, 1, true)
+        GameTooltip:AddLine("Open shows the Orb window, where the run is paused or stopped. Opening it starts "
+            .. "or spends nothing.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    p.orbOpen = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    p.orbOpen:SetText("Open")
+    p.orbOpen:SetScript("OnClick", function()
+        if Nexus.OrbPanel and Nexus.OrbPanel.Show then Nexus.OrbPanel.Show() end
+    end)
+    p.orbOpen:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Orbs / Lost Memories", 1, 0.82, 0)
+        GameTooltip:AddLine("Opens the Orb window to inspect it. It starts or spends nothing.", 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    p.orbOpen:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    p.orbOpen:Hide()
+    if theme and theme.StyleButton then
+        pcall(theme.StyleButton, p.details)
+        pcall(theme.StyleButton, p.orbOpen)
+    end
+    frame._play = p
+    return p
+end
+
+-- Details is memory only: it is part of the layout key, and the panel is
+-- rendered again with the model it shows. Nothing is saved or requested.
+function M.TogglePlanDetails()
+    M._playDetails = not M._playDetails
+    if M.Refresh then M.Refresh() end
+    return M._playDetails
+end
+
+-- The Orb line's text for this render (UI.PanelRunLine), or nil.
+function M.OrbLineText()
+    local orb = Nexus.OrbPanel
+    if not (orb and type(orb.PanelRunLine) == "function") then return nil end
+    local ok, shown, full = pcall(orb.PanelRunLine)
+    if not ok or type(shown) ~= "string" or shown == "" then return nil end
+    return {shown = shown, full = type(full) == "string" and full or shown}
+end
+
+-- Your record and the best known record for the same Echoes (layout rows
+-- bestDps, bestKnown, recordNote). Also run on a records-only render.
+function M.RenderPlayRecords(model, layout)
+    local records = layout ~= nil and layout.boxes ~= nil and layout.boxes.bestKnown ~= nil
+    local p = (records or (frame and frame._play)) and M.EnsurePlayWidgets() or nil
+    if not p then return end
+    SetVisible(p.yoursValue, records); SetVisible(p.bestLabel, records); SetVisible(p.bestValue, records)
+    SetVisible(p.bestHit, records); SetVisible(p.note, records)
+    if not records then
+        bestDpsText:SetJustifyH("CENTER")
+        return
+    end
+    local text = Nexus.UserText
+    local function Value(d, l)
+        if d and l then return "Dummy " .. d .. " - Lich King " .. l end
+        if d then return d .. " DPS" end
+        if l then return "Lich King " .. l end
+        return nil
+    end
+    local best = type(model.bestDps) == "table" and model.bestDps or {}
+    local mineD, mineL = PlayDps(best.dummy), PlayDps(best.lk)
+    local mine = Value(mineD, mineL)
+    bestDpsText:SetJustifyH("LEFT")
+    bestDpsText:SetText(PLAY.label .. ((mineD and not mineL) and "Yours · Training Dummy" or "Yours") .. "|r")
+    p.yoursValue:SetText(mine and (PLAY.value .. mine .. "|r")
+        or (PLAY.muted .. "no record yet - fight a training dummy|r"))
+    local pr = type(model.progress) == "table" and model.progress or {}
+    local perf = type(pr.performance) == "table" and pr.performance or {}
+    local knownD = PlayDps(type(perf.dummy) == "table" and perf.dummy.global or nil)
+    local knownL = PlayDps(type(perf.lk) == "table" and perf.lk.global or nil)
+    local known = Value(knownD, knownL)
+    p.bestLabel:SetText(PLAY.label .. (text and text.BEST_KNOWN or "Best known") .. " · same build|r")
+    if known then
+        p.bestValue:SetText(PLAY.value .. known .. "|r")
+    else
+        -- No record held: say why, from the start-up snapshot. Loading is a
+        -- wait and unavailable is named; neither is "0" or "no records".
+        local okStatus, status = false, nil
+        if type(Nexus.StartupStatus) == "function" then okStatus, status = pcall(Nexus.StartupStatus) end
+        local state = okStatus and type(status) == "table" and status.state or nil
+        local readout = Nexus.Readout
+        local function Kind(kind, fallback)
+            return readout and readout.StatusText and readout.StatusText(kind, fallback) or fallback
+        end
+        if state == "ready" then
+            p.bestValue:SetText(PLAY.muted .. "none received yet|r")
+        elseif state == "failed" then
+            p.bestValue:SetText(PLAY.wait .. Kind("unavailable", "shared data") .. "|r")
+        else
+            p.bestValue:SetText(PLAY.wait .. ((readout and readout.StatusParts)
+                and (readout.StatusParts("loading").glyph .. " shared data loading") or "shared data loading") .. "|r")
+        end
+    end
+    -- The design's note in the shared record-scope words (UserText.RECORD_SCOPE).
+    p.note:SetText(PLAY.muted .. "Shared records this client holds, not a server-wide ranking.|r")
+end
+
+-- The Play summary's content and visibility for this render. `layout` is the
+-- responsive layout this pass places (nil without one).
+function M.RenderPlaySummary(model, layout)
+    local play = layout ~= nil and layout.play == true
+    -- The DPS rows also show in the completed view.
+    local records = layout ~= nil and type(layout.boxes) == "table" and layout.boxes.bestKnown ~= nil
+    local p = (play or records or (frame and frame._play)) and M.EnsurePlayWidgets() or nil
+    if not p then return end
+    local pr = type(model.progress) == "table" and model.progress or {}
+    local details = play and M._playDetails == true
+    -- The former rows: the names show only under Details; the tomes row is
+    -- one of the four counts here.
+    if play then
+        SetVisible(needLabel, details); SetVisible(needText, details); SetVisible(needHit, details)
+        SetVisible(shedLabel, details); SetVisible(shedText, details); SetVisible(shedHit, details)
+        SetVisible(frame._needLabelHit, details); SetVisible(frame._shedLabelHit, details)
+        local toLock = details and #toLockNamesCache > 0
+        SetVisible(frame.toLockLabel, toLock); SetVisible(frame.toLockText, toLock); SetVisible(frame.toLockHit, toLock)
+        SetVisible(tomesLabel, false); SetVisible(tomesValue, false); SetVisible(tomesHit, false)
+    end
+    for _, widget in ipairs({p.details, p.track, p.needed, p.tomes, p.extra, p.locked,
+        p.neededHit, p.tomesHit, p.extraHit, p.lockedHit}) do SetVisible(widget, play) end
+    if play then
+        local total, owned = PlayWhole(pr.total), PlayWhole(pr.owned)
+        local text = Nexus.UserText
+        -- The run's count with its whole unit (UX-13: "rolled copies this
+        -- run"), on its own full-width row under the heading, so the unit is
+        -- neither cut nor moved to a hover.
+        progressValue:SetText(text and text.RunProgressText
+            and text.RunProgressText(pr.owned, pr.total, #toLockNamesCache)
+            or ((owned and total) and (owned .. " / " .. total .. " rolled copies this run")
+                or "Rolled copies this run: unavailable"))
+        p.details:SetText(details and "Hide details" or "Details")
+        -- The share of planned rolled copies this run has (none while
+        -- either count is unknown).
+        p.share = (owned and total and total > 0) and {math.min(owned, total), total} or nil
+        SetVisible(p.fill, p.share ~= nil and p.share[1] > 0)
+        local function Count(n, one, many)
+            if n == nil then return "?" end
+            return n .. " " .. (n == 1 and one or many)
+        end
+        local needed = (owned and total) and math.max(0, total - owned) or nil
+        p.needed:SetText(PlayPair("Still needed", Count(needed, "copy", "copies")))
+        local tomes = #unknownTomesCache
+        p.tomes:SetText(PlayPair("Missing tomes", tomes > 0 and Count(tomes, "Echo", "Echoes") or "none"))
+        local extra = #shedNamesCache
+        p.extra:SetText(PlayPair("Extra copies", extra > 0 and (extra .. " listed") or "none"))
+        local lock = #toLockNamesCache
+        p.locked:SetText(PlayPair("Locked targets", lock > 0 and (lock .. " to lock") or "none to lock"))
+    else
+        p.share = nil
+        SetVisible(p.fill, false)
+    end
+    -- Difficulty and Soul Ash as one line in the Play panel; the card stays
+    -- in the setup and completed views.
+    local ss = type(model.serverStatus) == "table" and model.serverStatus or nil
+    local server = play and layout.boxes.serverLine ~= nil and ss ~= nil
+    if server then
+        worldStatusBox:Hide()
+        local parts = {PlayPair("Difficulty", tostring(ss.tier or ss.mode or "?")),
+            PlayPair("Soul Ash", ss.ash ~= nil and tostring(ss.ash) or "?")}
+        if ss.gain ~= nil then parts[#parts + 1] = PlayPair("Multiplier", tostring(ss.gain)) end
+        local intensity, maximum = tonumber(ss.intensity), tonumber(ss.intensityMax)
+        if intensity then
+            parts[#parts + 1] = PlayPair("Intensity", tostring(math.floor(intensity))
+                .. (maximum and maximum > 0 and (" / " .. tostring(math.floor(maximum))) or ""))
+        end
+        p.server:SetText(table.concat(parts, "   "))
+    end
+    SetVisible(p.server, server); SetVisible(p.serverHit, server)
+    M.RenderPlayRecords(model, layout)
+    -- The Orb run line, while a run is known.
+    M.RefreshOrbLine(model, layout)
+end
+
+-- The Orb line's text, on every render, settled ones included (the run
+-- moves without a new model): shown while this render read a run and the
+-- layout holds its row.
+function M.RefreshOrbLine(model, layout)
+    local p = frame and frame._play
+    if not p then return end
+    local line = type(model) == "table" and model._nexusOrbLine or nil
+    local shown = type(line) == "table" and type(layout) == "table" and type(layout.boxes) == "table"
+        and layout.boxes.orbLine ~= nil
+    if shown then
+        p.orb:SetText(line.shown)
+        p.orbHit._nexusFull = line.full
+    else
+        p.orbHit._nexusFull = nil
+    end
+    SetVisible(p.orb, shown); SetVisible(p.orbHit, shown); SetVisible(p.orbOpen, shown)
+end
+
+-- Geometry of the Play summary inside the layout's boxes.
+function M.PlacePlaySummary(layout)
+    local p = frame and frame._play
+    if not (p and layout and layout.boxes) then return end
+    local boxes = layout.boxes
+    local function Put(widget, box, dx, dw)
+        if not (widget and box) then return end
+        widget:ClearAllPoints()
+        widget:SetPoint("TOPLEFT", frame, "TOPLEFT", box.x + (dx or 0), -box.y)
+        widget:SetSize(math.max(1, box.w - (dw or 0)), box.h)
+    end
+    Put(p.details, boxes.planDetails)
+    local bar = boxes.planBar
+    if bar then
+        Put(p.track, bar)
+        p.fill:ClearAllPoints()
+        p.fill:SetPoint("TOPLEFT", frame, "TOPLEFT", bar.x, -bar.y)
+        local share = p.share
+        p.fill:SetSize(math.max(1, share and math.floor(bar.w * share[1] / share[2]) or 0), bar.h)
+    end
+    Put(p.needed, boxes.planNeeded); Put(p.tomes, boxes.planTomes)
+    Put(p.extra, boxes.planExtra); Put(p.locked, boxes.planLocked)
+    Put(p.server, boxes.serverLine)
+    -- Your value shares the label's row on the right; the label keeps the
+    -- left part of it.
+    local records = boxes.bestDps
+    if records then
+        local valueW = math.floor(records.w * 0.55)
+        Put(bestDpsText, records, 0, valueW)
+        Put(p.yoursValue, records, records.w - valueW, records.w - valueW)
+        Put(p.bestLabel, boxes.bestKnown, 0, valueW)
+        Put(p.bestValue, boxes.bestKnown, records.w - valueW, records.w - valueW)
+        Put(p.note, boxes.recordNote)
+    end
+    Put(p.orb, boxes.orbLine)
+    Put(p.orbOpen, boxes.orbLineOpen)
+end
+
+-- The Auto scope line (Claude Design full UI, "Main panel (Play)": with Auto
+-- ON, "Auto may choose offers and may save a better finished run over this
+-- build. It never loads a build or starts Orbs"), in Readout.AUTO_ON_NOTE's
+-- permission-qualified words. Shown in full on its own rows whenever a
+-- selected Auto has a roll block, beside a recommendation too, so the scope
+-- never retreats into the Auto button's hover; a held or waiting Auto keeps
+-- it as well (it states what Auto may do, not that it is acting), which keeps
+-- the reserved roll footprint the same through a board cycle. A panel
+-- region, not a roll-area row: the roll body and the card rows stay exactly
+-- the runtime's. Text only; it reads and decides nothing.
+function M.AutoScopeShown(model, rollBlock, noBuild)
+    return type(model) == "table" and model.auto == true and rollBlock and not noBuild and true or false
+end
+
+-- The real fallback of that row. AutoNoteFor leaves the scope line out of the
+-- roll body while LayoutMetrics is loaded, because the layout gives it its own
+-- row. When this pass has no layout with that row (LayoutMetrics.Panel or
+-- RuntimeMetrics failed and no earlier layout, or only an earlier layout
+-- without the row, is at hand), the same words are added to the body on their
+-- own line, so a selected Auto always shows what it may do. With the row they
+-- are not repeated. Without LayoutMetrics, AutoNoteFor's own body line stays
+-- as it was. Text only; it reads and decides nothing.
+function M.AutoScopeFallback(body, model, rollBlock, noBuild, layout)
+    local note = Nexus.Readout and Nexus.Readout.AUTO_ON_NOTE
+    if not Nexus.LayoutMetrics or type(note) ~= "string"
+        or not M.AutoScopeShown(model, rollBlock, noBuild) then return body end
+    local boxes = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes or nil
+    if boxes and boxes.autoScope then return body end
+    body = tostring(body or "")
+    if body:find(note, 1, true) then return body end
+    return (body ~= "" and (body .. "\n") or "") .. note
+end
+
+-- Places and fills the line from the layout's autoScope box (none: hidden).
+-- Built lazily and reached through M: EnsureFrame is at the upvalue ceiling.
+function M.RenderAutoScope(layout)
+    local box = type(layout) == "table" and type(layout.boxes) == "table" and layout.boxes.autoScope or nil
+    local line = frame and frame._autoScopeText
+    local note = Nexus.Readout and Nexus.Readout.AUTO_ON_NOTE
+    if not (box and frame and type(note) == "string") then
+        if line then line:Hide() end
+        return false
+    end
+    if not line then
+        local metrics = Nexus.LayoutMetrics
+        line = frame:CreateFontString(nil, "OVERLAY", metrics and metrics.FontObject
+            and metrics.FontObject("small") or "GameFontHighlightSmall")
+        line:SetJustifyH("LEFT")
+        line:SetJustifyV("TOP")
+        line:SetWordWrap(true)
+        -- A fixed status colour beside the words, never from the palette.
+        line:SetTextColor(1, 0.68, 0.42)
+        frame._autoScopeText = line
+    end
+    line:SetText(note)
+    line:ClearAllPoints()
+    line:SetPoint("TOPLEFT", frame, "TOPLEFT", box.x, -box.y)
+    line:SetSize(box.w, box.h)
+    line:Show()
+    return true
+end
+
 -- Built lazily: EnsureFrame is at the Lua 3.3.5 upvalue ceiling.
 local function EnsureCallboardWidgets()
     if not frame or frame._callboardLabel then return end
@@ -3229,16 +4111,11 @@ function M.SetAuto(auto)
     ReleaseRollOnAutoOff(auto and true or false)
 end
 
+-- /nexus panel and the minimap button: the player's own hide or show, saved
+-- through M.Hide / M.Show.
 function M.Toggle()
     local f = EnsureFrame()
-    if f:IsShown() then
-        panelWantedVisible = false
-        f:Hide()
-    else
-        panelWantedVisible = true
-        RequestDisplayRecovery()
-        ApplyWantedVisibility()
-    end
+    if f:IsShown() then M.Hide() else M.Show() end
 end
 
 local function LayoutServerStatus(completed)
@@ -3305,9 +4182,8 @@ end
 -- Auto keeps its existing consentful click handler, now in the header. The
 -- footer contains navigation only; moving between hubs never toggles Auto.
 local function LayoutFooter(showAuto)
-    menuBtn:Show()
-    menuBtn:ClearAllPoints()
-    menuBtn:SetPoint("TOPLEFT", frame, "TOPLEFT", 7, -6)
+    -- Header line 1 (M.HeaderSlots): Options beside Close, Auto beside Options.
+    local slots = M.PlaceOptionsButton()
 
     local orbsHub = frame._orbsHubBtn
     autoBtn:ClearAllPoints()
@@ -3317,8 +4193,8 @@ local function LayoutFooter(showAuto)
 
     if showAuto then
         autoBtn:Show()
-        autoBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -47, -7)
-        autoBtn:SetSize(84, 22)
+        autoBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -slots.auto, -slots.top)
+        autoBtn:SetSize(slots.autoWidth, slots.height)
         AUTO_LABEL.Fit()
     else autoBtn:Hide() end
     planBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, 7)
@@ -3378,6 +4254,9 @@ local function ApplyPanelLayout(layout, completed)
             text:SetSize(boxes.roll.w-inset*2, layout.small)
             y = y + layout.small + math.max(2,math.floor(layout.gap/3))
         end
+        -- The offer cards take the same band as these rows (in three columns,
+        -- or stacked rows when a status line does not fit a column).
+        M.PlaceOfferCards(layout, boxes.roll, inset)
         -- Guidance alone (no cards) starts right below the heading, so it
         -- has the card rows' space; with cards it follows them as before.
         local noCards = true
@@ -3423,7 +4302,13 @@ local function ApplyPanelLayout(layout, completed)
         EnsureCallboardWidgets()
         PlaceCallboardBox(boxes.callboard, layout)
     end
-    PlacePanelBox(progressLabel, boxes.progressHeader)
+    -- The heading keeps one small line (issue #143), centred in the Play
+    -- heading row, which is as tall as its Details button.
+    local header = boxes.progressHeader
+    if header then
+        PlacePanelRect(progressLabel, header.x,
+            header.y + math.max(0, math.floor((header.h - layout.small) / 2)), header.w, layout.small)
+    end
     PlacePanelBox(progressValue, boxes.progressValue)
 
     if boxes.tomes then
@@ -3464,6 +4349,7 @@ local function ApplyPanelLayout(layout, completed)
         PositionPerformance(-boxes.performance.y,completed,layout)
     end
     PlacePanelBox(bestDpsText, boxes.bestDps)
+    M.PlacePlaySummary(layout)
 end
 
 local function RenderBestDps(model, complete, noBuild, activeRoll, statusVisible)
@@ -3491,7 +4377,7 @@ local function ApplyModel(model, signatures, roll)
     if previousSignatures and signatures.layout == previousSignatures.layout then
         local changed = false
         if signatures.notice ~= previousSignatures.notice then
-            frame._menuBtn:SetText(model.updateNotice and "!" or "...")
+            frame._menuBtn:SetText(M.OptionsText(model.updateNotice))
             renderStats.noticePasses = renderStats.noticePasses + 1
             changed = true
         end
@@ -3510,6 +4396,7 @@ local function ApplyModel(model, signatures, roll)
                 or ss.gain or ss.intensity ~= nil) and true or false
             RenderPerformanceState(pr, complete, not noBuild and showPerformance)
             RenderBestDps(model, complete, noBuild, activeRoll, statusVisible)
+            M.RenderPlayRecords(model, frame._responsiveLayout)
             renderStats.performancePasses = renderStats.performancePasses + 1
             changed = true
         end
@@ -3527,7 +4414,7 @@ local function ApplyModel(model, signatures, roll)
     end
     renderStats.layouts = renderStats.layouts + 1
     if frame._menuBtn then
-        frame._menuBtn:SetText(model.updateNotice and "!" or "...")
+        frame._menuBtn:SetText(M.OptionsText(model.updateNotice))
     end
 
     local pr = type(model.progress) == "table" and model.progress or {}
@@ -3601,6 +4488,14 @@ local function ApplyModel(model, signatures, roll)
                     or 0,
                 cardRows=#cards > 0 or (type(roll) == "table" and roll.cardRows) or false,
                 callboard=callboardObserved and true or false,
+                planDetails=M._playDetails == true,
+                orbLine=type(model._nexusOrbLine) == "table",
+                -- The Auto scope line's rows (M.RenderAutoScope), at the
+                -- 396 px content width of the 420 px panel.
+                autoScopeRows=M.AutoScopeShown(model, rollBlock, noBuild)
+                    and Nexus.Readout and Nexus.Readout.AUTO_ON_NOTE
+                    and Nexus.LayoutMetrics.TextRows(Nexus.Readout.AUTO_ON_NOTE, 396, fontScale)
+                    or 0,
             })
             if layoutOk and type(candidate) == "table" then
                 responsiveLayout = candidate
@@ -3638,6 +4533,11 @@ local function ApplyModel(model, signatures, roll)
         if model.auto and model.paused
             and (effective == "waiting" or effective == "rechecking") then
             statusText:SetText("|cffffd100Auto " .. effective .. "|r")
+        elseif model.auto and Nexus.Readout and Nexus.Readout.WaitingForOffer
+            and Nexus.Readout.WaitingForOffer(model.paused) then
+            -- The design's waiting state: named as a wait for the offer,
+            -- never as "0 offers" or as an acting Auto.
+            statusText:SetText("|cffffd100" .. Nexus.Readout.WAITING_OFFER_HEADING .. "|r")
         elseif model.auto and model.paused then
             statusText:SetText("|cffffd100Auto ON — paused|r")
         elseif #cards == 0 and recommendation == "" then
@@ -3646,6 +4546,14 @@ local function ApplyModel(model, signatures, roll)
             -- With the Orb guidance and its button: the short form, which
             -- stays one line at every font scale.
             statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Slot " .. activeSlot) or "|cff888888Preview|r")
+        elseif #cards > 0 and Nexus.Readout and Nexus.Readout.OfferHeading then
+            -- The design's offer heading (whose choice it is), with the
+            -- destination it applies to: a Saved Build slot or a preview. It
+            -- keeps the established state words: "Auto OFF" while the player
+            -- chooses, and "Active:" only for a selected, unheld Auto on a
+            -- Saved Build (every hold and wait took a branch above). It is
+            -- fitted to the heading row (M.SetOfferHeading).
+            M.SetOfferHeading(statusText, model, activeSlot, responsiveLayout)
         elseif model.auto == false then
             -- The Auto selection is OFF (not merely held): Nexus only
             -- recommends, and the player chooses in the game's window.
@@ -3666,16 +4574,32 @@ local function ApplyModel(model, signatures, roll)
             if marked == i and line ~= "" then line = "|cff4dff80>>|r " .. line end
             cardTexts[i]:SetText(line)
         end
+        -- The design's offer cards over these rows (M.RenderOfferCards). The
+        -- marked card is the runtime's own Take target in either Auto mode;
+        -- the card's tag says what that means in each.
+        do
+            local lines, facts = {}, {}
+            for i = 1, 3 do
+                lines[i] = type(cards[i]) == "table" and SafeText(cards[i].text) or ""
+                facts[i] = type(cards[i]) == "table" and type(cards[i].facts) == "table" and cards[i].facts or false
+            end
+            M.RenderOfferCards(lines, Nexus.Readout and Nexus.Readout.MarkedCard
+                and Nexus.Readout.MarkedCard(cards) or nil, model.auto, responsiveLayout ~= nil, facts)
+        end
         -- An unresolved Orb action's own reason is more specific than the
         -- general pause text; otherwise the recommendation stays first. A
         -- reserved block has no current choice: it says so, and no more.
         local body = activeRoll and bodyText or "|cff888888No Echo choice is showing.|r"
         if marked and activeRoll and bodyText == recommendation
             and not (guide and guide.openOrbs) and type(cards[marked]) == "table" then
-            body = Nexus.Readout.RecommendationWithTarget(recommendation, SafeText(cards[marked].text))
+            body = Nexus.Readout.RecommendationWithTarget(recommendation, SafeText(cards[marked].text),
+                type(cards[marked].facts) == "table" and cards[marked].facts or nil)
         end
         -- The inline Auto line follows whatever the body shows, on its own line.
         if autoNote ~= "" then body = (body ~= "" and (body .. "\n") or "") .. autoNote end
+        -- Without a built layout that holds the Auto scope row, the scope
+        -- line stays visible in the body (M.AutoScopeFallback).
+        body = M.AutoScopeFallback(body, model, rollBlock, noBuild, responsiveLayout)
         recText:SetText(body)
         -- Compact charges, only from charge facts the model itself carries
         -- (Readout.ChargesLine; unknown is "?", never 0).
@@ -3688,9 +4612,14 @@ local function ApplyModel(model, signatures, roll)
                 if line ~= "" then frame._chargesHover:Show() else frame._chargesHover:Hide() end
             end
         end
-    elseif frame._chargesText then
-        frame._chargesText:Hide()
-        if frame._chargesHover then frame._chargesHover:Hide() end
+    else
+        -- No roll block: no offer card of an earlier board may stay shown
+        -- (the block's own hide does not clear its children's state).
+        M.RenderOfferCards(nil, nil, model.auto, false)
+        if frame._chargesText then
+            frame._chargesText:Hide()
+            if frame._chargesHover then frame._chargesHover:Hide() end
+        end
     end
     if frame._orbsBtn then
         frame._orbsBtn.blockers = guide and guide.blockers or nil
@@ -3940,7 +4869,11 @@ local function ApplyModel(model, signatures, roll)
     end
 
     RenderBestDps(model, complete, noBuild, activeRoll, statusVisible)
+    -- The Play summary over the rows above (counts, Details, the Difficulty
+    -- / Soul Ash line, the DPS rows and the Orb line).
+    M.RenderPlaySummary(model, responsiveLayout)
     ApplyPanelLayout(responsiveLayout,complete)
+    M.RenderAutoScope(responsiveLayout)
     -- Issue #143: the labels of the three mapped buttons keep one line inside
     -- their final boxes: My Builds at the 68x19 set above, Assign Wishlist and
     -- Create Wishlist at the setup boxes ApplyPanelLayout placed (their
@@ -4002,7 +4935,11 @@ local function ApplyCandidate(model, signatures, roll)
     if not frame.toLockLabel then CreateToLockWidgets(frame) end
     M.ApplyOwnedFonts()
     local applied = ApplyModel(model, signatures, roll)
-    if applied then M.UpdateContextHeader(model) end
+    if applied then
+        M.UpdateContextHeader(model)
+        -- The Orb line's words follow the run on settled renders too.
+        M.RefreshOrbLine(model, frame._responsiveLayout)
+    end
     if applied and Nexus.LayoutMetrics and Nexus.LayoutMetrics.FitToScreen then
         -- The HUD can grow taller than the viewport with large fonts, an
         -- observed Callboard and optional sections. Refit on settled renders
@@ -4073,6 +5010,8 @@ function M.Render(model)
     -- so a changed presentation with identical raw counts cannot stay stale.
     candidate._nexusChargeLine = type(candidate.charges) == "table" and Nexus.Readout
         and Nexus.Readout.ChargesLine and Nexus.Readout.ChargesLine(candidate.charges) or ""
+    -- The Orb run line, read once per render (the Orb window's compact read).
+    candidate._nexusOrbLine = M.OrbLineText()
     local signatures = ModelSignatures(candidate)
     -- The reservation changes the layout, so it is part of its signature.
     local roll = RollPresentation(candidate)
@@ -4158,6 +5097,19 @@ function M.AutoNoteFor(model)
         and (tonumber(GetTime()) or 0) - (tonumber(refusal.at) or 0) <= 60 then
         return refusal.text
     end
+    -- Auto ON and acting: what Auto may do (the design's Auto ON line,
+    -- Readout.AUTO_ON_NOTE) is the panel's own Auto scope row
+    -- (M.RenderAutoScope), shown beside a recommendation too, so the roll
+    -- body stays exactly the runtime's recommendation (hud_roll_footprint).
+    -- While LayoutMetrics is loaded the row is expected; if this pass then
+    -- builds no layout with that row, ApplyModel adds the line to the body
+    -- itself (M.AutoScopeFallback). Without LayoutMetrics the former body line
+    -- remains, beside an offer with no recommendation.
+    if model.auto == true and not (type(model.paused) == "string" and model.paused ~= "") then
+        if Nexus.LayoutMetrics then return nil end
+        local cards = type(model.cards) == "table" and model.cards or {}
+        return (#cards > 0 and SafeText(model.recommendation) == "") and Nexus.Readout.AUTO_ON_NOTE or nil
+    end
     if not (model.auto and type(model.paused) == "string" and model.paused ~= "") then return nil end
     local complete = owned >= total and #(type(pr.toLock) == "table" and pr.toLock or {}) == 0
     local effective = type(model.effective) == "table" and model.effective.state or nil
@@ -4170,7 +5122,7 @@ function M.AutoNoteFor(model)
     return Nexus.Readout.AutoHoldNote and Nexus.Readout.AutoHoldNote(model.paused) or nil
 end
 
--- The "Automation settings" submenu of the ... menu (UX-10): every permission
+-- The "Automation settings" submenu of the Options menu (UX-10): every permission
 -- Auto gates on, with its current value (Readout.AutomationSettingsRows), read
 -- from Store.Settings and the runtime's counters when the menu opens. Opening,
 -- hovering or closing it changes nothing. Only the Reroll and Freeze rows act,
@@ -4223,7 +5175,7 @@ function M.AutomationMenuItems(action)
     return items
 end
 
--- Issue #123: the Nexus-only language chooser of the ... menu. Its facts come
+-- Issue #123: the Nexus-only language chooser of the Options menu. Its facts come
 -- from the lifecycle's read-only LanguageStatus callback (Panel.Init); until
 -- that exists every choice is shown disabled. Opening, hovering and closing
 -- the menu only read. A choice is submitted only by a row click, through the
@@ -4298,7 +5250,7 @@ function M.LanguageStatus()
     return status
 end
 
--- The ... menu row: the active language, and a pending choice when there is one.
+-- The Options menu row: the active language, and a pending choice when there is one.
 function M.LanguageMenuLabel()
     local ok, status = pcall(M.LanguageStatus)
     if not ok or type(status) ~= "table" then return "Language" end
@@ -4496,11 +5448,14 @@ function M.RenderStats() return DefensiveCopy(renderStats) end
 
 -- What this owner knows about its own visibility, as facts another owner can
 -- act on. Read-only: it creates no frame, requests no render and writes
--- nothing. `ready` is the question the stock HUD needs answered before it
--- steps aside -- can this panel display at all -- which is deliberately NOT
--- the same as `shown`: a player who hid it and a dialog that suppresses it
--- both leave a panel that is perfectly able to display.
+-- nothing. `ready` says whether this panel can display at all, which is
+-- deliberately NOT the same as `shown`: a player who hid it and a dialog that
+-- suppresses it both leave a panel that is perfectly able to display.
+-- `wanted` is the player's saved choice (issue #164). The stock HUD stands
+-- aside only for a panel that is ready AND wanted: one the player hid is not
+-- replacing anything, while one an open dialog suppresses still is.
 function M.VisibilityFacts()
+    LoadWantedVisibility()
     return {
         exists = frame ~= nil,
         shown = frame ~= nil and frame:IsShown() and true or false,
@@ -4515,13 +5470,22 @@ function M.VisibilityFacts()
         failures = renderStats.failures,
     }
 end
+-- The player's own show and hide (the header X, Hide Nexus Panel, /nexus
+-- panel, the minimap button). Both save the choice (SetWantedVisibility) and
+-- tell the stock HUD owner; neither touches Auto or any gameplay setting.
 function M.Show()
-    panelWantedVisible = true
+    SetWantedVisibility(true)
     EnsureFrame()
+    ReleaseStaleMenuSuppression()
     RequestDisplayRecovery()
     ApplyWantedVisibility()
+    NotifyStockHud()
 end
-function M.Hide() panelWantedVisible = false; if frame then frame:Hide() end end
+function M.Hide()
+    SetWantedVisibility(false)
+    if frame then frame:Hide() end
+    NotifyStockHud()
+end
 function M.IsShown() return frame and frame:IsShown() or false end
 
 return M

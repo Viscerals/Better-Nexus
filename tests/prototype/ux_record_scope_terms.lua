@@ -4,7 +4,7 @@
 -- recorded date) and its own owner flag; unknown stays unsaid, never "Level 0".
 -- Build Library cards name the category of their best-DPS headline and say
 -- when a row's owner is not established (R6).
--- One user meaning per label: the panel's ... button is "Menu and status",
+-- One user meaning per label: the panel's menu button is "Options" (#165),
 -- the Build Library scope is "Mine" (the game's own page keeps "My Builds"),
 -- Help gives the same words, and an offline terminology lint keeps the
 -- deprecated unqualified forms out of the player-facing UI sources, with
@@ -139,16 +139,22 @@ C.scenario('R3 the menu button has one name, and Help uses the same words',funct
  local lines=button and V.TooltipLines(function() button:GetScript('OnEnter')(button) end) or {}
  local tip=V.Plain(table.concat(lines,'\n'))
  print('OBSERVED','R3 menu tip='..tip:gsub('\n',' | '))
- C.expect(V.Plain(lines[1] or '')=='Menu and status' and not tip:find('Nexus Settings',1,true),
-  'R3: the ... button is called Menu and status',tip)
+ -- Issue #165: the control shows "Options" and its hover is headed by that
+ -- same visible name (Panel.OptionsLabel), never by a name the panel does not
+ -- show (panel_options_label checks the hover drops "Menu and status").
+ local shown=button and V.Plain(button:GetText() or '') or ''
+ C.expect(V.Plain(lines[1] or '')=='Options' and shown:find('Options',1,true)~=nil
+  and not tip:find('Nexus Settings',1,true) and not tip:find('Menu and status',1,true),
+  'R3: the menu button has one name, Options, on the control and its hover',tip)
  local before=Effects()
  if Nexus.Help and Nexus.Help.Show then Nexus.Help.Show('start') end
  local body=V.Plain(NexusHelpWindow and NexusHelpWindow.body and NexusHelpWindow.body:GetText() or '')
  C.expect(body:find('Best known: the best shared DPS record this client holds',1,true)~=nil
-  and body:find('Menu and status: the ... button',1,true)~=nil
+  and body:find('Options: the Options button on the Nexus panel header',1,true)~=nil
+  and not body:find('Menu and status: the ... button',1,true)
   and body:find("My Builds is the game's page of your Saved Builds",1,true)~=nil
   and body:find('the Mine scope lists your Saved Builds and shared listings',1,true)~=nil,
-  'R3: Help names Best known, Menu and status, the game\'s My Builds page and the Mine scope',body:sub(-700))
+  'R3: Help names Best known, the Options button, the game\'s My Builds page and the Mine scope',body:sub(-700))
  C.guard(Same(Effects(),before),'R3: opening Help sends, requests and acts nothing')
 end)
 
@@ -207,7 +213,7 @@ local RULES={
  {phrase='"Global  ',why='the compact shared column is Best known (UX-14)'},
  {phrase='/ %d complete',why='a run count is rolled copies this run; complete needs every category (UX-13)'},
  {phrase='in progress|r',why='the Saved Build card counts Wishlist copies in this Saved Build (UX-13)'},
- {phrase='Nexus Settings',why='the ... button is Menu and status (UX-15)'},
+ {phrase='Nexus Settings',why='the menu button is Options (UX-15, #165)'},
  {phrase='within seconds',why='no replacement latency is promised (UX-05/UX-15)'},
  {phrase='right away',why='no replacement latency is promised; the copy states the check trigger (FN7/OD4)'},
  {phrase='"My Builds"',files={['ui/CommunityRenderer.lua']=true},why='the Build Library scope is Mine; My Builds is the game\'s page (UX-15)'},
