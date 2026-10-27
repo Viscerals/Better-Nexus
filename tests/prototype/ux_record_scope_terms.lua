@@ -91,7 +91,11 @@ local function ShowRecords()
  local button=NexusPanel and NexusPanel._menuBtn
  if button then button:GetScript('OnClick')(button) end
  for _,item in ipairs(captured or {}) do
-  if item.text=='Show DPS records' and type(item.func)=='function' then item.func();return true end
+  if item.text=='Manage' and item.hasArrow then
+   for _,entry in ipairs(item.menuList or {}) do
+    if entry.text=='Show DPS records' and type(entry.func)=='function' then entry.func();return true end
+   end
+  end
  end
  return false
 end

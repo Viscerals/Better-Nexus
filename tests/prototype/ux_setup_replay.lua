@@ -293,8 +293,12 @@ C.scenario('S2 Close (X) during the delay opens the informational Welcome; the P
  EasyMenu=realMenu
  local setup,help
  for _,item in ipairs(items or {}) do
-  if item.text=='Setup / Welcome' then setup=item end
-  if item.text=='Help / Getting Started' then help=item end
+  if item.text=='Manage' and item.hasArrow then
+   for _,entry in ipairs(item.menuList or {}) do
+    if entry.text=='Setup / Welcome' then setup=entry end
+    if entry.text=='Help / Getting Started' then help=entry end
+   end
+  end
  end
  C.setup(help~=nil,'S2: fixture: the menu lists Help / Getting Started')
  C.expect(setup~=nil and type(setup.func)=='function','S2: the ... menu offers Setup / Welcome')

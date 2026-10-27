@@ -687,7 +687,7 @@ C.scenario('the editor destination row keeps naming the captured Saved Build Six
  Close()
 end)
 
-C.scenario('the HUD destination row fits an empty long-named Saved Build 123 at the 2.0 font scale',function()
+C.scenario('the Play header keeps an empty long-named Saved Build 123 readable at the 2.0 font scale',function()
  Boot({active=0,slots={[107]={name='W-Free',verified=false,echoes=EF}}})
  -- The double font model is set for this case only. The four region font
  -- methods, the model and the font object as they were before it are
@@ -713,26 +713,44 @@ C.scenario('the HUD destination row fits an empty long-named Saved Build 123 at 
     owned=0,total=2,missing={},shed={},unknownTomes={},toLock={},isCommunityPreview=false},
    assignment={state='ready',name='W-Free',emptySlot=true},cards={},auto=false,level=40})
   C.setup(ok and res~=false,'R-HUD: fixture: the real HUD renders the synthetic model',res)
-  local row=_G.NexusPanel and NexusPanel._destinationRow
-  local has=type(row)=='table' and type(row.cells)=='table'
-  C.expect(has,'R-HUD: the HUD shows its destination row of cells')
+  local panel=_G.NexusPanel
+  local labels=panel and {panel._contextTitle,panel._contextBuild,panel._contextWishlist} or {}
+  local hits=panel and {panel._contextTitleHit,panel._contextBuildHit,panel._contextWishlistHit} or {}
+  local has=#labels==3 and #hits==3
+  C.expect(has and panel._destinationRow and not panel._destinationRow:IsShown(),
+   'R-HUD: the three-line Play header replaces the cramped four-cell row')
   if not (ok and has) then return end
-  local t,bad=RowCells(row)
-  local all=table.concat(t,' / ')
-  print('OBSERVED','R-HUD row='..all)
-  C.expect(#bad==0,'R-HUD: before hover, four visible cells, each within its own width, disjoint inside the row',table.concat(bad,'; '))
-  local who=t[1]:gsub('^Character:%s*',''):gsub('^C:%s*',''):gsub('%.%.%.$','')
-  C.expect(who~='' and CHARACTER:sub(1,#who)==who
-   and ((t[2]:find('#123',1,true) and not t[2]:find('#123%d')) or t[2]:find('slot 123)',1,true))
-   and (t[3]:find('!$') or t[3]:find('Refused',1,true) or t[3]:find('No valid assignment',1,true))
-   and V.Names(t[4],'Empty'),
-   'R-HUD: it shows the leading character, the whole #123, the whole Wishlist refusal marker and the whole Empty state',all)
-  local hit=type(row.hits)=='table' and row.hits[2] or nil
-  local enter=hit and hit:GetScript('OnEnter')
-  local tip=enter and V.Plain(table.concat(V.TooltipLines(function() enter(hit) end),' / ')) or ''
-  C.expect(tip:find('Character: '..CHARACTER,1,true) and tip:find('slot 123)',1,true)
-   and tip:find(string.rep('wide ',11)..'wide',1,true) and tip:find('holds no Echoes',1,true),
-   'R-HUD: hovering the Saved Build cell then discloses the whole destination',tip)
+  local shown,tip,bad={},{},{}
+  for i=1,3 do
+   local label,hit=labels[i],hits[i]
+   shown[i]=V.Plain(label:GetText())
+   if not label:IsVisible() or not hit:IsVisible() or shown[i]=='' then
+    bad[#bad+1]='line '..i..' is not visible'
+   end
+   local placed,r=pcall(G.Rect,label,panel)
+   if not placed then bad[#bad+1]='line '..i..' is not placed'
+   elseif r[1]<0 or r[3]>panel:GetWidth() or r[2]<0 or r[4]>panel:GetHeight() then
+    bad[#bad+1]='line '..i..' outside panel '..G.Text(r)
+   end
+   local enter=hit:GetScript('OnEnter')
+   local lines,healthy={},false
+   if enter then lines,healthy=V.TooltipLines(enter,hit) end
+   if not healthy then bad[#bad+1]='line '..i..' hover is unavailable' end
+   tip[i]=V.Plain(table.concat(lines,'\n'))
+   local leave=hit:GetScript('OnLeave');if leave then leave(hit) end
+  end
+  local all=table.concat(shown,' / ')
+  print('OBSERVED','R-HUD header='..all)
+  C.expect(#bad==0,'R-HUD: three visible, placed lines with working full-text hover',table.concat(bad,'; '))
+  C.expect(shown[1]:find('Nexus',1,true) and shown[2]:find('Build:',1,true)
+   and shown[3]:find('Wishlist:',1,true),
+   'R-HUD: the header visibly identifies the destination categories',all)
+  local disclosure=table.concat(tip,'\n')
+  C.expect(disclosure:find('Character: '..CHARACTER,1,true)
+   and disclosure:find('slot 123)',1,true)
+   and disclosure:find(string.rep('wide ',11)..'wide',1,true)
+   and disclosure:find('holds no Echoes',1,true),
+   'R-HUD: hovering the header discloses the full empty Saved Build destination',disclosure)
  end)
  for _,k in ipairs(KEYS) do methods[k]=saved[k] end
  G.model,_G.NexusFontNormal=savedModel,savedObject
@@ -773,13 +791,9 @@ C.scenario('C: a Preview title alone is not destination authority',function()
   if title then m.progress.wishlistName=title end
   return m
  end
- -- The whole underlying-none Preview alternatives of the state cell
- -- (minimum, compact, full), bare or after the cell's label.
+ -- The full state line is disclosed by the first header line's hover.
  local function NonePreview(text)
-  for _,alt in ipairs({'P_','Preview: None','Preview; None captured'}) do
-   if text==alt or text=='S:'..alt or text=='State: '..alt then return true end
-  end
-  return false
+  return text=='State: Preview; None captured'
  end
  -- The Wishlist disclosure segments, and whether one names the title.
  local function Wishlists(tip)
@@ -787,19 +801,21 @@ C.scenario('C: a Preview title alone is not destination authority',function()
   for seg in tip:gmatch('Wishlist:[^\n]*') do n=n+1;titled=titled or seg:find(TITLE,1,true)~=nil end
   return n,titled
  end
- -- The shown row for model m: its facts, its four cell texts and every line
- -- its hit areas disclose on hover (OnEnter, then OnLeave).
+ -- The shown header for model m: its facts, three labels, state disclosure,
+ -- and every full-text hover (OnEnter, then OnLeave).
  local function Shown(m,label)
   local facts=P.DestinationFacts(m) or {}
   P.Render(m)
   local row=NexusPanel and NexusPanel._destinationRow
-  local cells=type(row)=='table' and row.cells
-  if not C.setup(type(cells)=='table' and #cells==4,'C: shown HUD row has four cells ('..label..')') then return nil end
+  local labels={NexusPanel._contextTitle,NexusPanel._contextBuild,NexusPanel._contextWishlist}
+  local hits={NexusPanel._contextTitleHit,NexusPanel._contextBuildHit,NexusPanel._contextWishlistHit}
+  if not C.setup(#labels==3 and #hits==3 and row and not row:IsShown(),
+   'C: three-line Play header replaces hidden destination row ('..label..')') then return nil end
   local texts,visible={},true
-  for i=1,4 do visible=visible and cells[i]:IsVisible();texts[i]=V.Plain(cells[i]:GetText()) end
-  C.setup(visible,'C: HUD row cells are shown ('..label..')')
+  for i=1,3 do visible=visible and labels[i]:IsVisible();texts[i]=V.Plain(labels[i]:GetText()) end
+  C.setup(visible,'C: Play header labels are shown ('..label..')')
   local lines,ran,healthy={},0,true
-  for _,hit in pairs(type(row.hits)=='table' and row.hits or {}) do
+  for _,hit in ipairs(hits) do
    local enter=type(hit)=='table' and type(hit.GetScript)=='function' and hit:GetScript('OnEnter')
    if type(enter)=='function' then
     local got,ok=V.TooltipLines(enter,hit)
@@ -809,7 +825,8 @@ C.scenario('C: a Preview title alone is not destination authority',function()
     if type(leave)=='function' then pcall(leave,hit) end
    end
   end
-  C.setup(ran>0 and healthy,'C: HUD row hits disclose on hover ('..label..')',ran)
+  C.setup(ran==3 and healthy,'C: all Play header lines disclose on hover ('..label..')',ran)
+  texts[4]=hits[1]._nexusFull and hits[1]._nexusFull:match('State:[^\n]*') or ''
   return {facts=facts,cells=texts,tip=table.concat(lines,'\n')}
  end
  P.Show()
@@ -832,9 +849,9 @@ C.scenario('C: a Preview title alone is not destination authority',function()
    same=same and titled.cells[i]==plain.cells[i]
    named=named or titled.cells[i]:find(TITLE,1,true)~=nil
   end
-  C.expect(same,'C: shown row is the same with and without the Preview title ('..label..')',
+  C.expect(same,'C: shown header is the same with and without the Preview title ('..label..')',
    table.concat(titled.cells,' / ')..' vs '..table.concat(plain.cells,' / '))
-  C.guard(not named,'C: no shown cell names the Preview title ('..label..')',table.concat(titled.cells,' / '))
+  C.guard(not named,'C: no shown header line names the Preview title ('..label..')',table.concat(titled.cells,' / '))
   -- The disclosure, checked apart from the shown text.
   C.guard(plain.tip:find(STATE_LINE,1,true)~=nil,'C: untitled Preview discloses '..STATE_LINE..' ('..label..')',plain.tip)
   C.expect(titled.tip:find(STATE_LINE,1,true)~=nil,'C: titled Preview discloses '..STATE_LINE..' ('..label..')',titled.tip)

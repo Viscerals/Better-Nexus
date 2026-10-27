@@ -164,7 +164,10 @@ for _,version in ipairs({'1.96.6','999.0.0',FORGED,'2.0.0-beta.1+test.1','1.20.0
  local items;EasyMenu=function(list)items=list end
  NexusPanel._menuBtn:Click();H.Advance(1,.05)
  local found=false
- for _,item in ipairs(items or {})do
+ local manage
+ for _,item in ipairs(items or {})do if item.text=='Manage' then manage=item end end
+ assert(manage and manage.hasArrow and type(manage.menuList)=='table','the compact menu reaches Manage')
+ for _,item in ipairs(manage.menuList)do
   if type(item.text)=='string' then
    if not hinted then
     assert(not item.text:find(version:match('^[%d%.]+'),1,true) or item.text:find('Installed',1,true),'no menu entry names the peer version '..version..': '..item.text)
@@ -226,7 +229,13 @@ assert(Nexus.Updates.GetCandidate().display=='1.20.0-beta.1 test.9029','and the 
 local items;EasyMenu=function(list)items=list end
 NexusPanel._menuBtn:Click();H.Advance(1,.05)
 local entry
-for _,item in ipairs(items or {})do if item.text=='Update available: 1.20.0-beta.1 test.9029' then entry=item end end
+for _,top in ipairs(items or {})do
+ if top.text=='Manage' then
+  for _,item in ipairs(top.menuList or {})do
+   if item.text=='Update available: 1.20.0-beta.1 test.9029' then entry=item end
+  end
+ end
+end
 assert(entry and not entry.disabled and NexusPanel._menuBtn:GetText()=='!','menu entry and HUD badge for trusted evidence')
 popup=nil;entry.func()
 assert(popup and popup.url=='https://github.com/Viscerals/Better-Nexus/releases' and popup.text:find('New Nexus test build available: 1.20.0-beta.1 test.9029',1,true))

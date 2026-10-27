@@ -316,22 +316,18 @@ do
  check(has(s.selectorTip,'Assigns a wishlist reference to the Saved Build currently selected in the server dropdown.'),'populated: selector tooltip unchanged')
  check(has(s.rowTip,'Sets this Wishlist as the target for this loadout.') and not has(s.rowTip,'refused'),'populated: row tooltip unchanged')
  check(has(s.unassignTip,'Keeps the Wishlist; stops using it for this loadout.'),'populated: Unassign tooltip unchanged')
- -- W6 handed-off identity. The HUD Wishlist cell (cells[3]) as shown: after
- -- its cue and any trailing '...', every shown character is a prefix of NAME,
- -- at least the fit's 3-character leading token. Only after that is the whole
- -- assigned plan read from the same cell's real hover (row.hits[3] OnEnter,
- -- the FullTextTooltip AddLine path), never from visible text.
- local hudRow=NexusPanel._destinationRow
- local cell=type(hudRow)=='table' and type(hudRow.cells)=='table' and hudRow.cells[3] or nil
+ -- The Play header now owns the visible Wishlist identity. Its full hover
+ -- must still disclose the actual assigned plan when the label is shortened.
+ local cell=NexusPanel._contextWishlist
  local w=cell and cell:IsVisible() and cell:GetText() or ''
- local shown=w:gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''):gsub('^Wishlist:%s*',''):gsub('^W:%s*',''):gsub('%.%.%.$','')
+ local shown=w:gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''):gsub('^Wishlist:%s*',''):gsub('%s*%(assigned%)$',''):gsub('%.%.%.$','')
  check(not has(s.hud,EMPTY_NOTE) and w~='' and has(s.hud,w) and #shown>=3 and NAME:sub(1,#shown)==shown,
-  'populated: the HUD shows the handed-off plan: '..w)
- local hit=type(hudRow.hits)=='table' and hudRow.hits[3] or nil
+  'populated: the Play header shows the handed-off plan: '..w)
+ local hit=NexusPanel._contextWishlistHit
  tip={}
  local full=hit and hit:IsVisible() and Hover(hit) or ''
  check(('\n'..full..'\n'):find('\nWishlist: '..NAME..' (assigned)\n',1,true)~=nil,
-  'populated: hovering the HUD Wishlist cell discloses the whole assigned plan: '..full)
+  'populated: hovering the Play Wishlist line discloses the whole assigned plan: '..full)
  check(s.orbPlan=='Assigned Wishlist: '..NAME,'populated: Orb shows the assigned plan')
 end
 -- 3b. No Saved Build selected (slot 0): the first-run plan is the target; wording unchanged.

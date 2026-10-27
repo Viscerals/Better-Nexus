@@ -110,7 +110,11 @@ C.scenario('Q4 the plan count says copies, not Echoes',function()
  local button=NexusPanel and NexusPanel._menuBtn
  if button then button:GetScript('OnClick')(button) end
  local show
- for _,item in ipairs(captured or {}) do if item.text=='Show DPS records' then show=item end end
+ for _,item in ipairs(captured or {}) do
+  if item.text=='Manage' and item.hasArrow then
+   for _,entry in ipairs(item.menuList or {}) do if entry.text=='Show DPS records' then show=entry end end
+  end
+ end
  C.setup(show~=nil and type(show.func)=='function','Q4: fixture: the menu offers Show DPS records')
  if show then show.func() end
  C.setup(RenderCounts(12,79,{}),'Q4: fixture: the panel renders the plan with DPS records shown')

@@ -96,7 +96,10 @@ for _,scale in ipairs({.75,1,1.25,1.5,2})do
    check(miniButton:GetHeight()==open:GetHeight(),'the two controls share a row height')
    local fit=miniButton._nexusMiniFit
    check(fit and fit.fits and fit.width+20<=miniButton:GetWidth(),'font-width model fits the label with end-cap clearance')
-   check(miniButton:GetText()==(scale<=1 and 'Orb mini panel' or 'Mini'),'full label is used unless the available width requires a compact label')
+   local char=Nexus.LayoutMetrics.ConservativeText(scale)
+   local available=hud:GetWidth()-24-open:GetWidth()-6
+   local expected=math.ceil(14*char)+20<=available and 'Orb mini panel' or 'Mini'
+   check(miniButton:GetText()==expected,'full label is used unless the actual wider HUD leaves too little space')
    local _,_,_,_,recY=hud._rollRec:GetPoint()
    local buttonTop=area:GetHeight()-bottom-open:GetHeight()
    check(-recY+hud._rollRec:GetHeight()<=buttonTop,'the button row does not cover the guidance text')
