@@ -760,13 +760,30 @@ end
 
 function M.UpdateContextHeader(model)
     if not (frame and frame._contextTitle) then return false end
-    local fields, tooltip = Nexus.UserText.DestinationFields(M.DestinationFacts(model))
+    local facts = M.DestinationFacts(model) or {}
+    local fields, tooltip = Nexus.UserText.DestinationFields(facts)
     local width = math.max(240, tonumber(frame:GetWidth()) or 420)
     local labelWidth = math.max(100, width - 134)
+    -- Put high-priority state before names: truncation at 420px must not
+    -- silently turn a Community preview into an apparent assignment or hide
+    -- an empty Saved Build's refusal. The complete facts remain on hover.
+    local cue = facts.preview and "Preview" or nil
+    if facts.empty then
+        cue = cue and (cue .. "; Empty") or "Empty"
+    elseif not cue and (facts.unconfirmed or facts.kind == "unconfirmed") then
+        cue = "Unconfirmed"
+    elseif not cue and facts.kind == "unknown" then
+        cue = "Not known"
+    end
+    local title = "Nexus" .. (cue and (" [" .. cue .. "]") or "")
+        .. "  -  " .. fields[1].value
+    local build = facts.preview and facts.kind == "none" and "None captured"
+        or (facts.slot and fields[2].compact) or fields[2].value
+    local wishlist = facts.empty and fields[3].compact or fields[3].value
     local lines = {
-        {frame._contextTitle, frame._contextTitleHit, "Nexus  -  " .. fields[1].value},
-        {frame._contextBuild, frame._contextBuildHit, "Build: " .. fields[2].value},
-        {frame._contextWishlist, frame._contextWishlistHit, "Wishlist: " .. fields[3].value},
+        {frame._contextTitle, frame._contextTitleHit, title},
+        {frame._contextBuild, frame._contextBuildHit, "Build: " .. build},
+        {frame._contextWishlist, frame._contextWishlistHit, "Wishlist: " .. wishlist},
     }
     for index = 1, #lines do
         local line = lines[index]

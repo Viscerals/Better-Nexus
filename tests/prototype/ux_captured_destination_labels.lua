@@ -742,9 +742,13 @@ C.scenario('the Play header keeps an empty long-named Saved Build 123 readable a
   local all=table.concat(shown,' / ')
   print('OBSERVED','R-HUD header='..all)
   C.expect(#bad==0,'R-HUD: three visible, placed lines with working full-text hover',table.concat(bad,'; '))
-  C.expect(shown[1]:find('Nexus',1,true) and shown[2]:find('Build:',1,true)
-   and shown[3]:find('Wishlist:',1,true),
-   'R-HUD: the header visibly identifies the destination categories',all)
+  C.expect(panel:GetWidth()==420 and shown[1]:find('Nexus [Empty]',1,true)
+   and shown[2]:find('Build: #123',1,true)
+   and shown[3]:find('Wishlist: Refused',1,true)
+   and G.Length('Nexus [Empty]')*G.MODELS.double.char<=labels[1]:GetWidth()
+   and G.Length('Build: #123')*G.MODELS.double.char<=labels[2]:GetWidth()
+   and G.Length('Wishlist: Refused')*G.MODELS.double.char<=labels[3]:GetWidth(),
+   'R-HUD: at 420px and 2x text the Empty, slot and refusal cues fit before long names',all)
   local disclosure=table.concat(tip,'\n')
   C.expect(disclosure:find('Character: '..CHARACTER,1,true)
    and disclosure:find('slot 123)',1,true)
@@ -826,8 +830,8 @@ C.scenario('C: a Preview title alone is not destination authority',function()
    end
   end
   C.setup(ran==3 and healthy,'C: all Play header lines disclose on hover ('..label..')',ran)
-  texts[4]=hits[1]._nexusFull and hits[1]._nexusFull:match('State:[^\n]*') or ''
-  return {facts=facts,cells=texts,tip=table.concat(lines,'\n')}
+  local state=hits[1]._nexusFull and hits[1]._nexusFull:match('State:[^\n]*') or ''
+  return {facts=facts,cells=texts,state=state,tip=table.concat(lines,'\n')}
  end
  P.Show()
  for _,state in ipairs({'unassigned',false}) do
@@ -841,11 +845,19 @@ C.scenario('C: a Preview title alone is not destination authority',function()
   C.expect(titled.facts.kind=='none','C: a Preview title alone keeps kind none ('..label..')',titled.facts.kind)
   C.guard(plain.facts.wishlist==nil and titled.facts.wishlist==nil,
    'C: a Preview title is no Wishlist fact ('..label..')',titled.facts.wishlist)
-  C.guard(NonePreview(plain.cells[4]),'C: untitled Preview shows none under Preview ('..label..')',plain.cells[4])
-  C.expect(NonePreview(titled.cells[4]),
-   'C: titled Preview shows none under Preview, not unconfirmed ('..label..')',titled.cells[4])
+  C.guard(NonePreview(plain.state),'C: untitled Preview discloses none under Preview ('..label..')',plain.state)
+  C.expect(NonePreview(titled.state),
+   'C: titled Preview discloses none under Preview, not unconfirmed ('..label..')',titled.state)
+  C.expect(NexusPanel:GetWidth()==420
+   and titled.cells[1]:find('Nexus [Preview]',1,true)
+   and plain.cells[1]:find('Nexus [Preview]',1,true)
+   and titled.cells[2]:find('Build: None captured',1,true)
+   and G.Length('Nexus [Preview]')*(G.model and G.model.char or G.MODELS.default.char)
+    <=NexusPanel._contextTitle:GetWidth(),
+   'C: the 420px header visibly distinguishes a Preview with no captured Build ('..label..')',
+   table.concat(titled.cells,' / '))
   local same,named=true,false
-  for i=1,4 do
+  for i=1,3 do
    same=same and titled.cells[i]==plain.cells[i]
    named=named or titled.cells[i]:find(TITLE,1,true)~=nil
   end
