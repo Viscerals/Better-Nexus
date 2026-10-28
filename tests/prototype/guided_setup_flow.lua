@@ -179,7 +179,9 @@ C.scenario('F1 first use: every navigation control moves the guide only',functio
  for _,n in ipairs(UISpecialFrames) do if n=='NexusGuidedSetupEscape' then reg=reg+1 elseif n=='NexusGuidedSetup' then raw=raw+1 end end
  C.expect(reg==1 and raw==0,'F1: Escape closes the coach through its one listed Escape child (the coach itself is not listed)',reg..'/'..raw)
  -- Setup Alternative: the header's Reference replaces the step with the
- -- optional topic list inside the coach; it is never under the step.
+ -- optional topic list inside the coach; it is never under the step. Its
+ -- dense manual is the separately labelled Open full Reference (renamed from
+ -- Open full Help in the composition pass; the route is unchanged).
  Press(Btn('Reference'))
  C.expect(Shown() and Text():find('Reference - optional',1,true)~=nil and Text():find('WHY THIS MATTERS',1,true)==nil
   and not (_G.NexusHelpWindow and NexusHelpWindow:IsShown()),
@@ -187,7 +189,7 @@ C.scenario('F1 first use: every navigation control moves the guide only',functio
  if _G.NexusGuidedSetupEscape then NexusGuidedSetupEscape:Hide() end
  C.expect(Shown() and Text():find('Reference - optional',1,true)==nil and NexusGuidedSetupEscape:IsShown(),
   'F1: Escape closes the Reference view first and keeps the coach')
- Press(Btn('Reference'));Press(Btn('Open full Help'))
+ Press(Btn('Reference'));Press(Btn('Open full Reference'))
  C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown(),'F1: the Reference view opens full Help')
  if _G.NexusHelpWindow then NexusHelpWindow:Hide() end
  Press(Btn('X'));Nexus.GuidedSetupUI.Show()
@@ -528,7 +530,7 @@ C.scenario('F9 full Help replaces the coach while open; closing it returns the s
  C.expect(Text():find('in place of this guide',1,true)~=nil and Text():find('/nexus reference',1,true)~=nil
   and Text():find('/nexus tutorial',1,true)==nil and Text():find('/nexus help',1,true)==nil,
   'F9: the Reference view says the reference pages replace the guide and names /nexus reference, which opens them',Text())
- Press(Btn('Open full Help'))
+ Press(Btn('Open full Reference'))
  C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() and not Shown(),'F9: full Help opens in place of the coach, not over it')
  C.expect(not NexusGuidedSetupEscape:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==seen,
   'F9: stepping aside takes no Escape and records no dismissal')
@@ -538,7 +540,7 @@ C.scenario('F9 full Help replaces the coach while open; closing it returns the s
  C.expect(Shown() and Step()=='wishlist' and Text():find('Reference - optional',1,true)==nil,
   'F9: on the next frame the coach is back at the same step, its Reference view closed',Text())
  C.guard(tally.returned=='flow','F9: the coach came back in a frame the attribution counts as the flow\'s own',tostring(tally.returned))
- Press(Btn('Reference'));Press(Btn('Open full Help'))
+ Press(Btn('Reference'));Press(Btn('Open full Reference'))
  local checklist
  for _,c in ipairs(NexusHelpWindow.children) do
   if c.kind=='Button' and c:GetText()=='Setup checklist' then checklist=c end
@@ -582,7 +584,7 @@ C.scenario('F10 a receipt or an editor closing while full Help is open does not 
  local known,tally=Known(),Tally()
  local function Help() return _G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() end
  local function FullHelp(tag)
-  Press(Btn('Reference'));Press(Btn('Open full Help'))
+  Press(Btn('Reference'));Press(Btn('Open full Reference'))
   return C.setup(Help() and not Shown() and Guide().waitingKind=='help',tag..': fixture: full Help is open in place of the coach')
  end
  Press(Btn('Start an empty Wishlist'))

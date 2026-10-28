@@ -808,7 +808,8 @@ T.Guide = {
         closeTipSession = 'Close (Esc) - your place is kept until you reload or log out: saved data cannot be written right now',
         back = 'Back', later = 'Continue later',
         skip = 'Skip for now', next = 'Continue', finish = 'Close guide',
-        checklistShow = 'All steps v', checklistHide = 'All steps ^', helpClose = 'X', fullHelp = 'Open full Help',
+        checklistShow = 'All steps v', checklistHide = 'All steps ^', helpClose = 'X', fullHelp = 'Open full Reference',
+        fullReference = 'Open full Reference', allTopics = '< All topics',
         refBack = '< Back to step %d - %s', dismissDraft = 'Pick a saved Wishlist',
         open = 'Open the Wishlist chooser', openAgain = 'Open the Wishlist chooser again', check = 'Check again',
         replace = 'Replace and continue', cancel = 'Choose another', retry = 'Try again',
@@ -844,14 +845,33 @@ T.Guide = {
             rejected = 'Nothing was changed; this step stays open.',
             unavailable = 'Nothing is marked done.', stale = 'The earlier result no longer counts.',
             waiting = 'Nothing is marked done yet.'}},
-    -- The optional Reference view: a topic list, each topic one Help page
-    -- opened in place of the guide (U.OpenHelp); never shown under a step.
+    -- The optional Reference view (Setup Alternative): a topic list, then one
+    -- short article per topic in the same view; never shown under a step.
+    -- Open full Reference is the separate, explicit way to the dense manual
+    -- page (U.OpenHelp), which opens in place of the guide.
     reference = {title = 'Reference', tag = 'Reference - optional',
         lead = 'More detail for after setup. One topic at a time.',
-        full = 'Each topic opens its full reference page (/nexus reference) in place of this guide; close it to come back to this step.',
-        topics = {{page = 'start', title = 'Getting started'}, {page = 'wishlists', title = 'Wishlists and locked targets'},
-            {page = 'rolling', title = 'Auto, rolling and saving'}, {page = 'orbs', title = 'Orbs / Lost Memories'},
-            {page = 'sharing', title = 'Shared builds and DPS'}, {page = 'troubleshooting', title = 'Problems and bug reports'}}},
+        escStep = 'Esc: back to step %d', escTopics = 'Esc: back to topics',
+        full = 'Open full Reference opens the complete manual page (/nexus reference) in place of this guide; close it to come back to this step.',
+        topics = {
+            {page = 'start', title = 'Getting started', paras = {
+                'Nexus points at Echoes from a Wishlist you choose. This guide links one Wishlist to one Saved Build, and each step says what it changes before it does.',
+                '/nexus guide reopens this guide at your step. /nexus reference opens the full manual.'}},
+            {page = 'wishlists', title = 'Wishlists and locked targets', paras = {
+                'A Wishlist is the Echoes you want. Edit and save it in Plan (the Wishlist Editor); an unsaved Plan draft stays yours until you save or discard it there.',
+                'A Saved Build follows one Wishlist at a time. You assign it in the Echo Journal chooser, and Nexus reads the result back before a step counts as done.'}},
+            {page = 'rolling', title = 'Auto, rolling and saving', paras = {
+                'Without Auto, Nexus only recommends: you choose every offer yourself.',
+                'Auto is a separate switch on the Nexus panel, with its own warning. This guide never turns it on or off.'}},
+            {page = 'orbs', title = 'Orbs / Lost Memories', paras = {
+                'Orb runs are optional and separate from setup. Opening the Orbs window, reading it or using Max spends nothing.',
+                'A run spends Orbs only after you press Start, within the maximum you approve. Closing the window does not stop a run: use Pause or Stop.'}},
+            {page = 'sharing', title = 'Shared builds and DPS', paras = {
+                'Sharing a build is always its own confirmed action. Sent is not delivered, and a shared build cannot be recalled.',
+                'What Sync sends depends on your saved Sync mode; with Sync Off, Nexus sends nothing. This guide never sends anything.'}},
+            {page = 'troubleshooting', title = 'Problems and bug reports', paras = {
+                'Something wrong? Type /nexus report before any reload, then Copy summary. Do not reload, reset or clear data to recreate it.',
+                'A prepared report file stays on this computer. Send it privately, never in public.'}}}},
     welcome = {title = 'Welcome to Nexus', titleReplay = 'Welcome back',
         body = 'Nexus recommends Echoes from a Wishlist you choose. This guide links one Wishlist to one Saved Build and shows you what a recommendation looks like.',
         bodyReplay = 'Replaying the guide resets nothing. It re-checks what is already set and lets you change anything safely.',
@@ -985,13 +1005,18 @@ T.Guide = {
         explore = 'Not part of a look-around',
         rows = {wishlist = 'Choose a Wishlist', target = 'Pick the Saved Build', assign = 'Assign & confirm',
             manual = 'Read a recommendation', auto = 'Auto (optional)'},
-        wishDone = '%s', wishSkipped = 'Skipped. No Wishlist chosen.', wishNot = 'Not chosen',
+        -- Each row is this guide's own progress; "in this guide" keeps a row
+        -- from reading as the game's assignment, which currentNote states
+        -- apart (read just now, never a completed step).
+        wishDone = '%s', wishSkipped = 'Skipped. No Wishlist chosen.', wishNot = 'Not chosen in this guide',
         wishDraft = 'A draft is open, not saved', wishPartial = 'The save did not finish', wishUncertain = 'The save may or may not have happened',
-        targetSkipped = 'Skipped', targetNot = 'Not chosen',
+        targetSkipped = 'Skipped', targetNot = 'Not chosen in this guide',
         assignDone = '%s follows %s. Confirmed by read back.', assignTrue = '%s already follows %s. Read back; not changed by this guide.',
         assignSkipped = 'Skipped. Nothing was assigned.', assignWaiting = 'Chooser opened, nothing chosen yet.',
         assignRejected = 'Nexus declined the assignment.', assignUnknown = "Not confirmed. Nexus didn't answer.",
-        assignStale = 'It was confirmed, but something changed since. Needs a fresh check.', assignNot = 'Not assigned',
+        assignStale = 'It was confirmed, but something changed since. Needs a fresh check.', assignNot = 'Not assigned by this guide',
+        currentNote = 'In the game now (read just now, not set or confirmed by this guide): %s follows %s.',
+        currentUnknown = 'What the game follows now could not be read just now.',
         manualDone = 'Tried the preview', manualSkipped = 'Skipped', manualNot = 'Not tried',
         autoUnknown = "Mode not reported. This guide didn't touch it.", autoMode = '%s, unchanged by this guide',
         autoNotReviewed = '%s - not reviewed',

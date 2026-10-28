@@ -59,14 +59,14 @@ foreground(orb,help);unchanged(before,'Help and Orb timer reads with a paused re
 button(help,'Close'):Click();button(orb.advanced,'Recheck'):Click();unchanged(before,'actual Recheck after Help')
 M.Stop();assert(M.Status().pending and H.Count('orb-spend')==1 and H.Count('take')==0,'pending exposure retained without an extra mutation')
 -- The Orb window's Help: the guided setup coach in this window's place, not
--- the manual. While an Auto warning waits, the coach refuses and the
--- Reference answers above the Orb window instead.
+-- the manual. While an Auto warning waits, the coach refuses and says why;
+-- the Orb window stays and no manual opens (Reference is its own button).
 Nexus.OrbPanel.Show();before=snapshot()
 local waiting=Nexus.OverwriteWarning and Nexus.OverwriteWarning.IsOpen and Nexus.OverwriteWarning.IsOpen()
 button(orb,'Help'):Click()
 if waiting then
- assert(help:IsShown()and help.page:GetText()=='Page 5 / 7'and orb:IsShown(),'refused coach: Help answers with the Orbs Reference above the Orb window')
- button(help,'Close'):Click()
+ assert(not help:IsShown()and orb:IsShown()and not (NexusGuidedSetup and NexusGuidedSetup:IsShown()),
+  'refused coach: the Orb window stays and Help opens no manual')
 else
  assert(NexusGuidedSetup and NexusGuidedSetup:IsShown()and not help:IsShown()and not orb:IsShown(),
   'actual Orb Help button opens the guided setup coach in the Orb window\'s place, not the manual')

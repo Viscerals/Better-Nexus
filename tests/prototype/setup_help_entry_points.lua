@@ -6,9 +6,9 @@
 -- offers Help as the guided setup coach through Help's guarded route
 -- (Help.OpenGuide, as the Options menu and /nexus help take it) and the
 -- manual under its own name, Reference. While an Auto warning waits for its
--- answer the coach does not open and says why; Help then answers with the
--- read-only Reference. The coach's own manual links and chat say Reference
--- or /nexus help, not Help.
+-- answer the coach does not open and says why; the window stays for a retry
+-- and nothing else opens (Reference is never chosen in Help's place). The
+-- coach's own manual links and chat say Reference or /nexus help, not Help.
 -- Categories (view_regression_support): EXPECT is behaviour added by this
 -- change (predicted from source to fail on the review3 cut, where these Help
 -- buttons call Help.Show("start"); not executed by the author). GUARD is
@@ -132,16 +132,20 @@ for index,p in ipairs(PRESENTATIONS) do
    'manual='..manual.n..' page='..tostring(manual.args and manual.args[1])..' coach='..coach.n)
   Reset()
 
-  -- The warning-open refusal and fallback contract of the Options menu and
-  -- /nexus help: the coach says why and the read-only Reference answers.
+  -- The warning-open refusal of the Options menu and /nexus help: the coach
+  -- says why; nothing else opens and the setup window stays for a retry
+  -- (composition review item 4 replaced the earlier Reference fallback).
   p.open()
   local fallback,said
   Refusing(function()
    said=Heard(function() fallback=Spy(Nexus.Help,'Show',function() help:Click() end) end)
   end)
-  C.expect(fallback.n==1 and fallback.args[1]=='start' and said:find('Answer the open warning',1,true)~=nil and not CoachShown(),
-   tag..': while an Auto warning waits, Help says why and opens the Reference instead of the coach',
+  C.expect(fallback.n==0 and said:find('Answer the open warning',1,true)~=nil and not CoachShown() and WelcomeShown(),
+   tag..': while an Auto warning waits, Help says why, opens no Reference and the setup window stays',
    'reference='..fallback.n..' said='..said)
+  -- The retry once the coach can open: Help then takes the window's place.
+  help:Click()
+  C.expect(CoachShown() and not ManualShown() and not WelcomeShown(),tag..': Help again opens the coach in the setup window\'s place')
   Reset()
   C.guard(Effects()==before and Saved()==saved,tag..': every route only navigates: no action, send, saved change or Auto change',
    before..' -> '..Effects())
@@ -175,8 +179,8 @@ C.scenario('K1 the setup checklist: Help opens the coach in its place, Reference
  local fallback
  Refusing(function() fallback=Spy(Nexus.Help,'Show',function() f.help:Click() end) end)
  local notice=V.Plain(f.notice:GetText() or '')
- C.expect(f:IsShown() and notice:find('Answer the open warning',1,true)~=nil and fallback.n==1 and fallback.args[1]=='start',
-  'K1: while an Auto warning waits, the checklist shows why and Help opens the Reference instead',notice)
+ C.expect(f:IsShown() and notice:find('Answer the open warning',1,true)~=nil and fallback.n==0,
+  'K1: while an Auto warning waits, the checklist shows why, stays and opens no Reference',notice)
 
  -- Without Help's route the reason is shown in the window and nothing raises.
  local help=Nexus.Help

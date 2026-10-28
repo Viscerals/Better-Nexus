@@ -1767,6 +1767,26 @@ local function Install()
     -- set; without this it renders as a mangled sliver.
     pcall(function() PanelTemplates_TabResize(ourTab, 0) end)
     pcall(function() PanelTemplates_DeselectTab(ourTab) end)
+    -- CharacterFrameTabButtonTemplate (3.3.5a export, CharacterFrameTemplates
+    -- .xml L51-68) resizes the tab again on every Show and DISPLAY_SIZE_CHANGED
+    -- to the host's maxTabWidth or 88, which can cut "Nexus Progress". These
+    -- post-hooks run after the inherited handlers and size this tab alone to
+    -- its whole label again; the host's own maxTabWidth and its tabs are left
+    -- as they are. The full name is also on hover. Once per tab.
+    if not ourTab._nexusTabLifecycle and ourTab.HookScript then
+        ourTab._nexusTabLifecycle = true
+        local function Fit() pcall(function() PanelTemplates_TabResize(ourTab, 0) end) end
+        ourTab:HookScript("OnShow", Fit)
+        ourTab:HookScript("OnEvent", function(_, event) if event == "DISPLAY_SIZE_CHANGED" then Fit() end end)
+        ourTab:HookScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine(TAB_LABEL, 1, 0.82, 0)
+            GameTooltip:AddLine("Opens Nexus's progress page in the Echo Journal. Opening it changes nothing.", 0.85, 0.85, 0.85, true)
+            GameTooltip:Show()
+        end)
+        ourTab:HookScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    end
     ourTab:Show()
     -- A second click closes the Advisor again. When the host hides the
     -- numbered tabs, no stock tab click is left to do that.

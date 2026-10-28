@@ -151,14 +151,22 @@ for _,command in ipairs({'help','tutorial','guide'})do
 end
 NexusGuidedSetup:Hide()
 SlashCmdList.NEXUS('reference');check(f:IsShown() and not NexusGuidedSetup:IsShown(),'reference reopens the reference pages after the coach')
--- When the coach cannot open (here: its window is not loaded), help still
--- answers with the read-only reference pages and says why.
+-- When the coach cannot open (here: its window is not loaded), help says why
+-- and opens nothing else: the reference pages stay the player's own choice
+-- (/nexus reference, named in the reply). Updated from the earlier fallback
+-- to the reference pages (composition review item 4: Help never chooses the
+-- manual by itself).
 f:Hide()
 local realUI=Nexus.GuidedSetupUI;Nexus.GuidedSetupUI=nil
 local said=Heard(function() SlashCmdList.NEXUS('help') end)
 Nexus.GuidedSetupUI=realUI
-check(f:IsShown() and said:find('Guided setup is not available',1,true)~=nil,'help without the coach opens the reference pages and says why: '..said)
-check(#H.actions==actions and #H.sent==sent,'the help fallback acts and sends nothing')
+check(not f:IsShown() and said:find('Guided setup is not available',1,true)~=nil and said:find('/nexus reference',1,true)~=nil,
+ 'help without the coach says why, names /nexus reference and opens no reference page: '..said)
+check(#H.actions==actions and #H.sent==sent,'the refused help acts and sends nothing')
+-- The retry: once the coach can open, the same command opens it.
+said=Heard(function() SlashCmdList.NEXUS('help') end)
+check(NexusGuidedSetup:IsShown() and not f:IsShown(),'help again opens the coach once it can: '..said)
+NexusGuidedSetup:Hide()
 local commands=Nexus.Help.Pages[6].text
 check(commands:find('/nexus help or /nexus tutorial - Guided setup at your current step',1,true)
  and commands:find('/nexus guide - Guided setup',1,true) and commands:find('/nexus reference - these reference pages',1,true)

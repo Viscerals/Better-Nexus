@@ -1619,7 +1619,9 @@ local function EnsureFrame()
 
     local autoLockLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     autoLockLabel:SetPoint("LEFT", autoLockCheck, "RIGHT", 2, 0)
+    autoLockLabel:SetJustifyH("LEFT")
     autoLockLabel:SetText("Auto-manage locked Echo slots")
+    frame._autoLockLabel = autoLockLabel
 
     -- Nexus-native EBH1 import/export. Closures deliberately reference only
     -- the global StaticPopup_Show and a string literal -- no module-level
@@ -1699,6 +1701,19 @@ local function EnsureFrame()
         Controller.SetSearch(self:GetText() or "")
         requestRefresh()
     end)
+    -- The design's "Search Echoes" placeholder: shown while the box is empty
+    -- and not being typed in; the filter itself is unchanged.
+    searchBox._nexusHint = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    searchBox._nexusHint:SetPoint("LEFT", searchBox, "LEFT", 6, 0)
+    searchBox._nexusHint:SetText("Search Echoes")
+    local function SyncSearchHint(self)
+        local empty = (self:GetText() or "") == ""
+        if empty and not self._nexusFocused then self._nexusHint:Show() else self._nexusHint:Hide() end
+    end
+    searchBox:HookScript("OnTextChanged", SyncSearchHint)
+    searchBox:HookScript("OnEditFocusGained", function(self) self._nexusFocused = true; SyncSearchHint(self) end)
+    searchBox:HookScript("OnEditFocusLost", function(self) self._nexusFocused = nil; SyncSearchHint(self) end)
+    SyncSearchHint(searchBox)
 
     classCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
     classCheck:SetPoint("LEFT", searchBox, "RIGHT", 18, 0)
@@ -1734,6 +1749,33 @@ local function EnsureFrame()
     frame._workspaceMyBuildsBtn:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
+    -- The Auto-manage label ends 8 units left of My Builds (game) in the
+    -- closed state, at every slot count and Locked (n/m) width: its room is
+    -- worked out from the same anchors (the Locked label at x 540, 18-unit
+    -- slots 4 apart, the checkbox 26 right of the last), then the whole label,
+    -- else "Auto-manage", one line; the complete name is on hover over the
+    -- label and the checkbox. Presentation only; the checkbox is unchanged.
+    local autoLockHit = Nexus.LayoutMetrics and Nexus.LayoutMetrics.FullTextTooltip
+        and Nexus.LayoutMetrics.FullTextTooltip(autoLockLabel, frame) or nil
+    frame._fitAutoLock = function(slots)
+        local full = "Auto-manage locked Echo slots"
+        local okL, lw = pcall(lockedLabel.GetStringWidth, lockedLabel)
+        lw = okL and tonumber(lw) or 60
+        local left = 540 + lw + 8 + (22 * (tonumber(slots) or 6) - 4) + 26 + 22 + 2
+        local right = (tonumber(frame:GetWidth()) or 1040) - 34 - 140 - 8
+        local room = math.floor(right - left)
+        autoLockLabel:SetText(full)
+        local okF, fw = pcall(autoLockLabel.GetStringWidth, autoLockLabel)
+        fw = okF and tonumber(fw) or (#full * 6)
+        if fw > room then autoLockLabel:SetText("Auto-manage") end
+        if type(autoLockLabel.SetWordWrap) == "function" then pcall(autoLockLabel.SetWordWrap, autoLockLabel, false) end
+        autoLockLabel:SetSize(math.max(1, room), 14)
+        autoLockLabel._nexusFullText = full
+        if room < 24 then autoLockLabel:Hide() else autoLockLabel:Show() end
+        if autoLockHit then if room < 24 then autoLockHit:Hide() else autoLockHit:Show() end end
+        return room
+    end
+    frame._fitAutoLock(6)
 
     local header = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     header:SetPoint("TOPLEFT", 34, -158)
@@ -2098,6 +2140,8 @@ local function RefreshView(catalogRevision)
             autoLockCheck:SetPoint("LEFT", lockedIcons[slotCount], "RIGHT", 26, 0)
             autoLockCheck._nexusAnchorSlot = slotCount
         end
+        -- The Locked (n/m) text and the slot count move the label's room.
+        if frame._fitAutoLock then frame._fitAutoLock(slotCount) end
         local fi = 1
         for i = 1, slotCount do
             local btn, needBtn = lockedIcons[i], lockedNeedIcons[i]
@@ -2921,6 +2965,11 @@ end
     end
 
     function M.RenderIntentControls(apply, saving, blocked)
+        -- The window's one primary action (design: filled primary Save); a
+        -- disabled one is drawn as any disabled button (Theme.SetPrimary).
+        -- Presentation only: the action and its confirmation are unchanged.
+        local theme = Nexus.Theme
+        if apply and theme and type(theme.SetPrimary) == "function" then theme.SetPrimary(apply, true) end
         local button = frame and frame._saveOnlyBtn
         if not (apply and button) then return end
         local choice = not saving and frame._saveChoice == true

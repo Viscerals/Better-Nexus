@@ -279,7 +279,11 @@ assert(checkedRows>=1,'the current appearance is checked in the direct Options l
 for _,text in ipairs({'Open Settings...','Hide Nexus Panel','Log viewer...',Nexus.Updates.Status().menu or 'Open Releases page'})do
  assert(found[text] and type(found[text].func)=='function','Options offers '..text..' directly')
 end
-assert(#top<=P.OPTIONS_MENU_MAX_ROWS,'the top level stays within the stock dropdown row limit: '..#top)
+-- No stock row cap is asserted: the 3.3.5a dropdown export starts at 8 rows
+-- and grows them per item; whether the menu fits the screen is native NOT_RUN.
+local labelled=0
+for _,item in ipairs(top)do if type(item.text)=='string' and item.text~='' then labelled=labelled+1 end end
+assert(labelled==#top,'every top-level Options row has a label: '..labelled..'/'..#top)
 assert(T.Equal(db,NexusDB),'opening the menu writes no saved data')
 assert(#H.actions==actions,'opening the menu sends no game action')
 assert(P.AutoSelectedNow()==autoBefore and f._autoBtn:GetText()==autoText,'opening the menu leaves Auto as it was')

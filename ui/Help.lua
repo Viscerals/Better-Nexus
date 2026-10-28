@@ -462,16 +462,19 @@ end
 -- "Nexus Setup Alternative": Help opens the coach, the manual is Reference on
 -- request). Help is the guided setup coach at its current step (H.OpenGuide).
 -- When the coach cannot open (an Auto warning waits for its answer) it has
--- said why and the read-only Reference answers at `page` instead, so Help
--- always answers. `leave` (optional) hides the calling window afterwards, for
--- a window whose layer is above the coach or Reference; it is told whether
--- the coach opened. Opening either assigns, saves, sends, spends and changes
--- Auto nothing. Returns true when the coach opened.
+-- said why in chat, and nothing else opens: the manual is Reference, the
+-- player's own separate choice, never a substitute for Help. The calling
+-- window then stays as it is (its draft, popup or confirmation included), so
+-- the player can answer the warning and press Help again. `leave` (optional)
+-- hides the calling window, for a window whose layer is above the coach; it
+-- runs only once the coach opened (and is told so). Opening the coach
+-- assigns, saves, sends, spends and changes Auto nothing. Returns true when
+-- the coach opened, else false and the reason.
 function H.OpenHelp(page,leave)
-    local opened=H.OpenGuide()==true
-    if type(leave)=="function" then leave(opened) end
-    if not opened then H.Show(page) end
-    return opened
+    local opened,why=H.OpenGuide()
+    if opened~=true then return false,why end
+    if type(leave)=="function" then leave(true) end
+    return true
 end
 -- A window's Reference button: the manual at that window's own page. `leave`
 -- as for H.OpenHelp, run first, as the earlier contextual Help did.

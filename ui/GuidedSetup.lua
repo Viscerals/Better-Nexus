@@ -9,10 +9,12 @@
 -- guide read (otherwise WHAT YOU WILL SEE). The footer is the Wishlist step's
 -- one Selected name, Continue across the row, the gate hint, then Back, Skip
 -- for now and Continue later (the same close as X: the place is kept). The
--- header's Reference replaces the step with an optional topic list (each
--- topic one Help page, opened in place of the guide) and its own way back;
--- it is never shown under a step. The older notes below on the inline Help
--- card and the Help side panel describe what Reference replaced. The design's
+-- header's Reference replaces the step with an optional topic list; a topic
+-- opens its short article in the same view (All topics, or Escape, returns
+-- to the list), and a separately labelled Open full Reference opens the
+-- dense manual in place of the guide. It has its own way back and is never
+-- shown under a step. The older notes below on the inline Help card and the
+-- Help side panel describe what Reference replaced. The design's
 -- 640 px window with a scrolling body and a pinned footer is the bounded
 -- window (Bound, ScreenCap): on a readable UI size the coach is at most 640 px
 -- tall and its body scrolls; text is no longer shrunk with the whole window.
@@ -90,6 +92,8 @@ local CW = W - 2 * PAD
 -- at normal and enlarged text (the design's 960 px and 1100 px).
 local WIDE = {w = 900, nav = 208, aside = 232, need = 960, needLarge = 1100}
 local GAP, MIN_H, BLOCK_MAX = 8, 360, 220
+-- The tallest the bounded window grows (Setup Alternative "Compact 640px").
+local MAX_H = 640
 local WHITE = 'Interface\\Buttons\\WHITE8X8'
 local HELP = {welcome = 'start', wishlist = 'wishlists', target = 'wishlists', assign = 'wishlists',
     manual = 'rolling', auto = 'rolling', summary = 'start'}
@@ -505,26 +509,17 @@ local function StatusIcon(kind, x, y)
     Text(Status(kind).glyph or '?', x, y - 1, ICON, 'head', solid and {0.06, 0.04, 0.03} or color, 'CENTER')
 end
 
--- A status chip: its icon and its word in the 12 px font, in a bordered box
--- (never colour alone). Its width is the icon and the word in the
--- conservative text model at the current font scale (its 10 px character
--- width scaled to the 12 px font), up to maxW; a longer word wraps and the
--- box grows to hold it. Returns its width and height.
-local function Chip(kind, word, x, y, right, maxW)
-    local str = word or Status(kind).word or ''
+-- A status word's width in the conservative text model at the current font
+-- scale (its 10 px character width scaled to the 12 px font), up to maxW; a
+-- longer word wraps under itself.
+local function WordWidth(str, maxW)
     local metrics = Nexus.LayoutMetrics
     local char = metrics and metrics.ConservativeText and metrics.ConservativeText(metrics.RuntimeMetrics and metrics.RuntimeMetrics() or 1) or 7
-    local length = #(str:gsub('[\128-\191]', ''))
-    local w = math.max(ICON + 30, math.min(maxW or CW, math.ceil(length * char * 1.2) + ICON + 12))
-    if right then x = x - w end
-    local color = COLOR[kind] or MUTED
-    local h = math.max(18, Text(str, x + ICON + 8, y - 2, w - ICON - 12, 'strong', color) + 4)
-    StatusIcon(kind, x + 4, y - 2)
-    Box(x, y, w, h, color, {0.08, 0.06, 0.05}, 0.6)
-    return w, h
+    local length = #(tostring(str or ''):gsub('[\128-\191]', ''))
+    return math.max(24, math.min(maxW or CW, math.ceil(length * char * 1.2)))
 end
 
--- Go to step on a summary row: the design's borderless link under the chip,
+-- Go to step on a summary row: the design's small Go at the row's right end,
 -- in the link look of Skip for now with the 12 px font, sized to its label
 -- and right-aligned at `right`. It only moves the guide. Returns its width.
 local GO_H = 18
@@ -1121,26 +1116,49 @@ function VIEW.summary(g, s, ctx, c, y)
         if id == 'assign' and inPath and st.state == 'observed' then kind = 'observed' end
         local rt = y
         local half = math.floor(CW / 2)
-        -- One row, two text lines (the design's summary row): the step and
-        -- its detail on the left; on the right its chip and, under it on the
-        -- detail's line, Go to step as the design's small link, never a
-        -- button stacked under the chip.
-        local cw, chh = Chip(kind, word, PAD + CW - 6, y - 6, true, half)
-        local side, gh = cw, 0
+        -- The design's summary row (Setup Alternative Step 7), one line
+        -- across: the boxed icon, the step, its status word and a small Go,
+        -- with the step's detail as a second muted line under the step (an
+        -- adaptive wrap, not a second column). A long word or text wraps
+        -- inside its own column, so nothing overlaps at larger text.
+        local right, gw = PAD + CW - 6, 0
         if inPath and kind ~= 'verified' and kind ~= 'observed' and not (id == 'auto' and s.autoKept) then
             local target = id
-            local gw = GoLink(b.goStep, function() g.GoTo(target) end, PAD + CW - 6, y - 8 - chh, half)
-            side, gh = math.max(cw, gw), 2 + GO_H
+            gw = GoLink(b.goStep, function() g.GoTo(target) end, right, y - 6, half)
         end
-        local lh = Text((fin.rows or {})[id] or id, PAD + 8, y - 6, CW - side - 24, 'head', TEXT)
-        lh = lh + Text(Detail(id, kind), PAD + 8, y - 8 - lh, CW - side - 24, 'body', MUTED) + 2
-        local rh = math.max(lh, chh + gh + 2, 22) + 8
+        local str = word or Status(kind).word or ''
+        local wordRight = right - (gw > 0 and gw + 6 or 0)
+        local ww = WordWidth(str, half - (gw > 0 and gw + 6 or 0))
+        -- The word is drawn just before its icon's glyph (tests read them
+        -- as one pair).
+        local wh = Text(str, wordRight - ww, y - 8, ww, 'strong', COLOR[kind] or MUTED, 'RIGHT')
+        local ix = PAD + 8
+        StatusIcon(kind, ix, y - 6)
+        local lx = ix + ICON + 8
+        local lw = math.max(40, wordRight - ww - 8 - lx)
+        local lh = Text((fin.rows or {})[id] or id, lx, y - 6, lw, 'head', TEXT)
+        lh = lh + Text(Detail(id, kind), lx, y - 8 - lh, lw, 'body', MUTED) + 2
+        local rh = math.max(lh, wh + 2, ICON, gw > 0 and GO_H or 0) + 10
         Fill(PAD + 1, y - rh, CW - 2, 1, {0.3, 0.24, 0.18}, 1)
         y = rt - rh
     end
     local sh = Text(fin.sent, PAD + 8, y - 6, CW - 16, 'muted', MUTED) + 12
     Box(PAD, rowsTop, CW, rowsTop - y + sh, {0.4, 0.32, 0.22}, {0.1, 0.08, 0.06}, 0.5)
     y = y - sh - GAP
+    -- What the game follows now, read for this render (core
+    -- CurrentAssignment), apart from the rows above: they are this guide's
+    -- own progress, so "Not chosen in this guide" never contradicts a panel
+    -- that shows an assignment. The note selects, completes and keeps
+    -- nothing; a confirmed or already read link says it in its row instead.
+    local cur = ctx.current
+    if cur and not explore and not (sm.complete or sm.trueNow) then
+        if cur.state == 'assigned' or cur.state == 'roles' then
+            local where = cur.destination and TargetLabel(cur.destination, cur.destName) or '?'
+            y = y - Text(Fmt(fin.currentNote, where, Name(cur.name)), PAD, y, CW, 'body', COLOR.observed) - GAP
+        elseif cur.state == 'unknown' and fin.currentUnknown then
+            y = y - Text(fin.currentUnknown, PAD, y, CW, 'body', COLOR.unavailable) - GAP
+        end
+    end
     -- Optional lessons: separate, never blocking setup.
     y = y - Text((fin.more or '') .. ' ' .. (fin.moreSub or ''), PAD, y, CW, 'body', TEXT) - 6
     for _, l in ipairs(fin.lessons or {}) do
@@ -1174,18 +1192,42 @@ local function Character()
     return table.concat(parts, ' - ')
 end
 
+-- Where the coach's top edge starts below the UI's top: where a full-height
+-- (MAX_H) coach centred 40 px above the middle had it before, so the tallest
+-- step opens where it did. The coach is held by its top (Setup Alternative:
+-- the dialog is aligned at its top), so its header, Reference and X stay put
+-- while a step, All steps or Reference changes the height below them.
+local function TopOffset()
+    local ok, h = pcall(UIParent.GetHeight, UIParent)
+    h = ok and tonumber(h) or nil
+    if not h or h < 480 then return 24 end
+    return math.max(12, math.floor((h - math.min(MAX_H, h - 24)) / 2) - 40)
+end
+
 local function Ensure()
     if frame then return frame end
     frame = CreateFrame('Frame', 'NexusGuidedSetup', UIParent)
     frame:SetSize(W, MIN_H)
-    frame:SetPoint('CENTER', UIParent, 'CENTER', 0, 40)
+    frame:SetPoint('TOP', UIParent, 'TOP', 0, -TopOffset())
     frame:SetFrameStrata('DIALOG')
     frame:SetClampedToScreen(true)
     frame:EnableMouse(true)
     frame:SetMovable(true)
     frame:RegisterForDrag('LeftButton')
     frame:SetScript('OnDragStart', function(self) self:StartMoving() end)
-    frame:SetScript('OnDragStop', function(self) self:StopMovingOrSizing() end)
+    -- A moved coach is held again by its top-left corner where the player
+    -- put it (the client may anchor a moved frame by another corner, which
+    -- would move the header when the height changes). Its own scale's units.
+    frame:SetScript('OnDragStop', function(self)
+        self:StopMovingOrSizing()
+        local okL, left = pcall(self.GetLeft, self)
+        local okT, top = pcall(self.GetTop, self)
+        left, top = okL and tonumber(left) or nil, okT and tonumber(top) or nil
+        if left and top then
+            self:ClearAllPoints()
+            self:SetPoint('TOPLEFT', UIParent, 'BOTTOMLEFT', left, top)
+        end
+    end)
     -- The wheel scrolls a bounded body (U.ScrollWheel); otherwise it does nothing.
     frame:EnableMouseWheel(true)
     frame:SetScript('OnMouseWheel', function(_, delta) U.ScrollWheel(delta) end)
@@ -1264,8 +1306,9 @@ local function Ensure()
     if theme and theme.Exempt then theme.Exempt(box) else box._nexusThemeExempt = true end
     box:Hide()
     frame.importBox = box
-    -- Escape closes the topmost layer: the Reference view first (view.help),
-    -- then the coach
+    -- Escape closes the topmost layer: an open Reference article first
+    -- (back to the topics, view.topic), then the Reference view (back to the
+    -- step, view.help), then the coach
     -- exactly as Close does (U.Close). As for the Welcome
     -- (ui/QuickStart.lua), the coach itself is not listed in UISpecialFrames:
     -- a route that steps aside, a warning or another window hides it without
@@ -1277,7 +1320,10 @@ local function Ensure()
     local escape = CreateFrame('Frame', 'NexusGuidedSetupEscape', frame)
     escape:SetScript('OnHide', function(self)
         if not (frame and frame:IsVisible()) then return end
-        if view.help then view.help = false; self:Show(); U.Render(); return end
+        if view.help then
+            if view.topic then view.topic = nil else view.help = false end
+            self:Show(); U.Render(); return
+        end
         U.Close()
     end)
     frame:HookScript('OnShow', function() escape:Show() end)
@@ -1302,24 +1348,39 @@ local function Place(b, spec, x, y, w)
 end
 
 -- The optional Reference view (Setup Alternative), drawn in place of the
--- step while view.help is set: a way back to the step, its title and tag, one
--- lead line, then one row per topic. A topic opens its Help page in place of
--- the guide (U.OpenHelp, which returns to this step); Open full Help opens the
--- page for this step. Reading or opening changes nothing. Returns the y below.
+-- step while view.help is set. Its topic list: a way back to the step, the
+-- title and tag, one lead line, one row per topic. A topic opens its short
+-- article in this same view (view.topic): All topics returns to the list,
+-- and Escape goes article -> topics -> step -> close (Ensure's Escape child).
+-- The dense manual is a separate, explicitly labelled Open full Reference
+-- (U.OpenHelp), at the open topic's page or this step's. Reading, moving and
+-- opening change nothing. Returns the y below.
+local function Topic(r, page)
+    for _, topic in ipairs(r.topics or {}) do if topic.page == page then return topic end end
+end
 local function ReferenceView(c, b, labels, id, pos, y)
     local r = c.reference or {}
-    y = y - Actions({{label = Fmt(b.refBack, pos, labels[id] or id),
-        act = function() view.help = false end}}, PAD, y, CW) - GAP
-    y = y - Text(r.title, PAD, y, CW, 'title', GOLD) - 2
+    local topic = view.topic and Topic(r, view.topic) or nil
+    if not topic then view.topic = nil end
+    local back = topic and {label = b.allTopics or '< All topics', act = function() view.topic = nil end}
+        or {label = Fmt(b.refBack, pos, labels[id] or id), act = function() view.help = false end}
+    y = y - Actions({back}, PAD, y, CW) - 2
+    y = y - Text(topic and r.escTopics or Fmt(r.escStep, pos), PAD, y, CW, 'muted', MUTED) - GAP
+    y = y - Text(topic and topic.title or r.title, PAD, y, CW, 'title', GOLD) - 2
     y = y - Text(r.tag, PAD, y, CW, 'small', MUTED) - GAP
-    y = y - Text(r.lead, PAD, y, CW, 'body', TEXT) - GAP
-    for _, topic in ipairs(r.topics or {}) do
-        local page = topic.page
-        y = y - Row({label = topic.title .. '  >', act = function() U.OpenHelp(page) end}, PAD, y, CW) - 2
+    if topic then
+        for _, para in ipairs(topic.paras or {}) do y = y - Text(para, PAD, y, CW, 'body', TEXT) - GAP end
+    else
+        y = y - Text(r.lead, PAD, y, CW, 'body', TEXT) - GAP
+        for _, t in ipairs(r.topics or {}) do
+            local page = t.page
+            y = y - Row({label = t.title .. '  >', act = function() view.topic = page end}, PAD, y, CW) - 2
+        end
+        y = y - GAP
     end
-    y = y - GAP
     y = y - Text(r.full, PAD, y, CW, 'muted', MUTED) - 6
-    return y - Actions({{label = b.fullHelp, act = function() U.OpenHelp(HELP[id]) end}}, PAD, y, CW) - GAP
+    local page = topic and topic.page or HELP[id]
+    return y - Actions({{label = b.fullReference or b.fullHelp, act = function() U.OpenHelp(page) end}}, PAD, y, CW) - GAP
 end
 
 -- The outcome slot under the step's action (Setup Alternative): OBSERVED
@@ -1391,7 +1452,7 @@ end
 -- changes nothing. Native wheel dispatch over child buttons, clipping and
 -- pixels are NOT RUN.
 ------------------------------------------------------------------------
-local SCROLL = {max = 640, view = BLOCK_MAX + 20, step = 40, bar = 12}
+local SCROLL = {max = MAX_H, view = BLOCK_MAX + 20, step = 40, bar = 12}
 
 -- The tallest the coach may be on this UI, or nil to grow as before.
 local function ScreenCap()
@@ -1614,9 +1675,10 @@ function U.Render()
         auto = g.AutoState(), character = Character(),
         kept = type(g.PlaceKept) == 'function' and g.PlaceKept() or 'session'}
     ctx.summary = g.Summary()
-    -- What Nexus follows now, read for this render of the Wishlist step only
-    -- (VIEW.wishlist); never kept, so a later render reads it again.
-    if id == 'wishlist' and not view.help and type(g.CurrentAssignment) == 'function' then
+    -- What Nexus follows now, read for this render of the Wishlist step and
+    -- the summary only (VIEW.wishlist, VIEW.summary); never kept, so a later
+    -- render reads it again.
+    if (id == 'wishlist' or id == 'summary') and not view.help and type(g.CurrentAssignment) == 'function' then
         ctx.current = g.CurrentAssignment()
     end
     local metrics = Nexus.LayoutMetrics
@@ -1640,7 +1702,7 @@ function U.Render()
     Place(f.close, {label = b.close, tip = ctx.kept == 'saved' and b.closeTip or b.closeTipSession or b.closeTip,
         act = function() U.Close() end}, nil, nil, 26)
     f.close:SetPoint('TOPRIGHT', f, 'TOPRIGHT', -12, -14)
-    Place(f.help, {label = b.help, act = function() view.help = not view.help end}, nil, nil, 52)
+    Place(f.help, {label = b.help, act = function() view.help, view.topic = not view.help, nil end}, nil, nil, 52)
     if metrics and metrics.FitButtonWidth then metrics.FitButtonWidth(f.help, 52, 140) end
     f.help:SetPoint('TOPRIGHT', f, 'TOPRIGHT', -42, -14)
     if Nexus.Theme and Nexus.Theme.SetSelected then Nexus.Theme.SetSelected(f.help, view.help) end
@@ -1768,7 +1830,7 @@ function U.Render()
     -- Everything taken from the pools so far is the body; the rest is footer.
     local bodyUsed = {}
     for kind, p in pairs(pools) do bodyUsed[kind] = p.used end
-    local scrollKey = id .. (reference and ':reference' or '') .. (view.wide and ':wide' or '')
+    local scrollKey = id .. (reference and (':reference:' .. tostring(view.topic or '')) or '') .. (view.wide and ':wide' or '')
     y = y - GAP
     local rowW = W - 2 * EDGE
     if reference then
@@ -2090,7 +2152,7 @@ function U.OpenHelp(page)
     if not (f and f:IsShown()) then return pcall(help.Show, page) end
     -- The Reference view gives way to full Help; closing Help returns to the
     -- step itself, not to the topic list.
-    view.help = false
+    view.help, view.topic = false, nil
     f.waiting, f.waitingKind = true, 'help'
     f:Hide()
     local ok = pcall(help.Show, page, function()
@@ -2196,7 +2258,7 @@ function U.Close(reason)
     local onClose = frame.firstUse
     local lines = CloseLines(reason)
     frame.firstUse, frame.waiting, frame.waitingKind, frame.buildsRoute, frame.planAsk = nil, nil, nil, nil, nil
-    view.help = false
+    view.help, view.topic = false, nil
     frame:Hide()
     for _, line in ipairs(lines) do if line then Say(line) end end
     if type(onClose) == 'function' then pcall(onClose) end

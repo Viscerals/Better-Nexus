@@ -109,7 +109,8 @@ C.scenario('X2 the Leaderboard (Records): Help opens the coach, Reference the Sh
  if wish then
   C.expect(G.Apart(r,G.Rect(wish,f)) and G.Inside(r,root),'X2: Help sits beside the other nav buttons, inside the window',G.Text(r))
  end
- local title=Text(f,'Explore / Leaderboard')
+ -- The window is titled Records (composition pass; earlier "Explore / Leaderboard").
+ local title=Text(f,'Records')
  C.expect(G.Inside(x,root) and Holds(reference) and (not title or G.Apart(TitleRect(f,title),x)),
   'X2: Reference is inside the window, holds its label and is clear of the centred title',G.Text(x))
  for _,label in ipairs({'Sync Now'}) do

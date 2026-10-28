@@ -1211,15 +1211,19 @@ end
 -- changes nothing. The reply says where the full manual moved, as the design
 -- asks for this changed habit. When the coach does not open (an Auto warning
 -- waits for its answer, or it is not loaded), Help.OpenGuide has printed why
--- and the read-only reference pages open instead, so Help always answers.
+-- and nothing else opens: the reply only names the retry and the separate
+-- /nexus reference, which stays the player's own choice.
 local function CommandHelp()
     local help = Nexus.Help
-    local opened = help and type(help.OpenGuide) == "function" and help.OpenGuide() == true
-    if opened then
+    if not (help and type(help.OpenGuide) == "function") then
+        Print("Guided setup is not available yet. Nothing was opened. The full manual: /nexus reference.")
+        return
+    end
+    if help.OpenGuide() == true then
         Print("Help opens Guided setup at your current step. The full manual: /nexus reference.")
         return
     end
-    CommandReference()
+    Print("Guided setup did not open; nothing else was opened. Type /nexus help again once it can open. The full manual: /nexus reference.")
 end
 
 EnsureMainCommands = function()

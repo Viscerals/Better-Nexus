@@ -485,6 +485,14 @@ local function refresh()
         fullStatus=fullStatus.."\nOriginal operation: "..name(s.operationName,true)
     end
     setFull(frame.status,shownStatus,fullStatus)
+    -- Start's own reason, beside it: only while Start (not Pause or Resume)
+    -- shows and the runtime says it cannot start; the same words as the status.
+    if frame.startWhy then
+        local why=(not busy and s.state~="PAUSED" and s.canStart==false) and truthful(s.startReason) or nil
+        why=why and tostring(why) or ""
+        local line=why:match("^[^\n]*") or ""
+        setFull(frame.startWhy,line~="" and ("Start: "..line) or "",why~="" and ("Start: "..why) or nil)
+    end
     frame.assignmentNote:SetText(a.mirrorNote or "")
     if advanced then
         local rows=s.sources or {};sourcePage=math.max(1,math.min(sourcePage,math.max(1,math.ceil(#rows/4))))
@@ -650,11 +658,15 @@ local function ensure()
         notify(primary(n,d.tracking and d.text==nil and shown==frame.limit.shownDraft,frame.historyReview))
     end)
     frame.stop=button(frame,470,-188,120,"Stop",function()notify(Nexus.OrbRuntime.Stop())end)
-    frame.approval=text(frame,20,-221,580,37,"Start approves this maximum: eligible surplus copies/recycling. Ordinary Auto OFF.\nUp to 2 recovery checks within this maximum; owned Echoes decide completion.")
+    -- Why Start would not start now, on the line right under the Start row
+    -- (one line; the whole reason on hover). The click still checks again.
+    frame.startWhy=text(frame,20,-213,580,12)
+    frame.approval=text(frame,20,-227,580,34,"Start approves this maximum: eligible surplus copies/recycling. Ordinary Auto OFF.\nUp to 2 recovery checks within this maximum; owned Echoes decide completion.")
     frame.usage=text(frame,20,-263,580,22);frame.status=text(frame,20,-289,580,74);frame.notice=text(frame,20,-364,440,24)
     -- Fixed boxes; a status or refusal longer than its box is complete in a tooltip.
     if Nexus.LayoutMetrics then
         frame.approvalHit=Nexus.LayoutMetrics.FullTextTooltip(frame.approval,frame)
+        frame.startWhyHit=Nexus.LayoutMetrics.FullTextTooltip(frame.startWhy,frame)
         frame.usageHit=Nexus.LayoutMetrics.FullTextTooltip(frame.usage,frame)
         frame.statusHit=Nexus.LayoutMetrics.FullTextTooltip(frame.status,frame)
         frame.noticeHit=Nexus.LayoutMetrics.FullTextTooltip(frame.notice,frame)

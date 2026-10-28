@@ -2432,6 +2432,9 @@ local DETAIL_STATUS = {
         "The selected build record is invalid and cannot be shown."},
     incomplete={"Build not available yet",
         "The full Echo list for this build is still arriving."},
+    -- No build selected: what the area is for, in place of an empty space.
+    none={"No build selected",
+        "Select a build on the left to see its Echoes, DPS records and owner. Selecting a build only reads it; nothing is sent, saved or assigned."},
 }
 
 local function ShowDetailStatus(kind)
@@ -2481,7 +2484,7 @@ local function RefreshDetailPanel(buildId, listPending)
     if not detailPanel then return end
     if buildId == nil then
         detailPanel._nexusShownId = nil
-        detailPanel:Hide(); HideDetailStatus(); return
+        ShowDetailStatus("none"); return
     end
     local projection = EnsureCommunityProjection()
     local detail, build
@@ -2907,9 +2910,20 @@ local function GetCard(parent)
             self:SetBackdropColor(0.07, 0.08, 0.11, 0.98)
             self:SetBackdropBorderColor(0.45, 0.55, 0.7, 1)
         end)
-        if self._fullTitle and self._displayTitle ~= self._fullTitle then
+        -- The complete title, and the complete owner and status line (the
+        -- row cuts it at its width), on the card's own hover, so no hover
+        -- area covers the card's click.
+        local cutTitle = self._fullTitle and self._displayTitle ~= self._fullTitle
+        local owner, cutOwner = self._fullAuthor, false
+        if owner and self.author then
+            local okW, textW = pcall(self.author.GetStringWidth, self.author)
+            local boxW = tonumber(self.author:GetWidth()) or 0
+            cutOwner = okW and tonumber(textW) ~= nil and boxW > 0 and tonumber(textW) > boxW + 0.5
+        end
+        if cutTitle or cutOwner then
             GameTooltip:SetOwner(self,"ANCHOR_TOP")
-            GameTooltip:AddLine(self._fullTitle,1,0.82,0,true)
+            GameTooltip:AddLine(self._fullTitle or "",1,0.82,0,true)
+            if cutOwner then GameTooltip:AddLine(owner,1,1,1,true) end
             GameTooltip:AddLine(
                 "Open build details for the complete title and records.",
                 0.8,0.8,0.8,true)
@@ -3751,6 +3765,11 @@ local function EnsureFrame()
     syncStatusText:SetJustifyH("LEFT")
     -- The responsive layout sizes this region to the rows its text needs.
     syncStatusText:SetJustifyV("TOP")
+    -- Diagnostics (the catalog version) are on hover, not in the line
+    -- (RenderSyncStatus sets the full text).
+    if Nexus.LayoutMetrics and type(Nexus.LayoutMetrics.FullTextTooltip) == "function" then
+        frame._syncStatusHit = Nexus.LayoutMetrics.FullTextTooltip(syncStatusText, frame)
+    end
 
     -- Left: scrollable card list -----------------------------------------
     -- Clip region (SetClipsChildren is retail-only on 3.3.5 -- same class
@@ -3897,14 +3916,16 @@ RenderSyncStatus = function(receiveCount)
             and (tonumber(stats.received) or 0) or 0
         local added = type(sync.LastSyncNewCount) == "function"
             and (tonumber(sync.LastSyncNewCount()) or 0) or 0
+        -- The catalog version is a diagnostic: it is on hover (below), not
+        -- in the line.
         if received > 0 then
             syncStatusText:SetText(string.format(
-                "|cff888888%d bundled + %d overlay; %d available; %d shown of %d results. Last sync added %d; catalog %s.|r",
-                bundled,overlay,available,shown,results,added,version))
+                "|cff888888%d bundled + %d overlay; %d available; %d shown of %d results. Last sync added %d.|r",
+                bundled,overlay,available,shown,results,added))
         else
             syncStatusText:SetText(string.format(
-                "|cff888888%d bundled + %d overlay; %d available; %d shown of %d results; catalog %s. Sync Now asks other Nexus users.|r",
-                bundled,overlay,available,shown,results,version))
+                "|cff888888%d bundled + %d overlay; %d available; %d shown of %d results. Sync Now asks other Nexus users.|r",
+                bundled,overlay,available,shown,results))
         end
     end
     local syncStats = type(sync.Stats) == "function" and sync.Stats() or {}
@@ -3923,6 +3944,10 @@ RenderSyncStatus = function(receiveCount)
     end
     if syncBtn then syncBtn:SetText(preparing and "Preparing..."
         or receiving and "Listening..." or "Sync Now") end
+    -- On hover: the whole line and its diagnostics (LayoutMetrics
+    -- FullTextTooltip reads _nexusFullText).
+    syncStatusText._nexusFullText = (syncStatusText:GetText() or "")
+        .. "\n|cff888888Catalog version: " .. tostring(version) .. "|r"
     -- The status region holds every row of this text. Its rows are measured
     -- against the width the layout gave it; only a change of rows re-lays
     -- the window (once), so ordinary refreshes reuse the current geometry.
@@ -4323,6 +4348,7 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
                         b.author or "?", 1024, false))
                 or "Unknown"
             card.author:SetText("by "..displayAuthor..ownerTag..qualityTag)
+            card._fullAuthor = card.author:GetText()
         end
         if IsSavedMirror(b) then
             if b.destinationWishlistName then
@@ -4447,7 +4473,10 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
         scrollBar:SetMinMaxValues(0,0)
         scrollBar.value = 0
         pcall(function() scrollFrame:SetVerticalScroll(0) end)
-        RefreshDetailPanel(nil)
+        -- No results: the list's own empty message speaks; the detail area
+        -- is left clear rather than asking for a selection from no rows.
+        if detailPanel then detailPanel._nexusShownId = nil; detailPanel:Hide() end
+        HideDetailStatus()
     else
         if frame._emptyState then frame._emptyState:Hide() end
         scrollChild:SetHeight(math.max(virtual.contentHeight, 10))

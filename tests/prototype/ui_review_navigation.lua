@@ -234,15 +234,15 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
   C.expect(coach.n==1,'V2: Help / Getting Started opens the guided setup coach (GuidedSetupUI.Show)',coach.n)
   C.expect(manual.n==0,'V2: Help / Getting Started does not open the long Reference manual (Help.Show)',manual.n)
   -- While an Auto warning waits for its answer the coach refuses and says
-  -- why (Help.OpenGuide); Help then answers with the read-only Reference,
-  -- as /nexus help does, and still changes nothing.
+  -- why (Help.OpenGuide); nothing else opens: Reference is its own entry
+  -- (composition review item 4 replaced the earlier fallback to the manual).
   local ui,real,refused=Nexus.GuidedSetupUI,Nexus.GuidedSetupUI.Show,0
   ui.Show=function() refused=refused+1;return false,'warning-open' end
   local fallback=Spy(Nexus.Help,'Show',function() help.func() end)
   ui.Show=real
-  C.expect(refused==1 and fallback.n==1 and fallback.args[1]=='start',
-   'V2: a refused coach (Auto warning open) leaves Help answering with the Reference start page, not a silent menu',
-   'refused='..refused..' reference='..fallback.n..' page='..tostring(fallback.args and fallback.args[1]))
+  C.expect(refused==1 and fallback.n==0,
+   'V2: a refused coach (Auto warning open) opens no Reference page in Help\'s place',
+   'refused='..refused..' reference='..fallback.n)
  end
  if reference then
   local manual

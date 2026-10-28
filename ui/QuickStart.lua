@@ -45,19 +45,23 @@ end
 -- (design/current "Nexus Setup Alternative": Help and Setup open the coach,
 -- Reference on request), through Help's own guarded route as the Options
 -- menu and /nexus help take it. While an Auto warning waits for its answer
--- the coach does not open and Help.OpenGuide says why; the read-only
--- Reference then opens instead, so Help always answers. Returns true only
--- when the coach opened. Opening either assigns, saves, sends, spends and
--- changes Auto nothing.
+-- the coach does not open and Help.OpenGuide says why; nothing else opens
+-- (Reference stays the player's own separate choice), and the reason is
+-- returned so the caller can keep it in view for a retry. Returns true only
+-- when the coach opened, else false and the reason. Opening it assigns,
+-- saves, sends, spends and changes Auto nothing.
 local function OpenHelpCoach()
     local help = Nexus.Help
     if type(help) == "table" and type(help.OpenGuide) == "function" then
-        if help.OpenGuide() == true then return true end
-        if type(help.Show) == "function" then help.Show("start") end
-        return false
+        local opened, why = help.OpenGuide()
+        if opened == true then return true end
+        return false, why
     end
     local ui = Nexus.GuidedSetupUI
-    return type(ui) == "table" and type(ui.Show) == "function" and ui.Show() == true or false
+    if not (type(ui) == "table" and type(ui.Show) == "function") then return false end
+    local opened, why = ui.Show()
+    if opened == true then return true end
+    return false, why
 end
 M.OpenHelpCoach = OpenHelpCoach
 
@@ -365,15 +369,19 @@ local function EnsureFrame()
     -- Help: the step-by-step coach (ui/GuidedSetup.lua), the prominent full
     -- row, through the guarded route above (OpenHelpCoach). Like the other
     -- entry buttons it only navigates: it records no setup fact, grants no
-    -- consent and never turns Auto ON. The Sync line moves down.
+    -- consent and never turns Auto ON. The coach is asked first: only once it
+    -- opened does it take this window's place (and the other setup windows
+    -- close). A refused coach has said why in chat; this window, and any
+    -- other open window with its draft, then stay for a retry, and nothing
+    -- else opens. The Sync line moves down.
     local guide = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     guide:SetSize(372, 26)
     guide:SetPoint("TOPLEFT", 24, -284)
     guide:SetText("Help: Guided setup")
     guide:SetScript("OnClick", function()
+        if not OpenHelpCoach() then return end
         Finish()
         CloseOtherSetupWindows()
-        OpenHelpCoach()
     end)
     frame.guide = guide
     local sync = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -633,11 +641,11 @@ local function EnsureChecklist()
     end)
     -- Help is the guided setup coach at its current step (Help.OpenGuide, as
     -- OpenHelpCoach above), which takes this window's place. When it cannot
-    -- open (an Auto warning waits for its answer) the reason is shown here and
-    -- the read-only Reference opens above this window, so Help always answers.
+    -- open (an Auto warning waits for its answer) the reason is shown here,
+    -- this window stays for a retry and nothing else opens: Reference, below,
+    -- is the player's own separate choice.
     f.help = button(286, 70, "Help", function()
-        if route("OpenGuide", "Guided setup is not available. Nothing was opened.") then return end
-        OpenReference()
+        route("OpenGuide", "Guided setup is not available. Nothing was opened.")
     end)
     f.close = button(362, 74, "Close", function() f:Hide() end)
     -- Reference, the optional long manual, on its own row above Help and

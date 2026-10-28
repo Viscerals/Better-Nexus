@@ -392,7 +392,9 @@ end
 -- build's own (the Saved Build step lists it), not this. `state`: 'assigned'
 -- or 'roles' (with key, name and slot), 'none', 'blocked' (the active Saved
 -- Build is empty or missing, so it follows nothing) or 'unknown' (Saved
--- Builds or the destination cannot be read now; nothing is guessed).
+-- Builds or the destination cannot be read now, including a missing or
+-- failing active-build reader: a first-run association kept from earlier is
+-- then never shown as current; nothing is guessed).
 -- `destination` and `destName` say where.
 function G.CurrentAssignment()
     local opts = G.TargetOptions()
@@ -480,12 +482,17 @@ end
 --   'first'   - the first-run target while a Saved Build is active, which
 --               the chooser does not assign to.
 -- Blocked options have no route.
+-- The active Saved Build comes from the adapter's SelectedSavedBuild only. A
+-- reader that is missing or fails is not a confirmed "no active Saved Build":
+-- the whole list is then unread (nil), so neither the first-run target nor
+-- any slot is taken as where the chooser assigns now.
 function G.TargetOptions()
     local a = Nexus.GameAdapter
     local ok, slots = Try(a and a.Slots)
     if not ok or type(slots) ~= 'table' or slots.activeKnown == false then return nil end
     local okS, sel = Try(a.SelectedSavedBuild, slots)
-    sel = okS and tonumber(sel) or nil
+    if not okS then return nil end
+    sel = tonumber(sel)
     local out, max = {}, math.min(10, tonumber(slots.maxSlots) or 5)
     for slot = 1, max do
         local row = type(slots.bySlot) == 'table' and slots.bySlot[slot] or nil

@@ -77,6 +77,39 @@ assert(status.mode=='journal-tabs' and status.anchor=='ProjectEbonholdEchoJourna
 assert(select(1,tab:GetPoint(1))=='TOPLEFT' and select(3,tab:GetPoint(1))=='TOPRIGHT' and tab:GetFrameLevel()==tabs[3]:GetFrameLevel())
 print('PASS lazy creation: installed on first open, anchored after the last shown journal tab')
 
+-- 1b. The inherited tab lifecycle (composition pass). SYNTHETIC model of the
+-- 3.3.5a export (CharacterFrameTemplates.xml L51-68): the template's own
+-- OnShow and DISPLAY_SIZE_CHANGED handlers resize the tab to the host's
+-- maxTabWidth or 88; the harness runs no template, so that call is made here
+-- first, then the tab's scripts (the Nexus post-hooks) run. The last resize
+-- must be this tab's own whole-label size (no maximum); the host's
+-- maxTabWidth is not changed. Native pixels and handler order NOT_RUN.
+do
+ local resizes,realResize={},PanelTemplates_TabResize
+ PanelTemplates_TabResize=function(t,padding,absolute,maxWidth)
+  if t==tab then resizes[#resizes+1]={padding=padding,max=maxWidth} end
+ end
+ journal.maxTabWidth=88
+ local function Inherited() PanelTemplates_TabResize(tab,0,nil,tab:GetParent().maxTabWidth or 88) end
+ Inherited();tab:Hide();tab:Show()
+ local last=resizes[#resizes]
+ assert(#resizes>=2 and last.max==nil,'after the inherited Show resize, the tab is sized to its whole label again: '..#resizes)
+ local onEvent=tab:GetScript('OnEvent')
+ assert(type(onEvent)=='function','the tab handles the display-size event')
+ resizes={};Inherited();onEvent(tab,'DISPLAY_SIZE_CHANGED')
+ assert(#resizes==2 and resizes[2].max==nil,'after a display-size change the tab is sized to its whole label again')
+ assert(journal.maxTabWidth==88,'the host\'s maxTabWidth is left as it was')
+ PanelTemplates_TabResize=realResize
+ local lines,realTip={},GameTooltip
+ GameTooltip={SetOwner=function()end,AddLine=function(_,text)lines[#lines+1]=tostring(text)end,Show=function()end,Hide=function()end}
+ local enter=tab:GetScript('OnEnter')
+ if enter then enter(tab) end
+ GameTooltip=realTip
+ assert(table.concat(lines,' '):find('Nexus Progress',1,true),'hovering the tab names it in full: '..table.concat(lines,' | '))
+ journal.maxTabWidth=nil
+end
+print('PASS the inherited tab resize is followed by the whole-label size; full name on hover')
+
 -- 2. Idempotent installation and hooks: repeated lifecycle calls add nothing.
 local points=H.Clone({tab:GetPoint(1)})
 for i=1,5 do J.TryInstall();EJ.Show();EJ.Toggle();EJ.Toggle()end

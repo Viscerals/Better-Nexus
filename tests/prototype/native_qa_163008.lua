@@ -3,13 +3,16 @@
 -- N1 Help in each Nexus window opens the guided setup coach (design/current
 --    "Nexus Setup Alternative": Help opens the coach, the manual is Reference
 --    on request); a separately labelled Reference opens that window's own
---    manual page. While an Auto warning waits, the coach refuses and Help
---    answers with that Reference page. The Records (Leaderboard) Help no
---    longer opens the seven-page manual. The manual keeps its privacy and
---    consent warnings.
+--    manual page. While an Auto warning waits, the coach refuses and says
+--    why; Help then opens nothing else and the window stays for a retry
+--    (composition review: Help never chooses the manual by itself). The
+--    Records (Leaderboard) Help no longer opens the seven-page manual. The
+--    manual keeps its privacy and consent warnings.
 -- N2 The Options menu offers every established route as a direct choice (no
---    single Manage submenu), with Appearance, within the stock dropdown's row
---    limit, opened at the Options button; Help text names those direct paths.
+--    single Manage submenu), with Appearance, opened at the Options button;
+--    Help text names those direct paths. No stock row cap or client minimum
+--    height is claimed (the dropdown export grows its rows); native fit is
+--    NOT_RUN.
 -- N3 Hide details collapses the Play panel's detail section (the four counts
 --    and the names behind them) and its space; Show details restores them
 --    with the same counts; a reload starts collapsed with the same counts.
@@ -69,12 +72,14 @@ local function Refusing(body)
  ui.Show=real
  assert(ok,err)
 end
-local function Quiet(fn)
- local realPrint=print
- print=function() end
+-- What was printed (chat) while fn ran, plain.
+local function Heard(fn)
+ local heard,realPrint={},print
+ print=function(...) heard[#heard+1]=tostring((...)) end
  local ok,err=pcall(fn)
  print=realPrint
  assert(ok,err)
+ return V.Plain(table.concat(heard,' / '))
 end
 
 C.setup(Nexus.StartupStatus().coreReady==true,'fixture: local start-up is ready')
@@ -121,11 +126,16 @@ for i,w in ipairs(WINDOWS) do
    'N1.'..i..': Reference opens the manual at the window\'s own page and not the coach',
    'manual='..manual.n..' page='..tostring(manual.args and manual.args[1])..' coach='..coach.n)
   Close();f=w.open();help,reference=w.buttons(f)
-  local fallback
-  Quiet(function() Refusing(function() fallback=Spy(Nexus.Help,'Show',function() help:Click() end) end) end)
-  C.expect(fallback.n==1 and fallback.args[1]==w.page,
-   'N1.'..i..': while an Auto warning waits, Help answers with the window\'s Reference page instead of nothing',
-   'reference='..fallback.n..' page='..tostring(fallback.args and fallback.args[1]))
+  -- Composition review item 4: a refused coach never makes Help choose the
+  -- manual. It says why; the calling window stays (with whatever it holds)
+  -- and pressing Help again once the coach can open opens it.
+  local fallback,said
+  Refusing(function() said=Heard(function() fallback=Spy(Nexus.Help,'Show',function() help:Click() end) end) end)
+  C.expect(fallback.n==0 and f:IsShown() and said:find('Answer the open warning',1,true)~=nil,
+   'N1.'..i..': while an Auto warning waits, Help says why, opens no Reference page and the window stays',
+   'reference='..fallback.n..' shown='..tostring(f:IsShown())..' said='..said)
+  coach,manual=Routes(function() help:Click() end)
+  C.expect(coach.n==1 and manual.n==0,'N1.'..i..': Help again opens the coach once it can','coach='..coach.n..' manual='..manual.n)
   Close()
   C.guard(NavEffects()==before,'N1.'..i..': Help and Reference only navigate: no action, send, setting or Auto change',NavEffects())
  end)
@@ -208,11 +218,15 @@ C.scenario('N2 Options offers every route directly, with Appearance, inside the 
  local submenus=0
  for _,item in ipairs(top) do if item.hasArrow then submenus=submenus+1 end end
  C.expect(submenus==3,'N2: only Appearance, Automation settings and Language open a list',submenus)
- -- The stock 3.3.5 dropdown: at most UIDROPDOWNMENU_MAXBUTTONS (32) rows of
- -- 16 px, plus its border; the UI is at least 768 units tall.
- C.expect(#top<=Nexus.Panel.OPTIONS_MENU_MAX_ROWS and Nexus.Panel.OPTIONS_MENU_MAX_ROWS<=32,
-  'N2: the top level stays within the stock dropdown row limit',#top)
- C.expect(#top*16+32<=768,'N2: the whole menu fits the smallest UI height',#top*16+32)
+ -- No stock row cap is claimed: the 3.3.5a UIDropDownMenu export starts at 8
+ -- buttons per level and grows them per added item (build 12340, L1-5 and
+ -- L178-229). The synthetic height below (16-unit rows plus a 32-unit
+ -- border) is recorded, not judged against any client minimum: whether the
+ -- menu fits the screen at a UI scale is native NOT_RUN.
+ print('OBSERVED','N2 synthetic menu height',#top..' rows',#top*16+32)
+ local unlabelled=0
+ for _,item in ipairs(top) do if not (type(item.text)=='string' and item.text~='') then unlabelled=unlabelled+1 end end
+ C.expect(#top>0 and unlabelled==0,'N2: every top-level row has a label',unlabelled)
  C.guard(Effects()==before,'N2: opening the menu changes nothing',Effects())
  -- Help is the coach; Reference is the manual's first page.
  local coach,manual=Routes(function() Item(top,'Help / Getting Started').func() end)

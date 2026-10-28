@@ -260,8 +260,8 @@ C.scenario('K6 its buttons and routes only navigate',function()
   'K6: Reference opens Getting started of the manual above the checklist, not the coach')
  if NexusHelpWindow then NexusHelpWindow:Hide() end
  -- While an Auto warning waits for its answer the coach refuses: the reason
- -- is shown in the checklist, which stays, and Help answers with the
- -- read-only Reference instead.
+ -- is shown in the checklist, which stays for a retry, and nothing else
+ -- opens (Reference is its own button; composition review item 4).
  local ui=Nexus.GuidedSetupUI
  if ui and f.help then
   local real=ui.Show
@@ -270,8 +270,8 @@ C.scenario('K6 its buttons and routes only navigate',function()
   ui.Show=real
   local notice=V.Plain(f.notice:GetText() or '')
   C.expect(ok and f:IsShown() and notice:find('Answer the open warning',1,true)~=nil
-   and _G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() and not (_G.NexusGuidedSetup and NexusGuidedSetup:IsShown()),
-   'K6: a refused coach says why in the checklist and Help opens the Reference instead',notice)
+   and not (_G.NexusHelpWindow and NexusHelpWindow:IsShown()) and not (_G.NexusGuidedSetup and NexusGuidedSetup:IsShown()),
+   'K6: a refused coach says why in the checklist, which stays, and opens no Reference',notice)
   if NexusHelpWindow then NexusHelpWindow:Hide() end
  end
  f.close:Click()

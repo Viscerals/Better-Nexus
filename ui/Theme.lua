@@ -18,7 +18,7 @@ local stats = {
     treeWalks=0, skippedTrees=0, nodesVisited=0,
     buttonsStyled=0, virtualRows=0, hooks=0, textures=0,
     windowsStyled=0, exemptTrees=0, resolves=0, reapplies=0,
-    reappliedControls=0, preferenceChanges=0,
+    reappliedControls=0, preferenceChanges=0, windowBases=0, tooltipBases=0,
 }
 
 local WHITE = "Interface\\Buttons\\WHITE8X8"
@@ -34,7 +34,7 @@ local STYLES = {
         summary="Default. A deep, quiet backdrop with Nexus Amethyst purple accents and glow.",
         windowBackdrop={bgFile=WHITE, edgeFile=EDGE, tile=false, edgeSize=12,
             insets={left=3, right=3, top=3, bottom=3}},
-        windowColor={0.030, 0.034, 0.046},
+        windowColor={0.030, 0.034, 0.046}, baseColor={0.030, 0.034, 0.046},
         shadeBottom={0, 0, 0, 0.30}, glowAlpha=0.14, accentAlpha=0.75,
         buttonBg={0.032, 0.038, 0.054, 0.96}, pressedBg={0.016, 0.020, 0.030, 1},
         text={0.94, 0.92, 0.86}, disabledText={0.52, 0.54, 0.57}, hoverAlpha=0.40,
@@ -46,7 +46,7 @@ local STYLES = {
         windowBackdrop={bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",
             edgeFile=EDGE, tile=true, tileSize=32, edgeSize=12,
             insets={left=4, right=4, top=4, bottom=4}},
-        windowColor={0.16, 0.165, 0.175},
+        windowColor={0.16, 0.165, 0.175}, baseColor={0.055, 0.057, 0.062},
         shade={0.10, 0.105, 0.115, 0.05},
         buttonBg={0.025, 0.03, 0.04, 0.96}, pressedBg={0.015, 0.02, 0.025, 1},
         text={0.92, 0.84, 0.62}, disabledText={0.48, 0.50, 0.52}, hoverAlpha=0.38,
@@ -169,11 +169,25 @@ local function SavedChoices()
     return style, palette, settings
 end
 
+-- A primary action (T.SetPrimary) is filled with the palette's hover colour
+-- while it is enabled; the style's text keeps its contrast on that fill. A
+-- disabled primary is drawn as any disabled button, so it never looks
+-- available. Every other button keeps the style's own fill.
+local function ButtonFill(button, enabled)
+    if button._nexusPrimary and enabled ~= false then
+        return Color(active.palette.hover, 1)
+    end
+    return Color(active.style.buttonBg)
+end
+
 local function ButtonState(button, enabled)
     local style, palette = active.style, active.palette
     if enabled == nil then
         local value = not button.IsEnabled or button:IsEnabled()
         enabled = value == true or value == 1
+    end
+    if button._nexusPrimary then
+        pcall(button.SetBackdropColor, button, ButtonFill(button, enabled))
     end
     local text = TextRegion(button)
     if enabled then
@@ -191,9 +205,13 @@ local function PaintButton(button)
     local style, palette = active.style, active.palette
     pcall(button.SetBackdrop, button,
         button._nexusCompact and COMPACT_BACKDROP or BUTTON_BACKDROP)
-    pcall(button.SetBackdropColor, button, Color(style.buttonBg))
+    pcall(button.SetBackdropColor, button, ButtonFill(button))
     local hover = button._nexusDarkHover
-    if hover then pcall(hover.SetVertexColor, hover, Color(palette.hover, style.hoverAlpha)) end
+    if hover then
+        -- On a primary fill the hover colour would not show; the accent does.
+        local tint = button._nexusPrimary and palette.accent or palette.hover
+        pcall(hover.SetVertexColor, hover, Color(tint, button._nexusPrimary and 0.25 or style.hoverAlpha))
+    end
     ButtonState(button)
 end
 
@@ -208,12 +226,38 @@ local function PaintInput(input)
     pcall(input.SetBackdropBorderColor, input, Color(active.palette.border, 0.95))
 end
 
+-- The opaque base under a styled window (T.StyleWindow). Its frame sits one
+-- level below the window in the window's strata, so the window's own
+-- backdrop, shade, accent line, text and children all draw above it. A window
+-- at level 0 has no lower level; it keeps its backdrop alone.
+local function SyncWindowBase(window)
+    local base = window._nexusWindowBase
+    if not base then return false end
+    local level = tonumber(window.GetFrameLevel and window:GetFrameLevel()) or 0
+    if level < 1 then base:Hide(); return false end
+    pcall(base.SetFrameLevel, base, level - 1)
+    base:Show()
+    return true
+end
+T._SyncWindowBase = SyncWindowBase
+
 local function PaintWindow(window)
     local style, palette = active.style, active.palette
     local c = style.windowColor
     pcall(window.SetBackdrop, window, style.windowBackdrop)
     pcall(window.SetBackdropColor, window, c[1], c[2], c[3], window._nexusWindowAlpha or 0.90)
     pcall(window.SetBackdropBorderColor, window, Color(palette.windowBorder, 0.95))
+    local base = window._nexusWindowBase
+    if base then
+        -- Inside the border, at the style's own backdrop insets.
+        local inset = style.windowBackdrop.insets and style.windowBackdrop.insets.left or 3
+        base:ClearAllPoints()
+        base:SetPoint("TOPLEFT", window, "TOPLEFT", inset, -inset)
+        base:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -inset, inset)
+        local b = style.baseColor or c
+        pcall(base._nexusFill.SetVertexColor, base._nexusFill, b[1], b[2], b[3], 1)
+        SyncWindowBase(window)
+    end
     local shade = window._nexusWindowShade
     if shade and style.shade then
         local s = style.shade
@@ -345,7 +389,9 @@ function T._OnMouseDown(self)
     if active then pcall(self.SetBackdropColor, self, Color(active.style.pressedBg)) end
 end
 function T._OnMouseUp(self)
-    if active then pcall(self.SetBackdropColor, self, Color(active.style.buttonBg)) end
+    if not active then return end
+    local enabled = not self.IsEnabled or self:IsEnabled()
+    pcall(self.SetBackdropColor, self, ButtonFill(self, enabled == true or enabled == 1))
 end
 function T._OnEnable(self) if active then ButtonState(self, true) end end
 function T._OnDisable(self) if active then ButtonState(self, false) end end
@@ -370,9 +416,109 @@ function T.StyleWindow(window, alpha)
     line:SetPoint("TOPLEFT", 6, -6)
     line:SetPoint("TOPRIGHT", -6, -6)
     window._nexusWindowAccent = line
+    -- #163 visual review: game text showed through windows that asked for
+    -- 0.94-0.98. The requested alpha is only the backdrop colour's; Nexus
+    -- Slate's tiled dialog background has its own partly transparent texels,
+    -- and every style's shade is translucent. An opaque base one level below
+    -- the window gives each style a solid floor behind its text while the
+    -- window still draws its own backdrop, texture, shade and border on top
+    -- (the same identity). Native effective opacity is not established here.
+    local base = CreateFrame("Frame", nil, window)
+    local fill = base:CreateTexture(nil, "BACKGROUND")
+    stats.textures = stats.textures + 1
+    fill:SetTexture(WHITE)
+    fill:SetAllPoints(base)
+    base._nexusFill = fill
+    window._nexusWindowBase = base
+    stats.windowBases = stats.windowBases + 1
+    -- A window raised or re-levelled while hidden takes its base along.
+    if window.HookScript then
+        window:HookScript("OnShow", SyncWindowBase)
+        stats.hooks = stats.hooks + 1
+    end
     windows[window] = true
     PaintWindow(window)
+    T.EnsureTooltipBase()
     return window
+end
+
+-- A Nexus tooltip gets the same solid floor: a base under GameTooltip, shown
+-- only while the tooltip's owner lies inside a styled Nexus window, and hidden
+-- for every other owner and whenever the tooltip hides. GameTooltip's own
+-- backdrop, size and lines are unchanged. Created and hooked once.
+local tooltipHooked = false
+local function StyledOwner(owner)
+    local node, depth = owner, 0
+    while node and depth < 16 do
+        if windows[node] then return node end
+        if type(node.GetParent) ~= "function" then return nil end
+        local ok, parent = pcall(node.GetParent, node)
+        node = ok and parent or nil
+        depth = depth + 1
+    end
+    return nil
+end
+function T.SyncTooltipBase(tip)
+    tip = tip or GameTooltip
+    local base = tip and tip._nexusSolidBase
+    if not base then return false end
+    local okOwner, owner = pcall(tip.GetOwner, tip)
+    local level = tonumber(tip.GetFrameLevel and tip:GetFrameLevel()) or 0
+    if not (okOwner and owner and level >= 1 and StyledOwner(owner)) then
+        base:Hide()
+        return false
+    end
+    if not active then Active() end
+    local c = active.style.baseColor or active.style.windowColor
+    pcall(base._nexusFill.SetVertexColor, base._nexusFill, c[1], c[2], c[3], 1)
+    pcall(base.SetFrameLevel, base, level - 1)
+    base:Show()
+    return true
+end
+function T.EnsureTooltipBase()
+    if tooltipHooked then return true end
+    local tip = GameTooltip
+    if not (tip and tip.HookScript and type(hooksecurefunc) == "function"
+        and type(CreateFrame) == "function") then return false end
+    tooltipHooked = true
+    local base = CreateFrame("Frame", nil, tip)
+    base:SetPoint("TOPLEFT", tip, "TOPLEFT", 3, -3)
+    base:SetPoint("BOTTOMRIGHT", tip, "BOTTOMRIGHT", -3, 3)
+    local fill = base:CreateTexture(nil, "BACKGROUND")
+    stats.textures = stats.textures + 1
+    fill:SetTexture(WHITE)
+    fill:SetAllPoints(base)
+    base._nexusFill = fill
+    base:Hide()
+    tip._nexusSolidBase = base
+    stats.tooltipBases = stats.tooltipBases + 1
+    -- A post-hook: every Show of the shared tooltip, whoever calls it, runs
+    -- first; this only shows or hides the base, never the tooltip. OnShow
+    -- covers a tooltip the client shows without a Lua Show call (a SetText
+    -- or Set* that shows it); a Show of an already shown tooltip with a new
+    -- owner has only the Show hook.
+    local function Sync(self) pcall(T.SyncTooltipBase, self) end
+    hooksecurefunc(tip, "Show", Sync)
+    tip:HookScript("OnShow", Sync)
+    tip:HookScript("OnHide", function(self)
+        if self._nexusSolidBase then self._nexusSolidBase:Hide() end
+    end)
+    stats.hooks = stats.hooks + 3
+    return true
+end
+
+-- A window's one primary action (Plan's Save / Create, level-80 Open Orbs and
+-- its Orbs hub): filled with the palette's hover colour while enabled, drawn as
+-- any disabled button otherwise. on=false returns it to an ordinary button.
+-- Only presentation; a repeated call with the same state does nothing.
+function T.SetPrimary(button, on)
+    if not button then return button end
+    on = on and true or nil
+    if button._nexusPrimary == on then return button end
+    button._nexusPrimary = on
+    if not button._nexusDarkStyled then T.StyleButton(button) end
+    if button._nexusDarkStyled and active then PaintButton(button) end
+    return button
 end
 
 -- Opt-in dialog labels follow style contrast and palette accents. The weak

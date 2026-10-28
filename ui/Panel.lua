@@ -2845,10 +2845,11 @@ end
 -- Appearance is a direct entry; only Appearance, Automation settings and the
 -- language chooser keep their own list. Opening it only reads current labels
 -- and never changes a setting or starts automation.
--- The stock 3.3.5 dropdown draws at most UIDROPDOWNMENU_MAXBUTTONS rows per
--- level (32 as recalled, not checked against the client export here); the 26
--- rows here stay within OPTIONS_MENU_MAX_ROWS.
-M.OPTIONS_MENU_MAX_ROWS = 32
+-- No fixed row cap is assumed: the 3.3.5a export of UIDropDownMenu.lua starts
+-- with 8 buttons per level and creates further rows as items are added
+-- (build 12340, UIDropDownMenu.lua L1-5 and L178-229). Whether the whole
+-- top level fits the screen at a given UI scale is a native check, not
+-- established here.
 function M.MoreMenuItems(anchor)
     local items = {}
     local function Add(item) items[#items + 1] = item end
@@ -2857,18 +2858,17 @@ function M.MoreMenuItems(anchor)
     -- (design/current "Nexus Setup Alternative": Help and Setup open the
     -- coach, Reference on request). It takes Help's own guarded route
     -- (Help.OpenGuide), which does not open over an Auto warning that waits
-    -- for its answer and says why; the read-only Reference then opens
-    -- instead, as for /nexus help, so Help always answers. Opening it
-    -- assigns, saves, sends, spends and changes Auto nothing.
+    -- for its answer and says why in chat; then nothing else opens, as for
+    -- /nexus help (Reference is its own entry below), and choosing Help again
+    -- after the answer opens the coach. Opening it assigns, saves, sends,
+    -- spends and changes Auto nothing.
     Add({ text = "Help / Getting Started", notCheckable = true,
         tooltipTitle = "Help / Getting Started",
         tooltipText = "Opens the step-by-step setup guide where you left it, as /nexus help. The full manual is "
             .. "Reference (full manual).",
         func = MenuAction(function()
             local help = Nexus.Help
-            if not help then return end
-            local opened = type(help.OpenGuide) == "function" and help.OpenGuide() == true
-            if not opened and type(help.Show) == "function" then help.Show("start") end
+            if help and type(help.OpenGuide) == "function" then help.OpenGuide() end
         end) })
     -- The optional long manual (ui/Help.lua pages, also /nexus reference),
     -- from its first page. Read only; its own buttons only navigate.
@@ -4779,6 +4779,16 @@ local function ApplyModel(model, signatures, roll)
             frame._orbsBtn:Show()
         else
             frame._orbsBtn:Hide()
+        end
+        -- Level 80 with no offer (design/current Lv80): Open Orbs... is the
+        -- one next step, so it and the footer's Orbs hub are the filled
+        -- primary (Theme.SetPrimary); otherwise both are ordinary buttons.
+        -- Presentation only: both still only open the Orb window.
+        if Nexus.Theme and type(Nexus.Theme.SetPrimary) == "function" then
+            Nexus.Theme.SetPrimary(frame._orbsBtn, noOffer and frame._orbsBtn:IsShown())
+            if frame._orbsHubBtn then
+                Nexus.Theme.SetPrimary(frame._orbsHubBtn, noOffer and frame._orbsBtn:IsShown())
+            end
         end
     end
     SetVisible(frame._orbMiniBtn, frame._orbsBtn and frame._orbsBtn:IsShown())

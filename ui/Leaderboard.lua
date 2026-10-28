@@ -1078,6 +1078,21 @@ local function FindSelectedRow()
     return nil
 end
 
+-- The overflow cue (EnsureFrame): shown only while the list is longer than
+-- its view; the thumb's length and place follow the view's share and offset,
+-- and "More below" stays while rows lie below the view. Display only.
+local function UpdateScrollCue(visibleH)
+    local track, thumb, cue = frame and frame._scrollTrack, frame and frame._scrollThumb, frame and frame._scrollCue
+    if not (track and thumb and cue) then return end
+    if not (scrollMax and scrollMax > 0) then track:Hide(); thumb:Hide(); cue:Hide(); return end
+    local h = tonumber(visibleH) or 440
+    local size = math.max(12, math.floor(h * h / (h + scrollMax)))
+    local y = math.floor((h - size) * math.min(1, math.max(0, scrollValue / scrollMax)))
+    thumb:ClearAllPoints(); thumb:SetPoint("TOPLEFT", track, "TOPLEFT", 0, -y); thumb:SetHeight(size)
+    track:Show(); thumb:Show()
+    if scrollValue < scrollMax then cue:Show() else cue:Hide() end
+end
+
 local function BindRows(reason)
     if rowBinding then return end
     rowBinding = true
@@ -1126,6 +1141,7 @@ local function BindRows(reason)
         listChild:SetHeight(math.max(1,virtual.contentHeight))
         scrollMax, scrollValue = virtual.maxOffset, virtual.offset
         pcall(function() listScroll:SetVerticalScroll(scrollValue) end)
+        UpdateScrollCue(visibleH)
         virtualStats.results=#currentRows
         virtualStats.active=#activeRows
         virtualStats.peakActive=math.max(virtualStats.peakActive,#activeRows)
@@ -1185,7 +1201,9 @@ local function EnsureFrame()
     frame:SetScript("OnDragStart",function(self) self:StartMoving() end); frame:SetScript("OnDragStop",function(self) self:StopMovingOrSizing() end); frame:Hide()
     pcall(function() frame:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=12,top=12,bottom=11}}) end)
     pcall(function() frame:SetBackdropColor(0.16,0.165,0.175,0.90) end)
-    local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); title:SetPoint("TOP",0,-14); title:SetText("Explore / Leaderboard")
+    -- The workspace's own name, as its tab says (Records); the window used to
+    -- carry the older "Explore / Leaderboard" heading.
+    local title=frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); title:SetPoint("TOP",0,-14); title:SetText("Records"); frame._title=title
     local close=CreateFrame("Button",nil,frame,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",-6,-6)
     local builds=MakeNavButton(frame,"Builds",88); builds:SetPoint("TOPLEFT",18,-12); builds:SetScript("OnClick",function() M.Hide(); if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end end)
     local board=MakeNavButton(frame,"Leaderboard",102); board:SetPoint("LEFT",builds,"RIGHT",4,0); board:SetText("|cffffd200Leaderboard|r"); board:Disable()
@@ -1263,7 +1281,9 @@ local function EnsureFrame()
     local head=CreateFrame("Frame",nil,frame); head:SetSize(LIST_W,22); head:SetPoint("TOPLEFT",18,-133); SetBackdrop(head,0.74)
     local labels={{"#",8,30,"CENTER"},{"CHARACTER / LOADOUT",80,300,"LEFT"},{"RESULT",430,145,"RIGHT"}}
     for _,x in ipairs(labels) do local t=head:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); t:SetPoint("LEFT",x[2],0); t:SetSize(x[3],14); t:SetJustifyH(x[4]); t:SetText(x[1]) end
-    local clip=CreateFrame("Frame",nil,frame); clip:SetPoint("TOPLEFT",18,-158); clip:SetPoint("BOTTOMLEFT",18,18); clip:SetWidth(LIST_W); pcall(function() clip:SetClipsChildren(true) end)
+    -- 440 units (eleven whole 40-unit rows at 640 high) above a line for the
+    -- overflow cue, so the list does not end in a half-cut row.
+    local clip=CreateFrame("Frame",nil,frame); clip:SetPoint("TOPLEFT",18,-158); clip:SetPoint("BOTTOMLEFT",18,42); clip:SetWidth(LIST_W); pcall(function() clip:SetClipsChildren(true) end)
     listScroll=CreateFrame("ScrollFrame",nil,clip); listScroll:SetAllPoints(clip); listScroll:EnableMouseWheel(true); listChild=CreateFrame("Frame",nil,listScroll); listChild:SetWidth(LIST_W); listChild:SetHeight(1); listScroll:SetScrollChild(listChild)
     setScrollValue=function(value,reason)
         value=tonumber(value)
@@ -1275,6 +1295,15 @@ local function EnsureFrame()
             renderRowsWindow(reason or "scroll")
         end
     end
+    -- A visible overflow cue beside the wheel-only list: a track and thumb in
+    -- the gap left of the detail pane, and "More below" under the list while
+    -- rows lie below the view (UpdateScrollCue). Display only.
+    local track=frame:CreateTexture(nil,"ARTWORK"); track:SetTexture(1,1,1,1); track:SetVertexColor(0.3,0.3,0.36,0.8)
+    track:SetPoint("TOPLEFT",clip,"TOPRIGHT",4,0); track:SetPoint("BOTTOMLEFT",clip,"BOTTOMRIGHT",4,0); track:SetWidth(4); track:Hide()
+    local thumb=frame:CreateTexture(nil,"OVERLAY"); thumb:SetTexture(1,1,1,1); thumb:SetVertexColor(1,0.82,0,0.85); thumb:SetWidth(4); thumb:Hide()
+    local cue=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall"); cue:SetPoint("TOPRIGHT",clip,"BOTTOMRIGHT",0,-6); cue:SetSize(260,12); cue:SetJustifyH("RIGHT")
+    cue:SetText("More below - scroll the list"); cue:Hide()
+    frame._scrollTrack,frame._scrollThumb,frame._scrollCue=track,thumb,cue
     listScroll:SetScript("OnMouseWheel",function(_,d) setScrollValue(scrollValue-d*(ROW_H+2)*4,"scroll") end)
     listScroll:SetScript("OnSizeChanged",function()
         if renderRowsWindow and frame and frame:IsShown() and not rowBinding then
@@ -1459,7 +1488,10 @@ function M.RefreshData()
     local selected=FindSelectedRow()
     if not selected and selectedKey then selectedKey=nil end
     local label=category=="lk" and "Lich King" or (category=="dummy" and "Training Dummy" or "Both records")
-    countText:SetText(tostring(#currentRows).." ranked "..label..(category=="combined" and " • requires both records • ranked by strongest single DPS" or " records"))
+    -- The scope of what is listed: the best records known here, from the
+    -- shared records this client received (not a server-wide ranking).
+    countText:SetText(tostring(#currentRows).." ranked "..label..(category=="combined" and " • requires both records • ranked by strongest single DPS" or " records")
+        .." • best known, from shared records received")
     renderRowsWindow=BindRows
     local bound, bindError = pcall(BindRows, "data")
     if not bound then
@@ -1482,8 +1514,9 @@ function M.RefreshData()
         if Nexus.LayoutMetrics then Nexus.LayoutMetrics.WrapHeight(detail.empty,280,70,math.max(70,detail:GetHeight()-40)) end
     else
         -- Rows are listed: an earlier category's "no records" instruction no
-        -- longer applies, so the unselected pane is blank, as on first open.
-        detail.empty:SetText("")
+        -- longer applies; with nothing selected the pane says what to do.
+        detail.empty:SetText(M.SELECT_PROMPT)
+        if Nexus.LayoutMetrics then Nexus.LayoutMetrics.WrapHeight(detail.empty,280,70,math.max(70,detail:GetHeight()-40)) end
         RenderDetail(selected)
     end
     virtualStats.dataRefreshes=virtualStats.dataRefreshes+1
@@ -1531,6 +1564,8 @@ function M.MarkDataDirty()
 end
 
 function M.Init(adapter) Adapter=adapter end
+-- The detail pane with records listed and none selected.
+M.SELECT_PROMPT="Select a record on the left to see its build, DPS and Echoes."
 function M.Show(mode)
     local community=Nexus.CommunityBuilds
     if community and type(community.WaitForStartup)=="function"

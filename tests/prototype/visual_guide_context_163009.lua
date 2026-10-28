@@ -20,21 +20,39 @@
 -- V7 the choice cards' mark is the client's round radio button
 --    (UIRadioButtonTemplate, as the Sync mode dialog uses it), checked for
 --    the one choice and taking no mouse; no painted square remains.
+-- V8 (composition review P2) a missing or failing active Saved Build reader
+--    is not a confirmed "no active Saved Build": with a populated active
+--    build and a retained first-run plan, what is assigned now is unknown,
+--    never that first-run plan; a reader that confirms no active build still
+--    shows the first-run destination; a missing or failing first-run read
+--    back is unknown. None of it selects, completes or acts.
+-- V9 (Setup Alternative G1/G3/G4) the coach is held by its top: its header
+--    controls stay put while short and long steps, All steps and Reference
+--    change its height; a Reference topic opens a short article in the same
+--    view, Escape goes article -> topics -> step -> close, and Open full
+--    Reference is the separate way to the manual; the summary says its rows
+--    are this guide's progress and names what the game follows now apart.
 -- EXPECT: added behaviour. On 0e5b84d7 (this pass's base) no card says
 -- Assigned now, the mark is three painted squares, the Step 7 chip is one
 -- 10 px text and Go to step a 22 px button under it, so each EXPECT fails
--- there by design. GUARD: what must already hold: reading and rendering
--- select, receipt, complete, keep, write, act, send, spend and toggle nothing.
+-- there by design; the V8/V9 EXPECTs fail at 9bf92559 (selector failure fell
+-- back to the first-run plan; the coach was centred; a topic opened the
+-- manual). GUARD: what must already hold: reading and rendering select,
+-- receipt, complete, keep, write, act, send, request Orb charges, spend and
+-- toggle nothing, and outside the coach's own kept place (PLACE_KEY, the one
+-- write it may make) NexusDB and WishlistRealizerDB stay byte-for-byte equal
+-- in the harness's serialization; only the counted adapter writers and that
+-- serialization are observed, not every client SavedVariables path.
 -- SETUP: fixture state. Real TOC boots through format5_support; a reload is
 -- an offline module reload of round-tripped literal saved data, not a client
 -- /reload. Text is measured by layout_geometry_support's stated model. The
--- client's radio art, fonts, pixels, mouse dispatch and SavedVariables
--- writing are NOT RUN; no native claim.
+-- client's radio art, fonts, pixels, mouse dispatch, frame-stack Escape and
+-- SavedVariables writing are NOT RUN; no native claim.
 local V=dofile('tests/prototype/view_regression_support.lua')
 local F=dofile('tests/prototype/format5_support.lua')
 local L=dofile('tests/prototype/layout_geometry_support.lua')
 local C=V.Checker('visual_guide_context_163009')
-local H,A,G,U,writes,spends
+local H,A,G,U,writes,spends,requests
 local HOST={}
 local E1={{spellId=201172,quality=0,stacks=1}}
 local E2={{spellId=201175,quality=0,stacks=1}}
@@ -73,9 +91,9 @@ local function Host(h)
   [106]={name='W-Six',verified=false,echoes=E6},[107]={name='W-Free',verified=false,echoes=EF},
   [108]={name=HOST.twin and 'W-Free' or 'W-Copy',verified=false,echoes={{spellId=201174,quality=0,stacks=1}}}}
  h.perks.serverActiveSlot=2
- spends=0
+ spends,requests=0,0
  ProjectEbonhold.OrbService={IsStateKnown=function() return true end,GetCharges=function() return 0 end,
-  IsOfferPending=function() return false end,RequestCharges=function() end,
+  IsOfferPending=function() return false end,RequestCharges=function() requests=requests+1 end,
   ConfirmSpend=function() spends=spends+1;return false end}
  local make=CreateFrame
  CreateFrame=function(kind,name,parent,template,...)
@@ -109,9 +127,22 @@ local function Kept() return G.PlaceKept() end
 local function Stored(slot) local s=Nexus.Store.State();return s.loadoutWishlists and s.loadoutWishlists[slot] end
 local function Writes() local n=0;for _,c in pairs(writes) do n=n+c end;return n end
 local function Auto() return Nexus.RecomputeStats().autoEnabled==true end
-local function Quiet() return table.concat({#H.actions,#H.sent,spends,tostring(Auto())},'/') end
+-- Game actions, sends, Orb spends, Orb charge requests and Auto.
+local function Quiet() return table.concat({#H.actions,#H.sent,spends,requests,tostring(Auto())},'/') end
 local function Effects() return Writes()..'/'..Quiet() end
 local function Saved() return F.Serialize(NexusDB) end
+-- Both saved roots as serialized, without the coach's own kept place
+-- (PLACE_KEY at any depth): the one write the coach may make. Anything else
+-- changed in them is a write the coach must not make.
+local function Others()
+ local function Strip(v)
+  if type(v)~='table' then return v end
+  local out={}
+  for k,x in pairs(v) do if k~=KEY then out[k]=Strip(x) end end
+  return out
+ end
+ return F.Serialize(Strip(NexusDB))..' || '..F.Serialize(Strip(rawget(_G,'WishlistRealizerDB')))
+end
 
 -- The coach's shown choice rows, and their label, description and marks.
 local function Rows()
@@ -186,7 +217,7 @@ end
 C.scenario('V1 the Wishlist the active Saved Build follows says Assigned now before any choice; nothing is selected or done',function()
  if not Boot('V1') then return end
  if not C.setup(Assign(2,107,'W-Free') and A.SelectedSavedBuild()==2,'V1: fixture: Fire PvE (Saved Build 2, active) follows W-Free') then return end
- local before=Effects()
+ local before,others=Effects(),Others()
  if not C.setup(ToWishlist() and #Cards()==3,'V1: fixture: the Wishlist step lists W-Six, W-Free and W-Copy',Step()) then return end
  local progress=Progress()
  C.expect(Tags()=='W-Free','V1: exactly the Wishlist Fire PvE follows says Assigned now, before any choice',Tags())
@@ -203,13 +234,14 @@ C.scenario('V1 the Wishlist the active Saved Build follows says Assigned now bef
  local sm=G.Summary()
  C.guard(sm.wishlist=='todo' and sm.assign=='todo' and sm.complete==false and sm.trueNow==false and sm.open==3,
   'V1: the summary counts no guide step from the game\'s own assignment',F.Serialize(sm))
- C.guard(Effects()==before and Stored(2).name=='W-Free','V1: showing it assigned, wrote, acted, sent, spent and toggled nothing',Effects())
+ C.guard(Effects()==before and Stored(2).name=='W-Free','V1: showing it assigned, wrote, acted, sent, requested, spent and toggled nothing',Effects())
+ C.guard(Others()==others,'V1: outside the coach\'s own kept place the saved roots are unchanged')
 end)
 
 C.scenario('V2 choosing other cards: one selected card, named alone by the footer; Assigned now stays with the game',function()
  if not Boot('V2') then return end
  if not C.setup(Assign(2,107,'W-Free'),'V2: fixture: Fire PvE follows W-Free') then return end
- local before=Effects()
+ local before,others=Effects(),Others()
  if not C.setup(ToWishlist(),'V2: fixture: the Wishlist step',Step()) then return end
  local function Pick(tag,name)
   Press(Card(name))
@@ -238,7 +270,8 @@ C.scenario('V2 choosing other cards: one selected card, named alone by the foote
  C.guard(Step()=='assign' and st=='observed' and G.CanNext(),'V2: the existing link is observed, not verified by this guide',st)
  local sm=G.Summary()
  C.guard(sm.complete==false and sm.trueNow==true,'V2: true now, not completed by the guide',F.Serialize(sm))
- C.guard(Effects()==before,'V2: choosing and moving assigned, wrote, acted, sent, spent and toggled nothing',Effects())
+ C.guard(Effects()==before,'V2: choosing and moving assigned, wrote, acted, sent, requested, spent and toggled nothing',Effects())
+ C.guard(Others()==others,'V2: outside the coach\'s own kept place the saved roots are unchanged')
 end)
 
 C.scenario('V3 Wishlists holding the same Echoes: only the one read back says Assigned now; under one name none does',function()
@@ -247,13 +280,14 @@ C.scenario('V3 Wishlists holding the same Echoes: only the one read back says As
  for _,c in ipairs(G.WishlistOptions() or {}) do key[tonumber(c.slot) or 0]=c.key end
  if not C.setup(key[107]~=nil and key[107]==key[108] and key[106]~=key[107],'V3: fixture: W-Free and W-Copy share one content key') then return end
  if not C.setup(Assign(2,108,'W-Copy'),'V3: fixture: Fire PvE follows W-Copy') then return end
- local before=Effects()
+ local before,others=Effects(),Others()
  if not C.setup(ToWishlist(),'V3: fixture: the Wishlist step',Step()) then return end
  C.expect(Tags()=='W-Copy','V3: only W-Copy, the one read back, says Assigned now; W-Free with the same Echoes does not',Tags())
  Press(Card('W-Free'))
  C.guard(Selected()=='W-Free' and G.State().wishlist.slot==107,'V3: choosing W-Free selects W-Free itself',Selected())
  C.expect(Tags()=='W-Copy' and Checks()=='W-Free','V3: the selected card and the assigned card stay two different cards',Tags()..' / '..Checks())
- C.guard(Effects()==before,'V3: nothing was written, acted, sent, spent or toggled',Effects())
+ C.guard(Effects()==before,'V3: nothing was written, acted, sent, requested, spent or toggled',Effects())
+ C.guard(Others()==others,'V3: outside the coach\'s own kept place the saved roots are unchanged')
  -- The same Echoes under the same name in two server slots: the read back
  -- cannot name one of them, so neither is marked, and the step says why.
  if not Boot('V3 twin',{twin=true}) then return end
@@ -372,7 +406,10 @@ C.scenario('V5 replay and reload keep the coach\'s choice and the assignment rea
  C.expect(#chips==5,'V5: each of the five summary rows has its own status icon',#chips)
  C.expect(At(3).glyph=='=' and At(1).glyph=='+' and At(3).glyph~=At(1).glyph,
   'V5: Already linked has its own icon, apart from the chosen and confirmed one',tostring(At(1).glyph)..' / '..tostring(At(3).glyph))
- C.guard(At(3).word==Nexus.UserText.Guide.words.linked,'V5: its word says Already linked',At(3).word)
+ -- EXPECT, not GUARD: the word is read through the icon/word pair this pass
+ -- added (Chips); the observed-versus-confirmed meaning itself is the GUARD
+ -- on the row's text above.
+ C.expect(At(3).word==Nexus.UserText.Guide.words.linked,'V5: its word says Already linked',At(3).word)
  C.expect(At(4).glyph=='-' and At(4).word=='Skipped' and At(4).glyph~=At(3).glyph,'V5: a skipped step has another icon and word',At(4).glyph)
  C.guard(Writes()==w0 and Quiet()==quiet,'V5 reload: after the fixture write, rendering and moving wrote, acted, sent, spent and toggled nothing',Effects())
 end)
@@ -387,21 +424,30 @@ local function SummaryChecks(tag,g)
  C.guard(t:find('Not finished: 3 steps still open',1,true)~=nil and G.Summary().trueNow==false,
   tag..': the summary counts the three open steps; the game\'s own assignment completes none',t)
  local root=L.Rect(g,g)
- -- The rows' labels in order, and the text under the last row.
+ -- What the game follows now is said apart from the rows (G4): read just
+ -- now, not set or confirmed by this guide.
+ local note=fin.currentNote and fin.currentNote:format(T.target.slot:format(2,'Fire PvE'),'W-Free') or '?'
+ C.expect(t:find(note,1,true)~=nil,tag..': the summary names what the game follows now apart from the guide\'s rows',t)
+ local ids={'wishlist','target','assign','manual','auto'}
+ -- The rows' labels in order, and the text under the last row, in view now.
  local labels,sent={},nil
  for _,fs in ipairs(U.TextRegions()) do
   local s=V.Plain(fs:GetText() or '')
-  for _,id in ipairs({'wishlist','target','assign','manual','auto'}) do
+  for _,id in ipairs(ids) do
    if s==fin.rows[id] and not labels[id] then labels[id]=L.Rect(fs,g) end
   end
   if s==fin.sent then sent=L.Rect(fs,g) end
  end
- local ids={'wishlist','target','assign','manual','auto'}
- local all=sent~=nil
- for _,id in ipairs(ids) do all=all and labels[id]~=nil end
- if not C.setup(all,tag..': fixture: the five rows and the line under them are in view') then return end
+ local inView=0
+ for _,id in ipairs(ids) do if labels[id] then inView=inView+1 end end
+ -- Presentation (EXPECT, not fixture): the five rows and the line under
+ -- them fit at once, or the body visibly scrolls to the rest. Either way the
+ -- checks below run on the rows in view; scrolling and the lessons follow.
+ local st0=U.ScrollState()
+ C.expect((inView==5 and sent~=nil) or (st0~=nil and st0.max>0 and inView>0),
+  tag..': the five rows and the line under them are in view, or the body scrolls to them',inView..' rows, line '..tostring(sent~=nil))
  local chips=Chips()
- C.expect(#chips==5,tag..': five status icons',#chips)
+ C.expect(#chips==inView and inView>0,tag..': a status icon for each row in view',#chips..'/'..inView)
  for i,chip in ipairs(chips) do
   C.expect(chip.glyph=='-' and chip.word=='Skipped' and TWELVE[chip.fs._font] and chip.wordFs~=nil and TWELVE[chip.wordFs._font],
    tag..': row '..i..' shows its icon and its word in the 12 px font',tostring(chip.glyph)..' '..tostring(chip.word))
@@ -412,21 +458,29 @@ local function SummaryChecks(tag,g)
  for _,c in ipairs(g.children) do
   if c.kind=='Button' and c:IsShown() and V.Plain(c:GetText() or '')==T.buttons.goStep then goes[#goes+1]={c,L.Rect(c,g)} end
  end
- table.sort(goes,function(a,b) return a[2][2]<b[2][2] end)
- C.guard(#goes==5,tag..': every skipped step offers Go to step',#goes)
+ C.guard(#goes==inView,tag..': every skipped step in view offers Go to step',#goes..'/'..inView)
+ local rowGo,firstOpen={},nil
  for i,id in ipairs(ids) do
-  local go=goes[i]
-  local top,bottom=labels[id][2],(ids[i+1] and labels[ids[i+1]] or sent)[2]
-  if go then
-   local r=go[2]
-   C.expect(r[2]>=top and r[4]<=bottom and r[4]-r[2]<=18 and r[1]>=labels[id][3],
-    tag..': Go to step for '..id..' is a link inside its own row, right of its text',L.Text(r)..' row '..top..'..'..bottom)
-   C.expect(go[1].label~=nil and TWELVE[go[1].label._font],tag..': Go to step for '..id..' reads in the 12 px font')
-  end
-  -- Two text lines (label and detail) plus the chip and link padding; the
-  -- 22 px button stacked under the chip made a row 2*line+32 tall.
-  if ids[i+1] then
-   C.expect(bottom-top<=2*line+24,tag..': the '..id..' row is two lines tall, not inflated',bottom-top)
+  if labels[id] then
+   local nextRow=ids[i+1] and labels[ids[i+1]] or (not ids[i+1] and sent) or nil
+   local top,bottom=labels[id][2],nextRow and nextRow[2] or math.huge
+   local go
+   for _,x in ipairs(goes) do if x[2][2]>=top and x[2][2]<bottom then go=x end end
+   rowGo[id]=go
+   firstOpen=firstOpen or (go and id)
+   C.expect(go~=nil,tag..': the '..id..' row has its own Go to step')
+   if go then
+    local r=go[2]
+    -- The design's one horizontal row: the link starts on the step's line.
+    C.expect(r[2]>=top and r[2]<=top+line and r[4]<=bottom and r[4]-r[2]<=18 and r[1]>=labels[id][3],
+     tag..': Go to step for '..id..' is on its row\'s line, right of its text',L.Text(r)..' row '..top..'..'..bottom)
+    C.expect(go[1].label~=nil and TWELVE[go[1].label._font],tag..': Go to step for '..id..' reads in the 12 px font')
+   end
+   -- Two text lines (label and detail) plus padding; the 22 px button
+   -- stacked under the chip made a row 2*line+32 tall.
+   if nextRow then
+    C.expect(bottom-top<=2*line+24,tag..': the '..id..' row is two lines tall, not inflated',bottom-top)
+   end
   end
  end
  local shown={}
@@ -439,8 +493,9 @@ local function SummaryChecks(tag,g)
  end
  -- Go to step only moves the guide.
  local quiet,w0=Quiet(),Writes()
- if goes[3] then Press(goes[3][1]) end
- C.guard(Step()=='assign' and Quiet()==quiet and Writes()==w0,tag..': Go to step moves to that step and changes nothing',Step())
+ if firstOpen then Press(rowGo[firstOpen][1]) end
+ C.guard(firstOpen~=nil and Step()==firstOpen and Quiet()==quiet and Writes()==w0,
+  tag..': Go to step moves to that step and changes nothing',Step())
  G.GoTo('summary');U.Render()
  -- The optional lessons: in view, or the body scrolls to them.
  local st=U.ScrollState()
@@ -457,7 +512,7 @@ local function SummaryChecks(tag,g)
   C.guard(Text():find('spends nothing',1,true)~=nil,tag..': the lesson opens in place and reads only',Text())
   Press(Opt(orbs.title))
  end
- C.guard(Quiet()==quiet and Writes()==w0,tag..': reading the summary acted, sent, spent, wrote and toggled nothing',Effects())
+ C.guard(Quiet()==quiet and Writes()==w0,tag..': reading the summary acted, sent, requested, spent, wrote and toggled nothing',Effects())
 end
 
 C.scenario('V6 Step 7: an icon and a 12 px word per row, Go to step a link on the row, two-line rows, lessons reachable',function()
@@ -465,7 +520,7 @@ C.scenario('V6 Step 7: an icon and a 12 px word per row, Go to step a link on th
  if not C.setup(Assign(2,107,'W-Free'),'V6: fixture: Fire PvE follows W-Free') then return end
  L.UseFont(L.MODELS.default)
  UIParent:SetSize(800,600)
- local before=Effects()
+ local before,others=Effects(),Others()
  if not C.setup(ToWishlist(),'V6: fixture: the Wishlist step') then return end
  for _=1,5 do Press(Btn('Skip for now')) end
  local g=Guide()
@@ -474,12 +529,13 @@ C.scenario('V6 Step 7: an icon and a 12 px word per row, Go to step a link on th
  UIParent:SetSize(1024,768)
  U.Render()
  if C.setup(g:GetWidth()==900,'V6: fixture: the desktop window',g:GetWidth()) then SummaryChecks('V6 desktop',g) end
- C.guard(Effects()==before and Stored(2).name=='W-Free','V6: the whole flow assigned, wrote, acted, sent, spent and toggled nothing',Effects())
+ C.guard(Effects()==before and Stored(2).name=='W-Free','V6: the whole flow assigned, wrote, acted, sent, requested, spent and toggled nothing',Effects())
+ C.guard(Others()==others,'V6: outside the coach\'s own kept place the saved roots are unchanged')
 end)
 
 C.scenario('V7 choice cards carry the client\'s round radio mark, checked for the one choice, taking no mouse; no square',function()
  if not Boot('V7') then return end
- local before=Effects()
+ local before,others=Effects(),Others()
  U.Show()
  local function Marks(tag,want)
   local bad,checked,n={},{},0
@@ -519,7 +575,166 @@ C.scenario('V7 choice cards carry the client\'s round radio mark, checked for th
  Press(fire);Marks('V7 target Slot 2',fire and Label(fire) or '?')
  Press(Btn('Back'))
  Marks('V7 back over recycled rows','W-Copy')
- C.guard(Effects()==before,'V7: choosing and moving assigned, wrote, acted, sent, spent and toggled nothing',Effects())
+ C.guard(Effects()==before,'V7: choosing and moving assigned, wrote, acted, sent, requested, spent and toggled nothing',Effects())
+ C.guard(Others()==others,'V7: outside the coach\'s own kept place the saved roots are unchanged')
 end)
 
-C.finish('(Assigned now read apart from the coach\'s choice; round single-choice marks; compact Step 7 rows)')
+-- The adapter reads CurrentAssignment takes the destination from, swapped
+-- for one scenario and restored afterwards (also when it raises). Synthetic
+-- reads only; no saved table is seeded or changed by them.
+local SWAP={'Slots','SelectedSavedBuild','GetFirstRunWishlist','FirstRunToken','AssignmentActionToken'}
+local function Swapped(fns,body)
+ local real={}
+ for _,k in ipairs(SWAP) do real[k]=A[k] end
+ for k,v in pairs(fns) do if v==false then A[k]=nil else A[k]=v end end
+ local ok,err=pcall(body)
+ for _,k in ipairs(SWAP) do A[k]=real[k] end
+ assert(ok,err)
+end
+-- A populated active Saved Build (slot 1) and an older first-run plan that
+-- is still associated (the probe's conditions).
+local LIVE={Slots=function() return {activeKnown=true,activeSlot=1,maxSlots=1,
+  bySlot={[1]={name='Live active',echoes={{spellId=201172}}}}} end,
+ GetFirstRunWishlist=function() return {key='old-first',name='Old first-run plan',slot=107} end,
+ FirstRunToken=function() return 'stored-first' end,
+ AssignmentActionToken=function() return 'token' end}
+local function With(extra)
+ local out={}
+ for k,v in pairs(LIVE) do out[k]=v end
+ for k,v in pairs(extra) do out[k]=v end
+ return out
+end
+
+C.scenario('V8 a missing or failing active Saved Build reader is unknown, never the retained first-run plan',function()
+ if not Boot('V8') then return end
+ local before,others=Effects(),Others()
+ if not C.setup(ToWishlist(),'V8: fixture: the Wishlist step',Step()) then return end
+ local progress=Progress()
+ for _,case in ipairs({{tag='missing',fn=false},{tag='throws',fn=function() error('read failed') end}}) do
+  Swapped(With({SelectedSavedBuild=case.fn}),function()
+   local r=G.CurrentAssignment()
+   C.expect(r.state=='unknown' and r.name==nil and r.key==nil and r.destination==nil,
+    'V8 '..case.tag..': with a populated active build, what is assigned now is unknown, not the first-run plan',
+    tostring(r.state)..'/'..tostring(r.destination)..'/'..tostring(r.name))
+   C.expect(G.TargetOptions()==nil,'V8 '..case.tag..': no destination list is guessed without the active build',case.tag)
+   U.Render()
+   local t=Text()
+   C.guard(Tags()=='' and t:find('Old first-run plan',1,true)==nil,'V8 '..case.tag..': no Wishlist is marked and the old plan is not named',t)
+   C.expect(t:find('could not be read',1,true)~=nil,'V8 '..case.tag..': the step says what is assigned now could not be read',t)
+   C.guard(G.State().wishlist==nil and Selected()=='' and Checks()=='','V8 '..case.tag..': nothing is selected for the player')
+  end)
+ end
+ -- A reader that answers "no active Saved Build" is a confirmed answer:
+ -- the first-run destination is what the chooser assigns to.
+ Swapped(With({SelectedSavedBuild=function() return nil,false end}),function()
+  local r=G.CurrentAssignment()
+  C.guard(r.state=='assigned' and r.destination=='first' and r.name=='Old first-run plan',
+   'V8 confirmed none: the first-run plan is what is assigned now',tostring(r.state)..'/'..tostring(r.destination))
+ end)
+ Swapped(With({SelectedSavedBuild=function() return nil,false end,GetFirstRunWishlist=function() return nil end,
+  FirstRunToken=function() return 'none' end}),function()
+  C.guard(G.CurrentAssignment().state=='none','V8 confirmed none, nothing kept: nothing is assigned now',G.CurrentAssignment().state)
+ end)
+ for _,case in ipairs({{tag='missing',fn=false},{tag='throws',fn=function() error('first-run read failed') end}}) do
+  Swapped(With({SelectedSavedBuild=function() return nil,false end,GetFirstRunWishlist=case.fn}),function()
+   local r=G.CurrentAssignment()
+   C.guard(r.state=='unknown' and r.name==nil,'V8 first-run read '..case.tag..': unknown, nothing named',tostring(r.state))
+  end)
+ end
+ U.Render()
+ local sm=G.Summary()
+ C.guard(Progress()==progress and sm.complete==false and sm.trueNow==false,
+  'V8: none of these reads set a choice, receipt, result or kept place, or completed a step',Progress())
+ C.guard(Effects()==before and Others()==others,'V8: reading assigned, wrote, acted, sent, requested, spent and toggled nothing',Effects())
+end)
+
+-- The coach's header controls (X and Reference) on the UI, by position.
+local function Header()
+ local g=Guide()
+ local x,r=L.Rect(g.close,UIParent),L.Rect(g.help,UIParent)
+ return {x[1],x[2],r[3],r[2]},g:GetHeight()
+end
+local function Near(a,b)
+ for i=1,4 do if math.abs(a[i]-b[i])>2 then return false end end
+ return true
+end
+local function Escape() if _G.NexusGuidedSetupEscape then NexusGuidedSetupEscape:Hide() end end
+
+C.scenario('V9 a top-held header, the Reference article and its Escape order, and the summary\'s own-progress words',function()
+ if not Boot('V9') then return end
+ L.UseFont(L.MODELS.default)
+ UIParent:SetSize(800,700)
+ local before,others=Effects(),Others()
+ U.Show()
+ if not C.setup(Shown() and Guide():GetWidth()==420,'V9: fixture: the compact coach at Welcome') then return end
+ local h0,height0=Header()
+ local heights,moved={[height0]=true},{}
+ local function Same(tag)
+  local h,height=Header()
+  heights[height]=true
+  if not Near(h,h0) then moved[#moved+1]=tag..' '..table.concat(h,',') end
+ end
+ Press(Opt('I already have'));Press(Btn('Continue'))
+ if not C.setup(Step()=='wishlist','V9: fixture: the Wishlist step',Step()) then return end
+ Same('wishlist')
+ Press(Btn('All steps v'));Same('all steps')
+ Press(Btn('All steps ^'))
+ local R=Nexus.UserText.Guide.reference
+ Press(Btn('Reference'));Same('reference topics')
+ if not C.setup(Text():find(R.lead,1,true)~=nil and Opt(R.topics[1].title)~=nil,'V9: fixture: the Reference topic list') then return end
+ -- A topic opens its short article here, not the manual.
+ local topic=R.topics[2]
+ Press(Opt(topic.title));Same('reference article')
+ local t=Text()
+ C.expect(t:find(topic.paras[1],1,true)~=nil and Btn(Nexus.UserText.Guide.buttons.allTopics)~=nil
+  and Opt(R.topics[1].title)==nil and not (_G.NexusHelpWindow and NexusHelpWindow:IsShown()) and Shown(),
+  'V9: a topic opens its short article in the coach, with All topics, and no manual',t)
+ C.expect(t:find(R.escTopics,1,true)~=nil,'V9: the article says where Escape goes',t)
+ -- Escape: article -> topics -> step -> close.
+ Escape()
+ C.expect(Shown() and Text():find(R.lead,1,true)~=nil and Opt(R.topics[1].title)~=nil,'V9: Escape from the article returns to the topics',Text())
+ Same('escape to topics')
+ Escape()
+ C.expect(Shown() and Step()=='wishlist' and Text():find(R.tag,1,true)==nil,'V9: Escape from the topics returns to the step',Text())
+ Same('escape to step')
+ -- All topics returns to the list too; Open full Reference is the separate
+ -- way to the manual, at the open topic's page.
+ Press(Btn('Reference'));Press(Opt(topic.title));Press(Btn(Nexus.UserText.Guide.buttons.allTopics))
+ C.expect(Text():find(R.lead,1,true)~=nil and Opt(topic.title)~=nil,'V9: All topics returns to the list',Text())
+ Press(Opt(topic.title))
+ local opened=Btn(Nexus.UserText.Guide.buttons.fullReference)
+ C.expect(opened~=nil,'V9: the article offers Open full Reference')
+ if opened then
+  Press(opened)
+  C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() and not Shown(),'V9: Open full Reference opens the manual in place of the coach')
+  NexusHelpWindow:Hide();H.Advance(0.1)
+ end
+ if not Shown() then U.Show() end
+ -- The summary: its rows are this guide's own progress (G4).
+ G.GoTo('summary');U.Render();Same('summary')
+ local fin=Nexus.UserText.Guide.finish
+ t=Text()
+ C.expect(t:find(fin.wishNot,1,true)~=nil and t:find(fin.assignNot,1,true)~=nil and fin.wishNot:find('this guide',1,true)~=nil
+  and fin.assignNot:find('this guide',1,true)~=nil,'V9: the summary says Not chosen in this guide / Not assigned by this guide',t)
+ local prefix=fin.currentNote:match('^(.-)%(')
+ C.guard(t:find(prefix,1,true)==nil,'V9: with nothing assigned in the game no current-assignment note is shown',t)
+ C.guard(Effects()==before and Others()==others,
+  'V9: moving, Reference, its articles, Escape and the manual wrote (outside the kept place), acted, sent, requested, spent and toggled nothing',Effects())
+ C.setup(Assign(2,107,'W-Free'),'V9: fixture: another route assigns W-Free to Fire PvE')
+ local w0,quiet=Writes(),Quiet()
+ U.Render();Same('summary with a current assignment')
+ t=Text()
+ C.expect(t:find(fin.currentNote:format(Nexus.UserText.Guide.target.slot:format(2,'Fire PvE'),'W-Free'),1,true)~=nil
+  and t:find(fin.wishNot,1,true)~=nil,'V9: the note names what the game follows now, and the rows still say this guide chose nothing',t)
+ local sm=G.Summary()
+ C.guard(G.State().wishlist==nil and sm.complete==false and sm.trueNow==false and sm.wishlist=='todo',
+  'V9: the note selects and completes nothing',F.Serialize(sm))
+ C.setup(next(heights,next(heights))~=nil,'V9: fixture: the steps and views had different heights')
+ C.expect(#moved==0,'V9: X and Reference stayed within 2 px while the height changed',table.concat(moved,' ; '))
+ Escape()
+ C.expect(not Shown(),'V9: Escape from the step closes the coach')
+ C.guard(Writes()==w0 and Quiet()==quiet,'V9: after the fixture write, nothing was written, acted, sent, requested, spent or toggled',Effects())
+ UIParent:SetSize(1024,768)
+end)
+
+C.finish('(Assigned now read apart from the coach\'s choice; round single-choice marks; compact Step 7 rows; unknown on a failed active-build read; top-held header; in-view Reference articles)')
