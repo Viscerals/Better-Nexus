@@ -10,6 +10,9 @@
 --                and a wide face that scales (0.70 em per character, 1.2 em
 --                lines)
 --   The Orb window uses fixed 7.0 px / 17 px (conservative) and 5.5 / 12.
+--   Its rows take the height the client measures (LayoutMetrics.WrapHeight),
+--   so each model is installed as the measurement (layout_geometry_support
+--   UseFont) before the real window lays itself out.
 -- The word wrap and the character count are this file's own; they do not
 -- call the product's LayoutMetrics.TextRows.
 -- Sizes and positions are the real widgets' after real renders and the real
@@ -24,7 +27,9 @@ local HUD={
  {name='default',char=function(s) return 0.55*10*s end,line=function(s) return 1.2*10*s end},
  {name='conservative',char=function(s) return math.max(7.0,0.70*10*s) end,line=function(s) return math.max(17,1.2*10*s) end},
 }
-local MODELS={{name='default',char=5.5,line=12},{name='conservative',char=7.0,line=17}}
+-- size: the font size a text region reports under the model (the Orb
+-- window's font does not follow the Nexus font scale).
+local MODELS={{name='default',char=5.5,line=12,size=12},{name='conservative',char=7.0,line=17,size=12}}
 local CAPS=20 -- the button template's two end caps
 local function Plain(s) return (tostring(s or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')) end
 -- Visible characters: a UTF-8 sequence (for example the dash) counts once.
@@ -226,7 +231,10 @@ do
  Fit('Orb-run recovery reason',true)
 end
 
--- The Orb window's status box with the longest overlapping refusal.
+-- The Orb window's status box with the longest overlapping refusal, then the
+-- same box after the offer and the choice settle. The harness measures every
+-- text as one 14-unit line; for each model its measurement is installed and
+-- the real window refreshed before the rows are read.
 do
  CreateFont=nil
  local Ho=(function()
@@ -234,27 +242,48 @@ do
   Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil;ProjectEbonhold=nil
   return dofile('tests/prototype/orbs_support.lua')
  end)()
+ -- After the harness load: the support reaches this harness's region methods.
+ local G=dofile('tests/prototype/layout_geometry_support.lua')
  Ho.OrbPlan()
  Ho.orbs.offer=true
  Ho.Board({{spellId=410002,quality=2},{spellId=410003,quality=0},{spellId=410004,quality=3}})
  Ho.perks.pendingSelectSpellId=410002;Ho.Notify();Ho.A.Poll()
+ local actions,sent=#Ho.actions,#Ho.sent
  Nexus.OrbPanel.Show()
- local status=NexusOrbPanel.status
- local text=status:GetText()
- check(text:find('no confirmed result',1,true) and text:find('An Orb offer is shown',1,true) and text:find('An Echo choice is shown',1,true),
-  'fixture: the longest overlapping refusal is shown: '..text)
- for _,m in ipairs(MODELS) do
-  local n=Lines(text,status:GetWidth(),m.char)
-  print('ORB_FIT','refusal',m.name,'box',status:GetWidth()..'x'..status:GetHeight(),'lines',n,'needs',n*m.line)
-  check(n*m.line<=status:GetHeight(),'refusal '..m.name..': every line of the Orb window status fits: '..n..' lines')
+ local f=NexusOrbPanel
+ check(f:IsShown() and Nexus.OrbPanel.Page()=='run','fixture: the Orb window shows its run page')
+ local function Status(label,fixture)
+  for _,m in ipairs(MODELS) do
+   G.UseFont(m);Nexus.OrbPanel.Refresh()
+   local status=f.status
+   local text=status:GetText() or ''
+   fixture(text,label..' '..m.name)
+   local n=Lines(text,status:GetWidth(),m.char)
+   print('ORB_FIT',label,m.name,'box',status:GetWidth()..'x'..status:GetHeight(),'lines',n,'needs',n*m.line)
+   check(status:GetWidth()==580,label..' '..m.name..': the status keeps its 580-unit width')
+   check(n*m.line<=status:GetHeight(),label..' '..m.name..': every line of the Orb window status fits: '..n..' lines')
+   -- Inside the window, below the usage line and above the rows after it.
+   local box={0,0,f:GetWidth(),f:GetHeight()}
+   local st,usage,close=G.Rect(status,f),G.Rect(f.usage,f),G.Rect(f.closeNotice,f)
+   check(G.Inside(st,box) and usage[4]<=st[2] and st[4]<=close[2],
+    label..' '..m.name..': the status '..G.Text(st)..' is inside the window, below the usage and above the close notice')
+   if (f.notice:GetText() or '')~='' then
+    local nt=G.Rect(f.notice,f)
+    check(st[4]<=nt[2] and nt[4]<=close[2],label..' '..m.name..': the notice follows the status, apart from it')
+   end
+  end
  end
- Ho.perks.pendingSelectSpellId=nil;Ho.Board(nil);Ho.orbs.offer=false;Ho.Notify()
- Nexus.OrbRuntime.Status()
- local text2=NexusOrbPanel.status:GetText()
- for _,m in ipairs(MODELS) do
-  local n=Lines(text2,NexusOrbPanel.status:GetWidth(),m.char)
-  check(n*m.line<=NexusOrbPanel.status:GetHeight(),'status '..m.name..' after the actions settle also fits')
- end
+ Status('refusal',function(text,tag)
+  check(text:find('no confirmed result',1,true) and text:find('An Orb offer is shown',1,true) and text:find('An Echo choice is shown',1,true),
+   'fixture: '..tag..': the longest overlapping refusal is shown: '..text)
+ end)
+ Ho.perks.pendingSelectSpellId=nil;Ho.Board(nil);Ho.orbs.offer=false;Ho.Notify();Ho.A.Poll()
+ Status('settled',function(text,tag)
+  check(text~='' and not text:find('An Orb offer is shown',1,true) and not text:find('An Echo choice is shown',1,true),
+   tag..': after the actions settle the status no longer reports them: '..text)
+ end)
+ check(#Ho.actions==actions and #Ho.sent==sent and (Ho.orbs.spends or 0)==0,
+  'showing and refreshing the Orb window takes no game action, sends nothing and spends no Orb')
 end
 
 print('PASS orb_guidance_geometry checks='..checks)
