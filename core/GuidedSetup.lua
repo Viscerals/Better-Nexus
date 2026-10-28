@@ -206,17 +206,26 @@ end
 -- its key, the destination while it is offered and not blocked. A list that
 -- is not read yet waits; a choice that is gone is dropped. Nothing else (no
 -- replacement acceptance, request or result) comes back.
+-- The kept Wishlist is its content key only, which Wishlists holding the same
+-- Echoes share (ChosenOption), and neither a name nor a recycled server slot
+-- proves which one it was. So it is taken again only while exactly one listed
+-- row has that key; while two or more do, none is taken, whatever their
+-- order, and the player is asked to choose again (s.reselect, the 'reselect'
+-- notice) instead.
 local function Readopt(s)
     local r = s.resume
     if r.wishlist and not s.wishlist then
         local list = G.WishlistOptions()
         if list then
+            local match, count = nil, 0
             for _, c in ipairs(list) do
-                if c.key == r.wishlist then
-                    s.wishlist = {key = c.key, name = tostring(c.name or ''), slot = tonumber(c.slot),
-                        source = 'existing', needsRoles = c.lockEvidenceStatus == 'unavailable'}
-                    break
-                end
+                if c.key == r.wishlist then count = count + 1; match = match or c end
+            end
+            if count == 1 then
+                s.wishlist = {key = match.key, name = tostring(match.name or ''), slot = tonumber(match.slot),
+                    source = 'existing', needsRoles = match.lockEvidenceStatus == 'unavailable'}
+            elseif count > 1 then
+                s.reselect, s.notice = true, 'reselect'
             end
             r.wishlist = nil
         end
@@ -318,7 +327,7 @@ function G.Recheck()
     if why then
         s.wishlist, s.draft, s.saveSeen, s.awaitSave = nil, nil, nil, nil
         s.target, s.request, s.notice, s.context = nil, nil, why, now
-        s.autoKept, s.resume = nil, nil
+        s.autoKept, s.resume, s.reselect = nil, nil, nil
         if why == 'owner' and (s.bound ~= nil or was ~= nil) then s.bound = false
         elseif why == 'epoch' and s.bound then s.bound, s.saved = nil, nil end
     end
@@ -345,13 +354,33 @@ function G.ChooseWishlist(c)
             and tonumber(live.slot) == tonumber(c.slot) then
             s.wishlist = {key = live.key, name = tostring(live.name or ''), slot = tonumber(live.slot),
                 source = 'existing', needsRoles = live.lockEvidenceStatus == 'unavailable'}
-            s.draft, s.saveSeen, s.awaitSave, s.request = nil, nil, nil, nil
+            s.draft, s.saveSeen, s.awaitSave, s.request, s.reselect = nil, nil, nil, nil, nil
             s.skipped.wishlist = nil
             if s.target then s.target.confirmedAction = nil end
             Changed(); return true
         end
     end
     return false, 'gone'
+end
+
+-- The index in `list` (WishlistOptions) of the chosen Wishlist itself, or
+-- nil. Wishlists holding the same Echoes share one content key, so the key
+-- alone would match each copy: a listed choice also matches its name and
+-- server slot, as ChooseWishlist took them. A Wishlist adopted from a save
+-- has no slot; it matches the one listed row of its key and name, and none
+-- while two such rows are listed. Reads the guide state only.
+function G.ChosenOption(list)
+    local w = G.State().wishlist
+    if not (w and type(list) == 'table') then return nil end
+    local found
+    for i, c in ipairs(list) do
+        if c.key == w.key and tostring(c.name or '') == tostring(w.name or '')
+            and (w.slot == nil or tonumber(c.slot) == w.slot) then
+            if found then return nil end
+            found = i
+        end
+    end
+    return found
 end
 
 -- The guide opened the editor or the import dialog: the next save or draft
@@ -574,7 +603,7 @@ function G.Note(kind, fields)
             if kind == 'draft' then s.draft = r
             elseif SAVED[r.saveKind] then
                 s.wishlist = {key = r.key, name = r.name or '', source = 'saved', receipt = r}
-                s.draft, s.saveSeen, s.awaitSave, s.request = nil, nil, nil, nil
+                s.draft, s.saveSeen, s.awaitSave, s.request, s.reselect = nil, nil, nil, nil, nil
                 if s.target then s.target.confirmedAction = nil end
             else s.saveSeen, s.draft = r, nil end
         end

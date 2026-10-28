@@ -37,8 +37,35 @@ local function SyncNote(f)
     local mode = policy and type(policy.Mode) == "function" and policy.Mode() or nil
     local text = mode == "automatic" and SYNC_AUTOMATIC_TEXT
         or mode and type(policy.Text) == "function" and policy.Text(mode) or nil
-    f.sync:SetText(text and (text .. " Help: Sharing lists what is sent.") or "")
+    f.sync:SetText(text and (text .. " Reference: Sharing lists what is sent.") or "")
     return f
+end
+
+-- Help on the setup surfaces is the guided setup coach at its current step
+-- (design/current "Nexus Setup Alternative": Help and Setup open the coach,
+-- Reference on request), through Help's own guarded route as the Options
+-- menu and /nexus help take it. While an Auto warning waits for its answer
+-- the coach does not open and Help.OpenGuide says why; the read-only
+-- Reference then opens instead, so Help always answers. Returns true only
+-- when the coach opened. Opening either assigns, saves, sends, spends and
+-- changes Auto nothing.
+local function OpenHelpCoach()
+    local help = Nexus.Help
+    if type(help) == "table" and type(help.OpenGuide) == "function" then
+        if help.OpenGuide() == true then return true end
+        if type(help.Show) == "function" then help.Show("start") end
+        return false
+    end
+    local ui = Nexus.GuidedSetupUI
+    return type(ui) == "table" and type(ui.Show) == "function" and ui.Show() == true or false
+end
+M.OpenHelpCoach = OpenHelpCoach
+
+-- The optional long manual (ui/Help.lua pages, also /nexus reference), from
+-- its first page. Read only; its own buttons only navigate.
+local function OpenReference()
+    local help = Nexus.Help
+    if type(help) == "table" and type(help.Show) == "function" then help.Show("start") end
 end
 
 -- Unlike the release note in ui/Changelog.lua, this acknowledgement does not
@@ -145,7 +172,7 @@ local UNSAVED_NOTICE = {
         .. "the Welcome is offered again next time. Setup information (read only) in the ... menu under Manage shows it again.",
     coach = "Guided setup is closed, but this cannot be saved right now "
         .. "(saved data is still loading or is read-only). If it cannot be saved this session, "
-        .. "Guided setup is offered again next time. Setup / Welcome in Help or in the ... menu under Manage reopens it.",
+        .. "Guided setup is offered again next time. /nexus help or Setup / Welcome in the ... menu under Manage reopens it.",
 }
 local function Dismiss(kind)
     dismissedThisSession = true
@@ -326,23 +353,27 @@ local function EnsureFrame()
         if Nexus.Leaderboard then Nexus.Leaderboard.Show() end
     end)
 
-    local help = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    help:SetSize(174,26);help:SetPoint("TOPLEFT",24,-250);help:SetText("Help / Getting Started")
-    help:SetScript("OnClick",function() Finish();if Nexus.Help then Nexus.Help.Show("start") end end)
+    -- The optional long manual under its own name, Reference (the design's
+    -- separately named view); Help itself is the coach row below.
+    local reference = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    reference:SetSize(174,26);reference:SetPoint("TOPLEFT",24,-250);reference:SetText("Reference")
+    reference:SetScript("OnClick",function() Finish();OpenReference() end)
+    frame.reference = reference
     local orbs = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     orbs:SetSize(174,26);orbs:SetPoint("TOPRIGHT",-24,-250);orbs:SetText("Orbs / Lost Memories")
     orbs:SetScript("OnClick",function() Finish();if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end)
-    -- Guided setup: the step-by-step coach (ui/GuidedSetup.lua). Like the
-    -- other entry buttons it only navigates: it records no setup fact,
-    -- grants no consent and never turns Auto ON. The Sync line moves down.
+    -- Help: the step-by-step coach (ui/GuidedSetup.lua), the prominent full
+    -- row, through the guarded route above (OpenHelpCoach). Like the other
+    -- entry buttons it only navigates: it records no setup fact, grants no
+    -- consent and never turns Auto ON. The Sync line moves down.
     local guide = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     guide:SetSize(372, 26)
     guide:SetPoint("TOPLEFT", 24, -284)
-    guide:SetText("Guided setup (step by step)")
+    guide:SetText("Help: Guided setup")
     guide:SetScript("OnClick", function()
         Finish()
         CloseOtherSetupWindows()
-        if Nexus.GuidedSetupUI then Nexus.GuidedSetupUI.Show() end
+        OpenHelpCoach()
     end)
     frame.guide = guide
     local sync = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -448,7 +479,9 @@ end
 -- open); none assigns, saves, sends, turns Auto ON, starts or resumes an Orb
 -- run or spends. Close and Escape only hide it.
 local checklist
-local CHECK_W, CHECK_H, CHECK_TEXT_W = 460, 400, 412
+-- 34 px above the earlier 400 for the Reference row above the buttons, so the
+-- fixed boxes below still end above it without LayoutMetrics.
+local CHECK_W, CHECK_H, CHECK_TEXT_W = 460, 434, 412
 local CHECK_ROW_Y = { -70, -114, -158 }
 local CHECK_STATUS_Y = { -242, -276, -310 }
 -- UX-18: each text block flows below the previous one at the height its
@@ -458,7 +491,9 @@ local CHECK_STATUS_Y = { -242, -276, -310 }
 -- height and shows its complete text on hover (LayoutMetrics.FullTextTooltip).
 -- The window grows to its content (never below CHECK_H) and is kept on screen
 -- (LayoutMetrics.FitToScreen). Without LayoutMetrics the fixed boxes above stay.
-local CHECK_TOP, CHECK_GAP, CHECK_BLOCK_MAX, CHECK_FOOTER = -38, 4, 120, 56
+-- The footer holds the button row and the Reference row 6 px above it.
+local CHECK_TOP, CHECK_GAP, CHECK_BLOCK_MAX, CHECK_FOOTER = -38, 4, 120, 86
+local CHECK_REFERENCE_Y, CHECK_REFERENCE_W = 50, 90
 
 local function ChecklistText(parent, y, h, template)
     local s = parent:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
@@ -486,6 +521,11 @@ local function LayoutChecklist(f)
     place(f.statusTitle, 2)
     for _, fs in ipairs(f.status) do place(fs) end
     place(f.notice)
+    -- Reference holds its whole label at the current font, never wider than
+    -- the text column (right-aligned, so it grows to the left).
+    if f.reference and type(metrics.FitButtonWidth) == "function" then
+        metrics.FitButtonWidth(f.reference, CHECK_REFERENCE_W, CHECK_TEXT_W)
+    end
     local height = math.max(CHECK_H, math.ceil(-y + CHECK_FOOTER))
     if math.abs((tonumber(f:GetHeight()) or 0) - height) > 0.5 then f:SetHeight(height) end
     if type(metrics.FitToScreen) == "function" then metrics.FitToScreen(f) end
@@ -572,16 +612,18 @@ local function EnsureChecklist()
     end
     -- Help's own routes: each says why when it cannot open, and opens nothing.
     -- The reason is also shown here.
+    -- Returns true when the route opened its window.
     local function route(open, missing)
         local help = Nexus.Help
         local fn = help and help[open]
         if type(fn) ~= "function" then
-            f.notice:SetText(missing);LayoutChecklist(f);return
+            f.notice:SetText(missing);LayoutChecklist(f);return false
         end
         local opened, why = fn()
-        if opened then f.notice:SetText("");f:Hide();return end
+        if opened then f.notice:SetText("");f:Hide();return true end
         f.notice:SetText(type(why) == "string" and why or missing)
         LayoutChecklist(f)
+        return false
     end
     f.assign = button(24, 130, "Assign Wishlist...", function()
         route("OpenAssignment", "Assign Wishlist is not available. Nothing was opened or assigned.")
@@ -589,11 +631,22 @@ local function EnsureChecklist()
     f.editor = button(160, 120, "Wishlist Editor", function()
         route("OpenEditor", "The Wishlist Editor is not available. Nothing was opened.")
     end)
-    -- Help opens above this window (Help's own layer); this window stays.
+    -- Help is the guided setup coach at its current step (Help.OpenGuide, as
+    -- OpenHelpCoach above), which takes this window's place. When it cannot
+    -- open (an Auto warning waits for its answer) the reason is shown here and
+    -- the read-only Reference opens above this window, so Help always answers.
     f.help = button(286, 70, "Help", function()
-        if Nexus.Help then Nexus.Help.Show("start") end
+        if route("OpenGuide", "Guided setup is not available. Nothing was opened.") then return end
+        OpenReference()
     end)
     f.close = button(362, 74, "Close", function() f:Hide() end)
+    -- Reference, the optional long manual, on its own row above Help and
+    -- Close. It opens above this window (Help's own layer); this window stays.
+    f.reference = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f.reference:SetSize(CHECK_REFERENCE_W, 24)
+    f.reference:SetPoint("BOTTOMRIGHT", -24, CHECK_REFERENCE_Y)
+    f.reference:SetText("Reference")
+    f.reference:SetScript("OnClick", OpenReference)
     local elapsed = 0
     f:SetScript("OnShow", function() elapsed = 0; f.notice:SetText(""); RefreshChecklist() end)
     f:SetScript("OnUpdate", function(_, dt)

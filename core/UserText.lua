@@ -801,19 +801,57 @@ T.Guide = {
     -- PlaceKept "saved"); while saved data cannot be written it is kept for
     -- this session only, and the Session words say so.
     checklistTitle = 'CHECKLIST',
-    buttons = {help = 'Help', close = 'X', closeTip = 'Close (Esc) - your place is kept',
+    -- Setup Alternative: the header's Reference opens the optional Reference
+    -- view in place of the step (help is that view's flag); All steps opens
+    -- the step list; Continue later closes exactly as X does.
+    buttons = {help = 'Reference', close = 'X', closeTip = 'Close (Esc) - your place is kept',
         closeTipSession = 'Close (Esc) - your place is kept until you reload or log out: saved data cannot be written right now',
-        back = 'Back',
+        back = 'Back', later = 'Continue later',
         skip = 'Skip for now', next = 'Continue', finish = 'Close guide',
-        checklistShow = 'Checklist v', checklistHide = 'Checklist ^', helpClose = 'X', fullHelp = 'Open full Help',
+        checklistShow = 'All steps v', checklistHide = 'All steps ^', helpClose = 'X', fullHelp = 'Open full Help',
+        refBack = '< Back to step %d - %s', dismissDraft = 'Pick a saved Wishlist',
         open = 'Open the Wishlist chooser', openAgain = 'Open the Wishlist chooser again', check = 'Check again',
         replace = 'Replace and continue', cancel = 'Choose another', retry = 'Try again',
         goWishlist = 'Choose a Wishlist', goTarget = 'Pick a Saved Build', goStep = 'Go to step',
         keep = 'Keep Auto %s', leave = 'Leave Auto alone', review = 'Review on the Nexus panel...', reread = 'Try reading it again',
         autoMore = '> What does Auto do?', autoLess = 'v What Auto does',
         read = 'Read', hide = 'Hide', replay = 'Run the guide again',
-        checkCode = 'Check code', openDraft = 'Open it as a draft', openBuilds = 'Open My Builds'},
+        checkCode = 'Check code', openDraft = 'Open it as a draft', openBuilds = 'Open My Builds',
+        returnPlan = 'Return to Plan draft', planChanged = 'Keep or discard Plan draft',
+        -- The bounded window's body controls (ui/GuidedSetup.lua ScreenCap).
+        scrollUp = 'Scroll up (or use the mouse wheel)', scrollDown = 'Scroll down (or use the mouse wheel)'},
     safety = 'Moving between steps never assigns, spends Orbs, sends data, or changes Auto.',
+    -- Setup Alternative: one short reason per step, the action under DO
+    -- THIS, then the outcome slot. Only a result the guide read is OBSERVED;
+    -- before that the slot says what to expect, never that it happened.
+    whyLabel = 'WHY THIS MATTERS', doLabel = 'DO THIS',
+    why = {welcome = 'Nexus points at Echoes from a Wishlist you choose. Nothing changes in game until you confirm a step.',
+        wishlist = 'A Wishlist is the Echoes you want. Recommendations and Orb runs work from it.',
+        target = 'A Saved Build is the build slot the game loads. It is the build your Wishlist will follow.',
+        assign = 'Once they are linked, recommendations follow your Wishlist for the build you play.',
+        manual = 'This is what Nexus points at while you roll. Nothing is chosen in game here.',
+        auto = 'Auto can act for you. It only changes when you change it yourself.',
+        summary = 'Only steps Nexus confirmed are marked done. Anything else stays open for later.'},
+    outcome = {expectLabel = 'WHAT YOU WILL SEE', observedLabel = 'OBSERVED', summaryLabel = 'SUMMARY',
+        expect = {welcome = 'Seven short steps. Back, Skip and Continue later never change anything.',
+            wishlist = 'One Wishlist lights up and the footer shows the same name.',
+            target = 'One Saved Build lights up. Nexus does not edit it.',
+            assign = 'After you confirm, Nexus reads the result back. Only a confirmed result counts as done.',
+            manual = 'A sample recommendation appears. Nothing is chosen in game.',
+            auto = 'Auto stays as it is unless you change it yourself.',
+            summary = 'Only steps Nexus confirmed are marked done. Skipped, unknown and declined steps stay open.'},
+        extra = {skipped = 'Nothing was changed; this step stays open.',
+            rejected = 'Nothing was changed; this step stays open.',
+            unavailable = 'Nothing is marked done.', stale = 'The earlier result no longer counts.',
+            waiting = 'Nothing is marked done yet.'}},
+    -- The optional Reference view: a topic list, each topic one Help page
+    -- opened in place of the guide (U.OpenHelp); never shown under a step.
+    reference = {title = 'Reference', tag = 'Reference - optional',
+        lead = 'More detail for after setup. One topic at a time.',
+        full = 'Each topic opens its full reference page (/nexus reference) in place of this guide; close it to come back to this step.',
+        topics = {{page = 'start', title = 'Getting started'}, {page = 'wishlists', title = 'Wishlists and locked targets'},
+            {page = 'rolling', title = 'Auto, rolling and saving'}, {page = 'orbs', title = 'Orbs / Lost Memories'},
+            {page = 'sharing', title = 'Shared builds and DPS'}, {page = 'troubleshooting', title = 'Problems and bug reports'}}},
     welcome = {title = 'Welcome to Nexus', titleReplay = 'Welcome back',
         body = 'Nexus recommends Echoes from a Wishlist you choose. This guide links one Wishlist to one Saved Build and shows you what a recommendation looks like.',
         bodyReplay = 'Replaying the guide resets nothing. It re-checks what is already set and lets you change anything safely.',
@@ -840,6 +878,25 @@ T.Guide = {
         importEmpty = '! Not checked: paste a code first.',
         importUnavailable = '! Not checked: the code reader is not available yet. Nothing was read or imported.',
         createTitle = 'Start an empty Wishlist', createDesc = 'Opens the Wishlist Editor. Add Echoes there, then save.',
+        -- While an unsaved Plan draft is set aside (Setup Alternative): the
+        -- row reads unavailable before it is clicked; a click shows one note.
+        createBlocked = 'Start an empty Wishlist (unavailable: unsaved Plan draft)',
+        createBlockedDesc = 'An empty Wishlist would replace your unsaved Plan draft. Return to it or pick a saved Wishlist.',
+        -- The footer's one name, the same Wishlist the single chosen card shows.
+        selected = 'Selected: %s', selectedNone = 'Selected: nothing yet',
+        -- Start an empty Wishlist while an unsaved Plan draft is set aside in
+        -- another workspace (WishlistEditor.SuspendedPlanDraft); the editor
+        -- never replaces that draft, and Return to Plan draft reopens it.
+        -- Under another character or Saved Build it cannot be reopened as it
+        -- is: Keep or discard Plan draft asks the editor's own question, whose
+        -- Discard draft opens Plan for the current context without it.
+        planHead = '! An unsaved Plan draft is waiting in Plan.',
+        planBody = 'You left it in Plan to open another workspace. An empty Wishlist would replace it, so none was opened. Nothing was saved or changed.',
+        planSame = 'Return to Plan draft to finish and save it there, or close it if you do not need it. Then start an empty Wishlist here.',
+        planContext = 'It was set aside under another character or Saved Build, so it cannot be reopened here. Keep or discard Plan draft asks you first: Keep draft leaves it set aside as it is; Discard draft deletes that unsaved draft and opens Plan for the current character and Saved Build, without it.',
+        -- A kept Wishlist that more than one listed Wishlist matches after a
+        -- reload (core/GuidedSetup.lua Readopt): none is picked for the player.
+        reselect = '! Choose your Wishlist again: more than one of your Wishlists holds the same Echoes as the one you chose, so none was picked for you.',
         chosen = 'Chosen: %s.', saved = 'Saved in the Wishlist Editor: %s.',
         draft = 'A draft is open in the Wishlist Editor. It counts only after you save it there.',
         partial = 'The plan was uploaded, but the save did not finish. See the result in the Wishlist Editor.',
@@ -944,11 +1001,12 @@ T.Guide = {
             {id = 'orbs', title = 'Orbs & Lost Memories', open = 'Open Orbs / Lost Memories',
                 lines = {"Orb runs can refine a build after you've played it. They're optional and separate from setup.",
                     'Reading this spends nothing. Every Orb run asks you first.'}},
-            {id = 'sharing', title = 'Sharing & Sync', open = 'Open Help: Sharing',
-                lines = {'Sync can send shared builds and DPS records; Help - Sharing lists exactly what goes out and when.',
+            {id = 'sharing', title = 'Sharing & Sync', open = 'Open Reference: Sharing',
+                lines = {'Sync can send shared builds and DPS records; Reference - Sharing lists exactly what goes out and when.',
                     'This guide never sends anything.'}}}},
-    -- The design's aside: full Help is what /nexus tutorial opens.
-    help = {title = 'About: %s', full = 'Full guide: Nexus Help (/nexus help or /nexus tutorial). It opens in place of this guide; close it to come back to this step.',
+    -- The design's aside: full Help is the reference pages /nexus reference
+    -- opens (/nexus help and /nexus tutorial open this coach).
+    help = {title = 'About: %s', full = 'Full guide: the Nexus reference pages (/nexus reference). They open in place of this guide; close them to come back to this step.',
         lines = {
             welcome = {"Nexus watches the Echoes you're offered and points at the ones on your Wishlist.",
                 'Each change in this guide has its own button and tells you what it does first.'},
@@ -978,8 +1036,8 @@ T.Guide = {
     chat = {paused = '[Nexus] Setup guide closed at "%s". Closing changed nothing.',
         -- Both routes open the coach itself (the design's "Reopen: Nexus
         -- menu > Setup / Welcome"). A resumed guide reads every result again.
-        reopen = '[Nexus] Reopen it from the Options menu: Manage > Setup / Welcome, or Help: Setup / Welcome. It resumes at this step and checks every result again.',
-        reopenSession = '[Nexus] Reopen it from the Options menu: Manage > Setup / Welcome, or Help: Setup / Welcome. Saved data cannot be written right now, so your place is kept only until you reload or log out.',
+        reopen = '[Nexus] Reopen it from the Options menu: Manage > Setup / Welcome, or type /nexus help. It resumes at this step and checks every result again.',
+        reopenSession = '[Nexus] Reopen it from the Options menu: Manage > Setup / Welcome, or type /nexus help. Saved data cannot be written right now, so your place is kept only until you reload or log out.',
         complete = '[Nexus] Setup confirmed: %s follows %s.',
         auto = '[Nexus] Auto is %s (this guide did not change it).',
         explore = '[Nexus] Look-around finished. Nothing was set up or changed.',
@@ -987,13 +1045,16 @@ T.Guide = {
     notice = {owner = 'The character changed, so earlier guide results were cleared.',
         epoch = 'Saved data changed, so earlier guide results were cleared.',
         session = 'A new world session started, so earlier guide results were cleared and must be checked again.',
-        restored = 'Resumed where you left off. Earlier results are not kept: each one is read again now.'},
+        restored = 'Resumed where you left off. Earlier results are not kept: each one is read again now.',
+        reselect = 'Resumed where you left off. More than one of your Wishlists holds the same Echoes as the one you chose, so the guide cannot tell which it was. Choose your Wishlist again; nothing was chosen for you.'},
     notes = {startup = 'Start-up is still running (see the loading panel). Nothing was opened.',
         unavailable = 'The game Character Progression button was not found. Nothing was opened or assigned.',
         noEditor = 'The Wishlist Editor is not available. Nothing was opened.',
         importChanged = 'That code no longer reads as a Wishlist code. Check it again. Nothing was opened.',
         importSuspended = 'An unsaved Plan draft is open in another workspace. Return to Plan before opening this code. Nothing was imported.',
-        gone = 'That Wishlist is no longer listed. Choose again.',
+        planRefused = 'Plan did not reopen the draft; a Save there may still be pending. Nothing was changed. Try again in a moment.',
+        planDiscarded = 'You discarded the Plan draft. Plan did not open over this guide; open it from the Nexus panel when you need it. Nothing else was changed.',
+        gone ='That Wishlist is no longer listed. Choose again.',
         notLoaded = 'Saved Build data is not loaded yet. Try again in a moment.',
         empty = 'That Saved Build holds no Echoes, so it cannot follow a Wishlist yet.',
         missing = 'That Saved Build is not available right now.',

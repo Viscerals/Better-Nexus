@@ -54,7 +54,10 @@ local function Copy(v) return assert(loadstring('return '..Ser(v)))() end
 -- The synthetic host of every boot, before the TOC loads: two Saved Builds,
 -- two server Wishlists, Saved Build 2 selected and a counted Orb service.
 -- HOST.noFree: the server no longer lists W-Free. HOST.owner: another
--- character of the same account is logged in.
+-- character of the same account is logged in. HOST.copy: a further server
+-- Wishlist, W-Copy, holds W-Free's Echoes (so both share one content key, as
+-- in guided_setup_flow F17), listed after W-Free; HOST.reorder lists it
+-- before W-Free instead (a lower server slot).
 local function Host(h)
  h.playerLevel=80;wipe(h.db)
  h.AddEcho(201172,'Echo One',0,5);h.AddEcho(201173,'Echo Six',0,5)
@@ -63,6 +66,9 @@ local function Host(h)
  local slots={[1]={name='One',verified=true,echoes=E1},[2]={name='Fire PvE',verified=true,echoes=E2},
   [106]={name='W-Six',verified=false,echoes=E6},[107]={name='W-Free',verified=false,echoes=EF}}
  if HOST.noFree then slots[107]=nil end
+ if HOST.copy then
+  slots[HOST.reorder and 105 or 108]={name='W-Copy',verified=false,echoes={{spellId=201174,quality=0,stacks=1}}}
+ end
  h.perks.serverBuildSlots=slots;h.perks.serverActiveSlot=2
  spends=0
  ProjectEbonhold.OrbService={IsStateKnown=function() return true end,GetCharges=function() return 0 end,
@@ -184,7 +190,7 @@ local function From(tag,text,o)
  if not C.setup(type(text)=='string',tag..': fixture: the saved data S1 left') then return false end
  local db=assert(loadstring('return '..text))()
  if o.mutate then o.mutate(db) end
- HOST={owner=o.owner,noFree=o.noFree}
+ HOST={owner=o.owner,noFree=o.noFree,copy=o.copy,reorder=o.reorder}
  Clear();H=F.Boot(db,Host,o.early)
  return Settle(tag,o.readOnly)
 end
@@ -451,6 +457,82 @@ C.scenario('S7 while saved data is loading the guide binds and writes nothing; o
  local place=Place(owner)
  C.expect(type(place)=='table' and place.path=='explore' and place.step=='manual' and place.wishlist==nil and place.target==nil,
   'S7: the place made this session is the one kept, with no earlier choice',Ser(place))
+end)
+
+-- S8 (review of the F17/F18 source): the kept Wishlist is its content key
+-- only, and two listed Wishlists can share it (guided_setup_flow F17). After
+-- a reload the guide took the first listed row with that key, so it could
+-- silently take another Wishlist than the one the player chose, and which
+-- one followed the list order. A key that two or more listed Wishlists hold
+-- now takes none: the coach asks the player to choose again, and nothing is
+-- chosen, ready or completed for them, in either order. A key that one
+-- listed Wishlist holds is still taken again (control, S1's record).
+-- EXPECT: no Wishlist taken, the ask to choose again and the player's own
+-- choice taken afterwards, in list order and reordered (each fails on the
+-- F17/F18 source, which takes W-Free, then W-Copy, for the same record).
+-- GUARD: the kept Saved Build, the unique-key control, no rewrite of the
+-- place on show and no write, action, send, spend or Auto change. Offline
+-- module reloads only; native reload NOT_RUN.
+C.scenario('S8 a kept Wishlist key that several listed Wishlists share is chosen again by the player, never picked for them',function()
+ HOST={copy=true};Clear();H=F.Boot(nil,Host)
+ if not Settle('S8') then return end
+ local GT=Nexus.UserText.Guide
+ local owner=Nexus.Store.CurrentOwnerKey()
+ Nexus.GuidedSetupUI.Show()
+ Press(Opt('I already have'));Press(Btn('Continue'))
+ local free,copy
+ for _,c in ipairs(G.WishlistOptions() or {}) do
+  if c.name=='W-Free' then free=c elseif c.name=='W-Copy' then copy=c end
+ end
+ if not C.setup(free~=nil and copy~=nil and free.key==copy.key and free.slot~=copy.slot,
+  'S8: fixture: W-Free and W-Copy hold the same Echoes, so they share one key') then return end
+ local key=copy.key
+ Press(Opt('W-Copy'));Press(Btn('Continue'));Press(Opt('Fire PvE'))
+ local s=G.State()
+ if not C.setup(Step()=='target' and s.wishlist~=nil and s.wishlist.name=='W-Copy' and s.target~=nil and s.target.destination==2,
+  'S8: fixture: W-Copy and Saved Build 2 chosen',Step()) then return end
+ Press(Btn('X'))
+ local place=Place(owner)
+ C.guard(type(place)=='table' and place.wishlist==key and place.target==2 and place.step=='target',
+  'S8: the kept place holds the shared key and Saved Build 2; the record cannot tell the two Wishlists apart',Ser(place))
+ local text=Saved()
+ for _,case in ipairs({{'in order',{copy=true},'W-Free'},{'reordered',{copy=true,reorder=true},'W-Copy'}}) do
+  local tag='S8 '..case[1]
+  if not From(tag,text,case[2]) then return end
+  local names={}
+  for _,c in ipairs(G.WishlistOptions() or {}) do if c.key==key then names[#names+1]=c.name end end
+  C.setup(#names==2 and names[1]==case[3],tag..': fixture: both are listed, '..case[3]..' first',table.concat(names,','))
+  local before,kept=Effects(),Ser(Place(owner))
+  Nexus.GuidedSetupUI.Show()
+  s=G.State()
+  C.guard(Kept()=='saved' and Step()=='target' and s.target~=nil and s.target.destination==2,
+   tag..': the kept step and Saved Build are resumed',Step())
+  C.expect(s.wishlist==nil and s.reselect==true,
+   tag..': neither Wishlist is taken: the guide cannot tell which one was chosen',s.wishlist and s.wishlist.name or 'none')
+  C.expect(Text():find(GT.notice.reselect,1,true)~=nil,tag..': the coach says to choose the Wishlist again',Text())
+  local sm=G.Summary()
+  C.guard(not G.CanNext() and sm.wishlist=='todo' and sm.complete==false and sm.trueNow==false and St()=='none',
+   tag..': nothing is chosen, ready or complete',tostring(sm.wishlist)..' '..St())
+  C.guard(Ser(Place(owner))==kept,tag..': showing the resumed coach rewrites nothing')
+  G.GoTo('wishlist')
+  C.expect(Text():find(GT.wishlist.reselect,1,true)~=nil and not G.CanNext() and Opt('W-Free')~=nil and Opt('W-Copy')~=nil,
+   tag..': the Wishlist step lists both, asks to choose again and Continue waits',Text())
+  Press(Opt('W-Copy'))
+  s=G.State()
+  local list=G.WishlistOptions() or {}
+  local at=G.ChosenOption(list)
+  C.expect(s.wishlist~=nil and s.wishlist.name=='W-Copy' and s.reselect==nil and at~=nil and list[at].name=='W-Copy'
+   and Text():find(GT.wishlist.reselect,1,true)==nil,
+   tag..': the player\'s own choice is taken, and only that row shows chosen',s.wishlist and s.wishlist.name or 'none')
+  C.guard(Effects()==before,tag..': no assignment, game action, send, Orb spend or Auto change',Effects())
+ end
+ -- Control: S1's record, whose key one listed Wishlist holds, is taken again.
+ if not From('S8 unique',S1.text) then return end
+ Nexus.GuidedSetupUI.Show()
+ s=G.State()
+ C.guard(s.wishlist~=nil and s.wishlist.key==S1.key and s.wishlist.name=='W-Free'
+  and s.reselect==nil and s.notice=='restored',
+  'S8 unique: a key one listed Wishlist holds is taken again from what Nexus lists now',s.wishlist and s.wishlist.name or 'none')
 end)
 
 C.finish('(guide place kept per character across an offline reload; outcomes read again; read-only, foreign and loading kept session-only; native reload NOT_RUN)')

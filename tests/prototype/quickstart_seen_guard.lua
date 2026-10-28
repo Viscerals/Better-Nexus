@@ -193,9 +193,11 @@ check(F.Serialize({builds=NexusDB.communityBuilds,marker=NexusDB.settingsVersion
 
 -- 8. Every entry button of the first-time Welcome (its deliberate
 -- presentation, QuickStart.Show, in a healthy session where first use is the
--- coach) opens its own view without creating a saved table.
+-- coach) opens its own view without creating a saved table. Reference is the
+-- long manual; Help: Guided setup is Help, the coach (design/current "Nexus
+-- Setup Alternative").
 local buttons={'Close','Set up current build','Import / Create Wishlist',
- 'Browse Community builds','Open Leaderboard','Help / Getting Started','Orbs / Lost Memories'}
+ 'Browse Community builds','Open Leaderboard','Reference','Orbs / Lost Memories','Help: Guided setup'}
 for _,label in ipairs(buttons)do
  F.Boot(F.Database())
  Nexus.QuickStart.Show()

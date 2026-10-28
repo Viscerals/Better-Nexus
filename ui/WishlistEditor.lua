@@ -1212,19 +1212,44 @@ function M.CancelWorkspaceSuspend()
     workspaceResume = nil
 end
 
+-- A read-only fact for the guided setup (ui/GuidedSetup.lua): nil while no
+-- unsaved Plan draft is set aside in another workspace, else whether the
+-- character and Saved Build it was set aside under are still the current ones
+-- (sameContext: ResumeWorkspaceDraft reopens it as it is; otherwise it asks
+-- before anything is discarded). It prints, shows, resumes and changes nothing.
+function M.SuspendedPlanDraft()
+    if not workspaceResume then return nil end
+    return {sameContext = SameWorkspaceContext(workspaceResume, WorkspaceContext()) and true or false}
+end
+
+-- The caller of the latest changed-context question that asked to hear about
+-- its Discard draft (the guided setup steps aside for the Plan it opens).
+-- Every ask replaces it and any hide of the question drops it, so an earlier
+-- caller never answers for a later question. Keep draft calls nothing.
+local contextChangedOpened
+
 StaticPopupDialogs["NEXUS_WORKSPACE_CONTEXT_CHANGED"] = {
-    text = "The character or selected Saved Build changed while your Plan draft was hidden. Discard that unsaved draft and open Plan for the current context?",
+    text = "The character or selected Saved Build changed while your Plan draft was hidden. Discard draft deletes that unsaved draft and opens Plan for the current character and Saved Build, without it. Keep draft leaves it set aside as it is.",
     button1 = "Discard draft",
     button2 = "Keep draft",
     OnAccept = function()
+        local opened = contextChangedOpened
+        contextChangedOpened = nil
         workspaceResume = nil
         M.Show()
+        if type(opened) == "function" then pcall(opened) end
     end,
+    OnCancel = function() contextChangedOpened = nil end,
+    OnHide = function() contextChangedOpened = nil end,
 }
 
-function M.ResumeWorkspaceDraft()
+-- onDiscardOpened (optional): called once, after Plan was shown for the
+-- current context, if the player answers this very changed-context question
+-- with Discard draft. Nothing else calls it.
+function M.ResumeWorkspaceDraft(onDiscardOpened)
     if not workspaceResume then return false, "no workspace draft" end
     if not SameWorkspaceContext(workspaceResume, WorkspaceContext()) then
+        contextChangedOpened = type(onDiscardOpened) == "function" and onDiscardOpened or nil
         if type(StaticPopup_Show) == "function"
             and not (type(StaticPopup_Visible) == "function"
                 and StaticPopup_Visible("NEXUS_WORKSPACE_CONTEXT_CHANGED")) then

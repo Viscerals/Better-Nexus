@@ -1,7 +1,8 @@
 -- Structural rendering checks; native text fit/clicks remain a separate gate.
 local H=dofile('tests/prototype/harness.lua')
 local T=dofile('tests/prototype/startup_support.lua');T.Load()
-SlashCmdList.NEXUS('help');local f=assert(NexusHelpWindow)
+-- The reference pages open with /nexus reference (/nexus help opens the coach).
+SlashCmdList.NEXUS('reference');local f=assert(NexusHelpWindow)
 local scroll=assert(NexusHelpScroll);local child=assert(f.content)
 assert(scroll:GetFrameLevel()>f:GetFrameLevel(),'Help scroll must render above its opaque parent')
 assert(f:GetFrameLevel()<100 and child:GetFrameLevel()<128,'keep every Help layer below the observed native clamping boundary')
@@ -19,6 +20,6 @@ for i=1,7 do
  navigation.Next:Click()
 end
 navigation.Previous:Click();navigation.Close:Click();assert(not f:IsShown())
-SlashCmdList.NEXUS('help');assert(f:IsShown() and f.body:IsVisible())
+SlashCmdList.NEXUS('reference');assert(f:IsShown() and f.body:IsVisible())
 assert(#H.actions==0 and #H.sent==0,'Help is passive before readiness')
 print('PASS explicit Help layering, anchors, text dimensions, seven-page navigation and passive reopen')

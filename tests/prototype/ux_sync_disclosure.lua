@@ -84,7 +84,9 @@ local STORE_EXPORTS={'AccountCharacters','CurrentOwnerKey','Init','IsAccountBuil
 -- any other entry still fails here.
 local OWNER_ENTRIES={'IsDurableStateRowV1','PlanPoolReadV1','ReadStateV1','ResolveStateRowV1',
  'SameSnapshotV1','UpdateSettingsV1','UpdateStateV1'}
-local WELCOME_TAIL=' Help: Sharing lists what is sent.'
+-- The long manual's Sharing page is the Reference (design/current "Nexus
+-- Setup Alternative"); Help on the setup window is the guided setup coach.
+local WELCOME_TAIL=' Reference: Sharing lists what is sent.'
 local MODELS={{name='default',char=5.5,line=12},{name='conservative',char=7.0,line=17}}
 
 local function Wrapped(text,width,char)
@@ -278,7 +280,7 @@ local function Run(tag,database,mode,line)
   local okRect=r[1]>=11 and r[3]<=W-12 and r[2]>=12 and r[4]<=Ht-11
   local clear,seen=true,0
   local BUTTONS={['Set up current build']=true,['Import / Create Wishlist']=true,['Browse Community builds']=true,
-   ['Open Leaderboard']=true,['Help / Getting Started']=true,['Orbs / Lost Memories']=true,['Close']=true}
+   ['Open Leaderboard']=true,['Reference']=true,['Orbs / Lost Memories']=true,['Close']=true}
   -- The exact "Close" caption of the dismiss control is an EXPECT. Only
   -- after it fails may the real legacy "Later" control stand in for it in
   -- this count and overlap check (the seen==9 SETUP is unchanged); the failed

@@ -384,6 +384,7 @@ local function PanelKey(spec)
         spec.callboard and 1 or 0,
         spec.planDetails and 1 or 0,spec.orbLine and 1 or 0,
         tonumber(spec.autoScopeRows) or 0,
+        spec.noOffer and 1 or 0,
     }, "|")
 end
 
@@ -412,15 +413,16 @@ function M.Panel(spec)
     Add(layout,"header",8,cursor,width-16,headerHeight)
     cursor = cursor + headerHeight + gap
 
-    -- The Play panel (Claude Design full UI, "Main panel (Play)") of a build
-    -- in progress: the current offer first, then a compact plan progress,
-    -- the Difficulty / Soul Ash line, the DPS rows and the Orb run line. The
-    -- Difficulty / Soul Ash card stays at the top of the setup and completed
-    -- views, where the design shows no Play summary.
+    -- The Play panel of a build in progress (design/current "Nexus Main Panel
+    -- - Compact Redesign"): below the Build / Wishlist header, the original
+    -- difficulty card (the pre-overhaul b0870929 worldStatusBox, 56 px for an
+    -- active build), then the current offer, a compact plan progress, the DPS
+    -- rows and the Orb run line. The same card heads the setup and completed
+    -- views. It is never flattened into a text row.
     local play = not spec.noBuild and not spec.complete
     layout.play = play
-    if spec.statusVisible and not play then
-        local height = math.max(52, normal + small * 2 + gap * 2)
+    if spec.statusVisible then
+        local height = math.max(play and 56 or 52, normal + small * 2 + gap * 2)
         Add(layout,"status",10,cursor,width-20,height)
         cursor = cursor + height + gap
     end
@@ -434,7 +436,23 @@ function M.Panel(spec)
         Add(layout,"callboard",12,cursor,width-24,callboardH)
         cursor = cursor + callboardH + gap
     end
-    if spec.activeRoll then
+    if spec.activeRoll and spec.noOffer then
+        -- Level 80, normal rolls finished, no offer (the design's collapsed
+        -- state): no 104 px offer minimum and no separate button row. One
+        -- guidance block of the conservative model's rows (the caller counts
+        -- them at the width left of the button) with the passive Open
+        -- Orbs... button inline at its right.
+        local char, line = M.ConservativeText(scale)
+        local rows = math.max(1, tonumber(spec.guidanceRows) or 1)
+        layout.noOffer = true
+        if spec.orbButton then
+            layout.orbButtonH = math.max(small + 6, line)
+            layout.orbButtonW = math.min(width-24, math.ceil(12 * char) + 20)
+        end
+        local height = math.max(rows * line, layout.orbButtonH or 0) + gap
+        Add(layout,"roll",10,cursor,width-20,height)
+        cursor = cursor + height + gap
+    elseif spec.activeRoll then
         local height = math.max(104, small * 6 + gap * 4)
         if spec.orbButton then
             -- Its own row for the passive "Open Orbs..." button, sized for
@@ -546,12 +564,7 @@ function M.Panel(spec)
                 cursor = cursor + height + gap
             end
         end
-        if spec.statusVisible then
-            -- Difficulty and Soul Ash on one line (the design's inline row);
-            -- the full values stay on its hover.
-            Add(layout,"serverLine",12,cursor,width-24,small + 4)
-            cursor = cursor + small + 4 + gap
-        end
+        -- No flattened Difficulty / Soul Ash row: the card above holds it.
         if spec.showPerformance then
             local height = small * 5 + gap * 4
             Add(layout,"performance",12,cursor,width-24,height)

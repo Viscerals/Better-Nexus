@@ -149,9 +149,16 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
   local item=Item(items,label)
   if not (item and type(item.func)=='function' or item and item.hasArrow) then missing[#missing+1]=label end
  end
- for _,prefix in ipairs({'Language','Appearance: ','Update notices: '}) do
+ for _,prefix in ipairs({'Language','Update notices: '}) do
   if #Prefixed(items,prefix)~=1 then missing[#missing+1]=prefix..'*' end
  end
+ -- design/current compact redesign: Appearance is one top-level Options
+ -- entry (no Manage hover chain), listing the shared Theme choices; it is
+ -- not repeated under Manage.
+ local appearance=Prefixed(top,'Appearance: ')
+ if #appearance~=1 or #Prefixed(items,'Appearance: ')~=0 then missing[#missing+1]='Appearance: * (top level only)' end
+ if appearance[1] and not (appearance[1].hasArrow and type(appearance[1].menuList)=='table'
+  and #appearance[1].menuList==#Nexus.Theme.MenuItems()) then missing[#missing+1]='Appearance submenu = Theme.MenuItems' end
  if not (Item(items,'Show DPS records') or Item(items,'Hide DPS records')) then missing[#missing+1]='DPS records' end
  if not (Item(items,'Disable Update Notices') or Item(items,'Enable Update Notices')) then missing[#missing+1]='Update Notices' end
  if not (Item(items,'Use Server Difficulty / Soul Ash HUD') or Item(items,'Use Nexus Difficulty / Soul Ash HUD')) then
@@ -213,6 +220,41 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
   end)
   C.expect(coach.n==0,'V2: and not the coach',coach.n)
  end
+ -- design/current "Nexus Setup Alternative": Help and Setup open the coach,
+ -- Reference on request. The visible Help entry takes Help's guarded coach
+ -- route (as /nexus help); the long manual is its own optional entry.
+ local reference=Item(items,'Reference (full manual)')
+ C.expect(reference and type(reference.func)=='function' and Under(reference,'Help and setup','Settings'),
+  'V2: the full manual is a separately named optional entry under Help and setup',Texts(items))
+ if help then
+  local manual
+  local coach=Spy(Nexus.GuidedSetupUI,'Show',function()
+   manual=Spy(Nexus.Help,'Show',function() help.func() end)
+  end)
+  C.expect(coach.n==1,'V2: Help / Getting Started opens the guided setup coach (GuidedSetupUI.Show)',coach.n)
+  C.expect(manual.n==0,'V2: Help / Getting Started does not open the long Reference manual (Help.Show)',manual.n)
+  -- While an Auto warning waits for its answer the coach refuses and says
+  -- why (Help.OpenGuide); Help then answers with the read-only Reference,
+  -- as /nexus help does, and still changes nothing.
+  local ui,real,refused=Nexus.GuidedSetupUI,Nexus.GuidedSetupUI.Show,0
+  ui.Show=function() refused=refused+1;return false,'warning-open' end
+  local fallback=Spy(Nexus.Help,'Show',function() help.func() end)
+  ui.Show=real
+  C.expect(refused==1 and fallback.n==1 and fallback.args[1]=='start',
+   'V2: a refused coach (Auto warning open) leaves Help answering with the Reference start page, not a silent menu',
+   'refused='..refused..' reference='..fallback.n..' page='..tostring(fallback.args and fallback.args[1]))
+ end
+ if reference then
+  local manual
+  local coach=Spy(Nexus.GuidedSetupUI,'Show',function()
+   manual=Spy(Nexus.Help,'Show',function() reference.func() end)
+  end)
+  C.expect(manual.n==1 and manual.args[1]=='start',
+   'V2: Reference (full manual) opens the manual at its first page (Help.Show("start"))',
+   tostring(manual.n)..' '..tostring(manual.args and manual.args[1]))
+  C.expect(coach.n==0,'V2: Reference (full manual) does not open the coach',coach.n)
+ end
+ if NexusHelpWindow then NexusHelpWindow:Hide() end
  local entries={}
  for _,item in ipairs(items) do
   if type(item.text)=='string' and (item.text=='Setup / Welcome' or item.text:find('Setup guide',1,true)) then
@@ -305,9 +347,12 @@ C.scenario('V3a readable context rows and guarded header routes at enlarged text
  C.expect(f:GetWidth()==420 and title and build and wishlist and change,
   'V3a: the 420 px Play header has three named rows and a Change action')
  local text=V.Plain(build:GetText() or '')..' '..V.Plain(wishlist:GetText() or '')
- C.expect(V.Plain(title:GetText() or ''):find('TestCharacter',1,true)~=nil
+ -- design/current compact redesign: line 1 is the title with its state cue;
+ -- the character is first on the title's hover.
+ local titleTip=table.concat((V.TooltipLines(f._contextTitleHit:GetScript('OnEnter'),f._contextTitleHit)),'\n')
+ C.expect(titleTip:find('TestCharacter',1,true)~=nil
   and text:find('Build:',1,true) and text:find('Wishlist:',1,true),
-  'V3a: character, Build and Wishlist have separate readable labels',text)
+  'V3a: character (title hover), Build and Wishlist have separate readable labels',text..' / '..titleTip)
  local box={0,0,f:GetWidth(),f:GetHeight()}
  for _,pair in ipairs({{title,f._autoBtn},{build,f._switchBtn},{wishlist,change}}) do
   local left,right=Rect(pair[1]),Rect(pair[2])

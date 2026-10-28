@@ -19,17 +19,24 @@ end
 local all=table.concat(text,'\n')
 check(all:find('EXTRA COPIES',1,true),'panel actual extra-copy heading')
 check(not all:find('TO SHED',1,true),'old main heading absent')
-SlashCmdList.NEXUS('help');check(NexusHelpWindow.body:GetText():find('experimental',1,true),'help identifies experimental build')
+SlashCmdList.NEXUS('reference');check(NexusHelpWindow.body:GetText():find('experimental',1,true),'help identifies experimental build')
 local auto=Nexus.RecomputeStats().autoEnabled
 Nexus.Help.Show('rolling');check(NexusHelpWindow.body:GetText():find('Target 2/current 5 means 3 extras',1,true),'extra-copy definition in help')
 check(Nexus.RecomputeStats().autoEnabled==auto,'wording/navigation does not enable automation')
-Nexus.QuickStart.Show();local help,orbs
+-- design/current "Nexus Setup Alternative": the Welcome's Help is the guided
+-- setup coach; the long manual is its separately named Reference.
+Nexus.QuickStart.Show();local help,reference,orbs
 for _,f in ipairs(H.frames)do if f:GetParent()==NexusQuickStart then
- if f:GetText()=='Help / Getting Started'then help=f end
+ if f:GetText()=='Help: Guided setup'then help=f end
+ if f:GetText()=='Reference'then reference=f end
  if f:GetText()=='Orbs / Lost Memories'then orbs=f end
 end end
-check(help and orbs,'persistent help and Orb entry points in welcome')
-help:Click();check(NexusHelpWindow:IsShown(),'real welcome help button')
+check(help and reference and orbs,'persistent help, Reference and Orb entry points in welcome')
+if NexusHelpWindow then NexusHelpWindow:Hide() end
+reference:Click();check(NexusHelpWindow:IsShown(),'real welcome Reference button opens the manual')
+NexusHelpWindow:Hide();Nexus.QuickStart.Show()
+help:Click();check(NexusGuidedSetup and NexusGuidedSetup:IsShown() and not NexusHelpWindow:IsShown(),'real welcome help button opens the guided setup coach, not the manual')
+Nexus.GuidedSetupUI.Hide()
 -- Raw policy implementation is retained, not rewritten by display mapping.
 local raw='tight horizon';check(T.Message(raw)=='Few selections remain' and raw=='tight horizon','mapping leaves source reason unchanged')
 -- Issue #123: English status localization seam. The three status reasons

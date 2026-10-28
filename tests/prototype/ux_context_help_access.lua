@@ -232,6 +232,22 @@ C.scenario('X7 the checklist keeps every reason readable under each font model a
   end
   C.expect(G.Apart(G.Rect(f.notice,f),G.Rect(f.close,f)) and G.Apart(G.Rect(f.status[3],f),G.Rect(f.assign,f)),
    tag..': the text ends above the buttons',tostring(f:GetHeight()))
+  -- The Reference row above Help and Close (design/current "Nexus Setup
+  -- Alternative": Reference on request) holds its whole label, stays inside
+  -- the window and clear of the text and the button row.
+  local ref=f.reference
+  C.expect(ref~=nil,tag..': the checklist offers Reference')
+  if ref then
+   local rr=G.Rect(ref,f)
+   -- Width at this model (24 px end caps, as LayoutMetrics.FitButtonWidth);
+   -- its height is the row's own 24 px, as the buttons beside it.
+   C.expect(G.Length(V.Plain(ref:GetText() or ''))*model.char+24<=ref:GetWidth() and ref:GetHeight()==f.help:GetHeight(),
+    tag..': Reference holds its whole label width in a button as tall as Help',tostring(ref:GetWidth())..'x'..tostring(ref:GetHeight()))
+   C.expect(G.Inside(rr,{11,12,f:GetWidth()-12,f:GetHeight()-11}) and G.Apart(rr,G.Rect(f.notice,f))
+    and G.Apart(rr,G.Rect(f.status[3],f)) and G.Apart(rr,G.Rect(f.help,f)) and G.Apart(rr,G.Rect(f.close,f))
+    and G.Apart(rr,G.Rect(f.editor,f)) and G.Apart(rr,G.Rect(f.assign,f)),
+    tag..': Reference lies inside the window, below the text and above the button row',G.Text(rr)..' in '..f:GetWidth()..'x'..f:GetHeight())
+  end
  end
  G.UseFont(G.MODELS.default)
  -- A refused route says why in the checklist itself.

@@ -3,7 +3,7 @@
 Nexus helps you work toward an Echo build: plan a Wishlist, follow roll
 recommendations or let Auto act for you, refine with Orbs, share builds and
 compare recorded DPS. This is an experimental build, not a stable release.
-The in-game Help (`/nexus help`) covers the same topics, but the two are not
+The in-game Help reference (`/nexus reference`) covers the same topics, but the two are not
 identical; where they differ, the game's own windows are current. In the game,
 **Setup checklist and status** (in the **...** menu, or **Setup checklist** in
 Help) shows which setup steps are true now; it only reads and opens windows.
@@ -267,7 +267,7 @@ Login, reconnect, new resources or reload never restart spending. If the game
 has no Orb service, only Orb mode is unavailable and ordinary rolling still
 works. If the Orb service exists but Nexus cannot read its state, ordinary
 rolling waits too. The Orb window's **Help** button
-opens this Orb section in `/nexus help`.
+opens this Orb section in `/nexus reference`.
 
 Closing the window does not stop an approved run. Use Pause or Stop.
 
@@ -378,9 +378,15 @@ full SavedVariables or account details publicly.
 
 ## Commands
 
-- `/nexus help` (also `/nexus guide`, `/nexus tutorial`, and **Help / Getting
-  Started** in the **...** menu and the Welcome window): the in-game Help, also
-  during loading.
+- `/nexus help` (also `/nexus guide`, `/nexus tutorial`, **Help / Getting
+  Started** in the Options menu, **Help: Guided setup** in the setup window and
+  **Help** in the setup checklist): Guided setup at your current step, also
+  during loading. Opening it changes nothing. While an Auto warning waits for
+  its answer, Guided setup does not open, says why and the Reference opens
+  instead.
+- `/nexus reference` (also **Reference (full manual)** in the Options menu and
+  **Reference** in the setup window and the setup checklist): the in-game
+  Help reference pages, also during loading.
 - `/nexus report`: support report.
 - `/nexus editor`: Wishlist Editor.
 - `/nexus orbs`: Orb window; does not spend.

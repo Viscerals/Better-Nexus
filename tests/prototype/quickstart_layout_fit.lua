@@ -16,8 +16,10 @@ local BODY="Already have a Saved Build? Assign the Wishlist you want it to follo
  "Starting fresh? Import a Wishlist code or copy a Community build into an editable draft."
 local HINT="Reopen Help any time with /nexus help. Automation and Orb spending require separate explicit controls."
 local SUBTITLE="Plan your Echoes, then choose what to automate."
+-- design/current "Nexus Setup Alternative": Help is the coach (the full row),
+-- the long manual its own optional Reference.
 local BUTTONS={'Set up current build','Import / Create Wishlist','Browse Community builds',
- 'Open Leaderboard','Help / Getting Started','Orbs / Lost Memories','Guided setup (step by step)','Close'}
+ 'Open Leaderboard','Reference','Orbs / Lost Memories','Help: Guided setup','Close'}
 local MODELS={{name='default',char=5.5,line=12},{name='conservative',char=7.0,line=17}}
 
 -- Label cases at the declared models of layout_geometry_support (default,
@@ -181,7 +183,7 @@ local function apart(a,b,label)
  check(a[3]<=b[1] or b[3]<=a[1] or a[4]<=b[2] or b[4]<=a[2],label..' do not overlap')
 end
 local order={'Set up current build','Import / Create Wishlist','Browse Community builds','Open Leaderboard',
- 'Help / Getting Started','Orbs / Lost Memories','Guided setup (step by step)','Close'}
+ 'Reference','Orbs / Lost Memories','Help: Guided setup','Close'}
 for _,label in ipairs(order)do
  local b=buttons[label];inside('button "'..label..'"',place(b,b:GetWidth(),b:GetHeight()))
 end
@@ -478,7 +480,7 @@ do
  local closeDep,sync=closeNamed and '' or ' [depends on the failed Close caption EXPECT]',rawget(qsOrig,'sync')
  check(dismissal and dismissal:GetScript('OnClick') and hintText and sync,'fault cases: the Welcome has its dismissal, hint and Sync line'..closeDep)
  local others={hintText,sync}
- for _,caption in ipairs({'Set up current build','Import / Create Wishlist','Browse Community builds','Open Leaderboard','Help / Getting Started','Orbs / Lost Memories','Guided setup (step by step)'})do
+ for _,caption in ipairs({'Set up current build','Import / Create Wishlist','Browse Community builds','Open Leaderboard','Reference','Orbs / Lost Memories','Help: Guided setup'})do
   local b=byCaption[caption];check(b and b~=dismissal,'fault cases: the Welcome keeps "'..caption..'"');others[#others+1]=b
  end
  local dw,dh,qw,qh,rawWidth0=dismissal:GetWidth(),dismissal:GetHeight(),qsOrig:GetWidth(),qsOrig:GetHeight(),rawget(dismissal,'GetTextWidth')

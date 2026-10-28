@@ -103,6 +103,51 @@ local function Fit(label,expectButton,withCards)
    check(rec:GetText()==g.text,tag..': fixture: the body shows the guidance text')
   end
   check(btn:IsShown()==expectButton,tag..': the button is '..(expectButton and 'shown' or 'hidden'))
+  -- design/current "Nexus Main Panel - Compact Redesign" (level 80, normal
+  -- rolls finished, no offer): the roll block collapses to the guidance with
+  -- Open Orbs... inline at its right; no heading, no 104 px minimum and no
+  -- separate button row. Every other guidance keeps the full block below.
+  local finished=g.state=='finished' or g.state=='finished-no-orbs' or g.state=='finished-unknown'
+  local laid=NexusPanel._responsiveLayout or {}
+  check((laid.noOffer==true)==(finished and not withCards),tag..': collapsed exactly for a finished run without an offer: '..tostring(g.state))
+  if laid.noOffer then
+   check(not head:IsShown(),tag..': the collapsed block has no heading row')
+   -- Scale-aware collapse. The requirement is that no unused offer space is
+   -- reserved, not a pixel bound: at large text the guidance wrapped beside
+   -- the inline button legitimately needs more than 104 px. The block is no
+   -- taller than its own content in the conservative model (this file's
+   -- word wrap at the body's real width, or the inline button when taller,
+   -- plus the layout gap), and shorter than the ordinary block for the same
+   -- guidance at the same scale (its rows at the ordinary 248 px body width).
+   local cchar,cline=HUD[2].char(s),HUD[2].line(s)
+   local rows=Lines(rec:GetText(),rec:GetWidth(),cchar)
+   local need=math.max(rows*cline,laid.orbButtonH or 0)+laid.gap
+   local ordinary=Nexus.LayoutMetrics.Panel({width=420,fontScale=s,activeRoll=true,orbButton=btn:IsShown(),
+    guidanceRows=Lines(rec:GetText(),248,cchar)}).boxes.roll.h
+   print('ORB_FIT',tag,'collapsed','area',area:GetWidth()..'x'..area:GetHeight(),'body',rec:GetWidth()..'x'..rec:GetHeight(),
+    'rows',rows,'needs',need,'ordinary',ordinary)
+   check(area:GetHeight()<=need,tag..': the collapsed block reserves nothing beyond its content: '..area:GetHeight()..' <= '..need)
+   check(area:GetHeight()<ordinary,tag..': the collapsed block is shorter than the ordinary block at this scale: '
+    ..area:GetHeight()..' < '..ordinary)
+   check(Top(rec)>=0 and Top(rec)+rec:GetHeight()<=area:GetHeight(),tag..': the body is inside the collapsed block')
+   for _,m in ipairs(HUD) do
+    local char,line=m.char(s),m.line(s)
+    local body=Lines(rec:GetText(),rec:GetWidth(),char)
+    check(body*line<=rec:GetHeight(),tag..' '..m.name..': every guidance line fits the collapsed body: '..body..' lines')
+    if expectButton then
+     check(Len(btn:GetText())*char+CAPS<=btn:GetWidth(),tag..' '..m.name..': the inline button label fits')
+     check(line<=btn:GetHeight(),tag..' '..m.name..': the inline button label is not clipped vertically')
+    end
+   end
+   if expectButton then
+    local point,rel,_,bx,by=btn:GetPoint(1)
+    local _,_,_,rx=rec:GetPoint(1)
+    check(rel==area and point=='TOPRIGHT',tag..': the button is anchored inline at the block\'s top right')
+    check(area:GetWidth()+bx-btn:GetWidth()>=(rx or 0)+rec:GetWidth(),tag..': the button sits right of the guidance text, apart from it')
+    check(-by+btn:GetHeight()<=area:GetHeight() and btn:GetWidth()<=area:GetWidth()-4,tag..': the button is inside the block')
+    check(not (NexusPanel._orbMiniBtn and NexusPanel._orbMiniBtn:IsShown()),tag..': the collapsed row keeps one action (the mini panel stays in the Orb window)')
+   end
+  else
   local recBottom=Top(rec)+rec:GetHeight()
   check(Top(rec)>=Top(head)+head:GetHeight(),tag..': the body starts below the heading')
   check(recBottom<=area:GetHeight(),tag..': the body ends inside the roll area')
@@ -130,6 +175,7 @@ local function Fit(label,expectButton,withCards)
    check(btnTop>=recBottom,tag..': the button is below the guidance text')
    check(btnTop>=Top(head)+head:GetHeight(),tag..': the button is below the heading')
    check(by>=0 and btn:GetWidth()<=area:GetWidth()-4,tag..': the button is inside the roll area')
+  end
   end
  end
 end

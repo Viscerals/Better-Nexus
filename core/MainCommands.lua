@@ -38,10 +38,16 @@ function Commands.New(options)
 
     function M.Dispatch(message)
         local early=(message or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-        -- tutorial keeps opening Help, as both original designs say (Setup /
-        -- Welcome opens the coach).
+        -- help and tutorial open the guided setup coach at its current step
+        -- (design/current "Nexus Setup Alternative": Help and Setup open the
+        -- coach); reference opens the full reference pages, the optional
+        -- manual. All three answer during loading and change nothing.
         if early=="loading" or early=="help" or early=="tutorial" or early=="orbs" then
             Invoke(early=="loading" and "loading" or early=="orbs" and "orbs" or "help",nil,early)
+            return
+        end
+        if early=="reference" then
+            Invoke("reference",nil,early)
             return
         end
         -- guide opens the guided setup coach, not the reference pages. Like
@@ -114,7 +120,9 @@ function Commands.New(options)
             Invoke("anchor", context, normalized, argument)
             return
         end
-        Invoke("help", context, normalized)
+        -- An unknown command gets the command summary and the reference
+        -- pages, as it always has; it does not open the setup coach.
+        Invoke("reference", context, normalized)
     end
 
     return M

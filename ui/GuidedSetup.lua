@@ -1,6 +1,21 @@
 -- Nexus: ui/GuidedSetup.lua
 -- The guided setup coach window over core/GuidedSetup.lua (issue #131), laid
 -- out after the Claude Design guided-setup artifact in its two presentations.
+--
+-- Setup Alternative (design/current "Nexus Setup Alternative"): the coach is
+-- one step at a time in a fixed order: the step line and rail ("All steps"
+-- opens the list), the step's title, one WHY THIS MATTERS line, DO THIS with
+-- its action, then an outcome slot that says OBSERVED only for a result the
+-- guide read (otherwise WHAT YOU WILL SEE). The footer is the Wishlist step's
+-- one Selected name, Continue across the row, the gate hint, then Back, Skip
+-- for now and Continue later (the same close as X: the place is kept). The
+-- header's Reference replaces the step with an optional topic list (each
+-- topic one Help page, opened in place of the guide) and its own way back;
+-- it is never shown under a step. The older notes below on the inline Help
+-- card and the Help side panel describe what Reference replaced. The design's
+-- 640 px window with a scrolling body and a pinned footer is the bounded
+-- window (Bound, ScreenCap): on a readable UI size the coach is at most 640 px
+-- tall and its body scrolls; text is no longer shrunk with the whole window.
 -- Where the visible UI is wide enough (the design's 960 px, 1100 px at
 -- enlarged text) it is the design's desktop window: 900 px, a header (title,
 -- character, Help, close), the checklist as side navigation on the left, one
@@ -85,9 +100,12 @@ local HELP_BLUE = {0.6, 0.72, 0.95}
 -- Session-only view state: the help card, the checklist, Auto's explainer,
 -- the open optional lesson, the presentation last rendered and the Wishlist
 -- step's paste field (open, its text, the last check's result and the text
--- that check read). Never saved; a pasted code is never imported by typing.
+-- that check read), and whether Start an empty Wishlist was asked while an
+-- unsaved Plan draft is set aside (PlanDraftCard), and a bounded window's
+-- scroll offset and the step it belongs to (Bound). Never saved; a pasted
+-- code is never imported by typing.
 local view = {help = false, checklist = false, autoMore = false, lesson = nil, review = false, wide = false,
-    import = {open = false, text = '', result = nil, checked = nil}}
+    planDraft = false, import = {open = false, text = '', result = nil, checked = nil}, scroll = 0}
 local function ResetImport() view.import = {open = false, text = '', result = nil, checked = nil} end
 
 local function Core() return Nexus.GuidedSetup end
@@ -138,6 +156,10 @@ local function Release()
     for _, p in pairs(pools) do
         for i = 1, #p do
             local item = p[i]
+            -- A region scrolled out of the last render's viewport (ApplyScroll)
+            -- is laid out afresh; its mark goes with it.
+            item._nexusOut = nil
+            if item.desc then item.desc._nexusOut = nil end
             if item.Hide then item:Hide() end
             if item._nexusHit then item._nexusHit:Hide() end
             if item.parts then for _, t in ipairs(item.parts) do t:Hide() end end
@@ -172,6 +194,8 @@ local function Box(x, y, w, h, edge, fill, fillAlpha)
         t:ClearAllPoints(); t:SetPoint('TOPLEFT', frame, 'TOPLEFT', e[2], e[3]); t:SetSize(e[4], e[5])
         if edge then Paint(t, edge, 0.95); t:Show() else t:Hide() end
     end
+    -- Its rectangle, so a scrolled body can show the part inside its viewport.
+    b.geo = {x = x, y = y, w = w, h = h, edge = edge ~= nil}
     return b
 end
 
@@ -179,6 +203,7 @@ local function Fill(x, y, w, h, c, a)
     local t = Take('fill', function() return Tex('ARTWORK') end)
     t:ClearAllPoints(); t:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y); t:SetSize(w, h)
     Paint(t, c, a); t:Show()
+    t.geo = {x = x, y = y, w = w, h = h}
     return t
 end
 
@@ -524,9 +549,32 @@ local function Notes(y, extra)
     return y
 end
 
+-- The step's head in the Setup Alternative order: its title, one WHY THIS
+-- MATTERS line, then the DO THIS label above the step's action. The step is
+-- the one U.Render is drawing (view.id).
+local function Head(title, y)
+    local c = Copy()
+    y = y - Text(title, PAD, y, CW, 'title', GOLD) - GAP
+    local why = (c.why or {})[view.id]
+    if why and why ~= '' then
+        y = y - Text(c.whyLabel or 'WHY THIS MATTERS', PAD, y, CW, 'small', MUTED) - 2
+        y = y - Text(why, PAD, y, CW, 'body', TEXT) - GAP
+    end
+    return y - Text(c.doLabel or 'DO THIS', PAD, y, CW, 'small', MUTED) - 4
+end
+
+-- The one Wishlist this step shows as chosen: the chosen card's own record,
+-- except a listed choice set aside while the paste field is the chosen way.
+-- The status line and the footer's Selected name both read this, so they can
+-- never name different Wishlists.
+local function ShownWishlist(s)
+    local w = s.wishlist
+    return w and not (view.import.open and w.source ~= 'saved') and w or nil
+end
+
 function VIEW.welcome(g, s, ctx, c, y)
     local t = c.welcome or {}
-    y = y - Text(s.replay and t.titleReplay or t.title, PAD, y, CW, 'title', GOLD) - GAP
+    y = Head(s.replay and t.titleReplay or t.title, y)
     y = y - Text(s.replay and t.bodyReplay or t.body, PAD, y, CW, 'body', TEXT) - GAP
     for _, p in ipairs(t.paths or {}) do
         local id = p.id
@@ -583,10 +631,42 @@ local function ImportPanel(s, c, y)
     return y - 4
 end
 
+-- The editor's read-only fact (WishlistEditor.SuspendedPlanDraft): an unsaved
+-- Plan draft set aside in another workspace, or nil.
+local function SuspendedDraft()
+    local editor = Nexus.WishlistEditor
+    if not (editor and type(editor.SuspendedPlanDraft) == 'function') then return nil end
+    local ok, d = pcall(editor.SuspendedPlanDraft)
+    return ok and type(d) == 'table' and d or nil
+end
+
+-- Start an empty Wishlist asked while an unsaved Plan draft is set aside
+-- (U.RouteEditor): the step's one answer, said here instead of the editor's
+-- refusal in chat, with one action (U.RoutePlan): Return to Plan draft while
+-- it can be reopened as it is, else Keep or discard Plan draft, which only
+-- asks the editor's question (its Discard opens Plan without that draft).
+-- The fact is read again on every render; the card goes with the draft.
+local function PlanDraftCard(c, y)
+    if not view.planDraft then return y end
+    local d = SuspendedDraft()
+    if not d then view.planDraft = false; return y end
+    local t, b = c.wishlist or {}, c.buttons or {}
+    local top, h = y, 8
+    h = h + Text(t.planHead, PAD + 8, y - h, CW - 16, 'head', COLOR.waiting) + 3
+    h = h + Text(t.planBody, PAD + 8, y - h, CW - 16, 'body', TEXT) + 3
+    h = h + Text(d.sameContext and t.planSame or t.planContext, PAD + 8, y - h, CW - 16, 'body', TEXT) + 4
+    -- Pick a saved Wishlist only closes this note: the draft stays as it is.
+    h = h + Actions({{label = d.sameContext and b.returnPlan or b.planChanged or b.returnPlan, primary = true,
+        act = function() U.RoutePlan() end},
+        {label = b.dismissDraft, act = function() view.planDraft = false; note = nil end}}, PAD + 8, y - h, CW - 16) + 8
+    Box(PAD, top, CW, h, COLOR.waiting, {0.12, 0.1, 0.06})
+    return y - h - GAP
+end
+
 function VIEW.wishlist(g, s, ctx, c, y)
     local t, n = c.wishlist or {}, c.notes or {}
     local imp = view.import
-    y = y - Text(t.title, PAD, y, CW, 'title', GOLD) - GAP
+    y = Head(t.title, y)
     -- Wishlist versus Saved Build: two concept cards side by side.
     local half = math.floor((CW - 1) / 2)
     local function Card(x, head, body)
@@ -602,27 +682,38 @@ function VIEW.wishlist(g, s, ctx, c, y)
     y = y - ch - GAP
     local list = g.WishlistOptions()
     local w = s.wishlist
+    -- The one listed row that is the choice itself (core ChosenOption): copies
+    -- of the same Echoes share a key, so a key alone would mark each of them.
+    local chosen = type(g.ChosenOption) == 'function' and g.ChosenOption(list) or nil
     local more
     for i, cand in ipairs(list or {}) do
         if i > 8 then more = t.more; break end
         -- One choice at a time: while the paste field is the chosen way, a
         -- listed Wishlist shows unchosen (Continue waits on the code; Render).
-        local mine = w and w.key == cand.key and not imp.open
+        local mine = chosen == i and not imp.open
         y = y - Row({label = Name(cand.name), radio = mine and true or false,
             desc = cand.lockEvidenceStatus == 'unavailable' and t.needsRoles or t.yours,
             act = function()
-                imp.open = false
+                imp.open, view.planDraft = false, false
                 local ok, why = g.ChooseWishlist(cand); note = (not ok) and n[why] or nil
             end}, PAD, y, CW) - 4
     end
     y = y - Row({label = t.importTitle, desc = t.importDesc, radio = imp.open,
-        act = function() imp.open = true; note = nil end}, PAD, y, CW) - 4
+        act = function() imp.open, view.planDraft = true, false; note = nil end}, PAD, y, CW) - 4
     if imp.open then y = ImportPanel(s, c, y) end
-    y = y - Row({label = t.createTitle, desc = t.createDesc, radio = false,
+    -- An unsaved Plan draft set aside: the row says it is unavailable before
+    -- any click; a click still only shows the one note (U.RouteEditor).
+    local blocked = SuspendedDraft() ~= nil
+    y = y - Row({label = blocked and t.createBlocked or t.createTitle,
+        desc = blocked and t.createBlockedDesc or t.createDesc, radio = false,
         act = function() imp.open = false; U.RouteEditor('new') end}, PAD, y, CW) - GAP
+    y = PlanDraftCard(c, y)
+    -- A kept Wishlist that several listed ones match (core Readopt): none
+    -- was taken, and the step says so until the player chooses.
+    if s.reselect and not w then y = y - Text(t.reselect, PAD, y, CW, 'body', COLOR.waiting) - GAP end
     local status, color
     -- A listed choice set aside for the paste field is not shown as chosen.
-    local shown = w and not (imp.open and w.source ~= 'saved') and w or nil
+    local shown = ShownWishlist(s)
     if shown then status, color = Fmt(w.source == 'saved' and t.saved or t.chosen, Name(w.name)), COLOR.verified
     elseif s.draft then status, color = t.draft, COLOR.waiting
     elseif s.saveSeen then status, color = t[s.saveSeen.saveKind] or t.notSaved, COLOR.rejected end
@@ -637,7 +728,7 @@ end
 
 function VIEW.target(g, s, ctx, c, y)
     local t, b, n = c.target or {}, c.buttons or {}, c.notes or {}
-    y = y - Text(t.title, PAD, y, CW, 'title', GOLD) - GAP
+    y = Head(t.title, y)
     local opts = ctx.targets
     if not opts then
         local top = y
@@ -717,7 +808,7 @@ end
 
 function VIEW.assign(g, s, ctx, c, y)
     local t, b, sb = c.assign or {}, c.buttons or {}, c.target or {}
-    y = y - Text(t.title, PAD, y, CW, 'title', GOLD) - GAP
+    y = Head(t.title, y)
     local f, st = ctx.facts, ctx.assign
     -- A target that is not ready (its read back unknown, or a replacement not
     -- accepted) takes no new assignment. An assignment already made whose
@@ -803,7 +894,7 @@ end
 
 function VIEW.manual(g, s, ctx, c, y)
     local m = c.sim or {}
-    y = y - Text(m.title, PAD, y, CW, 'title', GOLD) - GAP
+    y = Head(m.title, y)
     y = y - Text(m.body, PAD, y, CW, 'body', TEXT) - GAP
     local top = y
     -- The simulated preview: a labelled frame that stays visible.
@@ -833,7 +924,7 @@ end
 
 function VIEW.auto(g, s, ctx, c, y)
     local a, b = c.auto or {}, c.buttons or {}
-    y = y - Text(a.title, PAD, y, CW, 'title', GOLD) - GAP
+    y = Head(a.title, y)
     local mode = ctx.auto
     local unknown = mode == 'unknown'
     local top, h = y, 8
@@ -883,7 +974,7 @@ function VIEW.summary(g, s, ctx, c, y)
         title = Fmt(fin.titleOpen, sm.open, sm.open == 1 and '' or 's')
         sub = ctx.kept == 'saved' and fin.subOpen or fin.subOpenSession or fin.subOpen
     end
-    y = y - Text(title, PAD, y, CW, 'title', GOLD) - GAP
+    y = Head(title, y)
     y = y - Text(sub, PAD, y, CW, 'body', TEXT) - GAP
     local f, st = ctx.facts, ctx.assign
     local wishName = s.wishlist and Name(s.wishlist.name) or '?'
@@ -958,7 +1049,7 @@ function VIEW.summary(g, s, ctx, c, y)
             y = y - 3 - Actions({{label = l.open, act = function() U.Lesson(id) end}}, PAD + 10, y - 3, CW - 10) - GAP
         end
     end
-    y = y - Actions({{label = b.replay, act = function() note = nil; view.lesson = nil; ResetImport(); g.Replay() end}}, PAD, y - 2, CW) - GAP
+    y = y - Actions({{label = b.replay, act = function() note = nil; view.lesson, view.planDraft = nil, false; ResetImport(); g.Replay() end}}, PAD, y - 2, CW) - GAP
     return y
 end
 
@@ -992,6 +1083,9 @@ local function Ensure()
     frame:RegisterForDrag('LeftButton')
     frame:SetScript('OnDragStart', function(self) self:StartMoving() end)
     frame:SetScript('OnDragStop', function(self) self:StopMovingOrSizing() end)
+    -- The wheel scrolls a bounded body (U.ScrollWheel); otherwise it does nothing.
+    frame:EnableMouseWheel(true)
+    frame:SetScript('OnMouseWheel', function(_, delta) U.ScrollWheel(delta) end)
     frame:Hide()
     pcall(function()
         frame:SetBackdrop({bgFile = WHITE, edgeFile = 'Interface\\Tooltips\\UI-Tooltip-Border', edgeSize = 14,
@@ -1027,6 +1121,8 @@ local function Ensure()
     -- Back is a themed secondary button; Skip for now and Continue keep the
     -- design's own looks (FooterAction), which the tree walk below leaves alone.
     frame.back, frame.skip, frame.next = NewButton(), FooterAction('link'), FooterAction('primary')
+    -- Continue later (Setup Alternative): the same deliberate close as X.
+    frame.later = FooterAction('link')
     frame.footLine = Tex('ARTWORK')
     local theme = Nexus.Theme
     if theme then
@@ -1065,7 +1161,8 @@ local function Ensure()
     if theme and theme.Exempt then theme.Exempt(box) else box._nexusThemeExempt = true end
     box:Hide()
     frame.importBox = box
-    -- Escape closes the topmost layer: the help card first, then the coach
+    -- Escape closes the topmost layer: the Reference view first (view.help),
+    -- then the coach
     -- exactly as Close does (U.Close). As for the Welcome
     -- (ui/QuickStart.lua), the coach itself is not listed in UISpecialFrames:
     -- a route that steps aside, a warning or another window hides it without
@@ -1101,18 +1198,53 @@ local function Place(b, spec, x, y, w)
     if x and y then b:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y) end
 end
 
--- The step's help: the inline card of the compact window or the desktop
--- window's side panel, at x/y with width w. Returns its height.
-local function HelpBlock(x, y, w, c, b, label, id)
-    local h, hh, closeW = c.help or {}, 8, 28
-    hh = hh + Text(Fmt(h.title, label), x + 8, y - hh, w - 22 - closeW, 'head', HELP_BLUE) + 4
-    Action({label = b.helpClose, act = function() view.help = false end}, x + w - 6 - closeW, y - 6, closeW)
-    for _, line in ipairs((h.lines or {})[id] or {}) do hh = hh + Text(line, x + 8, y - hh, w - 16, 'body', TEXT) + 3 end
-    hh = hh + Text(h.full, x + 8, y - hh - 2, w - 16, 'muted', MUTED) + 6
-    hh = hh + Actions({{label = b.fullHelp, act = function() U.OpenHelp(HELP[id]) end}},
-        x + 8, y - hh, w - 16) + 8
-    Box(x, y, w, hh, HELP_BLUE, {0.08, 0.1, 0.16})
-    return hh
+-- The optional Reference view (Setup Alternative), drawn in place of the
+-- step while view.help is set: a way back to the step, its title and tag, one
+-- lead line, then one row per topic. A topic opens its Help page in place of
+-- the guide (U.OpenHelp, which returns to this step); Open full Help opens the
+-- page for this step. Reading or opening changes nothing. Returns the y below.
+local function ReferenceView(c, b, labels, id, pos, y)
+    local r = c.reference or {}
+    y = y - Actions({{label = Fmt(b.refBack, pos, labels[id] or id),
+        act = function() view.help = false end}}, PAD, y, CW) - GAP
+    y = y - Text(r.title, PAD, y, CW, 'title', GOLD) - 2
+    y = y - Text(r.tag, PAD, y, CW, 'small', MUTED) - GAP
+    y = y - Text(r.lead, PAD, y, CW, 'body', TEXT) - GAP
+    for _, topic in ipairs(r.topics or {}) do
+        local page = topic.page
+        y = y - Row({label = topic.title .. '  >', act = function() U.OpenHelp(page) end}, PAD, y, CW) - 2
+    end
+    y = y - GAP
+    y = y - Text(r.full, PAD, y, CW, 'muted', MUTED) - 6
+    return y - Actions({{label = b.fullHelp, act = function() U.OpenHelp(HELP[id]) end}}, PAD, y, CW) - GAP
+end
+
+-- The outcome slot under the step's action (Setup Alternative): OBSERVED
+-- with the status word only for a result the guide read (StepStatus);
+-- otherwise WHAT YOU WILL SEE with what the step is expected to show. A
+-- glyph and a word, never colour alone. Returns the y below.
+local function Outcome(c, id, kind, word, y)
+    local o = c.outcome or {}
+    local st = (c.status or {})[kind] or {}
+    local label, text, color
+    if id == 'summary' then
+        label, text, color = o.summaryLabel, (o.expect or {}).summary, MUTED
+    elseif kind == 'not' or (kind == 'waiting' and not word) then
+        label, text, color = o.expectLabel, (o.expect or {})[id], MUTED
+        st = (c.status or {})['not'] or {}
+    else
+        local extra = (o.extra or {})[kind]
+        label = o.observedLabel
+        text = tostring(word or st.word or '') .. '.' .. ((extra and extra ~= '') and (' ' .. extra) or '')
+        color = COLOR[kind] or MUTED
+    end
+    local x, w, h = PAD, CW, 6
+    local g = Text(st.glyph or 'o', x + 8, y - h, 26, 'head', color)
+    local lh = Text(label or '', x + 40, y - h, w - 48, 'small', color) + 2
+    lh = lh + Text(text or '', x + 40, y - h - lh, w - 48, 'body', TEXT)
+    h = h + math.max(g, lh) + 6
+    Box(x, y, w, h, color, {0.07, 0.055, 0.045})
+    return y - h - GAP
 end
 
 -- A footer button sized to its whole label: at least `minimum`, at most the
@@ -1136,6 +1268,232 @@ local function FooterButton(b, spec, minimum, rowW)
     return w
 end
 
+------------------------------------------------------------------------
+-- The bounded window (Setup Alternative, "Compact 640px": a scrolling body
+-- between the fixed header and a pinned footer). Where the visible UI size is
+-- readable (the same 640 x 480 floor as LayoutMetrics.FitToScreen) the coach
+-- is at most 640 px tall, or the UI height less FitToScreen's 24 px margin.
+-- A step taller than that keeps its header and its footer (Continue, Back,
+-- Skip for now, Continue later) in place, and the body between them scrolls:
+-- the mouse wheel over the coach, or the small up and down controls at its
+-- right edge, beside a track and thumb that show where the view is. So the
+-- text keeps its size instead of FitToScreen scaling the whole window down.
+-- An implausibly small reported UI size keeps the earlier growing window.
+-- Every region is still a direct child of the coach (no ScrollFrame): a
+-- region wholly inside the view is moved by the scroll offset and shown, any
+-- other one is hidden until scrolled to (a text is never cut through), and a
+-- box or fill shows the part of it inside the view. The view starts at the
+-- top for each step and for the Reference view; a click inside the same step
+-- keeps it. Scrolling only moves what is shown: it reads, writes, sends and
+-- changes nothing. Native wheel dispatch over child buttons, clipping and
+-- pixels are NOT RUN.
+------------------------------------------------------------------------
+local SCROLL = {max = 640, view = BLOCK_MAX + 20, step = 40, bar = 12}
+
+-- The tallest the coach may be on this UI, or nil to grow as before.
+local function ScreenCap()
+    if not UIParent then return nil end
+    local okW, w = pcall(UIParent.GetWidth, UIParent)
+    local okH, h = pcall(UIParent.GetHeight, UIParent)
+    w, h = okW and tonumber(w) or nil, okH and tonumber(h) or nil
+    if not (w and h) or w < 640 or h < 480 then return nil end
+    return math.max(MIN_H, math.min(SCROLL.max, math.floor(h - 24)))
+end
+
+-- A shown region anchored by one point to the coach: where it is laid out.
+local function Anchored(r)
+    if not (r and type(r.GetPoint) == 'function' and r:IsShown()) then return nil end
+    local point, rel, relPoint, x, y = r:GetPoint(1)
+    if rel ~= frame or type(y) ~= 'number' then return nil end
+    return {r = r, point = point, relPoint = relPoint or point, x = tonumber(x) or 0, y = y,
+        h = tonumber(r:GetHeight()) or 0}
+end
+
+-- The body as this render laid it out: every pooled item taken before the
+-- footer (`used`), with the checklist button and the paste field.
+local function BodyRecords(used)
+    local list = {}
+    for kind, p in pairs(pools) do
+        for i = 1, math.min(p.used, used[kind] or 0) do
+            local item = p[i]
+            if kind == 'box' then
+                if item.geo and item.parts[1]:IsShown() then list[#list + 1] = {box = item} end
+            elseif kind == 'fill' then
+                if item.geo and item:IsShown() then list[#list + 1] = {fill = item} end
+            else
+                local rec = Anchored(item)
+                if rec then list[#list + 1] = rec end
+            end
+        end
+    end
+    for _, r in ipairs({frame.checklist, frame.importBox}) do
+        local rec = Anchored(r)
+        if rec then list[#list + 1] = rec end
+    end
+    return list
+end
+
+-- Moves the footer (its line, its buttons and every pooled item taken after
+-- the body) up by `shift` px, onto the bottom of the view.
+local function FooterShift(used, shift)
+    local list = {frame.footLine, frame.next, frame.back, frame.skip, frame.later}
+    for kind, p in pairs(pools) do
+        for i = (used[kind] or 0) + 1, p.used do list[#list + 1] = p[i] end
+    end
+    for _, r in ipairs(list) do
+        local rec = Anchored(r)
+        if rec then r:ClearAllPoints(); r:SetPoint(rec.point, frame, rec.relPoint, rec.x, rec.y + shift) end
+    end
+end
+
+-- Places texture `t` over content depths from..to (px below the coach's top
+-- before scrolling) at scroll offset s, or hides it when nothing is left.
+local function Clip(t, x, w, from, to, s)
+    if to - from < 1 then t:Hide(); return end
+    t:ClearAllPoints(); t:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, -(from - s)); t:SetSize(w, to - from); t:Show()
+end
+
+local function ScrollControl(label, tip, dir)
+    local b = CreateFrame('Button', nil, frame)
+    b:SetSize(SCROLL.bar, SCROLL.bar)
+    local theme = Nexus.Theme
+    if theme and theme.Exempt then theme.Exempt(b) else b._nexusThemeExempt = true end
+    b.fill = b:CreateTexture(nil, 'BACKGROUND'); b.fill:SetTexture(WHITE); b.fill:SetAllPoints(b)
+    b.label = b:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
+    b.label:SetPoint('CENTER', b, 'CENTER', 0, 0)
+    b:SetFontString(b.label)
+    b:SetText(label)
+    local hover = b:CreateTexture(nil, 'HIGHLIGHT'); hover:SetTexture(WHITE); hover:SetAllPoints(b)
+    hover:SetVertexColor(1, 1, 1, 0.15)
+    b.full = tip
+    b:SetScript('OnClick', function() U.ScrollBy(dir * math.max(SCROLL.step, (view.body and
+        (view.body.bottom - view.body.head) or SCROLL.step) - SCROLL.step)) end)
+    b:SetScript('OnEnter', Tooltip)
+    b:SetScript('OnLeave', function() if GameTooltip then GameTooltip:Hide() end end)
+    b:Hide()
+    return b
+end
+
+-- Shows the body at view.scroll: each region wholly inside the view moved
+-- and shown, any other hidden; boxes and fills cut to the view. Then the
+-- track, thumb and up / down controls (hidden while nothing scrolls).
+local function ApplyScroll()
+    local f, b = frame, view.body
+    local parts = {f.scrollUp, f.scrollDown, f.scrollTrack, f.scrollThumb}
+    if not (b and b.max > 0) then
+        for _, r in ipairs(parts) do if r then r:Hide() end end
+        if not b then return end
+    end
+    local s = view.scroll
+    local top, bottom = b.head + s, b.bottom + s
+    for _, rec in ipairs(b.records) do
+        if rec.box then
+            local g, p = rec.box.geo, rec.box.parts
+            local t0, t1 = -g.y, -g.y + g.h
+            local a, z = math.max(t0, top), math.min(t1, bottom)
+            Clip(p[1], g.x, g.w, a, z, s)
+            local open = z - a >= 1
+            if g.edge and open and a == t0 then Clip(p[2], g.x, g.w, t0, t0 + 1, s) else p[2]:Hide() end
+            if g.edge and open and z == t1 then Clip(p[3], g.x, g.w, t1 - 1, t1, s) else p[3]:Hide() end
+            if g.edge then Clip(p[4], g.x, 1, a, z, s); Clip(p[5], g.x + g.w - 1, 1, a, z, s)
+            else p[4]:Hide(); p[5]:Hide() end
+        elseif rec.fill then
+            local g = rec.fill.geo
+            Clip(rec.fill, g.x, g.w, math.max(-g.y, top), math.min(-g.y + g.h, bottom), s)
+        else
+            local r, d = rec.r, -rec.y
+            local inside = d >= top - 0.5 and d + rec.h <= bottom + 0.5
+            r:ClearAllPoints(); r:SetPoint(rec.point, f, rec.relPoint, rec.x, rec.y + s)
+            if inside then r:Show() else r:Hide() end
+            r._nexusOut = (not inside) or nil
+            if r.desc then r.desc._nexusOut = r._nexusOut end
+            if r._nexusHit then if inside then r._nexusHit:Show() else r._nexusHit:Hide() end end
+        end
+    end
+    if b.max <= 0 then return end
+    -- Built the first time a step scrolls (after the Theme's tree walk; the
+    -- controls draw their own fixed colours).
+    if not f.scrollUp then
+        f.scrollUp = ScrollControl('^', (Copy().buttons or {}).scrollUp or 'Scroll up', -1)
+        f.scrollDown = ScrollControl('v', (Copy().buttons or {}).scrollDown or 'Scroll down', 1)
+        f.scrollTrack, f.scrollThumb = Tex('ARTWORK'), Tex('OVERLAY')
+        Paint(f.scrollTrack, {0.3, 0.24, 0.18}); Paint(f.scrollThumb, GOLD, 0.8)
+    end
+    local x, bar = W - SCROLL.bar - 2, SCROLL.bar
+    f.scrollUp:ClearAllPoints(); f.scrollUp:SetPoint('TOPLEFT', f, 'TOPLEFT', x, -b.head)
+    f.scrollDown:ClearAllPoints(); f.scrollDown:SetPoint('TOPLEFT', f, 'TOPLEFT', x, -(b.bottom - bar))
+    f.scrollUp:Show(); f.scrollDown:Show()
+    if s > 0 then f.scrollUp:Enable() else f.scrollUp:Disable() end
+    if s < b.max then f.scrollDown:Enable() else f.scrollDown:Disable() end
+    for _, c in ipairs({{f.scrollUp, s > 0}, {f.scrollDown, s < b.max}}) do
+        Paint(c[1].fill, c[2] and GOLD or MUTED, c[2] and 0.35 or 0.15)
+        c[1].label:SetTextColor(c[2] and GOLD[1] or MUTED[1], c[2] and GOLD[2] or MUTED[2], c[2] and GOLD[3] or MUTED[3])
+    end
+    local trackTop, trackH = b.head + bar + 2, math.max(1, b.bottom - b.head - 2 * (bar + 2))
+    f.scrollTrack:ClearAllPoints(); f.scrollTrack:SetPoint('TOPLEFT', f, 'TOPLEFT', x + bar / 2 - 2, -trackTop)
+    f.scrollTrack:SetSize(4, trackH); f.scrollTrack:Show()
+    local shownH = b.bottom - b.head
+    local thumbH = math.max(10, math.min(trackH, math.floor(trackH * shownH / (shownH + b.max))))
+    local thumbY = trackTop + math.floor((trackH - thumbH) * s / b.max)
+    f.scrollThumb:ClearAllPoints(); f.scrollThumb:SetPoint('TOPLEFT', f, 'TOPLEFT', x + bar / 2 - 2, -thumbY)
+    f.scrollThumb:SetSize(4, thumbH); f.scrollThumb:Show()
+end
+
+-- Scrolls the body by dy px (positive: further down), within its range.
+-- Returns whether the view moved. Reads and changes nothing else.
+function U.ScrollBy(dy)
+    local b = view.body
+    if not (frame and frame:IsShown() and b and b.max > 0) then return false end
+    local s = math.max(0, math.min(b.max, view.scroll + (tonumber(dy) or 0)))
+    if s == view.scroll then return false end
+    view.scroll = s
+    ApplyScroll()
+    return true
+end
+
+-- The mouse wheel over the coach (Ensure): one notch is SCROLL.step px.
+function U.ScrollWheel(delta)
+    return U.ScrollBy(-(tonumber(delta) or 0) * SCROLL.step)
+end
+
+-- The view of the body (nil while the whole step shows): its top and bottom
+-- in px below the coach's top, the scroll offset and its largest value.
+function U.ScrollState()
+    local b = view.body
+    if not b then return nil end
+    return {head = b.head, bottom = b.bottom, scroll = view.scroll, max = b.max}
+end
+
+-- The end of a render: the coach's height, bounded where the UI size is
+-- readable (ScreenCap) with the body scrolled in its view. `top` is the body's
+-- top, `contentEnd` where its content ends, `footY` the footer line, `endY`
+-- the footer's bottom (all negative offsets) and `used` the pools' counts
+-- when the footer began. `key` names the step and view, whose scroll resets.
+local function Bound(top, contentEnd, footY, endY, used, key)
+    local f = frame
+    local natural = math.ceil(-endY)
+    if key ~= view.scrollKey then view.scroll, view.scrollKey = 0, key end
+    view.body = nil
+    local cap = ScreenCap()
+    if cap and natural > cap then
+        local head, foot = -top, -footY
+        local footer = natural - foot
+        local bottom = math.max(head + SCROLL.view, cap - footer)
+        if bottom < foot then
+            view.body = {head = head, bottom = bottom, max = math.max(0, math.ceil(-contentEnd - bottom)),
+                records = BodyRecords(used)}
+            view.scroll = math.max(0, math.min(view.scroll, view.body.max))
+            FooterShift(used, foot - bottom)
+            natural = math.ceil(bottom + footer)
+        end
+    end
+    if not view.body then view.scroll = 0 end
+    ApplyScroll()
+    f:SetHeight(math.max(MIN_H, natural))
+    local metrics = Nexus.LayoutMetrics
+    if metrics and type(metrics.FitToScreen) == 'function' then metrics.FitToScreen(f) end
+end
+
 function U.Render()
     local f, g = Ensure(), Core()
     if not g then return end
@@ -1148,6 +1506,7 @@ function U.Render()
     local s, c = g.State(), Copy()
     local b = c.buttons or {}
     local id = g.StepId()
+    view.id = id
     local ctx = {targets = g.TargetOptions(), facts = g.TargetFacts(), assign = g.AssignStatus(),
         auto = g.AutoState(), character = Character(),
         kept = type(g.PlaceKept) == 'function' and g.PlaceKept() or 'session'}
@@ -1160,7 +1519,9 @@ function U.Render()
     -- The presentation (file header), then the step card's left edge and width.
     view.wide = WideFits()
     local nav = view.wide and WIDE.nav or 0
-    local aside = (view.wide and view.help) and WIDE.aside or 0
+    -- Reference is its own view in place of the step (Setup Alternative),
+    -- never a side panel beside it.
+    local aside = 0
     W = view.wide and WIDE.w or COMPACT_W
     PAD = nav + EDGE
     CW = W - nav - 2 * EDGE - (aside > 0 and (aside + EDGE) or 0)
@@ -1234,28 +1595,25 @@ function U.Render()
         navBottom = ny - GAP
     end
 
-    -- The help for this step (Escape closes it before the coach): the side
-    -- panel of the desktop window, else the inline card.
     local asideBottom = top
-    if view.help then
-        if aside > 0 then
-            asideBottom = top - HelpBlock(W - EDGE - aside, top, aside, c, b, labels[id] or id, id) - GAP
-        else
-            y = y - HelpBlock(PAD, y, CW, c, b, labels[id] or id, id) - GAP
+    local reference = view.help == true
+    if reference then
+        -- The optional Reference in place of the step (Escape closes it
+        -- before the coach); the step and its footer wait underneath.
+        y = ReferenceView(c, b, labels, id, pos, y)
+    else
+        -- The desktop window has no compact step line: its position heads
+        -- the card. The step's status is the outcome slot below its action.
+        if view.wide then
+            local kicker = Fmt(c.kicker, pos, total) .. (id == 'auto' and (c.kickerOptional or '') or '')
+            y = y - Text(kicker, PAD, y - 3, CW, 'body', GOLD) - GAP
         end
+        if s.notice then y = y - Text('? ' .. ((c.notice or {})[s.notice] or ''), PAD, y, CW, 'body', COLOR.stale) - GAP end
+        y = VIEW[id](g, s, ctx, c, y)
+        if note then y = y - Text(note, PAD, y, CW, 'body', GOLD) - GAP end
+        local kind, word = StepStatus(g, s, ctx, id)
+        y = Outcome(c, id, kind, word, y)
     end
-
-    -- Kicker and the current step's status chip.
-    local kicker = string.upper(Fmt(c.kicker, pos, total)) .. (id == 'auto' and (c.kickerOptional or '') or '')
-    local kw = Text(kicker, PAD, y - 3, 150, 'small', MUTED)
-    local kind, word = StepStatus(g, s, ctx, id)
-    if id == 'summary' then kind, word = 'not', (c.words or {}).summary end
-    local _, kh = Chip(kind, word, PAD + 156, y, false, CW - 156)
-    y = y - math.max(kw, kh) - GAP
-    if s.notice then y = y - Text('? ' .. ((c.notice or {})[s.notice] or ''), PAD, y, CW, 'body', COLOR.stale) - GAP end
-
-    y = VIEW[id](g, s, ctx, c, y)
-    if note then y = y - Text(note, PAD, y, CW, 'body', GOLD) - GAP end
 
     -- Footer: Back, the gate hint, Skip for now and Continue. While the paste
     -- field is the chosen way, Continue waits until a Wishlist from it is
@@ -1285,55 +1643,96 @@ function U.Render()
         elseif id == 'auto' then hint = ctx.auto == 'unknown' and gt.autoUnknown or gt.auto
         else hint = gt[id] or '' end
     end
-    -- Footer across the window: the gate hint, then Continue at the right,
-    -- Skip for now before it and Back at the left; a button that does not fit
-    -- beside the others moves to a further row (never over another, never cut).
-    y = math.min(y, navBottom, asideBottom, -MIN_H + 70)
+    -- Footer across the window (Setup Alternative): on the Wishlist step the
+    -- one Selected name, then Continue across the row, the gate hint under it
+    -- while it waits, then Back, Skip for now and Continue later centred in
+    -- one row; a link that does not fit moves to a further row (never over
+    -- another, never cut). The Reference view has no footer: its own way back
+    -- returns to the step, whose footer then shows again.
+    -- Where the body's content ends, before the window's minimum height pads
+    -- it; a bounded window scrolls exactly that far (Bound).
+    local contentEnd = math.min(y, navBottom, asideBottom)
+    y = math.min(contentEnd, -MIN_H + 70)
+    local footY = y
     f.footLine:ClearAllPoints(); f.footLine:SetPoint('TOPLEFT', f, 'TOPLEFT', 6, y); f.footLine:SetSize(W - 12, 1)
     Paint(f.footLine, {0.45, 0.3, 0.16}); f.footLine:Show()
     if view.wide then Fill(nav, -(head + 2), 1, -y - head - 2, {0.3, 0.24, 0.18}, 1) end
+    -- Everything taken from the pools so far is the body; the rest is footer.
+    local bodyUsed = {}
+    for kind, p in pairs(pools) do bodyUsed[kind] = p.used end
+    local scrollKey = id .. (reference and ':reference' or '') .. (view.wide and ':wide' or '')
     y = y - GAP
     local rowW = W - 2 * EDGE
-    if hint ~= '' then y = y - Text(hint, EDGE, y, rowW, 'body', {1, 0.84, 0.5}, 'RIGHT') - 6 end
-    local right, rowY = EDGE + rowW, y
-    local nw = FooterButton(f.next, {label = id == 'summary' and b.finish or b.next, enabled = canNext, primary = true,
+    if reference then
+        f.next:Hide(); f.skip:Hide(); f.back:Hide(); f.later:Hide()
+        y = y - EDGE
+        Bound(top, contentEnd, footY, y, bodyUsed, scrollKey)
+        return
+    end
+    if id == 'wishlist' then
+        local tw = c.wishlist or {}
+        local shown = ShownWishlist(s)
+        y = y - Text(shown and Fmt(tw.selected, Name(shown.name)) or tw.selectedNone, EDGE, y, rowW, 'body', TEXT) - 6
+    end
+    FooterButton(f.next, {label = id == 'summary' and b.finish or b.next, enabled = canNext, primary = true,
         act = function()
             note = nil
             if id == 'summary' then U.Close('finish') else g.Next() end
         end}, 60, rowW)
-    f.next:SetPoint('TOPLEFT', f, 'TOPLEFT', right - nw, rowY)
-    local left = right - nw
-    if g.SKIPPABLE[id] and not canNext then
-        local sw = FooterButton(f.skip, {label = b.skip, act = function() note = nil; g.Skip() end}, 60, rowW)
-        if left - 6 - sw >= EDGE then left = left - 6 - sw else rowY, left = rowY - 26, right - sw end
-        f.skip:SetPoint('TOPLEFT', f, 'TOPLEFT', left, rowY)
-    else f.skip:Hide() end
+    f.next:SetWidth(rowW)
+    f.next:SetPoint('TOPLEFT', f, 'TOPLEFT', EDGE, y)
+    y = y - 22 - 6
+    if hint ~= '' then y = y - Text(hint, EDGE, y, rowW, 'body', {1, 0.84, 0.5}, 'CENTER') - 6 end
+    local links = {}
     if pos > 1 then
-        local bw = FooterButton(f.back, {label = b.back, act = function() note = nil; g.Back() end}, 70, rowW)
-        if EDGE + bw + 6 > left then rowY = rowY - 26 end
-        f.back:SetPoint('TOPLEFT', f, 'TOPLEFT', EDGE, rowY)
+        links[#links + 1] = {f.back, FooterButton(f.back, {label = b.back, act = function() note = nil; g.Back() end}, 70, rowW)}
     else f.back:Hide() end
-    y = rowY - 22 - EDGE
-    f:SetHeight(math.max(MIN_H, math.ceil(-y)))
-    if metrics and type(metrics.FitToScreen) == 'function' then metrics.FitToScreen(f) end
+    if g.SKIPPABLE[id] and not canNext then
+        links[#links + 1] = {f.skip, FooterButton(f.skip, {label = b.skip, act = function() note = nil; g.Skip() end}, 60, rowW)}
+    else f.skip:Hide() end
+    links[#links + 1] = {f.later, FooterButton(f.later, {label = b.later, tip = ctx.kept == 'saved' and b.closeTip
+        or b.closeTipSession or b.closeTip, act = function() note = nil; U.Close() end}, 60, rowW)}
+    -- Rows of links, each row centred in the footer.
+    local rows, row, used = {}, {}, 0
+    for _, link in ipairs(links) do
+        if #row > 0 and used + 6 + link[2] > rowW then rows[#rows + 1] = {row, used}; row, used = {}, 0 end
+        used = used + (#row > 0 and 6 or 0) + link[2]
+        row[#row + 1] = link
+    end
+    if #row > 0 then rows[#rows + 1] = {row, used} end
+    for index, r in ipairs(rows) do
+        local x = EDGE + math.floor((rowW - r[2]) / 2)
+        for _, link in ipairs(r[1]) do
+            link[1]:SetPoint('TOPLEFT', f, 'TOPLEFT', x, y)
+            x = x + link[2] + 6
+        end
+        if index < #rows then y = y - 26 end
+    end
+    y = y - 22 - EDGE
+    Bound(top, contentEnd, footY, y, bodyUsed, scrollKey)
 end
 
--- Visible text in render order (the header first), for readers and tests.
+-- The coach's text in render order (the header first), for readers and
+-- tests. A bounded window's body text scrolled out of view is included: it is
+-- the step's own text, one scroll away (U.TextRegions lists only what is in view).
 function U.VisibleText()
     if not frame then return '' end
     local out = {frame.title:GetText() or '', frame.char:GetText() or ''}
     for _, fs in ipairs(order) do out[#out + 1] = fs:GetText() or '' end
     return table.concat(out, ' | ')
 end
+-- The text regions in view, in render order (ApplyScroll marks the others).
 function U.TextRegions()
     local out = {}
-    for i, fs in ipairs(order) do out[i] = fs end
+    for _, fs in ipairs(order) do if not fs._nexusOut then out[#out + 1] = fs end end
     return out
 end
 
--- The routes that end through the editor or the import dialog. A coach that
--- stepped aside for full Help ('help') comes back only through U.HelpEnded.
-local EDITOR_ROUTE = {new = true, import = true}
+-- The routes that end through the editor or the import dialog ('plan': the
+-- set-aside Plan draft, U.RoutePlan, or the Plan its Discard draft opened for
+-- the current context, U.PlanDiscarded). A coach that stepped aside for full
+-- Help ('help') comes back only through U.HelpEnded.
+local EDITOR_ROUTE = {new = true, import = true, plan = true}
 
 -- An unsaved route may be canceled without a save receipt. Return to the
 -- same guide step, but never claim the Wishlist was completed.
@@ -1367,7 +1766,10 @@ end
 
 -- Opens the editor or the import dialog; the guide steps aside and returns
 -- when the editor reports a save or the route is canceled. Opening a draft
--- completes nothing.
+-- completes nothing. An empty Wishlist would replace an unsaved Plan draft
+-- set aside in another workspace, which the editor refuses (NewWishlist); the
+-- step then says so in place (PlanDraftCard) and opens, arms and prints
+-- nothing. A refusal the editor still reports brings the coach back at once.
 function U.RouteEditor(kind)
     local g, n, f = Core(), Copy().notes or {}, frame
     if not Ready() then note = n.startup; return end
@@ -1375,15 +1777,82 @@ function U.RouteEditor(kind)
     if kind == 'import' then
         if type(StaticPopup_Show) ~= 'function' or not (StaticPopupDialogs or {}).NEXUS_IMPORT_WISHLIST then note = n.noEditor; return end
     elseif not (editor and type(editor.NewWishlist) == 'function') then note = n.noEditor; return end
+    if kind == 'new' and SuspendedDraft() then view.planDraft = true; note = nil; return end
     g.AwaitSave(); note = nil
     f.waiting, f.waitingKind = true, kind
     f:Hide()
     if kind == 'import' then
         StaticPopup_Show('NEXUS_IMPORT_WISHLIST')
     else
-        editor.NewWishlist()
+        local ok, opened = pcall(editor.NewWishlist)
+        if not ok or opened == false then
+            if not ok then note = n.noEditor end
+            view.planDraft = SuspendedDraft() ~= nil
+            U.RouteEnded('new')
+            return
+        end
         U.WatchEditor('new')
     end
+end
+
+-- Return to Plan draft: the draft set aside in another workspace, reopened
+-- as it is by the editor's own resume (WishlistEditor.ResumeWorkspaceDraft).
+-- That draft is not the empty Wishlist this step asked for, so no save is
+-- armed and its later save chooses nothing here. The coach steps aside only
+-- once Plan is shown, and comes back when the editor closes (U.WatchEditor).
+-- Under another character or Saved Build the editor asks first whether to
+-- discard it; that question is this click's answer, and the coach stays.
+-- Keep draft leaves the draft and the coach as they are. Discard draft is the
+-- player's own answer: the editor drops the draft and opens Plan for the
+-- current context (not the old draft), and only then does the coach step
+-- aside for that Plan exactly as for a returned draft (PlanDiscarded).
+function U.RoutePlan()
+    local n, f = Copy().notes or {}, frame
+    if not Ready() then note = n.startup; return end
+    local editor = Nexus.WishlistEditor
+    if not (editor and type(editor.ResumeWorkspaceDraft) == 'function') then note = n.noEditor; return end
+    local d = SuspendedDraft()
+    note = nil
+    if not d then view.planDraft = false; return end
+    -- This ask only: a hide of the coach, a reopen or a later ask drops it.
+    local ask = {}
+    f.planAsk = ask
+    local ok, opened = pcall(editor.ResumeWorkspaceDraft, function() U.PlanDiscarded(ask) end)
+    local editorFrame = _G.NexusEditorFrame
+    if ok and opened and editorFrame and editorFrame:IsShown() then
+        f.planAsk = nil
+        view.planDraft = false
+        f.waiting, f.waitingKind = true, 'plan'
+        f:Hide()
+        U.WatchEditor('plan')
+        return
+    end
+    if not ok then f.planAsk = nil; note = n.noEditor elseif d.sameContext then f.planAsk = nil; note = n.planRefused end
+end
+
+-- The editor's report that the player answered this coach's changed-context
+-- question (U.RoutePlan) with Discard draft and Plan was shown for the
+-- current context. A coach closed, reopened or asked again since (Close,
+-- Hide, Show, ShowFirstUse and a new ask drop the ask), or one that stepped
+-- aside for another route meanwhile, takes nothing from it. The new Plan arms
+-- no save and chooses nothing here; the coach steps aside for it and comes
+-- back when the editor closes. When Plan is not on screen the coach stays and
+-- says so.
+function U.PlanDiscarded(ask)
+    local f = frame
+    if not (f and ask ~= nil and f.planAsk == ask and not f.waiting) then return end
+    f.planAsk = nil
+    view.planDraft = false
+    local editorFrame = _G.NexusEditorFrame
+    if editorFrame and editorFrame:IsShown() then
+        note = nil
+        f.waiting, f.waitingKind = true, 'plan'
+        f:Hide()
+        U.WatchEditor('plan')
+        return
+    end
+    note = (Copy().notes or {}).planDiscarded
+    if f:IsShown() then U.Render() end
 end
 
 -- Check code: reads the pasted text through the editor's read-only check
@@ -1511,7 +1980,8 @@ function U.OpenHelp(page)
     if not (help and type(help.Show) == 'function') then return false end
     local f = frame
     if not (f and f:IsShown()) then return pcall(help.Show, page) end
-    -- The step's own help card gives way to full Help; it is not reopened.
+    -- The Reference view gives way to full Help; closing Help returns to the
+    -- step itself, not to the topic list.
     view.help = false
     f.waiting, f.waitingKind = true, 'help'
     f:Hide()
@@ -1549,8 +2019,12 @@ function U.Show()
     local f = Ensure()
     -- An ordinary hide does not acknowledge first use. Keep its guarded
     -- callback across a Help reopen so a later deliberate Close can do so.
-    -- A new session: an earlier Open My Builds no longer answers here.
-    f.waiting, f.waitingKind, f.buildsRoute, note = nil, nil, nil, nil
+    -- A new session: an earlier Open My Builds or Plan draft question no
+    -- longer answers here, and an earlier answer about a set-aside Plan draft
+    -- is given again only if asked.
+    f.waiting, f.waitingKind, f.buildsRoute, f.planAsk, note = nil, nil, nil, nil, nil
+    -- A reopened coach shows its step from the top (Bound resets the view).
+    view.planDraft, view.scrollKey = false, nil
     f:Show()
     U.Render()
     return true
@@ -1567,7 +2041,8 @@ function U.ShowFirstUse(onClose)
     local f = Ensure()
     f.firstUse = onClose
     if f.waiting and not f:IsShown() then return true end
-    f.waiting, f.waitingKind, f.buildsRoute, note = nil, nil, nil, nil
+    f.waiting, f.waitingKind, f.buildsRoute, f.planAsk, note = nil, nil, nil, nil, nil
+    view.planDraft, view.scrollKey = false, nil
     f:Show()
     U.Render()
     return true
@@ -1579,7 +2054,7 @@ function U.Replay()
     ResetImport()
     return U.Show()
 end
-function U.Hide() if frame then frame.waiting, frame.waitingKind = nil, nil; frame:Hide() end end
+function U.Hide() if frame then frame.waiting, frame.waitingKind, frame.planAsk = nil, nil, nil; frame:Hide() end end
 
 -- What the chat says on close: where the guide paused, or (from the summary's
 -- Close guide) what is true now. Closing never marks a step done.
@@ -1612,7 +2087,7 @@ function U.Close(reason)
     if not frame then return end
     local onClose = frame.firstUse
     local lines = CloseLines(reason)
-    frame.firstUse, frame.waiting, frame.waitingKind, frame.buildsRoute = nil, nil, nil, nil
+    frame.firstUse, frame.waiting, frame.waitingKind, frame.buildsRoute, frame.planAsk = nil, nil, nil, nil, nil
     view.help = false
     frame:Hide()
     for _, line in ipairs(lines) do if line then Say(line) end end
@@ -1623,10 +2098,13 @@ end
 -- its own route. One that stepped aside for full Help is not brought back over
 -- Help (or over a window Help opened in its place): the receipt is already
 -- recorded (core/GuidedSetup.lua G.Note), and U.HelpEnded reads it afresh
--- when Help closes.
+-- when Help closes. Nor is one that returned the player to a set-aside Plan
+-- draft (U.RoutePlan) or to the Plan its Discard draft opened
+-- (U.PlanDiscarded): a save there is not this step's, and the coach comes
+-- back when the editor closes.
 function U.OnChange(receipt)
     if not frame then return end
-    if frame.waiting and frame.waitingKind ~= 'help' and type(receipt) == 'table'
+    if frame.waiting and frame.waitingKind ~= 'help' and frame.waitingKind ~= 'plan' and type(receipt) == 'table'
         and (receipt.kind == 'save' or receipt.kind == 'assign') then
         local warning = Nexus.OverwriteWarning
         if not (warning and type(warning.IsOpen) == 'function' and warning.IsOpen()) then

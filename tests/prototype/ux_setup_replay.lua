@@ -168,6 +168,16 @@ local function Press(text,where)
  b:Click()
  return true
 end
+-- Closes the guided setup coach through its design close control (a visible
+-- "X" whose hover names Close); true when the coach is closed afterwards.
+local function CloseCoach()
+ local coach,close=NexusGuidedSetup
+ for _,c in ipairs(coach and coach.children or {}) do
+  if c.kind=='Button' and c:IsShown() and c:GetText()=='X' and type(c.tip)=='string' and c.tip:find('^Close') then close=c end
+ end
+ if close then close:Click() end
+ return not (coach and coach:IsShown())
+end
 
 C.scenario('S1 No after reading: the informational Welcome opens at once; Setup / Welcome replays it',function()
  H=Fresh()
@@ -227,10 +237,22 @@ C.scenario('S1 No after reading: the informational Welcome opens at once; Setup 
   C.expect(not Shown() and Seen()==nil and Saved()==savedBefore,'S1: closing the replay records nothing and writes nothing')
   shown=Replay()
   C.expect(shown==true and Shown(),'S1: it can be replayed again in the same session')
-  WelcomeButton('Help / Getting Started'):Click()
+  -- design/current "Nexus Setup Alternative": the replay's Reference opens
+  -- the long manual; its Help opens the guided setup coach, not the manual.
+  local reference=WelcomeButton('Reference')
+  C.expect(reference~=nil,'S1: the replay offers the long manual under its own name, Reference',Captions())
+  if reference then reference:Click() end
   C.expect(not Shown() and NexusHelpWindow and NexusHelpWindow:IsShown() and Seen()==nil and Saved()==savedBefore,
    'S1: an entry button of the replay opens its view and records nothing')
   if NexusHelpWindow then NexusHelpWindow:Hide() end
+  shown=Replay()
+  local help=Shown() and WelcomeButton('Help: Guided setup') or nil
+  C.expect(shown==true and help~=nil,'S1: the replay offers Help as the guided setup coach',Captions())
+  if help then help:Click() end
+  C.expect(not Shown() and NexusGuidedSetup and NexusGuidedSetup:IsShown()
+   and not (NexusHelpWindow and NexusHelpWindow:IsShown()) and Seen()==nil and Saved()==savedBefore and not Auto(),
+   'S1: the replay\'s Help opens the coach, not the Reference manual, and records nothing')
+  CloseCoach()
  end
  -- Auto keeps its own warning after No and the replay, and no Auto answer
  -- opens the closed Welcome, whichever way it is given.
@@ -291,19 +313,22 @@ C.scenario('S2 Close (X) during the delay opens the informational Welcome; the P
  C.setup(menu~=nil,'S2: fixture: the Nexus panel menu button exists')
  if menu then menu:Click() end
  EasyMenu=realMenu
- local setup,info,help
+ local setup,info,help,reference
  for _,item in ipairs(items or {}) do
   if item.text=='Manage' and item.hasArrow then
    for _,entry in ipairs(item.menuList or {}) do
     if entry.text=='Setup / Welcome' then setup=entry end
     if entry.text=='Setup information (read only)' then info=entry end
     if entry.text=='Help / Getting Started' then help=entry end
+    if entry.text=='Reference (full manual)' then reference=entry end
    end
   end
  end
  C.setup(help~=nil,'S2: fixture: the menu lists Help / Getting Started')
  C.expect(setup~=nil and type(setup.func)=='function','S2: the ... menu offers Setup / Welcome')
  C.expect(info~=nil and type(info.func)=='function','S2: the ... menu keeps the informational setup as a secondary entry')
+ C.expect(reference~=nil and type(reference.func)=='function',
+  'S2: the ... menu offers the full manual as its own optional entry, Reference (full manual)')
  local savedBefore=Saved()
  -- The original guided design: "Reopen: Nexus menu > Setup / Welcome" opens
  -- the step-by-step coach, as Help's Setup / Welcome does.
@@ -312,13 +337,20 @@ C.scenario('S2 Close (X) during the delay opens the informational Welcome; the P
   local coach=NexusGuidedSetup
   C.expect(coach~=nil and coach:IsShown() and not Shown(),
    'S2: the menu Setup / Welcome opens the guided setup coach, not the information-only Welcome',Title())
-  local close
-  for _,c in ipairs(coach and coach.children or {}) do
-   if c.kind=='Button' and c:IsShown() and c:GetText()=='X' and type(c.tip)=='string' and c.tip:find('^Close') then close=c end
-  end
-  if close then close:Click() end
-  C.expect(not (coach and coach:IsShown()) and Seen()==nil and Saved()==savedBefore and not Auto(),
+  C.expect(CloseCoach() and Seen()==nil and Saved()==savedBefore and not Auto(),
    'S2: opening and closing it records nothing, writes nothing and keeps Auto OFF')
+ end
+ -- design/current "Nexus Setup Alternative": Help and Setup open the coach,
+ -- Reference on request. The menu's Help opens the coach as /nexus help
+ -- does, not the long manual.
+ if help then
+  if NexusHelpWindow then NexusHelpWindow:Hide() end
+  help.func()
+  local coach=NexusGuidedSetup
+  C.expect(coach~=nil and coach:IsShown() and not (NexusHelpWindow and NexusHelpWindow:IsShown()) and not Shown(),
+   'S2: Help / Getting Started opens the guided setup coach, not the Reference manual or the information-only Welcome',Title())
+  C.expect(CloseCoach() and Seen()==nil and Saved()==savedBefore and not Auto(),
+   'S2: opening Help and closing the coach records nothing, writes nothing and keeps Auto OFF')
  end
  if info then
   info.func()
@@ -326,14 +358,17 @@ C.scenario('S2 Close (X) during the delay opens the informational Welcome; the P
   if Shown() then Dismiss('S2: the menu replay') end
   C.expect(Seen()==nil and Saved()==savedBefore,'S2: and records nothing')
  end
- -- Help / Getting Started opens the first page directly.
- if help then
+ -- Reference (full manual) opens the manual's first page directly, and not
+ -- the coach.
+ if reference then
   Nexus.Help.Show('orbs');Nexus.Help.Hide()
-  help.func()
+  reference.func()
   local page=NexusHelpWindow and NexusHelpWindow.page and NexusHelpWindow.page:GetText() or ''
-  C.expect(NexusHelpWindow and NexusHelpWindow:IsShown() and page=='Page 1 / 7',
-   'S2: Help / Getting Started opens page 1, not the page last shown',page)
+  C.expect(NexusHelpWindow and NexusHelpWindow:IsShown() and page=='Page 1 / 7'
+   and not (NexusGuidedSetup and NexusGuidedSetup:IsShown()),
+   'S2: Reference (full manual) opens page 1 of the manual, not the page last shown and not the coach',page)
   if NexusHelpWindow then NexusHelpWindow:Hide() end
+  C.expect(Seen()==nil and Saved()==savedBefore and not Auto(),'S2: reading the Reference records nothing and keeps Auto OFF')
  end
  Quiet('S2',before)
  -- Bounded runtime continuation after the genuine informational Close above,

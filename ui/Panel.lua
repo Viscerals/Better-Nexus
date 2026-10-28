@@ -729,10 +729,17 @@ end
 -- the same order. Geometry and words only: placing it opens, sends and
 -- changes nothing.
 ------------------------------------------------------------------------
+-- design/current "Nexus Main Panel - Compact Redesign": line 1 holds only the
+-- Shift-drag grip and the title at the left and Auto, Options and Close at
+-- the right, with 8 px between the three controls (4 px before) so each is a
+-- distinct target; Close is the design's square-ish 24 px. The title starts
+-- after the grip (titleLeft) and keeps the rest: 150 px at 420 px.
 do
-    local EDGE, TOP, HEIGHT, GAP, CAPS = 10, 7, 22, 4, 12
-    local CLOSE_W, OPTIONS_W, AUTO_W = 28, 92, 84
-    local SLOTS = {top = TOP, height = HEIGHT, gap = GAP, caps = CAPS,
+    local EDGE, TOP, HEIGHT, GAP, CAPS = 10, 7, 22, 8, 12
+    local CLOSE_W, OPTIONS_W, AUTO_W = 24, 92, 84
+    local GRIP_X, GRIP_W = 8, 22
+    local SLOTS = {top = TOP, height = HEIGHT, gap = GAP, caps = CAPS, edge = EDGE, closeWidth = CLOSE_W,
+        gripX = GRIP_X, gripWidth = GRIP_W, titleLeft = GRIP_X + GRIP_W + 6,
         options = EDGE + CLOSE_W + GAP, optionsWidth = OPTIONS_W,
         auto = EDGE + CLOSE_W + GAP + OPTIONS_W + GAP, autoWidth = AUTO_W}
     -- The width line 1 keeps for its right-hand controls, gap included.
@@ -831,10 +838,10 @@ function M.UpdateContextHeader(model)
     local fields, tooltip = Nexus.UserText.DestinationFields(facts)
     local width = math.max(240, tonumber(frame:GetWidth()) or 420)
     local labelWidth = math.max(100, width - 134)
-    -- The title runs from x 12 to the Auto slot (M.HeaderSlots): 182 px at
-    -- 420 px, more on a wider panel.
+    -- The title runs from after the grip to the Auto slot (M.HeaderSlots):
+    -- 150 px at 420 px, more on a wider panel.
     local slots = M.HeaderSlots()
-    local titleWidth = math.max(100, width - slots.reserved - 12)
+    local titleWidth = math.max(100, width - slots.reserved - slots.titleLeft)
     -- Put high-priority state before names: truncation at 420px must not
     -- silently turn a Community preview into an apparent assignment or hide
     -- an empty Saved Build's refusal. The complete facts remain on hover.
@@ -846,8 +853,9 @@ function M.UpdateContextHeader(model)
     elseif not cue and facts.kind == "unknown" then
         cue = "Not known"
     end
+    -- Line 1 is the title and its state cue only (the design's "Nexus"); the
+    -- character stays first on the title's hover (tooltip[1]).
     local title = "Nexus" .. (cue and (" [" .. cue .. "]") or "")
-        .. "  -  " .. fields[1].value
     local build = facts.preview and facts.kind == "none" and "None captured"
         or (facts.slot and fields[2].compact) or fields[2].value
     local wishlist = facts.empty and fields[3].compact or fields[3].value
@@ -856,6 +864,9 @@ function M.UpdateContextHeader(model)
         {frame._contextBuild, frame._contextBuildHit, "Build: " .. build},
         {frame._contextWishlist, frame._contextWishlistHit, "Wishlist: " .. wishlist},
     }
+    frame._contextTitle:ClearAllPoints()
+    frame._contextTitle:SetPoint("TOPLEFT", frame, "TOPLEFT", slots.titleLeft, -8)
+    M.EnsureHeaderGrip()
     for index = 1, #lines do
         local line = lines[index]
         line[1]:SetWidth(index == 1 and titleWidth or labelWidth)
@@ -2750,11 +2761,82 @@ function M.EnsureHeaderClose()
         if Nexus.Theme and Nexus.Theme.StyleButton then pcall(Nexus.Theme.StyleButton, close) end
         frame._closeBtn = close
     end
+    local slots = M.HeaderSlots()
     close:ClearAllPoints()
-    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -7)
-    close:SetSize(28, 22)
+    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -slots.edge, -slots.top)
+    close:SetSize(slots.closeWidth, slots.height)
     close:Show()
     return close
+end
+
+-- The visible Shift-drag grip (design/current "Nexus Main Panel - Compact
+-- Redesign"; design/PANEL_DIFFICULTY_SOURCE_REFERENCE.md "Discoverable panel
+-- drag handle"): six dots in the header's left corner with a hover highlight
+-- and a "Shift-drag to move" tooltip. Holding Shift and dragging it moves the
+-- panel through the panel's own existing drag handlers (clamped to the
+-- screen; panelX / panelY saved as before); a plain click or a drag without
+-- Shift does nothing. No other control becomes a drag target. Built lazily
+-- (EnsureFrame is at the upvalue ceiling). Its dots are fixed colours, never
+-- from the palette. Native Shift detection while dragging is NOT RUN.
+function M.EnsureHeaderGrip()
+    if not frame then return nil end
+    local grip = frame._dragGrip
+    if not grip then
+        grip = CreateFrame("Button", nil, frame)
+        grip._nexusThemeExempt = true
+        grip:SetFrameLevel(frame:GetFrameLevel() + 8)
+        grip:EnableMouse(true)
+        grip:RegisterForDrag("LeftButton")
+        grip.edge = grip:CreateTexture(nil, "BORDER")
+        grip.edge:SetAllPoints()
+        grip.edge:SetTexture(0.32, 0.32, 0.38, 0.55)
+        grip.fill = grip:CreateTexture(nil, "ARTWORK")
+        grip.fill:SetPoint("TOPLEFT", grip, "TOPLEFT", 1, -1)
+        grip.fill:SetPoint("BOTTOMRIGHT", grip, "BOTTOMRIGHT", -1, 1)
+        grip.fill:SetTexture(0.03, 0.03, 0.05, 0.9)
+        grip.dots = {}
+        for row = 1, 3 do
+            for column = 1, 2 do
+                local dot = grip:CreateTexture(nil, "OVERLAY")
+                dot:SetSize(3, 3)
+                dot:SetPoint("TOPLEFT", grip, "TOPLEFT", 6 + (column - 1) * 6, -5 - (row - 1) * 5)
+                dot:SetTexture(0.72, 0.72, 0.78, 1)
+                grip.dots[#grip.dots + 1] = dot
+            end
+        end
+        local hover = grip:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetTexture(1, 1, 1, 0.12)
+        grip.hover = hover
+        grip:SetScript("OnDragStart", function(self)
+            local shift = type(IsShiftKeyDown) == "function" and IsShiftKeyDown()
+            if not shift then return end
+            self._nexusMoving = true
+            frame:StartMoving()
+        end)
+        grip:SetScript("OnDragStop", function(self)
+            if not self._nexusMoving then return end
+            self._nexusMoving = nil
+            local stop = frame:GetScript("OnDragStop")
+            if stop then stop(frame) else frame:StopMovingOrSizing() end
+        end)
+        grip:SetScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+            GameTooltip:AddLine("Shift-drag to move", 1, 1, 1)
+            GameTooltip:AddLine("Hold Shift, then drag this grip. A plain click does nothing. Options > Manage > "
+                .. "Reset Panel Position puts the panel back.", 0.8, 0.8, 0.8, true)
+            GameTooltip:Show()
+        end)
+        grip:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        frame._dragGrip = grip
+    end
+    local slots = M.HeaderSlots()
+    grip:ClearAllPoints()
+    grip:SetPoint("TOPLEFT", frame, "TOPLEFT", slots.gripX, -slots.top)
+    grip:SetSize(slots.gripWidth, slots.height)
+    grip:Show()
+    return grip
 end
 
 -- The Options menu's Manage submenu retains all established routes and owners.
@@ -2764,7 +2846,28 @@ function M.MoreMenuItems(anchor)
     local items = {}
     local function Add(item) items[#items + 1] = item end
     Add(MenuTitle("Help and setup"))
+    -- Help is the guided setup coach at its current step, as /nexus help
+    -- (design/current "Nexus Setup Alternative": Help and Setup open the
+    -- coach, Reference on request). It takes Help's own guarded route
+    -- (Help.OpenGuide), which does not open over an Auto warning that waits
+    -- for its answer and says why; the read-only Reference then opens
+    -- instead, as for /nexus help, so Help always answers. Opening it
+    -- assigns, saves, sends, spends and changes Auto nothing.
     Add({ text = "Help / Getting Started", notCheckable = true,
+        tooltipTitle = "Help / Getting Started",
+        tooltipText = "Opens the step-by-step setup guide where you left it, as /nexus help. The full manual is "
+            .. "Reference (full manual).",
+        func = MenuAction(function()
+            local help = Nexus.Help
+            if not help then return end
+            local opened = type(help.OpenGuide) == "function" and help.OpenGuide() == true
+            if not opened and type(help.Show) == "function" then help.Show("start") end
+        end) })
+    -- The optional long manual (ui/Help.lua pages, also /nexus reference),
+    -- from its first page. Read only; its own buttons only navigate.
+    Add({ text = "Reference (full manual)", notCheckable = true,
+        tooltipTitle = "Reference",
+        tooltipText = "The full Nexus manual, one page per topic, also /nexus reference. Reading it changes nothing.",
         func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("start") end end) })
     -- Setup / Welcome is the guided setup coach itself, as in Help (the
     -- original guided design: "Reopen: Nexus menu > Setup / Welcome", and the
@@ -2839,13 +2942,7 @@ function M.MoreMenuItems(anchor)
     -- choice is submitted, through the lifecycle callback.
     Add({ text = M.LanguageMenuLabel(), notCheckable = true, hasArrow = true,
         menuList = M.LanguageMenuItems(MenuAction) })
-    -- Opens the style and colour choices as their own menu.
-    Add({ text = "Appearance: " .. ((Nexus.Theme and Nexus.Theme.Summary)
-            and Nexus.Theme.Summary() or "default") .. "...",
-        notCheckable = true,
-        func = MenuAction(function()
-            if Nexus.Theme and Nexus.Theme.ShowMenu then Nexus.Theme.ShowMenu(anchor) end
-        end) })
+    -- Appearance is on the menu's top level (below), not repeated here.
     Add({ text = showPerformance and "Hide DPS records" or "Show DPS records",
         notCheckable = true,
         func = MenuAction(function()
@@ -2921,7 +3018,22 @@ function M.MoreMenuItems(anchor)
             M.Hide()
             print("|cffffd200Nexus:|r The Nexus panel is hidden. " .. HIDE_NOTE)
         end) })
-    return { MenuTitle("Nexus"),
+    -- design/current "Nexus Main Panel - Compact Redesign": Options opens
+    -- Appearance directly, without the Manage hover chain. Its list is the
+    -- shared Theme choice (Theme.MenuItems: the same saved style and colour
+    -- the Orb windows use), the current one checked; building the menu
+    -- writes nothing, and only a row click chooses (Theme.SetStyle /
+    -- SetPalette through the settings owner).
+    local appearance = { text = "Appearance: " .. ((Nexus.Theme and Nexus.Theme.Summary)
+            and Nexus.Theme.Summary() or "default"), notCheckable = true,
+        tooltipTitle = "Appearance", tooltipText = Nexus.Theme and Nexus.Theme.HELP or nil }
+    if Nexus.Theme and type(Nexus.Theme.MenuItems) == "function" then
+        appearance.hasArrow = true
+        appearance.menuList = Nexus.Theme.MenuItems(CloseDropDownMenus)
+    else
+        appearance.disabled = true
+    end
+    return { MenuTitle("Nexus"), appearance,
         { text = "Manage", notCheckable = true, hasArrow = true,
             tooltipTitle = "Manage Nexus",
             tooltipText = "Setup, settings, notices, logs and panel actions. Opening this menu changes nothing.",
@@ -3297,6 +3409,16 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts)
             local own = type(facts) == "table" and type(facts[index]) == "table" and facts[index] or nil
             local shown = readout.OfferCard(line, marked == index, auto, own)
             card.name:SetText(shown.name)
+            -- The name in its Echo quality colour (the design's quality on the
+            -- name), only from the card's own quality fact and the addon's
+            -- established Echo rarity colours (OrbHistory.QUALITY_COLORS, as
+            -- the Wishlist overlay); an unknown quality stays white, never
+            -- read from the text or a WoW item-quality offset.
+            local history = Nexus.OrbHistory
+            local q = own and tonumber(own.quality)
+            local qc = q and history and type(history.QUALITY_COLORS) == "table" and history.QUALITY_COLORS[q] or nil
+            card.name:SetTextColor(qc and qc[1] or 1, qc and qc[2] or 1, qc and qc[3] or 1)
+            card._nexusQuality = qc and q or nil
             card.quality:SetText(shown.quality)
             card.tag:SetText(shown.shown or shown.tag)
             if shown.marked then
@@ -3359,40 +3481,26 @@ function M.SetOfferHeading(text, model, activeSlot, layout)
     return chosen
 end
 
--- Geometry of the cards inside the roll box: the band the card rows hold
--- (from below the heading, 3 x (small + row gap)), split into three columns.
--- When a shown card's quality or tag line is wider than its column (enlarged
--- text, a guaranteed or marked card, a long localized word), the same three
--- cards are stacked instead, each a full-width row of the same band: the name,
--- then its quality and its tag at their whole widths (only a tag wider than
--- half the row, or a quality then left without room, is shortened, complete
--- on the card's hover), the name
--- in the rest (shortened there, complete on the hover and named in the
+-- Geometry of the cards inside the roll box (design/current "Nexus Main
+-- Panel - Compact Redesign": compact offer rows, not tall cards): the band
+-- the card rows hold (from below the heading, 3 x (small + row gap)), one
+-- full-width row per offer: the name, then its quality and its tag at their
+-- whole widths (only a tag wider than half the row, or a quality then left
+-- without room, is shortened, complete on the card's hover), the name in the
+-- rest (shortened there, complete on the hover and named in the
 -- recommendation). The band, the roll box and the panel keep their size.
--- Returns "columns" or "rows".
+-- No Echo icon is drawn: no verified icon source exists in this source.
+-- Returns "rows".
 function M.PlaceOfferCards(layout, box, inset)
     local cards = frame and frame._offerCards
     if not (cards and layout and box) then return nil end
     local top = 1 + layout.small + math.max(3, math.floor(layout.gap / 2))
     local rowGap = math.max(2, math.floor(layout.gap / 3))
-    local height = 3 * (layout.small + rowGap) - rowGap
     local width = box.w - inset * 2
-    local column = math.max(1, math.floor((width - 2 * OFFER.gap) / 3))
-    local textWidth = math.max(1, column - OFFER.pad * 2)
-    local stacked = false
-    for index = 1, 3 do
-        local card = cards[index]
-        if card:IsShown() then
-            for _, key in ipairs({"quality", "tag"}) do
-                local line = card[key]:GetText() or ""
-                if line ~= "" and M.LineWidth(card[key], line) > textWidth then stacked = true end
-            end
-        end
-    end
     for index = 1, 3 do
         local card = cards[index]
         card:ClearAllPoints()
-        if stacked then
+        do
             card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset, -(top + (index - 1) * (layout.small + rowGap)))
             card:SetSize(width, layout.small)
             -- The status words first: the tag up to half the row, the quality
@@ -3412,20 +3520,9 @@ function M.PlaceOfferCards(layout, box, inset)
                 if part[2] > 0 then x = x + part[2] + OFFER.gap end
             end
             card._nexusLayout = "rows"
-        else
-            card:SetPoint("TOPLEFT", frame._rollArea, "TOPLEFT", inset + (index - 1) * (column + OFFER.gap), -top)
-            card:SetSize(column, height)
-            local lineTop = math.max(1, math.floor((height - 3 * layout.small) / 2))
-            for row, key in ipairs({"name", "quality", "tag"}) do
-                local text = card[key]
-                text:ClearAllPoints()
-                text:SetPoint("TOPLEFT", card, "TOPLEFT", OFFER.pad, -(lineTop + (row - 1) * layout.small))
-                text:SetSize(textWidth, layout.small)
-            end
-            card._nexusLayout = "columns"
         end
     end
-    return stacked and "rows" or "columns"
+    return "rows"
 end
 
 ------------------------------------------------------------------------
@@ -3733,23 +3830,12 @@ function M.RenderPlaySummary(model, layout)
         p.share = nil
         SetVisible(p.fill, false)
     end
-    -- Difficulty and Soul Ash as one line in the Play panel; the card stays
-    -- in the setup and completed views.
-    local ss = type(model.serverStatus) == "table" and model.serverStatus or nil
-    local server = play and layout.boxes.serverLine ~= nil and ss ~= nil
-    if server then
-        worldStatusBox:Hide()
-        local parts = {PlayPair("Difficulty", tostring(ss.tier or ss.mode or "?")),
-            PlayPair("Soul Ash", ss.ash ~= nil and tostring(ss.ash) or "?")}
-        if ss.gain ~= nil then parts[#parts + 1] = PlayPair("Multiplier", tostring(ss.gain)) end
-        local intensity, maximum = tonumber(ss.intensity), tonumber(ss.intensityMax)
-        if intensity then
-            parts[#parts + 1] = PlayPair("Intensity", tostring(math.floor(intensity))
-                .. (maximum and maximum > 0 and (" / " .. tostring(math.floor(maximum))) or ""))
-        end
-        p.server:SetText(table.concat(parts, "   "))
-    end
-    SetVisible(p.server, server); SetVisible(p.serverHit, server)
+    -- The Play panel shows the original difficulty card (design/current
+    -- "Nexus Main Panel - Compact Redesign", from the pre-overhaul b0870929
+    -- worldStatusBox): its own tier, Soul Ash, multiplier, red Intensity bar,
+    -- hover and Hardcore-menu click, in the layout's status box. The former
+    -- one-line row stays hidden.
+    SetVisible(p.server, false); SetVisible(p.serverHit, false)
     M.RenderPlayRecords(model, layout)
     -- The Orb run line, while a run is known.
     M.RefreshOrbLine(model, layout)
@@ -3795,7 +3881,6 @@ function M.PlacePlaySummary(layout)
     end
     Put(p.needed, boxes.planNeeded); Put(p.tomes, boxes.planTomes)
     Put(p.extra, boxes.planExtra); Put(p.locked, boxes.planLocked)
-    Put(p.server, boxes.serverLine)
     -- Your value shares the label's row on the right; the label keeps the
     -- left part of it.
     local records = boxes.bestDps
@@ -3821,6 +3906,35 @@ end
 -- the reserved roll footprint the same through a board cycle. A panel
 -- region, not a roll-area row: the roll body and the card rows stay exactly
 -- the runtime's. Text only; it reads and decides nothing.
+-- Level 80, normal rolls finished, no offer (design/current "Nexus Main Panel
+-- - Compact Redesign", Lv80 trigger): the Orb guidance says normal rolls are
+-- finished (logic/OrbGuidance.lua "finished", "finished-no-orbs",
+-- "finished-unknown"), no card is offered, no recommendation or inline Auto
+-- line is shown, no earlier board's card rows are reserved, and a selected
+-- Auto is not held (its paused heading stays). Layout only: the guidance,
+-- its words and Open Orbs... are the runtime's own. A new offer or any other
+-- guidance gives the full block back on the next render. Reads only.
+function M.NoOfferState(model, guide, guideText, cardCount, recommendation, autoNote, roll)
+    local state = type(guide) == "table" and guide.state or nil
+    if state ~= "finished" and state ~= "finished-no-orbs" and state ~= "finished-unknown" then return false end
+    if (tonumber(cardCount) or 0) > 0 or tostring(recommendation or "") ~= ""
+        or tostring(autoNote or "") ~= "" or tostring(guideText or "") == "" then return false end
+    if type(roll) == "table" and roll.cardRows then return false end
+    if type(model) == "table" and model.auto and model.paused then return false end
+    return true
+end
+
+-- Rows of the collapsed guidance in the conservative text model, at the 396
+-- px content width less the inline Open Orbs... button and its gap (the
+-- LayoutMetrics noOffer geometry). At least one.
+function M.NoOfferRows(text, fontScale, button)
+    local metrics = Nexus.LayoutMetrics
+    if not (metrics and metrics.TextRows and metrics.ConservativeText) then return 1 end
+    local char = metrics.ConservativeText(fontScale)
+    local width = 396 - (button and (math.ceil(12 * char) + 20 + math.ceil(6 * (tonumber(fontScale) or 1))) or 0)
+    return math.max(1, metrics.TextRows(text, math.max(1, width), fontScale))
+end
+
 function M.AutoScopeShown(model, rollBlock, noBuild)
     return type(model) == "table" and model.auto == true and rollBlock and not noBuild and true or false
 end
@@ -4269,7 +4383,10 @@ local function ApplyPanelLayout(layout, completed)
         end
         local button = frame._orbsBtn
         local buttonRow = 0
-        if button and button:IsShown() and layout.orbButtonH then
+        -- The ordinary bottom button row with the mini-panel access. The
+        -- collapsed level-80 layout has no such row (no mini fields either);
+        -- it places Open Orbs... inline below.
+        if button and button:IsShown() and layout.orbButtonH and not layout.noOffer then
             buttonRow = layout.orbButtonH + math.ceil(layout.gap/2)
             button:ClearAllPoints()
             button:SetPoint("BOTTOMRIGHT", rollArea, "BOTTOMRIGHT", -inset, math.ceil(layout.gap/2))
@@ -4290,6 +4407,25 @@ local function ApplyPanelLayout(layout, completed)
         rollDivider:ClearAllPoints()
         rollDivider:SetPoint("BOTTOMLEFT", rollArea, "BOTTOMLEFT", 1, 0)
         rollDivider:SetSize(boxes.roll.w-2,1)
+        -- The collapsed level-80 block (M.NoOfferState): no heading row, the
+        -- guidance from the top, Open Orbs... inline at its right; the
+        -- optional mini-panel access stays in the Orb window.
+        if layout.noOffer then
+            statusText:Hide()
+            local inline = 0
+            if button and button:IsShown() and layout.orbButtonW then
+                inline = layout.orbButtonW + layout.gap
+                button:ClearAllPoints()
+                button:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -inset, -1)
+                button:SetSize(layout.orbButtonW, layout.orbButtonH)
+            end
+            if frame._orbMiniBtn then frame._orbMiniBtn:Hide() end
+            recText:ClearAllPoints()
+            recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -1)
+            recText:SetSize(math.max(1, boxes.roll.w-inset*2-inline), math.max(1, boxes.roll.h-layout.gap))
+        else
+            statusText:Show()
+        end
     end
 
     PlacePanelBox(setupText, boxes.setupTitle)
@@ -4439,6 +4575,10 @@ local function ApplyModel(model, signatures, roll)
     -- ordinary gap between choices (RollPresentation). Content and actions
     -- still come only from the current model.
     local rollBlock = activeRoll or (type(roll) == "table" and roll.reserved) or false
+    -- Level 80 with normal rolls finished and no offer (design/current "Nexus
+    -- Main Panel - Compact Redesign", Lv80): layout only, the block collapses
+    -- to its guidance and inline Open Orbs... (M.NoOfferState).
+    local noOffer = M.NoOfferState(model, guide, guideText, #cards, recommendation, autoNote, roll)
     -- The roll body: an unresolved Orb run's own reason first, else the
     -- recommendation (which carries an Orb pause reason), else the guidance.
     local bodyText = (guide and guide.state == "orb-run" and guideText ~= "") and guideText
@@ -4479,7 +4619,9 @@ local function ApplyModel(model, signatures, roll)
                 -- with the Open Orbs button, the Orb pause reason; or, below
                 -- the cards, the recommendation with the inline Auto line
                 -- (without cards the body already has the card rows' space).
-                guidanceRows=(autoNote ~= "" and #cards > 0)
+                noOffer=noOffer,
+                guidanceRows=noOffer and M.NoOfferRows(guideText, fontScale, guide.openOrbs)
+                    or (autoNote ~= "" and #cards > 0)
                     and Nexus.LayoutMetrics.TextRows((bodyText ~= "" and (bodyText .. "\n") or "")
                         .. autoNote, 248, fontScale)
                     or (guideText ~= "" and (bodyText == guideText
@@ -4492,7 +4634,8 @@ local function ApplyModel(model, signatures, roll)
                 orbLine=type(model._nexusOrbLine) == "table",
                 -- The Auto scope line's rows (M.RenderAutoScope), at the
                 -- 396 px content width of the 420 px panel.
-                autoScopeRows=M.AutoScopeShown(model, rollBlock, noBuild)
+                -- Not in the collapsed level-80 block: no offer, nothing to choose.
+                autoScopeRows=M.AutoScopeShown(model, rollBlock and not noOffer, noBuild)
                     and Nexus.Readout and Nexus.Readout.AUTO_ON_NOTE
                     and Nexus.LayoutMetrics.TextRows(Nexus.Readout.AUTO_ON_NOTE, 396, fontScale)
                     or 0,
@@ -4599,7 +4742,7 @@ local function ApplyModel(model, signatures, roll)
         if autoNote ~= "" then body = (body ~= "" and (body .. "\n") or "") .. autoNote end
         -- Without a built layout that holds the Auto scope row, the scope
         -- line stays visible in the body (M.AutoScopeFallback).
-        body = M.AutoScopeFallback(body, model, rollBlock, noBuild, responsiveLayout)
+        body = M.AutoScopeFallback(body, model, rollBlock and not noOffer, noBuild, responsiveLayout)
         recText:SetText(body)
         -- Compact charges, only from charge facts the model itself carries
         -- (Readout.ChargesLine; unknown is "?", never 0).

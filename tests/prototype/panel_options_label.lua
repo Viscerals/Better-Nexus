@@ -140,8 +140,17 @@ local function CheckHeader(W,why)
  assert(auto:IsShown(),why..': the Auto control or its state words are shown')
  local r={title=Rect(f._contextTitle,W),auto=Rect(auto,W),options=Rect(f._menuBtn,W),
   close=Rect(f._closeBtn,W),build=Rect(f._contextBuild,W),switch=Rect(f._switchBtn,W),
-  wishlist=Rect(f._contextWishlist,W),change=Rect(f._contextChange,W)}
- assert(r.title.w==W-slots.reserved-12,why..': the title keeps the rest of line 1: '..r.title.w)
+  wishlist=Rect(f._contextWishlist,W),change=Rect(f._contextChange,W),grip=Rect(f._dragGrip,W)}
+ -- The visible Shift-drag grip (design/current) is a distinct target at the
+ -- left of line 1, before the title; the pairwise check below keeps it clear.
+ assert(f._dragGrip:IsShown() and r.grip.x+r.grip.w<=r.title.x and r.grip.w>=22 and r.grip.h>=22,
+  why..': the grip sits before the title as a 22 px target')
+ -- Distinct, spaced targets on line 1 (design: no clumped Auto/Options/X).
+ assert(r.auto.x+r.auto.w+slots.gap<=r.options.x+0.001 and r.options.x+r.options.w+slots.gap<=r.close.x+0.001,
+  why..': Auto, Options and Close keep the design gap between them')
+ -- The title starts after the Shift-drag grip (slots.titleLeft).
+ assert(r.title.w==W-slots.reserved-slots.titleLeft,why..': the title keeps the rest of line 1: '..r.title.w)
+ assert(r.title.x==slots.titleLeft,why..': the title starts after the grip: '..r.title.x)
  assert(r.title.w>=150,why..': the title stays readable: '..r.title.w)
  assert(r.options.w==slots.optionsWidth and r.auto.w==slots.autoWidth,why..': slot widths')
  local order={'title','auto','options','close'}
@@ -178,8 +187,9 @@ print('PASS header line 1 order and no overlap at 420 px and 640 px, Auto shown 
 
 -- 4b. Both Difficulty / Soul Ash HUD preferences, through the setter the
 -- Manage menu uses. With the Nexus HUD the panel mirrors the values (attached:
--- the Play summary's one line for a build in progress, the status card for a
--- finished build); with the server HUD the stock widget is the display
+-- the original b0870929 status card, for a build in progress as for a finished
+-- one -- design/current "Nexus Main Panel - Compact Redesign" retired the
+-- flattened Play line); with the server HUD the stock widget is the display
 -- (detached: neither is shown). The model each mode implies is synthetic
 -- (serverStatus above): Main's composition of it is not exercised here.
 -- Header line 1 is the same in both modes, and the attached status stays
@@ -207,8 +217,8 @@ for _,mode in ipairs({'nexus','server'})do
    if line and line:IsShown() then shown[#shown+1]=line end
    if card:IsShown() then shown[#shown+1]=card end
    if mode=='nexus' then
-    assert(#shown==1 and shown[1]==(complete and card or line),
-     why..': the mirrored status is shown once, as the '..(complete and 'card' or 'Play line'))
+    assert(#shown==1 and shown[1]==card,
+     why..': the mirrored status is shown once, as the original card, never a flattened line')
     local s=Rect(shown[1],W)
     local bottom=0
     for _,name in ipairs({'title','auto','options','close','build','switch','wishlist','change'})do
@@ -249,10 +259,26 @@ local autoBefore,shownBefore,autoText=P.AutoSelectedNow(),f:IsShown(),f._autoBtn
 menu:Click()
 assert(opened and opened.anchor==menu and opened.frame==P._moreMenu,'the menu opens at the Options button')
 local top=opened.list
-assert(top[1] and top[1].isTitle and top[2] and top[2].text=='Manage' and top[2].hasArrow
- and type(top[2].menuList)=='table','the compact menu reaches Manage')
+-- design/current "Nexus Main Panel - Compact Redesign": Appearance is a
+-- top-level Options entry (no Manage hover chain), the shared Theme list with
+-- the current choice checked; Manage keeps every other route.
+local manageItem,appearanceItem
+for _,item in ipairs(top)do
+ if item.text=='Manage' then manageItem=item end
+ if type(item.text)=='string' and item.text:find('^Appearance: ') then appearanceItem=item end
+end
+assert(top[1] and top[1].isTitle and manageItem and manageItem.hasArrow
+ and type(manageItem.menuList)=='table','the compact menu reaches Manage')
+assert(appearanceItem and appearanceItem.hasArrow and type(appearanceItem.menuList)=='table'
+ and #appearanceItem.menuList==#Nexus.Theme.MenuItems(),'Options opens Appearance directly: the shared Theme list')
+local checkedRows=0
+for _,item in ipairs(appearanceItem.menuList)do if item.checked then checkedRows=checkedRows+1 end end
+assert(checkedRows>=1,'the current appearance is checked in the direct Options list')
 local found={}
-for _,item in ipairs(top[2].menuList)do if type(item.text)=='string' then found[item.text]=item end end
+for _,item in ipairs(manageItem.menuList)do if type(item.text)=='string' then found[item.text]=item end end
+for text in pairs(found)do
+ assert(not text:find('^Appearance: '),'Appearance is not repeated under Manage: '..text)
+end
 for _,text in ipairs({'Open Settings...','Hide Nexus Panel','Log viewer...',Nexus.Updates.Status().menu or 'Open Releases page'})do
  assert(found[text] and type(found[text].func)=='function','Manage keeps '..text)
 end

@@ -179,22 +179,25 @@ C.scenario('P2 three offer cards side by side, the Wishlist pick set apart, and 
  C.expect(cards[2]._nexusMarked==false and cards[3]._nexusMarked==false,'P2: only the runtime-marked card is set apart')
  C.expect(cards[3].quality:GetText()=='Uncommon' and cards[3].tag:GetText()==R.OFFER_GUARANTEED_TAG,
   'P2: the guaranteed card says so on its tag line')
- C.expect(cards[1]._nexusLayout=='columns','P2: at the stock text size the cards stay three columns',tostring(cards[1]._nexusLayout))
+ -- design/current "Nexus Main Panel - Compact Redesign": compact offer rows.
+ C.expect(cards[1]._nexusLayout=='rows','P2: the offers are compact rows, one per offer',tostring(cards[1]._nexusLayout))
  C.expect(cards[1]._nexusFull=='Cinder Lattice (Epic) wanted','P2: the complete card line stays on its hover')
  C.expect(Heading():find('Current offer - you choose',1,true)~=nil,'P2: the heading says the player chooses',Heading())
- -- Geometry: disjoint columns inside the roll area, within the card band.
+ -- Geometry: disjoint full-width rows inside the roll area, within the card band.
  local area=NexusPanel._rollArea
- local lastRight,inside=-1,true
- for i=1,3 do
-  local point,relative,_,x,y=cards[i]:GetPoint()
-  if point~='TOPLEFT' or relative~=area or x<lastRight or x+cards[i]:GetWidth()>area:GetWidth() or y>0 then inside=false end
-  lastRight=x+cards[i]:GetWidth()
- end
- C.expect(inside,'P2: the cards are three disjoint columns inside the roll area')
  local layout=NexusPanel._responsiveLayout
  local band=layout and 3*(layout.small+math.max(2,math.floor(layout.gap/3))) or 0
- C.expect(layout and cards[1]:GetHeight()<=band and cards[1]:GetHeight()>=3*layout.small,
-  'P2: a card holds its three lines within the band the card rows reserve',tostring(cards[1]:GetHeight())..'/'..band)
+ local lastBottom,inside,first=nil,true,nil
+ for i=1,3 do
+  local point,relative,_,x,y=cards[i]:GetPoint()
+  first=first or -y
+  if point~='TOPLEFT' or relative~=area or x<0 or x+cards[i]:GetWidth()>area:GetWidth() or y>0
+   or (lastBottom and -y<lastBottom) then inside=false end
+  lastBottom=-y+cards[i]:GetHeight()
+ end
+ C.expect(inside,'P2: the offers are three disjoint rows inside the roll area')
+ C.expect(layout and lastBottom and first and lastBottom-first<=band and cards[1]:GetHeight()==layout.small,
+  'P2: the three rows stay within the band the card rows reserve',tostring(lastBottom)..'-'..tostring(first)..'/'..band)
  local clickable=false
  for i=1,3 do
   if cards[i]:GetScript('OnClick') or cards[i]:GetScript('OnMouseUp') or cards[i]:GetScript('OnMouseDown') then clickable=true end
@@ -338,8 +341,8 @@ C.scenario('P7 at 125% text the offer heading and every card status line fit wit
  G.UseFont(G.MODELS.default)
  P.Render(Model({auto=false}))
  C.setup(P.Render(Model({auto=false,cards=CARDS}))==true,'P7: fixture: the stock model again')
- C.guard(Heading():find('Current offer - you choose',1,true)~=nil and NexusPanel._offerCards[1]._nexusLayout=='columns',
-  'P7: with room the full heading and the three columns return',Heading())
+ C.guard(Heading():find('Current offer - you choose',1,true)~=nil and NexusPanel._offerCards[1]._nexusLayout=='rows',
+  'P7: with room the full heading returns, the offers stay compact rows',Heading())
  C.guard(Effects()==before,'P7: fitting and stacking change no game state',Effects())
 end)
 

@@ -6,7 +6,10 @@
 -- UTF-8 layout, through the real Setup / Welcome entry, coach window, Echo
 -- Journal chooser and StaticPopup handlers (synthetic host services). Also
 -- full Help in place of the coach with its asynchronous returns (F9, F10),
--- the design's footer treatments (F11) and its filled step actions (F12).
+-- the design's footer treatments (F11), its filled step actions (F12),
+-- one selected card per choice step (F17), Start an empty Wishlist beside
+-- an unsaved Plan draft set aside in another workspace (F18, F19) and the
+-- bounded 640 px window with its scrolling body and pinned footer (F20).
 -- EXPECT: added behaviour; at 2b287ef8 the SETUP is healthy (boot, two
 -- server Wishlists, selected Saved Build 2, chooser rows) but there is no
 -- Guided setup button or coach, so each EXPECT fails there (reported, not
@@ -40,6 +43,9 @@ local function Boot(o)
  H.perks.serverBuildSlots={[1]={name='One',verified=true,echoes=E1},[2]={name='Fire PvE',verified=true,echoes=E2},
   [3]={name='Empty three',verified=true,echoes={}},[106]={name='W-Six',verified=false,echoes=E6},
   [107]={name=o.free or 'W-Free',verified=false,echoes=EF}}
+ -- o.copy: a third server Wishlist with W-Free's Echoes under another name
+ -- and slot (F17).
+ if o.copy then H.perks.serverBuildSlots[108]={name='W-Copy',verified=false,echoes={{spellId=201174,quality=0,stacks=1}}} end
  H.perks.serverActiveSlot=2
  spends=0
  ProjectEbonhold.OrbService={IsStateKnown=function() return true end,GetCharges=function() return 0 end,
@@ -72,7 +78,11 @@ local function Find(exact,text)
   end
  end
 end
-local function Btn(t) return Find(true,t) end
+-- Setup Alternative: while an unsaved Plan draft is set aside, Start an
+-- empty Wishlist reads unavailable before any click (F18 asserts the label);
+-- the same row is found under either label.
+local CREATE,CREATE_BLOCKED='Start an empty Wishlist','Start an empty Wishlist (unavailable: unsaved Plan draft)'
+local function Btn(t) return Find(true,t) or (t==CREATE and Find(true,CREATE_BLOCKED)) or nil end
 local function Opt(t) return Find(false,t) end
 local function Press(b) if b then b:Click() end return b~=nil end
 local function On(b) return b~=nil and b:IsEnabled() end
@@ -132,9 +142,9 @@ local function Open(tag)
  Nexus.QuickStart.ShowSetup()
  local w,b=_G.NexusQuickStart,nil
  for _,c in ipairs(w and w.children or {}) do
-  if c.kind=='Button' and V.Plain(c:GetText() or '')=='Guided setup (step by step)' then b=c end
+  if c.kind=='Button' and V.Plain(c:GetText() or '')=='Help: Guided setup' then b=c end
  end
- C.expect(b~=nil,tag..': Setup / Welcome offers Guided setup')
+ C.expect(b~=nil,tag..': Setup / Welcome offers Help: Guided setup')
  if b then b:Click() end
  return C.expect(Shown(),tag..': the coach opens')
 end
@@ -157,7 +167,8 @@ C.scenario('F1 first use: every navigation control moves the guide only',functio
  Press(Btn('Skip for now'))
  C.expect(Step()=='target' and Nexus.GuidedSetup.State().skipped.wishlist==true,'F1: Skip for now moves on and records skipped')
  Press(Btn('Back'));C.expect(Step()=='wishlist','F1: Back returns')
- Press(Btn('Checklist v'))
+ -- Setup Alternative: the step list is behind All steps.
+ Press(Btn('All steps v'))
  C.expect(Opt('Read a recommendation')~=nil and Text():find('Skipped',1,true)~=nil,'F1: the checklist lists the steps with their status words',Text())
  Press(Opt('Read a recommendation'));C.expect(Step()=='manual','F1: a checklist row moves to its step')
  Press(Btn('Back'));Press(Btn('Back'));Press(Btn('Back'))
@@ -167,14 +178,17 @@ C.scenario('F1 first use: every navigation control moves the guide only',functio
  local reg,raw=0,0
  for _,n in ipairs(UISpecialFrames) do if n=='NexusGuidedSetupEscape' then reg=reg+1 elseif n=='NexusGuidedSetup' then raw=raw+1 end end
  C.expect(reg==1 and raw==0,'F1: Escape closes the coach through its one listed Escape child (the coach itself is not listed)',reg..'/'..raw)
- Press(Btn('Help'))
- C.expect(Shown() and Text():find('About: Choose a Wishlist',1,true)~=nil and not (_G.NexusHelpWindow and NexusHelpWindow:IsShown()),
-  'F1: Help opens the step help card inside the coach',Text())
+ -- Setup Alternative: the header's Reference replaces the step with the
+ -- optional topic list inside the coach; it is never under the step.
+ Press(Btn('Reference'))
+ C.expect(Shown() and Text():find('Reference - optional',1,true)~=nil and Text():find('WHY THIS MATTERS',1,true)==nil
+  and not (_G.NexusHelpWindow and NexusHelpWindow:IsShown()),
+  'F1: Reference opens the optional Reference view in place of the step, inside the coach',Text())
  if _G.NexusGuidedSetupEscape then NexusGuidedSetupEscape:Hide() end
- C.expect(Shown() and Text():find('About:',1,true)==nil and NexusGuidedSetupEscape:IsShown(),
-  'F1: Escape closes the help card first and keeps the coach')
- Press(Btn('Help'));Press(Btn('Open full Help'))
- C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown(),'F1: the help card opens full Help')
+ C.expect(Shown() and Text():find('Reference - optional',1,true)==nil and NexusGuidedSetupEscape:IsShown(),
+  'F1: Escape closes the Reference view first and keeps the coach')
+ Press(Btn('Reference'));Press(Btn('Open full Help'))
+ C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown(),'F1: the Reference view opens full Help')
  if _G.NexusHelpWindow then NexusHelpWindow:Hide() end
  Press(Btn('X'));Nexus.GuidedSetupUI.Show()
  if _G.NexusGuidedSetupEscape then NexusGuidedSetupEscape:Hide() end
@@ -281,14 +295,27 @@ C.scenario('F4 SIMULATED preview and optional lessons: no live action; honest su
  C.expect(Step()=='auto' and Btn('Keep Auto OFF')~=nil,'F4: Auto is offered as optional')
  Press(Btn('Keep Auto OFF'))
  local t=Text()
- C.expect(Step()=='summary' and t:find("You've had a look around",1,true)~=nil and t:find('Nexus confirmed',1,true)==nil
+ C.expect(Step()=='summary' and t:find("You've had a look around",1,true)~=nil
   and t:find('Not part of a look-around',1,true)~=nil and t:find('sent nothing and used no Orbs',1,true)~=nil,
-  'F4: the summary does not call setup complete',t)
+  'F4: the summary is the look-around summary',t)
+ -- The summary may say how steps are counted ("Only steps Nexus confirmed
+ -- are marked done"); it must never claim a completed setup or a confirmed
+ -- assignment for a look-around. Each phrase is the copy of such a claim.
+ local F,AS=Nexus.UserText.Guide.finish,Nexus.UserText.Guide.assign
+ local claims={F.titleDone,F.subDone,F.subTrue,AS.verified,'Confirmed by read back','Setup confirmed'}
+ local claimed={}
+ for _,claim in ipairs(claims) do if t:find(V.Plain(claim),1,true) then claimed[#claimed+1]=claim end end
+ C.expect(#claims==6 and #claimed==0,'F4: the summary makes no completed-setup or confirmed-assignment claim',table.concat(claimed,' | '))
+ C.expect(t:find('Only steps Nexus confirmed are marked done',1,true)~=nil,
+  'F4: the summary keeps its truthful rule that only confirmed steps count',t)
  C.expect(Nexus.GuidedSetup.Summary().complete==false,'F4: core setup is not complete')
  Press(Opt('Orbs & Lost Memories'))
  C.expect(Text():find('spends nothing',1,true)~=nil,'F4: the Orb lesson reads without opening anything')
- Press(Opt('Sharing & Sync'));Press(Btn('Open Help: Sharing'))
- C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown(),'F4: the sharing lesson opens Help')
+ -- The manual's Sharing page is the Reference (Help means this coach).
+ Press(Opt('Sharing & Sync'))
+ C.expect(Btn('Open Help: Sharing')==nil,'F4: the sharing lesson does not call the long manual Help')
+ Press(Btn('Open Reference: Sharing'))
+ C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown(),'F4: the sharing lesson opens the Reference')
  C.guard(Effects()==before,'F4: simulation and lessons took no game action, send, spend or Auto change',Effects())
 end)
 
@@ -348,7 +375,7 @@ C.scenario('F6 choice rows and preview cards stack without overlap at 420 px and
  Nexus.GuidedSetupUI.Render()
  Rows('long localized preview')
  cards[1].desc=original
- Press(Btn('Checklist v'))
+ Press(Btn('All steps v'))
  Rows('open checklist')
 end)
 
@@ -371,7 +398,7 @@ end
 -- F7: the design's desktop window. The visible UI size is a harness value
 -- (UIParent's size); native screen sizes, UI scale and the real-client
 -- wide/compact comparison are NOT RUN.
-C.scenario('F7 a wide screen shows the design desktop window: side checklist, step card beside it, Help as a side panel',function()
+C.scenario('F7 a wide screen shows the design desktop window: side checklist, step card beside it, Reference in place of the card',function()
  Boot()
  local uiW,uiH=UIParent:GetWidth(),UIParent:GetHeight()
  UIParent:SetSize(1400,900)
@@ -380,7 +407,7 @@ C.scenario('F7 a wide screen shows the design desktop window: side checklist, st
  Start('I already have')
  local g=Guide()
  C.expect(g:GetWidth()==900,'F7: the desktop window is 900 px wide',g:GetWidth())
- C.expect(Btn('Checklist v')==nil and Btn('Checklist ^')==nil,'F7: no collapsible checklist: the checklist is always shown')
+ C.expect(Btn('All steps v')==nil and Btn('All steps ^')==nil,'F7: no collapsible checklist: the checklist is always shown')
  local nav,content=0,0
  for _,c in ipairs(g.children) do
   if c.kind=='Button' and c:IsShown() then
@@ -398,15 +425,18 @@ C.scenario('F7 a wide screen shows the design desktop window: side checklist, st
  C.expect(Step()=='target','F7: a side navigation row moves to its step')
  Press(Btn('Back'))
  Laid('F7',g)
- Press(Btn('Help'))
+ Press(Btn('Reference'))
+ -- Setup Alternative: Reference replaces the step card beside the side
+ -- navigation (never a panel beside or under the step).
  local about
  for _,fs in ipairs(Nexus.GuidedSetupUI.TextRegions()) do
-  if V.Plain(fs:GetText() or ''):find('About:',1,true) then about=L.Rect(fs,g) end
+  if V.Plain(fs:GetText() or '')=='Reference - optional' then about=L.Rect(fs,g) end
  end
- C.expect(about~=nil and about[1]>=900-16-232,'F7: Help opens as the side panel at the right',about and L.Text(about))
+ C.expect(about~=nil and about[1]>=208 and not Text():find('W-Free',1,true),
+  'F7: Reference opens in place of the step card, beside the side navigation',about and L.Text(about))
  Laid('F7 help',g)
  if _G.NexusGuidedSetupEscape then NexusGuidedSetupEscape:Hide() end
- C.expect(Shown() and not Text():find('About:',1,true),'F7: Escape closes the Help side panel first')
+ C.expect(Shown() and not Text():find('Reference - optional',1,true),'F7: Escape closes the Reference view first')
  L.UseFont({name='125%',char=8.75,line=15,size=15})
  Nexus.GuidedSetupUI.Render()
  C.expect(g:GetWidth()==900,'F7: at 125% text a 1400 px UI keeps the desktop window')
@@ -491,11 +521,13 @@ C.scenario('F9 full Help replaces the coach while open; closing it returns the s
  local quiet,sent,seen=Quiet(),#H.sent,rawget(NexusDB,'hasSeenQuickStart')
  local known,tally=Known(),Tally()
  local function Frame() NextFrame(known,tally) end
- Press(Btn('Help'))
- -- The design's aside names full Help as what /nexus tutorial opens; that
- -- command opens Help again (core/MainCommands.lua), never the coach.
- C.expect(Text():find('in place of this guide',1,true)~=nil and Text():find('/nexus tutorial',1,true)~=nil,
-  'F9: the help card says full Help replaces the guide and names /nexus tutorial, which opens that Help',Text())
+ Press(Btn('Reference'))
+ -- The Reference view names the reference pages as what /nexus reference
+ -- opens (core/MainCommands.lua); /nexus help and /nexus tutorial open this
+ -- coach (Setup Alternative), so the view must not send the player there.
+ C.expect(Text():find('in place of this guide',1,true)~=nil and Text():find('/nexus reference',1,true)~=nil
+  and Text():find('/nexus tutorial',1,true)==nil and Text():find('/nexus help',1,true)==nil,
+  'F9: the Reference view says the reference pages replace the guide and names /nexus reference, which opens them',Text())
  Press(Btn('Open full Help'))
  C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() and not Shown(),'F9: full Help opens in place of the coach, not over it')
  C.expect(not NexusGuidedSetupEscape:IsShown() and rawget(NexusDB,'hasSeenQuickStart')==seen,
@@ -503,10 +535,10 @@ C.scenario('F9 full Help replaces the coach while open; closing it returns the s
  NexusHelpWindow:Hide() -- Close or Escape
  C.expect(not Shown(),'F9: the coach does not return inside the same Escape pass')
  Frame()
- C.expect(Shown() and Step()=='wishlist' and Text():find('About:',1,true)==nil,
-  'F9: on the next frame the coach is back at the same step, its help card closed',Text())
+ C.expect(Shown() and Step()=='wishlist' and Text():find('Reference - optional',1,true)==nil,
+  'F9: on the next frame the coach is back at the same step, its Reference view closed',Text())
  C.guard(tally.returned=='flow','F9: the coach came back in a frame the attribution counts as the flow\'s own',tostring(tally.returned))
- Press(Btn('Help'));Press(Btn('Open full Help'))
+ Press(Btn('Reference'));Press(Btn('Open full Help'))
  local checklist
  for _,c in ipairs(NexusHelpWindow.children) do
   if c.kind=='Button' and c:GetText()=='Setup checklist' then checklist=c end
@@ -550,7 +582,7 @@ C.scenario('F10 a receipt or an editor closing while full Help is open does not 
  local known,tally=Known(),Tally()
  local function Help() return _G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() end
  local function FullHelp(tag)
-  Press(Btn('Help'));Press(Btn('Open full Help'))
+  Press(Btn('Reference'));Press(Btn('Open full Help'))
   return C.setup(Help() and not Shown() and Guide().waitingKind=='help',tag..': fixture: full Help is open in place of the coach')
  end
  Press(Btn('Start an empty Wishlist'))
@@ -717,7 +749,7 @@ C.scenario('F12 step actions: the main one filled like Continue, the others seco
   local g,G=Guide(),Nexus.GuidedSetup
   if not C.setup(Step()=='wishlist' and g:GetWidth()==420,'F12: fixture: the Wishlist step in the compact window',g:GetWidth()) then return end
   local nxt=g.next
-  local OWN={[g.next]=true,[g.skip]=true,[g.back]=true,[g.help]=true,[g.close]=true,[g.checklist]=true}
+  local OWN={[g.next]=true,[g.skip]=true,[g.back]=true,[g.help]=true,[g.close]=true,[g.checklist]=true,[g.later or g.next]=true}
   -- The shown step actions: not the header, footer or a choice row.
   local function Actions()
    local list={}
@@ -845,7 +877,7 @@ C.scenario('F12 step actions: the main one filled like Continue, the others seco
     'F12: the stale card\'s one action is the filled Check again, with no chooser',Text())
    TextsFit('F12 stale')
   end
-  Press(Btn('Checklist v'));Press(Opt('Auto (optional)'))
+  Press(Btn('All steps v'));Press(Opt('Auto (optional)'))
   if not C.setup(Step()=='auto' and not Auto(),'F12: fixture: the Auto step with Auto OFF',Step()) then return end
   local kept=buttons.keep:format('OFF')
   Card('F12 auto',kept,buttons.review)
@@ -1321,6 +1353,624 @@ C.scenario('F16 a My Builds answer from before Close and reopen is stale: the re
  C_Timer=keepTimer
  Nexus.JournalTab.OpenBuilds=realOpen
  C.setup(ok,'F16: fixture: the scenario ran',err)
+end)
+
+-- F17: the choice cards' selected look (ui/GuidedSetup.lua Row) after card B
+-- then card C, as reported from native Setup step 2/7: both cards kept the
+-- selected look while the footer named C (the screenshots are not in this
+-- packet). The look is read from each shown row: its radio check (radioIn)
+-- and gold ring, and the Theme's selection (Theme.SetSelected: its bar, the
+-- held highlight through spied LockHighlight / UnlockHighlight, and its
+-- _nexusSelected mark). Exactly one card of the step carries any of it, it
+-- carries all of it, and it is the coach's own choice (core State), which
+-- the footer status names alone. A (W-Six), B (W-Free) and C (W-Copy) are
+-- server Wishlists; B and C hold the same Echoes, so they share one content
+-- key (GameAdapter WishlistIdentity) under two names and slots. EXPECT where
+-- B or C is the choice (the reported look); GUARD where the choice has a key
+-- of its own and on the other steps drawn by the same Row: the Welcome paths,
+-- the Saved Build targets, the checklist and side navigation and the
+-- SIMULATED preview cards. Also repeated clicks, hover in and out, the paste
+-- field, Continue and Back over pooled rows recycled by the target step and
+-- the checklist, close and reopen, a refresh and the desktop window. Hover is
+-- its scripts only: the HIGHLIGHT layer, the held highlight's pixels and
+-- native mouse focus are NOT RUN. Choices write, act, send, spend and toggle
+-- nothing.
+C.scenario('F17 choosing card B then card C leaves exactly one selected card: the chosen one, which the footer names',function()
+ Boot({copy=true})
+ local T,G=Nexus.UserText.Guide,Nexus.GuidedSetup
+ local TW=T.wishlist
+ local GOLD={1,0.78,0.36}
+ local uiW,uiH=UIParent:GetWidth(),UIParent:GetHeight()
+ -- Spies on the coach's buttons from the moment they are made, so every look
+ -- read below is the one the click's own render drew: the held highlight and
+ -- every texture's paint colour. A row made before this (a first-use render
+ -- at boot) is spied once the coach is open; its highlight starts as the
+ -- Theme's own mark, which SetSelected holds exactly while it marks the row.
+ local make=CreateFrame
+ local function Spy(b,held)
+  if b.spied then return end
+  b.spied,b.held=true,held==true
+  b.LockHighlight=function(self) self.held=true end
+  b.UnlockHighlight=function(self) self.held=false end
+  local tex=b.CreateTexture
+  b.CreateTexture=function(self,...)
+   local t=tex(self,...)
+   t.SetVertexColor=function(r,...) r.drawn={...} end
+   return t
+  end
+  for _,t in ipairs(b.regions or {}) do t.SetVertexColor=function(r,...) r.drawn={...} end end
+ end
+ CreateFrame=function(kind,name,parent,...)
+  local f=make(kind,name,parent,...)
+  if kind=='Button' and parent~=nil and parent==_G.NexusGuidedSetup then Spy(f) end
+  return f
+ end
+ local ok,err=pcall(function()
+  local before=Effects()
+  if not C.setup(Nexus.Theme and type(Nexus.Theme.SetSelected)=='function','F17: fixture: the Theme marks selected rows') then return end
+  if not Open('F17') then return end
+  local g=Guide()
+  local late=false
+  for _,c in ipairs(g.children) do
+   if c.kind=='Button' and not c.spied then Spy(c,c._nexusSelected);late=true end
+  end
+  -- Rows made before the spies are drawn once more at Welcome, before any
+  -- choice, so their ring colour is read too.
+  if late then Nexus.GuidedSetupUI.Render() end
+  local Click=Press
+  local function Gold(t)
+   local d=t.drawn
+   return d~=nil and math.abs(d[1]-GOLD[1])<1e-6 and math.abs(d[2]-GOLD[2])<1e-6 and math.abs(d[3]-GOLD[3])<1e-6
+  end
+  -- One row's selected look, part by part.
+  local function Look(r)
+   local radio=r.radio:IsShown()
+   return {radio=radio,check=r.radioIn:IsShown(),ring=radio and Gold(r.radio),
+    bar=r._nexusSelectedBar~=nil and r._nexusSelectedBar:IsShown(),held=r.held==true,mark=r._nexusSelected==true}
+  end
+  local function Any(l) return l.check or l.ring or l.bar or l.held or l.mark end
+  local function All(l) return l.bar and l.held and l.mark and (not l.radio or (l.check and l.ring)) end
+  local function Desc(l)
+   local out={}
+   for _,k in ipairs({'check','ring','bar','held','mark'}) do if l[k] then out[#out+1]=k end end
+   return #out>0 and table.concat(out,'+') or 'none'
+  end
+  -- The shown choice rows whose label passes keep: the labels of those with
+  -- any part of the selected look, and every such row by label.
+  local function Picked(keep)
+   local on,rows={},{}
+   for _,c in ipairs(g.children) do
+    if c.kind=='Button' and c.radio and c:IsShown() then
+     local label=V.Plain(c:GetText() or '')
+     if keep(label) then rows[label]=c;if Any(Look(c)) then on[#on+1]=label end end
+    end
+   end
+   table.sort(on)
+   return on,rows
+  end
+  local function Snap()
+   local _,rows=Picked(function() return true end)
+   local out={}
+   for label,r in pairs(rows) do out[#out+1]=label..'='..Desc(Look(r)) end
+   table.sort(out)
+   return table.concat(out,'; ')
+  end
+  local function One(kind,tag,keep,want)
+   local on,rows=Picked(keep)
+   local r=rows[want]
+   return kind(#on==1 and on[1]==want and r~=nil and All(Look(r)),
+    tag..': exactly one card carries the selected look, '..want..', and all of it',
+    'selected: '..table.concat(on,', ')..' | '..want..': '..(r and Desc(Look(r)) or 'not shown'))
+  end
+  local function None(tag,keep)
+   local on=Picked(keep)
+   C.guard(#on==0,tag..': before a choice no card carries the selected look',table.concat(on,', '))
+  end
+
+  -- The Wishlist step.
+  Click(Opt('I already have'));Click(Btn('Continue'))
+  local keys={}
+  for _,c in ipairs(G.WishlistOptions() or {}) do keys[c.name]=c.key end
+  if not C.setup(Step()=='wishlist' and keys['W-Free']~=nil and keys['W-Free']==keys['W-Copy']
+   and keys['W-Six']~=nil and keys['W-Six']~=keys['W-Free'],
+   'F17: fixture: the Wishlist step lists A (W-Six), B (W-Free) and C (W-Copy); B and C hold the same Echoes (one content key)',Step()) then return end
+  local SLOT={['W-Six']=106,['W-Free']=107,['W-Copy']=108}
+  local WISH={['W-Six']=true,['W-Free']=true,['W-Copy']=true,[TW.importTitle]=true,[TW.createTitle]=true}
+  local function IsWish(l) return WISH[l]==true end
+  local prefix=TW.chosen:match('^(.-)%%s') or 'Chosen: '
+  local function K(name) return (name=='W-Free' or name=='W-Copy') and C.expect or C.guard end
+  local function Wish(tag,name)
+   One(K(name),tag,IsWish,name)
+   local w,t=G.State().wishlist,Text()
+   local alone=true
+   for n in pairs(SLOT) do if n~=name and t:find(TW.chosen:format(n),1,true) then alone=false end end
+   C.guard(w~=nil and w.name==name and w.slot==SLOT[name] and t:find(TW.chosen:format(name),1,true)~=nil and alone
+    and On(Btn('Continue')),tag..': the coach\'s choice is '..name..' (slot '..SLOT[name]..') and the footer status names it alone',t)
+  end
+  None('F17 wishlist',IsWish)
+  Click(Opt('W-Free'));Wish('F17 B','W-Free')
+  Click(Opt('W-Copy'));Wish('F17 B then C','W-Copy')
+  Click(Opt('W-Copy'));Wish('F17 C again','W-Copy')
+  -- Hover in and out: the scripts change no part of any card's look; a
+  -- hovered card that is not the choice carries none of it.
+  local function Hover(tag,label)
+   local _,rows=Picked(function() return true end)
+   local r=rows[label]
+   if not C.setup(r~=nil and type(r:GetScript('OnEnter'))=='function' and type(r:GetScript('OnLeave'))=='function',
+    tag..': fixture: the '..label..' card is shown with its hover scripts') then return end
+   local was=Snap()
+   GameTooltip:Hide()
+   r:GetScript('OnEnter')(r)
+   C.setup(GameTooltip:IsShown(),tag..': fixture: hovering '..label..' shows its full-name tooltip')
+   local over,look=Snap(),Look(r)
+   r:GetScript('OnLeave')(r)
+   C.guard(over==was and Snap()==was,tag..': hovering '..label..' in and out changes no card\'s selected look',over)
+   return look
+  end
+  local hovered=Hover('F17 hover A','W-Six')
+  if hovered then C.guard(not Any(hovered),'F17 hover A: a hovered card that is not the choice carries no selected look',Desc(hovered)) end
+  hovered=Hover('F17 hover B','W-Free')
+  if hovered then C.expect(not Any(hovered),'F17 hover B: hovered B, not the choice, carries no selected look',Desc(hovered)) end
+  hovered=Hover('F17 hover C','W-Copy')
+  if hovered then C.guard(All(hovered),'F17 hover C: the chosen card keeps its whole selected look under the pointer',Desc(hovered)) end
+  Wish('F17 after hover','W-Copy')
+  Click(Opt('W-Six'));Wish('F17 A','W-Six')
+  Click(Opt('W-Copy'));Wish('F17 A then C','W-Copy')
+  Click(Opt('W-Free'));Wish('F17 C then B','W-Free')
+  Click(Opt('W-Copy'));Wish('F17 B then C again','W-Copy')
+  -- The paste field is the one choice while open; the listed choice is set
+  -- aside, then chosen again.
+  Click(Btn(TW.importTitle))
+  One(C.guard,'F17 paste field',IsWish,TW.importTitle)
+  C.guard(Text():find(prefix,1,true)==nil and not On(Btn('Continue')),'F17 paste field: no listed Wishlist is named chosen; Continue waits',Text())
+  Click(Opt('W-Copy'));Wish('F17 paste field then C','W-Copy')
+
+  -- Continue: the Saved Build step, drawn by the same Row from the same pool.
+  Click(Btn('Continue'))
+  if not C.setup(Step()=='target','F17: fixture: Continue opens the Saved Build step',Step()) then return end
+  local DEST={['Slot 1 - One']=1,['Slot 2 - Fire PvE']=2,['Slot 3 - Empty three']=3}
+  local function IsTarget(l) return l:find('^Slot %d')~=nil or l==T.target.first end
+  local function Target(tag,label)
+   One(C.guard,tag,IsTarget,label)
+   local s,f=G.State(),G.TargetFacts()
+   C.guard(s.target~=nil and s.target.destination==DEST[label] and f~=nil and f.destination==DEST[label]
+    and On(Btn('Continue'))==(f.canContinue==true) and Text():find(T.target.ifAssign:format('W-Copy'),1,true)~=nil,
+    tag..': the coach\'s target is '..label..'; its consequence card and Continue follow it',Text())
+  end
+  None('F17 target',IsTarget)
+  Click(Opt('Slot 1 - One'));Target('F17 target B','Slot 1 - One')
+  Click(Opt('Slot 2 - Fire PvE'));Target('F17 target B then C','Slot 2 - Fire PvE')
+  Click(Opt('Slot 3 - Empty three'));Target('F17 target empty','Slot 3 - Empty three')
+  Click(Opt('Slot 2 - Fire PvE'));Target('F17 target C again','Slot 2 - Fire PvE')
+  -- Back: the Wishlist cards take the rows the targets just used (the chosen
+  -- Fire PvE row is W-Free's again, the empty slot's is W-Copy's).
+  Click(Btn('Back'))
+  if not C.setup(Step()=='wishlist','F17: fixture: Back returns to the Wishlist step',Step()) then return end
+  Wish('F17 back over recycled rows','W-Copy')
+  -- The open checklist takes the first pooled rows: every Wishlist card is
+  -- drawn by another row, and one step row is the current step.
+  local function Nav(tag)
+   local on=Picked(function(l) return not WISH[l] end)
+   C.guard(#on==1 and on[1]:find(T.labels.wishlist,1,true)~=nil,tag..': exactly one step row is selected: the current step',table.concat(on,', '))
+  end
+  Click(Btn(T.buttons.checklistShow))
+  if C.setup(Btn(T.buttons.checklistHide)~=nil,'F17: fixture: the checklist is open') then
+   Nav('F17 checklist')
+   Wish('F17 checklist open','W-Copy')
+   Click(Opt('W-Free'));Wish('F17 checklist open, B','W-Free')
+   Click(Opt('W-Copy'));Wish('F17 checklist open, B then C','W-Copy')
+   Click(Btn(T.buttons.checklistHide))
+   Wish('F17 checklist closed','W-Copy')
+  end
+  -- Close and reopen; a refresh.
+  Click(Btn('X'))
+  if not C.setup(not Shown(),'F17: fixture: X closed the coach') then return end
+  Nexus.GuidedSetupUI.Show()
+  if not C.setup(Shown() and Step()=='wishlist','F17: fixture: reopened at the Wishlist step',Step()) then return end
+  Wish('F17 reopened','W-Copy')
+  Nexus.GuidedSetupUI.Render()
+  Wish('F17 refreshed','W-Copy')
+  -- The desktop window: its side navigation rows come first from the pool.
+  UIParent:SetSize(1400,900)
+  Nexus.GuidedSetupUI.Render()
+  if C.setup(g:GetWidth()==900,'F17: fixture: the desktop window',g:GetWidth()) then
+   Nav('F17 desktop')
+   Wish('F17 desktop','W-Copy')
+   Click(Opt('W-Free'));Wish('F17 desktop B','W-Free')
+   Click(Opt('W-Copy'));Wish('F17 desktop B then C','W-Copy')
+   Nav('F17 desktop after B then C')
+  end
+  UIParent:SetSize(uiW,uiH)
+  Nexus.GuidedSetupUI.Render()
+  Wish('F17 compact again','W-Copy')
+  C.guard(Effects()==before,'F17: choosing, hovering and moving wrote, acted, sent, spent and toggled nothing',Effects())
+
+  -- Welcome (after a replay) and the SIMULATED preview cards.
+  Nexus.GuidedSetupUI.Replay()
+  if not C.setup(Step()=='welcome','F17: fixture: replay starts at Welcome',Step()) then return end
+  local PATH={}
+  for _,p in ipairs(T.welcome.paths) do PATH[p.title]=p.id end
+  local function IsPath(l) return PATH[l]~=nil end
+  local function Path(tag,title)
+   One(C.guard,tag,IsPath,title)
+   C.guard(G.State().path==PATH[title] and On(Btn('Continue')),tag..': the coach\'s path is '..PATH[title]..' and Continue is offered',tostring(G.State().path))
+  end
+  None('F17 welcome',IsPath)
+  Click(Opt('New to Nexus'));Path('F17 welcome B','New to Nexus')
+  Click(Opt('I already have'));Path('F17 welcome B then C','I already have a Saved Build')
+  Click(Opt('Just look around'));Path('F17 welcome explore','Just look around')
+  Click(Btn('Continue'))
+  if not C.setup(Step()=='manual','F17: fixture: the look-around opens the SIMULATED preview',Step()) then return end
+  local m,CARD=T.sim,{}
+  for i,card in ipairs(T.sim.cards) do CARD[card.name]=i end
+  local function IsCard(l) return CARD[l]~=nil end
+  local function Card(tag,name)
+   One(C.guard,tag,IsCard,name)
+   local t,alone=Text(),true
+   for n in pairs(CARD) do if n~=name and t:find(m.picked:format(n),1,true) then alone=false end end
+   C.guard(G.State().manualPick==CARD[name] and t:find(m.picked:format(name),1,true)~=nil and alone,
+    tag..': the preview\'s pick is '..name..' and its message names it alone',t)
+  end
+  None('F17 preview',IsCard)
+  Click(Opt('Sample Frost'));Card('F17 preview B','Sample Frost')
+  Click(Opt('Sample Ash'));Card('F17 preview B then C','Sample Ash')
+  Click(Opt('Sample Ash'));Card('F17 preview C again','Sample Ash')
+  Click(Opt('Sample Frost'));Card('F17 preview C then B','Sample Frost')
+  C.guard(Effects()==before,'F17: the whole flow wrote, acted, sent, spent and toggled nothing',Effects())
+ end)
+ UIParent:SetSize(uiW,uiH)
+ CreateFrame=make
+ C.setup(ok,'F17: fixture: the scenario ran',err)
+end)
+
+-- F18: Start an empty Wishlist while an unsaved Plan draft is set aside in
+-- another workspace (the real Plan tab left for Explore: WishlistEditor
+-- SuspendForWorkspace). The editor's own refusal stays as it is
+-- (NewWishlist: false, 'Plan draft suspended' and its one chat line) and
+-- keeps guarding the draft. As reported, each click stepped the coach aside
+-- into that refusal, printed it again in chat and came back with nothing said
+-- in the step. The step now says it in place, once per ask, and offers Return
+-- to Plan draft: the editor's own resume (ResumeWorkspaceDraft), the same
+-- draft unchanged, no save armed. Under another character the editor's own
+-- Discard / Keep question answers it, and Keep keeps the draft. Without a
+-- draft set aside the button opens the empty editor as before. Also repeated
+-- clicks, close and reopen, the return's cancel (Plan closed unsaved) and a
+-- later unrelated save. EXPECT: the in-place explanation and route and no
+-- repeated chat line (each fails on a50372ba). GUARD: the draft, the
+-- editor's refusal, no armed save, no completion and no write, action, send,
+-- spend or Auto change. Popup layering over the coach and native chat are
+-- NOT RUN.
+local F5=dofile('tests/prototype/format5_support.lua')
+C.scenario('F18 Start an empty Wishlist beside a set-aside Plan draft: said in place, one route back to it, the draft untouched',function()
+ Boot()
+ local G,E,WS=Nexus.GuidedSetup,Nexus.WishlistEditor,Nexus.FullUIWorkspaces
+ local WARN='An unsaved Plan draft is open in another workspace'
+ local HEAD='An unsaved Plan draft is waiting in Plan'
+ local RETURN='Return to Plan draft'
+ local realPrint,realGuid=print,UnitGUID
+ local printed={}
+ print=function(...)
+  local parts={}
+  for i=1,select('#',...) do parts[i]=tostring((select(i,...))) end
+  printed[#printed+1]=table.concat(parts,' ')
+ end
+ -- The editor's refusal line, from print or the chat frame.
+ local function Warned()
+  local n=0
+  for _,l in ipairs(printed) do if l:find(WARN,1,true) then n=n+1 end end
+  for _,l in ipairs(H.chat or {}) do if tostring(l):find(WARN,1,true) then n=n+1 end end
+  return n
+ end
+ local function Heads() local _,n=Text():gsub(HEAD,'');return n end
+ local function Editor() return _G.NexusEditorFrame~=nil and NexusEditorFrame:IsShown() end
+ local function Draft() return F5.Serialize(E.DebugDraftState()) end
+ -- The editor's existing read-only check reports a set-aside draft.
+ local function SetAside()
+  local r=E.CheckImportCode(Nexus.Codec.EncodeEBH1({{spellId=201175,quality=0,stacks=1,locked=false}},'MAGE','Starter'))
+  return type(r)=='table' and r.suspended==true
+ end
+ local ok,err=pcall(function()
+  -- No draft set aside: the button opens the empty editor as before.
+  if not Open('F18') then return end
+  Start('New to Nexus')
+  if not C.setup(Step()=='wishlist' and Btn('Start an empty Wishlist')~=nil,'F18: fixture: the Wishlist step offers Start an empty Wishlist',Step()) then return end
+  local before=Effects()
+  Press(Btn('Start an empty Wishlist'))
+  C.guard(not Shown() and Editor() and G.State().awaitSave~=nil and Warned()==0,
+   'F18 fresh: with no draft set aside the coach steps aside for the empty editor and waits for its save; no warning')
+  if Editor() then NexusEditorFrame:Hide() end
+  C.guard(Shown() and Step()=='wishlist' and G.State().awaitSave==nil and Heads()==0 and Btn(RETURN)==nil,
+   'F18 fresh: closing that editor returns the coach at its step with nothing pending and nothing to return to',Text())
+  C.guard(Effects()==before,'F18 fresh: the empty editor route wrote, acted, sent, spent and toggled nothing',Effects())
+  Press(Btn('X'))
+  -- An unsaved Plan draft, set aside by the real Plan -> Explore tab.
+  if not C.setup(WS and WS.ShowPlan()==true and Editor(),'F18: fixture: Plan opens the real Wishlist Editor') then return end
+  local plan,NAME=NexusEditorFrame,'F18 unsent Plan draft'
+  NexusWishlistNameInput:SetText(NAME)
+  for _,f in ipairs(H.frames) do
+   if f.kind=='Button' and f:IsVisible() and f.status and f.data and f.data.spellId then f:Click();break end
+  end
+  if not C.setup(E.DebugDraftState().pending>0,'F18: fixture: the Plan draft holds an unsaved Echo') then return end
+  local tabs=plan._workspaceTabs
+  if not C.setup(tabs~=nil and tabs.builds~=nil,'F18: fixture: Plan shows its workspace tabs') then return end
+  tabs.builds:GetScript('OnClick')(tabs.builds)
+  local builds=_G.NexusCommunityBuildsFrame
+  if not C.setup(not plan:IsShown() and builds~=nil and builds:IsShown() and SetAside(),
+   'F18: fixture: Explore replaced Plan and the draft is set aside') then return end
+  local draft=Draft()
+  local refused,why=E.NewWishlist()
+  C.guard(refused==false and why=='Plan draft suspended' and Warned()==1 and Draft()==draft and not Editor() and SetAside(),
+   'F18: WishlistEditor.NewWishlist itself still refuses to replace the set-aside draft and says so once',tostring(why))
+  local warned,quiet=Warned(),Effects()
+  Nexus.GuidedSetupUI.Show()
+  if not C.setup(Shown() and Step()=='wishlist' and builds:IsShown(),'F18: fixture: the coach resumed at the Wishlist step beside Explore',Step()) then return end
+  C.guard(Heads()==0 and Btn(RETURN)==nil,'F18: before the player asks, the step says nothing about the draft',Text())
+  C.expect(Find(true,CREATE_BLOCKED)~=nil and Find(true,CREATE)==nil,
+   'F18: with the draft set aside, Start an empty Wishlist reads unavailable before any click',Text())
+  for i=1,3 do
+   local tag='F18 click '..i
+   Press(Btn('Start an empty Wishlist'))
+   C.expect(Warned()==warned,tag..': the editor\'s refusal is not printed again in chat',Warned()-warned)
+   C.expect(Shown() and Heads()==1 and On(Btn(RETURN)),
+    tag..': the step says once, in place, that the Plan draft is waiting, and offers Return to Plan draft',Text())
+   C.guard(Shown() and Step()=='wishlist' and not Editor() and builds:IsShown() and Draft()==draft and SetAside(),
+    tag..': the coach stays at its step; no editor opens over Explore and the draft is untouched')
+   local s=G.State()
+   C.guard(s.awaitSave==nil and s.wishlist==nil and s.draft==nil and not On(Btn('Continue')) and Effects()==quiet,
+    tag..': nothing is armed, chosen or completed; nothing written, acted, sent, spent or toggled',Effects())
+  end
+  -- Close and reopen: a new coach session says it again only when asked.
+  Press(Btn('X'))
+  Nexus.GuidedSetupUI.Show()
+  C.guard(Shown() and Step()=='wishlist' and Heads()==0,'F18 reopen: the reopened step starts without the earlier answer',Text())
+  Press(Btn('Start an empty Wishlist'))
+  C.expect(Heads()==1 and On(Btn(RETURN)) and Warned()==warned,'F18 reopen: asking again says it again in place, not in chat',Text())
+  -- Another character: the editor's own Discard / Keep question answers. The
+  -- draft cannot be reopened as it is here, so the action only asks (F19).
+  UnitGUID=function() return '0xF18OTHERCHARACTER' end
+  Nexus.GuidedSetupUI.Render()
+  C.expect(Text():find('asks you first',1,true)~=nil,'F18 other character: the step says its action asks before anything is discarded',Text())
+  local back=Btn('Keep or discard Plan draft')
+  H.popup=nil
+  if C.expect(back~=nil and Btn(RETURN)==nil,'F18 other character: Keep or discard Plan draft is offered, not Return to Plan draft') then
+   Press(back)
+   C.expect(H.popup~=nil and H.popup.which=='NEXUS_WORKSPACE_CONTEXT_CHANGED' and Shown() and Heads()==1 and not Editor(),
+    'F18 other character: the editor asks whether to discard the draft; the coach stays and no editor opens',tostring(H.popup and H.popup.which))
+   C.guard(Draft()==draft and SetAside() and Warned()==warned and Effects()==quiet,'F18 other character: the question alone changes nothing')
+   StaticPopup_Hide('NEXUS_WORKSPACE_CONTEXT_CHANGED') -- Keep draft, as a bare hide (the harness runs no handler)
+   C.guard(Draft()==draft and SetAside() and Shown() and not Editor(),'F18 other character: Keep draft keeps it set aside, unchanged')
+  end
+  UnitGUID=realGuid
+  -- The same character: Return to Plan draft reopens that very draft.
+  Nexus.GuidedSetupUI.Render()
+  back=Btn(RETURN)
+  if C.expect(back~=nil and Text():find('asks you first',1,true)==nil,'F18 return: Return to Plan draft is offered for the same character',Text()) then
+   Press(back)
+   C.expect(not Shown() and Editor() and NexusWishlistNameInput:GetText()==NAME and Draft()==draft and not SetAside(),
+    'F18 return: the coach steps aside for Plan, which shows the same unsaved draft, no longer set aside',NexusWishlistNameInput:GetText())
+   C.guard(G.State().awaitSave==nil and G.State().wishlist==nil and Warned()==warned,
+    'F18 return: returning arms no save, chooses nothing and prints nothing')
+   -- Cancel: the player closes Plan without saving.
+   if Editor() then NexusEditorFrame:Hide() end
+   C.expect(Shown() and Step()=='wishlist' and Heads()==0 and Btn(RETURN)==nil,
+    'F18 cancel: closing Plan brings the coach back at its step; nothing is waiting any more',Text())
+   C.guard(G.State().awaitSave==nil and G.State().wishlist==nil and not On(Btn('Continue')),'F18 cancel: the step is still not done')
+   G.Note('save',{kind='kept',name='F18 later save',key='f18-later'})
+   C.guard(G.State().wishlist==nil,'F18 cancel: a later unrelated save receipt is not taken as this step\'s Wishlist')
+  end
+  C.guard(Effects()==quiet,'F18: the explanation, the question, the return and its cancel wrote, acted, sent, spent and toggled nothing',Effects())
+ end)
+ print,UnitGUID=realPrint,realGuid
+ C.setup(ok,'F18: fixture: the scenario ran',err)
+end)
+
+-- F19 (review of the F18 source): the changed-context answer to a set-aside
+-- Plan draft. Under another character the step's action asked the editor's
+-- Discard / Keep question while the coach stayed open, and was still named
+-- Return to Plan draft although that draft is never returned there. Discard
+-- draft opened Plan for the current context with the coach left over it, and
+-- the coach's editor-return hook was installed only by a resume that opened
+-- at once, so closing that Plan brought nothing back. Now the action is Keep
+-- or discard Plan draft and the step and the question say Discard opens Plan
+-- for the current context without the draft. Keep draft (the dialog's Cancel,
+-- then its hide) leaves the draft and the coach as they were. Discard draft,
+-- the player's own answer, drops it as before; then the coach steps aside for
+-- that Plan, comes back at its step when it closes, and the empty Wishlist
+-- route works again. A coach closed with Escape while the question is open is
+-- never reopened or claimed by a later Discard. EXPECT: the label, the copy,
+-- the step aside and the return (each fails on the F18 source). GUARD: the
+-- draft until Discard, no armed save, no chosen Wishlist or completion, a
+-- save from that Plan not taken, and no write, action, send, spend or Auto
+-- change. The guide never routes to the editor before the question, so no
+-- earlier route installed its hook. Native popup and window layering, strata
+-- and the client's Escape order are NOT RUN.
+C.scenario('F19 Keep or discard a Plan draft set aside under another character: Keep keeps it; Discard opens current Plan and the coach steps aside and returns',function()
+ Boot()
+ local G,E,WS=Nexus.GuidedSetup,Nexus.WishlistEditor,Nexus.FullUIWorkspaces
+ local POPUP,NAME='NEXUS_WORKSPACE_CONTEXT_CHANGED','F19 unsent Plan draft'
+ local RETURN,ASK='Return to Plan draft','Keep or discard Plan draft'
+ local HEAD='An unsaved Plan draft is waiting in Plan'
+ local CURRENT='opens Plan for the current character and Saved Build, without it'
+ local realGuid=UnitGUID
+ local function Other() UnitGUID=function() return '0xF19OTHERCHARACTER' end end
+ local function Heads() local _,n=Text():gsub(HEAD,'');return n end
+ local function Editor() return _G.NexusEditorFrame~=nil and NexusEditorFrame:IsShown() end
+ local function Draft() return F5.Serialize(E.DebugDraftState()) end
+ local function SetAside()
+  local r=E.CheckImportCode(Nexus.Codec.EncodeEBH1({{spellId=201175,quality=0,stacks=1,locked=false}},'MAGE','Starter'))
+  return type(r)=='table' and r.suspended==true
+ end
+ -- An unsaved Plan draft, set aside by the real Plan -> Explore tab (F18).
+ local function Park(name)
+  if not (WS and WS.ShowPlan()==true and Editor()) then return nil end
+  local plan=NexusEditorFrame
+  NexusWishlistNameInput:SetText(name)
+  for _,f in ipairs(H.frames) do
+   if f.kind=='Button' and f:IsVisible() and f.status and f.data and f.data.spellId then f:Click();break end
+  end
+  local tabs=plan._workspaceTabs
+  if not (E.DebugDraftState().pending>0 and tabs and tabs.builds) then return nil end
+  tabs.builds:GetScript('OnClick')(tabs.builds)
+  if plan:IsShown() or not SetAside() then return nil end
+  return Draft()
+ end
+ -- The player's answer, as the client gives it: the button's handler, then
+ -- the dialog's hide.
+ local function Answer(accept)
+  local p=H.popup
+  local d=p and StaticPopupDialogs[p.which]
+  if not d then return false end
+  H.popup=nil
+  if accept then d.OnAccept(p.frame,p.data) elseif d.OnCancel then d.OnCancel(p.frame,p.data) end
+  if d.OnHide then d.OnHide(p.frame) end
+  return true
+ end
+ -- The step's one action, under either label, so the step aside and the
+ -- return are checked apart from the label.
+ local function Ask() H.popup=nil;return Press(Btn(ASK) or Btn(RETURN)) and H.popup~=nil and H.popup.which==POPUP end
+ local ok,err=pcall(function()
+  local draft=Park(NAME)
+  if not C.setup(draft~=nil,'F19: fixture: an unsaved Plan draft is set aside by the real Plan -> Explore tab') then return end
+  local quiet=Effects()
+  Nexus.GuidedSetupUI.Show();Start('New to Nexus')
+  if not C.setup(Shown() and Step()=='wishlist','F19: fixture: the coach is at the Wishlist step',Step()) then return end
+  Other()
+  Press(Btn('Start an empty Wishlist'))
+  C.expect(Heads()==1 and On(Btn(ASK)) and Btn(RETURN)==nil and Text():find(CURRENT,1,true)~=nil,
+   'F19 label: under another character the action is Keep or discard Plan draft, and the step says Discard opens Plan for the current context without it',Text())
+  C.expect(tostring(StaticPopupDialogs[POPUP].text):find(CURRENT,1,true)~=nil,
+   'F19 copy: the question says Discard draft opens Plan for the current context, not the old draft',StaticPopupDialogs[POPUP].text)
+  -- Keep draft.
+  if not C.setup(Ask(),'F19: fixture: the action asks the editor\'s question') then return end
+  C.guard(Shown() and not Editor() and Draft()==draft and SetAside(),'F19 keep: asking alone opens nothing and keeps the draft')
+  Answer(false)
+  local s=G.State()
+  C.guard(Shown() and Step()=='wishlist' and Heads()==1 and not Editor() and Draft()==draft and SetAside()
+   and s.awaitSave==nil and s.wishlist==nil and not On(Btn('Continue')) and Effects()==quiet,
+   'F19 keep: Keep draft keeps the draft set aside, unchanged, and the coach and its card as they were',Effects())
+  -- Discard draft: the player's own answer.
+  if not C.setup(Ask() and Draft()==draft,'F19: fixture: asked again; the draft still waits') then return end
+  Answer(true)
+  C.guard(Editor() and not SetAside() and E.DebugDraftState().pending==0 and NexusWishlistNameInput:GetText()~=NAME,
+   'F19 discard: Discard draft drops the old draft and opens Plan for the current context without it',NexusWishlistNameInput:GetText())
+  C.expect(not Shown() and Editor(),'F19 discard: the coach steps aside for that Plan instead of staying over it')
+  s=G.State()
+  C.guard(s.awaitSave==nil and s.wishlist==nil and s.draft==nil,'F19 discard: no save is armed and no Wishlist is chosen')
+  G.Note('save',{kind='kept',name='F19 current Plan save',key='f19-current'})
+  C.guard(G.State().wishlist==nil,'F19 discard: a save reported from that Plan is not taken as this step\'s Wishlist')
+  C.expect(not Shown() and Editor(),'F19 discard: that save does not bring the coach back over Plan')
+  -- Closing that Plan brings the coach back, still not done.
+  if Editor() then NexusEditorFrame:Hide() end
+  s=G.State()
+  C.expect(Shown() and Step()=='wishlist' and Guide().waiting==nil and Heads()==0 and Btn(ASK)==nil and Btn(RETURN)==nil,
+   'F19 close: closing that Plan brings the coach back at its step; no draft waits any more',Text())
+  C.guard(s.awaitSave==nil and s.wishlist==nil and not On(Btn('Continue')) and G.Summary().wishlist~='done',
+   'F19 close: the step is still not done')
+  -- With no draft set aside the empty Wishlist route opens the editor again.
+  Press(Btn('Start an empty Wishlist'))
+  C.guard(not Shown() and Editor() and G.State().awaitSave~=nil and Heads()==0,
+   'F19 reopen: Start an empty Wishlist opens the editor and waits for its save')
+  if Editor() then NexusEditorFrame:Hide() end
+  C.guard(Shown() and Step()=='wishlist' and G.State().awaitSave==nil and G.State().wishlist==nil,
+   'F19 reopen: closing it unsaved returns the coach with nothing pending or chosen')
+  C.guard(Effects()==quiet,'F19: keep, discard, close and reopen wrote, acted, sent, spent and toggled nothing',Effects())
+  -- Escape while the question is open closes the coach; a later Discard
+  -- opens Plan as answered but never reopens or claims that coach.
+  UnitGUID=realGuid
+  Press(Btn('X'))
+  draft=Park('F19 second draft')
+  if not C.setup(draft~=nil,'F19: fixture: a second Plan draft is set aside') then return end
+  local quiet2=Effects()
+  Nexus.GuidedSetupUI.Show()
+  Other()
+  Press(Btn('Start an empty Wishlist'))
+  if not C.setup(Ask() and Shown(),'F19: fixture: the question is open beside the coach') then return end
+  if _G.NexusGuidedSetupEscape then NexusGuidedSetupEscape:Hide() end
+  if not C.setup(not Shown(),'F19: fixture: Escape closed the coach (the question has no hideOnEscape)') then return end
+  Answer(true)
+  C.guard(Editor() and not SetAside(),'F19 escape: the later Discard draft opens Plan for the current context, as answered')
+  C.guard(not Shown() and Guide().waiting==nil,'F19 escape: it neither reopens nor claims the closed coach')
+  if Editor() then NexusEditorFrame:Hide() end
+  C.guard(not Shown() and G.State().wishlist==nil and G.State().awaitSave==nil,
+   'F19 escape: closing that Plan brings back no coach the player closed; nothing is chosen or armed')
+  C.guard(Effects()==quiet2,'F19 escape: wrote, acted, sent, spent and toggled nothing',Effects())
+ end)
+ UnitGUID=realGuid
+ C.setup(ok,'F19: fixture: the scenario ran',err)
+end)
+
+-- F20: the bounded window (Setup Alternative "Compact 640px"; reported
+-- natively as a coach that grew past the screen and was shrunk, text and
+-- all). On a readable UI size the coach is at most 640 px tall at its own
+-- scale; its header and footer stay put and the body between them scrolls by
+-- the wheel or the up / down controls. A region is shown only wholly inside
+-- the view (no text cut through); one out of view is a scroll away. A new
+-- step starts at the top. An implausibly small UI keeps the growing window.
+-- The UI size is a harness value; native wheel dispatch, clipping and pixels
+-- are NOT RUN.
+C.scenario('F20 a tall step in the 640 px window: pinned footer, scrolling body, readable text, nothing cut, nothing changed',function()
+ Boot()
+ local uiW,uiH=UIParent:GetWidth(),UIParent:GetHeight()
+ local ok,err=pcall(function()
+  UIParent:SetSize(1000,700)
+  L.UseFont({name='125%',char=8.75,line=15,size=15})
+  if not Open('F20') then return end
+  Start('Just look around')
+  Press(Btn('Skip for now'));Press(Btn('Skip for now'))
+  if not C.setup(Step()=='summary','F20: fixture: the look-around reaches the summary',Step()) then return end
+  local g,U=Guide(),Nexus.GuidedSetupUI
+  local quiet=Quiet()
+  local st=U.ScrollState()
+  C.expect(g:GetWidth()==420 and g:GetHeight()<=640 and (g:GetScale() or 1)==1,
+   'F20: the compact window is at most 640 px tall and keeps its scale (its text is not shrunk)',g:GetHeight()..' x'..tostring(g:GetScale()))
+  if not C.expect(st~=nil and st.max>0 and st.scroll==0,'F20: the summary is taller than the view, which starts at the top',st and st.max) then return end
+  local root=L.Rect(g,g)
+  local finish=Btn('Close guide')
+  C.expect(finish~=nil and L.Inside(L.Rect(finish,g),root) and L.Rect(finish,g)[2]>=st.bottom,
+   'F20: the footer (Close guide) stays inside the window, below the view',finish and L.Text(L.Rect(finish,g)))
+  local function Clean(tag)
+   for _,fs in ipairs(U.TextRegions()) do
+    local r=L.Rect(fs,g)
+    C.expect(L.Inside(r,root) and fs:IsShown() and (r[4]<=st.bottom+0.5 or r[2]>=st.bottom-0.5) and r[2]>=st.head-0.5,
+     tag..': a text in view is whole: inside the window and never across the view\'s edge',L.Text(r)..' '..V.Plain(fs:GetText() or ''):sub(1,24))
+   end
+   Laid(tag,g)
+  end
+  Clean('F20 top')
+  local replay=Nexus.UserText.Guide.buttons.replay
+  local more=V.Plain(Nexus.UserText.Guide.finish.more or '')
+  C.expect(Btn(replay)==nil and more~='' and Text():find(more,1,true)~=nil,
+   'F20: the replay action below the view is hidden until scrolled to; the step\'s text is still its own',Text())
+  local up,down=Btn('^'),Btn('v')
+  C.expect(up~=nil and down~=nil and not On(up) and On(down),'F20: the up / down controls show; up waits at the top')
+  local wheel=g:GetScript('OnMouseWheel')
+  if C.expect(type(wheel)=='function','F20: the coach takes the mouse wheel') then wheel(g,-1) end
+  st=U.ScrollState()
+  C.expect(st.scroll==40,'F20: one wheel notch down scrolls 40 px',st.scroll)
+  if down then Press(down) end
+  C.expect(U.ScrollState().scroll>40,'F20: the down control scrolls further',U.ScrollState().scroll)
+  U.ScrollBy(100000)
+  st=U.ScrollState()
+  C.expect(st.scroll==st.max and Btn(replay)~=nil and not On(Btn('v')) and On(Btn('^')),
+   'F20: at the end the replay action is in view and down waits',st.scroll..'/'..st.max)
+  Clean('F20 end')
+  C.expect(Btn('Close guide')~=nil and L.Rect(Btn('Close guide'),g)[2]>=st.bottom,'F20: the footer stays pinned while scrolled')
+  -- A click inside the same step keeps the view; a new step starts at the top.
+  Nexus.GuidedSetupUI.Render()
+  C.expect(U.ScrollState().scroll==st.scroll,'F20: a render of the same step keeps the view',U.ScrollState().scroll)
+  Press(Btn('Back'))
+  local back=U.ScrollState()
+  C.expect(Step()=='auto' and (back==nil or back.scroll==0),'F20: Back to another step shows it from the top',back and back.scroll)
+  C.guard(Quiet()==quiet,'F20: scrolling and moving wrote, acted, spent and toggled nothing',Quiet())
+  -- An unreadable UI size keeps the growing window, with nothing hidden.
+  UIParent:SetSize(uiW,uiH)
+  Press(Btn('Skip for now'))
+  C.expect(Step()=='summary' and U.ScrollState()==nil and Btn(replay)~=nil and Btn('^')==nil,
+   'F20: on an implausibly small UI the window grows as before; every action shows',Step())
+ end)
+ UIParent:SetSize(uiW,uiH)
+ L.UseFont(L.MODELS.default)
+ C.setup(ok,'F20: fixture: the scenario ran',err)
 end)
 
 C.finish('(guided coach: one step at a time; navigation changes nothing; confirmed only after read back)')

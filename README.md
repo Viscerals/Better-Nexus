@@ -72,11 +72,12 @@ Wishlists, Saved Builds, and your Active Loadout serve different purposes. Start
 
 ## Documentation & commands
 
-The **[documentation website](https://viscerals.github.io/Better-Nexus/)** covers installation, Wishlists, features, and troubleshooting. Its content may reflect updates beyond your installed build. Use the release notes for the exact package you downloaded and `/nexus help` for the guide shipped with it.
+The **[documentation website](https://viscerals.github.io/Better-Nexus/)** covers installation, Wishlists, features, and troubleshooting. Its content may reflect updates beyond your installed build. Use the release notes for the exact package you downloaded and `/nexus reference` for the guide shipped with it.
 
 | Command | Purpose |
 | --- | --- |
-| `/nexus help` | Open the in-game guide. |
+| `/nexus help` | Open Guided setup at your current step (also `/nexus tutorial`, `/nexus guide`). |
+| `/nexus reference` | Open the in-game reference pages (the full manual). |
 | `/nexus editor` | Open the Wishlist editor. |
 | `/nexus builds` | Browse Community Builds / Build Library. |
 | `/nexus leaderboard` | Open the DPS Leaderboard. |

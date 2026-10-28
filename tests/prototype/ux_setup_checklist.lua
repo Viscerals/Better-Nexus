@@ -234,17 +234,46 @@ C.scenario('K6 its buttons and routes only navigate',function()
  local f=Open('K6')
  if not f then return end
  C.expect(f.assign and V.Plain(f.assign:GetText())=='Assign Wishlist...' and f.editor and V.Plain(f.editor:GetText())=='Wishlist Editor'
-  and f.help and f.close,'K6: Assign Wishlist..., Wishlist Editor, Help and Close are offered')
+  and f.help and V.Plain(f.help:GetText())=='Help' and f.reference and V.Plain(f.reference:GetText())=='Reference' and f.close,
+  'K6: Assign Wishlist..., Wishlist Editor, Help, Reference and Close are offered')
  f.assign:Click()
  C.expect(opened==1 and not f:IsShown(),'K6: Assign Wishlist... opens the Wishlist chooser route once and closes the checklist',opened)
  f=Nexus.QuickStart.ShowChecklist()
  f.editor:Click()
  C.expect(_G.NexusEditorFrame~=nil and NexusEditorFrame:IsShown(),'K6: Wishlist Editor opens the editor')
  if NexusEditorFrame then NexusEditorFrame:Hide() end
+ -- design/current "Nexus Setup Alternative": Help and Setup open the coach,
+ -- Reference on request. Help takes the checklist's place with the coach;
+ -- Reference opens the manual's first page above it and the checklist stays.
+ if NexusHelpWindow then NexusHelpWindow:Hide() end
+ if Nexus.GuidedSetupUI then Nexus.GuidedSetupUI.Hide() end
  f=Nexus.QuickStart.ShowChecklist()
- f.help:Click()
- C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() and V.Plain(NexusHelpWindow.page:GetText())=='Page 1 / 7',
-  'K6: Help opens Getting started')
+ C.setup(not (_G.NexusGuidedSetup and NexusGuidedSetup:IsShown()),'K6: fixture: the coach is closed before Help is pressed')
+ if f.help then f.help:Click() end
+ C.expect(_G.NexusGuidedSetup~=nil and NexusGuidedSetup:IsShown() and not f:IsShown()
+  and not (_G.NexusHelpWindow and NexusHelpWindow:IsShown()),'K6: Help opens the guided setup coach in place of the checklist, not the manual')
+ if Nexus.GuidedSetupUI then Nexus.GuidedSetupUI.Hide() end
+ f=Nexus.QuickStart.ShowChecklist()
+ if f.reference then f.reference:Click() end
+ C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() and V.Plain(NexusHelpWindow.page:GetText())=='Page 1 / 7'
+  and f:IsShown() and not (_G.NexusGuidedSetup and NexusGuidedSetup:IsShown()),
+  'K6: Reference opens Getting started of the manual above the checklist, not the coach')
+ if NexusHelpWindow then NexusHelpWindow:Hide() end
+ -- While an Auto warning waits for its answer the coach refuses: the reason
+ -- is shown in the checklist, which stays, and Help answers with the
+ -- read-only Reference instead.
+ local ui=Nexus.GuidedSetupUI
+ if ui and f.help then
+  local real=ui.Show
+  ui.Show=function() return false,'warning-open' end
+  local ok=pcall(function() f.help:Click() end)
+  ui.Show=real
+  local notice=V.Plain(f.notice:GetText() or '')
+  C.expect(ok and f:IsShown() and notice:find('Answer the open warning',1,true)~=nil
+   and _G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() and not (_G.NexusGuidedSetup and NexusGuidedSetup:IsShown()),
+   'K6: a refused coach says why in the checklist and Help opens the Reference instead',notice)
+  if NexusHelpWindow then NexusHelpWindow:Hide() end
+ end
  f.close:Click()
  C.guard(not f:IsShown(),'K6: Close hides the checklist')
  C.guard(Writes()==before.writes and #H.actions==before.actions and #H.sent==before.sent and Auto()==before.auto

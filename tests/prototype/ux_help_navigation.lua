@@ -81,7 +81,8 @@ C.scenario('H1 Help during loading: direct pages; setup routes say why they wait
  H=dofile('tests/prototype/harness.lua')
  local T=dofile('tests/prototype/startup_support.lua');T.Load()
  local actions,sent=#H.actions,#H.sent
- SlashCmdList.NEXUS('help')
+ -- The reference pages (/nexus help opens the guided setup coach).
+ SlashCmdList.NEXUS('reference')
  local f=NexusHelpWindow
  C.setup(f and f:IsShown(),'H1: fixture: Help opens before start-up')
  C.setup(type(Nexus.StartupStatus)~='function' or not Nexus.StartupStatus().coreReady,'H1: fixture: start-up is not ready')

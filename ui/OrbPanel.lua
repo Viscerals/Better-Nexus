@@ -699,20 +699,13 @@ local function ensure()
     frame.advancedToggle=button(frame,115,-414,95,"Advanced",function()
         advanced=not advanced;pinTopLeft(frame);UI.Refresh()
     end)
-    frame.appearance=button(frame,220,-414,110,"Appearance",function(self)
-        if Nexus.Theme and Nexus.Theme.ShowMenu then Nexus.Theme.ShowMenu(self)end
-    end)
-    frame.appearance:SetScript("OnEnter",function(self)
-        if not (GameTooltip and Nexus.Theme) then return end
-        GameTooltip:SetOwner(self,"ANCHOR_TOP")
-        GameTooltip:SetText("Appearance: "..Nexus.Theme.Summary(),1,1,1,1,true)
-        GameTooltip:AddLine(Nexus.Theme.HELP,.9,.9,.9,true)
-        GameTooltip:Show()
-    end)
-    frame.appearance:SetScript("OnLeave",function()if GameTooltip then GameTooltip:Hide()end end)
+    -- Appearance is one shared choice (ui/Theme.lua: the same saved style and
+    -- colour for the Nexus panel and these windows). It is chosen from the
+    -- Nexus panel's Options > Appearance (design/current "Nexus Main Panel -
+    -- Compact Redesign"), so this window no longer repeats it.
     -- The optional compact status (UI.ShowMini). It only shows that panel:
     -- this window stays as it is, and nothing is started or changed.
-    frame.miniPanel=button(frame,340,-414,110,"Mini panel",function()UI.ShowMini()end)
+    frame.miniPanel=button(frame,220,-414,110,"Mini panel",function()UI.ShowMini()end)
     frame.miniPanel:SetScript("OnEnter",function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self,"ANCHOR_TOP");GameTooltip:SetText(MINI_OPEN_TIP,1,1,1,1,true);GameTooltip:Show()

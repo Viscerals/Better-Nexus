@@ -131,9 +131,10 @@ for _,p in ipairs(Nexus.Help.Pages) do
 end
 
 -- 8. Reading every page, through every entry point, changes nothing.
--- /nexus help reopens the guide on the page last shown; Start page returns
--- to Getting started (existing behaviour).
-SlashCmdList.NEXUS('help');check(NexusHelpWindow:IsShown(),'/nexus help opens the guide')
+-- /nexus reference reopens the reference pages on the page last shown; Start
+-- page returns to Getting started (existing behaviour). /nexus help opens the
+-- guided setup coach instead (help.lua).
+SlashCmdList.NEXUS('reference');check(NexusHelpWindow:IsShown(),'/nexus reference opens the reference pages')
 local startButton
 for _,x in ipairs(H.frames) do if x:GetParent()==NexusHelpWindow and x.kind=='Button' and x:GetText()=='Start page' then startButton=x end end
 startButton:Click();check(NexusHelpWindow.page:GetText()=='Page 1 / 7','Start page returns to Getting started')

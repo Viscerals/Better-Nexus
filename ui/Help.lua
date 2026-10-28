@@ -1,4 +1,8 @@
--- Reopenable read-only guide. Available before saved data or shared data is ready.
+-- Reopenable read-only reference pages: the optional full manual (/nexus
+-- reference, the coach's Reference topics and the context Help buttons).
+-- /nexus help and /nexus tutorial open the guided setup coach instead
+-- (design/current "Nexus Setup Alternative"). Available before saved data or
+-- shared data is ready.
 Nexus=Nexus or {}
 local H={};Nexus.Help=H
 local frame,index= nil,1
@@ -9,7 +13,7 @@ local returnTo=nil
 -- Keep the complete Help window above the Orb dialog's 30-33 layer band.
 local HELP_LEVEL=40
 local pages={
- {id="start",title="Getting started",text=[[Start here: Setup / Welcome opens Guided setup at the step you left. Click it above to begin; that is the first task, and opening it never turns Auto ON. It is also in the Options menu on the Nexus panel (Options > Manage > Setup / Welcome), and /nexus guide opens it too. You do not need the rest of this page to start.
+ {id="start",title="Getting started",text=[[Start here: Setup / Welcome opens Guided setup at the step you left. Click it above to begin; that is the first task, and opening it never turns Auto ON. It is also in the Options menu on the Nexus panel (Options > Manage > Setup / Welcome), and /nexus guide, /nexus help and /nexus tutorial open it too. You do not need the rest of this page to start.
 
 Guided setup goes one step at a time: choose or create a Wishlist, choose the Saved Build that should follow it, assign it in the Echo Journal chooser, try a SIMULATED recommendation and decide about Auto. A step is done only after Nexus reads the result back; a skipped, pending or unknown step is not done. Opening, navigating or closing the guide assigns, shares, spends and turns on nothing. It saves only its own place for this character and, when you first close the first-launch guide (Close or Escape), that it was seen, and only when saved data can be written; its steps stay as they are.
 
@@ -143,8 +147,9 @@ Loading: the loading panel shows the current step and elapsed time; a percentage
 Turning things off: Hide Nexus Panel (Options > Manage) or /nexus panel only hides the panel. Auto OFF only stops automatic actions. Neither turns Nexus off. To turn Nexus off, only when no action is active or pending: log out to character selection, click AddOns, untick Nexus, and log in again.
 
 Commands:
-/nexus help or /nexus tutorial - this guide, also during loading
+/nexus help or /nexus tutorial - Guided setup at your current step, also during loading
 /nexus guide - Guided setup, one step at a time; opening it changes nothing
+/nexus reference - these reference pages, also during loading
 /nexus report - support report
 /nexus editor - edit Wishlists
 /nexus orbs - open Orb mode without spending

@@ -2,10 +2,13 @@ local H=dofile('tests/prototype/harness.lua')
 local T=dofile('tests/prototype/startup_support.lua');T.Load()
 local checks=0;local function check(v,m)assert(v,m);checks=checks+1 end
 local actions,sent=#H.actions,#H.sent
-SlashCmdList.NEXUS('help')
+-- The reference pages are the optional manual: /nexus reference opens them
+-- (design/current "Nexus Setup Alternative"); /nexus help opens the coach.
+SlashCmdList.NEXUS('reference')
 local f=assert(NexusHelpWindow)
-check(f:IsShown(),'help opens before addon initialization')
-check(type(Nexus.StartupStatus)~='function' or not Nexus.StartupStatus().coreReady,'opening help cannot force readiness')
+check(f:IsShown(),'reference opens before addon initialization')
+check(not (_G.NexusGuidedSetup and NexusGuidedSetup:IsShown()),'reference does not open the guided setup coach')
+check(type(Nexus.StartupStatus)~='function' or not Nexus.StartupStatus().coreReady,'opening the reference cannot force readiness')
 check(f:GetWidth()==660 and f:GetHeight()==540,'bounded help panel')
 check(f:GetFrameStrata()=='DIALOG','normal parented dialog')
 check(f.body:GetText():find('Wishlist is a desired plan',1,true),'explain desired versus owned')
@@ -118,26 +121,45 @@ Open('start')
 check(_G.NexusGuidedSetup and NexusGuidedSetup:IsShown() and not f:IsShown(),'Getting started opens the Setup guide')
 NexusGuidedSetup:Hide()
 check(#H.actions==actions and #H.sent==sent,'topic cards and their routes act and send nothing')
--- Both original designs: /nexus tutorial keeps opening Help (the full-UI
--- review's Help & onboarding; the guided design's "today opened by /nexus
--- tutorial"), and Setup / Welcome opens the coach. /nexus guide, which is
--- implemented, opens the coach. Both answer during loading; neither acts.
+-- design/current "Nexus Setup Alternative" (governing): Help and Setup open
+-- the coach at the step you were on; the long manual is the optional
+-- Reference, reached by /nexus reference (the design's alias for the changed
+-- habit). So /nexus help, /nexus tutorial and /nexus guide open the coach,
+-- never the dense pages, and /nexus reference opens those pages. Each
+-- answers during loading; none acts or sends. The help reply announces where
+-- the manual moved.
+-- What one command says: its chat lines (Main's Print) and printed lines
+-- (Help's refusals).
+local function Heard(fn)
+ local heard,real,chat={},print,#H.chat
+ print=function(...) heard[#heard+1]=tostring((...));real(...) end
+ local ok,err=pcall(fn);print=real;assert(ok,err)
+ for i=chat+1,#H.chat do heard[#heard+1]=H.chat[i] end
+ return table.concat(heard,' / ')
+end
+for _,command in ipairs({'help','tutorial','guide'})do
+ f:Hide();if _G.NexusGuidedSetup then NexusGuidedSetup:Hide() end
+ local said=Heard(function() SlashCmdList.NEXUS(command) end)
+ local coach=_G.NexusGuidedSetup
+ check(coach and coach:IsShown(),command..' opens the guided setup coach during loading')
+ check(not f:IsShown(),command..' does not open the dense reference pages')
+ check(said:find('/nexus reference',1,true)~=nil,command..' names /nexus reference for the full manual: '..said)
+ check(#H.actions==actions and #H.sent==sent,command..' opens the coach without a game action or traffic')
+end
+NexusGuidedSetup:Hide()
+SlashCmdList.NEXUS('reference');check(f:IsShown() and not NexusGuidedSetup:IsShown(),'reference reopens the reference pages after the coach')
+-- When the coach cannot open (here: its window is not loaded), help still
+-- answers with the read-only reference pages and says why.
 f:Hide()
-SlashCmdList.NEXUS('tutorial')
-check(f:IsShown(),'tutorial opens the reference Help during loading')
-check(not (_G.NexusGuidedSetup and NexusGuidedSetup:IsShown()),'tutorial does not open the guided setup coach')
-check(#H.actions==actions and #H.sent==sent,'tutorial opens Help without a game action or traffic')
-f:Hide()
-SlashCmdList.NEXUS('guide')
-local coach=_G.NexusGuidedSetup
-check(coach and coach:IsShown(),'guide opens the guided setup coach')
-check(not f:IsShown(),'guide does not open the dense reference Help')
-check(#H.actions==actions and #H.sent==sent,'guide opens the coach without a game action or traffic')
-coach:Hide()
-SlashCmdList.NEXUS('help');check(f:IsShown(),'help reopens the reference pages after the coach')
+local realUI=Nexus.GuidedSetupUI;Nexus.GuidedSetupUI=nil
+local said=Heard(function() SlashCmdList.NEXUS('help') end)
+Nexus.GuidedSetupUI=realUI
+check(f:IsShown() and said:find('Guided setup is not available',1,true)~=nil,'help without the coach opens the reference pages and says why: '..said)
+check(#H.actions==actions and #H.sent==sent,'the help fallback acts and sends nothing')
 local commands=Nexus.Help.Pages[6].text
-check(commands:find('/nexus help or /nexus tutorial - this guide',1,true) and commands:find('/nexus guide - Guided setup',1,true)
- and not commands:find('/nexus guide or /nexus tutorial',1,true),'the command list says tutorial opens Help and guide opens the coach')
+check(commands:find('/nexus help or /nexus tutorial - Guided setup at your current step',1,true)
+ and commands:find('/nexus guide - Guided setup',1,true) and commands:find('/nexus reference - these reference pages',1,true)
+ and not commands:find('- this guide',1,true),'the command list says help, tutorial and guide open the coach and reference opens these pages')
 b('Start page'):Click();check(f.title:GetText():find('Getting started',1,true),'home button')
 Nexus.Help.Show('troubleshooting');local text=f.body:GetText()
 check(text:find('Select this page',1,true) and text:find('copy pages in order',1,true),'copy pagination explained')

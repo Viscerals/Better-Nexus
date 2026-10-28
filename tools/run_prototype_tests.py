@@ -360,6 +360,8 @@ NAMES += ['guided_first_entry']
 NAMES += ['guided_setup_resume']
 # Issue #163 UI review prototype: shared status vocabulary and grouped navigation with existing labels.
 NAMES += ['ui_review_navigation']
+# Setup Alternative (Codex review4): the setup window's and checklist's Help open the guarded coach, the manual is a separately named Reference; warning-open refusal falls back to Reference; 420 px / 125% and declared text-model geometry (EXPECT fails at the review3 cut by design; native NOT_RUN).
+NAMES += ['setup_help_entry_points']
 NAMES += ['full_ui_workspaces']
 # Issue #163: dedicated Settings window delegates to guarded owners; navigation reads only.
 NAMES += ['full_ui_settings']

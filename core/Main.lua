@@ -1196,11 +1196,30 @@ function Nexus.RollingStatusLines()
     return lines
 end
 
-local function CommandHelp()
+-- /nexus reference (and any unknown command): the full reference pages, the
+-- optional manual, with the command summary. Read-only, also during loading.
+local function CommandReference()
     if Nexus.Help then Nexus.Help.Show() end
-    Print("Nexus help: /nexus help | editor | panel | status | loading | orbs | policy | trace")
+    Print("Nexus reference: /nexus help | guide | reference | editor | panel | status | loading | orbs | policy | trace")
     Print("Rolling permissions: /nexus reroll on|off, /nexus freeze on|off. Automation is a separate switch.")
     Print("Rolling strategy: /nexus policy adaptive|released. Local roll record: /nexus trace.")
+end
+
+-- /nexus help and /nexus tutorial (design/current "Nexus Setup Alternative":
+-- Help and Setup open the coach at the step you were on): Guided setup
+-- through Help's own route (Help.OpenGuide), also during loading. Opening it
+-- changes nothing. The reply says where the full manual moved, as the design
+-- asks for this changed habit. When the coach does not open (an Auto warning
+-- waits for its answer, or it is not loaded), Help.OpenGuide has printed why
+-- and the read-only reference pages open instead, so Help always answers.
+local function CommandHelp()
+    local help = Nexus.Help
+    local opened = help and type(help.OpenGuide) == "function" and help.OpenGuide() == true
+    if opened then
+        Print("Help opens Guided setup at your current step. The full manual: /nexus reference.")
+        return
+    end
+    CommandReference()
 end
 
 EnsureMainCommands = function()
@@ -1313,7 +1332,7 @@ EnsureMainCommands = function()
                 end
                 for _,line in ipairs(Nexus.RollingStatusLines()) do Print(line) end
                 if value==nil then
-                    Print("adaptive = experimental strategy (default). released = the earlier strategy. See /nexus help.")
+                    Print("adaptive = experimental strategy (default). released = the earlier strategy. See /nexus reference.")
                 end
             end,
             -- Automatic local roll record: open it, switch it, or clear it.
@@ -1362,7 +1381,7 @@ EnsureMainCommands = function()
                 else Print(argument.option .. " permission: " .. argument.value .. ". The master Automation switch remains separate." .. sessionOnly) end
             end,
             prototype=function()
-                Print("Experimental Nexus: plan Wishlists, follow or automate Echo choices, refine with approved Orbs, share builds, and compare DPS. /nexus help explains each mode.")
+                Print("Experimental Nexus: plan Wishlists, follow or automate Echo choices, refine with approved Orbs, share builds, and compare DPS. /nexus reference explains each mode.")
                 Print("/nexus reroll on|off | /nexus freeze on|off | /nexus log errors")
                 local wire=Nexus.SyncWire and Nexus.SyncWire.Stats()
                 if wire then Print("Wire: "..tostring(wire.policy).."; CTL="..tostring(wire.available).."; suspended="..tostring(wire.suspended)) end
@@ -1439,16 +1458,17 @@ EnsureMainCommands = function()
                 CommandAnchor(settings, argument)
             end,
             help=function() CommandHelp() end,
+            reference=function() CommandReference() end,
             -- /nexus guide: the guided setup coach through Help's own route
             -- (Help.OpenGuide), which refuses in chat while an Auto warning
-            -- waits. /nexus tutorial and /nexus help open Help's reference
-            -- pages (core/MainCommands.lua dispatches tutorial to help).
+            -- waits. /nexus help and /nexus tutorial open the same coach
+            -- (CommandHelp); /nexus reference opens the reference pages.
             guide=function()
                 local help = Nexus.Help
                 local opened = help and type(help.OpenGuide) == "function"
                     and help.OpenGuide() == true
-                Print(opened and "Guided setup opened. Reference pages: /nexus help."
-                    or "Reference pages stay available: /nexus help.")
+                Print(opened and "Guided setup opened. Reference pages: /nexus reference."
+                    or "Reference pages stay available: /nexus reference.")
             end,
             update=function()
                 local status = Nexus.Updates and Nexus.Updates.Status and Nexus.Updates.Status()

@@ -1,8 +1,12 @@
 -- Play panel summary after the Claude Design full UI ("Main panel (Play)"):
 -- below the offer, a compact plan progress (the run's count, a bar, four
--- counts and Details for the Echo names), Difficulty and Soul Ash on one line,
+-- counts and Details for the Echo names), the original difficulty card (S3),
 -- your DPS record beside the best known record for the same Echoes with what
--- best known means, and one line of Orb run status with Open. Categories
+-- best known means, and one line of Orb run status with Open. After
+-- design/current "Nexus Main Panel - Compact Redesign" also: Details in place
+-- (never Plan), the level-80 collapse and re-expand (S7), the card's hover,
+-- Hardcore route and server-HUD hide (S8), the Shift-drag grip (S9) and the
+-- Play geometry at 0.75-2.0 font scale (S10). Categories
 -- (view_regression_support): EXPECT is behaviour added by this change (it
 -- fails before it by design: no NexusPanel._play, no UI.PanelRunLine); GUARD
 -- already held and must keep holding; SETUP is the fixture. Oracles: the real
@@ -36,8 +40,8 @@ local function Model(o)
   missing=o.missing or {},shed=o.shed or {},toLock=o.toLock or {},unknownTomes=o.unknownTomes or {},
   performance=o.performance}
  if o.owned==nil and not o.unknownOwned then pr.owned=2 end
- return {status='ready',level=40,auto=false,cards=o.cards or {},recommendation=o.recommendation or '',
-  progress=pr,serverStatus=o.serverStatus,bestDps=o.bestDps}
+ return {status='ready',level=o.level or 40,auto=false,cards=o.cards or {},recommendation=o.recommendation or '',
+  progress=pr,serverStatus=o.serverStatus,bestDps=o.bestDps,orbGuidance=o.orbGuidance}
 end
 -- Visible text of every shown FontString of the HUD, in tree order.
 local function ShownText()
@@ -49,7 +53,7 @@ local function ShownText()
 end
 local function Plain(fs) return fs and V.Plain(fs:GetText() or '') or '' end
 local function StatusCard()
- for _,f in ipairs(H.frames) do if f._nexusThemeExempt and f:GetParent()==NexusPanel then return f end end
+ for _,f in ipairs(H.frames) do if f._nexusThemeExempt and f:GetParent()==NexusPanel and f.intensityBar then return f end end
 end
 
 C.setup(Nexus.StartupStatus().coreReady==true,'fixture: local start-up is ready')
@@ -86,18 +90,37 @@ C.scenario('S1 compact plan progress: count, bar and four counts; names only und
  end end
  C.expect(apart,'S1: heading, bar and counts are disjoint boxes')
  C.guard(Effects()==before,'S1: rendering the summary makes no game action, send, saved-data or Auto change')
- -- Details shows the names; it is memory only.
+ -- Details shows the names; it is memory only. design/current "Nexus Main
+ -- Panel - Compact Redesign" wires its web Details to Plan; the addon keeps
+ -- the corrected behaviour: the named lists expand and collapse in place, the
+ -- panel grows and shrinks with them, the counts stay, and Plan never opens.
  local clicked=Effects()
+ local closedHeight=NexusPanel:GetHeight()
+ -- Plan is the Wishlist Editor workspace (FullUIWorkspaces.ShowPlan).
+ local function PlanShown()
+  local editor=_G.NexusEditorFrame
+  return editor~=nil and editor:IsShown()
+ end
+ C.setup(not PlanShown(),'S1: fixture: Plan is not open before Details')
  p.details:Click()
  C.setup(P.Render(m)==true,'S1: fixture: the same model rendered again after Details')
  text=ShownText()
  C.expect(P._playDetails==true and text:find('Hollow Bell',1,true)~=nil and text:find('Gravecall Chorus',1,true)~=nil
   and Plain(p.details)=='Hide details','S1: Details shows the names behind the counts',text)
  C.expect(NexusPanel._responsiveLayout.boxes.needed~=nil,'S1: the name columns are laid out under Details')
+ local openHeight=NexusPanel:GetHeight()
+ C.expect(openHeight>closedHeight and openHeight==NexusPanel._responsiveLayout.height,
+  'S1: the panel grows to hold the named lists',closedHeight..' -> '..openHeight)
+ C.expect(p.needed:IsShown() and p.tomes:IsShown() and p.extra:IsShown() and p.locked:IsShown()
+  and Plain(p.needed)=='Still needed  4 copies','S1: the four counts stay visible with Details open',Plain(p.needed))
+ C.expect(not PlanShown(),'S1: Details never navigates to Plan')
  C.guard(Effects()==clicked,'S1: Details changes no game action, send, saved data or Auto',Effects())
  p.details:Click()
  P.Render(m)
  C.expect(P._playDetails==false and not ShownText():find('Hollow Bell',1,true),'S1: Hide details hides them again')
+ C.expect(NexusPanel:GetHeight()==closedHeight and p.needed:IsShown(),
+  'S1: Hide details gives the height back and keeps the counts',NexusPanel:GetHeight())
+ C.expect(not PlanShown(),'S1: Hide details never navigates to Plan')
 end)
 
 C.scenario('S2 an unknown run count is "?", never 0, and fills no bar',function()
@@ -109,15 +132,18 @@ C.scenario('S2 an unknown run count is "?", never 0, and fills no bar',function(
  C.expect(not ShownText():find('0 copies',1,true),'S2: nothing says 0 copies',ShownText())
 end)
 
-C.scenario('S3 Difficulty and Soul Ash on one line in Play; the card stays in the completed view',function()
+-- design/current "Nexus Main Panel - Compact Redesign" reverses the earlier
+-- flattened row: Play shows the original b0870929 difficulty card again.
+C.scenario('S3 the original difficulty card in Play, not a flattened row; the card stays in the completed view',function()
  local ss={tier='Heroic +2',ash='1,240',gain='20',intensity=250,intensityMax=500}
  P.Render(Model({serverStatus=ss}))
  local p,card=NexusPanel._play,StatusCard()
  if not C.setup(type(p)=='table' and card~=nil,'S3: fixture: the summary and the protected card exist') then return end
- C.expect(p.server:IsShown() and Plain(p.server)=='Difficulty  Heroic +2   Soul Ash  1,240   Multiplier  20   Intensity  250 / 500',
-  'S3: one line names difficulty, Soul Ash, multiplier and intensity',Plain(p.server))
- C.expect(not card:IsShown(),'S3: the card is not drawn over the Play panel')
- C.expect(p.serverHit:IsShown() and p.serverHit:GetScript('OnClick')~=nil,'S3: the line keeps the card hover and click')
+ local box=NexusPanel._responsiveLayout.boxes.status
+ C.expect(card:IsShown() and box~=nil and card:GetHeight()==box.h and box.h>=56,
+  'S3: the card is shown in the Play panel at its 56 px active height',tostring(card:GetHeight()))
+ C.expect(NexusPanel._responsiveLayout.boxes.serverLine==nil and not p.server:IsShown() and not p.serverHit:IsShown(),
+  'S3: no flattened Difficulty / Soul Ash row')
  P.Render(Model({serverStatus=ss,owned=6}))
  C.guard(card:IsShown(),'S3: a completed build keeps the Difficulty / Soul Ash card')
  C.expect(not p.server:IsShown() and not p.needed:IsShown(),'S3: the completed view shows no Play summary rows')
@@ -182,6 +208,13 @@ C.scenario('S5 one line of Orb run status from the Orb window read; Open opens a
  runtime.CompactStatus=compact
  p.orbOpen:Click()
  C.guard(NexusOrbPanel~=nil and NexusOrbPanel:IsShown(),'S5: Open shows the Orb window')
+ -- Appearance is one shared Theme choice, reached from the panel's Options
+ -- directly; the Orb window no longer repeats it (design/current).
+ local repeated
+ for _,c in ipairs(NexusOrbPanel and NexusOrbPanel.children or {}) do
+  if c.kind=='Button' and V.Plain(c:GetText() or ''):find('Appearance',1,true) then repeated=c:GetText() end
+ end
+ C.expect(repeated==nil,'S5: the Orb window has no Appearance button of its own',repeated)
  C.guard(#H.actions==actions and #H.sent==sent and Nexus.RecomputeStats().autoEnabled~=true,
   'S5: showing the line and Open spend and send nothing and leave Auto OFF','actions='..#H.actions..' sent='..#H.sent)
  P.Render(Model())
@@ -216,6 +249,146 @@ C.scenario('S6 the header X closes the panel as Hide does; closing is not pausin
  C.expect(NexusPanel:IsShown() and NexusDB.panelHidden==nil and P.VisibilityFacts().wanted==true,
   'S6: Show brings the panel back and clears the saved hide',tostring(NexusDB.panelHidden))
  C.guard(Effects()==before,'S6: after Show every saved field, action, send and Auto is as before X',Effects())
+end)
+
+-- design/current "Nexus Main Panel - Compact Redesign", level 80 (R1-R3): the
+-- runtime's finished guidance with no offer collapses the roll block to the
+-- guidance and its inline Open Orbs...; a new offer gives the full block back;
+-- the offer going again collapses it at once (Auto OFF: no held card rows).
+-- The first render at level 80 is already collapsed (no 104 px flash). Layout
+-- only: Auto, saved data and the guidance words are unchanged throughout.
+C.scenario('S7 level 80: finished guidance with no offer collapses; a new offer re-expands; it collapses again',function()
+ local guide={state='finished',text='Normal rolls finished. Review Orbs for remaining rolled targets.',openOrbs=true}
+ local before=Effects()
+ local function Laid() return NexusPanel._responsiveLayout or {} end
+ local function Roll() return Laid().boxes and Laid().boxes.roll or nil end
+ C.setup(P.Render(Model({level=80,orbGuidance=guide}))==true,'S7: fixture: a level-80 render with finished guidance')
+ local roll=Roll()
+ C.expect(Laid().noOffer==true and roll~=nil and roll.h<104,
+  'S7: the first level-80 render is already collapsed: no 104 px offer minimum',roll and roll.h)
+ C.expect(NexusPanel._orbsBtn~=nil and NexusPanel._orbsBtn:IsShown(),'S7: Open Orbs... stays, inline')
+ C.expect(not (NexusPanel._orbMiniBtn and NexusPanel._orbMiniBtn:IsShown()),'S7: no separate Orb button row')
+ C.expect(V.Plain(NexusPanel._rollRec:GetText() or '')==guide.text,'S7: the guidance is the runtime\'s own words',
+  NexusPanel._rollRec:GetText())
+ local collapsedHeight=NexusPanel:GetHeight()
+ P.Render(Model({level=80,orbGuidance=guide,cards={{text='Frostwake Sigil (Rare)'}},recommendation='Take Frostwake Sigil.'}))
+ roll=Roll()
+ C.expect(not Laid().noOffer and roll~=nil and roll.h>=104 and NexusPanel:GetHeight()>collapsedHeight,
+  'S7: a new offer re-expands the full offer block',roll and roll.h)
+ P.Render(Model({level=80,orbGuidance=guide}))
+ C.expect(Laid().noOffer==true and NexusPanel:GetHeight()==collapsedHeight,
+  'S7: with the offer gone the block collapses again to the same height',NexusPanel:GetHeight())
+ -- Another guidance (not "finished") keeps the full block.
+ P.Render(Model({level=80,orbGuidance={state='waiting',text='An Echo choice is open.'}}))
+ C.expect(not Laid().noOffer,'S7: other guidance keeps the full block')
+ C.guard(Effects()==before,'S7: level-80 transitions make no game action, send, saved-data or Auto change',Effects())
+end)
+
+-- The original card's own interaction (b0870929 worldStatusHit): its hover
+-- names tier, Soul Ash, multiplier and Intensity; a click calls the existing
+-- ServerStatus.OpenHardcoreMenu route (stubbed here: the native toggle is NOT
+-- RUN). With the server HUD (no mirrored status in the model) the card and
+-- its layout box go; with the Nexus HUD they come back.
+C.scenario('S8 the difficulty card: hover facts, Hardcore click route, and no card while the server HUD is the display',function()
+ local ss={tier='Heroic +2',ash='1,240',gain='+45%',intensity=250,intensityMax=500,intensityLevel=2}
+ P.Render(Model({serverStatus=ss}))
+ local card=StatusCard()
+ if not C.setup(card~=nil and card:IsShown(),'S8: fixture: the card is shown') then return end
+ local hit
+ for _,c in ipairs(card.children or {}) do if c.kind=='Button' and c:GetScript('OnClick') then hit=c end end
+ if not C.setup(hit~=nil,'S8: fixture: the card\'s full-card button') then return end
+ local tip=table.concat(V.TooltipLines(hit:GetScript('OnEnter'),hit),' | ')
+ C.expect(tip:find('Heroic +2',1,true) and tip:find('Soul Ash: 1240',1,true) and tip:find('Multiplier: +45%',1,true)
+  and tip:find('Intensity: 250 / 500',1,true) and tip:find('Hardcore',1,true),'S8: the hover names tier, Soul Ash, multiplier, Intensity and the click',tip)
+ local status=Nexus.ServerStatus
+ local real,calls=status.OpenHardcoreMenu,0
+ status.OpenHardcoreMenu=function() calls=calls+1;return true end
+ local before=Effects()
+ hit:Click()
+ status.OpenHardcoreMenu=real
+ C.expect(calls==1,'S8: a click calls the existing Hardcore menu route once',calls)
+ C.guard(Effects()==before,'S8: the click itself changes no saved data, Auto, action or send',Effects())
+ local withCard=NexusPanel:GetHeight()
+ P.Render(Model({serverStatus=nil}))
+ C.expect(not card:IsShown() and NexusPanel._responsiveLayout.boxes.status==nil and NexusPanel:GetHeight()<withCard,
+  'S8: with the server HUD the panel shows no card and gives its height back',NexusPanel:GetHeight())
+ P.Render(Model({serverStatus=ss}))
+ C.expect(card:IsShown() and NexusPanel:GetHeight()==withCard,'S8: with the Nexus HUD again the card is back',NexusPanel:GetHeight())
+end)
+
+-- The visible Shift-drag grip (design/current, D1-D4): a plain drag or click
+-- does nothing; a Shift-drag moves the panel through its own drag handlers and
+-- saves panelX / panelY as before. Native modifier timing is NOT RUN.
+C.scenario('S9 the Shift-drag grip: visible, apart from the title and controls; only Shift-drag moves',function()
+ P.Render(Model())
+ local grip=NexusPanel._dragGrip
+ if not C.setup(grip~=nil and grip:IsShown(),'S9: fixture: the grip is shown') then return end
+ local g=G.Rect(grip,NexusPanel)
+ C.expect(g[3]-g[1]>=22 and g[4]-g[2]>=22,'S9: the grip is at least a 22 px target',G.Text(g))
+ for _,other in ipairs({NexusPanel._contextTitle,NexusPanel._autoBtn,NexusPanel._menuBtn,NexusPanel._closeBtn}) do
+  if other and other:IsShown() then
+   C.expect(G.Apart(g,G.Rect(other,NexusPanel)),'S9: the grip is apart from a header control',G.Text(G.Rect(other,NexusPanel)))
+  end
+ end
+ local tip=table.concat(V.TooltipLines(grip:GetScript('OnEnter'),grip),' ')
+ C.expect(tip:find('Shift-drag to move',1,true)~=nil,'S9: its hover says Shift-drag to move',tip)
+ C.expect(grip:GetScript('OnClick')==nil,'S9: a plain click on the grip has no action')
+ local moves,stops=0,0
+ local realStop=NexusPanel:GetScript('OnDragStop')
+ NexusPanel.StartMoving=function() moves=moves+1 end
+ NexusPanel:SetScript('OnDragStop',function(self) stops=stops+1;return realStop(self) end)
+ local shift=IsShiftKeyDown
+ IsShiftKeyDown=function() return false end
+ grip:GetScript('OnDragStart')(grip);grip:GetScript('OnDragStop')(grip)
+ C.expect(moves==0 and stops==0,'S9: a drag without Shift does not move the panel',moves..'/'..stops)
+ IsShiftKeyDown=function() return true end
+ grip:GetScript('OnDragStart')(grip);grip:GetScript('OnDragStop')(grip)
+ IsShiftKeyDown=shift
+ NexusPanel.StartMoving=nil
+ NexusPanel:SetScript('OnDragStop',realStop)
+ C.expect(moves==1 and stops==1,'S9: a Shift-drag moves the panel through its own handlers',moves..'/'..stops)
+ local saved=P.SavedLayoutRoot()
+ C.expect(tonumber(saved.panelX)~=nil and tonumber(saved.panelY)~=nil,'S9: the position is saved as panelX / panelY')
+end)
+
+-- The Play geometry at every supported font scale (LayoutMetrics clamps
+-- 0.75-2; 1.25 is the 125% text of the design's L1): the 420 px panel's boxes
+-- are disjoint and inside it, the card keeps at least its 56 px, Details adds
+-- the named lists below the counts without moving the counts, and level 80
+-- with no offer collapses the roll box under the 104 px minimum. Pure layout
+-- model; native font measurement is NOT RUN.
+C.scenario('S10 Play layout at 0.75-2.0 font scale: disjoint boxes, the card, Details and the level-80 collapse',function()
+ local LM=Nexus.LayoutMetrics
+ for _,scale in ipairs({0.75,1,1.25,1.5,2}) do
+  local function Laid(extra)
+   local spec={width=420,fontScale=scale,activeRoll=true,statusVisible=true,cardRows=true,toLockCount=1,orbLine=true}
+   for k,v in pairs(extra or {}) do spec[k]=v end
+   return LM.Panel(spec)
+  end
+  for _,o in ipairs({{},{planDetails=true},{cardRows=false,noOffer=true,orbButton=true,guidanceRows=2}}) do
+   local l=Laid(o)
+   local tag='S10 @'..scale..(o.planDetails and ' Details' or o.noOffer and ' level 80' or '')
+   local names,apart,inside={},true,true
+   for name in pairs(l.boxes) do names[#names+1]=name end
+   table.sort(names)
+   for i=1,#names do
+    local a=l.boxes[names[i]]
+    if a.x<0 or a.y<0 or a.x+a.w>420 or a.y+a.h>l.height then inside=false end
+    for j=i+1,#names do if LM.Overlap(a,l.boxes[names[j]]) then apart=false end end
+   end
+   C.expect(apart and inside,tag..': every box is inside the panel and apart from the others',table.concat(names,','))
+   C.expect(l.boxes.status~=nil and l.boxes.status.h>=56 and l.boxes.serverLine==nil,
+    tag..': the original card keeps at least 56 px; no flattened row',l.boxes.status and l.boxes.status.h)
+   if o.noOffer then
+    C.expect(l.noOffer==true and l.boxes.roll.h<104 and l.boxes.planNeeded~=nil,tag..': the roll box collapses below 104 px',l.boxes.roll.h)
+   end
+  end
+  local closed,open=Laid(),Laid({planDetails=true})
+  C.expect(open.height>closed.height and open.boxes.needed~=nil and closed.boxes.needed==nil
+   and open.boxes.planNeeded.y==closed.boxes.planNeeded.y and open.boxes.needed.y>open.boxes.planLocked.y,
+   'S10 @'..scale..': Details adds the lists below the counts and grows the panel; the counts stay put',
+   closed.height..' -> '..open.height)
+ end
 end)
 
 Nexus.DisableOrdinaryAutomation()
