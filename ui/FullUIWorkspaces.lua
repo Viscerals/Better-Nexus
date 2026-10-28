@@ -48,8 +48,9 @@ end
 
 -- The shared header (LayoutMetrics.WorkspaceHeader): each workspace places
 -- its tabs, Help, Reference and title at the same measured anchors from its
--- own top-left (root: the window, or Explore's scrolled content), so the
--- tabs and title stand still when the workspace changes. Labels, handlers
+-- own top-left (root: the window; Explore's header stays on the window
+-- above its scrolled body), so the tabs and title stand still when the
+-- workspace changes and while a body scrolls. Labels, handlers
 -- and loading hooks stay with BindTabs and each window. A button's label
 -- and the title get their template fonts per widget, after any window-wide
 -- font pass; no shared font object is changed.

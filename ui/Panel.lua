@@ -1974,7 +1974,13 @@ local function EnsureFrame()
     worldStatusHit:SetScript("OnEnter", function(self)
         local ss = worldStatusBox._summary or {}
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(ss.tier or ss.mode or "Difficulty", 1, 0.25, 0.25)
+        -- A known Normal (no Hardcore tier) is neutral, as the game's own
+        -- widget shows it; a Hardcore tier and an unknown mode keep the red.
+        if ss.tier == nil and ss.mode == "Normal" then
+            GameTooltip:AddLine("Normal", 0.85, 0.85, 0.85)
+        else
+            GameTooltip:AddLine(ss.tier or ss.mode or "Difficulty", 1, 0.25, 0.25)
+        end
         if ss.ash then GameTooltip:AddLine("Soul Ash: " .. tostring(ss.ash):gsub(",",""), 1, 1, 1) end
         if ss.gain then GameTooltip:AddLine("Soul Ash Multiplier: " .. tostring(ss.gain), 0.2, 1, 0.2) end
         if ss.intensity ~= nil then
@@ -3767,8 +3773,10 @@ function M.CapturePanelTop()
     return {left = left * scale, top = top * scale, details = M._playDetails == true}
 end
 
--- Run by every applied panel layout. Only the first layout that shows the
--- toggled Details state uses the held corner: the panel is anchored by its
+-- Run after every applied render, once its fit to the screen has set the
+-- final scale (ApplyCandidate), so the screen-unit corner converts at that
+-- scale. Only the first layout that shows the toggled Details state uses
+-- the held corner: the panel is anchored by its
 -- top-left there, so the Details row stays put and the section opens (or
 -- closes) below it. If the taller panel would leave the bottom of the screen,
 -- the panel moves up just enough to stay whole (the client clamps it there
@@ -4582,8 +4590,8 @@ local function ApplyPanelLayout(layout, completed)
     end
     PlacePanelBox(bestDpsText, boxes.bestDps)
     M.PlacePlaySummary(layout)
-    -- Show / Hide details keeps the panel's top where it was (M.HoldPanelTop).
-    M.HoldPanelTop(layout)
+    -- Show / Hide details keeps the panel's top where it was: ApplyCandidate
+    -- installs the held corner after the final fit (M.HoldPanelTop).
 end
 
 local function RenderBestDps(model, complete, noBuild, activeRoll, statusVisible)
@@ -5088,7 +5096,12 @@ local function ApplyModel(model, signatures, roll)
         local ashFmt = FmtAsh(ss.ash)
         -- Tooltip keeps full unformatted value
         local ashFull = ss.ash and tostring(ss.ash):gsub(",","") or "—"
-        worldStatusText:SetText("|cffff6b5f" .. difficulty .. "|r")
+        -- Only the scanner's validated distinction is used: a Hardcore tier
+        -- (ServerStatus tier HC1-HC5) keeps the original red; a known Normal
+        -- (mode "Normal", no tier) is neutral, as the game's own widget shows
+        -- it; an unknown mode keeps the card's former red caption.
+        worldStatusText:SetText(((ss.tier == nil and ss.mode == "Normal")
+            and "|cffd9d9d9" or "|cffff6b5f") .. difficulty .. "|r")
         worldStatusAsh:SetText((complete and "|cff8ec9d6Soul Ash  |r" or "|cffb8b8b8Ash |r") .. "|cffffffff" .. ashFmt .. "|r")
         worldStatusGain:SetText(ss.gain and ("|cff35e635" .. ss.gain .. "|r") or "")
         -- The bar is scaled to the game's validated maximum. Without valid
@@ -5196,6 +5209,14 @@ local function ApplyCandidate(model, signatures, roll)
         -- observed Callboard and optional sections. Refit on settled renders
         -- too: a viewport resize need not change the model's layout key.
         Nexus.LayoutMetrics.FitToScreen(frame)
+    end
+    if applied then
+        -- Show / Hide details keeps the panel's top where it was. The held
+        -- corner is in screen units, so it is installed only now, at the
+        -- scale the fit above left: a toggle that crosses the fit threshold
+        -- (an expanded panel scaled down, a collapsed one back at 1) keeps
+        -- the same physical top.
+        M.HoldPanelTop(frame._responsiveLayout)
     end
     return applied
 end

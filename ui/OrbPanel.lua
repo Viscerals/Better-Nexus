@@ -97,6 +97,8 @@ local function inactiveControls()
     if frame.review then frame.review:Hide();frame.review.drawnKey,frame.review.shownKey,frame.review.shownAction=nil,nil,nil end
     if frame.pause then frame.pause:Hide();frame.resume:Hide();frame.start:Show()end
     for _,b in ipairs(frame.mutations)do b:Disable()end
+    -- Start's reason belongs to a run read; without one it is not kept.
+    if frame.startWhy then frame.startWhy:SetText("");frame.startWhy._nexusFullText=nil end
     -- The same measured rows as a full read (no fixed 445 with blank bands).
     frame.advanced:Hide()
     if frame.flowBands then frame.flowBands(false) else frame:SetHeight(RUN_H) end
@@ -737,14 +739,16 @@ local function ensure()
     frame.miniPanel:SetScript("OnLeave",function()if GameTooltip then GameTooltip:Hide()end end)
     frame.closeButton=button(frame,515,-414,85,"Close",function()frame:Hide()end)
     frame.advanced=CreateFrame("Frame",nil,frame);frame.advanced:Hide();frame.advanced:SetSize(590,205);frame.advanced:SetPoint("TOPLEFT",15,-446);frame.advanced:SetFrameLevel(31)
-    -- The rows under Start take the room their text needs, so no fixed blank
-    -- band stays: Start's reason only while there is one (right under the
+    -- Every row from the targets line down takes the room its text needs, so
+    -- no fixed blank band stays: the targets, the locked-targets line only
+    -- while it has words, and the balance (with its draft line) as measured
+    -- (at most their former boxes; a longer text is whole on hover); then the
+    -- Start row; Start's reason only while there is one (right under the
     -- Start row), the approval text at its full 34 units always, the usage
-    -- and status as measured (at most their former boxes; a longer text is
-    -- whole on hover), the notice row only with a notice or its button, then
-    -- the close notice, the button row and Advanced. With every box full this
-    -- is the former 620 x 445 layout. Returns the window height. Only places
-    -- and heights change; no text, control or action does.
+    -- and status as measured, the notice row only with a notice or its
+    -- button, then the close notice, the button row and Advanced. With every
+    -- box full this is the former 620 x 445 layout. Returns the window
+    -- height. Only places and heights change; no text, control or action does.
     frame.flowBands=function(isAdvanced)
         local LM=Nexus.LayoutMetrics
         local function place(region,x,y) region:ClearAllPoints();region:SetPoint("TOPLEFT",frame,"TOPLEFT",x,-y) end
@@ -753,7 +757,20 @@ local function ensure()
             if not (LM and LM.WrapHeight) then fs:SetHeight(high);return high end
             return (LM.WrapHeight(fs,width,low,high))
         end
-        local y=213
+        -- Under the Wishlist row (its text and My Builds end by y 80).
+        local y=82
+        place(frame.targets,20,y)
+        local h=measured(frame.targets,580,12,26)
+        if h>0 then y=y+h+4 end
+        place(frame.permanent,20,y)
+        h=measured(frame.permanent,580,12,28)
+        if h>0 then y=y+h+4 end
+        place(frame.balance,20,y)
+        y=y+measured(frame.balance,580,12,34)+10
+        -- The Start row: the maximum, Max, Start (or Pause and Resume) and Stop.
+        place(frame.limitLabel,20,y+2);place(frame.limit,196,y);place(frame.max,268,y)
+        place(frame.pause,334,y);place(frame.resume,398,y);place(frame.start,334,y);place(frame.stop,470,y)
+        y=y+25
         place(frame.startWhy,20,y)
         local why=measured(frame.startWhy,580,12,12)
         if why>0 then y=y+12+2 end

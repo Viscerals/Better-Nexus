@@ -481,8 +481,21 @@ do
    'Enter a whole-number maximum from 1 to 10,000, or press Max.'}) do
    check(#line*m[2]<=f.balance:GetWidth(),m[1]..': one balance line stays one line: '..line)
   end
-  check(2*m[3]<=f.balance:GetHeight(),m[1]..': the balance and the draft line fit the balance box')
+  -- The balance box is measured now (OrbPanel flowBands, correction 3),
+  -- not a fixed 34: the window's measurement follows this model (each
+  -- line's characters at the box width, m[3] per row) and the box it then
+  -- gives holds the balance and the draft line, up to the former 34.
+  f.balance.GetStringHeight=function(self)
+   local rows,width=0,math.max(1,tonumber(self:GetWidth()) or 1)
+   for line in ((self:GetText() or '')..'\n'):gmatch('(.-)\n') do rows=rows+math.max(1,math.ceil(#line*m[2]/width)) end
+   return rows*m[3]
+  end
+  Nexus.OrbPanel.Refresh()
+  local lines=select(2,(f.balance:GetText() or ''):gsub('\n','\n'))+1
+  check(lines>=2 and lines*m[3]<=f.balance:GetHeight(),m[1]..': the balance and the draft line fit the measured balance box: '..lines..' lines in '..tostring(f.balance:GetHeight()))
+  f.balance.GetStringHeight=nil
  end
+ Nexus.OrbPanel.Refresh()
  check(Y(f.max)==Y(f.start) and f.max:GetHeight()==f.start:GetHeight(),'Max sits on the Start row, same height')
 end
 

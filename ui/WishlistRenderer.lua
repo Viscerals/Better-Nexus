@@ -1772,6 +1772,9 @@ local function EnsureFrame()
     -- (whole on its own hover) where the box would come nearer than 6 units
     -- to the last slot, so the box ends 8 units left of My Builds at every
     -- slot count and font size. _autoLockClear says whether it does.
+    -- The caption's hover always repeats the whole current caption, cut or
+    -- not: whether a cut shows depends on the client's width measurement,
+    -- which is not relied on to decide whether the hover has the text.
     frame._lockedLabelHit = Nexus.LayoutMetrics and Nexus.LayoutMetrics.FullTextTooltip
         and Nexus.LayoutMetrics.FullTextTooltip(lockedLabel, frame) or nil
     frame._fitAutoLock = function(slots)
@@ -1782,13 +1785,15 @@ local function EnsureFrame()
         lw = okL and tonumber(lw) or 60
         local cap = math.floor(right - 22 - 6 - (22 * n - 4) - 8 - 540)
         local caption = lockedLabel:GetText() or ""
+        lockedLabel._nexusFullText = caption ~= "" and caption or nil
         if lw > cap then
             lw = math.max(1, cap)
-            lockedLabel._nexusFullText = caption
         else
             lw = math.ceil(lw)
-            lockedLabel._nexusFullText = nil
         end
+        -- The hover area is offered only while the caption itself is.
+        local hit = frame._lockedLabelHit
+        if hit then if lockedLabel:IsShown() then hit:Show() else hit:Hide() end end
         if type(lockedLabel.SetWordWrap) == "function" then pcall(lockedLabel.SetWordWrap, lockedLabel, false) end
         lockedLabel:SetJustifyH("LEFT")
         lockedLabel:SetWidth(lw)

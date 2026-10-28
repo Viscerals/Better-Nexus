@@ -659,7 +659,8 @@ local STATUS_MAX_ROWS = 20
 -- (FitToScreen's), the window shows all of it. Otherwise the window is that
 -- tall (windowHeight) and the renderer scrolls the laid-out content inside
 -- it (scrollRange), so every control, the whole status and the list/detail
--- can be brought on screen. Nothing is scaled, shortened or hidden. A UI
+-- can be brought on screen. Nothing is scaled, shortened or hidden. Only the
+-- body scrolls: the shared header above scrollTop stays where it is. A UI
 -- size under FitToScreen's plausible minimum is not acted on.
 local COMMUNITY_VIEWPORT_MARGIN = 24
 local COMMUNITY_VIEWPORT_MIN_WIDTH, COMMUNITY_VIEWPORT_MIN_HEIGHT = 640, 480
@@ -756,6 +757,9 @@ function M.Community(spec)
     Add(layout,"title",tb.x,tb.y,tb.w,tb.h)
     Add(layout,"nav",nb.x,nb.y,nb.w,nb.h)
     layout.header = header
+    -- The body below the header (every box from here down) is what scrolls;
+    -- the header stays on the window. scrollTop is where the body begins.
+    layout.scrollTop = header.bottom + gap
     local cursor = header.bottom + gap * 2
     Add(layout,"browseLabel",20,cursor,width-40,small)
     cursor = cursor + small + math.max(3,math.floor(gap/2))

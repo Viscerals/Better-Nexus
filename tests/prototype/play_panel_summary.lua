@@ -6,7 +6,9 @@
 -- design/current "Nexus Main Panel - Compact Redesign" also: Details in place
 -- (never Plan), the level-80 collapse and re-expand (S7), the card's hover,
 -- Hardcore route and server-HUD hide (S8), the Shift-drag grip (S9) and the
--- Play geometry at 0.75-2.0 font scale (S10). Categories
+-- Play geometry at 0.75-2.0 font scale (S10). Correction 3 adds the
+-- difficulty appearance by validated mode (S3b) and the held Details top
+-- across a fit-scale change (S12). Categories
 -- (view_regression_support): EXPECT is behaviour added by this change (it
 -- fails before it by design: no NexusPanel._play, no UI.PanelRunLine); GUARD
 -- already held and must keep holding; SETUP is the fixture. Oracles: the real
@@ -156,6 +158,57 @@ C.scenario('S3 the original difficulty card in Play, not a flattened row; the ca
  P.Render(Model({serverStatus=ss,owned=6}))
  C.guard(card:IsShown(),'S3: a completed build keeps the Difficulty / Soul Ash card')
  C.expect(not p.server:IsShown() and not p.needed:IsShown(),'S3: the completed view shows no Play summary rows')
+end)
+
+-- Correction 3 item 4: the card uses only the scanner's validated
+-- distinction (ServerStatus: a Hardcore tier HC1-HC5, else mode "Normal",
+-- else unknown). A Hardcore tier keeps the original red caption and red
+-- hover heading; a known Normal is neutral, as the game's own widget shows
+-- it; an unknown mode keeps the former red "Difficulty". The raw Soul Ash
+-- and multiplier, the card's height and its theme exemption are the same in
+-- every case, and no intensity scale is invented. Native colours and the
+-- original art comparison are NOT RUN; #126 (the post-reload server tier) is
+-- not addressed by this.
+C.scenario('S3b the difficulty card: Hardcore red, a known Normal neutral, an unknown mode unchanged',function()
+ local before=Effects()
+ local function Heading(hit)
+  local first
+  local saved=rawget(GameTooltip,'AddLine')
+  rawset(GameTooltip,'AddLine',function(_,text,r,g,b) if not first then first={tostring(text),r,g,b} end end)
+  local ok=pcall(hit:GetScript('OnEnter'),hit)
+  rawset(GameTooltip,'AddLine',saved)
+  return ok and first or nil
+ end
+ local cases={
+  {'a Hardcore tier',{tier='HC3',mode='HC3',ash='12,345',gain='+150%'},'|cffff6b5fHC3|r',{1,0.25,0.25}},
+  {'a known Normal',{mode='Normal',ash='12,345',gain='+150%'},'|cffd9d9d9Normal|r',{0.85,0.85,0.85}},
+  {'an unknown mode',{ash='12,345',gain='+150%'},'|cffff6b5fDifficulty|r',{1,0.25,0.25}},
+ }
+ local height
+ for _,case in ipairs(cases) do
+  local tag='S3b '..case[1]
+  P.Render(Model({serverStatus=case[2]}))
+  local card=StatusCard()
+  if C.setup(card~=nil and card:IsShown(),tag..': fixture: the card is shown') then
+   local caption=card.regions[1]
+   C.expect(caption and caption:GetText()==case[3],tag..': the caption keeps the validated appearance',caption and caption:GetText())
+   local hit
+   for _,c in ipairs(card.children or {}) do if c.kind=='Button' and c:GetScript('OnClick') then hit=c end end
+   if C.setup(hit~=nil,tag..': fixture: the card\'s full-card button') then
+    local h=Heading(hit)
+    local want=case[4]
+    C.expect(h and h[1]==V.Plain(case[3]) and h[2]==want[1] and h[3]==want[2] and h[4]==want[3],
+     tag..': the hover heading has the same appearance',h and table.concat({h[1],tostring(h[2]),tostring(h[3]),tostring(h[4])},','))
+    local tip=table.concat(V.TooltipLines(hit:GetScript('OnEnter'),hit),' | ')
+    C.guard(tip:find('Soul Ash: 12345',1,true) and tip:find('Multiplier: +150%',1,true) and not tip:find('Intensity',1,true),
+     tag..': the raw Soul Ash and multiplier are kept; no intensity is invented',tip)
+   end
+   C.guard(card._nexusThemeExempt==true and not card.intensityBar:IsShown(),tag..': the card stays exempt from the theme; no bar without a validated scale')
+   height=height or card:GetHeight()
+   C.guard(card:GetHeight()==height,tag..': the card keeps its height',card:GetHeight())
+  end
+ end
+ C.guard(Effects()==before,'S3b: rendering each mode changed no saved data, Auto, action or send',Effects())
 end)
 
 C.scenario('S4 your record and the best known record for the same Echoes are separate rows',function()
@@ -472,7 +525,13 @@ C.scenario('S11 level 80 block and Auto OFF; Details grows downward from a held 
   if not C.setup(type(p)=='table' and p.details:IsShown(),'S11: fixture: Show details is offered') then return end
   local closedH=NexusPanel:GetHeight()
   local row=G.Rect(p.details,NexusPanel)
+  -- The intended starting corner, set and read back before the hold is
+  -- taken: earlier scenarios leave the panel at their own valid corner,
+  -- which production rightly keeps.
+  NexusPanel:ClearAllPoints();NexusPanel:SetPoint('TOPLEFT',UIParent,'BOTTOMLEFT',900,600)
   Track(900,600,1)
+  local x0,y0=Corner()
+  if not C.setup(x0==900 and y0==600,'S11: fixture: the panel starts with its top-left at 900,600',tostring(x0)..','..tostring(y0)) then return end
   local quiet=Effects()
   p.details:Click()
   local x,y=Corner()
@@ -511,6 +570,88 @@ C.scenario('S11 level 80 block and Auto OFF; Details grows downward from a held 
  NexusPanel:ClearAllPoints();NexusPanel:SetPoint('RIGHT',UIParent,'RIGHT',-40,0)
  UIParent:SetSize(w0,h0)
  C.setup(ok,'S11: fixture: the Details scenario ran',err)
+end)
+
+-- Correction 3 item 2: the held top across a change of fit scale. Here the
+-- panel's effective scale follows its real SetScale (LayoutMetrics.
+-- FitToScreen, run by every applied render) and its corner is read from its
+-- real anchor; nothing holds the scale constant. At font scale 2 the
+-- expanded Play layout is taller than the UI allows and is fitted below
+-- scale 1, while the collapsed one fits at 1 (the review's 1366 x 768 case;
+-- a UI height between the two heights is used if this model's heights do
+-- not straddle 768). Show details must keep the physical top while the scale
+-- drops, and Hide details while it returns to 1: the held corner used to be
+-- installed at the old scale and then moved by the fit (to y 930 or the
+-- clamp). Memory only: no saved field changes. Native scale and clamping are
+-- NOT RUN.
+C.scenario('S12 Details keeps the physical top while the fit scale changes with it',function()
+ local ss={tier='Heroic +2',ash='1,240',gain='20',intensity=250,intensityMax=500}
+ local m=Model({owned=2,missing={'Cinder Lattice x2 (Rare:x2)','Hollow Bell'},shed={'Ashen Tithe'},
+  toLock={'Gravecall Chorus'},serverStatus=ss})
+ local w0,h0=UIParent:GetWidth(),UIParent:GetHeight()
+ local realRefresh=P.Refresh
+ P.Refresh=function() return P.Render(m) end
+ local function Corner()
+  local pt=NexusPanel.points[1]
+  if not (pt and #NexusPanel.points==1 and pt[1]=='TOPLEFT' and pt[2]==UIParent and pt[3]=='BOTTOMLEFT') then return nil end
+  return pt[4],pt[5]
+ end
+ local ok,err=pcall(function()
+  G.UseFont(G.MODELS.double)
+  UIParent:SetSize(1366,768)
+  NexusPanel:SetScale(1)
+  NexusPanel:ClearAllPoints();NexusPanel:SetPoint('TOPLEFT',UIParent,'BOTTOMLEFT',100,700)
+  NexusPanel.GetEffectiveScale=function(self) return self:GetScale() end
+  NexusPanel.GetLeft=function() local x=Corner();return x end
+  NexusPanel.GetTop=function() local _,y=Corner();return y end
+  P._detailsHold=nil
+  P._playDetails=true;P.Render(m)
+  local openH=NexusPanel._responsiveLayout and NexusPanel._responsiveLayout.height
+  P._playDetails=false;P.Render(m)
+  local closedH=NexusPanel._responsiveLayout and NexusPanel._responsiveLayout.height
+  local p=NexusPanel._play
+  if not C.setup(type(p)=='table' and p.details:IsShown() and openH and closedH and openH>closedH+2,
+   'S12: fixture: the expanded Play layout is taller than the collapsed one at font scale 2',tostring(closedH)..' / '..tostring(openH)) then return end
+  local uiH=768
+  if not (closedH+24<=uiH and uiH<openH+24) then uiH=math.max(480,math.floor((closedH+openH)/2)+24) end
+  UIParent:SetSize(1366,uiH)
+  P.Render(m)
+  if not C.setup(closedH+24<=uiH and uiH<openH+24 and math.abs(NexusPanel:GetScale()-1)<0.001,
+   'S12: fixture: the collapsed panel fits at scale 1 and the expanded one needs less',
+   closedH..' / '..openH..' in '..uiH..' at '..tostring(NexusPanel:GetScale())) then return end
+  print('OBSERVED','S12 collapsed='..closedH..' expanded='..openH..' ui=1366x'..uiH)
+  -- A physical top under which both the collapsed and the fitted expanded
+  -- panel lie whole.
+  local top=uiH-12
+  NexusPanel:ClearAllPoints();NexusPanel:SetPoint('TOPLEFT',UIParent,'BOTTOMLEFT',100,top)
+  local quiet=Effects()
+  p.details:Click()
+  local x,y=Corner()
+  local s=NexusPanel:GetScale()
+  C.setup(P._playDetails==true and s<0.999,'S12: fixture: Show details fitted the expanded panel below scale 1',s)
+  C.expect(x~=nil and math.abs(x*s-100)<0.01 and math.abs(y*s-top)<0.01 and P._detailsGrowth
+   and P._detailsGrowth.direction=='down' and math.abs(P._detailsGrowth.top-top)<0.01,
+   'S12: Show details keeps the physical top (and says down) while the fit scale drops',
+   tostring(x and x*s)..','..tostring(y and y*s)..' at '..s)
+  C.expect(y~=nil and (y-openH)*s>=-0.01,'S12: the fitted expanded panel lies whole above the screen bottom',tostring(y and (y-openH)*s))
+  p.details:Click()
+  x,y=Corner();s=NexusPanel:GetScale()
+  C.setup(P._playDetails==false and math.abs(s-1)<0.001,'S12: fixture: Hide details fitted the collapsed panel at scale 1',s)
+  C.expect(x~=nil and math.abs(x*s-100)<0.01 and math.abs(y*s-top)<0.01 and P._detailsGrowth
+   and P._detailsGrowth.direction=='down' and math.abs(P._detailsGrowth.top-top)<0.01,
+   'S12: Hide details keeps the physical top while the fit scale returns to 1, not the old local offset',
+   tostring(x and x*s)..','..tostring(y and y*s)..' at '..s)
+  C.expect(NexusPanel:GetHeight()==closedH,'S12: and gives back the whole section',NexusPanel:GetHeight())
+  C.guard(Effects()==quiet,'S12: Show / Hide details across the fit saved nothing (panelX / panelY included), changed no Auto, action or send',Effects())
+ end)
+ P.Refresh=realRefresh
+ NexusPanel.GetLeft,NexusPanel.GetTop,NexusPanel.GetEffectiveScale=nil,nil,nil
+ P._playDetails=false;P._detailsHold=nil
+ G.UseFont(G.MODELS.default)
+ UIParent:SetSize(w0,h0)
+ NexusPanel:SetScale(1)
+ NexusPanel:ClearAllPoints();NexusPanel:SetPoint('RIGHT',UIParent,'RIGHT',-40,0)
+ C.setup(ok,'S12: fixture: the scale scenario ran',err)
 end)
 
 Nexus.DisableOrdinaryAutomation()

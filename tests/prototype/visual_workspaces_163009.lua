@@ -16,6 +16,12 @@
 --    (game) at six and eight locked slots;
 -- W5 the Orb window says why Start would not start on the line right under
 --    the Start row, clear of the approval text.
+-- Correction 3 adds W5c (the whole Orb run page flows, upper rows included),
+-- a real eligible and genuinely incomplete build for W6 with physical card
+-- reuse, the settled maintenance before W8's whole-saved-root snapshot, W8b
+-- (Explore's fixed header over a scrolled body on a short UI, across
+-- navigation), the Locked caption's real hover in W4 and a required catalog
+-- row in W9.
 -- EXPECT: added by this pass (predicted to fail at 9bf92559: no base, no
 -- primary seam use, "Explore / Leaderboard", a blank pane, no cue, the
 -- catalog in the line, no placeholder, an unbounded label, the reason only in
@@ -29,8 +35,11 @@ local G=dofile('tests/prototype/layout_geometry_support.lua')
 local LF=dofile('tests/prototype/leaderboard_fixture_support.lua')
 local C=V.Checker('visual_workspaces_163009')
 
+-- Each player has a Dummy and a Lich King record on the same build, so its
+-- build is listed under Explore's default "Require both DPS records" filter
+-- (ViewProjections); W2 still ranks the sixteen Dummy records.
 local players={}
-for i=1,16 do players[i]={name='Player'..string.char(64+i),class=i%2==0 and 'MAGE' or 'PRIEST',dps={dummy=50000-i*1000},locked=0} end
+for i=1,16 do players[i]={name='Player'..string.char(64+i),class=i%2==0 and 'MAGE' or 'PRIEST',dps={dummy=50000-i*1000,lk=52000-i*1000},locked=0} end
 local fx=LF.New({players=players})
 local H=F.Boot(fx:Install(F.Database()),function(h) F.OrbService(h) end)
 for _=1,200 do H.Advance(.05,.05) end
@@ -265,12 +274,33 @@ C.scenario('W4 Plan: search placeholder, primary Save, Auto-manage label clear o
     C.expect(not label:IsShown() or (lr[3]<=mr[1]-8+0.5 and lr[1]>=cr[3]),tag..': its label, when shown, lies between the box and My Builds',G.Text(lr))
     local sr=G.Rect(f._nexusLockedSlot(n),f)
     C.expect(cr[1]>=sr[3]+6-0.5,tag..': the box stays at least 6 px right of the last slot',G.Text(sr)..' / '..G.Text(cr))
-    local whole=G.Length(V.Plain(locked:GetText()))*model.char
-    C.expect(whole<=locked:GetWidth()+0.5 or locked._nexusFullText==locked:GetText(),
-     tag..': a cut Locked caption keeps its whole text for its hover',locked:GetWidth())
+    -- The caption's own hover (its real OnEnter), cut or not.
+    local hit=f._lockedLabelHit
+    local lines=hit and V.TooltipLines(hit:GetScript('OnEnter'),hit) or {}
+    C.expect(hit~=nil and hit:IsShown() and lines[1]==locked:GetText(),
+     tag..': hovering the Locked caption shows its whole text',tostring(lines[1])..' / '..locked:GetWidth())
    end
   end
   G.UseFont(G.MODELS.default)
+  -- Correction 3 item 3: the hover does not depend on the client's width
+  -- measurement. A measurement that fails, or one that reports only the
+  -- clipped extent of an already narrowed caption, still leaves the whole
+  -- caption on its hover, and the checkbox stays clear of My Builds.
+  local hit=f._lockedLabelHit
+  if C.setup(hit~=nil,'W4: fixture: the Locked caption\'s hover area') then
+   for _,mode in ipairs({'failing','clipped'}) do
+    locked:SetText('Locked (8/8):')
+    locked:SetWidth(20)
+    if mode=='failing' then locked.GetStringWidth=function() error('no width measurement') end
+    else locked.GetStringWidth=function(self) return math.min(G.Length(V.Plain(self:GetText()))*G.model.char,self:GetWidth()) end end
+    f._fitAutoLock(8)
+    local lines=V.TooltipLines(hit:GetScript('OnEnter'),hit)
+    C.expect(hit:IsShown() and lines[1]=='Locked (8/8):','W4: with a '..mode..' width measurement the Locked caption\'s hover has its whole text',lines[1])
+    local cr,mr=G.Rect(check,f),G.Rect(myBuilds,f)
+    C.guard(cr[3]<=mr[1]-8+0.5 and G.Apart(cr,mr),'W4: with a '..mode..' width measurement the checkbox stays 8 px left of My Builds',G.Text(cr)..' / '..G.Text(mr))
+    locked.GetStringWidth=nil
+   end
+  end
   locked:SetText(caption)
   f._fitAutoLock(check._nexusAnchorSlot or 6)
  end
@@ -357,18 +387,142 @@ C.scenario('W5b Orbs: the rows under Start take the room their text needs; no bl
  C.guard(Quiet()==q and Nexus.OrbRuntime.Status().running~=true,'W5b: the band flow started, spent, sent and toggled nothing',Quiet())
 end)
 
+-- Correction 3 item 6: the whole run page flows, the upper rows included.
+-- Every adjacent pair of visible sections (the Wishlist row, the targets,
+-- the locked-targets line, the balance, the Start row, Start's reason, the
+-- approval, usage, status, the notice row, the close notice and the
+-- buttons) is at most 16 units apart, without overlap, and the window ends
+-- at most 16 below the buttons: as the fixture reads it, with and without
+-- locked targets, with long target text, with a refused Start and while
+-- loading. The runtime read is wrapped for display only (a copy with the
+-- stated progress, note or refusal); the approval text keeps its 34 units
+-- and words and the locked-targets line its consequence. Nothing is
+-- started, spent, sent or toggled. Font model: default; native NOT_RUN.
+C.scenario('W5c Orbs: no blank band over 16 px anywhere on the run page, upper rows included',function()
+ local q=Quiet()
+ local f=Nexus.OrbPanel.Show()
+ if not C.setup(f~=nil and f.flowBands~=nil and f.targets~=nil and f.permanent~=nil and f.balance~=nil and f.assigned~=nil,
+  'W5c: fixture: the Orb window and its rows') then return end
+ local R=Nexus.OrbRuntime
+ local realStatus,realStartup=R.Status,Nexus.StartupStatus
+ local LONG='Target progress note '..string.rep('with a long synthetic reason ',6)
+ local function Sections()
+  local out={}
+  local function add(region,what,h)
+   local r=G.Rect(region,f)
+   out[#out+1]={rect={r[1],r[2],r[3],r[2]+(h or (r[4]-r[2]))},text=what}
+  end
+  add(f.plan,'Wishlist',Content(f.plan));add(f.assigned,'My Builds')
+  for _,entry in ipairs({{f.targets,'targets'},{f.permanent,'locked targets'},{f.balance,'balance'},
+   {f.startWhy,'Start reason'},{f.approval,'approval'},{f.usage,'usage'},{f.status,'status'},
+   {f.notice,'notice'},{f.closeNotice,'close notice'}}) do
+   local h=Content(entry[1])
+   if h>0 then add(entry[1],entry[2],h) end
+  end
+  for _,b in ipairs({{f.limit,'maximum'},{f.max,'Max'},{f.start,'Start'},{f.pause,'Pause'},{f.resume,'Resume'},
+   {f.stop,'Stop'},{f.cont,'Continue'},{f.review,'Review'},{f.help,'buttons'}}) do
+   if b[1]:IsShown() then add(b[1],b[2]) end
+  end
+  return out
+ end
+ local function Check(tag)
+  local s=Sections()
+  table.sort(s,function(a,b) return a.rect[2]<b.rect[2] end)
+  local worst,where,bottom=-math.huge,'',s[1].rect[4]
+  for i=2,#s do
+   local gap=s[i].rect[2]-bottom
+   if gap>worst then worst,where=gap,s[i-1].text..' -> '..s[i].text end
+   bottom=math.max(bottom,s[i].rect[4])
+  end
+  local hr=G.Rect(f.help,f)
+  local tail=f:GetHeight()-hr[4]
+  C.expect(worst<=16 and tail<=16,'W5c '..tag..': no blank band over 16 px from the Wishlist row to the window bottom',
+   string.format('%.0f at %s; %.0f below the buttons',worst,where,tail))
+  local overlaps={}
+  for i=1,#s do for j=i+1,#s do
+   if not G.Apart(s[i].rect,s[j].rect) then overlaps[#overlaps+1]=s[i].text..'/'..s[j].text end
+  end end
+  C.expect(#overlaps==0,'W5c '..tag..': no two sections overlap',table.concat(overlaps,', '))
+  C.guard(f.approval:GetHeight()>=34 and (f.approval:GetText() or ''):find('Start approves this maximum',1,true)~=nil,
+   'W5c '..tag..': the approval text keeps its 34 units and its words',f.approval:GetHeight())
+ end
+ local function With(change)
+  R.Status=function(...)
+   local s=realStatus(...)
+   local c={}
+   for k,v in pairs(s) do c[k]=v end
+   change(c)
+   return c
+  end
+  Nexus.OrbPanel.Refresh()
+ end
+ local ok,err=pcall(function()
+  Nexus.OrbPanel.Refresh()
+  Check('as the fixture reads it')
+  With(function(c) c.progress={rolledMissing=3,permanentMissing=2} end)
+  C.guard(V.Plain(f.permanent:GetText() or ''):find('Orbs cannot change locked Echo slots.',1,true)~=nil,
+   'W5c: with locked targets their line keeps its consequence',f.permanent:GetText())
+  Check('with locked targets')
+  With(function(c) c.progress={rolledMissing=3,permanentMissing=0} end)
+  if C.setup((f.permanent:GetText() or '')=='' and (f.targets:GetText() or '')~='','W5c: fixture: targets shown, no locked-targets line') then
+   local tr,br=G.Rect(f.targets,f),G.Rect(f.balance,f)
+   C.expect(br[2]-(tr[2]+Content(f.targets))<=16,'W5c: without locked targets the balance follows the targets line (no 50-unit band)',
+    string.format('%.0f',br[2]-(tr[2]+Content(f.targets))))
+  end
+  Check('without locked targets')
+  With(function(c)
+   c.progress=nil
+   local a={};for k,v in pairs(c.assignment or {}) do a[k]=v end
+   a.state='ready';a.note=LONG;c.assignment=a
+  end)
+  C.setup(V.Plain(f.targets:GetText() or ''):find('Target progress unavailable',1,true)==1,'W5c: fixture: the long targets text',f.targets:GetText())
+  Check('with long target text')
+  With(function(c) c.canStart=false;c.startReason='Synthetic refusal: the assigned Wishlist is not ready.';c.running=false;c.pending=false end)
+  C.setup(V.Plain(f.startWhy:GetText() or ''):find('^Start: ')~=nil,'W5c: fixture: Start says why it would not start',f.startWhy:GetText())
+  Check('with a refused Start')
+  R.Status=realStatus
+  Nexus.StartupStatus=function() return {coreReady=false} end
+  Nexus.OrbPanel.Refresh()
+  C.setup(V.Plain(f.balance:GetText() or '')=='Orb balance: loading','W5c: fixture: the loading read',f.balance:GetText())
+  Check('while loading')
+ end)
+ R.Status,Nexus.StartupStatus=realStatus,realStartup
+ Nexus.OrbPanel.Refresh()
+ Nexus.OrbPanel.Hide()
+ C.setup(ok,'W5c: fixture: the scenario ran',err)
+ C.guard(Quiet()==q and Nexus.OrbRuntime.Status().running~=true,'W5c: the measured flow started, spent, sent and toggled nothing',Quiet())
+end)
+
 -- Explore's owner line: a long owner on a build still waiting for its
 -- Echoes is cut on the row; the card's own hover must show that final line,
 -- the real waiting status included, and a reused card must show its new
--- build's line. The rows come from the real projection reader with one
--- listed build presented incomplete (its Echoes withheld) and unverified;
--- the renderer, the card pool and the hover are the production ones.
+-- build's line. The rows come from the real projection reader under the
+-- default filters (every fixture build has both DPS records, so it is
+-- listed); the first listed build is presented with a long, unestablished
+-- owner. Its incompleteness is in the build the renderer itself resolves
+-- (CommunityRenderer LoadBuild -> the Community controller's Build): while
+-- "waiting", that read answers the catalog's own record in the shape of a
+-- build whose full loadout has not arrived (no Echoes; loadoutAvailable
+-- false, needsFullBuild true). The renderer, the card pool and the hover
+-- are the production ones; the physical card that showed the waiting line
+-- is checked again after the pool rebinds it.
 C.scenario('W6 Explore: the hover owner line is the row as finally shown (waiting for Echoes), and a reused row refreshes it',function()
  local q=Quiet()
  local VP=Nexus.ViewProjections
  if not C.setup(type(VP)=='table' and type(VP.Builds)=='function' and type(VP.BuildsCurrent)=='function',
   'W6: fixture: the build projection reader') then return end
+ -- The controller instance the renderer resolves builds through, read from
+ -- the public facade's own upvalue (nothing is replaced by this read).
+ local controller
+ for i=1,60 do
+  local name,value=debug.getupvalue(Nexus.CommunityBuilds.IsOwnBuild,i)
+  if name==nil then break end
+  if name=='ControllerInstance' and type(value)=='function' then controller=value() end
+ end
+ if not C.setup(type(controller)=='table' and type(rawget(controller,'Build'))=='function',
+  'W6: fixture: the Community controller the renderer reads each build from') then return end
  local realRequest,realBuilds,realCurrent=rawget(VP,'RequestBuilds'),VP.Builds,VP.BuildsCurrent
+ local realBuild=rawget(controller,'Build')
  local reader=realRequest or realBuilds
  local LONG=string.rep('Longowner',12)
  local target,mode
@@ -385,13 +539,19 @@ C.scenario('W6 Explore: the hover owner line is the row as finally shown (waitin
   if out[1] then
    target=target or out[1].id
    for _,row in ipairs(out) do
-    if row.id==target then
-     row.displayAuthor=LONG;row.publicIdentityVerified=false
-     if mode=='waiting' then row.echoes={} end
-    end
+    if row.id==target then row.displayAuthor=LONG;row.publicIdentityVerified=false end
    end
   end
   return out,summary
+ end
+ controller.Build=function(id,...)
+  local b=realBuild(id,...)
+  if mode~='waiting' or id~=target or type(b)~='table' then return b end
+  local waiting={}
+  for k,v in pairs(b) do waiting[k]=v end
+  waiting.echoes={};waiting.lockedEchoes=nil;waiting.echoCount=0
+  waiting.loadoutAvailable=false;waiting.needsFullBuild=true
+  return waiting
  end
  local ok,err=pcall(function()
   Nexus.CommunityBuilds.Show()
@@ -406,6 +566,10 @@ C.scenario('W6 Explore: the hover owner line is the row as finally shown (waitin
   end
   local card=Bind('complete')
   if not C.setup(card~=nil and target~=nil,'W6: fixture: a listed build is bound to a card',tostring(target)) then return end
+  local resolved=realBuild(target)
+  C.setup(type(resolved)=='table' and type(resolved.echoes)=='table' and #resolved.echoes>0,
+   'W6: fixture: the catalog build the row resolves is complete',resolved and resolved.echoes and #resolved.echoes)
+  local created=Nexus.CommunityBuilds.VirtualStats().created
   local completeLine=card.author:GetText() or ''
   C.setup(not V.Plain(completeLine):find('waiting for Echoes',1,true) and V.Plain(completeLine):find(LONG,1,true)~=nil,
    'W6: fixture: the complete row names its long owner',completeLine)
@@ -429,8 +593,20 @@ C.scenario('W6 Explore: the hover owner line is the row as finally shown (waitin
    C.expect(again._fullAuthor==again.author:GetText() and not after:find('waiting for Echoes',1,true),
     'W6: a re-bound row shows its new line on hover, not the earlier waiting one',after)
   end
+  -- Physical reuse: no card frame was created by the two rebinds, so every
+  -- row shown is a pooled card, and the very card object that showed the
+  -- waiting line now shows (and hovers) its current build's line.
+  C.expect(Nexus.CommunityBuilds.VirtualStats().created==created,'W6: the rebinds reused the pooled cards (no new card frame)',
+   tostring(created)..' -> '..tostring(Nexus.CommunityBuilds.VirtualStats().created))
+  print('OBSERVED','W6 the waiting card '..(waiting==again and 'shows the same build again' or 'was rebound to build '..tostring(waiting.buildId)))
+  local reused=table.concat(V.TooltipLines(waiting:GetScript('OnEnter'),waiting),' | ')
+  C.expect(waiting:IsShown() and waiting._fullAuthor==waiting.author:GetText()
+   and not V.Plain(waiting.author:GetText() or ''):find('waiting for Echoes',1,true) and not reused:find('waiting for Echoes',1,true)
+   and (waiting.buildId==target or not reused:find(LONG,1,true)),
+   'W6: the physical card that showed the waiting line hovers its current line, not the earlier one',reused)
   C.guard(again==nil or again:GetScript('OnClick')~=nil,'W6: the row keeps its own click (select only)')
  end)
+ controller.Build=realBuild
  VP.RequestBuilds,VP.Builds,VP.BuildsCurrent=realRequest,realBuilds,realCurrent
  if Nexus.CommunityBuilds.MarkDataDirty then Nexus.CommunityBuilds.MarkDataDirty() end
  Nexus.CommunityBuilds.Refresh()
@@ -484,59 +660,105 @@ end)
 -- refused or loading destination moves nothing. Real tab clicks
 -- (FullUIWorkspaces.NavigateFrom); window corners are read from their real
 -- anchors (Track). Native pixels and effective scale are NOT_RUN.
+local function Title(f)
+ if f==_G.NexusCommunityBuildsFrame then return f._titleText end
+ if f==_G.NexusLeaderboardFrame then return f._title end
+ -- Plan's title: "Plan / Wishlist Editor", then "Plan / Create Wishlist" or
+ -- "Plan / Edit Wishlist" after a refresh.
+ for _,r in ipairs(f.regions or {}) do if r.kind=='FontString' and V.Plain(r:GetText() or ''):find('^Plan / ') then return r end end
+end
+local function PointsText(f)
+ local out={}
+ for i,p in ipairs(f.points) do
+  local parts={}
+  for j=1,5 do parts[j]=tostring(p[j]) end
+  out[i]=table.concat(parts,',')
+ end
+ return table.concat(out,';')
+end
+local function Header(f)
+ local out,tabs={},f._workspaceTabs or {}
+ for _,key in ipairs({'plan','builds','records'}) do out[key]=tabs[key] and G.Rect(tabs[key],f) end
+ out.help=f._helpNav and G.Rect(f._helpNav,f)
+ out.reference=f._referenceNav and G.Rect(f._referenceNav,f)
+ local t=Title(f);out.title=t and G.Rect(t,f)
+ return out
+end
+local function AtAnchors(f,tag)
+ local hd,box=Header(f),Nexus.LayoutMetrics.WorkspaceHeader(f:GetWidth()).boxes
+ local bad={}
+ for _,key in ipairs({'plan','builds','records','help','title'}) do
+  local r,b=hd[key],box[key]
+  if not (r and math.abs(r[1]-b.x)<0.5 and math.abs(r[2]-b.y)<0.5 and math.abs(r[3]-r[1]-b.w)<0.5 and math.abs(r[4]-r[2]-b.h)<0.5) then
+   bad[#bad+1]=key..(r and G.Text(r) or ' missing')
+  end
+ end
+ local rr=hd.reference
+ if not (rr and math.abs(rr[3]-(f:GetWidth()-40))<0.5 and math.abs(rr[2]-box.reference.y)<0.5) then bad[#bad+1]='reference'..(rr and G.Text(rr) or ' missing') end
+ if hd.title and hd.reference and not (G.Apart(hd.title,hd.reference) and G.Apart(hd.title,hd.help)) then bad[#bad+1]='title overlaps' end
+ C.expect(#bad==0,tag..': the tabs, Help, title and Reference stand at the shared header\'s anchors',table.concat(bad,', '))
+ local t=Title(f)
+ C.expect(Font(t)=='GameFontNormalLarge',tag..': the title has the shared title font',tostring(Font(t)))
+ return hd
+end
+local function Corner(f)
+ local p=f.points[1]
+ if not (p and #f.points==1 and p[1]=='TOPLEFT' and p[2]==UIParent and p[3]=='BOTTOMLEFT') then return nil end
+ return p[4],p[5]
+end
+local function Tab(f,key) return f._workspaceTabs and f._workspaceTabs[key] end
+
+-- Correction 3 item 5 (the W8 saved-state diagnosis). The fixture's own
+-- saved-data maintenance (DataCompaction and LegacyQualificationRepair,
+-- unchanged from the installed base) still has work pending when W8 starts:
+-- three idle synthetic seconds alone pool the bundle's evidence, advance its
+-- transaction generation and complete the repair for the current DPS
+-- revision. A whole-saved-root comparison around navigation means something
+-- only once that work is done. This waits, bounded by the harness clock,
+-- until compaction is not pending; the repair has no pass or follow-up
+-- pending and has completed the current DPS revision, in this session and
+-- in its saved record; and the whole saved root has then stayed
+-- byte-identical for three more synthetic seconds. It asserts that state as
+-- SETUP. Nothing is excluded from the later whole-root comparison.
+local function SettleMaintenance(tag)
+ local DC,LR,RV,S=Nexus.DataCompaction,Nexus.LegacyQualificationRepair,Nexus.Revisions,Nexus.Scheduler
+ local function Facts()
+  local c=DC and DC.Stats and DC.Stats(NexusDB) or {}
+  local r=LR and LR.Stats and LR.Stats() or {}
+  local revision=RV and RV.Get and RV.Get(RV.DPS_CHANGED)
+  local record=type(NexusDB.legacyQualificationRepair)=='table' and NexusDB.legacyQualificationRepair or {}
+  local followUp=S and S.Pending and S.Pending('legacy-qualification-repair.follow-up') or false
+  local done=c.pending~=true and r.pending~=true and r.followUpPending~=true and not followUp
+   and revision~=nil and tonumber(r.completedDpsRevision)==tonumber(revision)
+   and tonumber(record.completedDpsRevision)==tonumber(revision)
+  return done,string.format('compaction pending=%s phase=%s; repair pending=%s follow-up=%s/%s completed=%s saved=%s; DPS revision=%s',
+   tostring(c.pending),tostring(c.phase),tostring(r.pending),tostring(r.followUpPending),tostring(followUp),
+   tostring(r.completedDpsRevision),tostring(record.completedDpsRevision),tostring(revision))
+ end
+ local stable,last,facts=0,nil,''
+ for _=1,1200 do
+  local done
+  done,facts=Facts()
+  if done then
+   local now=F.Serialize(NexusDB)
+   if now==last then stable=stable+1 else stable=0 end
+   last=now
+  else
+   stable,last=0,nil
+  end
+  if stable>=60 then break end
+  H.Advance(.05,.05)
+ end
+ return C.setup(stable>=60,tag..': fixture: saved-data maintenance (compaction, the repair and its current-revision follow-up) settled before the snapshot',facts)
+end
+
 C.scenario('W8 Plan, Explore and Records: one header at fixed anchors; navigation keeps the place',function()
  local q=Quiet()
+ if not SettleMaintenance('W8') then return end
  local saved=F.Serialize(NexusDB)
  local LM,W=Nexus.LayoutMetrics,Nexus.FullUIWorkspaces
  local w0,h0=UIParent:GetWidth(),UIParent:GetHeight()
  UIParent:SetSize(1366,768)
- local function Title(f)
-  if f==_G.NexusCommunityBuildsFrame then return f._titleText end
-  if f==_G.NexusLeaderboardFrame then return f._title end
-  -- Plan's title: "Plan / Wishlist Editor", then "Plan / Create Wishlist" or
-  -- "Plan / Edit Wishlist" after a refresh.
-  for _,r in ipairs(f.regions or {}) do if r.kind=='FontString' and V.Plain(r:GetText() or ''):find('^Plan / ') then return r end end
- end
- local function PointsText(f)
-  local out={}
-  for i,p in ipairs(f.points) do
-   local parts={}
-   for j=1,5 do parts[j]=tostring(p[j]) end
-   out[i]=table.concat(parts,',')
-  end
-  return table.concat(out,';')
- end
- local function Header(f)
-  local out,tabs={},f._workspaceTabs or {}
-  for _,key in ipairs({'plan','builds','records'}) do out[key]=tabs[key] and G.Rect(tabs[key],f) end
-  out.help=f._helpNav and G.Rect(f._helpNav,f)
-  out.reference=f._referenceNav and G.Rect(f._referenceNav,f)
-  local t=Title(f);out.title=t and G.Rect(t,f)
-  return out
- end
- local function AtAnchors(f,tag)
-  local hd,box=Header(f),LM.WorkspaceHeader(f:GetWidth()).boxes
-  local bad={}
-  for _,key in ipairs({'plan','builds','records','help','title'}) do
-   local r,b=hd[key],box[key]
-   if not (r and math.abs(r[1]-b.x)<0.5 and math.abs(r[2]-b.y)<0.5 and math.abs(r[3]-r[1]-b.w)<0.5 and math.abs(r[4]-r[2]-b.h)<0.5) then
-    bad[#bad+1]=key..(r and G.Text(r) or ' missing')
-   end
-  end
-  local rr=hd.reference
-  if not (rr and math.abs(rr[3]-(f:GetWidth()-40))<0.5 and math.abs(rr[2]-box.reference.y)<0.5) then bad[#bad+1]='reference'..(rr and G.Text(rr) or ' missing') end
-  if hd.title and hd.reference and not (G.Apart(hd.title,hd.reference) and G.Apart(hd.title,hd.help)) then bad[#bad+1]='title overlaps' end
-  C.expect(#bad==0,'W8 '..tag..': the tabs, Help, title and Reference stand at the shared header\'s anchors',table.concat(bad,', '))
-  local t=Title(f)
-  C.expect(Font(t)=='GameFontNormalLarge','W8 '..tag..': the title has the shared title font',tostring(Font(t)))
-  return hd
- end
- local function Corner(f)
-  local p=f.points[1]
-  if not (p and #f.points==1 and p[1]=='TOPLEFT' and p[2]==UIParent and p[3]=='BOTTOMLEFT') then return nil end
-  return p[4],p[5]
- end
- local function Tab(f,key) return f._workspaceTabs and f._workspaceTabs[key] end
  local ok,err=pcall(function()
   Nexus.WishlistEditor.Show()
   local plan=NexusEditorFrame
@@ -545,7 +767,7 @@ C.scenario('W8 Plan, Explore and Records: one header at fixed anchors; navigatio
   -- (Plan is 680 high, Explore and Records at most 640).
   plan:ClearAllPoints();plan:SetPoint('TOPLEFT',UIParent,'BOTTOMLEFT',200,760)
   Track(plan,200,760,1)
-  local planHeader=AtAnchors(plan,'Plan')
+  local planHeader=AtAnchors(plan,'W8 Plan')
   -- Plan -> Explore by Plan's own tab.
   Tab(plan,'builds'):Click()
   for _=1,20 do H.Advance(.05,.05) end
@@ -554,7 +776,7 @@ C.scenario('W8 Plan, Explore and Records: one header at fixed anchors; navigatio
   local x,y=Corner(explore)
   C.expect(x==200 and y==760,'W8: Explore opens with its top-left where Plan\'s was',tostring(x)..','..tostring(y))
   Track(explore,0,500,1)
-  local exploreHeader=AtAnchors(explore,'Explore')
+  local exploreHeader=AtAnchors(explore,'W8 Explore')
   local same=true
   for _,key in ipairs({'plan','builds','records','help','title'}) do
    local a,b=planHeader[key],exploreHeader[key]
@@ -569,7 +791,7 @@ C.scenario('W8 Plan, Explore and Records: one header at fixed anchors; navigatio
   x,y=Corner(records)
   C.expect(x==200 and y==760 and records:GetWidth()==(LM.WORKSPACE_WIDTH or 1040),'W8: Records opens at the same top-left, at the common width',tostring(x)..','..tostring(y))
   Track(records,0,500,1)
-  AtAnchors(records,'Records')
+  AtAnchors(records,'W8 Records')
   -- Records -> Plan, at another window scale: the corner is kept in screen
   -- units (0.9 x 200 = 180 and 0.9 x 760 = 684 units of a scale-1 window).
   records.GetEffectiveScale=function() return 0.9 end
@@ -578,7 +800,7 @@ C.scenario('W8 Plan, Explore and Records: one header at fixed anchors; navigatio
   C.expect(plan:IsShown() and x~=nil and math.abs(x-180)<0.01 and math.abs(y-684)<0.01,
    'W8: a different window scale keeps the corner on screen, in screen units',tostring(x)..','..tostring(y))
   records.GetEffectiveScale=function() return 1 end
-  AtAnchors(plan,'Plan again')
+  AtAnchors(plan,'W8 Plan again')
   -- A corner the destination cannot keep whole is kept on screen.
   plan:ClearAllPoints();plan:SetPoint('TOPLEFT',UIParent,'BOTTOMLEFT',1300,760)
   Tab(plan,'records'):Click()
@@ -620,12 +842,12 @@ C.scenario('W8 Plan, Explore and Records: one header at fixed anchors; navigatio
   for _=1,20 do H.Advance(.05,.05) end
   if C.setup(explore:IsShown(),'W8: fixture: Explore at a 960 px UI') then
    C.setup(explore:GetWidth()<1040,'W8: fixture: Explore is narrower there',explore:GetWidth())
-   AtAnchors(explore,'Explore at 960')
+   AtAnchors(explore,'W8 Explore at 960')
    explore:Hide()
   end
   -- Reopening a window directly keeps the same header.
   Nexus.Leaderboard.Show()
-  AtAnchors(records,'Records reopened')
+  AtAnchors(records,'W8 Records reopened')
   records:Hide()
  end)
  for _,name in ipairs({'NexusEditorFrame','NexusCommunityBuildsFrame','NexusLeaderboardFrame'}) do
@@ -636,6 +858,127 @@ C.scenario('W8 Plan, Explore and Records: one header at fixed anchors; navigatio
  C.setup(ok,'W8: fixture: the scenario ran',err)
  C.guard(F.Serialize(NexusDB)==saved,'W8: navigating and placing saved nothing')
  C.guard(Quiet()==q,'W8: navigation acted, sent and toggled nothing',Quiet())
+end)
+
+-- Correction 3 item 1: Explore's header stays fixed while its body scrolls.
+-- On a short UI (1366 x 480) Explore's layout is taller than its window, so
+-- its body scrolls. The real mouse-wheel handler of the body (and the real
+-- bar) move it to a nonzero scroll and to the end of its range; the title,
+-- the tabs, Help and Reference stay where they were, at the shared anchors,
+-- above the body viewport, and the body moves by exactly the scroll. After
+-- scrolling, Explore -> Records -> Explore -> Plan by real tab clicks keeps
+-- the window's top-left and the header's screen place, and a re-entered
+-- Explore scrolls with the same fixed header. Corners are read from real
+-- anchors (Track). Native pixels, clipping and wheel delivery are NOT_RUN.
+C.scenario('W8b Explore on a short screen: the header stays put while the body scrolls, and across navigation',function()
+ local q=Quiet()
+ if not SettleMaintenance('W8b') then return end
+ local saved=F.Serialize(NexusDB)
+ local w0,h0=UIParent:GetWidth(),UIParent:GetHeight()
+ local function Same(a,b)
+  for _,key in ipairs({'plan','builds','records','help','reference','title'}) do
+   local r,s=a[key],b[key]
+   if not (r and s) then return false,key..' missing' end
+   for i=1,4 do if math.abs(r[i]-s[i])>0.5 then return false,key..' '..G.Text(r)..' / '..G.Text(s) end end
+  end
+  return true
+ end
+ local function SamePlace(a,b)
+  for _,key in ipairs({'plan','builds','records','help','title'}) do
+   local r,s=a[key],b[key]
+   if not (r and s and math.abs(r[1]-s[1])<0.5 and math.abs(r[2]-s[2])<0.5) then return false,key end
+  end
+  return true
+ end
+ local ok,err=pcall(function()
+  UIParent:SetSize(1366,480)
+  Nexus.CommunityBuilds.Show()
+  for _=1,20 do H.Advance(.05,.05) end
+  local explore=NexusCommunityBuildsFrame
+  if not C.setup(explore and explore:IsShown(),'W8b: fixture: Explore is open on a 1366 x 480 UI') then return end
+  explore:ClearAllPoints();explore:SetPoint('TOPLEFT',UIParent,'BOTTOMLEFT',150,480)
+  Track(explore,0,500,1)
+  local layout=explore._responsiveLayout
+  local scroll,content,bar=explore._contentScroll,explore._content,explore._contentBar
+  local range=type(layout)=='table' and tonumber(layout.scrollRange) or 0
+  if not C.setup(scroll and content and bar and scroll.scrollChild==content and range>0 and bar:IsShown(),
+   'W8b: fixture: the layout is taller than the window, so the body scrolls',range) then return end
+  C.guard(explore:GetHeight()<=480-24,'W8b: the window stays inside the short UI with its margin',explore:GetHeight())
+  local wheel=scroll:GetScript('OnMouseWheel')
+  if not C.setup(wheel~=nil,'W8b: fixture: the body\'s own mouse-wheel handler') then return end
+  wheel(scroll,1000)
+  local before=AtAnchors(explore,'W8b Explore at scroll 0')
+  local view=G.Rect(scroll,explore)
+  local lowest=0
+  for _,r in pairs(before) do lowest=math.max(lowest,r[4]) end
+  C.expect(lowest<=view[2]+0.5 and view[2]>0 and math.abs(view[4]-explore:GetHeight())<0.5 and view[1]==0,
+   'W8b: the header ends above the body viewport, which fills the window below it',lowest..' / '..G.Text(view))
+  local body0=G.Rect(explore._searchBox,explore)
+  -- Three notches down through the real wheel handler.
+  for _=1,3 do wheel(scroll,-1) end
+  local at=scroll:GetVerticalScroll()
+  if not C.setup(at>0 and at<=range and bar:GetValue()==at,'W8b: fixture: the wheel scrolled the body',at) then return end
+  local same,why=Same(before,Header(explore))
+  C.expect(same,'W8b: at a nonzero scroll the title, tabs, Help and Reference stand where they were',why)
+  AtAnchors(explore,'W8b Explore scrolled '..at)
+  local body1=G.Rect(explore._searchBox,explore)
+  C.guard(math.abs((body0[2]-body1[2])-at)<0.5,'W8b: the body moved by exactly the scroll',(body0[2]-body1[2])..' / '..at)
+  -- To the end of the range through the real bar.
+  bar:SetValue(range)
+  local changed=bar:GetScript('OnValueChanged')
+  if changed then changed(bar,range) end
+  same,why=Same(before,Header(explore))
+  C.expect(scroll:GetVerticalScroll()==range and same,'W8b: at the end of the range the header still stands where it was',why)
+  local list=G.Rect(explore._listClip,explore)
+  C.guard(list[4]<=explore:GetHeight()+0.5,'W8b: at the end of the range the list ends inside the window',G.Text(list))
+  wheel(scroll,-1)
+  -- Out of the scrolled Explore to Records by its tab.
+  Tab(explore,'records'):Click()
+  for _=1,20 do H.Advance(.05,.05) end
+  local records=NexusLeaderboardFrame
+  if not C.setup(records and records:IsShown() and not explore:IsShown(),'W8b: fixture: Records opened from the scrolled Explore\'s tab') then return end
+  local x,y=Corner(records)
+  C.expect(x==150 and y==480,'W8b: Records opens with its top-left where the scrolled Explore\'s was',tostring(x)..','..tostring(y))
+  Track(records,0,500,1)
+  local rh=AtAnchors(records,'W8b Records after the scrolled Explore')
+  same,why=SamePlace(before,rh)
+  C.expect(same,'W8b: scrolled Explore -> Records: the tabs, Help and title stay at the same screen place',why)
+  -- Back into Explore by Records' tab; it scrolls again under the same header.
+  Tab(records,'builds'):Click()
+  for _=1,20 do H.Advance(.05,.05) end
+  if not C.setup(explore:IsShown() and not records:IsShown(),'W8b: fixture: Explore opened again from Records\' tab') then return end
+  x,y=Corner(explore)
+  C.expect(x==150 and y==480,'W8b: Explore opens again at the same top-left',tostring(x)..','..tostring(y))
+  local again=explore._responsiveLayout
+  local now=scroll:GetVerticalScroll()
+  C.guard(type(again)=='table' and now>=0 and now<=(tonumber(again.scrollRange) or 0),'W8b: the re-entered body\'s scroll is inside its range',now)
+  wheel(scroll,1000);wheel(scroll,-1);wheel(scroll,-1)
+  same,why=Same(before,Header(explore))
+  C.expect(scroll:GetVerticalScroll()>0 and same,'W8b: the re-entered Explore scrolls under the same fixed header',why)
+  -- Out to Plan by Explore's tab, still scrolled.
+  Tab(explore,'plan'):Click()
+  for _=1,20 do H.Advance(.05,.05) end
+  local plan=NexusEditorFrame
+  if not C.setup(plan and plan:IsShown() and not explore:IsShown(),'W8b: fixture: Plan opened from the scrolled Explore\'s tab') then return end
+  x,y=Corner(plan)
+  C.expect(x==150 and y==480,'W8b: Plan opens at the scrolled Explore\'s top-left',tostring(x)..','..tostring(y))
+  local ph=AtAnchors(plan,'W8b Plan after the scrolled Explore')
+  same,why=SamePlace(before,ph)
+  C.expect(same,'W8b: scrolled Explore -> Plan: the tabs, Help and title stay at the same screen place',why)
+ end)
+ for _,name in ipairs({'NexusEditorFrame','NexusCommunityBuildsFrame','NexusLeaderboardFrame'}) do
+  local f=_G[name]
+  if f then Untrack(f);f:Hide() end
+ end
+ local explore=NexusCommunityBuildsFrame
+ if explore and explore._contentScroll then
+  local wheel=explore._contentScroll:GetScript('OnMouseWheel')
+  if wheel then wheel(explore._contentScroll,1000) end
+ end
+ UIParent:SetSize(w0,h0)
+ C.setup(ok,'W8b: fixture: the scenario ran',err)
+ C.guard(F.Serialize(NexusDB)==saved,'W8b: scrolling, navigating and placing saved nothing')
+ C.guard(Quiet()==q,'W8b: scrolling and navigation acted, sent and toggled nothing',Quiet())
 end)
 
 -- Plan clarity (item C): the save-result line's hover always repeats the
@@ -706,17 +1049,27 @@ C.scenario('W9 Plan: full status and footer text, legible steppers with unchange
   end
  end
  -- A catalog row's status column (110 units) is repeated in its tooltip.
+ -- The row is one of this Plan window's own catalog rows (the fixture's
+ -- harness Echoes list there with at least their quality as status); the
+ -- scenario requires it rather than passing without it.
+ local function InPlan(r)
+  local p=r
+  for _=1,10 do
+   if p==nil then return false end
+   if p==f then return true end
+   p=p:GetParent()
+  end
+  return false
+ end
  local catalog
  for _,c in ipairs(H.frames) do
-  if c.status and c.data and c:IsShown() and (c.status:GetText() or '')~='' then catalog=c;break end
+  if c.status and c.data and c.icon and c.text and c:IsShown() and InPlan(c) and (c.status:GetText() or '')~='' then catalog=c;break end
  end
- if catalog then
+ if C.setup(catalog~=nil,'W9: fixture: a listed catalog row with its status in Plan') then
   local lines=V.TooltipLines(catalog:GetScript('OnEnter'),catalog)
   local found=false
   for _,l in ipairs(lines) do if l==catalog.status:GetText() then found=true end end
   C.expect(found,'W9: a catalog row\'s tooltip repeats its whole status',catalog.status:GetText())
- else
-  print('OBSERVED','W9 no listed catalog row with a status in this fixture; the row status hover was not reached')
  end
  f:Hide()
  C.guard(F.Serialize(NexusDB)==saved and Quiet()==q,'W9: hovering and fitting saved, acted, sent and toggled nothing',Quiet())
@@ -774,4 +1127,4 @@ C.scenario('W10 the hub tooltips stand outside the panel with their whole text',
 end)
 
 C.guard(#H.actions==0,'no game action anywhere in this test',#H.actions)
-C.finish('(opaque bases and primary seam; Records title/scope/prompt/cue; Explore diagnostics on hover; Plan search/Save/label/checkbox; Orb Start reason and measured bands; Explore owner hover and fonts; shared header and navigation place; Plan clarity; hub tooltip; offline model only, native NOT_RUN)')
+C.finish('(opaque bases and primary seam; Records title/scope/prompt/cue; Explore diagnostics on hover; Plan search/Save/label/checkbox; Orb Start reason and measured bands, upper rows included; Explore owner hover with card reuse and fonts; shared header and navigation place; Explore fixed header over a scrolled body; Plan clarity; hub tooltip; offline model only, native NOT_RUN)')

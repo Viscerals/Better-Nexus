@@ -40,7 +40,10 @@ local function ExpectCaption(H,mode,tier,label)
   end
  end
  check(box~=nil and box:IsShown(),label..': actual difficulty card is shown')
- local expected='|cffff6b5f'..(tier or mode or 'Difficulty')..'|r'
+ -- A Hardcore tier and an unknown mode keep the red caption; a known Normal
+ -- (no tier) is neutral, as the game's own widget shows it (correction 3).
+ local colour=(tier==nil and mode=='Normal') and '|cffd9d9d9' or '|cffff6b5f'
+ local expected=colour..(tier or mode or 'Difficulty')..'|r'
  check(box.regions[1]:GetText()==expected,label..': actual rendered caption')
  check(Nexus.Panel.VisibilityFacts().committed==true,label..': panel committed')
  check(HardmodeFrame==nil,label..': no selected-menu override')

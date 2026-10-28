@@ -1049,15 +1049,19 @@ function Renderer.New(options)
     end
     end
 
-    -- Laid-out widgets live in the window's scrolled content (EnsureFrame), so
-    -- the client clips them to the window and scrolling moves them together.
-    -- At scroll 0 the content's top-left is the window's: the same places.
-    local function PlaceCommunityBox(widget, box)
+    -- The body's laid-out widgets live in the window's scrolled content
+    -- (EnsureFrame), so the client clips them to the body viewport below the
+    -- header and scrolling moves them together. The content begins at the
+    -- layout's scrollTop: at scroll 0 a box stands where the layout puts it
+    -- in the window. The header (onWindow: the title and the navigation)
+    -- stays on the window itself and never scrolls.
+    local function PlaceCommunityBox(widget, box, onWindow)
         if not (widget and box) then return end
-        local content = frame._content or frame
+        local content = (not onWindow and frame._content) or frame
+        local top = content ~= frame and (tonumber(frame._contentTop) or 0) or 0
         if widget:GetParent() ~= content then widget:SetParent(content) end
         widget:ClearAllPoints()
-        widget:SetPoint("TOPLEFT",content,"TOPLEFT",box.x,-box.y)
+        widget:SetPoint("TOPLEFT",content,"TOPLEFT",box.x,-(box.y - top))
         widget:SetSize(box.w,box.h)
     end
 
@@ -1121,20 +1125,26 @@ function Renderer.New(options)
     end
 
     local function ApplyCommunityLayout(layout)
-        -- The window is as tall as the layout allows on screen; the content
-        -- keeps the whole layout and scrolls inside it.
+        -- The window is as tall as the layout allows on screen. The header
+        -- stays at the window's top; below it the body viewport shows the
+        -- content, which keeps the rest of the layout and scrolls inside it
+        -- (the same scroll range: the layout less the window).
         local windowHeight = tonumber(layout.windowHeight) or layout.height
+        local top = math.max(0, math.floor(tonumber(layout.scrollTop) or 0))
         frame:SetSize(layout.width,windowHeight)
+        frame._contentTop = top
         local contentScroll, content = frame._contentScroll, frame._content
         if contentScroll and content then
-            contentScroll:SetSize(layout.width,windowHeight)
-            content:SetSize(layout.width,layout.height)
+            contentScroll:ClearAllPoints()
+            contentScroll:SetPoint("TOPLEFT",frame,"TOPLEFT",0,-top)
+            contentScroll:SetSize(layout.width,math.max(1,windowHeight - top))
+            content:SetSize(layout.width,math.max(1,layout.height - top))
             pcall(function() contentScroll:UpdateScrollChildRect() end)
         end
 
         local boxes = layout.boxes
-        PlaceCommunityBox(frame._titleText,boxes.title)
-        PlaceCommunityBox(frame._navBar,boxes.nav)
+        PlaceCommunityBox(frame._titleText,boxes.title,true)
+        PlaceCommunityBox(frame._navBar,boxes.nav,true)
         PlaceCommunityBox(frame._browseLabel,boxes.browseLabel)
         PlaceCommunityBox(searchBox,boxes.search)
         PlaceCommunityBox(scopeBtn,boxes.scope)
@@ -1158,10 +1168,11 @@ function Renderer.New(options)
             and frame._searchLabel:GetParent() ~= frame._content then
             frame._searchLabel:SetParent(frame._content)
         end
-        -- The shared workspace header (the same anchors as Plan and Records)
-        -- and the control rows' own fonts, after every layout.
+        -- The shared workspace header (the same anchors as Plan and Records,
+        -- from the window's own top-left) and the control rows' own fonts,
+        -- after every layout.
         if Nexus.FullUIWorkspaces and Nexus.FullUIWorkspaces.ApplyHeader then
-            Nexus.FullUIWorkspaces.ApplyHeader(frame, frame._content or frame, {
+            Nexus.FullUIWorkspaces.ApplyHeader(frame, frame, {
                 title=frame._titleText, help=frame._helpNav,
                 reference=frame._referenceNav,
             })
@@ -1170,6 +1181,10 @@ function Renderer.New(options)
         if detailPanel then detailPanel:SetFrameLevel(frame:GetFrameLevel() + 10) end
         local contentBar = frame._contentBar
         if contentBar then
+            -- The bar spans the body viewport, beside the content it moves.
+            contentBar:ClearAllPoints()
+            contentBar:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-4,-top)
+            contentBar:SetPoint("BOTTOMRIGHT",frame,"BOTTOMRIGHT",-4,12)
             local range = math.max(0, tonumber(layout.scrollRange) or 0)
             contentBar:SetMinMaxValues(0,range)
             if range > 0 then contentBar:Show() else contentBar:Hide() end
@@ -3237,12 +3252,14 @@ local function EnsureFrame()
     pcall(function() frame:SetBackdropColor(0.16,0.165,0.175,0.90) end)
 
     -- Scrolled content ----------------------------------------------------
-    -- Every laid-out widget is placed in this content (PlaceCommunityBox).
-    -- It is as tall as the layout; the window is as tall as the visible UI
-    -- allows (LayoutMetrics.Community windowHeight), and when the layout is
-    -- taller the content scrolls: the mouse wheel over the window and the bar
-    -- at its right edge move it (SetContentScroll). The bar is shown only
-    -- while there is something to scroll.
+    -- Every laid-out widget below the header is placed in this content
+    -- (PlaceCommunityBox); the title and navigation stay on the window. The
+    -- viewport starts below the header (ApplyCommunityLayout); the window is
+    -- as tall as the visible UI allows (LayoutMetrics.Community
+    -- windowHeight), and when the layout is taller the content scrolls: the
+    -- mouse wheel over the body and the bar at its right edge move it
+    -- (SetContentScroll). The bar is shown only while there is something to
+    -- scroll.
     local contentScroll = CreateFrame("ScrollFrame",nil,frame)
     contentScroll:SetPoint("TOPLEFT",frame,"TOPLEFT",0,0)
     contentScroll:SetSize(1040,640)
@@ -3891,7 +3908,7 @@ local function EnsureFrame()
         -- give them back their own fonts.
         frame._nexusNormalizeFonts()
         if Nexus.FullUIWorkspaces and Nexus.FullUIWorkspaces.ApplyHeader then
-            Nexus.FullUIWorkspaces.ApplyHeader(frame, frame._content or frame, {
+            Nexus.FullUIWorkspaces.ApplyHeader(frame, frame, {
                 title=frame._titleText, help=frame._helpNav,
                 reference=frame._referenceNav,
             })

@@ -173,11 +173,18 @@ local function Route(f)
  if scroll and content and scroll.scrollChild==content then return scroll,content,f._contentBar end
  return nil,f,nil
 end
--- Everything the window offers: the status, the title and navigation, the
--- browse and action controls with their labels, the list and the detail.
+-- Everything the window's body offers: the status, the browse and action
+-- controls with their labels, the list and the detail. The title and the
+-- navigation are the fixed header above the body (correction 3): they are
+-- checked by Header below, not scrolled to. A window without a scroll route
+-- has no separate header; there they are reached like the body.
+local HEADER={'_titleText','_navBar'}
 local function Reachables(f)
  local out={}
- for _,name in ipairs({'_syncStatusText','_titleText','_navBar','_browseLabel','_searchBox','_scopeBtn','_myBuildsBtn',
+ if not f._contentScroll then
+  for _,name in ipairs(HEADER) do if f[name] then out[#out+1]={name,f[name]} end end
+ end
+ for _,name in ipairs({'_syncStatusText','_browseLabel','_searchBox','_scopeBtn','_myBuildsBtn',
   '_classDropBtn','_qualifiedBox','_sortToggle','_actionLabel'}) do
   if f[name] then out[#out+1]={name,f[name]} end
  end
@@ -272,7 +279,8 @@ local function Check(tag,modeWords,viewport)
  local wr=G.Rect(f,UIParent)
  local minimumBody=math.max(150,math.ceil(133*(layout.scale or 1)))
  local scroll,surface,bar=Route(f)
- local extra=math.max(0,surface:GetHeight()-f:GetHeight())
+ -- What lies beyond the body's viewport (the window itself without a route).
+ local extra=math.max(0,surface:GetHeight()-(scroll and scroll:GetHeight() or f:GetHeight()))
  print('OBSERVED',tag,'rows='..rows,'needs='..rows*m.line,'box='..box.w..'x'..box.h,'measured rows='..printable(measured),
   'shown rows='..printable(visible),'scale='..printable(layout.scale),'line='..printable(layout.statusLine),
   'font='..(current and 'current' or 'stale')..'/'..printable(fontSize),
@@ -321,11 +329,27 @@ local function Check(tag,modeWords,viewport)
  end
  -- Every control, the status and the list/detail can be brought fully on
  -- screen, through the bar and through the wheel.
+ local header={}
+ if scroll then
+  for _,name in ipairs(HEADER) do if f[name] then header[#header+1]={name,f[name],G.Rect(f[name],UIParent)} end end
+ end
  for _,c in ipairs(Reachables(f)) do
   local byBar=ByBar(f,c[2],ui)
   local byWheel=ByWheel(f,c[2],ui)
   C.expect(byBar and byWheel,tag..': '..c[1]..' can be brought fully on screen (scroll bar and mouse wheel)',
    'bar='..tostring(byBar)..' wheel='..tostring(byWheel)..' at '..G.Text(G.Rect(c[2],UIParent)))
+ end
+ -- The fixed header: whole on screen inside the window, above the body
+ -- viewport, and at the same place after all that scrolling (the body is
+ -- left scrolled by the last region brought on screen).
+ for _,h in ipairs(header) do
+  local now=G.Rect(h[2],UIParent)
+  local view=G.Rect(scroll,UIParent)
+  local still=true
+  for i=1,4 do if math.abs(now[i]-h[3][i])>0.5 then still=false end end
+  C.expect(G.Inside(now,ui) and G.Inside(now,wr) and now[4]<=view[2]+0.5 and still,
+   tag..': the header\'s '..h[1]..' stays whole on screen above the body, wherever the body is scrolled',
+   G.Text(h[3])..' -> '..G.Text(now)..' (scroll '..tostring(scroll:GetVerticalScroll())..')')
  end
  ToTop(f)
 end
