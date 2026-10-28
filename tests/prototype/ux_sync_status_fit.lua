@@ -54,6 +54,13 @@
 -- stop there, and a UI or font change keeps the scrolled place inside the new
 -- range. Native pixel fit, clipping, nested scrolling, tooltips and dragging
 -- remain NOT TESTED.
+-- Correction 3: the catalog version is a diagnostic on the status's hover,
+-- not in its line. The former guard that a status holding every row has no
+-- hover text is replaced: the ordinary status names no catalog version, and
+-- its real hover (_syncStatusHit) shows the complete current status, then
+-- the catalog version, owned by that hover area, gone on leave, changing
+-- nothing. The title and navigation are a fixed header above the body's
+-- viewport, so S measures the body's range against that viewport.
 -- Unchanged (GUARD): the pinned count sentence (' bundled + ') and the
 -- policies' Off/Manual words in the status; no game action.
 -- SETUP: the fixture reached its state (a SETUP failure is not red evidence).
@@ -232,6 +239,29 @@ local function ToTop(f)
  local wheel=scroll and scroll:GetScript('OnMouseWheel')
  if wheel then wheel(scroll,1000) end
 end
+-- Hovers the status through its real hover area (_syncStatusHit's OnEnter,
+-- then OnLeave) and answers what the shared tooltip showed. Only the
+-- tooltip's owner and text methods are observed (V.TooltipLines); both are
+-- restored afterwards.
+local function Hover(f)
+ local hit=f._syncStatusHit
+ local enter=hit and hit:GetScript('OnEnter')
+ local leave=hit and hit:GetScript('OnLeave')
+ local out={hit=hit,lines={}}
+ if not (enter and leave) then return out end
+ GameTooltip:Hide()
+ local savedOwner=rawget(GameTooltip,'SetOwner')
+ rawset(GameTooltip,'SetOwner',function(_,owner,anchor) out.owner,out.anchor=owner,anchor end)
+ out.lines,out.ok,out.err=V.TooltipLines(function()
+  enter(hit)
+  out.shown=GameTooltip:IsShown()
+ end)
+ rawset(GameTooltip,'SetOwner',savedOwner)
+ leave(hit)
+ out.hidden=not GameTooltip:IsShown() and hit._nexusTip==nil
+ GameTooltip:Hide()
+ return out
+end
 
 local function Check(tag,modeWords,viewport)
  local f=Frame()
@@ -294,10 +324,28 @@ local function Check(tag,modeWords,viewport)
   box.h..' / '..printable(allocated))
  local holds=rows*m.line<=box.h
  C.expect(holds,tag..': the allocated status region holds every row of its text',rows*m.line..' > '..box.h)
- if holds then
-  C.guard(status._nexusFullText==nil and not (f._statusHit and f._statusHit:IsShown()),
-   tag..': a status that holds every row has no extra hover text')
- end
+ -- Correction 3 (diagnostics on hover): the ordinary status states no
+ -- catalog diagnostics; its real hover shows the complete current status and
+ -- then the catalog version, whether or not the status holds every row.
+ -- Hovering reads only: no saved, status, layout or scroll change, no action.
+ C.expect(not plain:lower():find('catalog version',1,true),tag..': the ordinary status carries no catalog diagnostics',plain)
+ local before={saved=F.Serialize(NexusDB),actions=#H.actions,sent=#H.sent,text=status:GetText(),full=status._nexusFullText,
+  rows=f._nexusStatusRows,key=f._nexusLayoutKey,layout=f._responsiveLayout,offset=scroll and scroll:GetVerticalScroll()}
+ local hover=Hover(f)
+ local tip=V.Plain(table.concat(hover.lines,'\n'))
+ local version=tip:sub(1,#plain)==plain and tip:sub(#plain+1):match('^\nCatalog version: (%S[^\n]*)$') or nil
+ C.expect(hover.hit~=nil and hover.hit:IsShown() and hover.ok==true,tag..': the status has its real hover area, and hovering it raises nothing',
+  hover.hit and tostring(hover.err) or 'no _syncStatusHit')
+ C.expect(version~=nil,tag..': the status hover shows the complete current status, then the catalog version',tip)
+ C.expect(hover.owner==hover.hit and hover.shown==true and hover.hidden==true,
+  tag..': the hover tooltip is owned by the status hover area, shown on enter and hidden on leave',
+  'owner='..tostring(hover.owner==hover.hit)..' anchor='..printable(hover.anchor)..' shown='..printable(hover.shown)..' hidden='..printable(hover.hidden))
+ C.guard(F.Serialize(NexusDB)==before.saved and #H.actions==before.actions and #H.sent==before.sent
+  and status:GetText()==before.text and status._nexusFullText==before.full and f._nexusStatusRows==before.rows
+  and f._nexusLayoutKey==before.key and f._responsiveLayout==before.layout
+  and (scroll==nil or scroll:GetVerticalScroll()==before.offset),
+  tag..': hovering the status saved, acted, sent, re-laid, scrolled and rewrote nothing',
+  'actions='..(#H.actions-before.actions)..' sent='..(#H.sent-before.sent))
  C.expect(status:GetWidth()==box.w and status:GetHeight()==box.h,tag..': the FontString has exactly the allocated size',
   status:GetWidth()..'x'..status:GetHeight())
  -- Inherited: inside the window's laid-out content (the window itself when it
@@ -473,12 +521,16 @@ C.scenario('S the window\'s scroll route while it is open',function()
  local ui={0,0,800,600}
  local scroll,content,bar=Route(f)
  local range=tonumber(f._responsiveLayout and f._responsiveLayout.scrollRange) or 0
+ -- Correction 3: the title and navigation are a fixed header above the
+ -- body's viewport (the ScrollFrame), so the body scrolls over its content
+ -- beyond that viewport, not beyond the whole window.
  print('OBSERVED','S','window='..printable(f:GetWidth())..'x'..printable(f:GetHeight()),
-  'content='..printable(content:GetWidth())..'x'..printable(content:GetHeight()),'range='..printable(range))
- C.expect(scroll~=nil and bar~=nil and bar:IsShown() and range>0 and content:GetHeight()-f:GetHeight()==range
+  'content='..printable(content:GetWidth())..'x'..printable(content:GetHeight()),
+  'body viewport='..(scroll and printable(scroll:GetHeight()) or 'none'),'range='..printable(range))
+ C.expect(scroll~=nil and bar~=nil and bar:IsShown() and range>0 and content:GetHeight()-scroll:GetHeight()==range
   and f:GetHeight()<=600-24,
   'S: at 2.0 in 800x600 the window fits the UI and has a scroll route over the rest of its layout',
-  printable(f:GetHeight())..' / '..printable(range))
+  printable(f:GetHeight())..' / '..(scroll and printable(content:GetHeight()-scroll:GetHeight()) or 'none')..' / '..printable(range))
  local wheel=scroll and scroll:GetScript('OnMouseWheel')
  local changed=bar and bar:GetScript('OnValueChanged')
  if not (scroll and bar and wheel and changed) then
@@ -500,9 +552,11 @@ C.scenario('S the window\'s scroll route while it is open',function()
   'S: a larger UI while scrolled keeps the place inside the new, smaller range',
   printable(scroll:GetVerticalScroll())..' of '..printable(wideRange))
  G.UseFont(G.MODELS.default);Render()
- C.expect(scroll:GetVerticalScroll()==0 and not bar:IsShown() and f:GetHeight()==content:GetHeight(),
+ C.expect(scroll:GetVerticalScroll()==0 and not bar:IsShown() and scroll:GetHeight()==content:GetHeight()
+  and f:GetHeight()<=UIParent:GetHeight()-24,
   'S: back at the default face everything fits again: no scroll and no bar',
-  printable(scroll:GetVerticalScroll())..' / '..printable(f:GetHeight())..' of '..printable(content:GetHeight()))
+  printable(scroll:GetVerticalScroll())..' / body '..printable(content:GetHeight())..' of viewport '..printable(scroll:GetHeight())
+  ..', window '..printable(f:GetHeight()))
  G.UseFont(G.MODELS.double);UIParent:SetSize(800,600);Render()
  local again=tonumber(f._responsiveLayout and f._responsiveLayout.scrollRange) or 0
  bar:SetValue(10000);changed(bar,10000)
