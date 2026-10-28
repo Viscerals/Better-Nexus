@@ -22,7 +22,17 @@ H.Offer();check(H.Count('take')==0,'paused offer remains accessible without auto
 Nexus.OrbPanel.Refresh()
 button('Resume',f):Click();check(H.Count('take')==1,'real Resume selects known target')
 H.Result(410002,2);check(M.Status().state=='COMPLETE','UI-started operation confirms target')
-button('Help',f):Click();check(NexusHelpWindow:IsShown(),'Orb-specific help accessible')
+-- Help is the guided setup coach in this window's place; Reference is the
+-- manual's Orbs page. Neither spends, sends nor acts.
+local acts,sent=#H.actions,#H.sent
+button('Help',f):Click()
+check(NexusGuidedSetup and NexusGuidedSetup:IsShown() and not f:IsShown()
+ and not(NexusHelpWindow and NexusHelpWindow:IsShown()),'Orb Help opens the guided setup coach, not the manual')
+Nexus.GuidedSetupUI.Hide();Nexus.OrbPanel.Show();check(f:IsShown(),'Orb window reopens after the coach')
+button('Reference',f):Click()
+check(NexusHelpWindow and NexusHelpWindow:IsShown() and NexusHelpWindow.title:GetText()=='Nexus Reference - Orbs / Lost Memories'
+ and not NexusGuidedSetup:IsShown(),'Orb Reference opens the manual at the Orbs page')
+check(#H.actions==acts and #H.sent==sent,'Help and Reference act on nothing and send nothing')
 Nexus.Help.Hide();f:Hide();check(H.Count('orb-spend')==before+1,'closing panel/help creates no action')
 -- Ordinary auto must remain off through the actual session owner.
 check(Nexus.RecomputeStats().autoEnabled==false,'UI-run completion leaves ordinary Auto OFF')

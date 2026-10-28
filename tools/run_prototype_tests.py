@@ -372,6 +372,8 @@ NAMES += ['play_offer_cards']
 NAMES += ['play_panel_summary']
 # Issue #165: the header Options button: its localized label with the code-owned trusted-notice "!", its hover, header line 1 geometry at 420 and 640 px and 125% text in both Difficulty / Soul Ash HUD modes, and its read-only menu route (synthetic fixtures; native glyph widths NOT_RUN).
 NAMES += ['panel_options_label']
+# Native QA test.163008: window Help opens the guided coach and a labelled Reference opens the window's manual page; Options offers direct choices (no Manage submenu); Hide details collapses the Play detail section and its space, Show details restores the same counts, reload starts collapsed; Display Settings opens clear of the editor's upper-right controls at scaled and edge layouts (EXPECT fails at 0e5b84d7 by design; native NOT_RUN).
+NAMES += ['native_qa_163008']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

@@ -138,10 +138,11 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
  local before=Effects()
  local menu=NexusPanel._menuBtn
  local top=Capture(function() menu:GetScript('OnClick')(menu) end)
- local manage=Item(top,'Manage')
- C.setup(manage and manage.hasArrow and type(manage.menuList)=='table',
-  'V2: the compact ... menu opens a nested Manage list',Texts(top))
- local items=manage and manage.menuList or {}
+ -- Native QA test.163008: every entry is a direct choice on the Options
+ -- menu's top level; there is no nested Manage list.
+ C.setup(type(top)=='table' and #top>0,'V2: the Options menu opens',Texts(top))
+ C.expect(Item(top,'Manage')==nil,'V2: the Options menu has no Manage submenu',Texts(top))
+ local items=top or {}
  print('OBSERVED','V2 menu='..Texts(items))
  local missing={}
  for _,label in ipairs({'Help / Getting Started','Setup / Welcome','Setup checklist and status','Orbs / Lost Memories',
@@ -153,10 +154,9 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
   if #Prefixed(items,prefix)~=1 then missing[#missing+1]=prefix..'*' end
  end
  -- design/current compact redesign: Appearance is one top-level Options
- -- entry (no Manage hover chain), listing the shared Theme choices; it is
- -- not repeated under Manage.
+ -- entry, listing the shared Theme choices.
  local appearance=Prefixed(top,'Appearance: ')
- if #appearance~=1 or #Prefixed(items,'Appearance: ')~=0 then missing[#missing+1]='Appearance: * (top level only)' end
+ if #appearance~=1 then missing[#missing+1]='Appearance: * (once, top level)' end
  if appearance[1] and not (appearance[1].hasArrow and type(appearance[1].menuList)=='table'
   and #appearance[1].menuList==#Nexus.Theme.MenuItems()) then missing[#missing+1]='Appearance submenu = Theme.MenuItems' end
  if not (Item(items,'Show DPS records') or Item(items,'Hide DPS records')) then missing[#missing+1]='DPS records' end
@@ -164,7 +164,7 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
  if not (Item(items,'Use Server Difficulty / Soul Ash HUD') or Item(items,'Use Nexus Difficulty / Soul Ash HUD')) then
   missing[#missing+1]='HUD mode'
  end
- C.guard(#missing==0,'V2: every earlier entry remains reachable under its own label in Manage',table.concat(missing,', '))
+ C.guard(#missing==0,'V2: every earlier entry remains reachable under its own label, directly in Options',table.concat(missing,', '))
  local order,last,unordered={'Help and setup','Settings','Notices','Logs','Also on the panel footer','Panel'},0,{}
  for _,title in ipairs(order) do
   local at
@@ -531,10 +531,11 @@ C.scenario('V6 Help names the footer routes it describes',function()
  local sharing,orbs,troubleshooting=Body('sharing'),Body('orbs'),Body('troubleshooting')
  NexusHelpWindow:Hide()
  C.expect(sharing:find('Click Explore on the Nexus panel, then Build Library.',1,true)~=nil,'V6: Help sends Build Library readers to Explore')
- -- The menu is named by its visible Options label and its Manage group
- -- (issue #165), not the retired ellipsis.
- C.expect(orbs:find('Open /nexus orbs, Orbs on the Nexus panel, Orbs / Lost Memories in the Options menu under Manage',1,true)~=nil
-   and not orbs:find('in the ... menu',1,true),
+ -- The menu is named by its visible Options label (issue #165), not the
+ -- retired ellipsis, and the entry is a direct choice there (native QA
+ -- test.163008: no Manage submenu).
+ C.expect(orbs:find('Open /nexus orbs, Orbs on the Nexus panel, Orbs / Lost Memories in the Options menu, or Open Orbs...',1,true)~=nil
+   and not orbs:find('in the ... menu',1,true) and not orbs:find('Manage',1,true),
   'V6: Help lists the footer Orbs route beside the kept ones, under the Options menu it names',orbs)
  C.expect(troubleshooting:find('Explore',1,true)~=nil and troubleshooting:find('loading or unavailable',1,true)~=nil
    and not troubleshooting:find('Gray Build Library/Leaderboard tabs',1,true),

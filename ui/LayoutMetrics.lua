@@ -522,11 +522,14 @@ function M.Panel(spec)
             cursor = cursor + height + gap
         end
     else
-        -- Compact plan progress: one heading row (the heading and Details),
-        -- the run's count with its whole unit on its own full-width row (the
-        -- design's heading row wraps), a bar, then two rows of two counts.
-        -- The Echo names behind the counts (the Still needed, Extra copies
-        -- and To lock lists) are laid out only while Details is open.
+        -- Compact plan progress: one heading row (the heading and Show /
+        -- Hide details), the run's count with its whole unit on its own
+        -- full-width row (the design's heading row wraps) and a bar. The
+        -- detail section below the bar (two rows of two counts: Still needed,
+        -- Missing tomes, Extra copies, Locked targets; then the Echo names
+        -- behind them: the Still needed, Extra copies and To lock lists) is
+        -- laid out only while details are shown (native QA test.163008):
+        -- Hide details gives back its whole height.
         local rowGap = math.max(2,math.floor(gap/3))
         local char = M.ConservativeText(scale)
         local detailsW = math.min(width-24, math.ceil(12 * char) + 20)
@@ -543,17 +546,19 @@ function M.Panel(spec)
         cursor = cursor + normal + rowGap
         local barH = math.max(5, math.ceil(small / 2))
         Add(layout,"planBar",12,cursor,width-24,barH)
-        cursor = cursor + barH + rowGap + 1
-        local columnGap = 12
-        local columnWidth = math.floor((width - 24 - columnGap) / 2)
-        local rightX, rightW = 12+columnWidth+columnGap, width-24-columnWidth-columnGap
-        Add(layout,"planNeeded",12,cursor,columnWidth,small)
-        Add(layout,"planTomes",rightX,cursor,rightW,small)
-        cursor = cursor + small + rowGap
-        Add(layout,"planExtra",12,cursor,columnWidth,small)
-        Add(layout,"planLocked",rightX,cursor,rightW,small)
-        cursor = cursor + small + gap
-        if spec.planDetails then
+        if not spec.planDetails then
+            cursor = cursor + barH + gap
+        else
+            cursor = cursor + barH + rowGap + 1
+            local columnGap = 12
+            local columnWidth = math.floor((width - 24 - columnGap) / 2)
+            local rightX, rightW = 12+columnWidth+columnGap, width-24-columnWidth-columnGap
+            Add(layout,"planNeeded",12,cursor,columnWidth,small)
+            Add(layout,"planTomes",rightX,cursor,rightW,small)
+            cursor = cursor + small + rowGap
+            Add(layout,"planExtra",12,cursor,columnWidth,small)
+            Add(layout,"planLocked",rightX,cursor,rightW,small)
+            cursor = cursor + small + gap
             local columnHeight = small * 4 + math.max(3,math.floor(gap/2))
             Add(layout,"needed",12,cursor,columnWidth,columnHeight)
             Add(layout,"shed",rightX,cursor,rightW,columnHeight)

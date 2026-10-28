@@ -7,15 +7,12 @@ local toc=assert(io.open('Nexus.toc','rb')):read('*a')
 check(toc:find('ui\\SettingsWindow.lua',1,true)~=nil,
     'the runtime TOC loads Settings')
 local settingsMenu
+-- Native QA test.163008: Settings is a direct choice in the Options menu.
 for _,item in ipairs(Nexus.Panel.MoreMenuItems()) do
-    if item.text=='Manage' and type(item.menuList)=='table' then
-        for _,entry in ipairs(item.menuList) do
-            if entry.text=='Open Settings...' then settingsMenu=entry end
-        end
-    end
+    if item.text=='Open Settings...' then settingsMenu=item end
 end
 check(settingsMenu and type(settingsMenu.func)=='function',
-    'the panel Manage menu reaches Settings')
+    'the panel Options menu reaches Settings directly')
 settingsMenu.func()
 check(settings.IsShown(),'the panel opens the actual Settings window')
 local baseline=F.Serialize(NexusDB)

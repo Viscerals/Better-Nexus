@@ -314,15 +314,12 @@ C.scenario('S2 Close (X) during the delay opens the informational Welcome; the P
  if menu then menu:Click() end
  EasyMenu=realMenu
  local setup,info,help,reference
- for _,item in ipairs(items or {}) do
-  if item.text=='Manage' and item.hasArrow then
-   for _,entry in ipairs(item.menuList or {}) do
-    if entry.text=='Setup / Welcome' then setup=entry end
-    if entry.text=='Setup information (read only)' then info=entry end
-    if entry.text=='Help / Getting Started' then help=entry end
-    if entry.text=='Reference (full manual)' then reference=entry end
-   end
-  end
+ -- Direct Options choices (native QA test.163008).
+ for _,entry in ipairs(items or {}) do
+  if entry.text=='Setup / Welcome' then setup=entry end
+  if entry.text=='Setup information (read only)' then info=entry end
+  if entry.text=='Help / Getting Started' then help=entry end
+  if entry.text=='Reference (full manual)' then reference=entry end
  end
  C.setup(help~=nil,'S2: fixture: the menu lists Help / Getting Started')
  C.expect(setup~=nil and type(setup.func)=='function','S2: the ... menu offers Setup / Welcome')

@@ -2429,7 +2429,7 @@ local function EnsureFrame()
     orbsHub:SetScript("OnLeave", function() GameTooltip:Hide() end)
     frame._orbsHubBtn = orbsHub
 
-    -- Options (issue #165): the settings and Manage menu, named in words on
+    -- Options (issue #165): the menu of direct choices, named in words on
     -- header line 1 beside Close (M.PlaceOptionsButton). Navigation stays
     -- visible in the footer while infrequent tools live behind this button.
     menuBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -2824,7 +2824,7 @@ function M.EnsureHeaderGrip()
             if not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
             GameTooltip:AddLine("Shift-drag to move", 1, 1, 1)
-            GameTooltip:AddLine("Hold Shift, then drag this grip. A plain click does nothing. Options > Manage > "
+            GameTooltip:AddLine("Hold Shift, then drag this grip. A plain click does nothing. Options > "
                 .. "Reset Panel Position puts the panel back.", 0.8, 0.8, 0.8, true)
             GameTooltip:Show()
         end)
@@ -2839,9 +2839,16 @@ function M.EnsureHeaderGrip()
     return grip
 end
 
--- The Options menu's Manage submenu retains all established routes and owners.
--- Its top level stays short in the compact panel; opening either level only
--- reads current labels and never changes a setting or starts automation.
+-- The Options menu: every established route and owner is a direct choice on
+-- its top level, grouped under titles (native QA test.163008: no single
+-- Manage hover chain). design/current "Nexus Main Panel - Compact Redesign":
+-- Appearance is a direct entry; only Appearance, Automation settings and the
+-- language chooser keep their own list. Opening it only reads current labels
+-- and never changes a setting or starts automation.
+-- The stock 3.3.5 dropdown draws at most UIDROPDOWNMENU_MAXBUTTONS rows per
+-- level (32 as recalled, not checked against the client export here); the 26
+-- rows here stay within OPTIONS_MENU_MAX_ROWS.
+M.OPTIONS_MENU_MAX_ROWS = 32
 function M.MoreMenuItems(anchor)
     local items = {}
     local function Add(item) items[#items + 1] = item end
@@ -2925,6 +2932,22 @@ function M.MoreMenuItems(anchor)
         end) })
 
     Add(MenuTitle("Settings"))
+    -- design/current "Nexus Main Panel - Compact Redesign": Options opens
+    -- Appearance directly. Its list is the shared Theme choice
+    -- (Theme.MenuItems: the same saved style and colour the Orb windows use),
+    -- the current one checked; building the menu writes nothing, and only a
+    -- row click chooses (Theme.SetStyle / SetPalette through the settings
+    -- owner).
+    local appearance = { text = "Appearance: " .. ((Nexus.Theme and Nexus.Theme.Summary)
+            and Nexus.Theme.Summary() or "default"), notCheckable = true,
+        tooltipTitle = "Appearance", tooltipText = Nexus.Theme and Nexus.Theme.HELP or nil }
+    if Nexus.Theme and type(Nexus.Theme.MenuItems) == "function" then
+        appearance.hasArrow = true
+        appearance.menuList = Nexus.Theme.MenuItems(CloseDropDownMenus)
+    else
+        appearance.disabled = true
+    end
+    Add(appearance)
     Add({ text = "Open Settings...", notCheckable = true,
         tooltipTitle = "Settings",
         tooltipText = "Open the grouped settings window. Opening it changes no preferences.",
@@ -2942,7 +2965,6 @@ function M.MoreMenuItems(anchor)
     -- choice is submitted, through the lifecycle callback.
     Add({ text = M.LanguageMenuLabel(), notCheckable = true, hasArrow = true,
         menuList = M.LanguageMenuItems(MenuAction) })
-    -- Appearance is on the menu's top level (below), not repeated here.
     Add({ text = showPerformance and "Hide DPS records" or "Show DPS records",
         notCheckable = true,
         func = MenuAction(function()
@@ -3018,26 +3040,7 @@ function M.MoreMenuItems(anchor)
             M.Hide()
             print("|cffffd200Nexus:|r The Nexus panel is hidden. " .. HIDE_NOTE)
         end) })
-    -- design/current "Nexus Main Panel - Compact Redesign": Options opens
-    -- Appearance directly, without the Manage hover chain. Its list is the
-    -- shared Theme choice (Theme.MenuItems: the same saved style and colour
-    -- the Orb windows use), the current one checked; building the menu
-    -- writes nothing, and only a row click chooses (Theme.SetStyle /
-    -- SetPalette through the settings owner).
-    local appearance = { text = "Appearance: " .. ((Nexus.Theme and Nexus.Theme.Summary)
-            and Nexus.Theme.Summary() or "default"), notCheckable = true,
-        tooltipTitle = "Appearance", tooltipText = Nexus.Theme and Nexus.Theme.HELP or nil }
-    if Nexus.Theme and type(Nexus.Theme.MenuItems) == "function" then
-        appearance.hasArrow = true
-        appearance.menuList = Nexus.Theme.MenuItems(CloseDropDownMenus)
-    else
-        appearance.disabled = true
-    end
-    return { MenuTitle("Nexus"), appearance,
-        { text = "Manage", notCheckable = true, hasArrow = true,
-            tooltipTitle = "Manage Nexus",
-            tooltipText = "Setup, settings, notices, logs and panel actions. Opening this menu changes nothing.",
-            menuList = items } }
+    return items
 end
 
 -- The Plan and Explore hub menus. Each consequence note is a visible row:
@@ -3608,15 +3611,17 @@ function M.EnsurePlayWidgets()
     local function OpenEditor() if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end
     local theme = Nexus.Theme
 
-    -- Details: shows or hides the Echo names behind the counts.
+    -- Show / Hide details: shows or collapses the detail section (the four
+    -- counts and the Echo names behind them).
     p.details = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     p.details:SetScript("OnClick", function() M.TogglePlanDetails() end)
     p.details:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(M._playDetails and "Hide details" or "Details", 1, 1, 1)
-        GameTooltip:AddLine("Shows or hides the Echo names behind these counts: still needed, extra copies and "
-            .. "locked targets to lock. It changes only what this panel shows.", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(M._playDetails and "Hide details" or "Show details", 1, 1, 1)
+        GameTooltip:AddLine("Shows or hides the details under the bar: still needed, missing tomes, extra copies "
+            .. "and locked targets, with the Echo names behind them. It changes only what this panel shows; the "
+            .. "counts and your build stay the same.", 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
     p.details:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -3787,8 +3792,11 @@ function M.RenderPlaySummary(model, layout)
     if not p then return end
     local pr = type(model.progress) == "table" and model.progress or {}
     local details = play and M._playDetails == true
-    -- The former rows: the names show only under Details; the tomes row is
-    -- one of the four counts here.
+    -- The detail section (native QA test.163008): the four counts and the
+    -- names behind them show only while details are shown; Hide details
+    -- collapses them and LayoutMetrics.Panel gives back their space. The
+    -- counts are worded on every Play render either way, so Show details
+    -- restores the same counts. The former tomes row is one of the counts.
     if play then
         SetVisible(needLabel, details); SetVisible(needText, details); SetVisible(needHit, details)
         SetVisible(shedLabel, details); SetVisible(shedText, details); SetVisible(shedHit, details)
@@ -3797,8 +3805,9 @@ function M.RenderPlaySummary(model, layout)
         SetVisible(frame.toLockLabel, toLock); SetVisible(frame.toLockText, toLock); SetVisible(frame.toLockHit, toLock)
         SetVisible(tomesLabel, false); SetVisible(tomesValue, false); SetVisible(tomesHit, false)
     end
-    for _, widget in ipairs({p.details, p.track, p.needed, p.tomes, p.extra, p.locked,
-        p.neededHit, p.tomesHit, p.extraHit, p.lockedHit}) do SetVisible(widget, play) end
+    SetVisible(p.details, play); SetVisible(p.track, play)
+    for _, widget in ipairs({p.needed, p.tomes, p.extra, p.locked,
+        p.neededHit, p.tomesHit, p.extraHit, p.lockedHit}) do SetVisible(widget, details) end
     if play then
         local total, owned = PlayWhole(pr.total), PlayWhole(pr.owned)
         local text = Nexus.UserText
@@ -3809,7 +3818,7 @@ function M.RenderPlaySummary(model, layout)
             and text.RunProgressText(pr.owned, pr.total, #toLockNamesCache)
             or ((owned and total) and (owned .. " / " .. total .. " rolled copies this run")
                 or "Rolled copies this run: unavailable"))
-        p.details:SetText(details and "Hide details" or "Details")
+        p.details:SetText(details and "Hide details" or "Show details")
         -- The share of planned rolled copies this run has (none while
         -- either count is unknown).
         p.share = (owned and total and total > 0) and {math.min(owned, total), total} or nil
@@ -5271,7 +5280,8 @@ end
 -- hovering or closing it changes nothing. Only the Reroll and Freeze rows act,
 -- through their existing setter (/nexus reroll|freeze on|off: MainCommands to
 -- Main's rollingOption); Lock Wishlist Echoes opens the Wishlist Editor, whose
--- own control is its setter; the last row opens Help. `action` wraps a click
+-- own control is its setter; the last row opens the Reference page on Auto.
+-- `action` wraps a click
 -- (the menu's MenuAction: it closes the menu first).
 function M.AutomationMenuItems(action)
     local readout = Nexus.Readout

@@ -294,7 +294,7 @@ function M.Show(category)
     return true
 end
 
--- The Manage hub can ask for a section without depending on window internals.
+-- The Options menu can ask for a section without depending on window internals.
 function M.ShowSection(category) return M.Show(category) end
 
 function M.Hide() if frame then frame:Hide() end end

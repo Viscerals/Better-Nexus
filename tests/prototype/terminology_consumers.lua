@@ -549,10 +549,9 @@ do
   local items;EasyMenu=function(list)items=list end
   NexusPanel._menuBtn:Click()
   local found,rows=nil,0
-  local manage
-  for _,item in ipairs(items or {})do if item.text=='Manage' then manage=item end end
-  check(manage and manage.hasArrow and type(manage.menuList)=='table','the ... menu exposes a nested Manage list')
-  for _,item in ipairs(manage.menuList)do
+  -- The language chooser is a direct Options choice (native QA test.163008).
+  check(type(items)=='table' and #items>0,'the Options menu lists its direct choices')
+  for _,item in ipairs(items)do
    if type(item.text)=='string' and item.text:find('^Language')then found=found or item;rows=rows+1 end
   end
   return found,rows
@@ -1703,9 +1702,7 @@ do
  NexusPanel._menuBtn:Click()
  EasyMenu=easy
  local language,found,stale
- local manage
- for _,item in ipairs(items or {})do if item.text=='Manage' then manage=item end end
- for _,item in ipairs(manage and manage.menuList or {})do
+ for _,item in ipairs(items or {})do
   if type(item.text)=='string' and item.text:find('^Language')then language=item end
  end
  for _,row in ipairs(language and language.menuList or {})do

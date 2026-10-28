@@ -611,24 +611,42 @@ end
 -- The page's buttons, created once in the scrolled content.
 local function PageButton(kind)
     local b = kind == "details" and detailsButton or kind == "help" and M._pageHelpButton
+        or kind == "reference" and M._pageReferenceButton
         or kind == "builds" and buildsButton or nil
     if b then return b end
     b = CreateFrame("Button", nil, child, "UIPanelButtonTemplate")
     if kind == "help" then
-        -- M7: contextual Help, passive. It opens the Wishlists Help page above
-        -- the Journal and changes nothing here: it assigns, saves, sends,
+        -- Help is the guided setup coach (Help.OpenHelp; native QA
+        -- test.163008), above the Journal. Passive: it assigns, saves, sends,
         -- rolls, spends and turns nothing on. Kept on the module table.
         M._pageHelpButton = b
         b:SetSize(56, 22)
         b:SetText("Help")
         b:SetScript("OnClick", function()
-            if Nexus.Help and Nexus.Help.Show then Nexus.Help.Show("wishlists") end
+            if Nexus.Help and Nexus.Help.OpenHelp then Nexus.Help.OpenHelp("wishlists") end
         end)
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:AddLine("Help", 1, 1, 1)
-            GameTooltip:AddLine("Opens Help on Wishlists and locked targets. Opening it changes nothing on this page.",
-                0.82, 0.82, 0.82, true)
+            GameTooltip:AddLine("Opens the step-by-step setup guide where you left it. Opening it changes nothing "
+                .. "on this page. Reference beside it has the full Wishlists page.", 0.82, 0.82, 0.82, true)
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    elseif kind == "reference" then
+        -- The manual's Wishlists and locked targets page, above the Journal,
+        -- under its own name. Passive, as Help.
+        M._pageReferenceButton = b
+        b:SetSize(80, 22)
+        b:SetText("Reference")
+        b:SetScript("OnClick", function()
+            if Nexus.Help and Nexus.Help.OpenReference then Nexus.Help.OpenReference("wishlists") end
+        end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("Reference", 1, 1, 1)
+            GameTooltip:AddLine("Opens the full manual on Wishlists and locked targets. Opening it changes nothing "
+                .. "on this page.", 0.82, 0.82, 0.82, true)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -863,6 +881,16 @@ local function DoRefresh()
     help:ClearAllPoints()
     help:SetPoint("TOPLEFT", child, "TOPLEFT", helpX, helpY)
     help:Show()
+    -- Reference follows Help on the same terms.
+    local reference = PageButton("reference")
+    local refX, refY = helpX + 60, helpY
+    if refX + 80 > width + 6 then
+        refX, refY = 6, helpY - 26
+        cy = cy - 26
+    end
+    reference:ClearAllPoints()
+    reference:SetPoint("TOPLEFT", child, "TOPLEFT", refX, refY)
+    reference:Show()
     cy = cy - 30
 
     if detailsShown then

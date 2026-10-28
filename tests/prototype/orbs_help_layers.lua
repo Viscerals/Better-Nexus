@@ -1,4 +1,7 @@
--- Real Orb Help entry path, including simultaneous Advanced controls.
+-- Real Orb Reference entry path (the manual's Orbs page over the Orb window),
+-- including simultaneous Advanced controls. Native QA test.163008: the Orb
+-- window's Help is the guided setup coach and the manual moved to its
+-- Reference button, which keeps this layering contract; Help is checked last.
 -- This checks the observed native ordering mechanism, not native pixel output.
 local H=dofile('tests/prototype/orbs_support.lua');local M,O=H.M,H.O
 local function button(parent,label)
@@ -33,9 +36,9 @@ local function unchanged(before,reason)
  for k,v in pairs(before)do assert(after[k]==v,reason..' changed '..k)end
 end
 local function open(orb)
- local before=snapshot();button(orb,'Help'):Click();local help=assert(NexusHelpWindow)
- assert(help.page:GetText()=='Page 5 / 7','actual Orb Help button opens the Orb topic')
- foreground(orb,help);unchanged(before,'Help opening');return help
+ local before=snapshot();button(orb,'Reference'):Click();local help=assert(NexusHelpWindow)
+ assert(help.page:GetText()=='Page 5 / 7','actual Orb Reference button opens the Orb topic')
+ foreground(orb,help);unchanged(before,'Reference opening');return help
 end
 H.OrbPlan({{spellId=410002,quality=2,stacks=3}});O.charges=0
 local orb=Nexus.OrbPanel.Show();button(orb,'Advanced'):Click();assert(orb.advanced:IsShown())
@@ -55,4 +58,19 @@ Nexus.OrbPanel.Refresh();help=open(orb);before=snapshot();H.Advance(.6)
 foreground(orb,help);unchanged(before,'Help and Orb timer reads with a paused ready offer')
 button(help,'Close'):Click();button(orb.advanced,'Recheck'):Click();unchanged(before,'actual Recheck after Help')
 M.Stop();assert(M.Status().pending and H.Count('orb-spend')==1 and H.Count('take')==0,'pending exposure retained without an extra mutation')
-print('PASS actual Orb Help layering/Advanced/reopen/navigation/running Close/paused ready offer/passive Recheck')
+-- The Orb window's Help: the guided setup coach in this window's place, not
+-- the manual. While an Auto warning waits, the coach refuses and the
+-- Reference answers above the Orb window instead.
+Nexus.OrbPanel.Show();before=snapshot()
+local waiting=Nexus.OverwriteWarning and Nexus.OverwriteWarning.IsOpen and Nexus.OverwriteWarning.IsOpen()
+button(orb,'Help'):Click()
+if waiting then
+ assert(help:IsShown()and help.page:GetText()=='Page 5 / 7'and orb:IsShown(),'refused coach: Help answers with the Orbs Reference above the Orb window')
+ button(help,'Close'):Click()
+else
+ assert(NexusGuidedSetup and NexusGuidedSetup:IsShown()and not help:IsShown()and not orb:IsShown(),
+  'actual Orb Help button opens the guided setup coach in the Orb window\'s place, not the manual')
+ Nexus.GuidedSetupUI.Hide()
+end
+unchanged(before,'Orb Help (coach)')
+print('PASS actual Orb Reference layering/Advanced/reopen/navigation/running Close/paused ready offer/passive Recheck; Orb Help opens the coach')

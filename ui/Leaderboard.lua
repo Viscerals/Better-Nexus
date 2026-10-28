@@ -1190,10 +1190,13 @@ local function EnsureFrame()
     local builds=MakeNavButton(frame,"Builds",88); builds:SetPoint("TOPLEFT",18,-12); builds:SetScript("OnClick",function() M.Hide(); if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end end)
     local board=MakeNavButton(frame,"Leaderboard",102); board:SetPoint("LEFT",builds,"RIGHT",4,0); board:SetText("|cffffd200Leaderboard|r"); board:Disable()
     local wish=MakeNavButton(frame,"Wishlists",92); wish:SetPoint("LEFT",board,"RIGHT",4,0); wish:SetScript("OnClick",function() M.Hide(); if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end end)
-    -- M7: Help for this window (its Sharing page, which covers the
-    -- Leaderboard). Like the other navigation buttons it replaces this window,
-    -- whose layer is above Help's; it opens a page only.
-    frame._helpNav=MakeNavButton(frame,"Help",56); frame._helpNav:SetPoint("LEFT",wish,"RIGHT",4,0); frame._helpNav:SetScript("OnClick",function() M.Hide(); if Nexus.Help then Nexus.Help.Show("sharing") end end)
+    -- Help is the guided setup coach (Help.OpenHelp; native QA test.163008);
+    -- Reference, at the top right clear of the centred title, is the manual's
+    -- Sharing page, which covers the Leaderboard. Like the other navigation
+    -- buttons each replaces this window, whose layer is above theirs; each
+    -- opens a page only.
+    frame._helpNav=MakeNavButton(frame,"Help",56); frame._helpNav:SetPoint("LEFT",wish,"RIGHT",4,0); frame._helpNav:SetScript("OnClick",function() if Nexus.Help and Nexus.Help.OpenHelp then Nexus.Help.OpenHelp("sharing",M.Hide) end end)
+    frame._referenceNav=MakeNavButton(frame,"Reference",84); frame._referenceNav:SetPoint("TOPRIGHT",-40,-12); frame._referenceNav:SetScript("OnClick",function() if Nexus.Help and Nexus.Help.OpenReference then Nexus.Help.OpenReference("sharing",M.Hide) end end)
     if Nexus.FullUIWorkspaces then
         Nexus.FullUIWorkspaces.BindTabs(frame, "records", {
             plan = wish, builds = builds, records = board,

@@ -60,7 +60,7 @@ C.setup(Nexus.StartupStatus().coreReady==true,'fixture: local start-up is ready'
 Nexus.DisableOrdinaryAutomation()
 P.Show()
 
-C.scenario('S1 compact plan progress: count, bar and four counts; names only under Details',function()
+C.scenario('S1 compact plan progress: count and bar; the four counts and their names only under Show details',function()
  local before=Effects()
  local m=Model({owned=2,missing={'Cinder Lattice x2 (Rare:x2)','Hollow Bell'},shed={'Ashen Tithe'},
   toLock={'Gravecall Chorus'},unknownTomes={'Frostwake Sigil'}})
@@ -69,31 +69,29 @@ C.scenario('S1 compact plan progress: count, bar and four counts; names only und
  C.expect(type(p)=='table' and NexusPanel._responsiveLayout and NexusPanel._responsiveLayout.play==true,
   'S1: the Play summary exists in the Play layout')
  if type(p)~='table' then return end
- C.expect(p.needed:IsShown() and Plain(p.needed)=='Still needed  4 copies','S1: still needed copies',Plain(p.needed))
+ -- Native QA test.163008: the detail section (the four counts and the names
+ -- behind them) starts collapsed; its counts are worded either way.
+ C.expect(not p.needed:IsShown() and not p.tomes:IsShown() and not p.extra:IsShown() and not p.locked:IsShown(),
+  'S1: the detail section starts collapsed')
+ C.expect(Plain(p.needed)=='Still needed  4 copies','S1: still needed copies',Plain(p.needed))
  C.expect(Plain(p.tomes)=='Missing tomes  1 Echo','S1: Echoes blocked by missing tomes',Plain(p.tomes))
  C.expect(Plain(p.extra)=='Extra copies  1 listed','S1: extra copies listed',Plain(p.extra))
  C.expect(Plain(p.locked)=='Locked targets  1 to lock','S1: locked targets still to lock',Plain(p.locked))
  local boxes=NexusPanel._responsiveLayout.boxes
  C.expect(p.track:IsShown() and p.fill:IsShown() and p.fill:GetWidth()==math.floor(boxes.planBar.w*2/6),
   'S1: the bar fills the share of planned rolled copies this run has',tostring(p.fill:GetWidth()))
- C.expect(p.details:IsShown() and Plain(p.details)=='Details','S1: Details is offered on the heading row')
+ C.expect(p.details:IsShown() and Plain(p.details)=='Show details','S1: Show details is offered on the heading row')
+ C.expect(boxes.planNeeded==nil and boxes.needed==nil,'S1: no detail rows are laid out while collapsed')
  local text=ShownText()
- C.expect(not text:find('Hollow Bell',1,true) and not text:find('Gravecall Chorus',1,true),
-  'S1: the Echo names stay behind Details',text)
- C.expect(not text:find('MISSING TOMES',1,true),'S1: the former tomes row is one of the counts here',text)
- -- Every count box is inside the panel and apart from the others.
- local apart=true
- local names={'planNeeded','planTomes','planExtra','planLocked','planBar','progressHeader','progressValue','planDetails'}
- for i=1,#names do for j=i+1,#names do
-  local a,b=boxes[names[i]],boxes[names[j]]
-  if not (a and b) or Nexus.LayoutMetrics.Overlap(a,b) then apart=false end
- end end
- C.expect(apart,'S1: heading, bar and counts are disjoint boxes')
+ C.expect(not text:find('Hollow Bell',1,true) and not text:find('Gravecall Chorus',1,true)
+  and not text:find('Still needed',1,true) and not text:find('Missing tomes',1,true),
+  'S1: the counts and Echo names stay behind Show details',text)
+ C.expect(not text:find('MISSING TOMES',1,true),'S1: the former tomes row is not shown',text)
  C.guard(Effects()==before,'S1: rendering the summary makes no game action, send, saved-data or Auto change')
- -- Details shows the names; it is memory only. design/current "Nexus Main
- -- Panel - Compact Redesign" wires its web Details to Plan; the addon keeps
- -- the corrected behaviour: the named lists expand and collapse in place, the
- -- panel grows and shrinks with them, the counts stay, and Plan never opens.
+ -- Details is memory only. design/current "Nexus Main Panel - Compact
+ -- Redesign" wires its web Details to Plan; the addon keeps the corrected
+ -- behaviour: the detail section expands and collapses in place, the panel
+ -- grows and shrinks with it, and Plan never opens.
  local clicked=Effects()
  local closedHeight=NexusPanel:GetHeight()
  -- Plan is the Wishlist Editor workspace (FullUIWorkspaces.ShowPlan).
@@ -103,23 +101,34 @@ C.scenario('S1 compact plan progress: count, bar and four counts; names only und
  end
  C.setup(not PlanShown(),'S1: fixture: Plan is not open before Details')
  p.details:Click()
- C.setup(P.Render(m)==true,'S1: fixture: the same model rendered again after Details')
+ C.setup(P.Render(m)==true,'S1: fixture: the same model rendered again after Show details')
  text=ShownText()
  C.expect(P._playDetails==true and text:find('Hollow Bell',1,true)~=nil and text:find('Gravecall Chorus',1,true)~=nil
-  and Plain(p.details)=='Hide details','S1: Details shows the names behind the counts',text)
- C.expect(NexusPanel._responsiveLayout.boxes.needed~=nil,'S1: the name columns are laid out under Details')
+  and Plain(p.details)=='Hide details','S1: Show details shows the names behind the counts',text)
+ boxes=NexusPanel._responsiveLayout.boxes
+ C.expect(boxes.needed~=nil and boxes.planNeeded~=nil,'S1: the counts and name columns are laid out under Show details')
+ -- Every count box is inside the panel and apart from the others.
+ local apart=true
+ local names={'planNeeded','planTomes','planExtra','planLocked','planBar','progressHeader','progressValue','planDetails'}
+ for i=1,#names do for j=i+1,#names do
+  local a,b=boxes[names[i]],boxes[names[j]]
+  if not (a and b) or Nexus.LayoutMetrics.Overlap(a,b) then apart=false end
+ end end
+ C.expect(apart,'S1: heading, bar and counts are disjoint boxes')
  local openHeight=NexusPanel:GetHeight()
  C.expect(openHeight>closedHeight and openHeight==NexusPanel._responsiveLayout.height,
-  'S1: the panel grows to hold the named lists',closedHeight..' -> '..openHeight)
+  'S1: the panel grows to hold the detail section',closedHeight..' -> '..openHeight)
  C.expect(p.needed:IsShown() and p.tomes:IsShown() and p.extra:IsShown() and p.locked:IsShown()
-  and Plain(p.needed)=='Still needed  4 copies','S1: the four counts stay visible with Details open',Plain(p.needed))
- C.expect(not PlanShown(),'S1: Details never navigates to Plan')
- C.guard(Effects()==clicked,'S1: Details changes no game action, send, saved data or Auto',Effects())
+  and Plain(p.needed)=='Still needed  4 copies','S1: the four counts show with details open',Plain(p.needed))
+ C.expect(not PlanShown(),'S1: Show details never navigates to Plan')
+ C.guard(Effects()==clicked,'S1: Show details changes no game action, send, saved data or Auto',Effects())
  p.details:Click()
  P.Render(m)
- C.expect(P._playDetails==false and not ShownText():find('Hollow Bell',1,true),'S1: Hide details hides them again')
- C.expect(NexusPanel:GetHeight()==closedHeight and p.needed:IsShown(),
-  'S1: Hide details gives the height back and keeps the counts',NexusPanel:GetHeight())
+ text=ShownText()
+ C.expect(P._playDetails==false and not text:find('Hollow Bell',1,true) and not text:find('Still needed',1,true),
+  'S1: Hide details hides the counts and names again')
+ C.expect(NexusPanel:GetHeight()==closedHeight and not p.needed:IsShown() and Plain(p.details)=='Show details',
+  'S1: Hide details gives the whole section\'s height back',NexusPanel:GetHeight())
  C.expect(not PlanShown(),'S1: Hide details never navigates to Plan')
 end)
 
@@ -380,14 +389,22 @@ C.scenario('S10 Play layout at 0.75-2.0 font scale: disjoint boxes, the card, De
    C.expect(l.boxes.status~=nil and l.boxes.status.h>=56 and l.boxes.serverLine==nil,
     tag..': the original card keeps at least 56 px; no flattened row',l.boxes.status and l.boxes.status.h)
    if o.noOffer then
-    C.expect(l.noOffer==true and l.boxes.roll.h<104 and l.boxes.planNeeded~=nil,tag..': the roll box collapses below 104 px',l.boxes.roll.h)
+    C.expect(l.noOffer==true and l.boxes.roll.h<104 and l.boxes.planBar~=nil,tag..': the roll box collapses below 104 px',l.boxes.roll.h)
    end
   end
+  -- Native QA test.163008: Show details adds the whole detail section (the
+  -- counts, then the named lists) below the bar; Hide details gives back
+  -- exactly that height, and nothing above the bar moves.
   local closed,open=Laid(),Laid({planDetails=true})
   C.expect(open.height>closed.height and open.boxes.needed~=nil and closed.boxes.needed==nil
-   and open.boxes.planNeeded.y==closed.boxes.planNeeded.y and open.boxes.needed.y>open.boxes.planLocked.y,
-   'S10 @'..scale..': Details adds the lists below the counts and grows the panel; the counts stay put',
+   and closed.boxes.planNeeded==nil and open.boxes.planNeeded~=nil
+   and open.boxes.planBar.y==closed.boxes.planBar.y and open.boxes.planNeeded.y>open.boxes.planBar.y
+   and open.boxes.needed.y>open.boxes.planLocked.y,
+   'S10 @'..scale..': Show details adds the counts and lists below the bar and grows the panel; the bar stays put',
    closed.height..' -> '..open.height)
+  C.expect(open.boxes.bestDps.y-closed.boxes.bestDps.y==open.height-closed.height,
+   'S10 @'..scale..': the rows below move by exactly the section\'s height',
+   (open.boxes.bestDps.y-closed.boxes.bestDps.y)..' / '..(open.height-closed.height))
  end
 end)
 

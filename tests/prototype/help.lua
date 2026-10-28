@@ -20,8 +20,9 @@ local function b(label)
 end
 -- Getting started leads with the first task; page navigation and reference
 -- follow it. Each setup route is named by the real Options menu path, whose
--- top level is Manage (ui/Panel.lua MoreMenuItems; ui_review_navigation V2
--- and guided_first_entry E14 check the labels against the real menu). Issue
+-- top level holds every choice directly since native QA test.163008
+-- (ui/Panel.lua MoreMenuItems; ui_review_navigation V2, guided_first_entry
+-- E14 and native_qa_163008 check the labels against the real menu). Issue
 -- #165: the panel's menu button reads Options (panel_options_label), so Help
 -- names that visible control, never the retired bare ellipsis.
 Nexus.Help.Show('start')
@@ -29,20 +30,22 @@ local start=f.body:GetText()
 check(start:find('Start here: Setup / Welcome opens Guided setup',1,true)==1,'start page leads with the first task')
 local first,pages=start:find('Setup / Welcome opens Guided setup',1,true),start:find('the page buttons above open any page directly',1,true)
 check(first and pages and first<pages,'page navigation follows the first task')
-for _,route in ipairs({'(Options > Manage > Setup / Welcome)','Setup information (read only), in the Options menu under Manage',
- 'under Manage as Setup checklist and status','click Plan on the Nexus panel, then Wishlist Editor'})do
+for _,route in ipairs({'(Options > Setup / Welcome)','Setup information (read only), in the Options menu,',
+ 'is listed there as Setup checklist and status','click Plan on the Nexus panel, then Wishlist Editor'})do
  check(start:find(route,1,true),'start page route: '..route)
 end
 local all='';for _,p in ipairs(Nexus.Help.Pages)do all=all..p.text..'\n' end
 for _,stale in ipairs({'click ... on the Nexus panel, then Wishlist Editor','click ... on the Nexus panel, then Automation settings',
  '... > Automation settings','Hide Nexus Panel (... menu)','Setup information (read only), also under Manage'})do
- check(not all:find(stale,1,true),'no route that skips Manage: '..stale)
+ check(not all:find(stale,1,true),'no stale route: '..stale)
 end
 for _,stale in ipairs({'... menu','... > Manage','click ... on','the ... button','Menu and status'})do
  check(not all:find(stale,1,true),'#165: no page names the retired ellipsis control: '..stale)
 end
-check(all:find('click Options on the Nexus panel, then Manage, then Automation settings',1,true)
- and all:find('Options > Manage > Automation settings',1,true) and all:find('Hide Nexus Panel (Options > Manage)',1,true)
+-- Native QA test.163008: no page describes the retired Manage submenu.
+check(not all:find('Manage',1,true),'no page names the retired Manage submenu')
+check(all:find('click Options on the Nexus panel, then Automation settings',1,true)
+ and all:find('Options > Automation settings',1,true) and all:find('Hide Nexus Panel (Options)',1,true)
  and all:find('the Options button then reads ! Options',1,true),'#165: Help routes name the visible Options control and its notice mark')
 check(Nexus.Panel==nil or type(Nexus.Panel.OptionsText)~='function'
  or (Nexus.Panel.OptionsText(nil)=='Options' and Nexus.Panel.OptionsText(true)=='! Options'),

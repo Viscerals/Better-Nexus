@@ -169,10 +169,10 @@ end
 local UNSAVED_NOTICE = {
     welcome = "The Welcome is closed, but this cannot be saved right now "
         .. "(saved data is still loading or is read-only). If it cannot be saved this session, "
-        .. "the Welcome is offered again next time. Setup information (read only) in the ... menu under Manage shows it again.",
+        .. "the Welcome is offered again next time. Setup information (read only) in the Options menu shows it again.",
     coach = "Guided setup is closed, but this cannot be saved right now "
         .. "(saved data is still loading or is read-only). If it cannot be saved this session, "
-        .. "Guided setup is offered again next time. /nexus help or Setup / Welcome in the ... menu under Manage reopens it.",
+        .. "Guided setup is offered again next time. /nexus help or Setup / Welcome in the Options menu reopens it.",
 }
 local function Dismiss(kind)
     dismissedThisSession = true

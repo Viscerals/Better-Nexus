@@ -549,7 +549,8 @@ function M.AutomationSettingsRows(facts)
     if facts.readOnly then
         Add("info", "Saved data is read-only: a change lasts this session only")
     end
-    Add("help", "What Auto may do (Help)...")
+    -- The manual's Auto page, named Reference (Help is the guided coach).
+    Add("help", "What Auto may do (Reference)...")
     return rows
 end
 

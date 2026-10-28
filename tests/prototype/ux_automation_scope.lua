@@ -361,9 +361,8 @@ local function OpenMoreMenu()
  CloseDropDownMenus=CloseDropDownMenus or function() end
  local button=NexusPanel and NexusPanel._menuBtn
  if button then button:GetScript('OnClick')(button) end
- local manage
- for _,item in ipairs(captured or {}) do if item.text=='Manage' then manage=item end end
- return manage and manage.menuList or nil
+ -- Every entry is a direct Options choice (native QA test.163008).
+ return captured
 end
 local function MenuItem(items,prefix)
  for _,item in ipairs(items or {}) do

@@ -979,6 +979,12 @@ function M.ToggleDisplayPopup(anchorTo)
     return RendererInstance().ToggleDisplayPopup(anchorTo)
 end
 
+-- Where Display Settings opens relative to the editor (pure; the renderer's
+-- DisplayPopupPlacement).
+function M.DisplayPopupPlacement(spec)
+    return RendererInstance().DisplayPopupPlacement(spec)
+end
+
 function M.Init(adapter, model)
     Adapter = adapter
     Model = model

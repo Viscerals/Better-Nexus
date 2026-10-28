@@ -424,20 +424,18 @@ C.scenario('E13 an opened imported draft is not a saved Wishlist; closing it ret
  Quiet('E13',b)
 end)
 
--- The ... menu decides which label opens which window: each Setup item of its
--- real Manage list is run once with the three window owners spied, so the
--- labels come from the menu's own handlers, not from this file.
+-- The Options menu decides which label opens which window: each Setup item of
+-- its real top level (direct choices since native QA test.163008) is run once
+-- with the three window owners spied, so the labels come from the menu's own
+-- handlers, not from this file.
 C.scenario('E14 Help Getting started names the coach and the information-only view by their menu labels',function()
  if not FirstBoot('E14') then return end
  NexusOverwriteWarning.yes:Click()
  if not CloseFirstUse('E14') then return end
  local b,saved=Counts(),Saved()
  local ok,top=pcall(Nexus.Panel.MoreMenuItems)
- local items
- for _,item in ipairs(ok and type(top)=='table' and top or {}) do
-  if item.text=='Manage' and type(item.menuList)=='table' then items=item.menuList end
- end
- if not C.setup(items~=nil,'E14: fixture: the real ... menu lists its Manage items',tostring(top)) then return end
+ local items=ok and type(top)=='table' and top or nil
+ if not C.setup(items~=nil,'E14: fixture: the real Options menu lists its items',tostring(top)) then return end
  local quick,ui=Nexus.QuickStart,Nexus.GuidedSetupUI
  local realSetup,realList,realShow=quick.ShowSetup,quick.ShowChecklist,ui.Show
  local coachLabel,infoLabel

@@ -1074,6 +1074,38 @@ local function HideDisplayPopup()
     if displayPopup then displayPopup:Hide() end
 end
 
+-- Where the Display Settings popup opens, relative to the editor (native QA
+-- test.163008). Anchored under its button, the 300 px TOOLTIP-strata popup
+-- covered the editor's upper-right control band (Import / Export, My Builds,
+-- the locked Echo slots with their Auto-manage checkbox and Plan
+-- alternatives), so those could not be clicked while it was open. It now
+-- opens beside the editor where the screen has room for it, else inside the
+-- editor with its top below that band (over the Selected Echoes list). Pure:
+-- spec.editor {left, top, right, bottom} in UIParent units (y up, as
+-- GetLeft/GetTop report scaled to UIParent), spec.ratio editor units to
+-- UIParent units (a FitToScreen-scaled editor is below 1), spec.screenW,
+-- spec.width the popup width. Returns {where, point, relativePoint, x, y}
+-- for popup:SetPoint(point, editor, relativePoint, x, y); offsets are in the
+-- popup's own (UIParent) units.
+M.DISPLAY_POPUP_BAND_BOTTOM = 182 -- editor units: Plan alternatives' bottom (154 + 22) and a 6 px gap
+M.DISPLAY_POPUP_BUTTON_BOTTOM = 94 -- editor units: Display Settings' bottom (66 + 22) and a 6 px gap
+function M.DisplayPopupPlacement(spec)
+    local e, ratio = spec.editor, tonumber(spec.ratio) or 1
+    local width, gap = tonumber(spec.width) or 300, 6
+    local screenW = tonumber(spec.screenW) or 0
+    local beside = -M.DISPLAY_POPUP_BUTTON_BOTTOM * ratio
+    if e and screenW > 0 then
+        if e.right + gap + width <= screenW then
+            return {where="right", point="TOPLEFT", relativePoint="TOPRIGHT", x=gap, y=beside}
+        end
+        if e.left - gap - width >= 0 then
+            return {where="left", point="TOPRIGHT", relativePoint="TOPLEFT", x=-gap, y=beside}
+        end
+    end
+    return {where="inside", point="TOPRIGHT", relativePoint="TOPRIGHT", x=-34 * ratio,
+        y=-M.DISPLAY_POPUP_BAND_BOTTOM * ratio}
+end
+
 local function ToggleDisplayPopup(anchorTo)
     local p = EnsureDisplayPopup()
     if p:IsShown() then
@@ -1081,7 +1113,18 @@ local function ToggleDisplayPopup(anchorTo)
         return
     end
     p:ClearAllPoints()
-    if anchorTo and anchorTo.IsVisible and anchorTo:IsVisible() then
+    if frame and frame:IsVisible() then
+        local parentScale = UIParent:GetEffectiveScale()
+        local ratio = (parentScale and parentScale > 0)
+            and (frame:GetEffectiveScale() / parentScale) or 1
+        local left, top, right, bottom = frame:GetLeft(), frame:GetTop(), frame:GetRight(), frame:GetBottom()
+        local edges = (left and top and right and bottom) and {left=left * ratio, top=top * ratio,
+            right=right * ratio, bottom=bottom * ratio} or nil
+        local place = M.DisplayPopupPlacement({editor=edges, ratio=ratio,
+            screenW=UIParent:GetWidth(), width=p:GetWidth()})
+        p:SetPoint(place.point, frame, place.relativePoint, place.x, place.y)
+        p._nexusPlacement = place.where
+    elseif anchorTo and anchorTo.IsVisible and anchorTo:IsVisible() then
         p:SetPoint("TOPRIGHT", anchorTo, "BOTTOMRIGHT", 0, -6)
     else
         p:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -1387,14 +1430,23 @@ local function EnsureFrame()
     wishNav:SetPoint("LEFT", boardNav, "RIGHT", 4, 0)
     wishNav:SetText("|cffffd200Wishlists|r")
     wishNav:Disable()
-    -- M7: Help for this window (its Wishlists page). The editor stays open
-    -- below Help (HIGH under Help's DIALOG); nothing is saved or discarded.
+    -- Help is the guided setup coach (Help.OpenHelp; native QA test.163008);
+    -- Reference, at the top right clear of the centred title, is the manual's
+    -- Wishlists page. The editor stays open below either (HIGH under their
+    -- DIALOG); nothing is saved or discarded.
     frame._helpNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame._helpNav:SetSize(56, 22)
     frame._helpNav:SetPoint("LEFT", wishNav, "RIGHT", 4, 0)
     frame._helpNav:SetText("Help")
     frame._helpNav:SetScript("OnClick", function()
-        if Nexus.Help then Nexus.Help.Show("wishlists") end
+        if Nexus.Help and Nexus.Help.OpenHelp then Nexus.Help.OpenHelp("wishlists") end
+    end)
+    frame._referenceNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    frame._referenceNav:SetSize(84, 22)
+    frame._referenceNav:SetPoint("TOPRIGHT", -40, -12)
+    frame._referenceNav:SetText("Reference")
+    frame._referenceNav:SetScript("OnClick", function()
+        if Nexus.Help and Nexus.Help.OpenReference then Nexus.Help.OpenReference("wishlists") end
     end)
     if Nexus.FullUIWorkspaces then
         Nexus.FullUIWorkspaces.BindTabs(frame, "plan", {

@@ -186,7 +186,7 @@ f:SetWidth(420)
 print('PASS header line 1 order and no overlap at 420 px and 640 px, Auto shown and hidden')
 
 -- 4b. Both Difficulty / Soul Ash HUD preferences, through the setter the
--- Manage menu uses. With the Nexus HUD the panel mirrors the values (attached:
+-- Options menu uses. With the Nexus HUD the panel mirrors the values (attached:
 -- the original b0870929 status card, for a build in progress as for a finished
 -- one -- design/current "Nexus Main Panel - Compact Redesign" retired the
 -- flattened Play line); with the server HUD the stock widget is the display
@@ -249,7 +249,7 @@ assert(status.VisibilityFacts().mode==originalMode,'fixture: the original HUD pr
 f:SetWidth(420)
 print('PASS both Difficulty / Soul Ash HUD modes: header line 1 unchanged, the attached status below it')
 
--- 5. Route: a click opens the same Manage menu at the button and changes
+-- 5. Route: a click opens the Options menu at the button and changes
 -- nothing: no saved data, no action, no Auto change, no visibility change.
 assert(P.Render(Model()))
 local opened
@@ -260,31 +260,29 @@ menu:Click()
 assert(opened and opened.anchor==menu and opened.frame==P._moreMenu,'the menu opens at the Options button')
 local top=opened.list
 -- design/current "Nexus Main Panel - Compact Redesign": Appearance is a
--- top-level Options entry (no Manage hover chain), the shared Theme list with
--- the current choice checked; Manage keeps every other route.
-local manageItem,appearanceItem
+-- top-level Options entry, the shared Theme list with the current choice
+-- checked. Native QA test.163008: every other route is a direct choice on
+-- the same top level; there is no Manage submenu.
+local appearanceItem,appearances=nil,0
+local found={}
 for _,item in ipairs(top)do
- if item.text=='Manage' then manageItem=item end
- if type(item.text)=='string' and item.text:find('^Appearance: ') then appearanceItem=item end
+ assert(item.text~='Manage','Options opens no Manage submenu')
+ if type(item.text)=='string' then found[item.text]=item end
+ if type(item.text)=='string' and item.text:find('^Appearance: ') then appearanceItem=item;appearances=appearances+1 end
 end
-assert(top[1] and top[1].isTitle and manageItem and manageItem.hasArrow
- and type(manageItem.menuList)=='table','the compact menu reaches Manage')
-assert(appearanceItem and appearanceItem.hasArrow and type(appearanceItem.menuList)=='table'
- and #appearanceItem.menuList==#Nexus.Theme.MenuItems(),'Options opens Appearance directly: the shared Theme list')
+assert(top[1] and top[1].isTitle,'the menu opens with a group title')
+assert(appearances==1 and appearanceItem.hasArrow and type(appearanceItem.menuList)=='table'
+ and #appearanceItem.menuList==#Nexus.Theme.MenuItems(),'Options opens Appearance directly, once: the shared Theme list')
 local checkedRows=0
 for _,item in ipairs(appearanceItem.menuList)do if item.checked then checkedRows=checkedRows+1 end end
 assert(checkedRows>=1,'the current appearance is checked in the direct Options list')
-local found={}
-for _,item in ipairs(manageItem.menuList)do if type(item.text)=='string' then found[item.text]=item end end
-for text in pairs(found)do
- assert(not text:find('^Appearance: '),'Appearance is not repeated under Manage: '..text)
-end
 for _,text in ipairs({'Open Settings...','Hide Nexus Panel','Log viewer...',Nexus.Updates.Status().menu or 'Open Releases page'})do
- assert(found[text] and type(found[text].func)=='function','Manage keeps '..text)
+ assert(found[text] and type(found[text].func)=='function','Options offers '..text..' directly')
 end
+assert(#top<=P.OPTIONS_MENU_MAX_ROWS,'the top level stays within the stock dropdown row limit: '..#top)
 assert(T.Equal(db,NexusDB),'opening the menu writes no saved data')
 assert(#H.actions==actions,'opening the menu sends no game action')
 assert(P.AutoSelectedNow()==autoBefore and f._autoBtn:GetText()==autoText,'opening the menu leaves Auto as it was')
 assert(f:IsShown()==shownBefore,'opening the menu leaves the panel as it was')
-print('PASS Options click route: Manage menu, nothing changed')
+print('PASS Options click route: direct Options choices, nothing changed')
 print('PASS panel options label')

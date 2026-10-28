@@ -3433,17 +3433,27 @@ local function EnsureFrame()
         if Nexus.WishlistEditor then Nexus.WishlistEditor.Show() end
     end)
 
-    -- M7: Help for this window (its Sharing page). Like the other navigation
-    -- buttons it replaces this window, whose layer is above Help's; it opens
-    -- a page only and shares, sends or changes nothing.
+    -- Help is the guided setup coach (Help.OpenHelp; native QA test.163008);
+    -- Reference beside it is the manual's Sharing page. Like the other
+    -- navigation buttons each replaces this window, whose layer is above
+    -- theirs; each opens a page only and shares, sends or changes nothing.
     frame._helpNav = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
     frame._helpNav:SetSize(56,22)
     frame._helpNav:SetPoint("LEFT",wishlistBtn,"RIGHT",4,0)
     frame._helpNav:SetText("Help")
     frame._helpNav:SetScript("OnClick",function()
-        CloseDropdowns()
-        frame:Hide()
-        if Nexus.Help then Nexus.Help.Show("sharing") end
+        if Nexus.Help and Nexus.Help.OpenHelp then
+            Nexus.Help.OpenHelp("sharing",function() CloseDropdowns(); frame:Hide() end)
+        end
+    end)
+    frame._referenceNav = CreateFrame("Button",nil,navBar,"UIPanelButtonTemplate")
+    frame._referenceNav:SetSize(84,22)
+    frame._referenceNav:SetPoint("LEFT",frame._helpNav,"RIGHT",4,0)
+    frame._referenceNav:SetText("Reference")
+    frame._referenceNav:SetScript("OnClick",function()
+        if Nexus.Help and Nexus.Help.OpenReference then
+            Nexus.Help.OpenReference("sharing",function() CloseDropdowns(); frame:Hide() end)
+        end
     end)
     if Nexus.FullUIWorkspaces then
         Nexus.FullUIWorkspaces.BindTabs(frame, "builds", {

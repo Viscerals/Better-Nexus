@@ -293,14 +293,11 @@ C.scenario('K6 its buttons and routes only navigate',function()
  if menu then menu:GetScript('OnClick')(menu) end
  EasyMenu,CloseDropDownMenus=realEasy,realClose
  local entry
+ -- A direct Options choice (native QA test.163008).
  for _,item in ipairs(items or {}) do
-  if item.text=='Manage' and item.hasArrow then
-   for _,row in ipairs(item.menuList or {}) do
-    if row.text=='Setup checklist and status' then entry=row end
-   end
-  end
+  if item.text=='Setup checklist and status' then entry=item end
  end
- C.expect(entry~=nil and type(entry.func)=='function','K6: the ... menu offers Setup checklist and status')
+ C.expect(entry~=nil and type(entry.func)=='function','K6: the Options menu offers Setup checklist and status')
  if entry then
   Nexus.QuickStart.HideChecklist();CloseDropDownMenus=function() end
   entry.func()
@@ -574,14 +571,11 @@ local function J2OpenViaMenu(tag)
   CloseDropDownMenus=function() end
   local menu=NexusPanel and NexusPanel._menuBtn
   if menu and menu:GetScript('OnClick') then menu:GetScript('OnClick')(menu) end
-  for _,item in ipairs(items or {}) do
-   if item.text=='Manage' and item.hasArrow then
-    for _,row in ipairs(item.menuList or {}) do
-     if row.text=='Setup checklist and status' and type(row.func)=='function' then
-      if Nexus.QuickStart and Nexus.QuickStart.HideChecklist then Nexus.QuickStart.HideChecklist() end
-      row.func();opened=true
-     end
-    end
+  -- A direct Options choice (native QA test.163008).
+  for _,row in ipairs(items or {}) do
+   if row.text=='Setup checklist and status' and type(row.func)=='function' then
+    if Nexus.QuickStart and Nexus.QuickStart.HideChecklist then Nexus.QuickStart.HideChecklist() end
+    row.func();opened=true
    end
   end
  end)

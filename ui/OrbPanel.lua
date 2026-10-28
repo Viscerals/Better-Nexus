@@ -695,7 +695,15 @@ local function ensure()
     end)
     frame.review:Hide()
     frame.closeNotice=text(frame,20,-393,580,20,CLOSE_NOTICE)
-    button(frame,20,-414,85,"Help",function()Nexus.Help.Show("orbs")end)
+    -- Help is the guided setup coach (Help.OpenHelp; native QA test.163008),
+    -- which opens in this window's place: closing this window does not stop
+    -- an approved run. Reference is the manual's Orbs page, above this window
+    -- (Help's 40-42 band over this 30-33 one), which stays shown. Neither
+    -- spends, starts or changes anything.
+    frame.help=button(frame,20,-414,85,"Help",function()
+        Nexus.Help.OpenHelp("orbs",function(opened)if opened then frame:Hide()end end)
+    end)
+    frame.reference=button(frame,340,-414,95,"Reference",function()Nexus.Help.OpenReference("orbs")end)
     frame.advancedToggle=button(frame,115,-414,95,"Advanced",function()
         advanced=not advanced;pinTopLeft(frame);UI.Refresh()
     end)

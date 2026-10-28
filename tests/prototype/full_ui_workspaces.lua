@@ -224,9 +224,11 @@ UIParent:SetSize(800,600)
 check(U.ShowExplore()==true,'Explore reports a visible destination to its panel caller')
 local left=G.Rect(builds._workspaceTabs.builds,builds)
 local right=G.Rect(builds._helpNav,builds)
+-- Native QA test.163008: Reference (the manual) sits after Help on the row.
+local reference=G.Rect(builds._referenceNav,builds)
 check(builds:GetWidth()<=UIParent:GetWidth() and left[1]>=0
- and right[3]<=builds:GetWidth(),
- 'workspace tabs and Help stay inside the narrow real Build Library window')
+ and right[3]<=builds:GetWidth() and reference[3]<=builds:GetWidth() and G.Apart(right,reference),
+ 'workspace tabs, Help and Reference stay inside the narrow real Build Library window')
 builds:Hide()
 UIParent:SetSize(oldWidth,oldHeight)
 check(#H.actions==beforeActions and #H.sent==beforeSends and requests==0,

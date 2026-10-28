@@ -349,9 +349,9 @@ for _,case in ipairs({PROTECTED[1],PROTECTED[3],PROTECTED[5]})do
   check(Nexus.UserText.Message('CURSOR_REQUIRED')==want,label..': the status text shown')
   Nexus.Panel.Show()
   local items;EasyMenu=function(list)items=list end;NexusPanel._menuBtn:Click()
-  local manage,menu
-  for _,item in ipairs(items or {})do if item.text=='Manage' then manage=item end end
-  for _,item in ipairs(manage and manage.menuList or {})do
+  -- The language chooser is a direct Options choice (native QA test.163008).
+  local menu
+  for _,item in ipairs(items or {})do
    if type(item.text)=='string' and item.text:find('^Language')then menu=item end
   end
   local disabled=0;for _,row in ipairs(menu and menu.menuList or {})do if row.func and row.disabled==true then disabled=disabled+1 end end

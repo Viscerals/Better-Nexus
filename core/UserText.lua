@@ -770,8 +770,8 @@ T.GLOSSARY = "Counts: planned copies (the plan), rolled copies this run, the Wis
     .. "Unavailable is not 0, and a plan is not a finished build. Best known: the best shared DPS record this "
     .. "client holds for the exact same Echoes; it is not a complete or server-wide ranking. My Builds is the "
     .. "game's page of your Saved Builds; in Build Library, the Mine scope lists your Saved Builds and "
-    .. "shared listings. Options: the Options button on the Nexus panel header opens its menu, with Manage; "
-    .. "point at it for the current status."
+    .. "shared listings. Options: the Options button on the Nexus panel header opens its menu of direct "
+    .. "choices; point at it for the current status."
 
 ------------------------------------------------------------------------
 -- Guided setup coach copy (ui/GuidedSetup.lua, issue #131), from the Claude
@@ -1036,8 +1036,8 @@ T.Guide = {
     chat = {paused = '[Nexus] Setup guide closed at "%s". Closing changed nothing.',
         -- Both routes open the coach itself (the design's "Reopen: Nexus
         -- menu > Setup / Welcome"). A resumed guide reads every result again.
-        reopen = '[Nexus] Reopen it from the Options menu: Manage > Setup / Welcome, or type /nexus help. It resumes at this step and checks every result again.',
-        reopenSession = '[Nexus] Reopen it from the Options menu: Manage > Setup / Welcome, or type /nexus help. Saved data cannot be written right now, so your place is kept only until you reload or log out.',
+        reopen = '[Nexus] Reopen it from the Options menu: Setup / Welcome, or type /nexus help. It resumes at this step and checks every result again.',
+        reopenSession = '[Nexus] Reopen it from the Options menu: Setup / Welcome, or type /nexus help. Saved data cannot be written right now, so your place is kept only until you reload or log out.',
         complete = '[Nexus] Setup confirmed: %s follows %s.',
         auto = '[Nexus] Auto is %s (this guide did not change it).',
         explore = '[Nexus] Look-around finished. Nothing was set up or changed.',
