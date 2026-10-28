@@ -50,7 +50,10 @@
 -- Sample buttons are demo controls, not offered. Native pixels,
 -- native font measurement and the real-client wide/compact comparison are
 -- NOT RUN. Status glyphs are printable ASCII beside a word (the shared
--- Readout rule), never Unicode symbols that the client may not draw.
+-- Readout rule), never Unicode symbols that the client may not draw; on the
+-- summary each glyph is its own 14 px icon in the 12 px font (StatusIcon).
+-- The design's round radio marks are the client's own UIRadioButtonTemplate
+-- (NewRow), not a drawn shape.
 --
 -- The footer follows the design's three treatments. Continue is the one
 -- filled action (amber fill, light gold edge, dark label; while it waits, the
@@ -94,7 +97,7 @@ local HELP = {welcome = 'start', wishlist = 'wishlists', target = 'wishlists', a
 -- and a word in the copy.
 local COLOR = {['not'] = {0.62, 0.6, 0.58}, waiting = {0.95, 0.8, 0.38}, checking = {0.58, 0.76, 1},
     verified = {0.46, 0.86, 0.52}, skipped = {0.72, 0.7, 0.68}, unavailable = {0.82, 0.64, 1},
-    stale = {0.5, 0.86, 0.9}, rejected = {1, 0.52, 0.42}}
+    stale = {0.5, 0.86, 0.9}, rejected = {1, 0.52, 0.42}, observed = {0.62, 0.84, 0.72}}
 local GOLD, TEXT, MUTED = {1, 0.78, 0.36}, {0.92, 0.9, 0.86}, {0.74, 0.7, 0.66}
 local HELP_BLUE = {0.6, 0.72, 0.95}
 -- Session-only view state: the help card, the checklist, Auto's explainer,
@@ -110,6 +113,23 @@ local function ResetImport() view.import = {open = false, text = '', result = ni
 
 local function Core() return Nexus.GuidedSetup end
 local function Copy() local t = Nexus.UserText; return t and t.Guide or {} end
+-- Words this file adds until core/UserText.lua Guide carries them; a key of
+-- the same name there wins (Words). What Nexus follows now on the Wishlist
+-- step (core CurrentAssignment), and the summary's Already linked status: a
+-- link read back that this guide did not make, never Done - confirmed.
+local EXTRA = {
+    wishlist = {assignedNow = 'Assigned now to %s',
+        assignedNowLine = 'Assigned now to %s: %s.',
+        assignedNowAmbiguous = 'Assigned now to %s: %s. More than one listed Wishlist holds the same Echoes under that name, so none is marked.',
+        assignedNowUnknown = '! What is assigned now could not be read, so no Wishlist is marked as assigned.'},
+    status = {observed = {glyph = '=', word = 'Already linked'}},
+}
+local function Words(group, key)
+    local c = Copy()[group]
+    local v = type(c) == 'table' and c[key] or nil
+    if v == nil and EXTRA[group] then v = EXTRA[group][key] end
+    return v
+end
 local function Fmt(text, ...)
     local ok, s = pcall(string.format, tostring(text or ''), ...)
     return ok and s or tostring(text or '')
@@ -377,16 +397,25 @@ local function Actions(specs, x, y, w)
     return used
 end
 
--- A choice row: a radio box (when given), its title as the button text and a
+-- A choice row: a radio mark (when given), its title as the button text and a
 -- wrapped description under it. Long names wrap; the full title is on hover.
+-- The mark is the client's own round single-choice button (the stock
+-- UIRadioButtonTemplate, as the Sync mode dialog in ui/CommunityRenderer.lua
+-- uses it: its ring, and its dot only while checked), so a choice never reads
+-- as a square check box and no texture path is assumed here. It takes no
+-- mouse: the row stays the one click target, and each render sets the mark
+-- checked for the one choice only. The client's radio art is NOT RUN here.
 local function NewRow()
     local b = NewButton()
     b.desc = b:CreateFontString(nil, 'OVERLAY', FONTS.body)
     b.desc:SetJustifyH('LEFT'); b.desc:SetJustifyV('TOP')
-    b.radio = b:CreateTexture(nil, 'OVERLAY'); b.radio:SetTexture(WHITE)
-    b.radioIn = b:CreateTexture(nil, 'OVERLAY'); b.radioIn:SetTexture(WHITE)
-    b.radioHole = b:CreateTexture(nil, 'OVERLAY'); b.radioHole:SetTexture(WHITE)
-    b.extra = {b.desc, b.radio, b.radioIn, b.radioHole}
+    b.radio = CreateFrame('CheckButton', nil, b, 'UIRadioButtonTemplate')
+    b.radio:SetSize(16, 16)
+    b.radio:EnableMouse(false)
+    local theme = Nexus.Theme
+    if theme and theme.Exempt then theme.Exempt(b.radio) else b.radio._nexusThemeExempt = true end
+    b.radio:Hide()
+    b.extra = {b.desc, b.radio}
     return b
 end
 
@@ -429,7 +458,8 @@ local function Row(spec, x, y, w)
     if desc ~= '' then
         b.desc:ClearAllPoints()
         b.desc:SetPoint('TOPLEFT', b, 'TOPLEFT', inset, -8 - th)
-        b.desc:SetTextColor(MUTED[1], MUTED[2], MUTED[3])
+        local dc = spec.descColor or MUTED
+        b.desc:SetTextColor(dc[1], dc[2], dc[3])
         local metrics = Nexus.LayoutMetrics
         if metrics and type(metrics.WrapHeight) == 'function' then dh = metrics.WrapHeight(b.desc, tw, 12, BLOCK_MAX)
         else b.desc:SetWidth(tw); b.desc:SetHeight(14); dh = 14 end
@@ -441,36 +471,87 @@ local function Row(spec, x, y, w)
     b:ClearAllPoints()
     b:SetPoint('TOPLEFT', frame, 'TOPLEFT', x, y)
     if spec.radio ~= nil then
-        -- A filled square inside a ring reads as chosen without colour.
-        b.radio:ClearAllPoints(); b.radio:SetPoint('TOPLEFT', b, 'TOPLEFT', 9, -8); b.radio:SetSize(12, 12)
-        Paint(b.radio, spec.radio and GOLD or MUTED); b.radio:Show()
-        b.radioHole:ClearAllPoints(); b.radioHole:SetPoint('TOPLEFT', b, 'TOPLEFT', 11, -10); b.radioHole:SetSize(8, 8)
-        Paint(b.radioHole, {0.08, 0.06, 0.05}); b.radioHole:Show()
-        b.radioIn:ClearAllPoints(); b.radioIn:SetPoint('TOPLEFT', b, 'TOPLEFT', 12, -11); b.radioIn:SetSize(6, 6)
-        Paint(b.radioIn, GOLD)
-        if spec.radio then b.radioIn:Show() else b.radioIn:Hide() end
-    end
+        -- The round mark's dot reads as chosen without colour (NewRow).
+        b.radio:ClearAllPoints(); b.radio:SetPoint('TOPLEFT', b, 'TOPLEFT', 7, -7)
+        b.radio:SetChecked(spec.radio == true)
+        if spec.enabled == false then b.radio:Disable() else b.radio:Enable() end
+        b.radio:Show()
+    else b.radio:Hide() end
     local theme = Nexus.Theme
     if theme and theme.SetSelected then theme.SetSelected(b, spec.radio == true or spec.selected == true) end
     return h
 end
 
--- A status chip: glyph and word in a bordered box (never colour alone). Its
--- width is the whole text in the conservative text model at the current font
--- scale, up to maxW; a longer word wraps and the box grows to hold it.
--- Returns its width and height.
-local function Chip(kind, word, x, y, right, maxW)
+-- A status kind's glyph and word: the copy's, else this file's (EXTRA).
+local function Status(kind)
     local c = Copy().status or {}
-    local st = c[kind] or c['not'] or {glyph = '?', word = '?'}
-    local str = (st.glyph or '?') .. ' ' .. (word or st.word or '')
+    return c[kind] or EXTRA.status[kind] or c['not'] or {glyph = '?', word = '?'}
+end
+
+-- A status icon: the state's own glyph in the 12 px font inside a 14 px mark
+-- drawn with the solid texture, filled for Done - confirmed and outlined for
+-- every other state. Each state has its own printable ASCII glyph (the
+-- Readout rule), so the icons differ without colour; no icon texture of the
+-- client is assumed. Native glyph pixels are NOT RUN.
+local ICON = 14
+local function StatusIcon(kind, x, y)
+    local color = COLOR[kind] or MUTED
+    local solid = kind == 'verified'
+    if solid then Fill(x, y, ICON, ICON, color, 0.95)
+    else
+        Fill(x, y, ICON, 1, color, 0.95); Fill(x, y - ICON + 1, ICON, 1, color, 0.95)
+        Fill(x, y, 1, ICON, color, 0.95); Fill(x + ICON - 1, y, 1, ICON, color, 0.95)
+    end
+    Text(Status(kind).glyph or '?', x, y - 1, ICON, 'head', solid and {0.06, 0.04, 0.03} or color, 'CENTER')
+end
+
+-- A status chip: its icon and its word in the 12 px font, in a bordered box
+-- (never colour alone). Its width is the icon and the word in the
+-- conservative text model at the current font scale (its 10 px character
+-- width scaled to the 12 px font), up to maxW; a longer word wraps and the
+-- box grows to hold it. Returns its width and height.
+local function Chip(kind, word, x, y, right, maxW)
+    local str = word or Status(kind).word or ''
     local metrics = Nexus.LayoutMetrics
     local char = metrics and metrics.ConservativeText and metrics.ConservativeText(metrics.RuntimeMetrics and metrics.RuntimeMetrics() or 1) or 7
     local length = #(str:gsub('[\128-\191]', ''))
-    local w = math.max(24, math.min(maxW or CW, math.ceil(length * char) + 12))
+    local w = math.max(ICON + 30, math.min(maxW or CW, math.ceil(length * char * 1.2) + ICON + 12))
     if right then x = x - w end
-    local h = math.max(18, Text(str, x + 6, y - 3, w - 8, 'small', COLOR[kind] or MUTED) + 6)
-    Box(x, y, w, h, COLOR[kind] or MUTED, {0.08, 0.06, 0.05}, 0.6)
+    local color = COLOR[kind] or MUTED
+    local h = math.max(18, Text(str, x + ICON + 8, y - 2, w - ICON - 12, 'strong', color) + 4)
+    StatusIcon(kind, x + 4, y - 2)
+    Box(x, y, w, h, color, {0.08, 0.06, 0.05}, 0.6)
     return w, h
+end
+
+-- Go to step on a summary row: the design's borderless link under the chip,
+-- in the link look of Skip for now with the 12 px font, sized to its label
+-- and right-aligned at `right`. It only moves the guide. Returns its width.
+local GO_H = 18
+local function NewGoLink()
+    local b = FooterAction('link')
+    for _, line in ipairs({b.underline, b.underlineHover}) do
+        line:ClearAllPoints(); line:SetPoint('BOTTOM', b, 'BOTTOM', 0, 2)
+    end
+    return b
+end
+local function GoLink(label, act, right, y, maxW)
+    local b = Take('golink', NewGoLink)
+    Arm(b, {label = label, act = act})
+    b:SetHeight(GO_H)
+    local metrics = Nexus.LayoutMetrics
+    local w = metrics and metrics.FitButtonWidth and metrics.FitButtonWidth(b, 40, maxW or CW) or 80
+    -- The underline spans the text (FooterButton's rule for Skip for now).
+    local ok, tw = pcall(b.GetTextWidth, b)
+    tw = ok and tonumber(tw) or nil
+    if not (tw and tw > 0 and tw < math.huge) then tw = w - 24 end
+    tw = math.max(1, math.min(w - 8, math.ceil(tw)))
+    b.underline:SetWidth(tw); b.underlineHover:SetWidth(tw)
+    -- The design's amber link, not the footer link's grey.
+    b.label:SetTextColor(GOLD[1], GOLD[2], GOLD[3]); Paint(b.underline, GOLD)
+    b:ClearAllPoints()
+    b:SetPoint('TOPLEFT', frame, 'TOPLEFT', right - w, y)
+    return w
 end
 
 -- The design's desktop window where the visible UI holds it (with the same
@@ -685,14 +766,24 @@ function VIEW.wishlist(g, s, ctx, c, y)
     -- The one listed row that is the choice itself (core ChosenOption): copies
     -- of the same Echoes share a key, so a key alone would mark each of them.
     local chosen = type(g.ChosenOption) == 'function' and g.ChosenOption(list) or nil
+    -- What Nexus follows now (core CurrentAssignment, read for this render):
+    -- its one listed row says Assigned now. That is the game's assignment,
+    -- not this step's choice: the row is not selected, chosen or done by it.
+    local cur = ctx.current
+    local now, matches
+    if cur and type(g.CurrentOption) == 'function' then now, matches = g.CurrentOption(list, cur) end
+    local where = cur and cur.destination and TargetLabel(cur.destination, cur.destName) or nil
     local more
     for i, cand in ipairs(list or {}) do
         if i > 8 then more = t.more; break end
         -- One choice at a time: while the paste field is the chosen way, a
         -- listed Wishlist shows unchosen (Continue waits on the code; Render).
         local mine = chosen == i and not imp.open
+        local desc = cand.lockEvidenceStatus == 'unavailable' and t.needsRoles or t.yours
+        local current = now == i
+        if current then desc = Fmt(Words('wishlist', 'assignedNow'), where or '?') .. '\n' .. (desc or '') end
         y = y - Row({label = Name(cand.name), radio = mine and true or false,
-            desc = cand.lockEvidenceStatus == 'unavailable' and t.needsRoles or t.yours,
+            desc = desc, descColor = current and COLOR.observed or nil,
             act = function()
                 imp.open, view.planDraft = false, false
                 local ok, why = g.ChooseWishlist(cand); note = (not ok) and n[why] or nil
@@ -708,6 +799,15 @@ function VIEW.wishlist(g, s, ctx, c, y)
         desc = blocked and t.createBlockedDesc or t.createDesc, radio = false,
         act = function() imp.open = false; U.RouteEditor('new') end}, PAD, y, CW) - GAP
     y = PlanDraftCard(c, y)
+    -- What Nexus follows now when no shown row can carry it: unread (never
+    -- guessed), shared by several listed rows (none is picked), or not among
+    -- the rows shown. Nothing assigned, or an empty active build, says nothing.
+    if cur and cur.state == 'unknown' then
+        y = y - Text(Words('wishlist', 'assignedNowUnknown'), PAD, y, CW, 'body', COLOR.unavailable) - GAP
+    elseif list and cur and (cur.state == 'assigned' or cur.state == 'roles') and not (now and now <= 8) then
+        local line = (matches or 0) > 1 and Words('wishlist', 'assignedNowAmbiguous') or Words('wishlist', 'assignedNowLine')
+        y = y - Text(Fmt(line, where or '?', Name(cur.name)), PAD, y, CW, 'body', COLOR.observed) - GAP
+    end
     -- A kept Wishlist that several listed ones match (core Readopt): none
     -- was taken, and the step says so until the player chooses.
     if s.reselect and not w then y = y - Text(t.reselect, PAD, y, CW, 'body', COLOR.waiting) - GAP end
@@ -1016,22 +1116,25 @@ function VIEW.summary(g, s, ctx, c, y)
         if id == 'auto' and not s.autoKept and kind ~= 'stale' and kind ~= 'skipped' then
             kind, word = 'not', Fmt(fin.autoNotReviewed, ctx.auto == 'on' and 'ON' or 'OFF')
         end
+        -- A link Nexus read back but this guide did not make (core
+        -- AssignStatus observed) has its own icon, apart from Done - confirmed.
+        if id == 'assign' and inPath and st.state == 'observed' then kind = 'observed' end
         local rt = y
         local half = math.floor(CW / 2)
+        -- One row, two text lines (the design's summary row): the step and
+        -- its detail on the left; on the right its chip and, under it on the
+        -- detail's line, Go to step as the design's small link, never a
+        -- button stacked under the chip.
         local cw, chh = Chip(kind, word, PAD + CW - 6, y - 6, true, half)
-        -- Go to step sits under the chip at the width its label needs; the
-        -- row's words keep the rest of the row.
-        local side, bh = cw, 0
-        if inPath and kind ~= 'verified' and not (id == 'auto' and s.autoKept) then
+        local side, gh = cw, 0
+        if inPath and kind ~= 'verified' and kind ~= 'observed' and not (id == 'auto' and s.autoKept) then
             local target = id
-            local go, gw = Action({label = b.goStep, act = function() g.GoTo(target) end}, PAD, y - 10 - chh, half)
-            go:ClearAllPoints()
-            go:SetPoint('TOPLEFT', frame, 'TOPLEFT', PAD + CW - 6 - gw, y - 10 - chh)
-            side, bh = math.max(cw, gw), 4 + 22
+            local gw = GoLink(b.goStep, function() g.GoTo(target) end, PAD + CW - 6, y - 8 - chh, half)
+            side, gh = math.max(cw, gw), 2 + GO_H
         end
         local lh = Text((fin.rows or {})[id] or id, PAD + 8, y - 6, CW - side - 24, 'head', TEXT)
         lh = lh + Text(Detail(id, kind), PAD + 8, y - 8 - lh, CW - side - 24, 'body', MUTED) + 2
-        local rh = math.max(lh, chh + bh + 4, 22) + 8
+        local rh = math.max(lh, chh + gh + 2, 22) + 8
         Fill(PAD + 1, y - rh, CW - 2, 1, {0.3, 0.24, 0.18}, 1)
         y = rt - rh
     end
@@ -1511,6 +1614,11 @@ function U.Render()
         auto = g.AutoState(), character = Character(),
         kept = type(g.PlaceKept) == 'function' and g.PlaceKept() or 'session'}
     ctx.summary = g.Summary()
+    -- What Nexus follows now, read for this render of the Wishlist step only
+    -- (VIEW.wishlist); never kept, so a later render reads it again.
+    if id == 'wishlist' and not view.help and type(g.CurrentAssignment) == 'function' then
+        ctx.current = g.CurrentAssignment()
+    end
     local metrics = Nexus.LayoutMetrics
     local labels = c.labels or {}
     local pos, total = g.Position()

@@ -383,6 +383,47 @@ function G.ChosenOption(list)
     return found
 end
 
+-- What Nexus follows now, apart from anything the coach chose: the read back
+-- (ReadAssignment) of the destination the Echo Journal chooser assigns to
+-- now (TargetOptions journal: the active Saved Build, else the first-run
+-- target). It is the game's assignment, never a guide choice, receipt or
+-- result: it selects, completes, keeps and changes nothing, and it is read
+-- again on every call. A link of a Saved Build that is not active is that
+-- build's own (the Saved Build step lists it), not this. `state`: 'assigned'
+-- or 'roles' (with key, name and slot), 'none', 'blocked' (the active Saved
+-- Build is empty or missing, so it follows nothing) or 'unknown' (Saved
+-- Builds or the destination cannot be read now; nothing is guessed).
+-- `destination` and `destName` say where.
+function G.CurrentAssignment()
+    local opts = G.TargetOptions()
+    if not opts then return {state = 'unknown'} end
+    if opts.journal == 'blocked' then return {state = 'blocked'} end
+    local r = G.ReadAssignment(opts.journal)
+    r.destination = opts.journal
+    r.destName = opts.journal ~= 'first' and opts.journalName or nil
+    return r
+end
+
+-- The index in `list` (WishlistOptions) of the Wishlist `cur`
+-- (CurrentAssignment) names, and how many listed rows could be it. As for
+-- ChosenOption, Wishlists holding the same Echoes share one key, so a row
+-- must also have the read back's name, and its server slot when the read back
+-- has one; while two or more rows match, none is named. Reads only.
+function G.CurrentOption(list, cur)
+    if not (type(cur) == 'table' and (cur.state == 'assigned' or cur.state == 'roles')
+        and type(list) == 'table') then return nil, 0 end
+    local found, count = nil, 0
+    for i, c in ipairs(list) do
+        if c.key == cur.key and tostring(c.name or '') == tostring(cur.name or '')
+            and (cur.slot == nil or tonumber(c.slot) == cur.slot) then
+            count = count + 1
+            found = found or i
+        end
+    end
+    if count ~= 1 then return nil, count end
+    return found, 1
+end
+
 -- The guide opened the editor or the import dialog: the next save or draft
 -- reported after this point belongs to this step.
 function G.AwaitSave()
@@ -417,6 +458,9 @@ function G.ReadAssignment(dest)
     if not ok or type(cand) ~= 'table' then r.state = 'unknown'; return r end
     r.key = type(key) == 'string' and key or cand.key
     r.name = tostring(cand.name or '')
+    -- The server slot of the Wishlist the read back resolved, or nil when the
+    -- adapter could not pin one row (GameAdapter WishlistRoles.ResolveSaved).
+    r.slot = tonumber(cand.slot)
     r.state = (evidence == 'actionable' and 'assigned') or (evidence == 'evidence-pending' and 'roles') or 'unknown'
     return r
 end

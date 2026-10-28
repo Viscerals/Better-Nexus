@@ -374,6 +374,8 @@ NAMES += ['play_panel_summary']
 NAMES += ['panel_options_label']
 # Native QA test.163008: window Help opens the guided coach and a labelled Reference opens the window's manual page; Options offers direct choices (no Manage submenu); Hide details collapses the Play detail section and its space, Show details restores the same counts, reload starts collapsed; Display Settings opens clear of the editor's upper-right controls at scaled and edge layouts (EXPECT fails at 0e5b84d7 by design; native NOT_RUN).
 NAMES += ['native_qa_163008']
+# Issues #131/#163 guide slice after native QA test.163008: the Wishlist the active Saved Build follows says Assigned now apart from the coach's single choice (duplicate-content identity, failing/missing/changed/inactive reads, replay and offline reload, honest summary); choice cards use the client round radio mark (UIRadioButtonTemplate); Step 7 rows show an icon and 12 px word with Go to step as a link on the row (EXPECT fails at 0e5b84d7 by design; native NOT_RUN).
+NAMES += ['visual_guide_context_163009']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

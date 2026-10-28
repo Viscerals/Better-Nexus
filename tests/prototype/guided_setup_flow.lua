@@ -1358,8 +1358,10 @@ end)
 -- F17: the choice cards' selected look (ui/GuidedSetup.lua Row) after card B
 -- then card C, as reported from native Setup step 2/7: both cards kept the
 -- selected look while the footer named C (the screenshots are not in this
--- packet). The look is read from each shown row: its radio check (radioIn)
--- and gold ring, and the Theme's selection (Theme.SetSelected: its bar, the
+-- packet). The look is read from each shown row: its round radio mark
+-- checked (the client's UIRadioButtonTemplate since the guide slice after
+-- test.163008, in place of the painted dot and gold ring; its art is the
+-- client's), and the Theme's selection (Theme.SetSelected: its bar, the
 -- held highlight through spied LockHighlight / UnlockHighlight, and its
 -- _nexusSelected mark). Exactly one card of the step carries any of it, it
 -- carries all of it, and it is the coach's own choice (core State), which
@@ -1379,7 +1381,6 @@ C.scenario('F17 choosing card B then card C leaves exactly one selected card: th
  Boot({copy=true})
  local T,G=Nexus.UserText.Guide,Nexus.GuidedSetup
  local TW=T.wishlist
- local GOLD={1,0.78,0.36}
  local uiW,uiH=UIParent:GetWidth(),UIParent:GetHeight()
  -- Spies on the coach's buttons from the moment they are made, so every look
  -- read below is the one the click's own render drew: the held highlight and
@@ -1415,24 +1416,20 @@ C.scenario('F17 choosing card B then card C leaves exactly one selected card: th
    if c.kind=='Button' and not c.spied then Spy(c,c._nexusSelected);late=true end
   end
   -- Rows made before the spies are drawn once more at Welcome, before any
-  -- choice, so their ring colour is read too.
+  -- choice, so their held highlight is read from a spied render too.
   if late then Nexus.GuidedSetupUI.Render() end
   local Click=Press
-  local function Gold(t)
-   local d=t.drawn
-   return d~=nil and math.abs(d[1]-GOLD[1])<1e-6 and math.abs(d[2]-GOLD[2])<1e-6 and math.abs(d[3]-GOLD[3])<1e-6
-  end
   -- One row's selected look, part by part.
   local function Look(r)
    local radio=r.radio:IsShown()
-   return {radio=radio,check=r.radioIn:IsShown(),ring=radio and Gold(r.radio),
+   return {radio=radio,check=radio and type(r.radio.GetChecked)=='function' and r.radio:GetChecked()==true,
     bar=r._nexusSelectedBar~=nil and r._nexusSelectedBar:IsShown(),held=r.held==true,mark=r._nexusSelected==true}
   end
-  local function Any(l) return l.check or l.ring or l.bar or l.held or l.mark end
-  local function All(l) return l.bar and l.held and l.mark and (not l.radio or (l.check and l.ring)) end
+  local function Any(l) return l.check or l.bar or l.held or l.mark end
+  local function All(l) return l.bar and l.held and l.mark and (not l.radio or l.check) end
   local function Desc(l)
    local out={}
-   for _,k in ipairs({'check','ring','bar','held','mark'}) do if l[k] then out[#out+1]=k end end
+   for _,k in ipairs({'check','bar','held','mark'}) do if l[k] then out[#out+1]=k end end
    return #out>0 and table.concat(out,'+') or 'none'
   end
   -- The shown choice rows whose label passes keep: the labels of those with
