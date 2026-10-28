@@ -173,7 +173,10 @@ C.scenario('L1b loadout-uncertain restored record: paused, no guessed target, no
  local hovered,hoverOK=V.TooltipLines(function()mini.reasonHit:GetScript('OnEnter')(mini.reasonHit)end)
  C.guard(hoverOK and hovered[1]==s.reason,'L1b: actual mini hover exposes that complete reason',hovered[1])
  mini.reasonHit:GetScript('OnLeave')(mini.reasonHit)
- C.guard(f:GetWidth()==620 and f:GetHeight()==445 and f.status:GetWidth()==580 and f.status:GetHeight()==74
+ -- Stale exact 445/74 pin updated (finish pass item D, OrbPanel flowBands):
+ -- the full window's rows are measured, at most their former boxes.
+ C.guard(f:GetWidth()==620 and f:GetHeight()<=445 and f.status:GetWidth()==580
+  and f.status:GetHeight()>=12 and f.status:GetHeight()<=74
   and mini:GetWidth()==356 and mini:GetHeight()==196,'L1b: the existing full and mini geometry is retained')
  -- Supply font measurement only: the actual fixed-box tooltip owns the
  -- overflow decision and must expose the exact rendered text when needed.

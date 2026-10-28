@@ -1197,7 +1197,9 @@ end
 local function EnsureFrame()
     if frame then return frame end
     frame=CreateFrame("Frame","NexusLeaderboardFrame",UIParent); frame:SetClampedToScreen(true); if type(UISpecialFrames)=="table" then table.insert(UISpecialFrames,"NexusLeaderboardFrame") end
-    frame:SetSize(980,640); frame:SetPoint("CENTER"); frame:SetFrameStrata("DIALOG"); frame:SetFrameLevel(55); frame:EnableMouse(true); frame:SetMovable(true); frame:RegisterForDrag("LeftButton")
+    -- The workspaces' common width (Plan and Explore are 1040 too), so the
+    -- shared header stands at the same place in each.
+    frame:SetSize(Nexus.LayoutMetrics and Nexus.LayoutMetrics.WORKSPACE_WIDTH or 1040,640); frame:SetPoint("CENTER"); frame:SetFrameStrata("DIALOG"); frame:SetFrameLevel(55); frame:EnableMouse(true); frame:SetMovable(true); frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart",function(self) self:StartMoving() end); frame:SetScript("OnDragStop",function(self) self:StopMovingOrSizing() end); frame:Hide()
     pcall(function() frame:SetBackdrop({bgFile="Interface\\DialogFrame\\UI-DialogBox-Background",edgeFile="Interface\\DialogFrame\\UI-DialogBox-Border",tile=true,tileSize=32,edgeSize=32,insets={left=11,right=12,top=12,bottom=11}}) end)
     pcall(function() frame:SetBackdropColor(0.16,0.165,0.175,0.90) end)
@@ -1219,6 +1221,9 @@ local function EnsureFrame()
         Nexus.FullUIWorkspaces.BindTabs(frame, "records", {
             plan = wish, builds = builds, records = board,
         }, function() if classMenu then classMenu:Hide() end end)
+        Nexus.FullUIWorkspaces.ApplyHeader(frame, frame, {
+            title=title, help=frame._helpNav, reference=frame._referenceNav,
+        })
     end
 
     searchBox=CreateFrame("EditBox","NexusLeaderboardSearch",frame,"InputBoxTemplate"); searchBox:SetSize(265,22); searchBox:SetPoint("TOPLEFT",18,-50); searchBox:SetAutoFocus(false); searchBox:SetScript("OnTextChanged",RefreshInteractive)

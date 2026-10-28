@@ -6,8 +6,12 @@ local function button(label,parent)
 end
 H.OrbPlan();local before=H.Count('orb-spend')
 SlashCmdList.NEXUS('orbs');local f=assert(NexusOrbPanel)
-check(f:IsShown() and f:GetWidth()==620 and f:GetHeight()==445,'bounded normal Orb window')
-check(f.status:GetHeight()==74 and f.closeNotice:GetHeight()==20,'dedicated result reason and single Close disclosure')
+-- Stale presentation pin updated (finish pass item D): the rows under Start
+-- now take the height their text needs (OrbPanel flowBands), so the window is
+-- at most the former 445 high, never a fixed 445 with blank bands; the status
+-- box is measured (at most its former 74, the whole text on hover).
+check(f:IsShown() and f:GetWidth()==620 and f:GetHeight()<=445 and f._bandsBottom~=nil and f._bandsBottom<=f:GetHeight(),'bounded normal Orb window')
+check(f.status:GetHeight()>=12 and f.status:GetHeight()<=74 and f.statusHit~=nil and f.closeNotice:GetHeight()==20,'dedicated result reason and single Close disclosure')
 check(H.Count('orb-spend')==before,'show is read-only with respect to gameplay')
 check(f.approval:GetText():find('Start approves this maximum',1,true) and f.approval:GetText():find('eligible surplus copies',1,true),'Start discloses maximum and automatic source approval')
 button('Advanced',f):Click();check(f.advanced:IsShown(),'optional exclusions and passive recheck')

@@ -39,7 +39,9 @@ section('1 the button and the window',function()
  SlashCmdList.NEXUS('orbs');local f=assert(NexusOrbPanel)
  H.Advance(.5)
  check(f.cont and f.cont:IsShown() and f.cont:IsEnabled(),'the Continue button is shown for the class')
- check(f:GetHeight()==445,'the Orb window keeps its size')
+ -- At most the former 445 (stale exact pin updated by the finish pass, item
+ -- D: measured rows), with every row inside it.
+ check(f:GetHeight()<=445 and f._bandsBottom~=nil and f._bandsBottom<=f:GetHeight(),'the Orb window keeps its size')
  local sent=#H.sent;local reqs=server.requests
  f.cont:Click()
  local w=assert(NexusOrbContinue,'its own window');check(w:IsShown(),'the window opens')

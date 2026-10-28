@@ -442,16 +442,23 @@ function M.Panel(spec)
         -- guidance block of the conservative model's rows (the caller counts
         -- them at the width left of the button) with the passive Open
         -- Orbs... button inline at its right.
+        -- The block is exactly as tall as its guidance (or the button), with
+        -- no inner padding, and the gaps above and below it are at most 8 px
+        -- at any font scale (design/current Lv80: no empty band where the
+        -- offers were). Every earlier section ended with one `gap`.
         local char, line = M.ConservativeText(scale)
         local rows = math.max(1, tonumber(spec.guidanceRows) or 1)
+        local tight = math.min(gap, 8)
         layout.noOffer = true
+        layout.noOfferGap = tight
         if spec.orbButton then
             layout.orbButtonH = math.max(small + 6, line)
             layout.orbButtonW = math.min(width-24, math.ceil(12 * char) + 20)
         end
-        local height = math.max(rows * line, layout.orbButtonH or 0) + gap
+        cursor = cursor - gap + tight
+        local height = math.max(rows * line, layout.orbButtonH or 0)
         Add(layout,"roll",10,cursor,width-20,height)
-        cursor = cursor + height + gap
+        cursor = cursor + height + tight
     elseif spec.activeRoll then
         local height = math.max(104, small * 6 + gap * 4)
         if spec.orbButton then
@@ -742,10 +749,14 @@ function M.Community(spec)
         kind="community",width=width,boxes={},required={},hitboxes={},
         scale=scale,key=key,pageSize=20,small=small,normal=normal,gap=gap,
     }
-    Add(layout,"title",52,10,width-104,normal)
-    local navY = layout.boxes.title.y + layout.boxes.title.h + gap
-    Add(layout,"nav",18,navY,math.min(314,width-70),math.max(24,normal+8))
-    local cursor = layout.boxes.nav.y + layout.boxes.nav.h + gap * 2
+    -- The shared workspace header: the title and the tab row are one row at
+    -- the same anchors as Plan's and Records' (M.WorkspaceHeader).
+    local header = M.WorkspaceHeader(width)
+    local tb, nb = header.boxes.title, header.boxes.tabs
+    Add(layout,"title",tb.x,tb.y,tb.w,tb.h)
+    Add(layout,"nav",nb.x,nb.y,nb.w,nb.h)
+    layout.header = header
+    local cursor = header.bottom + gap * 2
     Add(layout,"browseLabel",20,cursor,width-40,small)
     cursor = cursor + small + math.max(3,math.floor(gap/2))
     cursor = Flow(layout,CONTROL_ORDER,labels,cursor,scale,width-40,nil,true)
@@ -839,6 +850,33 @@ function M.Community(spec)
             math.floor(math.max(28,cardWidth-88)/28))),
     }
     return Remember(communityCache,communityOrder,key,layout)
+end
+
+-- The header Plan, Explore and Records share (FullUIWorkspaces.ApplyHeader):
+-- the three workspace tabs, Plan / Explore / Records, then Help, in one row
+-- from the window's top-left; the title after Help; Reference at the top
+-- right, left of the close button. Every place is measured from the top-left
+-- corner (Reference from the top-right), never centred in the window, so the
+-- tabs and the title keep one place in each workspace at any window width,
+-- and the window's top-left is what navigation carries across. The buttons
+-- keep their template height; a title longer than its room stays one line.
+M.WORKSPACE_WIDTH = 1040
+local WORKSPACE_TABS = {"plan","builds","records"}
+function M.WorkspaceHeader(width)
+    width = math.max(640, math.floor(tonumber(width) or M.WORKSPACE_WIDTH))
+    local top, left, height, gap, tabW, helpW, referenceW = 12, 18, 22, 4, 96, 56, 84
+    local boxes, x = {}, left
+    for _, key in ipairs(WORKSPACE_TABS) do
+        boxes[key] = Box(x, top, tabW, height)
+        x = x + tabW + gap
+    end
+    boxes.help = Box(x, top, helpW, height)
+    x = x + helpW
+    boxes.tabs = Box(left, top, x - left, height)
+    boxes.reference = Box(width - 40 - referenceW, top, referenceW, height)
+    local titleX = x + 16
+    boxes.title = Box(titleX, top + 2, math.max(1, boxes.reference.x - 12 - titleX), 18)
+    return {width=width,top=top,bottom=top + height,order=WORKSPACE_TABS,boxes=boxes}
 end
 
 function M.ResetCache()

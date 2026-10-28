@@ -1158,6 +1158,15 @@ function Renderer.New(options)
             and frame._searchLabel:GetParent() ~= frame._content then
             frame._searchLabel:SetParent(frame._content)
         end
+        -- The shared workspace header (the same anchors as Plan and Records)
+        -- and the control rows' own fonts, after every layout.
+        if Nexus.FullUIWorkspaces and Nexus.FullUIWorkspaces.ApplyHeader then
+            Nexus.FullUIWorkspaces.ApplyHeader(frame, frame._content or frame, {
+                title=frame._titleText, help=frame._helpNav,
+                reference=frame._referenceNav,
+            })
+        end
+        if frame._nexusNormalizeFonts then frame._nexusNormalizeFonts() end
         if detailPanel then detailPanel:SetFrameLevel(frame:GetFrameLevel() + 10) end
         local contentBar = frame._contentBar
         if contentBar then
@@ -3836,6 +3845,38 @@ local function EnsureFrame()
     detailPanel:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 20)
     detailPanel:SetFrameLevel(frame:GetFrameLevel() + 10)
 
+    -- One face and size for the browse and action rows: every control's
+    -- label, in each button state (normal, hover, disabled), the search text
+    -- and its hint, the check box label and the page line use the Nexus
+    -- normal font (it follows the Nexus font scale); the two row headings use
+    -- the Nexus small font. Set per widget, after the window-wide font pass,
+    -- so a template's state change cannot bring back a different size. No
+    -- game font object and no other window is changed; the templates,
+    -- handlers, Sync and sharing controls are untouched.
+    local controlRows = {
+        buttons={scopeBtn,myBuildsBtn,classDropBtn,sortToggle,syncBtn,
+            frame._modeBtn,postBtn,prevPageBtn,nextPageBtn,clearSearchBtn},
+        texts={searchBox,searchLabel,qualifiedLabel,resultText,pageText},
+        headings={browseLabel,actionLabel},
+    }
+    frame._nexusControlFonts = controlRows
+    frame._nexusNormalizeFonts = function()
+        local LM = Nexus.LayoutMetrics
+        if not (LM and LM.FontObject) then return false end
+        local normal, small = LM.FontObject("normal"), LM.FontObject("small")
+        for _, button in ipairs(controlRows.buttons) do
+            for _, setter in ipairs({"SetNormalFontObject","SetHighlightFontObject",
+                "SetDisabledFontObject"}) do
+                if type(button[setter]) == "function" then pcall(button[setter], button, normal) end
+            end
+            local label = type(button.GetFontString) == "function" and button:GetFontString()
+            if label then pcall(label.SetFontObject, label, normal) end
+        end
+        for _, text in ipairs(controlRows.texts) do pcall(text.SetFontObject, text, normal) end
+        for _, text in ipairs(controlRows.headings) do pcall(text.SetFontObject, text, small) end
+        return true
+    end
+
     -- Style the static browser controls once. Dynamic cards are created from
     -- an already dark template and do not need a full recursive restyle on
     -- every refresh.
@@ -3846,6 +3887,15 @@ local function EnsureFrame()
         Nexus.LayoutMetrics.ApplyFontTree(dropPanel,"normal")
         Nexus.LayoutMetrics.ApplyFontTree(sortPanel,"normal")
         frame._nexusOwnedFonts = true
+        -- The window-wide pass above reached the header and the rows too;
+        -- give them back their own fonts.
+        frame._nexusNormalizeFonts()
+        if Nexus.FullUIWorkspaces and Nexus.FullUIWorkspaces.ApplyHeader then
+            Nexus.FullUIWorkspaces.ApplyHeader(frame, frame._content or frame, {
+                title=frame._titleText, help=frame._helpNav,
+                reference=frame._referenceNav,
+            })
+        end
     end
     return frame
 end
@@ -4325,6 +4375,9 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
             or "Invalid title"
         card._fullTitle,card._displayTitle = fullTitle,displayTitle
         card.title:SetText(displayTitle)
+        -- The owner part of the author line (who, and whether the owner is
+        -- established), reused by an incomplete build's waiting line below.
+        local identityTag = ""
         do
             local ownerTag = ""
             if IsSavedMirror(b) then ownerTag = "  |cff66ccffSaved Build|r"
@@ -4339,8 +4392,10 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
             -- M4 (UX-14): a shared row whose owner the presentation layer did
             -- not establish says so on the row itself (the detail already
             -- carries the same note). Display only; no owner inference.
+            identityTag = ownerTag
             if b.publicIdentityVerified == false and ownerTag == "" then
                 qualityTag = qualityTag .. "  |cff999999Owner not established|r"
+                identityTag = "  |cff999999Owner not established|r"
             end
             local displayAuthor = b.displayAuthor
                 or (Nexus.Identity and Nexus.Identity.DisplaySafeText
@@ -4348,7 +4403,6 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
                         b.author or "?", 1024, false))
                 or "Unknown"
             card.author:SetText("by "..displayAuthor..ownerTag..qualityTag)
-            card._fullAuthor = card.author:GetText()
         end
         if IsSavedMirror(b) then
             if b.destinationWishlistName then
@@ -4431,9 +4485,13 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
                     and Nexus.Identity.DisplaySafeText(
                         b.author or "?", 1024, false))
                 or "Unknown"
-            card.author:SetText("by "..displayAuthor
+            card.author:SetText("by "..displayAuthor..identityTag
                 .."  |cff777777- waiting for Echoes|r")
         end
+        -- The hover's full owner and status line is the line as finally
+        -- shown (after every branch above), so a reused row never carries
+        -- an earlier build's or branch's text.
+        card._fullAuthor = card.author:GetText()
 
         card.mineBadge:Hide()
         card.addBtn:SetText("View")

@@ -97,7 +97,9 @@ local function inactiveControls()
     if frame.review then frame.review:Hide();frame.review.drawnKey,frame.review.shownKey,frame.review.shownAction=nil,nil,nil end
     if frame.pause then frame.pause:Hide();frame.resume:Hide();frame.start:Show()end
     for _,b in ipairs(frame.mutations)do b:Disable()end
-    frame.advanced:Hide();frame:SetHeight(RUN_H)
+    -- The same measured rows as a full read (no fixed 445 with blank bands).
+    frame.advanced:Hide()
+    if frame.flowBands then frame.flowBands(false) else frame:SetHeight(RUN_H) end
 end
 -- A recorded name on one line: at most 100 characters, cut on a character
 -- boundary (never inside a multi-byte letter or an escaped "||"). whole keeps
@@ -345,7 +347,8 @@ local function showPage(name)
     pinTopLeft(frame)
     if onRun then
         if logFrame then logFrame:Hide()end
-        frame:SetWidth(RUN_W);frame:SetHeight(advanced and RUN_H_ADVANCED or RUN_H)
+        frame:SetWidth(RUN_W)
+        if frame.flowBands then frame.flowBands(advanced) else frame:SetHeight(advanced and RUN_H_ADVANCED or RUN_H) end
     else
         -- A hidden box must not keep the keyboard. Typed text is already the
         -- runtime's draft, so nothing is lost.
@@ -527,7 +530,8 @@ local function refresh()
     else frame.review:Hide();frame.review.drawnKey,frame.review.shownKey,frame.review.shownAction=nil,nil,nil end
     if advanced then frame.advanced:Show()else frame.advanced:Hide()end
     selected(frame.advancedToggle,advanced)
-    frame:SetHeight(advanced and RUN_H_ADVANCED or RUN_H)
+    -- Measured rows (flowBands sets the height; a new one keeps the top-left).
+    if frame.flowBands then frame.flowBands(advanced) else frame:SetHeight(advanced and RUN_H_ADVANCED or RUN_H) end
     return true -- A complete run-status read/render, not a history/loading pass.
 end
 function UI.Refresh()
@@ -731,8 +735,45 @@ local function ensure()
         GameTooltip:SetOwner(self,"ANCHOR_TOP");GameTooltip:SetText(MINI_OPEN_TIP,1,1,1,1,true);GameTooltip:Show()
     end)
     frame.miniPanel:SetScript("OnLeave",function()if GameTooltip then GameTooltip:Hide()end end)
-    button(frame,515,-414,85,"Close",function()frame:Hide()end)
+    frame.closeButton=button(frame,515,-414,85,"Close",function()frame:Hide()end)
     frame.advanced=CreateFrame("Frame",nil,frame);frame.advanced:Hide();frame.advanced:SetSize(590,205);frame.advanced:SetPoint("TOPLEFT",15,-446);frame.advanced:SetFrameLevel(31)
+    -- The rows under Start take the room their text needs, so no fixed blank
+    -- band stays: Start's reason only while there is one (right under the
+    -- Start row), the approval text at its full 34 units always, the usage
+    -- and status as measured (at most their former boxes; a longer text is
+    -- whole on hover), the notice row only with a notice or its button, then
+    -- the close notice, the button row and Advanced. With every box full this
+    -- is the former 620 x 445 layout. Returns the window height. Only places
+    -- and heights change; no text, control or action does.
+    frame.flowBands=function(isAdvanced)
+        local LM=Nexus.LayoutMetrics
+        local function place(region,x,y) region:ClearAllPoints();region:SetPoint("TOPLEFT",frame,"TOPLEFT",x,-y) end
+        local function measured(fs,width,low,high)
+            if (fs:GetText() or "")=="" then fs:SetHeight(1);return 0 end
+            if not (LM and LM.WrapHeight) then fs:SetHeight(high);return high end
+            return (LM.WrapHeight(fs,width,low,high))
+        end
+        local y=213
+        place(frame.startWhy,20,y)
+        local why=measured(frame.startWhy,580,12,12)
+        if why>0 then y=y+12+2 end
+        place(frame.approval,20,y);frame.approval:SetHeight(34);y=y+34+2
+        place(frame.usage,20,y);y=y+measured(frame.usage,580,12,22)+4
+        place(frame.status,20,y);y=y+measured(frame.status,580,12,74)+1
+        local noticeH=measured(frame.notice,440,12,24)
+        if frame.cont:IsShown() or frame.review:IsShown() then noticeH=math.max(noticeH,24) end
+        place(frame.notice,20,y);place(frame.cont,470,y);place(frame.review,470,y)
+        if noticeH>0 then y=y+noticeH+5 end
+        place(frame.closeNotice,20,y);y=y+20+1
+        for _,b in ipairs({{frame.help,20},{frame.advancedToggle,115},{frame.miniPanel,220},
+            {frame.reference,340},{frame.closeButton,515}}) do place(b[1],b[2],y) end
+        y=y+24
+        if isAdvanced then place(frame.advanced,15,y+8);y=y+8+205 end
+        frame._bandsBottom=y
+        local height=y+9
+        if math.abs((tonumber(frame:GetHeight()) or 0)-height)>0.5 then pinTopLeft(frame);frame:SetHeight(height) end
+        return height
+    end
     local af=frame.advanced
     button(af,5,-4,100,"Recheck",function()notify(Nexus.OrbRuntime.Recheck())end)
     frame.clearExclusions=button(af,116,-4,195,"Clear source exclusions",function()notify(Nexus.OrbRuntime.ClearExclusions())end)

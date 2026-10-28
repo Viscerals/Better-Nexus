@@ -162,13 +162,17 @@ do
 end
 
 -- 9. Labels for the 84-pixel header button: Auto --, Auto ON, Auto OFF.
--- Colours and consent stay unchanged. The fit is scenario 22.
+-- Consent is unchanged. The OFF colour is now a neutral light grey (stale
+-- presentation pin updated, finish pass item E: the design's Auto OFF is the
+-- ordinary state, not red); the words still carry the state. The fit is
+-- scenario 22.
 do
  local H=Boot();Nexus.Panel.Show();H.Advance(.5)
  assert(Label()=='Auto OFF','OFF label: '..Label())
  local btn=NexusPanel._autoBtn
  assert(btn:GetWidth()==84 and btn:GetHeight()==22,'header button size: '..tostring(btn:GetWidth())..'x'..tostring(btn:GetHeight()))
- assert((btn:GetText() or ''):find('|cffe63c3c',1,true),'OFF colour unchanged')
+ assert((btn:GetText() or ''):find('|cffd9d9d9',1,true) and not (btn:GetText() or ''):find('|cffe63c3c',1,true),
+  'OFF is neutral light grey, not red')
  NexusPanel._autoBtn:Click();H.Advance(.5)
  assert(H.Auto() and Label()=='Auto ON','button click turns Auto ON: '..Label())
  assert((btn:GetText() or ''):find('|cff2ee62e',1,true),'ON colour unchanged')

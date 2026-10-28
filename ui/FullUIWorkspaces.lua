@@ -46,6 +46,102 @@ function M.BindTabs(frame, active, buttons, beforeLeave)
     return true
 end
 
+-- The shared header (LayoutMetrics.WorkspaceHeader): each workspace places
+-- its tabs, Help, Reference and title at the same measured anchors from its
+-- own top-left (root: the window, or Explore's scrolled content), so the
+-- tabs and title stand still when the workspace changes. Labels, handlers
+-- and loading hooks stay with BindTabs and each window. A button's label
+-- and the title get their template fonts per widget, after any window-wide
+-- font pass; no shared font object is changed.
+function M.ApplyHeader(frame, root, parts)
+    local LM = Nexus.LayoutMetrics
+    if not (frame and type(parts) == "table" and LM
+        and type(LM.WorkspaceHeader) == "function") then return nil end
+    root = root or frame
+    local header = LM.WorkspaceHeader(tonumber(root:GetWidth())
+        or tonumber(frame:GetWidth()))
+    local function Place(widget, box, fromRight)
+        if not (widget and box) then return end
+        widget:ClearAllPoints()
+        if fromRight then
+            widget:SetPoint("TOPRIGHT", root, "TOPRIGHT",
+                box.x + box.w - header.width, -box.y)
+        else
+            widget:SetPoint("TOPLEFT", root, "TOPLEFT", box.x, -box.y)
+        end
+        widget:SetSize(box.w, box.h)
+    end
+    local function TemplateFont(button)
+        local label = button and type(button.GetFontString) == "function"
+            and button:GetFontString() or nil
+        if label and type(label.SetFontObject) == "function" then
+            pcall(label.SetFontObject, label, "GameFontNormal")
+        end
+    end
+    local tabs = parts.tabs or frame._workspaceTabs or {}
+    for _, key in ipairs(header.order) do
+        Place(tabs[key], header.boxes[key])
+        TemplateFont(tabs[key])
+    end
+    Place(parts.help, header.boxes.help)
+    TemplateFont(parts.help)
+    Place(parts.reference, header.boxes.reference, true)
+    TemplateFont(parts.reference)
+    local title = parts.title
+    if title then
+        Place(title, header.boxes.title)
+        if type(title.SetFontObject) == "function" then
+            pcall(title.SetFontObject, title, "GameFontNormalLarge")
+        end
+        title:SetJustifyH("LEFT")
+        if type(title.SetWordWrap) == "function" then
+            pcall(title.SetWordWrap, title, false)
+        end
+    end
+    frame._workspaceHeader = header
+    return header
+end
+
+-- Navigation keeps the place: the destination opens with its top-left
+-- corner where the window it replaces had its own (the shared header then
+-- puts its tabs where the player's were), in screen units, so a different
+-- window scale or a dragged window is followed. The result is kept on
+-- screen; a UI size too small to judge is not clamped. Nothing is saved.
+function M.CapturePlace(frame)
+    if not (frame and frame.IsShown and frame:IsShown()
+        and type(frame.GetLeft) == "function" and type(frame.GetTop) == "function") then
+        return nil
+    end
+    local okL, left = pcall(frame.GetLeft, frame)
+    local okT, top = pcall(frame.GetTop, frame)
+    local okS, scale = pcall(frame.GetEffectiveScale, frame)
+    left, top = okL and tonumber(left), okT and tonumber(top)
+    scale = okS and tonumber(scale) or 1
+    if not (left and top and scale and scale > 0) then return nil end
+    return {left=left * scale, top=top * scale}
+end
+
+function M.RestorePlace(frame, place)
+    if not (frame and type(place) == "table" and tonumber(place.left)
+        and tonumber(place.top) and UIParent) then return false end
+    local okS, scale = pcall(frame.GetEffectiveScale, frame)
+    scale = okS and tonumber(scale) or 1
+    if not (scale and scale > 0) then return false end
+    local x, y = place.left / scale, place.top / scale
+    local okU, uiScale = pcall(UIParent.GetEffectiveScale, UIParent)
+    uiScale = okU and tonumber(uiScale) or 1
+    local uiW, uiH = tonumber(UIParent:GetWidth()) or 0, tonumber(UIParent:GetHeight()) or 0
+    local screenW, screenH = uiW * uiScale / scale, uiH * uiScale / scale
+    local w, h = tonumber(frame:GetWidth()) or 0, tonumber(frame:GetHeight()) or 0
+    if uiW >= 640 and uiH >= 480 then
+        x = math.max(0, math.min(x, screenW - w))
+        y = math.min(screenH, math.max(y, h))
+    end
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+    return true
+end
+
 local function Open(owner, frameName, unavailable)
     if not (owner and type(owner.Show) == "function") then return false, unavailable end
     local ok, reason = owner.Show()
@@ -142,6 +238,8 @@ function M.NavigateFrom(source, kind, beforeLeave)
     }
     if not names[kind] then return false, "unknown workspace" end
     if type(beforeLeave) == "function" then beforeLeave() end
+    -- Read before the destination opens: opening closes the other windows.
+    local place = M.CapturePlace(source)
     local ok, reason = M.Show(kind)
     if ok == false then
         if type(print) == "function" then
@@ -154,6 +252,7 @@ function M.NavigateFrom(source, kind, beforeLeave)
     if not (destination and destination.IsShown and destination:IsShown()) then
         return false, reason or "workspace did not open"
     end
+    if place and source ~= destination then M.RestorePlace(destination, place) end
     if source and source ~= destination and source.IsShown and source:IsShown() then
         source:Hide()
     end

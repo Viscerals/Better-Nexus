@@ -390,6 +390,14 @@ C.scenario('S10 Play layout at 0.75-2.0 font scale: disjoint boxes, the card, De
     tag..': the original card keeps at least 56 px; no flattened row',l.boxes.status and l.boxes.status.h)
    if o.noOffer then
     C.expect(l.noOffer==true and l.boxes.roll.h<104 and l.boxes.planBar~=nil,tag..': the roll box collapses below 104 px',l.boxes.roll.h)
+    -- Finish pass item E: no blank band where the offers were; the gaps
+    -- above and below the collapsed block are at most 8 px, and the block
+    -- is exactly its two guidance rows (or the inline button) high.
+    local s,r,h=l.boxes.status,l.boxes.roll,l.boxes.progressHeader
+    local _,line=LM.ConservativeText(scale)
+    C.expect(r.y-(s.y+s.h)<=8 and h.y-(r.y+r.h)<=8,tag..': the gaps around the collapsed block are at most 8 px',
+     (r.y-(s.y+s.h))..' / '..(h.y-(r.y+r.h)))
+    C.expect(r.h==math.max(2*line,l.orbButtonH or 0),tag..': the block is as tall as its guidance, no padding',r.h)
    end
   end
   -- Native QA test.163008: Show details adds the whole detail section (the
@@ -406,6 +414,103 @@ C.scenario('S10 Play layout at 0.75-2.0 font scale: disjoint boxes, the card, De
    'S10 @'..scale..': the rows below move by exactly the section\'s height',
    (open.boxes.bestDps.y-closed.boxes.bestDps.y)..' / '..(open.height-closed.height))
  end
+end)
+
+-- Finish pass item E (design/current Lv80 and the Auto chip): the collapsed
+-- level-80 block in the real render fills its box with the guidance and the
+-- inline primary Open Orbs...; Auto OFF is said in words in a neutral light
+-- grey, not an alarm red; Show / Hide details keeps the panel's top (and the
+-- Details row) where the player sees it and grows or shrinks downward, and
+-- near the bottom of the screen moves up only as far as needed and says so
+-- (Panel._detailsGrowth). Memory only: no saved field, Auto or action
+-- changes. The panel's screen corner is read from its real anchor (the
+-- harness answers a fixed corner for any other anchor). Native pixels,
+-- clamping and colour contrast are NOT RUN.
+C.scenario('S11 level 80 block and Auto OFF; Details grows downward from a held top',function()
+ local guide={state='finished',text='Normal rolls finished. Review Orbs for remaining rolled targets.',openOrbs=true}
+ local ss={tier='Heroic +2',ash='1,240',gain='20',intensity=250,intensityMax=500}
+ local before=Effects()
+ C.setup(P.Render(Model({level=80,orbGuidance=guide,serverStatus=ss}))==true,'S11: fixture: a level-80 render with finished guidance')
+ local l=NexusPanel._responsiveLayout
+ if C.setup(l and l.noOffer==true and l.boxes.roll~=nil,'S11: fixture: the collapsed block') then
+  local roll,rec=G.Rect(NexusPanel._rollArea,NexusPanel),G.Rect(NexusPanel._rollRec,NexusPanel)
+  C.expect(G.Inside(rec,roll,0.5) and math.abs((rec[4]-rec[2])-l.boxes.roll.h)<0.5,
+   'S11: the guidance fills the collapsed block, which has no padding below it',G.Text(rec)..' / '..G.Text(roll))
+  local open=NexusPanel._orbsBtn
+  C.expect(open and open:IsShown() and G.Inside(G.Rect(open,NexusPanel),roll,0.5) and open._nexusPrimary==true,
+   'S11: Open Orbs... is inline in the block and is the primary action',open and tostring(open._nexusPrimary))
+ end
+ local auto=NexusPanel._autoBtn
+ if C.setup(auto and auto:IsShown(),'S11: fixture: the Auto control is shown') then
+  local text=auto:GetText() or ''
+  C.expect(V.Plain(text)=='Auto OFF' and text:find('|cffd9d9d9',1,true)~=nil and not text:find('|cffe63c3c',1,true),
+   'S11: Auto OFF is said in words, in a neutral light grey',text)
+ end
+ C.guard(Effects()==before,'S11: the level-80 render changed no saved data, Auto, action or send',Effects())
+
+ -- Details: a held top. The test's refresh renders the same model.
+ local w0,h0=UIParent:GetWidth(),UIParent:GetHeight()
+ UIParent:SetSize(1366,768)
+ local m=Model({owned=2,missing={'Cinder Lattice x2 (Rare:x2)','Hollow Bell'},shed={'Ashen Tithe'},
+  toLock={'Gravecall Chorus'},serverStatus=ss})
+ local realRefresh=P.Refresh
+ P.Refresh=function() return P.Render(m) end
+ local function Corner()
+  local pt=NexusPanel.points[1]
+  if not (pt and #NexusPanel.points==1 and pt[1]=='TOPLEFT' and pt[2]==UIParent and pt[3]=='BOTTOMLEFT') then return nil end
+  return pt[4],pt[5]
+ end
+ local function Track(left,top,scale)
+  NexusPanel.GetLeft=function(self) local x=Corner();return x or left end
+  NexusPanel.GetTop=function(self) local _,y=Corner();return y or top end
+  NexusPanel.GetEffectiveScale=function() return scale end
+ end
+ local ok,err=pcall(function()
+  P._playDetails=false
+  P.Render(m)
+  local p=NexusPanel._play
+  if not C.setup(type(p)=='table' and p.details:IsShown(),'S11: fixture: Show details is offered') then return end
+  local closedH=NexusPanel:GetHeight()
+  local row=G.Rect(p.details,NexusPanel)
+  Track(900,600,1)
+  local quiet=Effects()
+  p.details:Click()
+  local x,y=Corner()
+  C.expect(P._playDetails==true and NexusPanel:GetHeight()>closedH and x==900 and y==600 and P._detailsGrowth
+   and P._detailsGrowth.direction=='down','S11: Show details keeps the panel top where it was and grows downward',
+   tostring(x)..','..tostring(y)..' h='..NexusPanel:GetHeight())
+  local row2=G.Rect(p.details,NexusPanel)
+  C.expect(row2[1]==row[1] and row2[2]==row[2],'S11: the Details button keeps its place under the held top',G.Text(row)..' / '..G.Text(row2))
+  p.details:Click()
+  x,y=Corner()
+  C.expect(P._playDetails==false and NexusPanel:GetHeight()==closedH and x==900 and y==600,
+   'S11: Hide details keeps the same top and gives the height back below it',tostring(x)..','..tostring(y))
+  -- Near the bottom of the screen: the panel moves up just enough to stay
+  -- whole, and says that its top moved.
+  NexusPanel:ClearAllPoints();NexusPanel:SetPoint('TOPLEFT',UIParent,'BOTTOMLEFT',900,closedH+10)
+  p.details:Click()
+  x,y=Corner()
+  local openH=NexusPanel:GetHeight()
+  C.expect(openH>closedH+10 and x==900 and y==openH and P._detailsGrowth.direction=='clamped',
+   'S11: with no room below, the panel rises only until its bottom meets the screen edge and reports clamped',
+   tostring(y)..' / '..openH..' '..tostring(P._detailsGrowth and P._detailsGrowth.direction))
+  p.details:Click()
+  -- Another panel scale: the corner is kept in screen units.
+  NexusPanel:ClearAllPoints();NexusPanel:SetPoint('TOPLEFT',UIParent,'BOTTOMLEFT',700,650)
+  Track(700,650,0.8)
+  p.details:Click()
+  x,y=Corner()
+  C.expect(x~=nil and math.abs(x-700)<0.01 and math.abs(y-650)<0.01 and P._detailsGrowth.direction=='down',
+   'S11: at panel scale 0.8 the held top is the same place',tostring(x)..','..tostring(y))
+  p.details:Click()
+  C.guard(Effects()==quiet,'S11: Show / Hide details saved nothing (panelX / panelY included), changed no Auto, action or send',Effects())
+ end)
+ P.Refresh=realRefresh
+ NexusPanel.GetLeft,NexusPanel.GetTop,NexusPanel.GetEffectiveScale=nil,nil,nil
+ P._playDetails=false;P._detailsHold=nil
+ NexusPanel:ClearAllPoints();NexusPanel:SetPoint('RIGHT',UIParent,'RIGHT',-40,0)
+ UIParent:SetSize(w0,h0)
+ C.setup(ok,'S11: fixture: the Details scenario ran',err)
 end)
 
 Nexus.DisableOrdinaryAutomation()

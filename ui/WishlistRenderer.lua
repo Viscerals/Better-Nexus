@@ -1342,13 +1342,15 @@ local function EnsureFrame()
     titleText:SetPoint("TOP", 0, -14)
     titleText:SetText("Plan / Wishlist Editor")
 
-    -- The existing 900x18 context row under the title is the destination
+    -- The existing 900x18 context row under the header is the destination
     -- row: editContextText is its first visible cell (character), and the
-    -- row, not that cell, is anchored below the title. M.Refresh fills it.
+    -- row, not that cell, is centred under the shared workspace header (the
+    -- title is placed in the header row, FullUIWorkspaces.ApplyHeader).
+    -- M.Refresh fills it.
     editContextText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     editContextText:SetJustifyH("LEFT")
     frame._destinationRow = Nexus.Panel.CreateDestinationRow(frame, editContextText)
-    frame._destinationRow:SetPoint("TOP", titleText, "BOTTOM", 0, -4)
+    frame._destinationRow:SetPoint("TOP", frame, "TOP", 0, -38)
     frame._destinationRow:SetSize(900, 18)
 
     wishlistNameLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1458,6 +1460,11 @@ local function EnsureFrame()
             Nexus.LoadingStatus.BindSharedButton(buildsNav, "Explore")
             Nexus.LoadingStatus.BindSharedButton(boardNav, "Records")
         end
+        -- The tabs, Help, Reference and the title at the shared header's
+        -- anchors, as in Explore and Records.
+        Nexus.FullUIWorkspaces.ApplyHeader(frame, frame, {
+            title = titleText, help = frame._helpNav, reference = frame._referenceNav,
+        })
     end
 
     loadoutSwitchBtn = CreateFrame("Button", nil, frame)
@@ -1757,12 +1764,41 @@ local function EnsureFrame()
     -- label and the checkbox. Presentation only; the checkbox is unchanged.
     local autoLockHit = Nexus.LayoutMetrics and Nexus.LayoutMetrics.FullTextTooltip
         and Nexus.LayoutMetrics.FullTextTooltip(autoLockLabel, frame) or nil
+    -- The check box itself is placed here too: 26 units after the last slot
+    -- while that leaves it 8 units left of My Builds, otherwise closer (never
+    -- nearer than 6), so a long Locked (n/m) text or larger font cannot push
+    -- the box under My Builds while only its label is hidden. The Locked
+    -- (n/m) caption itself is the one part that grows with text: it is cut
+    -- (whole on its own hover) where the box would come nearer than 6 units
+    -- to the last slot, so the box ends 8 units left of My Builds at every
+    -- slot count and font size. _autoLockClear says whether it does.
+    frame._lockedLabelHit = Nexus.LayoutMetrics and Nexus.LayoutMetrics.FullTextTooltip
+        and Nexus.LayoutMetrics.FullTextTooltip(lockedLabel, frame) or nil
     frame._fitAutoLock = function(slots)
         local full = "Auto-manage locked Echo slots"
+        local n = math.max(1, math.min(8, math.floor(tonumber(slots) or 6)))
+        local right = (tonumber(frame:GetWidth()) or 1040) - 34 - 140 - 8
         local okL, lw = pcall(lockedLabel.GetStringWidth, lockedLabel)
         lw = okL and tonumber(lw) or 60
-        local left = 540 + lw + 8 + (22 * (tonumber(slots) or 6) - 4) + 26 + 22 + 2
-        local right = (tonumber(frame:GetWidth()) or 1040) - 34 - 140 - 8
+        local cap = math.floor(right - 22 - 6 - (22 * n - 4) - 8 - 540)
+        local caption = lockedLabel:GetText() or ""
+        if lw > cap then
+            lw = math.max(1, cap)
+            lockedLabel._nexusFullText = caption
+        else
+            lw = math.ceil(lw)
+            lockedLabel._nexusFullText = nil
+        end
+        if type(lockedLabel.SetWordWrap) == "function" then pcall(lockedLabel.SetWordWrap, lockedLabel, false) end
+        lockedLabel:SetJustifyH("LEFT")
+        lockedLabel:SetWidth(lw)
+        local slotsRight = 540 + lw + 8 + (22 * n - 4)
+        local gap = math.max(6, math.min(26, right - 22 - slotsRight))
+        autoLockCheck:ClearAllPoints()
+        autoLockCheck:SetPoint("LEFT", frame._nexusLockedSlot(n), "RIGHT", gap, 0)
+        autoLockCheck._nexusAnchorSlot = n
+        frame._autoLockClear = slotsRight + gap + 22 <= right
+        local left = slotsRight + gap + 22 + 2
         local room = math.floor(right - left)
         autoLockLabel:SetText(full)
         local okF, fw = pcall(autoLockLabel.GetStringWidth, autoLockLabel)
@@ -1821,6 +1857,14 @@ local function EnsureFrame()
         row:SetScript("OnEnter", function(self)
             if not self.data then return end
             ShowEchoTooltip(self, self.data.spellId, "ANCHOR_RIGHT")
+            -- The status column (quality, Owned, Selected, Locked) is cut at
+            -- its 110 units with longer or larger text; the row's tooltip
+            -- always repeats it whole.
+            local status = self.status and self.status:GetText()
+            if status and status ~= "" and GameTooltip:IsShown() then
+                GameTooltip:AddLine(status, 1, 1, 1, true)
+                GameTooltip:Show()
+            end
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row:SetScript("OnClick", function(self)
@@ -1883,6 +1927,41 @@ local function EnsureFrame()
         row.plus:SetSize(22, 20); row.plus:SetPoint("RIGHT", -24, 0); row.plus:SetText("+")
         row.remove = CreateFrame("Button", nil, row, "UIPanelCloseButton")
         row.remove:SetSize(22, 22); row.remove:SetPoint("RIGHT", 0, 0)
+        -- Legible controls, same click areas: - and + are 22x22 with the
+        -- large template fonts for their glyphs; the remove X keeps its 22x22
+        -- click area and draws its art at 28 units centred on it (the close
+        -- art has a wide transparent margin). Each says what it does on
+        -- hover; the draft changes only as before, and nothing is saved.
+        for _, stepper in ipairs({row.minus, row.plus}) do
+            stepper:SetHeight(22)
+            pcall(stepper.SetNormalFontObject, stepper, "GameFontNormalLarge")
+            pcall(stepper.SetHighlightFontObject, stepper, "GameFontHighlightLarge")
+            pcall(stepper.SetDisabledFontObject, stepper, "GameFontDisableLarge")
+        end
+        for _, getter in ipairs({"GetNormalTexture", "GetPushedTexture",
+            "GetHighlightTexture", "GetDisabledTexture"}) do
+            local art = type(row.remove[getter]) == "function"
+                and row.remove[getter](row.remove) or nil
+            if art then
+                art:ClearAllPoints()
+                art:SetPoint("CENTER", row.remove, "CENTER", 0, 0)
+                art:SetSize(28, 28)
+            end
+        end
+        row.remove._nexusArtSize = 28
+        for _, hint in ipairs({
+            {row.minus, "One copy fewer", "Plans one copy fewer of this Echo."},
+            {row.plus, "One copy more", "Plans one more copy of this Echo, up to what it allows."},
+            {row.remove, "Remove from the plan", "Takes this Echo out of the plan."},
+        }) do
+            hint[1]:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(hint[2], 1, 0.82, 0.2)
+                GameTooltip:AddLine(hint[3] .. " Nothing is saved until you save the Wishlist.", 0.8, 0.8, 0.8, true)
+                GameTooltip:Show()
+            end)
+            hint[1]:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        end
         row.minus:SetScript("OnClick", function(self)
             local d = self:GetParent().data
             if d and not d.ghost then AdjustStacks(d.draftKey, -1); requestRefresh() end
@@ -1926,6 +2005,12 @@ local function EnsureFrame()
     pickFooterText:SetWordWrap(true)
     pickFooterText:SetJustifyH("LEFT")
     pickFooterText:SetJustifyV("TOP")
+    -- The planned-copy counts stay readable when the two lines need more
+    -- room (a longer locked count, larger text): hovering the footer shows
+    -- its whole text. The box and the counts are unchanged.
+    if Nexus.LayoutMetrics and Nexus.LayoutMetrics.FullTextTooltip then
+        frame._pickFooterHit = Nexus.LayoutMetrics.FullTextTooltip(pickFooterText, frame)
+    end
 
     -- Apply remains a presentation binding: the controller prepares and
     -- submits only after the established confirmation popup is accepted.
@@ -3244,12 +3329,18 @@ end
         hover:SetPoint("TOPLEFT", text, "TOPLEFT", 0, 0)
         hover:SetPoint("BOTTOMRIGHT", text, "BOTTOMRIGHT", 0, 0)
         hover:EnableMouse(true)
+        -- The one-line result is cut at its width with longer or larger
+        -- text, so its hover always repeats the whole line (then any detail
+        -- lines), not only when details exist.
         hover:SetScript("OnEnter", function(self)
-            local lines = frame and frame._saveResultDetail
-            if not (GameTooltip and lines) then return end
+            local whole = frame and frame._saveResultText and frame._saveResultText:GetText() or ""
+            if not GameTooltip or whole == "" then return end
+            local lines = frame._saveResultDetail
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-            GameTooltip:AddLine(tostring(frame._saveResultText:GetText() or ""), 1, 1, 1, true)
-            for _, line in ipairs(lines) do GameTooltip:AddLine(line, 0.82, 0.82, 0.82, true) end
+            GameTooltip:AddLine(tostring(whole), 1, 1, 1, true)
+            for _, line in ipairs(type(lines) == "table" and lines or {}) do
+                GameTooltip:AddLine(line, 0.82, 0.82, 0.82, true)
+            end
             GameTooltip:Show()
         end)
         hover:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)

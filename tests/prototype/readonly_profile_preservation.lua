@@ -159,10 +159,24 @@ local function Label(H,text)
   end
  end
 end
+-- The editor fits its Auto-manage caption to the room left of My Builds
+-- (whole, shortened to "Auto-manage", or hidden; frame._fitAutoLock), so the
+-- rendered text is not an identity. The switch is the CheckButton the
+-- editor's own label (frame._autoLockLabel, its whole caption kept in
+-- _nexusFullText) is anchored to. A label found by its exact rendered text
+-- must, when present, name the same check box. The checks below prove that
+-- its click reaches the runtime setting (Controller.SetAutoLockEnabled).
 local function AutoLockBox(H)
  Nexus.WishlistEditor.Show()
- local label=Label(H,'Auto-manage locked Echo slots')
- return label and label.points[1][2]
+ local f=_G.NexusEditorFrame
+ local label=f and f._autoLockLabel
+ if not (label and label._nexusFullText=='Auto-manage locked Echo slots') then return nil end
+ local box=label.points[1] and label.points[1][2]
+ if not (type(box)=='table' and box.kind=='CheckButton' and box:GetParent()==f
+  and type(box:GetScript('OnClick'))=='function') then return nil end
+ local rendered=Label(H,'Auto-manage locked Echo slots')
+ if rendered and rendered.points[1] and rendered.points[1][2]~=box then return nil end
+ return box
 end
 for _,case in ipairs(PROTECTED)do
  local db=F.Database({mutate=function(d)d.settings.autoLockEchoes=false;case.mutate(d)end})

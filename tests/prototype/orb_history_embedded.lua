@@ -301,7 +301,12 @@ for _,case in ipairs({
  Nexus.OrbPanel.Show();f:ClearAllPoints();f:SetPoint('TOPLEFT',UIParent,'BOTTOMLEFT',math.min(700,case[2]-640),500)
  Nexus.OrbPanel.Refresh();visible(case[1]..', run page',case[4])
  advancedButton:Click();visible(case[1]..', Advanced',case[4])
- check(f:GetHeight()==Nexus.OrbPanel.RUN_SIZE.advanced,'Advanced keeps its full height, so every control is reachable')
+ -- Stale exact-660 pin updated (finish pass item D, OrbPanel flowBands): the
+ -- measured window is at most the former Advanced height and holds the whole
+ -- Advanced box below the buttons.
+ local _,_,_,_,ay=f.advanced:GetPoint()
+ check(f.advanced:IsShown() and f:GetHeight()<=Nexus.OrbPanel.RUN_SIZE.advanced
+  and -(tonumber(ay) or 0)+f.advanced:GetHeight()<=f:GetHeight(),'Advanced keeps its full height, so every control is reachable')
  advancedButton:Click()
  Nexus.OrbPanel.ShowLog();visible(case[1]..', history page',case[4])
  f:Hide()

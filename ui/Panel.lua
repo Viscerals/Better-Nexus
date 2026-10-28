@@ -1335,10 +1335,14 @@ local function ReleaseRollOnAutoOff(auto)
     end
 end
 
+-- The words carry the state (ON / OFF / --); colour only adds to them. OFF
+-- is a neutral, readable light grey (design/current "Nexus Main Panel -
+-- Compact Redesign": Auto OFF is the ordinary, recommendations-only state,
+-- not an alarm), ON keeps its green.
 local function AutoLabel(auto)
     if auto == nil then return AUTO_LABEL.unknown end
     if auto then return "|cff2ee62e" .. AUTO_LABEL.on .. "|r" end
-    return "|cffe63c3c" .. AUTO_LABEL.off .. "|r"
+    return "|cffd9d9d9" .. AUTO_LABEL.off .. "|r"
 end
 
 local function FmtDps(dps)
@@ -3089,14 +3093,45 @@ function M.HubTooltipLines(kind)
     return {}
 end
 
+-- A hub's hover stands beside the panel, never over its own content: right of
+-- the panel when the screen has room for the whole tooltip there, else left,
+-- else above, else below (in screen units, any scale); with no room anywhere
+-- it stays right of the panel and the client keeps it on screen. Every line
+-- is shown whole (wrapped). M._hubTipPlacement records the side used.
 function M.ShowHubTooltip(kind, owner)
     if not GameTooltip then return end
-    GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+    local panel = _G.NexusPanel
+    GameTooltip:SetOwner(owner, panel and "ANCHOR_NONE" or "ANCHOR_TOP")
     for index, line in ipairs(M.HubTooltipLines(kind)) do
         if index == 1 then GameTooltip:AddLine(line, 1, 1, 1)
         else GameTooltip:AddLine(line, 0.85, 0.85, 0.85, true) end
     end
     GameTooltip:Show()
+    if not panel then M._hubTipPlacement = "top"; return end
+    local function Read(region, method)
+        local ok, value = pcall(region[method], region)
+        return ok and tonumber(value) or nil
+    end
+    local ps = Read(panel, "GetEffectiveScale") or 1
+    local ts = Read(GameTooltip, "GetEffectiveScale") or 1
+    local us = Read(UIParent, "GetEffectiveScale") or 1
+    local left, right = (Read(panel, "GetLeft") or 0) * ps, (Read(panel, "GetRight") or 0) * ps
+    local top, bottom = (Read(panel, "GetTop") or 0) * ps, (Read(panel, "GetBottom") or 0) * ps
+    local w, h = (Read(GameTooltip, "GetWidth") or 0) * ts, (Read(GameTooltip, "GetHeight") or 0) * ts
+    local sw, sh = (Read(UIParent, "GetWidth") or 0) * us, (Read(UIParent, "GetHeight") or 0) * us
+    local gap = 4 * ps
+    local where
+    if sw - right >= w + gap then where = "right"
+    elseif left >= w + gap then where = "left"
+    elseif sh - top >= h + gap then where = "above"
+    elseif bottom >= h + gap then where = "below"
+    else where = "right" end
+    GameTooltip:ClearAllPoints()
+    if where == "right" then GameTooltip:SetPoint("BOTTOMLEFT", panel, "BOTTOMRIGHT", 4, 0)
+    elseif where == "left" then GameTooltip:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", -4, 0)
+    elseif where == "above" then GameTooltip:SetPoint("BOTTOMLEFT", panel, "TOPLEFT", 0, 4)
+    else GameTooltip:SetPoint("TOPLEFT", panel, "BOTTOMLEFT", 0, -4) end
+    M._hubTipPlacement = where
 end
 
 -- A hub click: Orbs opens the Orb window (passive, as Open Orbs...); Plan
@@ -3710,10 +3745,60 @@ end
 
 -- Details is memory only: it is part of the layout key, and the panel is
 -- rendered again with the model it shows. Nothing is saved or requested.
+-- The panel's top (and so the Details button on it) stays where the player
+-- sees it: the toggled layout grows or shrinks downward (M.HoldPanelTop).
 function M.TogglePlanDetails()
     M._playDetails = not M._playDetails
+    M._detailsHold = M.CapturePanelTop()
     if M.Refresh then M.Refresh() end
     return M._playDetails
+end
+
+-- The shown panel's top-left corner in screen units (any scale), and the
+-- Details state the next layout must show; nil when it cannot be read.
+function M.CapturePanelTop()
+    if not (frame and frame:IsShown()) then return nil end
+    local function Read(region, method)
+        local ok, value = pcall(region[method], region)
+        return ok and tonumber(value) or nil
+    end
+    local left, top, scale = Read(frame, "GetLeft"), Read(frame, "GetTop"), Read(frame, "GetEffectiveScale")
+    if not (left and top and scale and scale > 0) then return nil end
+    return {left = left * scale, top = top * scale, details = M._playDetails == true}
+end
+
+-- Run by every applied panel layout. Only the first layout that shows the
+-- toggled Details state uses the held corner: the panel is anchored by its
+-- top-left there, so the Details row stays put and the section opens (or
+-- closes) below it. If the taller panel would leave the bottom of the screen,
+-- the panel moves up just enough to stay whole (the client clamps it there
+-- too): the top then moves, and M._detailsGrowth says "clamped" instead of
+-- "down". A layout that is not the Play view drops the hold. Nothing is
+-- saved: panelX / panelY change only by a drag, as before.
+function M.HoldPanelTop(layout)
+    local hold = M._detailsHold
+    if not (hold and frame and type(layout) == "table" and type(layout.boxes) == "table") then return nil end
+    if not layout.play then M._detailsHold = nil; return nil end
+    if (layout.boxes.planNeeded ~= nil) ~= hold.details then return nil end
+    M._detailsHold = nil
+    local okS, scale = pcall(frame.GetEffectiveScale, frame)
+    scale = okS and tonumber(scale) or 1
+    if not (scale and scale > 0) then return nil end
+    local x, y = hold.left / scale, hold.top / scale
+    local height = tonumber(layout.height) or tonumber(frame:GetHeight()) or 0
+    local growth = "down"
+    local okU, uiScale = pcall(UIParent.GetEffectiveScale, UIParent)
+    uiScale = okU and tonumber(uiScale) or 1
+    local uiH = tonumber(UIParent:GetHeight()) or 0
+    if uiH >= 480 then
+        local screenH = uiH * uiScale / scale
+        if y > screenH then y = screenH; growth = "clamped" end
+        if y - height < 0 then y = math.min(screenH, height); growth = "clamped" end
+    end
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+    M._detailsGrowth = {direction = growth, left = x * scale, top = y * scale}
+    return growth
 end
 
 -- The Orb line's text for this render (UI.PanelRunLine), or nil.
@@ -4425,13 +4510,15 @@ local function ApplyPanelLayout(layout, completed)
             if button and button:IsShown() and layout.orbButtonW then
                 inline = layout.orbButtonW + layout.gap
                 button:ClearAllPoints()
-                button:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -inset, -1)
+                button:SetPoint("TOPRIGHT", rollArea, "TOPRIGHT", -inset, 0)
                 button:SetSize(layout.orbButtonW, layout.orbButtonH)
             end
             if frame._orbMiniBtn then frame._orbMiniBtn:Hide() end
+            -- From the block's top, the whole box: LayoutMetrics sizes it to
+            -- the guidance (or the button) alone, with no padding.
             recText:ClearAllPoints()
-            recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, -1)
-            recText:SetSize(math.max(1, boxes.roll.w-inset*2-inline), math.max(1, boxes.roll.h-layout.gap))
+            recText:SetPoint("TOPLEFT", rollArea, "TOPLEFT", inset, 0)
+            recText:SetSize(math.max(1, boxes.roll.w-inset*2-inline), math.max(1, boxes.roll.h))
         else
             statusText:Show()
         end
@@ -4495,6 +4582,8 @@ local function ApplyPanelLayout(layout, completed)
     end
     PlacePanelBox(bestDpsText, boxes.bestDps)
     M.PlacePlaySummary(layout)
+    -- Show / Hide details keeps the panel's top where it was (M.HoldPanelTop).
+    M.HoldPanelTop(layout)
 end
 
 local function RenderBestDps(model, complete, noBuild, activeRoll, statusVisible)

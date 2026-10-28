@@ -707,9 +707,18 @@ C.scenario('V9 a top-held header, the Reference article and its Escape order, an
  if opened then
   Press(opened)
   C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() and not Shown(),'V9: Open full Reference opens the manual in place of the coach')
-  NexusHelpWindow:Hide();H.Advance(0.1)
+  -- The production return only (GuidedSetupUI.OpenHelp's close callback and
+  -- its one-frame HelpEnded), advanced by the harness clock; the test does
+  -- not reopen the coach, so a missing return fails here.
+  NexusHelpWindow:Hide()
+  C.expect(not Shown(),'V9: the coach is not shown in the same pass that closes the manual')
+  H.Advance(0.1)
+  t=Shown() and Text() or ''
+  C.expect(Shown() and Step()=='wishlist' and t:find(R.tag,1,true)==nil and t:find(topic.paras[1],1,true)==nil
+   and not NexusHelpWindow:IsShown(),
+   'V9: closing the manual brings the coach back by its own return, at the step (not the topics or the article)',t)
  end
- if not Shown() then U.Show() end
+ if not C.setup(Shown(),'V9: fixture: the coach is open for the summary checks') then return end
  -- The summary: its rows are this guide's own progress (G4).
  G.GoTo('summary');U.Render();Same('summary')
  local fin=Nexus.UserText.Guide.finish
