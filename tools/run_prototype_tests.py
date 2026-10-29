@@ -382,6 +382,8 @@ NAMES += ['visual_workspaces_163009']
 NAMES += ['native_dropdown_ownership']
 # Native acceptance of test.163009, Play Details: five missing and seven extra distinct names show two names and +3 / +5 more as separate measured one-line rows, whole inside their columns at default, taller and 125% text and both no-wrap readings; held top, downward growth / edge clamp, collapse of all four categories and every row, memory-only reload (EXPECT fails at a9ff2eda by design; native fit NOT_RUN).
 NAMES += ['native_details_measurement']
+# Issue #21 Stage A: a Community or Leaderboard scroll that keeps the exact bound virtual window (same rows, revisions, selection, layout and checked-out frames) does not release and rebind it; wheel steps, clamping, the overflow cue and every data, dirty, filter, selection, layout, resize and failure rebind are kept (EXPECT fails at 9bfb2bb9 by design; native flicker and frame timing NOT_RUN).
+NAMES += ['community_scroll_same_window','leaderboard_scroll_same_window']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

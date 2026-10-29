@@ -4298,10 +4298,52 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
         resultText:SetText(string.format("|cffd8c7a0Showing %d-%d of %d|r",
             first, last, total))
     end
+    -- #21 Stage A: what the last completed bind of THIS publication showed.
+    -- A scroll whose window, rows, data revisions, selection, layout and
+    -- checked-out cards all still match only moves the ScrollFrame, which
+    -- SetScroll has already done. Any other change, or any failure, rebinds.
+    local boundWindow = nil
+    local BOUND_FIELDS = {
+        "cards", "active", "count", "visibleH", "first", "last", "maxOffset",
+        "layout", "selected", "stale", "buildRevision", "dpsRevision",
+    }
+    local function BoundWindowKey(virtual, visibleH)
+        local buildRevision, dpsRevision = viewDiagnostic.pump.Revisions()
+        return {
+            cards=activeCards, active=#activeCards, count=#builds,
+            visibleH=visibleH, first=virtual.first, last=virtual.last,
+            maxOffset=virtual.maxOffset,
+            layout=frame and frame._responsiveLayout or false,
+            selected=SelectedId() or false,
+            stale=frame and frame._resultsStale or false,
+            buildRevision=buildRevision, dpsRevision=dpsRevision,
+        }
+    end
+    local function SameBoundWindow(virtual, visibleH)
+        if not boundWindow or refreshDirty or #builds == 0 then return false end
+        if not (scrollBar and scrollBar.value == virtual.offset) then return false end
+        local key = BoundWindowKey(virtual, visibleH)
+        for _, field in ipairs(BOUND_FIELDS) do
+            if key[field] ~= boundWindow[field] then return false end
+        end
+        return true
+    end
     renderBuildWindow = function(reason)
         if virtualBinding then return end
         virtualBinding = true
         local ok, err = pcall(function()
+    local rowHeight = CARD_HEIGHT + 4
+    local visibleH = math.max(100,
+        (scrollFrame and scrollFrame:GetHeight()) or 458)
+    local virtual = Nexus.VirtualList.Window(
+        #builds, rowHeight, visibleH,
+        scrollBar and scrollBar.value or 0, 2)
+    if reason == "scroll" and SameBoundWindow(virtual, visibleH) then
+        -- The bound cards stay; only the reported offset follows the view.
+        virtualStats.offset = virtual.offset
+        return
+    end
+    boundWindow = nil
     ReleaseAllCards()
     ReleaseAllHeaders()
     local cardLayout = frame and frame._responsiveLayout
@@ -4310,12 +4352,6 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
             gap=6,iconCapacity=12,
         }
 
-    local rowHeight = CARD_HEIGHT + 4
-    local visibleH = math.max(100,
-        (scrollFrame and scrollFrame:GetHeight()) or 458)
-    local virtual = Nexus.VirtualList.Window(
-        #builds, rowHeight, visibleH,
-        scrollBar and scrollBar.value or 0, 2)
     local yOffset = (virtual.first - 1) * rowHeight
     local lastClass = "__none__"
     local showHeaders = false
@@ -4578,9 +4614,11 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
     else
         virtualStats.dataBinds = virtualStats.dataBinds + 1
     end
+    boundWindow = BoundWindowKey(virtual, visibleH)
         end)
         virtualBinding = false
         if not ok then
+            boundWindow = nil
             pcall(ReleaseAllCards)
             pcall(ReleaseAllHeaders)
             virtualStats.active = 0
