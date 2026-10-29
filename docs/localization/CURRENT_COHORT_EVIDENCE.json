@@ -1914,8 +1914,8 @@
     {
       "id": "F2",
       "path": "tools/tests/test_l10n_catalog.py:534",
-      "predicate": "assertIn(\"uncommitted working copy\", KEY_CONTEXT.currentAdoption.scope) requires the stale phrase; this revision keeps it only inside an explicit historical qualification so the scope states the committed truth without breaking the registered suite",
-      "impact": "a test-owned rebind is needed before the phrase can be dropped"
+      "predicate": "assertIn(\"uncommitted working copy\", adoption[\"scope\"]) requires the superseded phrase in KEY_CONTEXT.currentAdoption.scope. The scope states the current committed adoption at 8393f5f4b61a0d62b5043b861539be868ebf80f6 (first committed in a50372ba485fd98043d68ec7d4f732ee947b0c28) as a CURRENT FACT and keeps the phrase only inside a sentence labelled HISTORICAL STATEMENT, SUPERSEDED AND NO LONGER TRUE. No metadata describes the adoption as currently uncommitted. The assertion therefore does not block truthful documentation, but it pins history rather than the current fact","minimalFixtureUpdate": "for Root's assessment, not applied here: in tools/tests/test_l10n_catalog.py replace line 534 `self.assertIn(\"uncommitted working copy\", adoption[\"scope\"])` with `self.assertIn(\"a50372ba485fd98043d68ec7d4f732ee947b0c28\", adoption[\"scope\"])` and `self.assertIn(\"8393f5f4b61a0d62b5043b861539be868ebf80f6\", adoption[\"scope\"])`; with that change the historical sentence may be dropped. Optional, separate: correct the comments at lines 202-212 and 231-234 and, as line 233 itself requests, replace WORKING_COPY_PHYSICAL_INPUTS for data/LocalizationEnglish.lua with the canonical LF blob identity (69d3998950b651f5b666f7b6a65a718c97bfb3719bfb4523d5c60037ed7f20a5, 3916) in CURRENT_REFERENCE_INPUTS; neither change weakens a check",
+      "impact": "test commentary and the pinned phrase are historical; a test-owned rebind lets the current fact be asserted directly"
     },
     {
       "id": "F3",

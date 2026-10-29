@@ -350,10 +350,22 @@ None of these is repaired in this lane.
   is the CRLF checkout of that blob. The commentary is stale, but the
   assertions pass.
 - **F2.** `tools/tests/test_l10n_catalog.py:534` requires the phrase
-  `uncommitted working copy` in `KEY_CONTEXT.currentAdoption.scope`. This
-  revision keeps the phrase only inside an explicit historical
-  qualification, so the scope states the committed truth without breaking
-  the registered suite. Dropping the phrase needs a test-owned rebind.
+  `uncommitted working copy` in `KEY_CONTEXT.currentAdoption.scope`. The
+  scope gives the committed adoption at `8393f5f` (first committed in
+  `a50372b`) as a CURRENT FACT. It keeps the phrase only inside a sentence
+  labelled HISTORICAL STATEMENT, SUPERSEDED AND NO LONGER TRUE. No metadata
+  describes the adoption as currently uncommitted, so the assertion doesn't
+  block truthful documentation, but it pins history rather than the current
+  fact. Minimal fixture update for Root's assessment, not applied here:
+  replace line 534 with
+  `self.assertIn("a50372ba485fd98043d68ec7d4f732ee947b0c28", adoption["scope"])`
+  and
+  `self.assertIn("8393f5f4b61a0d62b5043b861539be868ebf80f6", adoption["scope"])`.
+  The historical sentence can then be dropped. A separate, optional update:
+  correct the comments in F1 and, as line 233 itself asks, move the English
+  identity from `WORKING_COPY_PHYSICAL_INPUTS` to the canonical LF blob
+  (`69d39989…`, 3916 bytes) in `CURRENT_REFERENCE_INPUTS`. Neither update
+  weakens a check.
 - **F3.** `tools/tests/test_l10n_catalog.py:376`, `:481` and `:668` pin the
   declared contract pin of `RELEASE_LANGUAGES.json`, `KEY_CONTEXT.json` and
   `FULL_COVERAGE.md` to `5c77eec`. Current facts are therefore bound to
