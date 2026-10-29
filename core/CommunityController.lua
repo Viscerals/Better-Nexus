@@ -1336,8 +1336,8 @@ function Controller.New(options)
     -- kept as generated) exactly this description while the mirror carried
     -- exactly this marker: the marker's length, the marker, the description.
     -- The catalog field holds 2048 bytes. A witness written here is at most
-    -- 1181: length 2 + ":" 1 + an EditBuild title 80 + a generated
-    -- description 1098 (42 fixed + a catalog Wishlist name 1024 + two
+    -- 1199: length 2 + ":" 1 + an EditBuild title 80 + a generated
+    -- description 1116 (60 fixed + a catalog Wishlist name 1024 + two
     -- catalog integers of at most 16 digits). One over 2048 is not recorded.
     local function SavedDescriptionWitness(marker, description)
         if type(description) ~= "string" then return nil end
@@ -1372,8 +1372,11 @@ function Controller.New(options)
         end
         local description = "No Wishlist assigned yet."
         if current.destinationName then
+            -- EchoProgress counts the Wishlist's copies found in this Saved
+            -- Build (UserText.COUNT_UNITS.savedBuild): not planned copies and
+            -- not copies rolled this run.
             description = string.format(
-                "Assigned Wishlist: %s - target progress (%d/%d).",
+                "Assigned Wishlist: %s - %d/%d Wishlist copies in this Saved Build.",
                 tostring(current.destinationName), current.progress,
                 current.destinationTotal)
         end
@@ -1467,12 +1470,17 @@ function Controller.New(options)
         end
         local signature = table.concat(signatureParts, "|")
         local desiredPublishedId = published and published.id or nil
+        -- A description this build would generate differently (an earlier
+        -- build's unqualified text) is described again although the signature
+        -- is unchanged; text kept as the owner's is returned as it is.
+        local description, witness = SavedMirrorDescription(old, current)
         if not old or old._savedSignature ~= signature
             or old.recordBuildId ~= recordBuildId
-            or old.publishedBuildId ~= desiredPublishedId then
+            or old.publishedBuildId ~= desiredPublishedId
+            or (type(old.description) == "string"
+                and old.description ~= description) then
             local stamp = NextStamp(old and old.lastModified or 0)
             local localOwner = CurrentVerifiedOwnerKey()
-            local description, witness = SavedMirrorDescription(old, current)
             local record = {
                         id=current.id, title=current.title,
                         serverTitle=current.serverTitle,

@@ -225,6 +225,16 @@ C.scenario('Q5 the Saved Build card counts the Wishlist copies found in that Sav
  C.expect(line:find(expected,1,true)~=nil,'Q5: the card names the unit: Wishlist copies in this Saved Build',line)
  -- Only a shown card can hold this (an empty line is not evidence).
  C.expect(line~='' and not line:find('in progress',1,true),'Q5: it no longer calls the Saved Build\'s copies "in progress"',line)
+ -- The mirror's generated description, served beside it, counts the same
+ -- copies (EchoProgress) and names the same unit; every count it gives is
+ -- qualified.
+ local desc=V.Plain(mirror.description or '')
+ local unit=Nexus.UserText and Nexus.UserText.COUNT_UNITS and Nexus.UserText.COUNT_UNITS.savedBuild or '?'
+ local bare=desc:gsub('%d+ ?/ ?%d+ '..unit:gsub('%p','%%%0'),'')
+ print('OBSERVED','Q5 description='..desc)
+ C.expect(desc:find(string.format('%d/%d %s',tonumber(mirror.destinationProgress) or -1,
+  tonumber(mirror.destinationTotal) or -1,unit),1,true)~=nil and not bare:find('%d+ ?/ ?%d+'),
+  'Q5: the generated description gives its count only as '..unit,desc)
  C.guard(#H.actions==before,'Q5: opening and filtering the Build Library performs no game action',#H.actions)
 end)
 
