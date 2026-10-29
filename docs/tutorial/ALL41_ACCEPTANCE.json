@@ -6,42 +6,55 @@
  "authoring": {
   "author": "Claude Opus 5.5 (claude-opus-5-5)",
   "accountableOwner": "existing Nexus coordinator",
-  "independentReview": "Codex (pending for this rebinding revision)",
-  "dispositionStatus": "author dispositions; independent Spec/Standards review of this rebinding is pending"
+  "independentReview": "Codex (pending for this 8393f5f rebinding revision)",
+  "dispositionStatus": "author dispositions carried from the reviewed c7d2b74 revision; independent Spec/Standards review of this rebinding is pending"
  },
  "sourcePin": {
-  "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-  "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+  "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+  "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
  },
  "baselineStatus": {
   "kind": "final-source-pin",
   "boundTo": {
-   "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-   "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+   "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+   "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
   },
-  "statement": "Source symbols, line citations and assertions are rebound to the final pin above. Final-pin execution: The root coordinator's complete CI at this pin is terminal and PASSED: Lua 580 of 580 listed fixtures passed, 0 failed, 0 not run; both registered Python test files passed (84 cases); the source was unchanged during the run. Every fixture cited by a row passed. Line citations were rebound against f399dd0, whose cited source and fixture blobs are identical at c7d2b74. Each row keeps its 9bfb2bb results as historicalExecution; they are not proof of changed code. The failed f399dd0 complete CI, lane runs and the intermediate 6dcb46c CI are historical, not this pin's execution."
+  "statement": "Source symbols, line citations and assertions are rebound to the final pin above from c7d2b74 (24 commits, 54 changed paths). Citations into changed files were remapped from git line maps; five changed regions were re-read and rewritten or annotated. Final-pin execution: The root coordinator's complete CI at this pin is terminal and PASSED: Lua 599 of 599 listed fixtures passed, 0 failed, 0 not run; both registered Python test files passed (84 cases); exit 0. Every fixture cited by a row passed (63 of 63, exit 0). Source custody: the raw source inventory was captured after the run; committed-source custody and 99 runtime hashes matching the working files support sourceUnchanged, but no measured raw pre/post comparison exists. Each row keeps its c7d2b74 execution as priorPinExecution and its 9bfb2bb results as historicalExecution; they are not proof of the changed code. The aggregate totals do not establish any row's behavior."
  },
  "revision": {
   "supersedes": {
-   "commit": "8ae217f37df2e5c60942e20c3688a3652a3f8a23",
-   "tree": "98e698454f07059fd84a2d090d7a6dde467e6856",
-   "note": "That matrix text is integrated byte-identically in c7d2b74 and described f399dd0, including its failed complete CI."
+   "commit": "f770bc4244a8fed4ae70fbaeba50eeb3c955bcbb",
+   "tree": "921b0d3adda864b1e4bb4f59784d7ec611253913",
+   "note": "That matrix text is integrated byte-identically in 8393f5f (merged by c7e4d7c) and described c7d2b74 with its passing Lua 580 CI."
   },
   "earlier": [
+   {
+    "commit": "8ae217f37df2e5c60942e20c3688a3652a3f8a23",
+    "described": "f399dd0"
+   },
    {
     "commit": "2aaaecca766df39198780be1303f5352aca446d1",
     "described": "9bfb2bb"
    }
   ],
   "corrections": [
-   "Every source and test citation is rebound to f399dd0: shifted lines are remapped mechanically; changed regions are re-read and rewritten.",
-   "UX-02 and J4: partial -> met-offline-adopted-interpretation. G-UX02-a and G-UX02-b are resolved by 82b7695; the adopted reading of 'marked' (a separate Freeze mark) is recorded.",
-   "UX-13: partial -> met-offline-adopted-interpretation. G-UX13 is resolved by 62f16c7; the literal 'planned' interpretation is recorded as a retained conflict.",
-   "LP-13, LP-15, UX-07, UX-15 and the other partial rows stay partial; their citations are updated only.",
-   "Each row separates final-pin execution, lane runs and historical 9bfb2bb execution.",
-   "This revision: the final pin is now c7d2b74. Every cited source and fixture blob was verified identical to f399dd0, so citations are unchanged. Per-row execution (status, exit, checks) is re-read from the passing c7d2b74 complete CI.",
-   "This revision: the failed f399dd0 complete CI is kept as historical, with its fixture-level cause and repair recorded; the CI blocker is removed from current obligations. Dispositions and counts are unchanged."
+   "Final pin is now 8393f5f (tree 8c1397b). c7d2b74 -> 8393f5f merges the Orb terminal dismissal (#167), panel usability (#165 #168 #169 #170 #171 UI), whole-addon session pause (#171), Continue cadence (#172) and the native-menu/FAQ repair (87de3ff, 8393f5f).",
+   "Every cited source and fixture path was checked against the 8393f5f blob: 13 cited files changed, plus 2 executed-only fixtures (help, help_action_first). Shifted citations are remapped from git line maps; bare ':N' citations were resolved to their file and checked against the c7d2b74 line content.",
+   "Five cited ranges touched changed lines and were re-read: UX-02 Panel heading (new session-pause branch), UX-10 Auto hover (replaced), J4 accept callback (session-pause refusal), LP-06 K6 and UX-17 H1 (Reference page count 7 -> 8).",
+   "Per-row execution (status, exit, checks) is re-read from the passing 8393f5f complete CI; c7d2b74 execution is kept per row as priorPinExecution. help_action_first checks changed 6052 -> 6493 (FAQ page); every other cited fixture's check count is unchanged.",
+   "UX-10: a new source observation is recorded for a coordinator decision; its disposition is carried, not re-confirmed. Dispositions and counts are otherwise unchanged; no row is promoted."
   ],
+  "priorRevisionCorrections": {
+   "f770bc4": [
+    "Every source and test citation is rebound to f399dd0: shifted lines are remapped mechanically; changed regions are re-read and rewritten.",
+    "UX-02 and J4: partial -> met-offline-adopted-interpretation. G-UX02-a and G-UX02-b are resolved by 82b7695; the adopted reading of 'marked' (a separate Freeze mark) is recorded.",
+    "UX-13: partial -> met-offline-adopted-interpretation. G-UX13 is resolved by 62f16c7; the literal 'planned' interpretation is recorded as a retained conflict.",
+    "LP-13, LP-15, UX-07, UX-15 and the other partial rows stay partial; their citations are updated only.",
+    "Each row separates final-pin execution, lane runs and historical 9bfb2bb execution.",
+    "This revision: the final pin is now c7d2b74. Every cited source and fixture blob was verified identical to f399dd0, so citations are unchanged. Per-row execution (status, exit, checks) is re-read from the passing c7d2b74 complete CI.",
+    "This revision: the failed f399dd0 complete CI is kept as historical, with its fixture-level cause and repair recorded; the CI blocker is removed from current obligations. Dispositions and counts are unchanged."
+   ]
+  },
   "productOrTestChange": false,
   "rerun": false
  },
@@ -95,10 +108,197 @@
    "J5"
   ],
   "qualification": "Canonical41 normative objects are verbatim; original problem titles describe desired outcomes, not assertions of a current defect or acceptance. Source comments and fixture assertions are not execution evidence. Final composition and native acceptance are external.",
-  "note": "Maintainer-held sanitized input; each row's `canonical` object is copied from it unchanged."
+  "note": "Maintainer-held sanitized input; each row's `canonical` object is copied from it unchanged.",
+  "verification8393": {
+   "inputSha256Verified": true,
+   "objectsEqualToInput": 41,
+   "orderEqualToInput": true,
+   "counts": {
+    "UX": 18,
+    "LP": 18,
+    "J": 5
+   },
+   "note": "Each row's canonical object was compared with the maintainer-held input file whose SHA-256 is above; Crimson's separate N/H 41 feedback topics are a different inventory and are not used."
+  }
  },
  "evidence": {
   "sourceLineage": {
+   "base": {
+    "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+    "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+   },
+   "final": {
+    "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+    "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
+   },
+   "commits": 24,
+   "changedPaths": 54,
+   "mergedAcceptedLanes": [
+    {
+     "lane": "Orb terminal dismissal (#167)",
+     "commit": "ebc990c458e77109a4aa5353792fc1ff77e466b0",
+     "merge": "93a68b7227cbfb548f513605ec4c3b3d5baf5580"
+    },
+    {
+     "lane": "panel usability (#165 #168 #169 #170 #171 UI)",
+     "commit": "397f6c71633789508fcb5af81e7c2f4e683604b1",
+     "merge": "109b7c8c92e56e1331f8617caa715a03abf8ec5d"
+    },
+    {
+     "lane": "session-pause core (#171)",
+     "commit": "3020df65aad5cde5ac9fe24c248113d2b0f2123c",
+     "merge": "4076ebc2c1d8f6a81edb23ce9f13df2f663e5933"
+    },
+    {
+     "lane": "Continue cadence (#172)",
+     "commit": "3457617de78b08d0b522265fd6bce6f198d86783",
+     "merge": "b1ef40832899d2cec8312ca1dadb9376ffb49e3e"
+    },
+    {
+     "lane": "native menu and FAQ repair",
+     "commits": [
+      "87de3ff1ecf8599d4c73fdbb5368fdc04304cb9d",
+      "8393f5f4b61a0d62b5043b861539be868ebf80f6"
+     ]
+    }
+   ],
+   "laneAcceptance": "Merge commit subjects record these lanes as accepted; their review receipts were not re-read for this matrix, except the 8393f5f final-source reviews below.",
+   "matrixAtFinal": "docs/tutorial/ALL41_ACCEPTANCE.json and .md at 8393f5f are byte-identical to f770bc4 (merged by c7e4d7c).",
+   "citedChangedFiles": [
+    "core/AutomationRuntime.lua",
+    "core/GameAdapter.lua",
+    "core/Main.lua",
+    "core/MainLifecycle.lua",
+    "core/OrbRuntime.lua",
+    "ui/Help.lua",
+    "ui/LayoutMetrics.lua",
+    "ui/OrbPanel.lua",
+    "ui/Panel.lua",
+    "tests/prototype/ux_automation_scope.lua",
+    "tests/prototype/ux_help_navigation.lua",
+    "tests/prototype/ux_setup_checklist.lua",
+    "tests/prototype/ux_setup_replay.lua"
+   ],
+   "executedChangedFixtures": [
+    "tests/prototype/help.lua",
+    "tests/prototype/help_action_first.lua"
+   ],
+   "reReadChangedRegions": [
+    {
+     "row": "UX-02",
+     "c7d2b74": "ui/Panel.lua:4950-4991",
+     "final": "ui/Panel.lua:5268-5312",
+     "change": "new first session-pause heading branch; cited branches byte-identical"
+    },
+    {
+     "row": "UX-10",
+     "c7d2b74": "ui/Panel.lua:2370-2389",
+     "final": "ui/Panel.lua:2638, :5960-6061, :3168-3172; ui/Help.lua:307-316",
+     "change": "Auto hover replaced by a short summary; per-permission list moved to Options > Auto explained"
+    },
+    {
+     "row": "J4",
+     "c7d2b74": "core/AutomationRuntime.lua:4684-4716",
+     "final": "core/AutomationRuntime.lua:4715-4748",
+     "change": "accept callback also refuses during the session pause"
+    },
+    {
+     "row": "LP-06",
+     "c7d2b74": "tests/prototype/ux_setup_checklist.lua:222-335",
+     "final": "same lines",
+     "change": "Reference page count expectation 7 -> 8"
+    },
+    {
+     "row": "UX-17",
+     "c7d2b74": "tests/prototype/ux_help_navigation.lua:96-99",
+     "final": "same lines",
+     "change": "Reference page count expectations 7 -> 8"
+    }
+   ],
+   "rangesWithInsertedLines": [
+    "UX-01/J4 core/AutomationRuntime.lua:4653-4669 -> 4679-4700 (session-pause refusal)",
+    "J5 core/OrbRuntime.lua:3356-3392 -> 3383-3420 (session-pause refusal in M.Resume)"
+   ],
+   "method": "Read-only: git diff -U0 c7d2b74 8393f5f line maps per cited file; every remapped line is byte-identical at the new position; ranges touching changed or inserted lines were read at the 8393f5f blob."
+  },
+  "finalFullCI": {
+   "pin": {
+    "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+    "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
+   },
+   "owner": "root coordinator",
+   "scope": "full-ci: complete registered Lua inventory and registered Python tests",
+   "status": "passed",
+   "startedUTC": "2026-10-29T22:45:36.493Z",
+   "finishedUTC": "2026-10-29T22:59:34.7989064Z",
+   "exitCode": 0,
+   "runtime": "LuaJIT",
+   "lua": {
+    "listed": 599,
+    "passed": 599,
+    "failed": 0,
+    "not_run": 0
+   },
+   "python": {
+    "registeredFiles": 2,
+    "passedFiles": 2,
+    "cases": 84
+   },
+   "citedFixtures": {
+    "distinct": 63,
+    "passed": 63,
+    "exitZero": 63
+   },
+   "sourceUnchanged": true,
+   "sourceProvenance": {
+    "snapshotStage": "post-CI",
+    "rawPreCISnapshotRecorded": false,
+    "measuredRawPrePostComparison": false,
+    "basis": "committed-source custody (clean exact commit/tree before launch and after completion) and 99 runtime hashes matching the working files",
+    "claim": "sourceUnchanged rests on that custody; no measured raw pre/post comparison is claimed"
+   },
+   "receipts": {
+    "receipt": {
+     "name": "checks/native-final-8393f5f/RECEIPT.json",
+     "sha256": "862607b14c0d36dd8254c4b960370a815a492d98454a32c2f3172c00b1f64d43"
+    },
+    "results": {
+     "name": "checks/native-final-8393f5f/results.json",
+     "sha256": "be61f5092076369c36c1a08641f8de1a9753912259d88a843ce52ab5a6e34040"
+    },
+    "location": "maintainer-held local receipts; not committed"
+   },
+   "statement": "The root coordinator's complete CI at this pin is terminal and PASSED: Lua 599 of 599 listed fixtures passed, 0 failed, 0 not run; both registered Python test files passed (84 cases); exit 0. Every fixture cited by a row passed (63 of 63, exit 0). Source custody: the raw source inventory was captured after the run; committed-source custody and 99 runtime hashes matching the working files support sourceUnchanged, but no measured raw pre/post comparison exists.",
+   "use": "Offline synthetic execution of this pin. Aggregate totals, registration, header IDs or a grep hit never establish a row's behavior; each row binds its own cited fixtures. Not native, package or release evidence. Not a run of the later documentation commit."
+  },
+  "historicalFullCIc7d2b74": {
+   "pin": {
+    "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+    "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+   },
+   "owner": "root coordinator",
+   "scope": "complete registered Lua inventory and registered Python tests",
+   "status": "passed",
+   "observedUTC": "2026-10-29T14:22:09.633211+00:00",
+   "statement": "The root coordinator's complete CI at this pin is terminal and PASSED: Lua 580 of 580 listed fixtures passed, 0 failed, 0 not run; both registered Python test files passed (84 cases); the source was unchanged during the run. Every fixture cited by a row passed.",
+   "startedUTC": "2026-10-29T14:06:34.291475+00:00",
+   "finishedUTC": "2026-10-29T14:22:09.633211+00:00",
+   "exitCode": 0,
+   "sourceUnchanged": true,
+   "lua": {
+    "listed": 580,
+    "passed": 580,
+    "failed": 0,
+    "not_run": 0
+   },
+   "python": {
+    "registeredFiles": 2,
+    "passedFiles": 2,
+    "cases": 84
+   },
+   "use": "Complete CI of the previous pin c7d2b74; historical, not this pin's execution."
+  },
+  "sourceLineageC7d2b74": {
    "base": {
     "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
     "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -154,32 +354,6 @@
    ],
    "unionAudit": "Mechanical exact-author-blob audit passed: every changed tree entry equals its lane author blob or the base; no extra merge edits; registry byte-identical to 6dcb46c with 580 unique fixtures.",
    "changedFromBase": 22
-  },
-  "finalFullCI": {
-   "pin": {
-    "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-    "tree": "afd9170c34459ef5a976d989ab106535327724f5"
-   },
-   "owner": "root coordinator",
-   "scope": "complete registered Lua inventory and registered Python tests",
-   "status": "passed",
-   "observedUTC": "2026-10-29T14:22:09.633211+00:00",
-   "statement": "The root coordinator's complete CI at this pin is terminal and PASSED: Lua 580 of 580 listed fixtures passed, 0 failed, 0 not run; both registered Python test files passed (84 cases); the source was unchanged during the run. Every fixture cited by a row passed.",
-   "startedUTC": "2026-10-29T14:06:34.291475+00:00",
-   "finishedUTC": "2026-10-29T14:22:09.633211+00:00",
-   "exitCode": 0,
-   "sourceUnchanged": true,
-   "lua": {
-    "listed": 580,
-    "passed": 580,
-    "failed": 0,
-    "not_run": 0
-   },
-   "python": {
-    "registeredFiles": 2,
-    "passedFiles": 2,
-    "cases": 84
-   }
   },
   "validationCauseResolved": {
    "fixture": "tests/prototype/lifecycle_counter_accounting.lua",
@@ -284,70 +458,6 @@
     "date": "2026-10-29",
     "use": "Root-run discriminating RED: R10's count check fails on the predecessor's exact-two Freeze wording while every guard and setup holds."
    }
-  },
-  "independentReviews": {
-   "final2Reconciliation": {
-    "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
-    },
-    "comparison": "git diff f399dd09700e739fd27b187069bd4c83278c86c4...c7d2b740a5574c79a61c2ab9e84fc488eefe4504 (3 paths)",
-    "spec": "PASS, zero material findings",
-    "standards": "zero material findings",
-    "notes": "Thin reconciliation: both documents equal 8ae217f, the fixture equals 63ff470, every other path equals f399dd0. Reviewers ran no tests; the complete CI was still running when they read it."
-   },
-   "finalCombined": {
-    "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
-    },
-    "comparison": "git diff 9bfb2bb922123e0b60f8b7f0506fc508c4476052...f399dd09700e739fd27b187069bd4c83278c86c4 (21 paths)",
-    "spec": "PASS, zero material findings",
-    "standards": "zero material findings",
-    "notes": "Fixed-source reviews by independent Codex reviewers. Reviewers ran no tests. Their product conclusions carry to c7d2b74 because production and every other fixture are unchanged from f399dd0."
-   },
-   "lanes": [
-    {
-     "lane": "#126 difficulty read",
-     "commit": "dc47e652f52c0c3e0764888c9bd9e897db040890",
-     "spec": "PASS, zero material findings"
-    },
-    {
-     "lane": "#21 same-window scroll (fixture correction)",
-     "commit": "36eca60b1912bc365752bfc3dd3ee365927a1a2b",
-     "spec": "zero material findings"
-    },
-    {
-     "lane": "#131 all41 matrix correction (historical 9bfb text)",
-     "commit": "2aaaecca766df39198780be1303f5352aca446d1",
-     "spec": "zero material findings",
-     "standards": "zero material findings"
-    },
-    {
-     "lane": "UX-13 / LP-13 generated mirror counts",
-     "commit": "62f16c70d2bb438abdb5f581ba2e58c612d2f348",
-     "spec": "zero material findings",
-     "standards": "zero material findings"
-    },
-    {
-     "lane": "UX-02 / J4 manual recommendation",
-     "commit": "82b7695d27d6f870547f7638942c74f81604affd",
-     "spec": "PASS, prior P2 (exact-count wording) resolved",
-     "standards": "zero material findings"
-    },
-    {
-     "lane": "lifecycle_counter_accounting fixture repair (uncited)",
-     "commit": "63ff47019ac1b3e9b6f209d14fc6cff9ba672d0b",
-     "spec": "PASS, zero material findings",
-     "standards": "zero material findings"
-    },
-    {
-     "lane": "all41 matrix rebinding to f399dd0 (this file's predecessor)",
-     "commit": "8ae217f37df2e5c60942e20c3688a3652a3f8a23",
-     "note": "covered by the final2 reconciliation reviews as a held f399dd0 snapshot"
-    }
-   ],
-   "use": "Source and test-oracle reviews. Not execution, native acceptance or acceptance of this matrix. This c7d2b74 rebinding revision itself has no independent review yet."
   },
   "historicalFailedFullCIf399dd0": {
    "pin": {
@@ -505,6 +615,111 @@
     "cases": 84
    },
    "use": "Full CI of an intermediate union before the UX-13 and UX-02/J4 lanes; not this code's execution."
+  },
+  "independentReviewsC7d2b74": {
+   "final2Reconciliation": {
+    "pin": {
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+    },
+    "comparison": "git diff f399dd09700e739fd27b187069bd4c83278c86c4...c7d2b740a5574c79a61c2ab9e84fc488eefe4504 (3 paths)",
+    "spec": "PASS, zero material findings",
+    "standards": "zero material findings",
+    "notes": "Thin reconciliation: both documents equal 8ae217f, the fixture equals 63ff470, every other path equals f399dd0. Reviewers ran no tests; the complete CI was still running when they read it."
+   },
+   "finalCombined": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "comparison": "git diff 9bfb2bb922123e0b60f8b7f0506fc508c4476052...f399dd09700e739fd27b187069bd4c83278c86c4 (21 paths)",
+    "spec": "PASS, zero material findings",
+    "standards": "zero material findings",
+    "notes": "Fixed-source reviews by independent Codex reviewers. Reviewers ran no tests. Their product conclusions carry to c7d2b74 because production and every other fixture are unchanged from f399dd0."
+   },
+   "lanes": [
+    {
+     "lane": "#126 difficulty read",
+     "commit": "dc47e652f52c0c3e0764888c9bd9e897db040890",
+     "spec": "PASS, zero material findings"
+    },
+    {
+     "lane": "#21 same-window scroll (fixture correction)",
+     "commit": "36eca60b1912bc365752bfc3dd3ee365927a1a2b",
+     "spec": "zero material findings"
+    },
+    {
+     "lane": "#131 all41 matrix correction (historical 9bfb text)",
+     "commit": "2aaaecca766df39198780be1303f5352aca446d1",
+     "spec": "zero material findings",
+     "standards": "zero material findings"
+    },
+    {
+     "lane": "UX-13 / LP-13 generated mirror counts",
+     "commit": "62f16c70d2bb438abdb5f581ba2e58c612d2f348",
+     "spec": "zero material findings",
+     "standards": "zero material findings"
+    },
+    {
+     "lane": "UX-02 / J4 manual recommendation",
+     "commit": "82b7695d27d6f870547f7638942c74f81604affd",
+     "spec": "PASS, prior P2 (exact-count wording) resolved",
+     "standards": "zero material findings"
+    },
+    {
+     "lane": "lifecycle_counter_accounting fixture repair (uncited)",
+     "commit": "63ff47019ac1b3e9b6f209d14fc6cff9ba672d0b",
+     "spec": "PASS, zero material findings",
+     "standards": "zero material findings"
+    },
+    {
+     "lane": "all41 matrix rebinding to f399dd0 (this file's predecessor)",
+     "commit": "8ae217f37df2e5c60942e20c3688a3652a3f8a23",
+     "note": "covered by the final2 reconciliation reviews as a held f399dd0 snapshot"
+    }
+   ],
+   "use": "Source and test-oracle reviews up to c7d2b74. Not execution, native acceptance or acceptance of this matrix."
+  },
+  "independentReviews8393": {
+   "spec": {
+    "pin": {
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
+    },
+    "comparison": "git diff b1ef408...8393f5f (refresh 87de3ff...8393f5f)",
+    "result": "passed offline Spec review, 0 material findings",
+    "receiptSha256": "fb788b2613875d62cddb11ed52e9afebd6d7c1e1bc9469a983c856f55bdb802a"
+   },
+   "standards": {
+    "pin": {
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
+    },
+    "comparison": "git diff b1ef408...8393f5f (fresh delta 87de3ff...8393f5f)",
+    "result": "passed final-pin Standards refresh, 0 material findings",
+    "receiptSha256": "fdf261bdbe197e173fba9cf40c129e17e8d186a2e4564fbd071158d6c6b702c2"
+   },
+   "scope": "Final source and fixture review of the native-menu/FAQ delta at 8393f5f. Not independent acceptance of this documentation, not execution and not native acceptance."
+  },
+  "currentIntake": {
+   "olderQueueReconciliation": {
+    "pin": "87de3ff1ecf8599d4c73fdbb5368fdc04304cb9d",
+    "sha256": {
+     "md": "0cc44c399cf9734518bbf484845e4b3f1937fd4be06b4b966a625bf41d5b57a9",
+     "json": "ed4e087584df67d3ee72e175bbd5dfe89ab5a797164f697e8bef2da5b9c745b5"
+    },
+    "use": "Bounded read-only historical/current-source intake: ordinary Help -> coach and Assigned-now versus guide-local choice are source-implemented with native incomplete; first-warning native not run; Step 5 bounded. Not final native sign-off."
+   },
+   "native163012": {
+    "pin": "b1ef40832899d2cec8312ca1dadb9376ffb49e3e",
+    "sha256": "d6e1209ab41d7640a44d2cbb9e27b0181272c4c166e0cae83d5d42389fbb2cf4",
+    "use": "Bounded historical native sample of a private b1ef408 build at 1760x990, 100% main HUD scale: manual Welcome/Step 5 replay fitted and Options > Questions (FAQ) opened page 8/8 with Auto OFF; first-login/full setup not run; an Options menu repeat-close failure was recorded. Not first-login or full-flow evidence, not 8393f5f evidence and not acceptance of any row."
+   },
+   "trackerRead": {
+    "observedUTC": "2026-10-29T22:39:48Z",
+    "latestCurrentScopeComment": "https://github.com/Viscerals/Better-Nexus/issues/131#issuecomment-6502167124",
+    "use": "Current #131 scope: owner-approved compact Auto explanation with an accessible complete view and passive Help/FAQ; retained native scenarios. The stale issue opening does not reinstate cleared transfer/provider blockers."
+   }
   }
  },
  "historical": [
@@ -512,7 +727,9 @@
   "An earlier e8 matrix recorded zero whole items accepted and is historical.",
   "Older static/projected all41 maps and five-boundary review data are preparation only.",
   "The 9bfb2bb matrix revisions (8b1f221, 2aaaecca) and their results are historical.",
-  "The f399dd0 matrix revision (8ae217f) and the failed f399dd0 complete CI (Lua 579/580) are historical."
+  "The f399dd0 matrix revision (8ae217f) and the failed f399dd0 complete CI (Lua 579/580) are historical.",
+  "The c7d2b74 matrix revision (f770bc4) and the c7d2b74 complete CI (Lua 580/580, Python 84 cases) are historical.",
+  "The 163012 native sample (private b1ef408 build) and the screenshot usability review are bounded historical evidence, not 8393f5f or row acceptance."
  ],
  "dispositionVocabulary": {
   "met-offline": "every canonical acceptance proposal has a discriminating passing offline assertion at the pin",
@@ -567,7 +784,11 @@
   "nativePending": 38,
   "nativeNoneBeyondOfflineScope": 3,
   "acceptedWholeRows": 0,
-  "finalPinExecution": "complete suite PASSED at c7d2b74 (Lua 580/580, 0 not run; Python 2/2 files, 84 cases); all 63 cited fixtures PASS"
+  "finalPinExecution": "complete suite PASSED at 8393f5f (Lua 599/599, 0 not run; Python 2/2 files, 84 cases; exit 0); all 63 cited fixtures PASS, exit 0",
+  "priorPinExecution": "complete suite PASSED at c7d2b74 (Lua 580/580, 0 not run; Python 2/2 files, 84 cases); historical",
+  "coordinatorDecisionsPending": [
+   "UX-10 hover versus Auto explained (newSourceObservationsForCoordinator)"
+  ]
  },
  "rows": [
   {
@@ -597,7 +818,7 @@
    ],
    "callbackChain": [
     "warning No/Close/Escape (ui/OverwriteWarning.lua:210,213,228) -> Finish(false,...,explicit=true) -> onboardingOutcome='declined' (:132) -> same root/owner check (:143-145) -> ShowInformation (:110) -> QuickStart.ShowSetup (ui/QuickStart.lua:461): _informational=true, SETUP_TITLE/SETUP_HINT, no write",
-    "later Auto click -> AutomationRuntime ToggleAuto (core/AutomationRuntime.lua:4653-4669) -> OverwriteWarning.RequestAuto (:327): onboarding is 'declined' not 'pending' -> Show('auto') unless the player saved its suppression"
+    "later Auto click -> AutomationRuntime ToggleAuto (core/AutomationRuntime.lua:4679-4700) -> OverwriteWarning.RequestAuto (:327): onboarding is 'declined' not 'pending' -> Show('auto') unless the player saved its suppression"
    ],
    "discriminatingAssertions": [
     "tests/prototype/ux_setup_replay.lua:204-205 S1 No declines; `NexusDB.overwriteWarnings==nil and Seen()==nil` (real warning handlers)",
@@ -615,11 +836,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_setup_replay",
@@ -665,6 +886,61 @@
      }
     ]
    },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_setup_replay",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 229
+      },
+      {
+       "test": "overwrite_warning",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "overwrite_warning_welcome",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 26
+      },
+      {
+       "test": "overwrite_warning_lifecycle",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 76
+      },
+      {
+       "test": "overwrite_auto_gate",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "quickstart_seen_guard",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 76
+      },
+      {
+       "test": "guided_first_entry",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 195
+      }
+     ]
+    }
+   },
    "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
@@ -710,6 +986,10 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "The cited Auto request path (core/AutomationRuntime.lua:4679-4700) gained one refusal before RequestAuto: while the session pause (#171) holds, an Auto click keeps Auto OFF ('Auto stays OFF while Nexus is paused. Resume Nexus first.'). Additive; the decline/consent chain and its assertions are unchanged.",
+    "ux_setup_replay S2 now expects the Reference to open on 'Page 1 / 8' (FAQ page appended by #169); the cited UX-01 assertions are unchanged lines."
+   ],
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
     "notes": "All three canonical acceptance proposals have discriminating passing assertions under the adopted reading; 'Welcome shown' is satisfied by the information-only Welcome, not the first-time Welcome. Conflict recorded above.",
@@ -745,7 +1025,7 @@
    "adoptedInterpretation": "Delivered as two surfaces: the read-only 'Setup checklist and status' window (ui/QuickStart.lua:489-686, rows from Panel.SetupFacts via UserText.SetupChecklist) and the guided setup coach (core/GuidedSetup.lua, ui/GuidedSetup.lua) whose steps complete only from bound receipts plus fresh read back; the place is kept per character (PLACE_KEY guidedSetupPlaceV1) but no result is kept across reload.",
    "productionSymbols": [
     "ui/QuickStart.lua:542 RefreshChecklist",
-    "ui/Panel.lua:1079 M.SetupFacts",
+    "ui/Panel.lua:1081 M.SetupFacts",
     "core/UserText.lua SetupChecklist / StatusLines",
     "core/GuidedSetup.lua:74 ReadPlace, :125 Save, :255 G.Resume, :321 G.Recheck, :800 G.Summary",
     "ui/QuickStart.lua:712 ShowFirstUseCoach, :706 CoachClosed"
@@ -767,11 +1047,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_setup_checklist",
@@ -804,6 +1084,49 @@
       "checks": 229
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_setup_checklist",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 192
+      },
+      {
+       "test": "guided_setup_flow",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 2878
+      },
+      {
+       "test": "guided_setup_resume",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 138
+      },
+      {
+       "test": "guided_setup_readback",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 135
+      },
+      {
+       "test": "ux_setup_replay",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 229
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -840,6 +1163,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "ux_setup_checklist and ux_setup_replay changed only their Reference page-count expectation (7 -> 8 pages, FAQ appended); the cited checklist assertions are unchanged lines."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "State-derived checklist and replay composition exist; no consent from No/Close (see UX-01).",
@@ -876,19 +1202,19 @@
      "No engine name in recommendations"
     ]
    },
-   "adoptedInterpretation": "With Auto OFF the HUD identifies a card only when the runtime's current decision has one definite card target. A Take carries the Take marker ('>>' row, '> Wishlist pick' tag; core/AutomationRuntime.lua:3275-3276 highlight, ui/Readout.lua:81 MarkedCard). The adaptive Freeze for two or more different Needed offers (PAIR_FREEZE_SECOND_NEEDED) carries a separate, display-only Freeze mark ('[Freeze]' row, '> Freeze' tag; core/AutomationRuntime.lua:3280-3281, ui/Readout.lua:98 FreezeCard), never the Take marker, and the unstepped recommendation names that card. The canonical 'marked' is read as this action-specific mark: the Wishlist pick tag means Take, so a Freeze is not shown as a pick. The same Echo offered twice, or a decision without a card target, marks and names nothing (no guess). Reason text passes through UserText.Message (core/UserText.lua:93); its reasons table maps the three experimental adaptive labels without the engine name (:30-32). The Freeze wording is count-neutral ('Freeze one of the needed offers'). Policy (logic/EchoWeaver.lua) is unchanged.",
+   "adoptedInterpretation": "With Auto OFF the HUD identifies a card only when the runtime's current decision has one definite card target. A Take carries the Take marker ('>>' row, '> Wishlist pick' tag; core/AutomationRuntime.lua:3298-3299 highlight, ui/Readout.lua:81 MarkedCard). The adaptive Freeze for two or more different Needed offers (PAIR_FREEZE_SECOND_NEEDED) carries a separate, display-only Freeze mark ('[Freeze]' row, '> Freeze' tag; core/AutomationRuntime.lua:3303-3304, ui/Readout.lua:98 FreezeCard), never the Take marker, and the unstepped recommendation names that card. The canonical 'marked' is read as this action-specific mark: the Wishlist pick tag means Take, so a Freeze is not shown as a pick. The same Echo offered twice, or a decision without a card target, marks and names nothing (no guess). Reason text passes through UserText.Message (core/UserText.lua:93); its reasons table maps the three experimental adaptive labels without the engine name (:30-32). The Freeze wording is count-neutral ('Freeze one of the needed offers'). Policy (logic/EchoWeaver.lua) is unchanged.",
    "productionSymbols": [
-    "core/AutomationRuntime.lua:3268-3285 cardLines: highlight (Take, :3275-3276), freeze display flag (:3280-3281)",
-    "core/AutomationRuntime.lua:3293 recommendation = action.reason",
+    "core/AutomationRuntime.lua:3291-3308 cardLines: highlight (Take, :3298-3299), freeze display flag (:3303-3304)",
+    "core/AutomationRuntime.lua:3316 recommendation = action.reason",
     "ui/Readout.lua:81 MarkedCard, :98 FreezeCard, :184 RecommendationWithTarget, :219 OFFER_FREEZE_TAG, :221 OfferCard (Freeze tag :259-261)",
-    "ui/Panel.lua:4950-4991 heading branches; :4965-4974 Orb-guidance branch, Auto OFF 'You choose' at :4970-4971",
-    "ui/Panel.lua:4995-5008 marked/frozen rows, :5019-5020 RenderOfferCards(..., frozen), :5027-5033 named body",
-    "ui/Panel.lua:3607 M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)",
+    "ui/Panel.lua:5268-5312 heading branches; :5286-5295 Orb-guidance branch, Auto OFF 'You choose' at :5291-5292",
+    "ui/Panel.lua:5316-5329 marked/frozen rows, :5340-5341 RenderOfferCards(..., frozen), :5348-5354 named body",
+    "ui/Panel.lua:3914 M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)",
     "core/UserText.lua:21-32 reasons (experimental adaptive labels :30-32), :93 T.Message",
     "logic/EchoWeaver.lua:199-211 LABELS, :369-387 adaptive PAIR_FREEZE redirect (unchanged)"
    ],
    "callbackChain": [
-    "offer -> Policy/EchoWeaver.DecideNexus -> decision.reason=LABELS[code] (logic/EchoWeaver.lua:317) -> runtime panel model with highlight/freeze per card (core/AutomationRuntime.lua:3271-3285, :3293) -> Panel ApplyModel heading (ui/Panel.lua:4950-4991) -> MarkedCard or FreezeCard (:4995-5001) -> row prefix and offer-card tag (:5005-5006, :5019-5020) -> UserText.Message reason + RecommendationWithTarget body (:5027-5033)"
+    "offer -> Policy/EchoWeaver.DecideNexus -> decision.reason=LABELS[code] (logic/EchoWeaver.lua:317) -> runtime panel model with highlight/freeze per card (core/AutomationRuntime.lua:3294-3308, :3316) -> Panel ApplyModel heading (ui/Panel.lua:5268-5312) -> MarkedCard or FreezeCard (:5316-5322) -> row prefix and offer-card tag (:5326-5327, :5340-5341) -> UserText.Message reason + RecommendationWithTarget body (:5348-5354)"
    ],
    "discriminatingAssertions": [
     "tests/prototype/ux_manual_recommendation.lua:123-124 R1 Auto OFF heading says you choose, not active; :126-128 exactly one marked and named Take card (single Needed card)",
@@ -909,11 +1235,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_manual_recommendation",
@@ -945,6 +1271,43 @@
     "ux02-focused-82b7695",
     "ux02-predecessor-red-0d16ba7"
    ],
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_manual_recommendation",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 124
+      },
+      {
+       "test": "terminology_consumers",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "terminology",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "orb_guidance_navigation",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 70
+      }
+     ]
+    }
+   },
    "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
@@ -970,9 +1333,12 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "The cited heading region (ui/Panel.lua:5268-5312) gained a first branch for the session pause ('Nexus paused', model._nexusSessionPaused). The Orb-guidance branch (:5286-5295), Auto OFF 'You choose' (:5291-5292), Auto ON 'Active' (:5294) and the marking/naming code (:5316-5354) are byte-identical, only shifted."
+   ],
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
-    "notes": "All three canonical proposals now have discriminating offline assertions through the real TOC boot, adapter, policy, runtime and Panel: two (and three) different Needed offers -> exactly the decision's card identified with a Freeze mark and named (R8, R10); Auto OFF heading never Active, including with Orb guidance (R7, orb_guidance_navigation); no engine name in visible recommendation or status text (R8-R10, terminology_consumers). Met under the adopted reading of 'marked' above. The former candidate gaps G-UX02-a and G-UX02-b are resolved in the final source. Its cited fixtures passed in the terminal complete passing run at c7d2b74.",
+    "notes": "All three canonical proposals now have discriminating offline assertions through the real TOC boot, adapter, policy, runtime and Panel: two (and three) different Needed offers -> exactly the decision's card identified with a Freeze mark and named (R8, R10); Auto OFF heading never Active, including with Orb guidance (R7, orb_guidance_navigation); no engine name in visible recommendation or status text (R8-R10, terminology_consumers). Met under the adopted reading of 'marked' above. The former candidate gaps G-UX02-a and G-UX02-b are resolved in the final source. Its cited fixtures passed in the terminal complete passing runs at c7d2b74 and at 8393f5f.",
     "source": "canonical object above; issue #131; independent UX-02/J4 Spec and Standards reviews of 82b7695 and final combined reviews of f399dd0 (zero material findings)"
    },
    "standards": {
@@ -981,9 +1347,9 @@
    },
    "gapsAndLimits": [
     "RESOLVED in final source (was CANDIDATE GAP G-UX02-a): the experimental adaptive labels are mapped (core/UserText.lua:30-32) and the Freeze target is identified separately from the Take marker. Lineage 6dcb46c -> 0d16ba7 -> 82b7695 (count-neutral wording), integrated unchanged in f399dd0.",
-    "RESOLVED in final source (was CANDIDATE GAP G-UX02-b): the Orb-guidance heading branch says 'You choose' with Auto OFF (ui/Panel.lua:4970-4971) and keeps 'Active: Slot N' for Auto ON only (:4973).",
+    "RESOLVED in final source (was CANDIDATE GAP G-UX02-b): the Orb-guidance heading branch says 'You choose' with Auto OFF (ui/Panel.lua:5291-5292) and keeps 'Active: Slot N' for Auto ON only (:5294).",
     "Coverage advisory retained from the independent UX-02 Spec review: an unresolved earlier-Orb state with Auto OFF is not directly tested (the tests drive an unknown Orb state); the negative 'Active' checks are case-sensitive, while the positive 'you choose' checks discriminate.",
-    "With Orb guidance shown the body is not rewritten to name a target (ui/Panel.lua:5030), as before for the Take marker.",
+    "With Orb guidance shown the body is not rewritten to name a target (ui/Panel.lua:5351), as before for the Take marker.",
     "Native font, scale, edge fit and screenshot usability of the new heading and Freeze tag are unverified."
    ],
    "nativeCriterion": {
@@ -996,7 +1362,7 @@
      "Heading and Freeze tag fit at supported font and UI scales"
     ]
    },
-   "rowDisposition": "offline-supported under the adopted reading of 'marked'; cited fixtures pass in the complete passing run at c7d2b74; native pending"
+   "rowDisposition": "offline-supported under the adopted reading of 'marked'; cited fixtures pass in the complete passing run at 8393f5f; native pending"
   },
   {
    "id": "LP-02",
@@ -1008,9 +1374,9 @@
    },
    "adoptedInterpretation": "Compact charges row 'B:n R:n F:n' (unknown '?', untrusted '~') shown only with Auto OFF and a board.",
    "productionSymbols": [
-    "core/AutomationRuntime.lua:3064 Adapter.Charges read once per decision",
-    "core/AutomationRuntime.lua:3324 model.charges (Auto OFF only)",
-    "ui/Panel.lua:5459 _nexusChargeLine, :5042-5050 show/hide",
+    "core/AutomationRuntime.lua:3087 Adapter.Charges read once per decision",
+    "core/AutomationRuntime.lua:3347 model.charges (Auto OFF only)",
+    "ui/Panel.lua:5784 _nexusChargeLine, :5363-5371 show/hide",
     "ui/Readout.lua:308 ChargesLine"
    ],
    "callbackChain": [
@@ -1028,11 +1394,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_manual_recommendation",
@@ -1041,6 +1407,25 @@
       "checks": 124
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_manual_recommendation",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 124
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -1115,11 +1500,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_save_assignment_result",
@@ -1146,6 +1531,43 @@
       "checks": 82
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_save_assignment_result",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 155
+      },
+      {
+       "test": "ux_save_intents",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 149
+      },
+      {
+       "test": "ux_auto_assignment_consent",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 57
+      },
+      {
+       "test": "ux_save_retry_intent",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 82
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -1209,7 +1631,7 @@
    "adoptedInterpretation": "Explicit intents: Save changes (no assignment writer), Save & assign (bound destination writer), Create unassigned; intent and destinationKey bound into the confirmation and checked again before upload.",
    "productionSymbols": [
     "core/WishlistController.lua:183 INTENT, :1970-1985 IntentOf/DefaultIntent, :2232 destination re-check, :2381-2395 saveOnly",
-    "core/GameAdapter.lua:3259 UpdateWishlistAssociationAfterSave (token check)",
+    "core/GameAdapter.lua:3268 UpdateWishlistAssociationAfterSave (token check)",
     "ui/WishlistRenderer.lua:3033-3054 labels"
    ],
    "callbackChain": [
@@ -1226,11 +1648,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_save_intents",
@@ -1251,6 +1673,37 @@
       "checks": 57
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_save_intents",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 149
+      },
+      {
+       "test": "ux_save_retry_intent",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 82
+      },
+      {
+       "test": "ux_auto_assignment_consent",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 57
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -1312,7 +1765,7 @@
    "productionSymbols": [
     "core/WishlistController.lua:1870 DestinationDescriptor",
     "core/UserText.lua:208 SavedBuildLabel, :286 first-run short cell, :379 DestinationLines, :416 DestinationFields",
-    "ui/Panel.lua:920 DestinationFacts"
+    "ui/Panel.lua:922 DestinationFacts"
    ],
    "callbackChain": [
     "editor open captures context -> DestinationDescriptor -> confirmation text / destination row"
@@ -1329,11 +1782,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_captured_destination_labels",
@@ -1348,6 +1801,31 @@
       "checks": 54
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_captured_destination_labels",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 452
+      },
+      {
+       "test": "ux_destination_context",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 54
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -1399,7 +1877,7 @@
    },
    "adoptedInterpretation": "Shared four-cell destination strip (character / Saved Build / Wishlist / state) on the HUD and the editor; the setup checklist and coach word the destination from the same Panel.SetupFacts/TargetOptions facts but do not render the strip.",
    "productionSymbols": [
-    "ui/Panel.lua:645 CreateDestinationRow, :668 UpdateDestinationRow (HUD :1839,:5365)",
+    "ui/Panel.lua:645 CreateDestinationRow, :668 UpdateDestinationRow (HUD :2121,:5686)",
     "ui/WishlistRenderer.lua:1352,:2841 editor strip",
     "core/UserText.lua:526 SetupChecklist",
     "ui/GuidedSetup.lua:151 TargetLabel"
@@ -1417,11 +1895,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_destination_context",
@@ -1436,6 +1914,31 @@
       "checks": 452
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_destination_context",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 54
+      },
+      {
+       "test": "ux_captured_destination_labels",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 452
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -1497,7 +2000,7 @@
     "ui/JournalTab.lua:154 M.AssignWithConsent (owner re-check, accept once)",
     "ui/JournalTab.lua:1454 A.SetLoadoutWishlist, :1470 confirmation line",
     "ui/WishlistEditor.lua:720 ResolveAndAssignWishlist -> RolePicker (:516-546)",
-    "core/GameAdapter.lua:3227 A.SetLoadoutWishlist"
+    "core/GameAdapter.lua:3236 A.SetLoadoutWishlist"
    ],
    "callbackChain": [
     "chooser row OnClick -> AssociateWishlistOnly -> GuideOrigin -> AssignWithConsent -> (Auto ON) StaticPopup accepted later -> assign() -> A.SetLoadoutWishlist -> GuideAssign receipt -> RefreshAssociations -> chat confirmation",
@@ -1514,11 +2017,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_auto_assignment_consent",
@@ -1539,6 +2042,37 @@
       "checks": 135
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_auto_assignment_consent",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 57
+      },
+      {
+       "test": "ux_assignment_consent_routes",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 104
+      },
+      {
+       "test": "guided_setup_readback",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 135
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -1614,11 +2148,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "guided_setup_readback",
@@ -1639,6 +2173,37 @@
       "checks": 2878
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "guided_setup_readback",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 135
+      },
+      {
+       "test": "ux_setup_checklist",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 192
+      },
+      {
+       "test": "guided_setup_flow",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 2878
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -1697,7 +2262,7 @@
    },
    "adoptedInterpretation": "Every Assign Wishlist route opens the Echo Journal with its Wishlist chooser already open and titled 'Assign to: <destination>'; opening/cancelling assigns nothing; an empty Saved Build's chooser says assigning is refused.",
    "productionSymbols": [
-    "ui/Help.lua:409 H.OpenAssignment -> Panel.OpenAssignment",
+    "ui/Help.lua:467 H.OpenAssignment -> Panel.OpenAssignment",
     "ui/QuickStart.lua:636 checklist Assign Wishlist...",
     "ui/GuidedSetup.lua:2070 U.RouteChooser",
     "ui/JournalTab.lua OpenBuilds(true)"
@@ -1716,11 +2281,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_help_navigation",
@@ -1735,6 +2300,31 @@
       "checks": 192
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_help_navigation",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 32
+      },
+      {
+       "test": "ux_setup_checklist",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 192
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -1756,6 +2346,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "ux_help_navigation and ux_setup_checklist changed only their Reference page-count expectations (7 -> 8 pages); the cited assertions are unchanged lines."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "",
@@ -1801,11 +2394,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_setup_checklist",
@@ -1820,6 +2413,31 @@
       "checks": 2878
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_setup_checklist",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 192
+      },
+      {
+       "test": "guided_setup_flow",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 2878
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -1841,6 +2459,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "ux_setup_checklist K6 (:222-335) changed one expectation: the Reference opens on 'Page 1 / 8' (FAQ appended). The K6 navigation-only guards are unchanged."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "Distinct from UX-06: links originate in the checklist/coach.",
@@ -1876,11 +2497,11 @@
     "ui/OrbPanel.lua:137-153 review/reviewHeld/reviewRefusal",
     "ui/OrbPanel.lua:601-615 Resume handler (fresh Status, reviewRefusal)",
     "ui/OrbPanel.lua:690-713 Review target (drawnKey==shownKey==fresh key)",
-    "core/OrbRuntime.lua:3356 M.Resume, :3384-3392 adopt/limit/token",
-    "core/OrbRuntime.lua:3720,:3748-3752 resumeTargetView key"
+    "core/OrbRuntime.lua:3383 M.Resume, :3412-3420 adopt/limit/token",
+    "core/OrbRuntime.lua:3750,:3778-3782 resumeTargetView key"
    ],
    "callbackChain": [
-    "Pump marks targetChanged and pauses (core/OrbRuntime.lua:3066-3073) -> Status().resumeTarget kind 'changed' -> window/strip/mini name it -> Review click (key check) -> Resume click re-reads Status -> reviewRefusal -> OrbRuntime.Resume -> Rebind/adopt"
+    "Pump marks targetChanged and pauses (core/OrbRuntime.lua:3087-3094) -> Status().resumeTarget kind 'changed' -> window/strip/mini name it -> Review click (key check) -> Resume click re-reads Status -> reviewRefusal -> OrbRuntime.Resume -> Rebind/adopt"
    ],
    "discriminatingAssertions": [
     "tests/prototype/orb_target_review.lua:157 \"New target: Resume would use 'New legitimate target' instead of 'Orb test'\"",
@@ -1897,11 +2518,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "orb_target_review",
@@ -1922,6 +2543,37 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "orb_target_review",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 152
+      },
+      {
+       "test": "orb_review_identity",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 77
+      },
+      {
+       "test": "orbs_target_changes",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -1948,6 +2600,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "ui/OrbPanel.lua adds a session-only 'Hide until next run' on the main-panel strip for a settled, ended run only (#167); it replaces Pause/Resume/Stop only for such a run and is not offered for a paused, changed-target or recovery state. core/OrbRuntime.lua M.Resume (:3383-3420) gained a session-pause refusal. The cited target-review chains are byte-identical, only shifted."
+   ],
    "spec": {
     "disposition": "partial",
     "notes": "Window, strip and mini name the new target before Resume, and the rendered-key race is not present at this pin (the click re-reads and compares the fresh key). The canonical proposal says all surfaces, but the Play-panel Orb line does not name the changed target. Whether that line counts as a surface is an unresolved owner interpretation, so the row is not unqualified met.",
@@ -1959,7 +2614,7 @@
    },
    "gapsAndLimits": [
     "TEST GAP: no fixture clicks a still-enabled Resume after the assignment changed without a redraw (orb_target_review.lua:243-249 calls UI.Refresh first). Current code is correct (ui/OrbPanel.lua:602 re-reads, :612 compares).",
-    "INTERPRETATION: the Play-panel Orb line (ui/OrbPanel.lua:1626-1646 UI.PanelRunLine) shows state, usage, wait and reason, but not the changed target. It offers no Resume (Open only). Owner decision whether 'all surfaces' includes it."
+    "INTERPRETATION: the Play-panel Orb line (ui/OrbPanel.lua:1664-1684 UI.PanelRunLine) shows state, usage, wait and reason, but not the changed target. It offers no Resume (Open only). Owner decision whether 'all surfaces' includes it."
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
@@ -1995,11 +2650,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "orb_target_review",
@@ -2014,6 +2669,31 @@
       "checks": 77
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "orb_target_review",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 152
+      },
+      {
+       "test": "orb_review_identity",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 77
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -2070,8 +2750,8 @@
    "adoptedInterpretation": "Separate Pause and Resume buttons; repeated Pause keeps PAUSED and has no effect; real double-click proof reserved for native (M8/#133).",
    "productionSymbols": [
     "ui/OrbPanel.lua:597-600 Pause (re-reads running)",
-    "ui/OrbPanel.lua:1329-1333 strip Pause, :1754-1771/:1836 mini",
-    "core/OrbRuntime.lua:3303 M.Pause"
+    "ui/OrbPanel.lua:1329-1333 strip Pause, :1792-1809/:1836 mini",
+    "core/OrbRuntime.lua:3330 M.Pause"
    ],
    "callbackChain": [
     "Pause click -> Status().running check -> OrbRuntime.Pause -> notify -> Refresh disables Pause"
@@ -2087,11 +2767,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "orb_fixed_pause_resume",
@@ -2106,6 +2786,31 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "orb_fixed_pause_resume",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 51
+      },
+      {
+       "test": "orb_mini_panel",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -2127,6 +2832,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "The main-panel strip shows 'Hide until next run' instead of Pause/Resume/Stop only for a settled, ended run (#167), where those controls are disabled anyway; M.Resume (core/OrbRuntime.lua:3383-3420) and Pump gained session-pause holds. The cited Pause/Resume controls and assertions are unchanged, only shifted."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "Native double-click explicitly reserved by the canonical disposition.",
@@ -2160,7 +2868,7 @@
    "productionSymbols": [
     "ui/OrbPanel.lua:438-439 window swap",
     ":1325 strip hides f.primary, :1329-1338 pause/resume",
-    ":1836-1837 mini"
+    ":1874-1875 mini"
    ],
    "callbackChain": [
     "Refresh shows fixed Pause/Resume per state"
@@ -2175,11 +2883,11 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "orb_fixed_pause_resume",
@@ -2194,6 +2902,31 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "orb_fixed_pause_resume",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 51
+      },
+      {
+       "test": "orb_mini_panel",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -2215,6 +2948,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "Same strip change as UX-08 (settled ended run only); the fixed Pause/Resume controls cited are byte-identical, only shifted (ui/OrbPanel.lua:1874-1875)."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "Distinct from UX-08: control layout itself.",
@@ -2250,32 +2986,32 @@
    },
    "adoptedInterpretation": "A refused Auto click stores a visible reason shown in the roll block for 60 s ('Auto stayed OFF: ...' plus 'What helps:'); hold reasons visible in heading/body; ready state reads 'Roll status' / 'No Echo choice is showing.'.",
    "productionSymbols": [
-    "ui/Panel.lua:2344-2353 Auto button OnClick",
-    "ui/Panel.lua:5823-5859 M.NoteAutoClick",
-    "ui/Panel.lua:5537-5571 M.AutoNoteFor",
+    "ui/Panel.lua:2626-2635 Auto button OnClick",
+    "ui/Panel.lua:6365-6401 M.NoteAutoClick",
+    "ui/Panel.lua:6079-6113 M.AutoNoteFor",
     "ui/Readout.lua:465 AutoRefusalText, :456 AutoHoldNote",
-    "core/AutomationRuntime.lua:4599 ToggleAuto, :4510 actionHold.Effective"
+    "core/AutomationRuntime.lua:4625 ToggleAuto, :4536 actionHold.Effective"
    ],
    "callbackChain": [
     "Auto click -> callbacks.ToggleAuto (core/MainLifecycle.lua:809) -> AutomationRuntime.ToggleAuto -> refusal/RequestAuto -> Panel.NoteAutoClick -> re-render -> AutoNoteFor -> roll-block body"
    ],
    "discriminatingAssertions": [
-    "tests/prototype/ux_automation_scope.lua:486 'Auto stayed OFF: an Orb run is active or unresolved' + 'What helps:' (real click)",
-    ":493 cleared after Auto ON",
-    ":452 'Auto ON — paused' with reason",
+    "tests/prototype/ux_automation_scope.lua:499 'Auto stayed OFF: an Orb run is active or unresolved' + 'What helps:' (real click)",
+    ":506 cleared after Auto ON",
+    ":465 'Auto ON — paused' with reason",
     "tests/prototype/hud_roll_footprint.lua:180-182 waiting + AutoHoldNote; :125,:192 ready state 'Roll status' / 'No Echo choice is showing.'"
    ],
    "negativeControls": [
-    "P14 :489 refused click does no work",
-    "P15 :523 answered No is not a refusal"
+    "P14 :502 refused click does no work",
+    "P15 :536 answered No is not a refusal"
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_automation_scope",
@@ -2296,6 +3032,37 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_automation_scope",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 97
+      },
+      {
+       "test": "ux_status_composition",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 81
+      },
+      {
+       "test": "overwrite_auto_gate",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -2322,6 +3089,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "ToggleAuto gained a session-pause refusal that keeps Auto OFF; the cited Orb-run refusal path and HUD assertions (ux_automation_scope.lua:465, :499, :506) are unchanged, only shifted. The AutoTooltip helper change in ux_automation_scope is not used by this row's cited assertions."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "",
@@ -2354,7 +3124,7 @@
    },
    "adoptedInterpretation": "One shared three-line status (Auto / Sync / Orb) from Panel.SetupFacts via UserText.StatusLines in the setup checklist; reading does no work. A refused-click reason with Auto OFF appears in the roll block, not in this shared line.",
    "productionSymbols": [
-    "ui/Panel.lua:1079-1109 SetupFacts",
+    "ui/Panel.lua:1081-1111 SetupFacts",
     "core/UserText.lua:639-658 StatusLines, :612 OrbLine",
     "ui/QuickStart.lua:562-563"
    ],
@@ -2371,11 +3141,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_status_composition",
@@ -2390,6 +3160,31 @@
       "checks": 192
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_status_composition",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 81
+      },
+      {
+       "test": "ux_setup_checklist",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 192
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -2421,7 +3216,7 @@
     "notes": "Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "If LayoutMetrics failed to load, AutoNoteFor could return AUTO_ON_NOTE for an acting Auto (ui/Panel.lua:5556-5559) -> 'not acting now' would be untrue; TOC loads LayoutMetrics, so failure-mode only."
+    "If LayoutMetrics failed to load, AutoNoteFor could return AUTO_ON_NOTE for an acting Auto (ui/Panel.lua:6098-6101) -> 'not acting now' would be untrue; TOC loads LayoutMetrics, so failure-mode only."
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
@@ -2447,30 +3242,32 @@
    "adoptedInterpretation": "Auto tooltip, Auto warning and Help list each permission Auto may use with on/off from current settings, and the tome paragraph.",
    "productionSymbols": [
     "ui/Readout.lua:497-526 AutomationScopeLines, :532 TOME_PARAGRAPH",
-    "ui/Panel.lua:2370-2389 Auto tooltip",
+    "ui/Panel.lua:2638 Auto OnEnter -> :6043-6061 M.ShowAutoTooltip, :6008-6041 M.AutoSummaryLines (short hover: state, next click, essential consequence, 'Full details: Options > Auto explained.'; no per-permission list)",
+    "ui/Panel.lua:3168-3172 Options 'Auto explained (full details)' -> Help.Show('rolling'); :5960-6004 M.AutoDetailLines (Readout.AutomationScopeLines with current values, hold, Now)",
+    "ui/Help.lua:307-316 rolling page appends Panel.AutoDetailLines below its complete text",
     "ui/OverwriteWarning.lua:18-38 BodyText",
     "ui/Help.lua:58 'rolling' page",
     "data/DefaultProfile.lua:32-46 defaults"
    ],
    "callbackChain": [
-    "tooltip OnEnter / warning Show / Help page -> AutomationScopeLines(settings) read only"
+    "Auto hover OnEnter -> M.ShowAutoTooltip -> M.AutoSummaryLines (no AutomationScopeLines call at 8393f5f) ‖ Options 'Auto explained (full details)' / Help 'rolling' page -> Panel.AutoDetailLines -> AutomationScopeLines(settings) read only ‖ warning Show -> AutomationScopeLines(settings) read only"
    ],
    "discriminatingAssertions": [
-    "tests/prototype/ux_automation_scope.lua:170-175 '(autoPick): on ... (autoLockEchoes): off' from the real OnEnter",
-    ":215 after real '/nexus reroll off' tooltip shows off",
-    ":510-518 warning lists permissions and TOME_PARAGRAPH",
-    ":535-540 Help 'What Auto may do:' and tome paragraph"
+    "tests/prototype/ux_automation_scope.lua:183-188 '(autoPick): on ... (autoLockEchoes): off'; at 8393f5f its AutoTooltip helper (:91-105) joins the real OnEnter hover with the Help page opened through the real Options 'Auto explained (full details)' row, so this no longer shows that the hover itself lists the permissions",
+    ":228 after real '/nexus reroll off' the same joined hover + Auto explained text shows off",
+    ":523-531 warning lists permissions and TOME_PARAGRAPH",
+    ":548-553 Help 'What Auto may do:' and tome paragraph"
    ],
    "negativeControls": [
-    ":178-179 hover changes nothing; :521; :546"
+    ":191-192 hover changes nothing; :534; :559"
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_automation_scope",
@@ -2485,6 +3282,31 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_automation_scope",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 97
+      },
+      {
+       "test": "session_permissions",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -2506,11 +3328,15 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "Changed region: the Auto hover was replaced by a short summary (#169). At c7d2b74 the hover itself listed Readout.AutomationScopeLines; at 8393f5f the per-permission list with current values is on the Help 'rolling' page reached through Options > 'Auto explained (full details)', and the hover ends 'Full details: Options > Auto explained.'. The new fixture crimson_panel_auto_help (PASS, 61 checks at 8393f5f; not cited as row evidence) asserts that the hover does not contain the permission list (A1) and that the details page does (A6)."
+   ],
    "spec": {
     "disposition": "met-offline",
-    "notes": "",
+    "notes": "At 8393f5f this disposition is carried, not re-confirmed: see coordinatorDecision8393.",
     "source": "canonical object above; issue #131"
    },
+   "coordinatorDecision8393": "NEW SOURCE OBSERVATION (not resolved here): the canonical proposal 'Tooltip lists each enabled action with on/off' is no longer met by the Auto hover at 8393f5f (ui/Panel.lua:6008-6061); the per-permission list is on Options > 'Auto explained (full details)' -> Help 'rolling' page (ui/Panel.lua:3168-3172, :5960-6004; ui/Help.lua:307-316). Issue #131 comment 6502167124 records owner approval of a shorter first Auto explanation with an accessible complete consequences view. The cited assertion ux_automation_scope.lua:183-188 passes on the joined hover + details text. Coordinator/owner decision: keep met-offline, record met-offline-adopted-interpretation (the complete view counts as the tooltip), or partial. Counts are unchanged until then.",
    "standards": {
     "disposition": "no-hard-violation-found",
     "notes": "Defaults unchanged (data/DefaultProfile.lua). Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
@@ -2523,7 +3349,7 @@
      "Tooltip wrapping and Help text legibility in the client"
     ]
    },
-   "rowDisposition": "offline-supported; native pending"
+   "rowDisposition": "offline-supported at c7d2b74; carried at 8393f5f pending a coordinator decision (hover versus Auto explained); native pending"
   },
   {
    "id": "LP-10",
@@ -2536,29 +3362,29 @@
    "adoptedInterpretation": "Automation settings submenu/window over existing permissions: only Reroll and Freeze act, through their existing slash setters; other rows display or navigate.",
    "productionSymbols": [
     "ui/Readout.lua:543-580 AutomationSettingsRows",
-    "ui/Panel.lua:5582-5625 AutomationMenuItems",
+    "ui/Panel.lua:6124-6167 AutomationMenuItems",
     "ui/SettingsWindow.lua:66-69,:117"
    ],
    "callbackChain": [
     "menu row click -> MenuAction -> SlashCmdList.NEXUS('reroll|freeze on|off') -> existing setter"
    ],
    "discriminatingAssertions": [
-    "tests/prototype/ux_automation_scope.lua:392-398 every row and value",
-    ":401-404 Take/Activate disabled with func==nil",
-    ":414 Reroll row changes only autoReroll",
-    ":427 Lock row opens editor, changes no setting",
+    "tests/prototype/ux_automation_scope.lua:405-411 every row and value",
+    ":414-417 Take/Activate disabled with func==nil",
+    ":427 Reroll row changes only autoReroll",
+    ":440 Lock row opens editor, changes no setting",
     "tests/prototype/full_ui_settings.lua:28-29 serialized NexusDB unchanged across categories"
    ],
    "negativeControls": [
-    ":405-406 opening menu changes nothing, Auto OFF"
+    ":418-419 opening menu changes nothing, Auto OFF"
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_automation_scope",
@@ -2573,6 +3399,31 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_automation_scope",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 97
+      },
+      {
+       "test": "full_ui_settings",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -2594,6 +3445,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "The cited menu assertions (ux_automation_scope.lua:405-419, :427, :440) read the Automation settings submenu, not the changed AutoTooltip helper; they are unchanged, only shifted."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "Distinct from UX-10: the settings surface.",
@@ -2650,11 +3504,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_share_confirmation",
@@ -2681,6 +3535,43 @@
       "checks": 129
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_share_confirmation",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 327
+      },
+      {
+       "test": "ux_share_approval_retirement",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 40
+      },
+      {
+       "test": "ux_retry_share_feedback",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 36
+      },
+      {
+       "test": "ux_share_admission",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 129
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -2756,11 +3647,11 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_share_confirmation",
@@ -2769,6 +3660,25 @@
       "checks": 327
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_share_confirmation",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 327
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -2839,11 +3749,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_sync_disclosure",
@@ -2876,6 +3786,49 @@
       "checks": 7945
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_sync_disclosure",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 154
+      },
+      {
+       "test": "ux_sync_disclosure_sends",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 27
+      },
+      {
+       "test": "ux_sync_dps_page",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 256
+      },
+      {
+       "test": "ux_share_linked_dps",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 71
+      },
+      {
+       "test": "ux_sync_status_fit",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 7945
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -2964,11 +3917,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_sync_mode_choice",
@@ -2983,6 +3936,31 @@
       "checks": 79
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_sync_mode_choice",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 628
+      },
+      {
+       "test": "ux_sync_mode_transitions",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 79
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -3039,7 +4017,7 @@
    "interpretationConflict": "INTERPRETATION RETAINED (kept explicit): the canonical proposal says 'No 79/79 next to saved/assigned without planned'. Labelling the Saved Build count 'planned' would misstate it, so the count is qualified with the existing truthful unit (core/UserText.lua:667 COUNT_UNITS.savedBuild) instead of the literal word. Recorded for coordinator/owner disposition; no mathematics changed to obtain green.",
    "productionSymbols": [
     "core/UserText.lua:664-704 COUNT_UNITS (savedBuild :667), CountText, RunProgressText, ProgressComplete",
-    "ui/Panel.lua:1268,:4798,:4838 complete rule; :4077,:5182 RunProgressText",
+    "ui/Panel.lua:1271,:5116,:5156 complete rule; :4389,:5503 RunProgressText",
     "ui/CommunityRenderer.lua:4472 CountText('savedBuild')",
     "ui/WishlistRenderer.lua:2717 'Planned rolled copies'",
     "core/CommunityController.lua:1367-1383 SavedMirrorDescription (unit wording :1378-1381); :1473-1481 unchanged-signature description refresh; :385 EchoProgress"
@@ -3064,11 +4042,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_qualified_counts",
@@ -3099,6 +4077,43 @@
    "laneExecution": [
     "ux13-focused-62f16c7"
    ],
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_qualified_counts",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 33
+      },
+      {
+       "test": "ux_record_scope_terms",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 37
+      },
+      {
+       "test": "terminology",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "saved_mirror_assigned_description",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 76
+      }
+     ]
+    }
+   },
    "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
@@ -3126,7 +4141,7 @@
    },
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
-    "notes": "'No complete while locked targets remain' met (Q1). 'No 79/79 next to saved/assigned without planned' met under the retained interpretation recorded as this row's Conflict: the generated assigned-Saved-Build description and the Library card both qualify the count with the Saved Build unit (Q5, D1, D2, D4, D5). The former candidate gap G-UX13 is resolved in the final source. Its cited fixtures passed in the terminal complete passing run at c7d2b74.",
+    "notes": "'No complete while locked targets remain' met (Q1). 'No 79/79 next to saved/assigned without planned' met under the retained interpretation recorded as this row's Conflict: the generated assigned-Saved-Build description and the Library card both qualify the count with the Saved Build unit (Q5, D1, D2, D4, D5). The former candidate gap G-UX13 is resolved in the final source. Its cited fixtures passed in the terminal complete passing runs at c7d2b74 and at 8393f5f.",
     "source": "canonical object above; issue #131; independent UX-13 Spec and Standards reviews of 62f16c7 and final combined reviews of f399dd0"
    },
    "standards": {
@@ -3148,7 +4163,7 @@
      "First load after upgrading from an earlier build's SavedVariables rewrites the generated description once locally and sends nothing"
     ]
    },
-   "rowDisposition": "offline-supported under a retained interpretation; cited fixtures pass in the complete passing run at c7d2b74; native pending"
+   "rowDisposition": "offline-supported under a retained interpretation; cited fixtures pass in the complete passing run at 8393f5f; native pending"
   },
   {
    "id": "LP-13",
@@ -3174,11 +4189,11 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_qualified_counts",
@@ -3203,6 +4218,37 @@
    "laneExecution": [
     "ux13-focused-62f16c7"
    ],
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_qualified_counts",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 33
+      },
+      {
+       "test": "ux_record_scope_terms",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 37
+      },
+      {
+       "test": "saved_mirror_assigned_description",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 76
+      }
+     ]
+    }
+   },
    "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
@@ -3230,7 +4276,7 @@
    },
    "standards": {
     "disposition": "no-hard-violation-found",
-    "notes": "Judgement call, Duplicated Code: completion rule inlined at ui/Panel.lua:1268,4798,4838 while UserText.ProgressComplete is unused. Not a documented-standard violation."
+    "notes": "Judgement call, Duplicated Code: completion rule inlined at ui/Panel.lua:1271,5116,5156 while UserText.ProgressComplete is unused. Not a documented-standard violation."
    },
    "gapsAndLimits": [
     "No test that the shared formatter is used by every count surface."
@@ -3255,7 +4301,7 @@
    },
    "adoptedInterpretation": "No user-facing 'Global'; records say 'Best known' / shared-record qualifiers.",
    "productionSymbols": [
-    "ui/Panel.lua:1600-1625 AddDpsTooltip, :3324,:4018 BEST_KNOWN",
+    "ui/Panel.lua:1603-1628 AddDpsTooltip, :3629,:4330 BEST_KNOWN",
     "ui/Leaderboard.lua:156 LeaderboardScope, :1480-1481, :1534",
     "core/UserText.lua:707-710"
    ],
@@ -3275,11 +4321,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_record_scope_terms",
@@ -3288,6 +4334,25 @@
       "checks": 37
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_record_scope_terms",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 37
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -3336,7 +4401,7 @@
    "adoptedInterpretation": "Record detail with carried duration/level/date (UserText.RecordDetailParts) on the Panel DPS tooltip and single-category Leaderboard detail.",
    "productionSymbols": [
     "core/UserText.lua:722 RecordDetailParts, :746 OwnerLine",
-    "ui/Panel.lua:1616-1619",
+    "ui/Panel.lua:1619-1622",
     "ui/Leaderboard.lua:1012-1018",
     "core/CommunityProjection.lua:114-125 RecordText (Library)"
    ],
@@ -3352,11 +4417,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_record_scope_terms",
@@ -3365,6 +4430,25 @@
       "checks": 37
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_record_scope_terms",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 37
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -3431,11 +4515,11 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_record_scope_terms",
@@ -3456,6 +4540,37 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_record_scope_terms",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 37
+      },
+      {
+       "test": "terminology",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "terminology_consumers",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -3522,11 +4637,11 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_record_scope_terms",
@@ -3535,6 +4650,25 @@
       "checks": 37
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_record_scope_terms",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 37
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -3584,7 +4718,7 @@
    },
    "adoptedInterpretation": "Orb usage uses the shared words 'Orbs used ... approved' with 'pending ... not confirmed yet'; restored PAUSED headline, recovery headlines and truthful Continue/reload/history copy.",
    "productionSymbols": [
-    "ui/OrbPanel.lua:447-452 window usage, :1363-1371 strip, :1546-1571 mini, :242-258 recovery headlines, :1239-1240 Continue history note",
+    "ui/OrbPanel.lua:447-452 window usage, :1399-1407 strip, :1584-1609 mini, :242-258 recovery headlines, :1239-1240 Continue history note",
     "ui/Help.lua:125-129 Orbs page",
     "ui/OrbHistory.lua:86-89"
    ],
@@ -3603,11 +4737,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "orb_recovery_layers",
@@ -3634,6 +4768,43 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "orb_recovery_layers",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 124
+      },
+      {
+       "test": "orb_recovery_vocabulary",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 50
+      },
+      {
+       "test": "batch_orb_restored_wording",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 23
+      },
+      {
+       "test": "orb_continue_affordance",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -3665,9 +4836,12 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "The main-panel strip can be hidden for a settled, ended run until the next run (#167; session-only, presentation only). The usage-word code and assertions cited are unchanged; this row stays partial."
+   ],
    "spec": {
     "disposition": "partial",
-    "notes": "Same vocabulary, not literally identical strings: window/strip use '/', mini 'of', Play line 'Used X of Y approved'; pending phrasing differs per surface and is pinned by tests. Reload-advice check is a one-way source-text grep; runtime reload hints (core/OrbRuntime.lua:2348,2565,3373) not compared against Help.",
+    "notes": "Same vocabulary, not literally identical strings: window/strip use '/', mini 'of', Play line 'Used X of Y approved'; pending phrasing differs per surface and is pinned by tests. Reload-advice check is a one-way source-text grep; runtime reload hints (core/OrbRuntime.lua:2361,2578,3401) not compared against Help.",
     "source": "canonical object above; issue #131"
    },
    "standards": {
@@ -3709,11 +4883,11 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "orb_recovery_vocabulary",
@@ -3734,6 +4908,37 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "orb_recovery_vocabulary",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 50
+      },
+      {
+       "test": "orb_recovery_layers",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 124
+      },
+      {
+       "test": "orb_continue_affordance",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -3793,9 +4998,9 @@
    },
    "adoptedInterpretation": "Help is the guided coach at its current step; the long manual is the separately named Reference with one direct button per page (7). Page 1 and the coach Welcome lead with setup.",
    "productionSymbols": [
-    "ui/Help.lua:16 'start' page text, :363 H.Show, :447 H.OpenGuide, :473 H.OpenHelp, :481 H.OpenReference",
-    "ui/Panel.lua:2880-2888 Options menu Help/Reference",
-    "core/Main.lua:1202 /nexus reference, :1470 /nexus guide"
+    "ui/Help.lua:16 'start' page text, :421 H.Show, :505 H.OpenGuide, :531 H.OpenHelp, :539 H.OpenReference",
+    "ui/Panel.lua:3156-3164 Options menu Help/Reference",
+    "core/Main.lua:1207 /nexus reference, :1496 /nexus guide"
    ],
    "callbackChain": [
     "Help button -> Help.OpenHelp -> OpenGuide -> GuidedSetupUI.Show; Reference -> Help.Show(page)"
@@ -3811,11 +5016,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_help_navigation",
@@ -3839,9 +5044,46 @@
       "test": "help_action_first",
       "status": "PASS",
       "exit": 0,
-      "checks": 6052
+      "checks": 6493
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_help_navigation",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 32
+      },
+      {
+       "test": "setup_help_entry_points",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 105
+      },
+      {
+       "test": "help",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "help_action_first",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 6052
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -3873,6 +5115,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "Help gained an eighth Reference page, Questions (FAQ), with gold question lines (#169), and Options entries 'Auto explained (full details)' and 'Questions (FAQ)'. help, help_action_first (checks 6052 -> 6493) and ux_help_navigation H1 (:96-99) now expect eight pages; the ordinary-Help-to-coach and Reference routes cited are unchanged, only shifted (ui/Help.lua:421, :505, :531, :539)."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "",
@@ -3909,7 +5154,7 @@
     "ui/OrbPanel.lua:722,:724",
     "ui/JournalTab.lua:626,:643",
     "ui/WishlistRenderer.lua:1444,:1451",
-    "ui/Help.lua:434 H.OpenChecklist"
+    "ui/Help.lua:492 H.OpenChecklist"
    ],
    "callbackChain": [
     "window Help -> Help.OpenHelp(page, leave) -> coach; Reference -> Help.OpenReference(page, leave)"
@@ -3919,15 +5164,15 @@
     "X5 (:198) Help text names the routes"
    ],
    "negativeControls": [
-    "refused coach (warning open) keeps the calling window and draft (ui/Help.lua:461-479)"
+    "refused coach (warning open) keeps the calling window and draft (ui/Help.lua:519-537)"
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_context_help_access",
@@ -3942,6 +5187,31 @@
       "checks": 105
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_context_help_access",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 146
+      },
+      {
+       "test": "setup_help_entry_points",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 105
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -3963,6 +5233,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "Help page and FAQ additions as UX-17; the contextual Help/Reference routes cited are unchanged lines."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "Distinct from UX-17: per-window deep links.",
@@ -3999,7 +5272,7 @@
    "productionSymbols": [
     "ui/QuickStart.lua:602-604 notice, :624-635 route(), :495-540 LayoutChecklist",
     "ui/QuickStart.lua:420-442 Escape child",
-    "ui/Help.lua:379 Refuse"
+    "ui/Help.lua:437 Refuse"
    ],
    "callbackChain": [
     "refused route -> reason returned -> f.notice:SetText -> LayoutChecklist"
@@ -4015,11 +5288,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_context_help_access",
@@ -4040,6 +5313,37 @@
       "checks": 2878
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_context_help_access",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 146
+      },
+      {
+       "test": "ux_setup_checklist",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 192
+      },
+      {
+       "test": "guided_setup_flow",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 2878
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -4111,11 +5415,11 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_context_help_access",
@@ -4136,6 +5440,37 @@
       "checks": 7945
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_context_help_access",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 146
+      },
+      {
+       "test": "guided_setup_flow",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 2878
+      },
+      {
+       "test": "ux_sync_status_fit",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 7945
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -4162,6 +5497,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "ui/LayoutMetrics.lua FitToScreen gained an optional ceiling for the main panel size option (50%-150%, #165/#170); the other cited helpers are unchanged."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "Offline composition complete for the families covered; native gaps enumerated below as required.",
@@ -4230,11 +5568,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_setup_checklist",
@@ -4267,6 +5605,49 @@
       "checks": 76
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_setup_checklist",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 192
+      },
+      {
+       "test": "guided_setup_readback",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 135
+      },
+      {
+       "test": "guided_setup_flow",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 2878
+      },
+      {
+       "test": "guided_first_entry",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 195
+      },
+      {
+       "test": "quickstart_seen_guard",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 76
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -4344,8 +5725,8 @@
    "adoptedInterpretation": "Existing unassigned Saved Build: checklist names destination and 'None assigned'; Assign Wishlist... opens chooser titled with it; cancel assigns nothing; one choice makes exactly one association write and no upload; production and checklist readback; destination change while chooser is open truthful; a delayed captured callback writes only the captured Saved Build; empty Saved Build refused; Auto-ON consent distinct.",
    "productionSymbols": [
     "ui/JournalTab.lua:1428 AssociateWishlistOnly, :154 AssignWithConsent",
-    "core/GameAdapter.lua:3227 SetLoadoutWishlist (empty-slot refusal :3238-3240)",
-    "ui/Panel.lua:1079 SetupFacts",
+    "core/GameAdapter.lua:3236 SetLoadoutWishlist (empty-slot refusal :3247-3249)",
+    "ui/Panel.lua:1081 SetupFacts",
     "ui/QuickStart.lua:636 Assign Wishlist..."
    ],
    "callbackChain": [
@@ -4363,11 +5744,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_setup_checklist",
@@ -4400,6 +5781,49 @@
       "checks": 135
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_setup_checklist",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 192
+      },
+      {
+       "test": "ux_help_navigation",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 32
+      },
+      {
+       "test": "ux_save_assignment_result",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 155
+      },
+      {
+       "test": "ux_auto_assignment_consent",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 57
+      },
+      {
+       "test": "guided_setup_readback",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 135
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -4436,6 +5860,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "ux_help_navigation and ux_setup_checklist changed only their Reference page-count expectations (7 -> 8); the cited J2/J2b/J2c scenarios are unchanged lines."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "J2b calls the captured production OnClick directly (no native visible-click or timing claim).",
@@ -4474,10 +5901,10 @@
    },
    "adoptedInterpretation": "Captured destination/owner across character/loadout/slot/token changes: assignment-action tokens per destination and owner epoch; captured editors not redirected; reused Wishlist server slots refused; owner change refuses writes.",
    "productionSymbols": [
-    "core/GameAdapter.lua:2822-2890 AssignmentActionToken/Snapshot epoch",
-    "core/GameAdapter.lua:2992 SelectedSavedBuild",
+    "core/GameAdapter.lua:2831-2899 AssignmentActionToken/Snapshot epoch",
+    "core/GameAdapter.lua:3001 SelectedSavedBuild",
     "core/Store.lua:2427 CurrentOwnerKey",
-    "WishlistRoles.MayWrite in writers (core/GameAdapter.lua:3160,3203,3295)",
+    "WishlistRoles.MayWrite in writers (core/GameAdapter.lua:3169,3212,3304)",
     "ui/JournalTab.lua:154 AssignWithConsent owner re-check"
    ],
    "callbackChain": [
@@ -4497,11 +5924,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "wishlist_assignment_action_token",
@@ -4552,6 +5979,67 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "wishlist_assignment_action_token",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 132
+      },
+      {
+       "test": "assignment_identity",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "stale_server_slot_save",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "saved_build_wishlist_destination_guards",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 23
+      },
+      {
+       "test": "ux_captured_destination_labels",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 452
+      },
+      {
+       "test": "ux_destination_context",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 54
+      },
+      {
+       "test": "ux_auto_assignment_consent",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 57
+      },
+      {
+       "test": "wishlist_upload_context",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -4613,7 +6101,7 @@
     "notes": "Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "UNRESOLVED EDGE G-J3 (source-only): Saved Build slot contents replaced in the game between chooser click and a delayed Auto-ON accept. AssignWithConsent re-checks owner only (ui/JournalTab.lua:154-176); A.SetLoadoutWishlist checks the slot is populated (core/GameAdapter.lua:3238), not that it is the same Saved Build; the chat line names the captured loadoutName. Associations are keyed by slot index by design, so this may be intended; no test replaces a populated Saved Build before a delayed accept. Owner decision whether 'recycled slot' includes Saved Build slots.",
+    "UNRESOLVED EDGE G-J3 (source-only): Saved Build slot contents replaced in the game between chooser click and a delayed Auto-ON accept. AssignWithConsent re-checks owner only (ui/JournalTab.lua:154-176); A.SetLoadoutWishlist checks the slot is populated (core/GameAdapter.lua:3247), not that it is the same Saved Build; the chat line names the captured loadoutName. Associations are keyed by slot index by design, so this may be intended; no test replaces a populated Saved Build before a delayed accept. Owner decision whether 'recycled slot' includes Saved Build slots.",
     "Owner change cannot occur within one native session (character change reloads UI); offline tests replace CurrentOwnerKey."
    ],
    "nativeCriterion": {
@@ -4645,14 +6133,14 @@
    },
    "adoptedInterpretation": "Manual recommendation (a named single Take, or the named Freeze target of the adaptive two-or-more-Needed decision, identified with its own Freeze mark as in UX-02) or no-choice ready state ('Roll status' / 'No Echo choice is showing.'); existing permission disclosure in tooltip, warning and Help; Auto turns ON only through the Auto button, /nexus auto or the level-1 tome popup Yes, each via OverwriteWarning.RequestAuto and its explicit Yes (or the player's own earlier saved opt-out); Setup/Help/Settings/guided coach call no Auto setter; hold and refusal reasons visible; OFF read truthfully, including the Orb-guidance heading.",
    "productionSymbols": [
-    "ui/Panel.lua:2344-2353 Auto button",
-    "core/AutomationRuntime.lua:4599 ToggleAuto, :4653-4669 RequestAuto path, :4684-4716 accept/CommitToggle",
+    "ui/Panel.lua:2626-2635 Auto button",
+    "core/AutomationRuntime.lua:4625 ToggleAuto, :4679-4700 RequestAuto path, :4715-4748 accept/CommitToggle",
     "ui/OverwriteWarning.lua:327 RequestAuto, :120 Finish",
     "core/Main.lua:889 /nexus auto",
     "core/GuidedSetup.lua:787 G.AutoState, :794 G.KeepAuto (no setter)",
     "ui/GuidedSetup.lua:1020-1058 VIEW.auto (Keep/Review only)",
-    "ui/Panel.lua:4965-4974 Orb-guidance heading (Auto OFF 'You choose' :4970-4971)",
-    "ui/Readout.lua:98 FreezeCard; core/AutomationRuntime.lua:3280-3281 freeze display flag"
+    "ui/Panel.lua:5286-5295 Orb-guidance heading (Auto OFF 'You choose' :5291-5292)",
+    "ui/Readout.lua:98 FreezeCard; core/AutomationRuntime.lua:3303-3304 freeze display flag"
    ],
    "callbackChain": [
     "Auto click -> ToggleAuto -> Orb block refusal or RequestAuto -> warning Yes -> accept re-checks Orb block and OFF -> CommitToggle -> Panel.SetAuto",
@@ -4662,7 +6150,7 @@
     "tests/prototype/ux_manual_recommendation.lua:123-129 Auto OFF one named Take target, nothing performed; R4 :189-191 no-choice ready state",
     "tests/prototype/ux_manual_recommendation.lua:475-499 R7 Auto OFF with Orb guidance: 'you choose', never Active, reason and Open Orbs remain; :512-548 R8 and :628-654 R10 the Freeze target named and identified, no Take marker, no engine name, nothing performed",
     "tests/prototype/orb_guidance_navigation.lua:218-223 real HUD unknown Orb state with Auto OFF: truthful heading, Auto stays OFF",
-    "tests/prototype/ux_automation_scope.lua P17 :595 passive reads change nothing; :605 No keeps OFF; :609 next board still manual; :617 only Yes turns ON, no suppression saved; :627 action targets the board shown at acceptance",
+    "tests/prototype/ux_automation_scope.lua P17 :608 passive reads change nothing; :618 No keeps OFF; :622 next board still manual; :630 only Yes turns ON, no suppression saved; :640 action targets the board shown at acceptance",
     "tests/prototype/overwrite_auto_gate.lua every enable waits for Yes; disable cancels a pending Yes; Orb block re-checked at approval",
     "tests/prototype/guided_setup_flow.lua:888 Auto step toggles nothing; :283 Auto kept ON through the guide",
     "tests/prototype/full_ui_settings.lua:28-29 settings navigation leaves saved bytes unchanged"
@@ -4672,11 +6160,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "ux_manual_recommendation",
@@ -4725,6 +6213,61 @@
    "laneExecution": [
     "ux02-focused-82b7695"
    ],
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "ux_manual_recommendation",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 124
+      },
+      {
+       "test": "ux_automation_scope",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 97
+      },
+      {
+       "test": "overwrite_auto_gate",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "guided_setup_flow",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 2878
+      },
+      {
+       "test": "full_ui_settings",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "ux_status_composition",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 81
+      },
+      {
+       "test": "orb_guidance_navigation",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 70
+      }
+     ]
+    }
+   },
    "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
@@ -4765,9 +6308,12 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "The accept callback (core/AutomationRuntime.lua:4715-4748) also refuses while the session pause holds, and ToggleAuto refuses before RequestAuto while paused; 'only Yes turns ON' is unchanged. P17's passive read (ux_automation_scope.lua:608) now also opens and closes the Auto explained page through the real Options row; its no-change guard still holds."
+   ],
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
-    "notes": "The journey's recorded partial basis was only the two candidate gaps inherited from UX-02 (truthful OFF under Orb guidance; named selection for two distinct Needed offers). Both now have discriminating offline assertions through the real TOC path (R7, R8, R10, orb_guidance_navigation), and the other traced paths are unchanged: no-choice ready state, explicit Auto consent, and Setup/Help/Settings/coach starting no Auto. Met under the same adopted reading of 'named selection' as UX-02 (a Freeze target is named and marked as a Freeze, not as a Take). Its cited fixtures passed in the terminal complete passing run at c7d2b74.",
+    "notes": "The journey's recorded partial basis was only the two candidate gaps inherited from UX-02 (truthful OFF under Orb guidance; named selection for two distinct Needed offers). Both now have discriminating offline assertions through the real TOC path (R7, R8, R10, orb_guidance_navigation), and the other traced paths are unchanged: no-choice ready state, explicit Auto consent, and Setup/Help/Settings/coach starting no Auto. Met under the same adopted reading of 'named selection' as UX-02 (a Freeze target is named and marked as a Freeze, not as a Take). Its cited fixtures passed in the terminal complete passing runs at c7d2b74 and at 8393f5f.",
     "source": "canonical object above; issue #131; independent UX-02/J4 reviews of 82b7695 and final combined reviews of f399dd0"
    },
    "standards": {
@@ -4786,7 +6332,7 @@
      "Manual recommendation, Auto warning Yes/No, and opening Setup/Help/Settings without starting Auto in the client"
     ]
    },
-   "rowDisposition": "offline-supported under the UX-02 adopted reading; cited fixtures pass in the complete passing run at c7d2b74; native pending"
+   "rowDisposition": "offline-supported under the UX-02 adopted reading; cited fixtures pass in the complete passing run at 8393f5f; native pending"
   },
   {
    "id": "J5",
@@ -4807,8 +6353,8 @@
    },
    "adoptedInterpretation": "Optional journey; its safety boundaries are retained. Target change while paused -> named, reviewed, deliberate Resume with context/owner/limit/token guards; interrupted run -> recovery Check -> token-bound Continue that archives and stops, sends nothing and never repeats or refunds; opening Orb/Help/guide spends nothing.",
    "productionSymbols": [
-    "core/OrbRuntime.lua:3356-3392 M.Resume guards",
-    "core/OrbRuntime.lua:2351 ContinueBegin, :2028 RC.eligible, :2102 RC.check, :2676 ContinueConfirm",
+    "core/OrbRuntime.lua:3383-3420 M.Resume guards",
+    "core/OrbRuntime.lua:2364 ContinueBegin, :2039 RC.eligible, :2114 RC.check, :2689 ContinueConfirm",
     "ui/OrbPanel.lua:684 frame.cont, :1261-1289 Check/Continue/close cancel"
    ],
    "callbackChain": [
@@ -4828,11 +6374,11 @@
    ],
    "execution": {
     "pin": {
-     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
-     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+     "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"
     },
-    "run": "final2-full-c7d2b74",
-    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+    "run": "full-ci-8393f5f",
+    "status": "terminal: complete suite PASSED at 8393f5f; every fixture cited by this row PASS, exit 0",
     "tests": [
      {
       "test": "orb_target_review",
@@ -4883,6 +6429,67 @@
       "checks": null
      }
     ]
+   },
+   "priorPinExecution": {
+    "label": "historical: c7d2b74 complete CI (Lua 580/580, Python 2 files/84 cases); not this pin's execution",
+    "execution": {
+     "pin": {
+      "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+      "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+     },
+     "run": "final2-full-c7d2b74",
+     "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
+     "tests": [
+      {
+       "test": "orb_target_review",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 152
+      },
+      {
+       "test": "orbs_target_changes",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "orb_recovery_continue",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 180
+      },
+      {
+       "test": "orb_recovery_refusals",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 477
+      },
+      {
+       "test": "orb_bounded_recovery",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 534
+      },
+      {
+       "test": "orb_guidance_passive_open",
+       "status": "PASS",
+       "exit": 0,
+       "checks": 25
+      },
+      {
+       "test": "orb_continue_affordance",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      },
+      {
+       "test": "orb_mini_panel",
+       "status": "PASS",
+       "exit": 0,
+       "checks": null
+      }
+     ]
+    }
    },
    "historicalExecution": {
     "pin": {
@@ -4934,6 +6541,9 @@
     ],
     "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
+   "sourceDelta8393": [
+    "M.Resume (core/OrbRuntime.lua:3383-3420) gained a session-pause refusal, and Continue keeps the ordinary cadence for a newly approved running run (#172). The cited recovery guards are unchanged, only shifted; the optional journey's safety boundaries are retained."
+   ],
    "spec": {
     "disposition": "met-offline",
     "notes": "Resource-native proof separately bounded as the canonical contract states.",
@@ -4944,7 +6554,7 @@
     "notes": "Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "No fixture found reaching the PAUSED Resume refusal for a reached limit with uncertain>0 (core/OrbRuntime.lua:3391).",
+    "No fixture found reaching the PAUSED Resume refusal for a reached limit with uncertain>0 (core/OrbRuntime.lua:3419).",
     "Lost-approval wording has negative checks only."
    ],
    "nativeCriterion": {
@@ -4956,5 +6566,23 @@
    },
    "rowDisposition": "offline-supported (optional journey, safety boundaries retained); native pending"
   }
+ ],
+ "newSourceObservationsForCoordinator": [
+  {
+   "row": "UX-10",
+   "predicate": "canonical acceptance proposal 'Tooltip lists each enabled action with on/off'",
+   "observation": "At 8393f5f the Auto hover (ui/Panel.lua:2638 -> :6043-6061, :6008-6041) shows a short summary and 'Full details: Options > Auto explained.'; the per-permission on/off list is on the Help 'rolling' page via Options > 'Auto explained (full details)' (ui/Panel.lua:3168-3172, :5960-6004; ui/Help.lua:307-316). tests/prototype/ux_automation_scope.lua:183-188 passes on the joined hover + details text (helper :91-105); tests/prototype/crimson_panel_auto_help.lua A1 asserts the hover omits the list.",
+   "context": "Issue #131 comment 6502167124: owner approved a shorter first Auto explanation with an accessible complete consequences view.",
+   "decisionNeeded": "Whether UX-10 stays met-offline, becomes met-offline-adopted-interpretation, or becomes partial. Not resolved and not implemented here; counts unchanged until then."
+  }
+ ],
+ "nativeObligations133": [
+  "First-launch warning and decline route on a fresh profile (UX-01 information-only Welcome; native Escape capture).",
+  "Ordinary Help leading to the guided coach versus the optional dense Reference, across every entry family (Records, Build Library, Plan, Journal, Orbs, Options, slash commands), including the new Questions (FAQ) and Auto explained entries.",
+  "Step 2 'Assigned now' versus the guide-local selection; selected visual and footer agree; Back, reopen and /reload keep truthful evidence without changing the actual assignment.",
+  "Step 7 summary and post-/reload readability.",
+  "Historical Step 5 long-option and UI-text-scale variant (the 163012 sample at 1760x990, 100% HUD fitted only that sample).",
+  "Back, Skip, refusal, replay and suppression behavior of the coach and Welcome.",
+  "Every per-row native criterion below."
  ]
 }
