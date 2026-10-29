@@ -3,8 +3,9 @@
 -- Hide is presentation only and session-only: the same run stays hidden on
 -- every ticker refresh and panel re-render; a different run (even with the
 -- same numbers), or any active, pending, paused or unresolved state, is shown.
--- A stale click never hides a replacement run. Nothing is spent, chosen,
--- saved, reset or released by it.
+-- A stale click never hides a replacement run. A run that ended with unknown
+-- outcomes keeps its strip. Nothing is spent, chosen, saved, reset or
+-- released by it.
 -- Categories (view_regression_support): EXPECT marks behaviour introduced
 -- with its check, GUARD marks earlier behaviour that must keep holding, and
 -- SETUP marks the fixture.
@@ -217,6 +218,62 @@ C.scenario('D5 the Hide does not outlive its run or its runtime',function()
  C.setup(M.RunLog('current',1,0).runId==1,'D5: its run id starts again')
  Nexus.Panel.Show();H.Advance(.3)
  C.expect(bar:IsShown() and bar.dismiss:IsShown(),'D5: the fresh runtime\'s run is shown')
+end)
+
+-- The bounded-recovery setup of orb_bounded_recovery: real Start, real
+-- adapter and a quiet synthetic server, so both attempts' outcomes stay
+-- unknown and the run ends at its maximum with that exposure retained. Its
+-- matched control is the same Start with both results arriving normally.
+local RS=dofile('tests/prototype/orb_recovery_support.lua')
+local function RecoveryFresh(limit)
+ if NexusOrbRuntime then NexusOrbRuntime:SetScript('OnUpdate',nil);NexusOrbRuntime:SetScript('OnEvent',nil);NexusOrbRuntime:Hide() end
+ NexusSupportDB=nil;NexusPanel=nil
+ H,M,A,O=RS.S.Fresh();UI=Nexus.OrbPanel
+ UIParent:SetSize(1920,1080)
+ RS.S.Loadouts(H,A);H.perks.currentChoice={}
+ assert(M.Start(limit))
+end
+local function QuietServer()
+ local server=RS.Server(H)
+ H.service.RequestChoice=function()
+  SendAddonMessage(RS.PREFIX,'16','WHISPER',RS.ME);server.queue[#server.queue+1]={op=16,body=''}
+ end
+end
+local function WaitFor(predicate,seconds)
+ for _=1,(seconds or 30)*4 do if predicate() then return true end;H.Advance(.25) end
+ return predicate()
+end
+
+C.scenario('D6 a finished run with unknown outcomes stays shown; its matched settled control can hide',function()
+ -- Control: the same setup and maximum, both results observed.
+ RecoveryFresh(2)
+ H.Offer();H.Result(410002,2)
+ C.setup(WaitFor(function()return H.Count('orb-spend')==2 end),'D6 control: the run spends its second approved Orb')
+ H.Offer();H.Result(410002,2);H.Advance(2)
+ local s=M.CompactStatus()
+ C.setup(s and (s.state=='COMPLETE' or s.state=='FINISHED') and not s.pending and s.uncertain==0
+  and (s.unconfirmedResults or 0)==0,'D6 control: the run settled with both outcomes observed',s and s.state)
+ local bar=Strip()
+ C.expect(bar and bar:IsShown() and bar.dismiss:IsShown(),'D6 control: a settled run without unknown outcomes offers Hide')
+ bar.dismiss:Click()
+ C.expect(not bar:IsShown(),'D6 control: and Hide hides it')
+
+ RecoveryFresh(2);QuietServer()
+ C.setup(WaitFor(function()return M.Status().state=='FINISHED' end,45),'D6: unknown exposure reaches the approved maximum')
+ s=M.CompactStatus()
+ C.setup(not s.pending and not s.running and s.reserved==0 and s.spent==0 and s.uncertain==2
+  and s.unconfirmedResults==2 and s.remaining==2,'D6: settled-looking, with two unknown outcomes retained',
+  s.uncertain..'/'..tostring(s.unconfirmedResults)..'/'..tostring(s.remaining))
+ bar=Strip()
+ C.setup(bar and Has(bar.summary,'unknown spend exposure: 2'),'D6: the strip discloses the exposure',bar and bar.summary:GetText())
+ C.expect(bar:IsShown() and not bar.dismiss:IsShown(),'D6: a run with unknown outcomes is shown without Hide')
+ C.guard(bar.pause:IsShown() and bar.stop:IsShown() and not bar.stop:IsEnabled(),'D6: the row keeps its disabled actions')
+ local before=Effects()
+ local archive=F.Serialize(RS.SavedRow('orbRecoveryArchive'))
+ Direct(bar.dismiss);bar.refresh();H.Advance(1)
+ C.expect(bar:IsShown(),'D6: a direct Hide click does not hide it')
+ C.expect(Diff(before,Effects())==nil and F.Serialize(RS.SavedRow('orbRecoveryArchive'))==archive,
+  'D6: and changes no usage, limit, history, receipt or saved data',Diff(before,Effects()))
 end)
 
 C.finish('real attached strip, ticker and OrbRuntime; synthetic services; no native click or scale claim')
