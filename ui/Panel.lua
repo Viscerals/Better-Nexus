@@ -5931,7 +5931,7 @@ function M.AutoSummaryLines()
             lines[1] = "Auto is OFF: Nexus only recommends; you choose."
             lines[2] = "Click Auto to turn it ON; a warning asks first."
         else
-            lines[1] = "Auto: not known yet."
+            lines[1] = "Auto is not known yet."
             lines[2] = "Wait for Nexus to finish loading."
         end
         lines[3] = "When ON it may spend charges and change your Saved Build. Orb runs need their own approval."
