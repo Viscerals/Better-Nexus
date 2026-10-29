@@ -54,9 +54,16 @@ local function Session()
  for _,item in ipairs(P.MoreMenuItems(NexusPanel._menuBtn)) do
   local t=type(item.text)=='string' and V.Plain(item.text) or ''
   if t:find('Pause Nexus',1,true) or t:find('Resume Nexus',1,true) or t:find('Pauses Auto',1,true)
-   or t:find('Auto can continue',1,true) then out[#out+1]=item end
+   or t:find('Auto can continue',1,true) or t:find('An action already sent',1,true)
+   or t:find('Orb runs stay paused',1,true) then out[#out+1]=item end
  end
  return out
+end
+-- The visible note rows (disabled rows without an action), joined in order.
+local function Notes(rows)
+ local out={}
+ for _,r in ipairs(rows) do if r.disabled and r.func==nil then out[#out+1]=V.Plain(r.text) end end
+ return table.concat(out,' ')
 end
 local function Find(rows,prefix)
  for _,r in ipairs(rows) do if V.Plain(r.text):sub(1,#prefix)==prefix then return r end end
@@ -96,8 +103,8 @@ C.scenario('U2 rendering, Options and Help call no Pause or Resume; Options offe
  C.expect(D.pauses==0 and D.resumes==0,'U2: rendering, Options and Help call no Pause or Resume',D.pauses..'/'..D.resumes)
  local pause=Find(rows,'Pause Nexus for this session')
  C.expect(pause~=nil and not pause.disabled and type(pause.func)=='function','U2: Options offers Pause Nexus for this session')
- C.expect(pause and pause.tooltipText==EXPLAIN and Find(rows,'Pauses Auto')~=nil and V.Plain(Find(rows,'Pauses Auto').text)==EXPLAIN,
-  'U2: its explanation is its hover and a visible note',pause and pause.tooltipText)
+ C.expect(pause and pause.tooltipText==EXPLAIN and Notes(rows)==EXPLAIN,
+  'U2: its explanation is its hover and the visible note rows below it',Notes(rows))
  C.expect(Find(rows,'Resume Nexus')==nil and Title():sub(1,5)=='Nexus' and not Title():find('paused',1,true),'U2: not paused: no Resume, title is Nexus',Title())
  C.guard(Effects()==before,'U2: reading changes no saved data, Auto, action or send',Effects())
 end)
@@ -114,8 +121,8 @@ C.scenario('U3 Pause: once through the API; Nexus paused shown; Resume offered; 
  local rows=Session()
  local resume=Find(rows,'Resume Nexus')
  C.expect(resume~=nil and type(resume.func)=='function' and Find(rows,'Pause Nexus')==nil,'U3: Options now offers Resume Nexus instead')
- C.expect(resume and resume.tooltipText==RESUME_NOTE and Find(rows,'Auto can continue')~=nil
-  and V.Plain(Find(rows,'Auto can continue').text)==RESUME_NOTE,'U3: Resume carries its note beside it',resume and resume.tooltipText)
+ C.expect(resume and resume.tooltipText==RESUME_NOTE and Notes(rows)==RESUME_NOTE,
+  'U3: Resume carries its note beside it (hover and the note rows below it)',Notes(rows))
  C.guard(CB.refresh==cb.refresh and CB.toggle==cb.toggle,'U3: no refresh step and no Auto toggle ran',CB.refresh..'/'..CB.toggle)
  C.guard(Effects()==before,'U3: the panel itself changes no saved data, Auto, action or send',Effects())
  P.Render(Model())

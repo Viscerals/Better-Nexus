@@ -5835,12 +5835,14 @@ function M.SessionMenuItems()
     if status.paused then
         return {{ text = "Resume Nexus", notCheckable = true, tooltipTitle = "Resume Nexus",
             tooltipText = RESUME_NOTE, func = MenuAction(function() M.ResumeNexus() end) },
-            MenuNote(RESUME_NOTE)}
+            MenuNote("Auto can continue if it was already on."), MenuNote("Orb runs stay paused.")}
     end
+    -- The note is two short rows, so the menu stays narrow.
     return {{ text = "Pause Nexus for this session", notCheckable = true,
         tooltipTitle = "Pause Nexus for this session", tooltipText = PAUSE_EXPLAIN,
         func = MenuAction(function() M.PauseNexus() end) },
-        MenuNote(PAUSE_EXPLAIN)}
+        MenuNote("Pauses Auto, Orb actions, sharing and DPS recording."),
+        MenuNote("An action already sent may still finish.")}
 end
 
 -- Issue #169: the Auto facts of the last committed model (memory only; no
