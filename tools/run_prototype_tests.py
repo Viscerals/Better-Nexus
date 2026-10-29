@@ -394,6 +394,8 @@ NAMES += ['session_pause_final_boundaries','session_pause_sync_settlement']
 NAMES += ['session_pause_sync_receive']
 # Issue #171 third review repair: a pause raised inside the transport's pre-submit observers (send_settled, send_attempting) stops the stale packet before submission with no attempt counted; a send already entered keeps its result (native NOT_RUN).
 NAMES += ['session_pause_transport_observers']
+# Issue #172: after an explicit Continue, a newly approved running Orb run keeps the ordinary pump cadence; idle late observation and restored receipts stay slow (synthetic timing; native NOT_RUN).
+NAMES += ['orb_continue_running_cadence']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
