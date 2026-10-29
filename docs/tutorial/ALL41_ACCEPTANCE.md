@@ -1,0 +1,1107 @@
+# Nexus all41 acceptance matrix (issue #131)
+
+Source/offline reconciliation of the canonical 41 rows (`UX-01`–`UX-18`, `LP-01`–`LP-18`, `J1`–`J5`) against source pin `9bfb2bb922123e0b60f8b7f0506fc508c4476052` (tree `78084628356cf2bfa72bbc9176ee1ed4bcc05dc2`). **This is not tester, native, release or whole-feature acceptance. No row is accepted.** Native criteria are pending under [#133](https://github.com/Viscerals/Better-Nexus/issues/133).
+
+The machine-readable companion is [`ALL41_ACCEPTANCE.json`](ALL41_ACCEPTANCE.json); each of its rows keeps the canonical object unchanged (input SHA-256 `ceb0e37ce467ebe5fe494c04db49aafc7d5b0dcf71d4ffd52e0b6e668f3a9e44`, schema `nexus-m7-current-sanitized-public41-requirements/1`).
+Claude Opus 5.5 wrote the matrix; the existing Nexus coordinator is accountable for it. Dispositions are the author's own. The independent Codex Spec/Standards review of this matrix is pending.
+
+## Evidence used
+
+- **Focused run at the pin:** 61/61 registered fixtures passed (LuaJIT 2.1, `python -B tools/run_prototype_tests.py --runtime luajit --only …`). The worktree was clean afterwards. These are synthetic offline fixtures.
+- **Full suite at the pin:** Lua 577/577 and Python 2/2 files. This aggregate only shows the pin is green; it is never row acceptance.
+- **Bounded reviews at the pin:** independent Spec and Standards reviews of the eight-file menu-opacity/Details delta found zero findings. They are not an all41 sign-off.
+- **Bounded native check of this pin:** build identity, menu opacity and Details names were checked; the root Help callback opened the coach and Escape closed it; Auto stayed OFF. This is not all41 native acceptance.
+- **Historical material:** the issue's top status paragraphs, the earlier e8 matrix (0 whole items accepted) and older projected maps are historical only.
+
+## Recorded interpretation conflict
+
+**UX-01.** The canonical proposal says *"Fresh profile: No -> Welcome shown, Auto OFF, no overwriteWarnings write"*. Current consent behaviour differs, and it is kept:
+
+- The first-launch warning's answers are *Continue — Auto stays OFF* and *Close*.
+- An explicit Close, No, X or Escape declines. It then opens the Welcome frame as **information-only setup** (`ui/OverwriteWarning.lua:143-146` → `QuickStart.ShowSetup`).
+- `ui/QuickStart.lua:728` returns on `declined`. It shows no first-time Welcome or coach and writes no acknowledgement.
+
+This adopted behaviour is recorded rather than changed to make the row pass. Changing either side needs an owner decision.
+
+## Candidate gaps for separate lanes (not fixed here)
+
+- **UX-02:** CANDIDATE GAP G-UX02-a (source-only, not executed): predicate `#unheld>=2 and canFreeze and freeze charges>0 and horizon>=2 and frozenCount==0` in the default adaptive policy (logic/EchoWeaver.lua:378-387) yields reasonCode PAIR_FREEZE_SECOND_NEEDED with reason 'Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)' (:210). core/UserText.lua reasons (:21-29) and the gsub at :132 do not map it, so the engine name can reach the HUD; highlight (core/AutomationRuntime.lua:3275) is false for a Freeze, so 0 cards are marked. Same unmapped-label class for BANISH_BEFORE_REROLL and SETTLE_HELD_WANTED (:209,:211). Scope: logic/EchoWeaver.lua, core/UserText.lua, core/AutomationRuntime.lua; no current test offers two different Needed cards with Auto OFF.
+- **UX-02:** CANDIDATE GAP G-UX02-b (source-only, not executed): ui/Panel.lua:4962-4965 `guide and guide.openOrbs and guideText ~= ""` precedes the `model.auto == false` branch (:4974) and sets 'Active: Slot N'. OrbGuidance (logic/OrbGuidance.lua:75-79) sets openOrbs for orb-run/orb-state independent of Auto, so Auto OFF + cards + blocked Orb state reads 'Active'. orb_guidance_navigation covers Auto ON only.
+- **LP-04:** SCOPE GAP: setup checklist/coach do not render the shared strip (ui/QuickStart.lua checklist rows; ui/GuidedSetup.lua:151). Owner decision whether shared facts suffice or the strip itself is required.
+- **UX-13:** CANDIDATE GAP G-UX13 (source-verified, wording): core/CommunityController.lua:1374-1377 generates "Assigned Wishlist: %s - target progress (%d/%d)." as a Saved Build mirror description, shown in the Build Library detail (ui/CommunityRenderer.lua:2549-2557) and carried as the shared listing description. Predicate: assigned Saved Build detail contains N/M next to 'Assigned Wishlist' without 'planned' or a unit. tests/prototype/saved_mirror_assigned_description.lua:79 pins the bare N/M form. Owner decision whether 'target progress' suffices.
+- **LP-14:** SCOPE GAP G-LP14: Build Library 'BEST RECORDS FOR THIS LOADOUT' lines (core/CommunityProjection.lua:114-125; ui/CommunityRenderer.lua:2784-2793) show DPS/holder/your best only - no qualifier, duration, level or date where a row carries them; combined rows (ui/Leaderboard.lua:1004-1007) likewise. Untested.
+- **LP-15:** COVERAGE GAP G-LP15: lint scope bounded; e.g. the UX-13 description string (core/CommunityController.lua:1376) is outside it.
+- **UX-16:** INTERPRETATION: 'Same usage words on all three surfaces' - owner decision whether shared vocabulary with differing separators suffices.
+- **J3:** UNRESOLVED EDGE G-J3 (source-only): Saved Build slot contents replaced in the game between chooser click and a delayed Auto-ON accept. AssignWithConsent re-checks owner only (ui/JournalTab.lua:154-176); A.SetLoadoutWishlist checks the slot is populated (core/GameAdapter.lua:3238), not that it is the same Saved Build; the chat line names the captured loadoutName. Associations are keyed by slot index by design, so this may be intended; no test replaces a populated Saved Build before a delayed accept. Owner decision whether 'recycled slot' includes Saved Build slots.
+
+None of these was executed as a failing test; each is source-verified only. They are scoped to the cited paths, and this documentation-only change leaves production code and tests untouched.
+
+## Summary
+
+| Row | Title | Spec | Standards | Row disposition |
+|---|---|---|---|---|
+| UX-01 | Answering No at first launch removes the Welcome; Welcome cannot be reopened | met-offline-adopted-interpretation | no-hard-violation-found | offline-supported-with-recorded-conflict; native pending |
+| LP-01 | State-derived per-character/loadout setup checklist | met-offline | no-hard-violation-found | offline-supported; native pending |
+| UX-02 | Auto OFF recommendation does not identify the card | partial | no-hard-violation-found | offline-partial; two candidate gaps for a separate lane; native pending |
+| LP-02 | Compact charges row | met-offline | no-hard-violation-found | offline-supported; native pending |
+| UX-03 | Save/assign outcome chat-only; generic saved follows not-assigned | met-offline-adopted-interpretation | no-hard-violation-found | offline-supported; native pending |
+| LP-03 | Explicit Save changes / Save & assign controller intents | met-offline | no-hard-violation-found | offline-supported; native pending |
+| UX-04 | Destination not named in confirmations or the main panel; first-run plan shows None | met-offline | no-hard-violation-found | offline-supported; native pending |
+| LP-04 | Shared character/Saved Build/Wishlist/state strip | partial | no-hard-violation-found | offline-partial (scope); native pending |
+| UX-05 | Picker assigns on one click, silent success, Auto-ON consequence tooltip-only | met-offline | no-hard-violation-found | offline-supported; native pending |
+| LP-05 | Destination strip and setup checklist integration | met-offline | no-hard-violation-found | offline-supported; native pending |
+| UX-06 | Assign Wishlist lands on the game page, not the chooser | met-offline | no-hard-violation-found | offline-supported; native pending |
+| LP-06 | Checklist direct assignment links | met-offline | no-hard-violation-found | offline-supported; native pending |
+| UX-07 | Orb Resume after target change adopts a new target from unnamed compact controls | met-offline | no-hard-violation-found | offline-supported; test gap recorded; native pending |
+| LP-07 | Full-window re-review after changed Orb target | met-offline | no-hard-violation-found | offline-supported; test gap recorded; native pending |
+| UX-08 | Pause/Resume share a button in full window and main-panel strip | met-offline | no-hard-violation-found | offline-supported; native double-click pending |
+| LP-08 | Separate fixed Pause and Resume controls | met-offline | no-hard-violation-found | offline-supported; native pending |
+| UX-09 | Why Auto is not acting is hidden behind ... | met-offline | no-hard-violation-found | offline-supported; native pending |
+| LP-09 | Unified Auto/Sync/Orb status and inline reason area | met-offline-adopted-interpretation | no-hard-violation-found | offline-supported; native pending |
+| UX-10 | What Auto will do is not listed (actions, automatic save, tome changes) | met-offline | no-hard-violation-found | offline-supported; native pending |
+| LP-10 | Existing-permission Automation scope/settings panel | met-offline | no-hard-violation-found | offline-supported; native pending |
+| UX-11 | Copy into Editor and Share Build share one button; publish unconfirmed | met-offline | no-hard-violation-found | offline-supported; native pending |
+| LP-11 | Dedicated Share action area | met-offline-adopted-interpretation | no-hard-violation-found | offline-supported; native pending |
+| UX-12 | Automatic sends not disclosed; Sync status jargon | met-offline | no-hard-violation-found | offline-supported; native pending |
+| LP-12 | Optional in-game Sync mode choice; defaults unchanged | met-offline | no-hard-violation-found | offline-supported; native pending |
+| UX-13 | 79/79 and complete mean four different things | partial | no-hard-violation-found | offline-partial; candidate wording gap for a separate lane; native pending |
+| LP-13 | Shared qualified count formatter | partial | no-hard-violation-found | offline-partial (reach); no native-only criterion beyond UX-13 |
+| UX-14 | DPS and Leaderboard labels overstate scope | met-offline | no-hard-violation-found | offline-supported; native pending |
+| LP-14 | Record detail with available date/duration/level | partial | no-hard-violation-found | offline-partial (scope gap for a separate lane); native pending |
+| UX-15 | Label collisions | met-offline | no-hard-violation-found | offline-supported for checked labels |
+| LP-15 | Terminology lint | partial | no-hard-violation-found | offline-partial (coverage) |
+| UX-16 | Orb wording: usage x3, dense blocks, reload advice conflict, history lost on reload | partial | no-hard-violation-found | offline-partial (interpretation); native pending |
+| LP-16 | Unified Orb status vocabulary | met-offline | no-hard-violation-found | offline-supported; native pending |
+| UX-17 | Help and Welcome structure | met-offline | no-hard-violation-found | offline-supported; native pending |
+| LP-17 | Restructured Help and contextual deep links | met-offline | no-hard-violation-found | offline-supported; native pending |
+| UX-18 | Practical accessibility minimums | met-offline | no-hard-violation-found | offline-supported; native pending |
+| LP-18 | Accessibility pass per window family | met-offline | no-hard-violation-found | offline-supported; native gaps enumerated; native pending |
+| J1 | Fresh import/no Saved Build | met-offline | no-hard-violation-found | offline-supported; native pending |
+| J2 | Existing Saved Build/unassigned plan | met-offline | no-hard-violation-found | offline-supported; native pending |
+| J3 | Multiple characters/Saved Builds | partial | no-hard-violation-found | offline-partial (unresolved edge); native pending |
+| J4 | Manual recommendations then optional Automation | met-offline | no-hard-violation-found | offline-supported on traced paths; inherits UX-02 candidate gaps; native pending |
+| J5 | Optional Orb pause/target change/recovery | met-offline | no-hard-violation-found | offline-supported (optional journey, safety boundaries retained); native pending |
+
+Counts:
+- **Rows:** 41 (18 UX, 18 LP, 5 J).
+- **Spec:** met-offline 29, met-offline-adopted-interpretation 4, partial 8.
+- **Rows with pending native criteria:** 38.
+- **Accepted whole rows:** 0.
+
+## Rows
+
+### UX-01 — Answering No at first launch removes the Welcome; Welcome cannot be reopened
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-01", "kind": "originalUXfindingDesiredOutcome", "title": "Answering No at first launch removes the Welcome; Welcome cannot be reopened", "requiredM7Disposition": "Finish state-derived checklist/replay composition; no consent from No/Close.", "acceptanceProposals": ["Fresh profile: No -> Welcome shown, Auto OFF, no overwriteWarnings write", "Welcome reopenable same and later session", "Auto click after No still shows Auto warning"]}
+```
+
+- **Adopted/current interpretation:** Canonical wording 'No -> Welcome shown' is preserved. Current consent behaviour is kept: the first-launch warning's answers are 'Continue — Auto stays OFF' and 'Close'; an explicit Close/No, X or Escape declines and opens the Welcome frame as information-only setup ('Nexus setup (information only)'); QuickStart.ShowIfFirstTime returns on 'declined' without the first-time Welcome, guided coach or hasSeenQuickStart write. The canonical object is not edited to obtain green.
+- **Conflict:** INTERPRETATION CONFLICT (kept explicit): canonical 'No -> Welcome shown' vs current ui/QuickStart.lua:728 `if outcome == "declined" then return true end`. What is shown after a decline is the information-only Welcome (ui/OverwriteWarning.lua:143-146 -> QuickStart.ShowSetup, ui/QuickStart.lua:461-479), not the first-time Welcome or the coach. Recorded as adopted behaviour; owner decision required to change either side.
+- **Production symbols:** `ui/OverwriteWarning.lua:120 Finish(yes, closing, explicit)`; `ui/OverwriteWarning.lua:110 ShowInformation`; `ui/OverwriteWarning.lua:318 M.EnsureOnboarding`; `ui/OverwriteWarning.lua:327 M.RequestAuto`; `ui/OverwriteWarning.lua:245 ONBOARDING_YES`; `ui/QuickStart.lua:461 M.ShowSetup`; `ui/QuickStart.lua:724 M.ShowIfFirstTime`; `ui/QuickStart.lua:447 M.Show (consent-bound)`
+- **Callback chain:** warning No/Close/Escape (ui/OverwriteWarning.lua:210,213,228) -> Finish(false,...,explicit=true) -> onboardingOutcome='declined' (:132) -> same root/owner check (:143-145) -> ShowInformation (:110) -> QuickStart.ShowSetup (ui/QuickStart.lua:461): _informational=true, SETUP_TITLE/SETUP_HINT, no write ‖ later Auto click -> AutomationRuntime ToggleAuto (core/AutomationRuntime.lua:4648-4664) -> OverwriteWarning.RequestAuto (:327): onboarding is 'declined' not 'pending' -> Show('auto') unless the player saved its suppression
+- **Discriminating assertions:**
+  - tests/prototype/ux_setup_replay.lua:204-205 S1 No declines; `NexusDB.overwriteWarnings==nil and Seen()==nil` (real warning handlers)
+  - tests/prototype/ux_setup_replay.lua:210 S1 No opens the Welcome at once as information only
+  - tests/prototype/ux_setup_replay.lua:213 the consent-bound QuickStart.Show() still returns false
+  - tests/prototype/ux_setup_replay.lua:231-239 replay reopenable in the same session; :405 and :418 a seen/later-session boot can replay
+  - tests/prototype/ux_setup_replay.lua:261-264 after No, Auto still asks its own warning; declining keeps Auto OFF
+  - tests/prototype/ux_setup_replay.lua:299 S2 Close and S7 Escape (scenario at :483) open the informational Welcome
+- **Negative controls:** early No before reading delay answers nothing (:197); raw OnHide declines only, opens nothing (S8); stale answer after root/owner change opens nothing (S9/S10); Auto warning No/Close/Escape/CancelAuto open no Welcome (:275)
+- **Execution at the pin:** `ux_setup_replay` PASS (229), `overwrite_warning` PASS, `overwrite_warning_welcome` PASS, `overwrite_warning_lifecycle` PASS (76), `overwrite_auto_gate` PASS, `quickstart_seen_guard` PASS (76), `guided_first_entry` PASS (195)
+- **Spec:** `met-offline-adopted-interpretation`. All three canonical acceptance proposals have discriminating passing assertions under the adopted reading; 'Welcome shown' is satisfied by the information-only Welcome, not the first-time Welcome. Conflict recorded above.
+- **Standards:** `no-hard-violation-found`. Consent is not inferred from No/Close; no SavedVariables write on decline. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Interpretation conflict above (owner decision).
+  - Native Escape capture/UISpecialFrames order NOT_RUN (fixture header).
+- **Native (#133, pending):** Fresh profile in the client: Close/Escape on the first-launch warning shows the information-only Welcome, Auto stays OFF, no overwriteWarnings key written; Options > Setup information (read only) reopens it in the same and a later session; Auto click after Close still shows the Auto warning
+- **Row disposition:** offline-supported-with-recorded-conflict; native pending
+
+### LP-01 — State-derived per-character/loadout setup checklist
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-01", "kind": "largerProposal", "title": "State-derived per-character/loadout setup checklist", "requiredM7Disposition": "Finish state-derived checklist/replay composition; no consent from No/Close."}
+```
+
+- **Adopted/current interpretation:** Delivered as two surfaces: the read-only 'Setup checklist and status' window (ui/QuickStart.lua:489-686, rows from Panel.SetupFacts via UserText.SetupChecklist) and the guided setup coach (core/GuidedSetup.lua, ui/GuidedSetup.lua) whose steps complete only from bound receipts plus fresh read back; the place is kept per character (PLACE_KEY guidedSetupPlaceV1) but no result is kept across reload.
+- **Production symbols:** `ui/QuickStart.lua:542 RefreshChecklist`; `ui/Panel.lua:1079 M.SetupFacts`; `core/UserText.lua SetupChecklist / StatusLines`; `core/GuidedSetup.lua:74 ReadPlace, :125 Save, :255 G.Resume, :321 G.Recheck, :800 G.Summary`; `ui/QuickStart.lua:712 ShowFirstUseCoach, :706 CoachClosed`
+- **Callback chain:** checklist OnShow/OnUpdate 0.5 s (ui/QuickStart.lua:659-665) -> Panel.SetupFacts -> UserText.SetupChecklist -> row text; no writer ‖ coach Show -> G.Resume (core/GuidedSetup.lua:255) -> ReadPlace/Apply/Readopt; outcomes re-read via G.AssignStatus/TargetFacts ‖ replay G.Replay (:182) clears choices/results, never Wishlist, Saved Build or Auto
+- **Discriminating assertions:**
+  - tests/prototype/ux_setup_checklist.lua K1-K5 (:115-221): done only when true now; unknown/loading/restoring/unavailable apart; Welcome and Auto warning are not facts (K4 :168)
+  - tests/prototype/guided_setup_resume.lua (138 checks): place kept per character; outcomes read again; read-only/foreign/loading session-only
+  - tests/prototype/guided_setup_flow.lua F1 (:154) navigation moves the guide only; F4 (:286) honest summary
+- **Negative controls:** skipped is never done (core/GuidedSetup.lua:757-762, Summary :815-816); owner/epoch/session change clears evidence (R6, guided_setup_readback.lua:158-177); foreign/other-version place record never read or written (core/GuidedSetup.lua:66-101,143,149)
+- **Execution at the pin:** `ux_setup_checklist` PASS (192), `guided_setup_flow` PASS (2878), `guided_setup_resume` PASS (138), `guided_setup_readback` PASS (135), `ux_setup_replay` PASS (229)
+- **Spec:** `met-offline`. State-derived checklist and replay composition exist; no consent from No/Close (see UX-01).
+- **Standards:** `no-hard-violation-found`. Place record is a new versioned, bounded field written only through StoreAuthorityOwner.UpdateStateV1 on a durable row; unknown fields of a v1 record preserved. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - 163008 native screenshots reported guide-local choice vs current assignment confusion on Step 2/Step 7; current source adds CurrentAssignment/'Assigned now' (core/GuidedSetup.lua:399-427; tests/prototype/visual_guide_context_163009.lua V1-V5) - not natively re-observed at this pin.
+- **Native (#133, pending):** Coach Step 2 shows the already-assigned Wishlist as 'Assigned now' without completing the step; Step 7 readable; /reload resumes the step with every outcome read again; checklist rows/fonts at supported scales
+- **Row disposition:** offline-supported; native pending
+
+### UX-02 — Auto OFF recommendation does not identify the card
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-02", "kind": "originalUXfindingDesiredOutcome", "title": "Auto OFF recommendation does not identify the card", "requiredM7Disposition": "Verify accepted chosen-card/charges behavior composes with checklist and no-choice ready state.", "acceptanceProposals": ["Two Needed cards -> exactly one marked and named", "Auto OFF heading never says active", "No engine name in recommendations"]}
+```
+
+- **Adopted/current interpretation:** Auto OFF marks and names exactly one card only when the runtime's decision is a Take of a definite card (core/AutomationRuntime.lua:3275 highlight; ui/Readout.lua:81 MarkedCard). Reason text passes through UserText.Message (ui/Panel.lua:5396, core/UserText.lua:90).
+- **Production symbols:** `core/AutomationRuntime.lua:3268-3280 cardLines highlight`; `core/AutomationRuntime.lua:3288 recommendation = action.reason`; `ui/Readout.lua:81 MarkedCard, :167 RecommendationWithTarget`; `ui/Panel.lua:4950-4982 heading branches`; `core/UserText.lua:21-29 reasons, :90 T.Message`; `logic/EchoWeaver.lua:199-211 LABELS, :369-387 adaptive PAIR_FREEZE redirect`
+- **Callback chain:** offer -> Policy/EchoWeaver.DecideNexus -> decision.reason=LABELS[code] (logic/EchoWeaver.lua:317) -> runtime panel model (core/AutomationRuntime.lua:3288-3307) -> Panel.Render Present -> UserText.Message -> heading + card marker
+- **Discriminating assertions:**
+  - tests/prototype/ux_manual_recommendation.lua:108 Auto OFF heading has 'you choose' and not 'active'
+  - :111-112 exactly one marked and named card (single Needed card on the board)
+  - :128 duplicate same Echo -> no mark, no name
+  - tests/prototype/terminology_consumers.lua:28 no '(EchoWeaver)' on the real Take path
+- **Negative controls:** no needed offer / no offer (R4 :174); Auto held/waiting (:163,:165); no actions sent (:114,:136)
+- **Execution at the pin:** `ux_manual_recommendation` PASS (68), `terminology_consumers` PASS, `terminology` PASS
+- **Spec:** `partial`. Single-Needed-card cases met offline. Two candidate gaps found by source reading for the canonical 'Two Needed cards' and 'never says active' proposals (not executed).
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - CANDIDATE GAP G-UX02-a (source-only, not executed): predicate `#unheld>=2 and canFreeze and freeze charges>0 and horizon>=2 and frozenCount==0` in the default adaptive policy (logic/EchoWeaver.lua:378-387) yields reasonCode PAIR_FREEZE_SECOND_NEEDED with reason 'Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)' (:210). core/UserText.lua reasons (:21-29) and the gsub at :132 do not map it, so the engine name can reach the HUD; highlight (core/AutomationRuntime.lua:3275) is false for a Freeze, so 0 cards are marked. Same unmapped-label class for BANISH_BEFORE_REROLL and SETTLE_HELD_WANTED (:209,:211). Scope: logic/EchoWeaver.lua, core/UserText.lua, core/AutomationRuntime.lua; no current test offers two different Needed cards with Auto OFF.
+  - CANDIDATE GAP G-UX02-b (source-only, not executed): ui/Panel.lua:4962-4965 `guide and guide.openOrbs and guideText ~= ""` precedes the `model.auto == false` branch (:4974) and sets 'Active: Slot N'. OrbGuidance (logic/OrbGuidance.lua:75-79) sets openOrbs for orb-run/orb-state independent of Auto, so Auto OFF + cards + blocked Orb state reads 'Active'. orb_guidance_navigation covers Auto ON only.
+- **Native (#133, pending):** Live board with two Needed cards and Auto OFF: exactly one card marked and named, no engine name; Auto OFF heading never 'Active' including while Orb state is unknown
+- **Row disposition:** offline-partial; two candidate gaps for a separate lane; native pending
+
+### LP-02 — Compact charges row
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-02", "kind": "largerProposal", "title": "Compact charges row", "requiredM7Disposition": "Verify accepted chosen-card/charges behavior composes with checklist and no-choice ready state."}
+```
+
+- **Adopted/current interpretation:** Compact charges row 'B:n R:n F:n' (unknown '?', untrusted '~') shown only with Auto OFF and a board.
+- **Production symbols:** `core/AutomationRuntime.lua:3064 Adapter.Charges read once per decision`; `core/AutomationRuntime.lua:3319 model.charges (Auto OFF only)`; `ui/Panel.lua:5440 _nexusChargeLine, :5023-5031 show/hide`; `ui/Readout.lua:283 ChargesLine`
+- **Callback chain:** GameAdapter A.Charges (core/GameAdapter.lua:948) -> state.charges -> panelModel.charges -> Panel.Render -> charges text
+- **Discriminating assertions:**
+  - tests/prototype/ux_manual_recommendation.lua:336 'B:20 R:20 F:10' from the real producer
+  - :356 unreported -> 'B:? R:? F:?' (unknown is not zero)
+  - :362 untrusted '~'
+  - :367 re-render makes no charge read
+  - :375,:402 hidden between boards and with Auto ON
+- **Negative controls:** partial host push upstream limitation stated (:344-350)
+- **Execution at the pin:** `ux_manual_recommendation` PASS (68)
+- **Spec:** `met-offline`. Composes with the no-choice ready state (no board -> no row).
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Freshness of real host charge pushes is native-only.
+- **Native (#133, pending):** Charges row values match the game's own counters on a live board
+- **Row disposition:** offline-supported; native pending
+
+### UX-03 — Save/assign outcome chat-only; generic saved follows not-assigned
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-03", "kind": "originalUXfindingDesiredOutcome", "title": "Save/assign outcome chat-only; generic saved follows not-assigned", "requiredM7Disposition": "Verify accepted saved/unassigned/partial and save-intent results survive integrated refresh/cancel/context changes.", "acceptanceProposals": ["Generic success cannot replace unassigned/partial line", "Assign now / Cancel never uploads", "Failure line uses plain words"]}
+```
+
+- **Adopted/current interpretation:** The persistent save-result row in the editor carries saved/unassigned/partial/failed results and cannot be replaced by the generic success line; the generic 'Wishlist saved' chat line still follows in chat (accepted ordering, ux_save_assignment_result.lua:307). Assign now reuses the Journal chooser and never uploads.
+- **Production symbols:** `core/WishlistController.lua:2591-2597 ApplyAndRecord`; `:2686 SaveResultCurrent`; `:2723 SaveResult`; `:2750 AssignNowCheck`; `:2484/:2500/:2511 chat lines`; `ui/WishlistRenderer.lua:3426 AssignNow -> JournalTab.OpenBuilds(true)`
+- **Callback chain:** editor Save button -> confirmation popup -> ApplyAndRecord/TryApply -> GameAdapter writer -> state.saveResult -> RenderSaveResult ‖ Assign now... -> AssignNowCheck -> JournalTab.OpenBuilds(true) (UX-05 chain)
+- **Discriminating assertions:**
+  - tests/prototype/ux_save_assignment_result.lua:324 generic line does not replace the unassigned result row
+  - :384 failure before generic; :392 no '_' code in the row; :397 partial row persists
+  - :356,:426 no second upload from Assign now
+  - tests/prototype/ux_auto_assignment_consent.lua:158 Cancel uploads nothing
+- **Negative controls:** Cancel; refused upload; destination changed during host call (A10); owner change (:539); Saved Build emptied (C4b)
+- **Execution at the pin:** `ux_save_assignment_result` PASS (155), `ux_save_intents` PASS (149), `ux_auto_assignment_consent` PASS (57), `ux_save_retry_intent` PASS (82)
+- **Spec:** `met-offline-adopted-interpretation`. 'Generic success cannot replace unassigned/partial line' is met for the persistent row; the chat generic line is retained by accepted design.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Chat failure line appends the raw lowercase adapter reason in brackets (e.g. '(store unavailable)'); plain words, not a code - wording only.
+- **Native (#133, pending):** Real editor save/unassigned/partial result row visible after refresh and chat ordering in the client
+- **Row disposition:** offline-supported; native pending
+
+### LP-03 — Explicit Save changes / Save & assign controller intents
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-03", "kind": "largerProposal", "title": "Explicit Save changes / Save & assign controller intents", "requiredM7Disposition": "Verify accepted saved/unassigned/partial and save-intent results survive integrated refresh/cancel/context changes."}
+```
+
+- **Adopted/current interpretation:** Explicit intents: Save changes (no assignment writer), Save & assign (bound destination writer), Create unassigned; intent and destinationKey bound into the confirmation and checked again before upload.
+- **Production symbols:** `core/WishlistController.lua:183 INTENT, :1970-1985 IntentOf/DefaultIntent, :2232 destination re-check, :2381-2395 saveOnly`; `core/GameAdapter.lua:3259 UpdateWishlistAssociationAfterSave (token check)`; `ui/WishlistRenderer.lua:3033-3054 labels`
+- **Callback chain:** intent button -> confirmation carries intent+destinationKey -> accept -> TryApply -> saveOnly or bound writer
+- **Discriminating assertions:**
+  - tests/prototype/ux_save_intents.lua:760 Save changes uploads once, assignment unchanged
+  - :775 Save & assign through the existing writer
+  - tests/prototype/ux_save_retry_intent.lua:197 retry runs no assignment writer
+  - ux_save_retry_intent.lua R6-R8 (:331-365) refused before upload when the bound Saved Build was reassigned/unassigned
+- **Negative controls:** retry, outside reassign/unassign, replayed confirmation (I5), host error (I7/I8)
+- **Execution at the pin:** `ux_save_intents` PASS (149), `ux_save_retry_intent` PASS (82), `ux_auto_assignment_consent` PASS (57)
+- **Spec:** `met-offline`. Distinct from UX-03: adds the controller intents themselves.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Intent buttons and confirmations in the client; one upload per confirmed save
+- **Row disposition:** offline-supported; native pending
+
+### UX-04 — Destination not named in confirmations or the main panel; first-run plan shows None
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-04", "kind": "originalUXfindingDesiredOutcome", "title": "Destination not named in confirmations or the main panel; first-run plan shows None", "requiredM7Disposition": "Finish shared captured destination strip across setup/status/editor and nil/unavailable/empty states.", "acceptanceProposals": ["Switch active Saved Build mid-edit -> dialog names captured destination", "First-run plan labelled as such"]}
+```
+
+- **Adopted/current interpretation:** Confirmations name the destination captured when editing began (WishlistController DestinationDescriptor), never the currently active slot; a first-run plan is labelled first-run (short Saved Build cell 'None' with state cell 'First run').
+- **Production symbols:** `core/WishlistController.lua:1870 DestinationDescriptor`; `core/UserText.lua:205 SavedBuildLabel, :289 first-run short cell, :376 DestinationLines, :413 DestinationFields`; `ui/Panel.lua:920 DestinationFacts`
+- **Callback chain:** editor open captures context -> DestinationDescriptor -> confirmation text / destination row
+- **Discriminating assertions:**
+  - tests/prototype/ux_captured_destination_labels.lua:283 dialog names Fire PvE, not Arena, after a mid-edit switch
+  - :379 first-run plan labelled first-run
+  - :402 empty captured Saved Build refused
+  - tests/prototype/ux_destination_context.lua:192,:196
+- **Negative controls:** draft begun with no Saved Build (A09b); unknown slot data (A14u)
+- **Execution at the pin:** `ux_captured_destination_labels` PASS (452), `ux_destination_context` PASS (54)
+- **Spec:** `met-offline`. Both canonical proposals asserted.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Mid-edit Saved Build switch in the client: dialog names the captured destination; first-run plan label legible in the HUD
+- **Row disposition:** offline-supported; native pending
+
+### LP-04 — Shared character/Saved Build/Wishlist/state strip
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-04", "kind": "largerProposal", "title": "Shared character/Saved Build/Wishlist/state strip", "requiredM7Disposition": "Finish shared captured destination strip across setup/status/editor and nil/unavailable/empty states."}
+```
+
+- **Adopted/current interpretation:** Shared four-cell destination strip (character / Saved Build / Wishlist / state) on the HUD and the editor; the setup checklist and coach word the destination from the same Panel.SetupFacts/TargetOptions facts but do not render the strip.
+- **Production symbols:** `ui/Panel.lua:645 CreateDestinationRow, :668 UpdateDestinationRow (HUD :1839,:5346)`; `ui/WishlistRenderer.lua:1352,:2841 editor strip`; `core/UserText.lua:523 SetupChecklist`; `ui/GuidedSetup.lua:151 TargetLabel`
+- **Callback chain:** Panel.Render/editor render -> UpdateDestinationRow from DestinationFacts
+- **Discriminating assertions:**
+  - tests/prototype/wishlist_editor_context_label.lua reads the four real cells
+  - tests/prototype/ux_destination_context.lua D1-D5, D10-D12 empty/unassigned/unavailable/kept-unconfirmed/restoring
+  - tests/prototype/ux_captured_destination_labels.lua B2/F4 font scale 2 and world-session invalidation
+- **Negative controls:** nil/unavailable/empty states (D-scenarios)
+- **Execution at the pin:** `ux_destination_context` PASS (54), `ux_captured_destination_labels` PASS (452)
+- **Spec:** `partial`. Canonical disposition says 'across setup/status/editor'; strip is shared by status and editor only. Setup surfaces state the same facts in their own words.
+- **Standards:** `no-hard-violation-found`. Possible Duplicated Code (judgement): destination wording exists in UserText.SetupChecklist and GuidedSetup TargetLabel beside the strip. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - SCOPE GAP: setup checklist/coach do not render the shared strip (ui/QuickStart.lua checklist rows; ui/GuidedSetup.lua:151). Owner decision whether shared facts suffice or the strip itself is required.
+- **Native (#133, pending):** Strip fit and truncation at supported scales in HUD and editor
+- **Row disposition:** offline-partial (scope); native pending
+
+### UX-05 — Picker assigns on one click, silent success, Auto-ON consequence tooltip-only
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-05", "kind": "originalUXfindingDesiredOutcome", "title": "Picker assigns on one click, silent success, Auto-ON consequence tooltip-only", "requiredM7Disposition": "Integrate assignment readback/checklist; retain explicit distinct Auto-ON consent.", "acceptanceProposals": ["Auto OFF: one click assigns with visible confirmation", "Auto ON: confirm shown; Cancel changes nothing", "No Auto change without explicit click"]}
+```
+
+- **Adopted/current interpretation:** Auto OFF: one chooser click assigns to the captured destination and prints a visible confirmation. Auto ON (numbered non-empty target): NEXUS_ASSIGN_WISHLIST_AUTO_ON confirmation first; Cancel writes nothing; no Auto change from assignment.
+- **Production symbols:** `ui/JournalTab.lua:1428 AssociateWishlistOnly`; `ui/JournalTab.lua:154 M.AssignWithConsent (owner re-check, accept once)`; `ui/JournalTab.lua:1454 A.SetLoadoutWishlist, :1470 confirmation line`; `ui/WishlistEditor.lua:720 ResolveAndAssignWishlist -> RolePicker (:516-546)`; `core/GameAdapter.lua:3227 A.SetLoadoutWishlist`
+- **Callback chain:** chooser row OnClick -> AssociateWishlistOnly -> GuideOrigin -> AssignWithConsent -> (Auto ON) StaticPopup accepted later -> assign() -> A.SetLoadoutWishlist -> GuideAssign receipt -> RefreshAssociations -> chat confirmation ‖ no lock evidence -> ResolveAndAssignWishlist -> RolePicker confirm later -> SetLoadoutWishlist -> GuideNote('assign', origin='rolepicker')
+- **Discriminating assertions:**
+  - tests/prototype/ux_auto_assignment_consent.lua:312 Auto OFF assigns at once; :315 visible line
+  - :335 Auto ON asks first; :346 Cancel writes nothing, Auto unchanged
+  - :368 captured slot 2 written, not current active; :392 owner change refuses
+  - tests/prototype/ux_assignment_consent_routes.lua:335,:465,:604 every Auto-ON route asks first; answer once
+- **Negative controls:** cancel, stale owner, active selection changed, confirmation unavailable (N1), repeated answer
+- **Execution at the pin:** `ux_auto_assignment_consent` PASS (57), `ux_assignment_consent_routes` PASS (104), `guided_setup_readback` PASS (135)
+- **Spec:** `met-offline`. All three canonical proposals asserted through real row clicks and popup handlers.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Chooser click with Auto OFF/ON in the client; Cancel leaves assignment and Auto unchanged
+- **Row disposition:** offline-supported; native pending
+
+### LP-05 — Destination strip and setup checklist integration
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-05", "kind": "largerProposal", "title": "Destination strip and setup checklist integration", "requiredM7Disposition": "Integrate assignment readback/checklist; retain explicit distinct Auto-ON consent."}
+```
+
+- **Adopted/current interpretation:** Assignment results feed the coach and checklist only through bound receipts plus fresh read back (core/GuidedSetup.lua G.Note/BeginAssign/AssignStatus).
+- **Production symbols:** `core/GuidedSetup.lua:609 G.BeginAssign, :623 G.Note, :681 G.AssignStatus, :443 G.ReadAssignment`; `ui/JournalTab.lua:182 GuideAssign, :196 GuideOrigin`; `ui/WishlistEditor.lua:546,:644,:735 GuideNote`
+- **Callback chain:** coach RouteChooser (ui/GuidedSetup.lua:2070) -> G.ArmAssign -> JournalTab.OpenBuilds(true) -> row click GuideOrigin -> outcome GuideAssign -> G.Note claims[r]=request -> AssignStatus verified only if token==read.action and read.key==wishlist key
+- **Discriminating assertions:**
+  - tests/prototype/guided_setup_readback.lua R2 :113-124 verified/unknown/stale
+  - R5 :150-155 early/other-destination/forged never verify
+  - R7 :211-216 delayed role choice pending until its own receipt
+  - R9-R12 :295-338 old role choice / old Auto-ON confirmation not verified for a re-armed request
+  - R15 :364-373 Cancel only for its own request
+  - tests/prototype/ux_setup_checklist.lua:696-699 checklist readback 3 of 3
+- **Negative controls:** R3 refused, R4 other Wishlist, R13 missing/foreign origin, R14 operation before any request
+- **Execution at the pin:** `guided_setup_readback` PASS (135), `ux_setup_checklist` PASS (192), `guided_setup_flow` PASS (2878)
+- **Spec:** `met-offline`. Distinct from UX-05: adds readback/checklist integration; Auto-ON consent unchanged.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Delayed role picker and Auto-ON confirmation timing in the client
+- **Row disposition:** offline-supported; native pending
+
+### UX-06 — Assign Wishlist lands on the game page, not the chooser
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-06", "kind": "originalUXfindingDesiredOutcome", "title": "Assign Wishlist lands on the game page, not the chooser", "requiredM7Disposition": "Verify direct assignment chooser link without assignment on open/cancel.", "acceptanceProposals": ["Assign Wishlist -> picker visible with destination title"]}
+```
+
+- **Adopted/current interpretation:** Every Assign Wishlist route opens the Echo Journal with its Wishlist chooser already open and titled 'Assign to: <destination>'; opening/cancelling assigns nothing; an empty Saved Build's chooser says assigning is refused.
+- **Production symbols:** `ui/Help.lua:409 H.OpenAssignment -> Panel.OpenAssignment`; `ui/QuickStart.lua:636 checklist Assign Wishlist...`; `ui/GuidedSetup.lua:2070 U.RouteChooser`; `ui/JournalTab.lua OpenBuilds(true)`
+- **Callback chain:** Help/checklist/panel Assign -> guarded Panel.OpenAssignment -> JournalTab.OpenBuilds(true) -> chooser titled with captured target
+- **Discriminating assertions:**
+  - tests/prototype/ux_help_navigation.lua:135 chooser open and titled 'Assign to: One'; :136 opening assigns/acts/sends nothing; :139 closing assigns nothing
+  - :203 empty Saved Build chooser 'assigning is refused'
+  - tests/prototype/ux_setup_checklist.lua J2 (tests/prototype/ux_setup_checklist.lua:645) title=='Assign to: Fire PvE'
+- **Negative controls:** missing Character Progression button said before closing windows (H3 :150-164); loading refusal (H1 :106-114)
+- **Execution at the pin:** `ux_help_navigation` PASS (32), `ux_setup_checklist` PASS (192)
+- **Spec:** `met-offline`. 
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Real Character Progression/Echo Journal page opens with the chooser visible and titled
+- **Row disposition:** offline-supported; native pending
+
+### LP-06 — Checklist direct assignment links
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-06", "kind": "largerProposal", "title": "Checklist direct assignment links", "requiredM7Disposition": "Verify direct assignment chooser link without assignment on open/cancel."}
+```
+
+- **Adopted/current interpretation:** Checklist and coach provide direct assignment links (checklist 'Assign Wishlist...', coach chooser/My Builds routes) that only navigate.
+- **Production symbols:** `ui/QuickStart.lua:624-638 route()/f.assign`; `ui/GuidedSetup.lua:2070 RouteChooser, :2100 RouteBuilds`
+- **Callback chain:** checklist Assign -> Help.OpenAssignment (see UX-06); coach Open chooser -> G.ArmAssign then OpenBuilds(true); refused route shown in window (f.notice)
+- **Discriminating assertions:**
+  - tests/prototype/ux_setup_checklist.lua K6 (:222-335) buttons/routes only navigate; :271-274 refused coach reason in the window
+  - J2 (tests/prototype/ux_setup_checklist.lua:640-658) Assign Wishlist... opens chooser, cancel assigns nothing
+  - tests/prototype/guided_setup_flow.lua F14/F15 (:1015,:1138) target routes and My Builds route
+- **Negative controls:** F16 stale My Builds answer after Close/reopen changes nothing
+- **Execution at the pin:** `ux_setup_checklist` PASS (192), `guided_setup_flow` PASS (2878)
+- **Spec:** `met-offline`. Distinct from UX-06: links originate in the checklist/coach.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Checklist/coach links open the real Journal chooser and My Builds page
+- **Row disposition:** offline-supported; native pending
+
+### UX-07 — Orb Resume after target change adopts a new target from unnamed compact controls
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-07", "kind": "originalUXfindingDesiredOutcome", "title": "Orb Resume after target change adopts a new target from unnamed compact controls", "requiredM7Disposition": "Reconcile actual accepted-M6 target review and fix rendered-key race if still present.", "acceptanceProposals": ["Target change while paused -> all surfaces name the new target before Resume"]}
+```
+
+- **Adopted/current interpretation:** A changed target while paused is named on the full window, strip and mini; Resume is refused until the exact current key was drawn and reviewed; the click re-reads OrbRuntime.Status and compares the fresh key. No rendered-key race found.
+- **Production symbols:** `ui/OrbPanel.lua:137-153 review/reviewHeld/reviewRefusal`; `ui/OrbPanel.lua:601-615 Resume handler (fresh Status, reviewRefusal)`; `ui/OrbPanel.lua:690-713 Review target (drawnKey==shownKey==fresh key)`; `core/OrbRuntime.lua:3356 M.Resume, :3384-3392 adopt/limit/token`; `core/OrbRuntime.lua:3720,:3748-3752 resumeTargetView key`
+- **Callback chain:** Pump marks targetChanged and pauses (core/OrbRuntime.lua:3066-3073) -> Status().resumeTarget kind 'changed' -> window/strip/mini name it -> Review click (key check) -> Resume click re-reads Status -> reviewRefusal -> OrbRuntime.Resume -> Rebind/adopt
+- **Discriminating assertions:**
+  - tests/prototype/orb_target_review.lua:157 "New target: Resume would use 'New legitimate target' instead of 'Orb test'"
+  - :172-174 strip and :191 mini name the new target
+  - :207-208 window Resume refuses 'Review the new target first'
+  - :227 no effect across window/Start/strip/hidden primary/mini Resume
+  - :263 Resume adopts exactly the reviewed assignment
+  - tests/prototype/orb_review_identity.lua:100-124 stale Review/Cancel
+- **Negative controls:** third assignment different key (:246-250); closing window clears review (:255); returned target (I3)
+- **Execution at the pin:** `orb_target_review` PASS (152), `orb_review_identity` PASS (77), `orbs_target_changes` PASS
+- **Spec:** `met-offline`. Rendered-key race not present at this pin (click re-reads and compares fresh key).
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - TEST GAP: no fixture clicks a still-enabled Resume after the assignment changed without a redraw (orb_target_review.lua:243-249 calls UI.Refresh first). Current code is correct (:602 re-reads, :612 compares).
+  - Play-panel Orb line (ui/OrbPanel.lua:1626-1646 UI.PanelRunLine) does not name a changed target; it has no Resume (Open only). Interpretation of 'all surfaces' for owner.
+- **Native (#133, pending):** Target change while paused in the client: window, strip and mini name the new target before Resume
+- **Row disposition:** offline-supported; test gap recorded; native pending
+
+### LP-07 — Full-window re-review after changed Orb target
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-07", "kind": "largerProposal", "title": "Full-window re-review after changed Orb target", "requiredM7Disposition": "Reconcile actual accepted-M6 target review and fix rendered-key race if still present."}
+```
+
+- **Adopted/current interpretation:** Full-window re-review: review is per key, cleared on any key change and on close; the hidden legacy primary path applies the same review.
+- **Production symbols:** `ui/OrbPanel.lua:137 review, :396 clear on key change, :690-713 per-key review, :161-168 primary path`
+- **Callback chain:** Refresh sets drawnKey/shownKey from one target (:476,:528-531) -> Review only when drawn==shown==fresh -> Resume enabled when not held (:513-515)
+- **Discriminating assertions:**
+  - tests/prototype/orb_target_review.lua:247-248 review never carries to another assignment
+  - :255 close clears review
+  - tests/prototype/orb_review_identity.lua:106-107 only the redrawn button reviews B; I3 :152 returned target needs review
+- **Negative controls:** stale Cancel; returned target
+- **Execution at the pin:** `orb_target_review` PASS (152), `orb_review_identity` PASS (77)
+- **Spec:** `met-offline`. Distinct from UX-07: the re-review gate itself.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Same stale-enabled Resume test gap as UX-07.
+- **Native (#133, pending):** Re-review flow in the client window
+- **Row disposition:** offline-supported; test gap recorded; native pending
+
+### UX-08 — Pause/Resume share a button in full window and main-panel strip
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-08", "kind": "originalUXfindingDesiredOutcome", "title": "Pause/Resume share a button in full window and main-panel strip", "requiredM7Disposition": "Preserve actual accepted-M6 fixed controls; reserve real double-click proof for M8.", "acceptanceProposals": ["Double-click Pause leaves run paused"]}
+```
+
+- **Adopted/current interpretation:** Separate Pause and Resume buttons; repeated Pause keeps PAUSED and has no effect; real double-click proof reserved for native (M8/#133).
+- **Production symbols:** `ui/OrbPanel.lua:597-600 Pause (re-reads running)`; `ui/OrbPanel.lua:1329-1333 strip Pause, :1754-1771/:1836 mini`; `core/OrbRuntime.lua:3303 M.Pause`
+- **Callback chain:** Pause click -> Status().running check -> OrbRuntime.Pause -> notify -> Refresh disables Pause
+- **Discriminating assertions:**
+  - tests/prototype/orb_fixed_pause_resume.lua:69-72 Pause then two direct Pause calls keep PAUSED, Same(before,Effects())
+  - :76 Pause after an offer never resumes
+  - :117-118 strip
+  - tests/prototype/orb_mini_panel.lua:30-31 repeated Pause never resumes or spends
+- **Negative controls:** repeated Resume adds nothing (:82-83,:124-125)
+- **Execution at the pin:** `orb_fixed_pause_resume` PASS (51), `orb_mini_panel` PASS
+- **Spec:** `met-offline`. Native double-click explicitly reserved by the canonical disposition.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Native OnDoubleClick/disabled-button hit testing not covered (fixture header says not a native double-click proof).
+- **Native (#133, pending):** Real double-click on Pause in window/strip/mini leaves the run paused
+- **Row disposition:** offline-supported; native double-click pending
+
+### LP-08 — Separate fixed Pause and Resume controls
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-08", "kind": "largerProposal", "title": "Separate fixed Pause and Resume controls", "requiredM7Disposition": "Preserve actual accepted-M6 fixed controls; reserve real double-click proof for M8."}
+```
+
+- **Adopted/current interpretation:** Fixed controls: Pause/Resume replace Start in the same row with fixed labels; strip hides the shared primary.
+- **Production symbols:** `ui/OrbPanel.lua:438-439 window swap`; `:1325 strip hides f.primary, :1329-1338 pause/resume`; `:1836-1837 mini`
+- **Callback chain:** Refresh shows fixed Pause/Resume per state
+- **Discriminating assertions:**
+  - tests/prototype/orb_fixed_pause_resume.lua:53 Pause and Resume replace Start
+  - :56-60 same row, >=6 px padding
+  - :66,:119 labels never change
+  - :99 strip primary hidden
+  - :146-149 mini positions
+- **Execution at the pin:** `orb_fixed_pause_resume` PASS (51), `orb_mini_panel` PASS
+- **Spec:** `met-offline`. Distinct from UX-08: control layout itself.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Pixel geometry is the 7 px text model only.
+- **Native (#133, pending):** Pause/Resume positions and labels at supported scales
+- **Row disposition:** offline-supported; native pending
+
+### UX-09 — Why Auto is not acting is hidden behind ...
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-09", "kind": "originalUXfindingDesiredOutcome", "title": "Why Auto is not acting is hidden behind ...", "requiredM7Disposition": "Finish shared visible Auto/Sync/Orb current reason without triggering work.", "acceptanceProposals": ["Refused Auto click shows a visible reason", "Ready state reads in plain words"]}
+```
+
+- **Adopted/current interpretation:** A refused Auto click stores a visible reason shown in the roll block for 60 s ('Auto stayed OFF: ...' plus 'What helps:'); hold reasons visible in heading/body; ready state reads 'Roll status' / 'No Echo choice is showing.'.
+- **Production symbols:** `ui/Panel.lua:2344-2353 Auto button OnClick`; `ui/Panel.lua:5804-5840 M.NoteAutoClick`; `ui/Panel.lua:5518-5552 M.AutoNoteFor`; `ui/Readout.lua:440 AutoRefusalText, :431 AutoHoldNote`; `core/AutomationRuntime.lua:4594 ToggleAuto, :4505 actionHold.Effective`
+- **Callback chain:** Auto click -> callbacks.ToggleAuto (core/MainLifecycle.lua:809) -> AutomationRuntime.ToggleAuto -> refusal/RequestAuto -> Panel.NoteAutoClick -> re-render -> AutoNoteFor -> roll-block body
+- **Discriminating assertions:**
+  - tests/prototype/ux_automation_scope.lua:486 'Auto stayed OFF: an Orb run is active or unresolved' + 'What helps:' (real click)
+  - :493 cleared after Auto ON
+  - :452 'Auto ON — paused' with reason
+  - tests/prototype/hud_roll_footprint.lua:180-182 waiting + AutoHoldNote; :125,:192 ready state 'Roll status' / 'No Echo choice is showing.'
+- **Negative controls:** P14 :489 refused click does no work; P15 :523 answered No is not a refusal
+- **Execution at the pin:** `ux_automation_scope` PASS (97), `ux_status_composition` PASS (81), `overwrite_auto_gate` PASS
+- **Spec:** `met-offline`. 
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Refusal kinds other than Orb-block ('warning', status fallback) have no fixture.
+  - Tooltip 'Now: ready' not asserted.
+- **Native (#133, pending):** Refused Auto click reason visible without hover in the client
+- **Row disposition:** offline-supported; native pending
+
+### LP-09 — Unified Auto/Sync/Orb status and inline reason area
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-09", "kind": "largerProposal", "title": "Unified Auto/Sync/Orb status and inline reason area", "requiredM7Disposition": "Finish shared visible Auto/Sync/Orb current reason without triggering work."}
+```
+
+- **Adopted/current interpretation:** One shared three-line status (Auto / Sync / Orb) from Panel.SetupFacts via UserText.StatusLines in the setup checklist; reading does no work. A refused-click reason with Auto OFF appears in the roll block, not in this shared line.
+- **Production symbols:** `ui/Panel.lua:1079-1109 SetupFacts`; `core/UserText.lua:636-655 StatusLines, :609 OrbLine`; `ui/QuickStart.lua:562-563`
+- **Callback chain:** checklist refresh -> Panel.SetupFacts -> UserText.StatusLines -> status lines
+- **Discriminating assertions:**
+  - tests/prototype/ux_status_composition.lua:233 Auto OFF reads OFF; :238 'Auto: ON' + 'not acting now'
+  - :256 each Sync mode stated; :261 unreadable mode 'not known'
+  - :342-352 real OrbRuntime pause reason and 'Open Orbs'; read does no work
+- **Negative controls:** :239 reading turns nothing ON; :289; :354
+- **Execution at the pin:** `ux_status_composition` PASS (81), `ux_setup_checklist` PASS (192)
+- **Spec:** `met-offline-adopted-interpretation`. Unified status area exists in the checklist; HUD keeps its own roll-block reason.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - If LayoutMetrics failed to load, AutoNoteFor could return AUTO_ON_NOTE for an acting Auto (ui/Panel.lua:5537-5540) -> 'not acting now' would be untrue; TOC loads LayoutMetrics, so failure-mode only.
+- **Native (#133, pending):** Checklist status lines legible and current in the client
+- **Row disposition:** offline-supported; native pending
+
+### UX-10 — What Auto will do is not listed (actions, automatic save, tome changes)
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-10", "kind": "originalUXfindingDesiredOutcome", "title": "What Auto will do is not listed (actions, automatic save, tome changes)", "requiredM7Disposition": "Verify accepted existing-permission disclosure/defaults and no change from viewing settings.", "acceptanceProposals": ["Tooltip lists each enabled action with on/off", "Help mentions tome changes"]}
+```
+
+- **Adopted/current interpretation:** Auto tooltip, Auto warning and Help list each permission Auto may use with on/off from current settings, and the tome paragraph.
+- **Production symbols:** `ui/Readout.lua:472-501 AutomationScopeLines, :507 TOME_PARAGRAPH`; `ui/Panel.lua:2370-2389 Auto tooltip`; `ui/OverwriteWarning.lua:18-38 BodyText`; `ui/Help.lua:58 'rolling' page`; `data/DefaultProfile.lua:32-46 defaults`
+- **Callback chain:** tooltip OnEnter / warning Show / Help page -> AutomationScopeLines(settings) read only
+- **Discriminating assertions:**
+  - tests/prototype/ux_automation_scope.lua:170-175 '(autoPick): on ... (autoLockEchoes): off' from the real OnEnter
+  - :215 after real '/nexus reroll off' tooltip shows off
+  - :510-518 warning lists permissions and TOME_PARAGRAPH
+  - :535-540 Help 'What Auto may do:' and tome paragraph
+- **Negative controls:** :178-179 hover changes nothing; :521; :546
+- **Execution at the pin:** `ux_automation_scope` PASS (97), `session_permissions` PASS
+- **Spec:** `met-offline`. 
+- **Standards:** `no-hard-violation-found`. Defaults unchanged (data/DefaultProfile.lua). Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Tooltip wrapping and Help text legibility in the client
+- **Row disposition:** offline-supported; native pending
+
+### LP-10 — Existing-permission Automation scope/settings panel
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-10", "kind": "largerProposal", "title": "Existing-permission Automation scope/settings panel", "requiredM7Disposition": "Verify accepted existing-permission disclosure/defaults and no change from viewing settings."}
+```
+
+- **Adopted/current interpretation:** Automation settings submenu/window over existing permissions: only Reroll and Freeze act, through their existing slash setters; other rows display or navigate.
+- **Production symbols:** `ui/Readout.lua:518-555 AutomationSettingsRows`; `ui/Panel.lua:5563-5606 AutomationMenuItems`; `ui/SettingsWindow.lua:66-69,:117`
+- **Callback chain:** menu row click -> MenuAction -> SlashCmdList.NEXUS('reroll|freeze on|off') -> existing setter
+- **Discriminating assertions:**
+  - tests/prototype/ux_automation_scope.lua:392-398 every row and value
+  - :401-404 Take/Activate disabled with func==nil
+  - :414 Reroll row changes only autoReroll
+  - :427 Lock row opens editor, changes no setting
+  - tests/prototype/full_ui_settings.lua:28-29 serialized NexusDB unchanged across categories
+- **Negative controls:** :405-406 opening menu changes nothing, Auto OFF
+- **Execution at the pin:** `ux_automation_scope` PASS (97), `full_ui_settings` PASS
+- **Spec:** `met-offline`. Distinct from UX-10: the settings surface.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - full_ui_settings does not assert autoEnabled directly (saved bytes/actions/sends only).
+- **Native (#133, pending):** Dropdown drawing and row clicks in the client
+- **Row disposition:** offline-supported; native pending
+
+### UX-11 — Copy into Editor and Share Build share one button; publish unconfirmed
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-11", "kind": "originalUXfindingDesiredOutcome", "title": "Copy into Editor and Share Build share one button; publish unconfirmed", "requiredM7Disposition": "Close stale Share approval and Retry Share truthfulness while retaining accepted distinct Copy/Share/consent behavior.", "acceptanceProposals": ["Clicking Share on own Saved Build shows confirmation; Cancel sends nothing"]}
+```
+
+- **Adopted/current interpretation:** Copy into Editor and Share are separate buttons; Share on an own Saved Build shows NEXUS_SHARE_SAVED_BUILD; Cancel/Escape/closed Library/changed owner or content share nothing; only the latest shown approval is live; Retry Share states its reason and actual outcome.
+- **Production symbols:** `ui/CommunityRenderer.lua:2088-2126 Copy (:2103 never shares a Saved Build)`; `:2384-2433 Share OnClick, :2253-2341 ConfirmedShare, :2343-2377 dialog and OnHide retirement`; `:2151-2190 Retry Share`; `core/CommunityController.lua:3356-3524 PublishImportedBuild, :3051-3165 retry`
+- **Callback chain:** Share click -> approval stored -> StaticPopup -> Accept -> ConfirmedShare (approval/identity/Library checks) -> PublishImportedBuild -> Finish re-checks -> BroadcastIfPossible -> actual admission line
+- **Discriminating assertions:**
+  - tests/prototype/ux_share_confirmation.lua:269 opening confirmation sends nothing
+  - :319 Cancel shares nothing
+  - :301 Copy on a Saved Build shares nothing
+  - :382 Accept shares the confirmed build, not the selected one
+  - :426 approval cannot share twice
+  - tests/prototype/ux_share_approval_retirement.lua:227-266 late/retired approvals share nothing
+  - tests/prototype/ux_retry_share_feedback.lua:153-226 truthful Retry
+- **Negative controls:** Escape, closed Library + late Accept, changed title/player, pending Share (:474)
+- **Execution at the pin:** `ux_share_confirmation` PASS (327), `ux_share_approval_retirement` PASS (40), `ux_retry_share_feedback` PASS (36), `ux_share_admission` PASS (129)
+- **Spec:** `met-offline`. 
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Native popup OnAccept/OnHide ordering relied on (ui/CommunityRenderer.lua:2360) is modelled only.
+- **Native (#133, pending):** Share confirmation in the client; Cancel sends nothing on the wire
+- **Row disposition:** offline-supported; native pending
+
+### LP-11 — Dedicated Share action area
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-11", "kind": "largerProposal", "title": "Dedicated Share action area", "requiredM7Disposition": "Close stale Share approval and Retry Share truthfulness while retaining accepted distinct Copy/Share/consent behavior."}
+```
+
+- **Adopted/current interpretation:** Dedicated Share position: Share (or Delete/Stop Sharing) alone at the right of the action row; Copy/Retry/Edit on the left; mutually exclusive by state.
+- **Production symbols:** `ui/CommunityRenderer.lua:384-408 layout, :2749-2761 refresh exclusivity`
+- **Callback chain:** detail refresh -> button visibility/placement
+- **Discriminating assertions:**
+  - tests/prototype/ux_share_confirmation.lua:291 BOTTOMRIGHT/BOTTOMLEFT anchors
+  - :287 Copy hidden on a Saved Build
+  - :433 'Update Shared Build...' label
+- **Execution at the pin:** `ux_share_confirmation` PASS (327)
+- **Spec:** `met-offline-adopted-interpretation`. 'Action area' implemented as a separate right-hand position in the shared row, not a separate panel region.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Action row layout and wrapping in the client
+- **Row disposition:** offline-supported; native pending
+
+### UX-12 — Automatic sends not disclosed; Sync status jargon
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-12", "kind": "originalUXfindingDesiredOutcome", "title": "Automatic sends not disclosed; Sync status jargon", "requiredM7Disposition": "Close full/detail/linked-DPS/refusal disclosure and source-policy controls without new policy/defaults.", "acceptanceProposals": ["Welcome/Help state what may be sent automatically", "Same Sync words in Library and Leaderboard"]}
+```
+
+- **Adopted/current interpretation:** Welcome, Help, Build Library and Leaderboard disclose what Automatic Sync may send; Library and Leaderboard Sync Now tooltips use identical words; viewing never sets a mode.
+- **Production symbols:** `core/SyncModePolicy.lua:37 Mode, :46 Text, :146 Allows`; `ui/QuickStart.lua:32-42 SyncNote`; `ui/CommunityRenderer.lua:18, :3707-3716, :4008-4011`; `ui/Leaderboard.lua:1259-1271`; `ui/Help.lua sharing page`
+- **Callback chain:** window show/tooltip -> SyncModePolicy.Mode/Text read only -> text
+- **Discriminating assertions:**
+  - tests/prototype/ux_sync_disclosure.lua:232 Welcome line
+  - :235 Leaderboard tooltip words == Library tooltip words (real OnEnter)
+  - :253 Library status Automatic line
+  - :320-356 Help sentences
+  - tests/prototype/ux_sync_disclosure_sends.lua:107-121 Automatic sends, Manual/Off send none (two real runtimes)
+- **Negative controls:** ux_sync_disclosure.lua:223,:228 viewing changes no send/queue/mode/saved byte
+- **Execution at the pin:** `ux_sync_disclosure` PASS (154), `ux_sync_disclosure_sends` PASS (27), `ux_sync_dps_page` PASS (256), `ux_share_linked_dps` PASS (71), `ux_sync_status_fit` PASS (7945)
+- **Spec:** `met-offline`. 
+- **Standards:** `no-hard-violation-found`. No new policy/default. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Checklist Sync line (core/UserText.lua StatusLines) uses different words from the Library/Leaderboard text (wording only).
+  - Settings Sync row detail empty for Automatic (ui/SettingsWindow.lua:75) - wording only.
+  - Real network delivery native-only.
+- **Native (#133, pending):** Disclosure text legible in Welcome/Help/Library/Leaderboard; observed sends match the stated mode
+- **Row disposition:** offline-supported; native pending
+
+### LP-12 — Optional in-game Sync mode choice; defaults unchanged
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-12", "kind": "largerProposal", "title": "Optional in-game Sync mode choice; defaults unchanged", "requiredM7Disposition": "Close full/detail/linked-DPS/refusal disclosure and source-policy controls without new policy/defaults."}
+```
+
+- **Adopted/current interpretation:** Optional 'Sync mode...' dialog: draft-only radio choice; only Apply writes through StoreAuthorityOwner; default with no saved choice remains Automatic.
+- **Production symbols:** `ui/CommunityRenderer.lua:3723-3727 Sync mode button`; `SyncModeDialog Open/Select/Apply (core/SyncModePolicy.lua:74-96 ApplyChoice)`; `core/Store.lua:295-304 default, :2784 UpdateSettingsV1`
+- **Callback chain:** button -> dialog draft -> Apply -> ApplyChoice -> UpdateSettingsV1 -> read back
+- **Discriminating assertions:**
+  - tests/prototype/ux_sync_mode_choice.lua:161-163 opening writes nothing, draft starts Automatic
+  - :181-182 Cancel/X/Escape write nothing
+  - :236-238 radio alone changes nothing; Apply changes
+  - :276 stale draft refused; :313-314 unwritable storage refuses
+  - tests/prototype/ux_sync_mode_transitions.lua T1/T2 Apply sends nothing by itself
+- **Negative controls:** read-only storage, stale draft
+- **Execution at the pin:** `ux_sync_mode_choice` PASS (628), `ux_sync_mode_transitions` PASS (79)
+- **Spec:** `met-offline`. Defaults unchanged.
+- **Standards:** `no-hard-violation-found`. Saved setting written only through the existing Store owner; format compatibility preserved. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Radio buttons, Escape and Apply in the client
+- **Row disposition:** offline-supported; native pending
+
+### UX-13 — 79/79 and complete mean four different things
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-13", "kind": "originalUXfindingDesiredOutcome", "title": "79/79 and complete mean four different things", "requiredM7Disposition": "Compose qualified units/current-vs-recorded counts without changing eligibility mathematics.", "acceptanceProposals": ["No complete while locked targets remain", "No 79/79 next to saved/assigned without planned"]}
+```
+
+- **Adopted/current interpretation:** Distinct count units via UserText.COUNT_UNITS/CountText/RunProgressText; 'complete' requires rolled copies met and no locked target outstanding (Panel inline rule).
+- **Production symbols:** `core/UserText.lua:661-701 COUNT_UNITS, CountText, RunProgressText, ProgressComplete`; `ui/Panel.lua:1268,:4795,:4835 complete rule; :4074,:5163 RunProgressText`; `ui/CommunityRenderer.lua:4436 CountText('savedBuild')`; `ui/WishlistRenderer.lua:2717 'Planned rolled copies'`; `core/CommunityController.lua:1367-1380 SavedMirrorDescription`
+- **Callback chain:** model.progress -> Panel.Render -> RunProgressText / complete badge
+- **Discriminating assertions:**
+  - tests/prototype/ux_qualified_counts.lua:85-87 no 'complete' at 79/79 with a target to lock
+  - :93 '12 / 79 rolled copies this run'
+  - :197 'N / M Wishlist copies in this Saved Build'
+  - :280 'Planned rolled copies: 1/79'
+  - :286 save notice 'planned'
+- **Negative controls:** Q3 79/79 with nothing to lock is complete; :86 counts change nothing
+- **Execution at the pin:** `ux_qualified_counts` PASS (32), `ux_record_scope_terms` PASS (37), `terminology` PASS
+- **Spec:** `partial`. 'No complete while locked targets remain' met. One candidate wording gap for 'No 79/79 next to saved/assigned without planned'.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - CANDIDATE GAP G-UX13 (source-verified, wording): core/CommunityController.lua:1374-1377 generates "Assigned Wishlist: %s - target progress (%d/%d)." as a Saved Build mirror description, shown in the Build Library detail (ui/CommunityRenderer.lua:2549-2557) and carried as the shared listing description. Predicate: assigned Saved Build detail contains N/M next to 'Assigned Wishlist' without 'planned' or a unit. tests/prototype/saved_mirror_assigned_description.lua:79 pins the bare N/M form. Owner decision whether 'target progress' suffices.
+- **Native (#133, pending):** Count wording on HUD, editor and Library at supported scales
+- **Row disposition:** offline-partial; candidate wording gap for a separate lane; native pending
+
+### LP-13 — Shared qualified count formatter
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-13", "kind": "largerProposal", "title": "Shared qualified count formatter", "requiredM7Disposition": "Compose qualified units/current-vs-recorded counts without changing eligibility mathematics."}
+```
+
+- **Adopted/current interpretation:** Shared formatter exists in core/UserText.lua but reach is partial.
+- **Production symbols:** `core/UserText.lua:672 CountText, :684 RunProgressText, :697 ProgressComplete (no callers)`
+- **Callback chain:** callers listed under UX-13
+- **Discriminating assertions:**
+  - tests/prototype/ux_qualified_counts.lua (formatter outputs through real Panel/Library/editor)
+  - tests/prototype/ux_record_scope_terms.lua:211-226 lint rules for old count phrases
+- **Execution at the pin:** `ux_qualified_counts` PASS (32), `ux_record_scope_terms` PASS (37)
+- **Spec:** `partial`. Formatter not used by editor footer (ui/WishlistRenderer.lua:2717,3086,3220), save notice (core/WishlistController.lua:2512) or Saved Build description (core/CommunityController.lua:1376).
+- **Standards:** `no-hard-violation-found`. Judgement call, Duplicated Code: completion rule inlined at ui/Panel.lua:1268,4795,4835 while UserText.ProgressComplete is unused. Not a documented-standard violation.
+- **Gaps and limits:**
+  - No test that the shared formatter is used by every count surface.
+- **Native (#133, pending):** none beyond offline scope
+- **Row disposition:** offline-partial (reach); no native-only criterion beyond UX-13
+
+### UX-14 — DPS and Leaderboard labels overstate scope
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-14", "kind": "originalUXfindingDesiredOutcome", "title": "DPS and Leaderboard labels overstate scope", "requiredM7Disposition": "Retain source/provenance/category unknowns; integrate available details and no new-transfer implication.", "acceptanceProposals": ["No 'Global' label without 'shared/known' qualifier"]}
+```
+
+- **Adopted/current interpretation:** No user-facing 'Global'; records say 'Best known' / shared-record qualifiers.
+- **Production symbols:** `ui/Panel.lua:1600-1625 AddDpsTooltip, :3324,:4015 BEST_KNOWN`; `ui/Leaderboard.lua:156 LeaderboardScope, :1444-1445, :1498`; `core/UserText.lua:704-707`
+- **Callback chain:** render/tooltip -> UserText scope words
+- **Discriminating assertions:**
+  - tests/prototype/ux_record_scope_terms.lua:110 no 'Global'
+  - :130 no 'Global Best'
+  - :116 'not a complete or server-wide ranking'
+  - :184 Leaderboard status
+  - lint rules :209-210
+- **Negative controls:** :121 no 'Level 0'/owner claim when missing; :123 hover sends nothing
+- **Execution at the pin:** `ux_record_scope_terms` PASS (37)
+- **Spec:** `met-offline`. 
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Real received record fields native-only.
+- **Native (#133, pending):** Leaderboard/DPS labels with real shared records
+- **Row disposition:** offline-supported; native pending
+
+### LP-14 — Record detail with available date/duration/level
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-14", "kind": "largerProposal", "title": "Record detail with available date/duration/level", "requiredM7Disposition": "Retain source/provenance/category unknowns; integrate available details and no new-transfer implication."}
+```
+
+- **Adopted/current interpretation:** Record detail with carried duration/level/date (UserText.RecordDetailParts) on the Panel DPS tooltip and single-category Leaderboard detail.
+- **Production symbols:** `core/UserText.lua:719 RecordDetailParts, :743 OwnerLine`; `ui/Panel.lua:1616-1619`; `ui/Leaderboard.lua:1012-1018`; `core/CommunityProjection.lua:114-125 RecordText (Library)`
+- **Callback chain:** Leaderboard detail -> RecordDetailParts
+- **Discriminating assertions:**
+  - tests/prototype/ux_record_scope_terms.lua:118-120 '3:00 fight', 'Level 80', 'Recorded ... (UTC)', 'Owner identity not established'
+  - :189 Leaderboard detail duration/level/date
+- **Negative controls:** missing values omitted, not shown as 0
+- **Execution at the pin:** `ux_record_scope_terms` PASS (37)
+- **Spec:** `partial`. Leaderboard single-category and Panel tooltip met; Build Library loadout record lines and combined Leaderboard rows do not integrate carried details.
+- **Standards:** `no-hard-violation-found`. Judgement call, Duplicated Code: RecordText exists in core/CommunityProjection.lua:114 and a fallback copy in ui/CommunityRenderer.lua:2784.
+- **Gaps and limits:**
+  - SCOPE GAP G-LP14: Build Library 'BEST RECORDS FOR THIS LOADOUT' lines (core/CommunityProjection.lua:114-125; ui/CommunityRenderer.lua:2784-2793) show DPS/holder/your best only - no qualifier, duration, level or date where a row carries them; combined rows (ui/Leaderboard.lua:1004-1007) likewise. Untested.
+- **Native (#133, pending):** Record detail with real records in Library and Leaderboard
+- **Row disposition:** offline-partial (scope gap for a separate lane); native pending
+
+### UX-15 — Label collisions
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-15", "kind": "originalUXfindingDesiredOutcome", "title": "Label collisions", "requiredM7Disposition": "Finish shared vocabulary/deep links and terminology checks; internal IDs unchanged.", "acceptanceProposals": ["Each label maps to one meaning across UI and Help"]}
+```
+
+- **Adopted/current interpretation:** Shared vocabulary in UserText.Terms/GLOSSARY shown in Help; 'Mine' scope vs the game's 'My Builds'; 'Options' button; internal ids unchanged.
+- **Production symbols:** `core/UserText.lua:752-774 Terms/GLOSSARY`; `ui/Help.lua glossary`
+- **Callback chain:** render -> UserText terms
+- **Discriminating assertions:**
+  - tests/prototype/ux_record_scope_terms.lua:143 'Options'
+  - :149 Help 'Best known' definition
+  - :380 'Mine' + game's 'My Builds' tooltip
+  - :383 internal filterScope=='mine' unchanged
+  - :291 real 'My Builds' labels kept
+- **Execution at the pin:** `ux_record_scope_terms` PASS (37), `terminology` PASS, `terminology_consumers` PASS
+- **Spec:** `met-offline`. For the labels checked; whole-UI one-meaning coverage limited (see LP-15).
+- **Standards:** `no-hard-violation-found`. Internal IDs unchanged. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** none beyond offline scope
+- **Row disposition:** offline-supported for checked labels
+
+### LP-15 — Terminology lint
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-15", "kind": "largerProposal", "title": "Terminology lint", "requiredM7Disposition": "Finish shared vocabulary/deep links and terminology checks; internal IDs unchanged."}
+```
+
+- **Adopted/current interpretation:** Terminology lint is a fixed phrase list (18 rules) over 12 player-facing files plus one file-scoped rule for core/WishlistController.lua.
+- **Production symbols:** `tests/prototype/ux_record_scope_terms.lua:202-232 UI_FILES/RULES/SCOPED_FILES`
+- **Callback chain:** R5 scenario reads files and searches phrases
+- **Discriminating assertions:**
+  - tests/prototype/ux_record_scope_terms.lua R5 (:202-280)
+- **Execution at the pin:** `ux_record_scope_terms` PASS (37)
+- **Spec:** `partial`. A lint exists; it does not check one-meaning-per-label and excludes core/UserText.lua, core/CommunityController.lua, core/Main.lua, ui/GuidedSetup.lua, ui/OrbHistory.lua, ui/SettingsWindow.lua and data/LocalizationPacks.lua.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - COVERAGE GAP G-LP15: lint scope bounded; e.g. the UX-13 description string (core/CommunityController.lua:1376) is outside it.
+- **Native (#133, pending):** none beyond offline scope
+- **Row disposition:** offline-partial (coverage)
+
+### UX-16 — Orb wording: usage x3, dense blocks, reload advice conflict, history lost on reload
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-16", "kind": "originalUXfindingDesiredOutcome", "title": "Orb wording: usage x3, dense blocks, reload advice conflict, history lost on reload", "requiredM7Disposition": "Finish restored PAUSED/recovery/current usage and truthful Continue/reload/history copy.", "acceptanceProposals": ["Same usage words on all three surfaces", "Help and Orb reload advice consistent"]}
+```
+
+- **Adopted/current interpretation:** Orb usage uses the shared words 'Orbs used ... approved' with 'pending ... not confirmed yet'; restored PAUSED headline, recovery headlines and truthful Continue/reload/history copy.
+- **Production symbols:** `ui/OrbPanel.lua:447-452 window usage, :1363-1371 strip, :1546-1571 mini, :242-258 recovery headlines, :1239-1240 Continue history note`; `ui/Help.lua:125-129 Orbs page`; `ui/OrbHistory.lua:86-89`
+- **Callback chain:** Refresh -> usage/headline text from OrbRuntime.Status
+- **Discriminating assertions:**
+  - tests/prototype/orb_recovery_layers.lua:316 'Orbs used: 0 / 3 approved; pending: 1 Orb requested, not confirmed yet'
+  - :322 strip; :324 mini 'Orbs used: 0 of 3 approved'
+  - :387-389 Help/Orb reload advice consistency (source text, one direction)
+  - tests/prototype/orb_recovery_vocabulary.lua:51,:96-103
+  - tests/prototype/batch_orb_restored_wording.lua:68-82
+- **Negative controls:** no 'confirmed spend' wording (batch_orb_spend_wording)
+- **Execution at the pin:** `orb_recovery_layers` PASS (124), `orb_recovery_vocabulary` PASS (50), `batch_orb_restored_wording` PASS (23), `orb_continue_affordance` PASS (7)
+- **Spec:** `partial`. Same vocabulary, not literally identical strings: window/strip use '/', mini 'of', Play line 'Used X of Y approved'; pending phrasing differs per surface and is pinned by tests. Reload-advice check is a one-way source-text grep; runtime reload hints (core/OrbRuntime.lua:2348,2565,3373) not compared against Help.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - INTERPRETATION: 'Same usage words on all three surfaces' - owner decision whether shared vocabulary with differing separators suffices.
+- **Native (#133, pending):** Usage and reload/history copy on all Orb surfaces after a real reload
+- **Row disposition:** offline-partial (interpretation); native pending
+
+### LP-16 — Unified Orb status vocabulary
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-16", "kind": "largerProposal", "title": "Unified Orb status vocabulary", "requiredM7Disposition": "Finish restored PAUSED/recovery/current usage and truthful Continue/reload/history copy."}
+```
+
+- **Adopted/current interpretation:** Unified recovery vocabulary: headline, 'What you can do', 'Details:'; continue/recovery phase maps; history 'Now: Paused / last recorded'.
+- **Production symbols:** `ui/OrbPanel.lua:183-189 phase maps/phaseText, :242-258 UI.RECOVERY_HEADLINES/recoveryActions`
+- **Callback chain:** Refresh -> recovery headline/action lines
+- **Discriminating assertions:**
+  - tests/prototype/orb_recovery_vocabulary.lua:51-53 headline then action then Details
+  - :70,:80 Continue/no-Continue headlines
+  - :130,:138-139 history header/report wording
+- **Execution at the pin:** `orb_recovery_vocabulary` PASS (50), `orb_recovery_layers` PASS (124), `orb_continue_affordance` PASS (7)
+- **Spec:** `met-offline`. orb_continue_affordance uses a stubbed ContinueView (labels only).
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Recovery vocabulary in the client after a real reload
+- **Row disposition:** offline-supported; native pending
+
+### UX-17 — Help and Welcome structure
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-17", "kind": "originalUXfindingDesiredOutcome", "title": "Help and Welcome structure", "requiredM7Disposition": "Finish contextual safe Help/direct links and loading access across all journey states.", "acceptanceProposals": ["Any Help page reachable in one click", "Welcome shows setup steps first"]}
+```
+
+- **Adopted/current interpretation:** Help is the guided coach at its current step; the long manual is the separately named Reference with one direct button per page (7). Page 1 and the coach Welcome lead with setup.
+- **Production symbols:** `ui/Help.lua:16 'start' page text, :363 H.Show, :447 H.OpenGuide, :473 H.OpenHelp, :481 H.OpenReference`; `ui/Panel.lua:2880-2888 Options menu Help/Reference`; `core/Main.lua:1202 /nexus reference, :1470 /nexus guide`
+- **Callback chain:** Help button -> Help.OpenHelp -> OpenGuide -> GuidedSetupUI.Show; Reference -> Help.Show(page)
+- **Discriminating assertions:**
+  - tests/prototype/ux_help_navigation.lua:92 one direct button per page (7)
+  - :96-99 direct page and page 1 'Start here'
+  - :103 setup row offers Setup / Welcome, Assign Wishlist..., Wishlist Editor
+  - tests/prototype/setup_help_entry_points.lua (105 checks) setup Help entries open the coach; Reference separately named
+- **Negative controls:** loading refusals stated (H1 :106-114)
+- **Execution at the pin:** `ux_help_navigation` PASS (32), `setup_help_entry_points` PASS (105), `help` PASS (406), `help_action_first` PASS (6052)
+- **Spec:** `met-offline`. 
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - 163008 native report (Records Help opened the manual) is addressed in source at this pin (ui/Leaderboard.lua:1218 OpenHelp, :1219 OpenReference); native re-observation of every entry pending.
+- **Native (#133, pending):** Every Help entry (Records, Library, Plan, Journal, Orbs, Options, /nexus help) opens the coach; Reference opens its page; one-click page access
+- **Row disposition:** offline-supported; native pending
+
+### LP-17 — Restructured Help and contextual deep links
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-17", "kind": "largerProposal", "title": "Restructured Help and contextual deep links", "requiredM7Disposition": "Finish contextual safe Help/direct links and loading access across all journey states."}
+```
+
+- **Adopted/current interpretation:** Contextual Help and Reference per window family (Build Library, Leaderboard, Wishlist Editor, Orb window, Journal Build Progress) and Help's action row to the checklist.
+- **Production symbols:** `ui/CommunityRenderer.lua:3486,:3495`; `ui/Leaderboard.lua:1218-1219`; `ui/OrbPanel.lua:722,:724`; `ui/JournalTab.lua:626,:643`; `ui/WishlistRenderer.lua:1444,:1451`; `ui/Help.lua:434 H.OpenChecklist`
+- **Callback chain:** window Help -> Help.OpenHelp(page, leave) -> coach; Reference -> Help.OpenReference(page, leave)
+- **Discriminating assertions:**
+  - tests/prototype/ux_context_help_access.lua X1-X6 (:65-285) each family's Help opens the coach and Reference its page; nothing sent/assigned/saved/spent
+  - X5 (:198) Help text names the routes
+- **Negative controls:** refused coach (warning open) keeps the calling window and draft (ui/Help.lua:461-479)
+- **Execution at the pin:** `ux_context_help_access` PASS (146), `setup_help_entry_points` PASS (105)
+- **Spec:** `met-offline`. Distinct from UX-17: per-window deep links.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Full Reference back stack natively unobserved (remaining scope of the bounded native check at this pin).
+- **Native (#133, pending):** Each window family's Help/Reference in the client; Reference back stack
+- **Row disposition:** offline-supported; native pending
+
+### UX-18 — Practical accessibility minimums
+
+Canonical (verbatim):
+
+```json
+{"id": "UX-18", "kind": "originalUXfindingDesiredOutcome", "title": "Practical accessibility minimums", "requiredM7Disposition": "Complete offline window-family accessibility/visible-reason composition; list exact M8 native gaps.", "acceptanceProposals": ["Blocked reason visible without hover"]}
+```
+
+- **Adopted/current interpretation:** Blocked/refused reasons shown in-window (checklist f.notice, Help note, coach notes) without hover; Escape closes each family; long text wraps or has a full-text hover in the modelled fonts.
+- **Production symbols:** `ui/QuickStart.lua:602-604 notice, :624-635 route(), :495-540 LayoutChecklist`; `ui/QuickStart.lua:420-442 Escape child`; `ui/Help.lua:379 Refuse`
+- **Callback chain:** refused route -> reason returned -> f.notice:SetText -> LayoutChecklist
+- **Discriminating assertions:**
+  - tests/prototype/ux_context_help_access.lua:346 a refused route shows its reason in the window
+  - :319,:332 reasons readable under font models with a long name
+  - X8 (:353) Escape closes every family
+  - tests/prototype/ux_setup_checklist.lua:271-274 refused coach reason in the checklist; K7-K10 Escape/hide
+- **Negative controls:** passive ancestor hide records nothing (K9/K10)
+- **Execution at the pin:** `ux_context_help_access` PASS (146), `ux_setup_checklist` PASS (192), `guided_setup_flow` PASS (2878)
+- **Spec:** `met-offline`. 
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Geometry is the conservative harness model, not native glyphs/scale/hit testing.
+- **Native (#133, pending):** Blocked reason visible without hover at 100%/125% text and changed UI scale; Escape order; keyboard focus
+- **Row disposition:** offline-supported; native pending
+
+### LP-18 — Accessibility pass per window family
+
+Canonical (verbatim):
+
+```json
+{"id": "LP-18", "kind": "largerProposal", "title": "Accessibility pass per window family", "requiredM7Disposition": "Complete offline window-family accessibility/visible-reason composition; list exact M8 native gaps."}
+```
+
+- **Adopted/current interpretation:** Offline per-family accessibility composition (wrap/hover, Escape, in-window reasons, coach 420/640 px and 125% text layout). Exact native gaps listed in nativeCriterion.
+- **Production symbols:** `ui/LayoutMetrics.lua WrapHeight/FullTextTooltip/FitToScreen/FitButtonWidth`; `ui/GuidedSetup.lua bounded window (Bound, ScreenCap)`
+- **Callback chain:** layout passes per window family
+- **Discriminating assertions:**
+  - tests/prototype/ux_context_help_access.lua X7/X8
+  - tests/prototype/guided_setup_flow.lua F5,F6,F8,F11,F20 (420 px, 125%, long UTF-8, footer, 640 px)
+  - tests/prototype/ux_sync_status_fit.lua (7945 checks) Library fit/scroll
+- **Execution at the pin:** `ux_context_help_access` PASS (146), `guided_setup_flow` PASS (2878), `ux_sync_status_fit` PASS (7945)
+- **Spec:** `met-offline`. Offline composition complete for the families covered; native gaps enumerated below as required.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** 125% text and changed UI scale; edge/clamping and all menu entry families/levels; keyboard focus and Escape dispatch order; native font measurement vs the 7 px / conservative models; coach wide vs compact presentation on real screen widths; full Reference back stack; My Builds resize/reopen
+- **Row disposition:** offline-supported; native gaps enumerated; native pending
+
+### J1 — Fresh import/no Saved Build
+
+Canonical (verbatim):
+
+```json
+{"id": "J1", "kind": "endToEndJourney", "title": "Fresh import/no Saved Build", "originalCompletionContract": "Import remains draft-only until explicit Create; captured first-run target visible; no-choice ready state completes setup Auto OFF with zero resource activity.", "ownerQueueContract": "Draft import/Create/named first-run destination/result; truthful invalid/cancel/no-durable/no-choice AutoOFF zero activity.", "optional": false, "covers": ["UX-01", "UX-02", "UX-03", "UX-04", "UX-06", "UX-13", "UX-17", "UX-18"]}
+```
+
+- **Adopted/current interpretation:** Fresh profile: invalid code refused; import opens an editor draft only; Create confirmation names the first-run target; Cancel uploads nothing; explicit Create uploads once and makes one first-run writer call; checklist reads 3 of 3 with Auto OFF and no Echo choice; later refreshes do nothing. Coach import path: Check code (read only) then 'Open it as a draft' -> WishlistEditor.ImportEBH1String; only a later save receipt completes the Wishlist step.
+- **Production symbols:** `ui/WishlistEditor.lua ImportEBH1String / CheckImportCode`; `ui/GuidedSetup.lua:2031 U.CheckImport, :2049 U.RouteImport, :1909 U.RouteEnded`; `core/GuidedSetup.lua:431 G.AwaitSave, :437 G.CancelAwaitSave, :623 G.Note('draft'/'save')`; `core/GameAdapter.lua SetFirstLoadoutWishlistIdentity`; `ui/QuickStart.lua:542 RefreshChecklist`
+- **Callback chain:** checklist Wishlist Editor -> Help.OpenEditor -> NEXUS_IMPORT_WISHLIST -> naming dialog -> editor draft (no write) -> Create -> WISHLISTREALIZER_CREATE_WISHLIST (Cancel: nothing) -> accept -> upload + first-run identity write -> server mirror poll -> A.Wishlist 'First-run wishlist target' -> Panel.SetupFacts -> checklist ‖ coach: AwaitSave -> import route -> draft receipt (s.draft) -> save receipt SAVED kind -> s.wishlist source='saved' -> AssignStatus origin 'save'
+- **Discriminating assertions:**
+  - tests/prototype/ux_setup_checklist.lua J1 (:1070-1259): :1141-1143 no Wishlist -> not done, no guessed destination; :1148 invalid code refused visibly, no draft/dialog/upload/write; :1170-1172 import is a draft only; :1177 imported draft completes nothing; :1185 Create confirmation names the first-run target; :1189 Cancel uploads/assigns nothing; :1200 one upload and one first-run writer call; :1204 no other action or spend, Auto OFF; :1205 result names the first-run target; :1227 production readback; :1240-1242 checklist destination/Wishlist done, 3 of 3; :1247 'Auto: OFF'; :1255 later passive refreshes inert, no Echo choice
+  - tests/prototype/guided_setup_readback.lua R8 (:219-229) import is draft; Create verified by save receipt; R8b partial and R8c unconfirmed not done
+  - tests/prototype/guided_setup_flow.lua F13 (:905) Check code in place, draft a separate action
+  - tests/prototype/guided_first_entry.lua (195 checks) healthy first use is the coach
+- **Negative controls:** invalid code; Create Cancel; partial upload (R8b); unconfirmed upload (R8c); editor closed without save (U.RouteEnded/CancelAwaitSave)
+- **Execution at the pin:** `ux_setup_checklist` PASS (192), `guided_setup_readback` PASS (135), `guided_setup_flow` PASS (2878), `guided_first_entry` PASS (195), `quickstart_seen_guard` PASS (76)
+- **Spec:** `met-offline`. Original completion and owner-queue contracts traced through real handlers; host mirror is synthetic (fixture step 6).
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Covered rows carry their own gaps (UX-02 candidate gaps do not arise on the J1 no-choice path).
+- **Native (#133, pending):** Fresh character: import, Create, first-run label, checklist 3 of 3 with Auto OFF and zero resource activity in the client
+- **Row disposition:** offline-supported; native pending
+
+### J2 — Existing Saved Build/unassigned plan
+
+Canonical (verbatim):
+
+```json
+{"id": "J2", "kind": "endToEndJourney", "title": "Existing Saved Build/unassigned plan", "originalCompletionContract": "Named valid association accepted/read back; unassigned and partial states persist; Assign now does not re-upload; empty Saved Build refusal remains.", "ownerQueueContract": "Existing Saved Build/unassigned plan; named picker/readback/unassigned result/Assign without upload; distinct AutoON consent.", "optional": false, "covers": ["UX-03", "UX-04", "UX-05", "UX-06", "UX-13"]}
+```
+
+- **Adopted/current interpretation:** Existing unassigned Saved Build: checklist names destination and 'None assigned'; Assign Wishlist... opens chooser titled with it; cancel assigns nothing; one choice makes exactly one association write and no upload; production and checklist readback; destination change while chooser is open truthful; a delayed captured callback writes only the captured Saved Build; empty Saved Build refused; Auto-ON consent distinct.
+- **Production symbols:** `ui/JournalTab.lua:1428 AssociateWishlistOnly, :154 AssignWithConsent`; `core/GameAdapter.lua:3227 SetLoadoutWishlist (empty-slot refusal :3238-3240)`; `ui/Panel.lua:1079 SetupFacts`; `ui/QuickStart.lua:636 Assign Wishlist...`
+- **Callback chain:** checklist Assign -> Help.OpenAssignment -> Panel.OpenAssignment -> JournalTab.OpenBuilds(true) -> row OnClick -> AssignWithConsent -> SetLoadoutWishlist(captured active) -> RefreshAssociations/Panel.Refresh -> chat line -> checklist refresh
+- **Discriminating assertions:**
+  - tests/prototype/ux_setup_checklist.lua J2 (:591-939): tests/prototype/ux_setup_checklist.lua:634-637 unassigned not complete; tests/prototype/ux_setup_checklist.lua:645 chooser 'Assign to: Fire PvE'; tests/prototype/ux_setup_checklist.lua:651-658 cancel nothing; tests/prototype/ux_setup_checklist.lua:673-678 one write, no upload, named line; tests/prototype/ux_setup_checklist.lua:687-706 production/checklist readback, Auto OFF; tests/prototype/ux_setup_checklist.lua:719-722 refreshes inert; tests/prototype/ux_setup_checklist.lua:734-778 destination change truthful
+  - J2b (:940) delayed captured OnClick writes only Saved Build 2 (synthetic queued-callback boundary)
+  - J2c (:986) oracle rejects skipped delivery and misrouted write (fixture discriminator, not product evidence)
+  - tests/prototype/ux_help_navigation.lua:203-210 empty Saved Build refusal
+  - tests/prototype/ux_save_assignment_result.lua:356,:426 Assign now no upload; :397 partial persists
+- **Negative controls:** cancel; destination change; delayed callback; empty Saved Build; Auto-ON consent (UX-05)
+- **Execution at the pin:** `ux_setup_checklist` PASS (192), `ux_help_navigation` PASS (32), `ux_save_assignment_result` PASS (155), `ux_auto_assignment_consent` PASS (57), `guided_setup_readback` PASS (135)
+- **Spec:** `met-offline`. J2b calls the captured production OnClick directly (no native visible-click or timing claim).
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Native (#133, pending):** Existing Saved Build assignment through the real Journal chooser; delayed confirmation timing
+- **Row disposition:** offline-supported; native pending
+
+### J3 — Multiple characters/Saved Builds
+
+Canonical (verbatim):
+
+```json
+{"id": "J3", "kind": "endToEndJourney", "title": "Multiple characters/Saved Builds", "originalCompletionContract": "Captured inactive owner/destination unchanged by active context, restored association, recycled slot or callback; wrong-owner writes refused.", "ownerQueueContract": "Inactive/captured destination across character/loadout/slot/token changes; stale/reused-slot refusal and owner/unavailable distinction.", "optional": false, "covers": ["UX-03", "UX-04", "UX-05", "UX-13", "UX-15"]}
+```
+
+- **Adopted/current interpretation:** Captured destination/owner across character/loadout/slot/token changes: assignment-action tokens per destination and owner epoch; captured editors not redirected; reused Wishlist server slots refused; owner change refuses writes.
+- **Production symbols:** `core/GameAdapter.lua:2822-2890 AssignmentActionToken/Snapshot epoch`; `core/GameAdapter.lua:2992 SelectedSavedBuild`; `core/Store.lua:2427 CurrentOwnerKey`; `WishlistRoles.MayWrite in writers (core/GameAdapter.lua:3160,3203,3295)`; `ui/JournalTab.lua:154 AssignWithConsent owner re-check`
+- **Callback chain:** capture at open -> token/epoch compare at write -> refuse on change
+- **Discriminating assertions:**
+  - tests/prototype/wishlist_assignment_action_token.lua (132 checks) T6 owner/DB change makes bound editor stale; T10a newer choice kept
+  - tests/prototype/ux_destination_context.lua:192
+  - tests/prototype/ux_auto_assignment_consent.lua:368 captured slot, :392 owner change refuses
+  - tests/prototype/ux_captured_destination_labels.lua:563 reused Wishlist server slot
+  - tests/prototype/stale_server_slot_save.lua (101 checks)
+  - tests/prototype/assignment_identity.lua reordered/reused slots
+  - tests/prototype/saved_build_wishlist_destination_guards.lua deleted Saved Build
+- **Negative controls:** owner change, DB change, reused Wishlist slot, deleted/emptied Saved Build
+- **Execution at the pin:** `wishlist_assignment_action_token` PASS (132), `assignment_identity` PASS, `stale_server_slot_save` PASS, `saved_build_wishlist_destination_guards` PASS (23), `ux_captured_destination_labels` PASS (452), `ux_destination_context` PASS (54), `ux_auto_assignment_consent` PASS (57), `wishlist_upload_context` PASS
+- **Spec:** `partial`. Owner/Wishlist-slot/token cases met offline; one uncovered edge depends on what 'recycled slot' covers.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - UNRESOLVED EDGE G-J3 (source-only): Saved Build slot contents replaced in the game between chooser click and a delayed Auto-ON accept. AssignWithConsent re-checks owner only (ui/JournalTab.lua:154-176); A.SetLoadoutWishlist checks the slot is populated (core/GameAdapter.lua:3238), not that it is the same Saved Build; the chat line names the captured loadoutName. Associations are keyed by slot index by design, so this may be intended; no test replaces a populated Saved Build before a delayed accept. Owner decision whether 'recycled slot' includes Saved Build slots.
+  - Owner change cannot occur within one native session (character change reloads UI); offline tests replace CurrentOwnerKey.
+- **Native (#133, pending):** Multiple characters/Saved Builds: captured destination survives switching; wrong-owner writes refused after relog
+- **Row disposition:** offline-partial (unresolved edge); native pending
+
+### J4 — Manual recommendations then optional Automation
+
+Canonical (verbatim):
+
+```json
+{"id": "J4", "kind": "endToEndJourney", "title": "Manual recommendations then optional Automation", "originalCompletionContract": "Named selection or no-choice ready state; current scope disclosed; no Automation enablement without explicit consent; hold reasons visible.", "ownerQueueContract": "Manual recommendation or ready no-choice; existing action disclosure; opening Setup/Help/settings cannot start Auto; visible reason and truthful OFF.", "optional": false, "covers": ["UX-02", "UX-05", "UX-09", "UX-10", "UX-17", "UX-18"]}
+```
+
+- **Adopted/current interpretation:** Manual recommendation (named single Take) or no-choice ready state ('Roll status' / 'No Echo choice is showing.'); existing permission disclosure in tooltip, warning and Help; Auto turns ON only through the Auto button, /nexus auto or the level-1 tome popup Yes, each via OverwriteWarning.RequestAuto and its explicit Yes (or the player's own earlier saved opt-out); Setup/Help/Settings/guided coach call no Auto setter; hold and refusal reasons visible; OFF read truthfully.
+- **Production symbols:** `ui/Panel.lua:2344-2353 Auto button`; `core/AutomationRuntime.lua:4594 ToggleAuto, :4648-4664 RequestAuto path, :4679-4711 accept/CommitToggle`; `ui/OverwriteWarning.lua:327 RequestAuto, :120 Finish`; `core/Main.lua:889 /nexus auto`; `core/GuidedSetup.lua:787 G.AutoState, :794 G.KeepAuto (no setter)`; `ui/GuidedSetup.lua:1020-1058 VIEW.auto (Keep/Review only)`
+- **Callback chain:** Auto click -> ToggleAuto -> Orb block refusal or RequestAuto -> warning Yes -> accept re-checks Orb block and OFF -> CommitToggle -> Panel.SetAuto ‖ coach Auto step Keep -> G.KeepAuto records mode read now -> G.Next; Review -> Panel.Show only
+- **Discriminating assertions:**
+  - tests/prototype/ux_manual_recommendation.lua:108-114 Auto OFF one named target, nothing performed; R4 :174-176 no-choice ready state
+  - tests/prototype/ux_automation_scope.lua P17 :595 passive reads change nothing; :605 No keeps OFF; :609 next board still manual; :617 only Yes turns ON, no suppression saved; :627 action targets the board shown at acceptance
+  - tests/prototype/overwrite_auto_gate.lua every enable waits for Yes; disable cancels a pending Yes; Orb block re-checked at approval
+  - tests/prototype/guided_setup_flow.lua:888 Auto step toggles nothing; :283 Auto kept ON through the guide
+  - tests/prototype/full_ui_settings.lua:28-29 settings navigation leaves saved bytes unchanged
+- **Negative controls:** warning No/X/Escape/OnHide; first-launch Continue grants no Auto; refused click (UX-09)
+- **Execution at the pin:** `ux_manual_recommendation` PASS (68), `ux_automation_scope` PASS (97), `overwrite_auto_gate` PASS, `guided_setup_flow` PASS (2878), `full_ui_settings` PASS, `ux_status_composition` PASS (81)
+- **Spec:** `met-offline`. Journey contract met offline on the single-Needed-card and no-choice paths; UX-02 candidate gaps (two Needed cards, Orb-guidance heading) are recorded on UX-02 and would affect this journey's 'named selection' and 'truthful OFF' wording if confirmed.
+- **Standards:** `no-hard-violation-found`. Harness acknowledges warnings by default (tests/prototype/harness.lua:314); only P15, P17 and overwrite_auto_gate exercise the real Yes/No dialog - recorded as an evidence limit. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - Depends on UX-02 G-UX02-a/b for multi-Needed-card and Orb-guidance cases.
+- **Native (#133, pending):** Manual recommendation, Auto warning Yes/No, and opening Setup/Help/Settings without starting Auto in the client
+- **Row disposition:** offline-supported on traced paths; inherits UX-02 candidate gaps; native pending
+
+### J5 — Optional Orb pause/target change/recovery
+
+Canonical (verbatim):
+
+```json
+{"id": "J5", "kind": "endToEndJourney", "title": "Optional Orb pause/target change/recovery", "originalCompletionContract": "Settlement/current target/original operation and remaining limit clear; deliberate Continue/Resume; no repeat/refund; resource-native proof separately bounded.", "ownerQueueContract": "Optional Orb target/review/pause/recovery; existing settlement/context/limit/token/Continue guards; no repeat/refund implication.", "optional": true, "covers": ["UX-07", "UX-08", "UX-09", "UX-16", "UX-18"]}
+```
+
+- **Adopted/current interpretation:** Optional journey; its safety boundaries are retained. Target change while paused -> named, reviewed, deliberate Resume with context/owner/limit/token guards; interrupted run -> recovery Check -> token-bound Continue that archives and stops, sends nothing and never repeats or refunds; opening Orb/Help/guide spends nothing.
+- **Production symbols:** `core/OrbRuntime.lua:3356-3392 M.Resume guards`; `core/OrbRuntime.lua:2351 ContinueBegin, :2028 RC.eligible, :2102 RC.check, :2676 ContinueConfirm`; `ui/OrbPanel.lua:684 frame.cont, :1261-1289 Check/Continue/close cancel`
+- **Callback chain:** UX-07 chain for target change ‖ Continue -> ShowContinue -> Check -> ContinueBegin -> RC.advance -> token -> Continue click -> ContinueConfirm(token) -> RC.check -> RC.archive -> terminal STOPPED, approval=nil
+- **Discriminating assertions:**
+  - tests/prototype/orbs_target_changes.lua original settlement and Resume preserve one finite budget
+  - tests/prototype/orb_recovery_continue.lua:113-122 spent/limit unchanged, no spend/choice, old run cannot Resume, repeated confirm 'already'
+  - :149-159 stale/forged tokens refused
+  - tests/prototype/orb_recovery_refusals.lua (477 checks) stale/omitted/rejected/late/changed/failed inputs never release the blocker
+  - tests/prototype/orb_bounded_recovery.lua (534 checks) UI exit sends no mutation
+  - tests/prototype/orb_guidance_passive_open.lua:132,:161 opening changes nothing during run/recovery
+- **Negative controls:** context/level change, pending assignment change, stale token, closed window kills token, slot change withdraws confirm
+- **Execution at the pin:** `orb_target_review` PASS (152), `orbs_target_changes` PASS, `orb_recovery_continue` PASS (180), `orb_recovery_refusals` PASS (477), `orb_bounded_recovery` PASS (534), `orb_guidance_passive_open` PASS (25), `orb_continue_affordance` PASS (7), `orb_mini_panel` PASS
+- **Spec:** `met-offline`. Resource-native proof separately bounded as the canonical contract states.
+- **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
+- **Gaps and limits:**
+  - No fixture found reaching the PAUSED Resume refusal for a reached limit with uncertain>0 (core/OrbRuntime.lua:3391).
+  - Lost-approval wording has negative checks only.
+- **Native (#133, pending):** Real Orb spend/settlement, server responses and reload; no repeat/refund in the client (resource-native, separately authorized)
+- **Row disposition:** offline-supported (optional journey, safety boundaries retained); native pending
+
+## Remaining obligations
+
+- Codex's independent Spec and Standards review of this matrix against the same pin.
+- An owner decision on the UX-01 conflict, and on each interpretation or scope gap listed above.
+- Separate lanes for any candidate gap the owner accepts, each with a meaningful failing test first.
+- Native observation for every pending native criterion, under #133.
+- Final composition, PR and release gates stay as they are. Nothing here closes #131.
