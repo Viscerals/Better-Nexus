@@ -623,4 +623,36 @@ C.scenario('R9 Freeze controls: duplicate same Echo, unknown charges and a long 
  w.Stop()
 end)
 
+-- The adaptive Freeze admits two or more unheld Needed offers
+-- (logic/EchoWeaver.lua, #unheld>=2), so its words claim no exact count.
+C.scenario('R10 Auto OFF, three different Needed offers: the Freeze is named without an exact-count claim',function()
+ Boot()
+ CountAssignments()
+ C.setup(not Auto(),'R10: fixture: Auto is OFF')
+ local w=WatchDecisions()
+ local e0=Effects()
+ Offer({{spellId=200001,quality=1},{spellId=200002,quality=2},{spellId=200003,quality=3}})
+ local v=View()
+ local m=Nexus.Panel._lastModel
+ local d=w.last
+ print('OBSERVED','R10 decision='..Line(d)..' head=['..v.head..'] body=['..v.body..'] cards=['..table.concat(v.cards,' | ')..']')
+ C.setup(d and d.type=='freeze' and d.reasonCode=='PAIR_FREEZE_SECOND_NEEDED' and type(d.index)=='number'
+  and ({200001,200002,200003})[d.index]==d.spellId,'R10: fixture: the real adaptive decision Freezes one of three different Needed offers',Line(d))
+ C.setup(m.charges and m.charges.freeze==10 and m.charges.trustworthy==true and #v.cards==3,
+  'R10: fixture: trusted Freeze charges and the three offers shown')
+ local names={'Echo 1 (Uncommon)','Echo 2 (Rare)','Echo 3 (Epic)'}
+ local target=d and names[d.index] or '?'
+ local n,at=Frozen(v)
+ C.guard(n==1 and d and at==d.index,'R10: exactly the decision\'s Freeze card is identified',table.concat(v.cards,' | '))
+ C.guard(Marked(v)==0,'R10: no card carries the Take marker')
+ C.guard(v.body:find(target,1,true)~=nil and v.body:lower():find('freeze',1,true)~=nil and not v.body:find('Take',1,true),
+  'R10: the body names the Freeze target with Freeze wording',v.body)
+ local shown=VisibleText()
+ C.expect(not shown:lower():find('two needed',1,true) and not shown:lower():find('of two',1,true),
+  'R10: no visible recommendation or status text claims exactly two Needed offers',v.body)
+ C.guard(EngineFree(shown),'R10: no engine name in any visible text',v.body)
+ C.guard(SameEffects(Effects(),e0),'R10: nothing performed, sent or assigned; settings and Auto unchanged')
+ w.Stop()
+end)
+
 C.finish('(manual recommendation marked and named only when definite; Auto ON unchanged; charges unknown is not zero)')

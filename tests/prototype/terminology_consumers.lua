@@ -46,7 +46,7 @@ local rawLabels={
  {'MISSING_REVIEW_CODE','Details: MISSING_REVIEW_CODE'},
  {'payload changed','Reopen it and review'},
  -- UX-02: the adaptive policy's live labels carry no engine name either.
- {'Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)','Freeze one of two needed offers',true},
+ {'Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)','Freeze one of the needed offers',true},
  {'Banish an unwanted Echo before Reroll (EchoWeaver, experimental)','Banish an unneeded Echo before Reroll',true},
  {'Take the held wanted Echo instead of searching (EchoWeaver, experimental)','Take the held needed Echo instead of searching',true},
 }
@@ -1737,7 +1737,7 @@ do
  Nexus.Policy.Decide=decide
  check(last and last.type=='freeze' and last.reasonCode=='PAIR_FREEZE_SECOND_NEEDED','SETUP actual adaptive policy Freezes one of two Needed offers')
  local shown=texts()
- check(shown:find('Freeze one of two needed offers',1,true) and not shown:find('EchoWeaver',1,true) and not shown:find('experimental',1,true),
+ check(shown:find('Freeze one of the needed offers',1,true) and not shown:find('EchoWeaver',1,true) and not shown:find('experimental',1,true),
   'T19 Freeze: actual policy -> runtime -> Panel fontstring carries no engine name')
  check(#H.actions==acts and Nexus.RecomputeStats().autoEnabled~=true,'the Auto OFF recommendation performs nothing')
 end
