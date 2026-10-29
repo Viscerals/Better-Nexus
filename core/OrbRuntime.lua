@@ -950,8 +950,11 @@ local function installObserver()
     local elapsed=0
     frame:SetScript("OnUpdate",function(_,dt)
         elapsed=elapsed+(dt or 0)
+        -- Slow: a passive restored receipt after its fast window, or late-event
+        -- observation after Continue while no run is active (issue #172: a
+        -- newly approved running run keeps the ordinary cadence).
         local slow=run and ((run.pending and run.pending.restored and not run.running
-            and now()>=(run.recoveryFastUntil or 0)) or (RS.after and not run.pending))
+            and now()>=(run.recoveryFastUntil or 0)) or (RS.after and not run.pending and not run.running))
         if elapsed<(slow and RECOVERY_SLOW_INTERVAL or .2) then return end;elapsed=0
         local ok,err=pcall(M.Pump)
         if not ok then pause("Orb mode stopped after an internal error. Check diagnostics; no automatic repeat will be sent.")
