@@ -388,6 +388,8 @@ NAMES += ['server_status_difficulty_authority']
 NAMES += ['community_scroll_same_window','leaderboard_scroll_same_window']
 # Issue #168 (panelA): plain-left drag of the main panel from its background, grip and every passive label, count, card and icon through one owner (one StartMoving / StopMovingOrSizing, panelX / panelY saved once in UIParent units, only after a real move with valid reads); clicks, right drags and a second start do nothing; editor counts, difficulty and buttons are excluded; root / origin hide ends a move, the render transaction does not; hover areas fit their text (EXPECT fails at c7e4d7cd by design; native pointer capture NOT_RUN).
 NAMES += ['crimson_panel_drag']
+# Issue #170 (panelA): Options > Main panel size, 50%-150% in 5% steps with Reset to 100% (key removed); panelScale absent/malformed reads 100% without a write, explicit requests clamp and step; the choice is the main panel's FitToScreen ceiling (other callers keep 1) with Reduced to fit your screen shown and never saved; physical top-left kept on a size change, no panelX / panelY write; UIParent-unit drag save at 150%; no rescale during a drag; no other frame rescaled; read-only root session-only (EXPECT fails at 025d0ea by design; native pixels NOT_RUN).
+NAMES += ['crimson_panel_scale']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

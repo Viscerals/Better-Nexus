@@ -1789,7 +1789,7 @@ end
 -- with copies of the saved values.
 -- It is a module field rather than a local because EnsureFrame is at the Lua
 -- 5.1 upvalue limit.
-local PANEL_SAVED_KEYS = {"panelX", "panelY", "uiShowPerformance", "minimapAngle", "panelHidden"}
+local PANEL_SAVED_KEYS = {"panelX", "panelY", "uiShowPerformance", "minimapAngle", "panelHidden", "panelScale"}
 function M.SavedLayoutRoot()
     NexusDB = NexusDB or {}
     local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
@@ -1798,13 +1798,119 @@ function M.SavedLayoutRoot()
     return type(root) == "table" and root or NexusDB
 end
 
+local function Finite(v) return type(v) == "number" and v == v and v > -math.huge and v < math.huge end
+
+-- Main panel size (issue #170): the player's chosen size of this panel and
+-- its children, 50% to 150% in 5% steps, saved as panelScale. An absent key
+-- is 100%, and reading writes no default; a saved value that is not a
+-- number in range reads as 100% and is left as it is. Only an explicit
+-- choice writes: clamped and stepped, or removed by Reset to 100%. Other
+-- windows, the Wishlist overlay and the game's UI scale keep their own.
+local SCALE_MIN, SCALE_MAX = 0.5, 1.5
+function M.PanelScale()
+    local value = rawget(M.SavedLayoutRoot(), "panelScale")
+    if Finite(value) and value >= SCALE_MIN and value <= SCALE_MAX then return value end
+    return 1
+end
+
+function M.SetPanelScale(value)
+    if not Finite(value) then return false end
+    local steps = math.max(SCALE_MIN * 20, math.min(SCALE_MAX * 20, math.floor(value * 20 + 0.5)))
+    M.SavedLayoutRoot().panelScale = steps / 20
+    M.ApplyPanelScale()
+    return true
+end
+
+-- One 5% step larger (1) or smaller (-1) than the chosen size.
+function M.StepPanelScale(direction)
+    return M.SetPanelScale((math.floor(M.PanelScale() * 20 + 0.5) + direction) / 20)
+end
+
+function M.ResetPanelScale()
+    M.SavedLayoutRoot().panelScale = nil
+    M.ApplyPanelScale()
+    return true
+end
+
+-- The chosen size and the size applied at the last fit; reduced while the
+-- screen holds less than the chosen size. Never saved.
+function M.PanelScaleStatus()
+    local requested = M.PanelScale()
+    local last = M._panelScaleStatus
+    local effective = last and last.requested == requested and last.effective or requested
+    return {requested = requested, effective = effective, reduced = effective < requested - 0.001}
+end
+
+-- Anchors the panel by its top-left corner, given in screen units, at its
+-- current scale, moved only as far as needed to stay whole on the screen.
+function M.PlacePanelTopLeft(left, top)
+    local okS, scale = pcall(frame.GetEffectiveScale, frame)
+    if not (okS and Finite(scale) and scale > 0 and Finite(left) and Finite(top)) then return false end
+    local x, y = left / scale, top / scale
+    local width, height = tonumber(frame:GetWidth()) or 0, tonumber(frame:GetHeight()) or 0
+    local okU, uiScale = pcall(UIParent.GetEffectiveScale, UIParent)
+    local uiW, uiH = tonumber(UIParent:GetWidth()), tonumber(UIParent:GetHeight())
+    if okU and Finite(uiScale) and uiScale > 0 and Finite(uiW) and Finite(uiH) and uiW >= 640 and uiH >= 480 then
+        local screenW, screenH = uiW * uiScale / scale, uiH * uiScale / scale
+        x = math.max(0, math.min(x, screenW - width))
+        y = math.min(screenH, math.max(y, height))
+    end
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+    return true
+end
+
+-- The applied size: the chosen size is the fit ceiling (LayoutMetrics
+-- .FitToScreen, margin 24). A change of the applied size keeps the panel's
+-- physical top-left corner, then clamps it to the screen; no position is
+-- saved. Unreadable screen dimensions keep a finite applied size. Nothing
+-- rescales or re-anchors while the player moves the panel.
+function M.ApplyPanelScale()
+    if not frame or M._panelDrag then return nil end
+    local requested = M.PanelScale()
+    local okB, before = pcall(frame.GetEffectiveScale, frame)
+    local okL, left = pcall(frame.GetLeft, frame)
+    local okT, top = pcall(frame.GetTop, frame)
+    local metrics = Nexus.LayoutMetrics
+    local effective = metrics and type(metrics.FitToScreen) == "function"
+        and metrics.FitToScreen(frame, nil, requested) or nil
+    if not effective then
+        local current = tonumber(frame:GetScale())
+        if not (Finite(current) and current >= SCALE_MIN and current <= SCALE_MAX) then
+            frame:SetScale(math.min(1, requested))
+        end
+        effective = tonumber(frame:GetScale()) or 1
+    end
+    M._panelScaleStatus = {requested = requested, effective = effective}
+    local okA, after = pcall(frame.GetEffectiveScale, frame)
+    if okB and okA and okL and okT and Finite(before) and Finite(after) and before > 0
+        and math.abs(before - after) > 0.0005 and Finite(left) and Finite(top) then
+        M.PlacePanelTopLeft(left * before, top * before)
+    end
+    return effective
+end
+
+-- The saved position at the chosen size (EnsureFrame): panelX / panelY are
+-- UIParent units, a point offset is in the panel's own.
+function M.RestorePanelPosition()
+    local saved = M.SavedLayoutRoot()
+    local scale = M.PanelScale()
+    frame:SetScale(scale)
+    frame:ClearAllPoints()
+    local x, y = tonumber(saved.panelX), tonumber(saved.panelY)
+    if Finite(x) and Finite(y) then
+        frame:SetPoint("CENTER", UIParent, "CENTER", x / scale, y / scale)
+    else
+        frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
+    end
+end
+
 -- The panel's centre as an offset from UIParent's centre, in UIParent units
 -- (panelX / panelY). The frame's own centre is in its own scale, so it is
 -- converted through both effective scales first. nil unless every read is a
 -- finite number and both scales are positive.
 function M.PanelCenterOffset()
     if not frame then return nil end
-    local function Finite(v) return type(v) == "number" and v == v and v > -math.huge and v < math.huge end
     local okF, x, y = pcall(frame.GetCenter, frame)
     local okU, ux, uy = pcall(UIParent.GetCenter, UIParent)
     local okS, fs = pcall(frame.GetEffectiveScale, frame)
@@ -1927,12 +2033,7 @@ local function EnsureFrame()
     frame = CreateFrame("Frame", "NexusPanel", UIParent)
     frame:SetSize(420, 210)
     frame:SetClampedToScreen(true)
-    local savedLayout = M.SavedLayoutRoot()
-    if tonumber(savedLayout.panelX) and tonumber(savedLayout.panelY) then
-        frame:SetPoint("CENTER", UIParent, "CENTER", savedLayout.panelX, savedLayout.panelY)
-    else
-        frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
-    end
+    M.RestorePanelPosition()
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
@@ -2826,6 +2927,34 @@ end
 local function MenuTitle(text) return {text = text, isTitle = true, notCheckable = true} end
 local function MenuNote(text) return {text = text, notCheckable = true, disabled = true} end
 
+-- Options > Main panel size (issue #170): the chosen size, one 5% step either
+-- way, five sizes and Reset to 100%. Building it only reads; a row click is
+-- the one place a size is chosen. While the screen holds less, the list says
+-- so and the choice stays.
+function M.PanelSizeMenuItem()
+    local status = M.PanelScaleStatus()
+    local function Percent(v) return math.floor(v * 100 + 0.5) .. "%" end
+    local rows = {}
+    if status.reduced then
+        rows[#rows + 1] = MenuNote("Reduced to fit your screen (now " .. Percent(status.effective) .. ")")
+    end
+    rows[#rows + 1] = { text = "Larger (+5%)", notCheckable = true, disabled = status.requested >= SCALE_MAX,
+        func = MenuAction(function() M.StepPanelScale(1) end) }
+    rows[#rows + 1] = { text = "Smaller (-5%)", notCheckable = true, disabled = status.requested <= SCALE_MIN,
+        func = MenuAction(function() M.StepPanelScale(-1) end) }
+    for _, size in ipairs({0.5, 0.75, 1, 1.25, 1.5}) do
+        rows[#rows + 1] = { text = Percent(size), checked = math.abs(status.requested - size) < 0.001,
+            func = MenuAction(function() M.SetPanelScale(size) end) }
+    end
+    rows[#rows + 1] = { text = "Reset to 100%", notCheckable = true,
+        func = MenuAction(function() M.ResetPanelScale() end) }
+    return { text = "Main panel size: " .. Percent(status.requested), notCheckable = true, hasArrow = true,
+        menuList = rows, tooltipTitle = "Main panel size",
+        tooltipText = "Makes this panel larger or smaller, 50% to 150%. Other Nexus windows, the Wishlist "
+            .. "overlay, the game's difficulty HUD and your UI scale keep their own size. A screen too small "
+            .. "for the size shows it smaller until it fits." }
+end
+
 local function Say(kind, detail)
     local readout = Nexus.Readout
     if readout and type(readout.StatusText) == "function" then return readout.StatusText(kind, detail) end
@@ -3170,6 +3299,7 @@ function M.MoreMenuItems(anchor)
         func = MenuAction(OpenEditor) })
 
     Add(MenuTitle("Panel"))
+    Add(M.PanelSizeMenuItem())
     Add({ text = "Reset Panel Position", notCheckable = true,
         func = MenuAction(function()
             local saved = M.SavedLayoutRoot()
@@ -5536,11 +5666,12 @@ local function ApplyCandidate(model, signatures, roll)
         M.RefreshOrbLine(model, frame._responsiveLayout)
         M.FitPassiveHovers()
     end
-    if applied and Nexus.LayoutMetrics and Nexus.LayoutMetrics.FitToScreen then
+    if applied then
         -- The HUD can grow taller than the viewport with large fonts, an
         -- observed Callboard and optional sections. Refit on settled renders
         -- too: a viewport resize need not change the model's layout key.
-        Nexus.LayoutMetrics.FitToScreen(frame)
+        -- The player's chosen size is the ceiling (issue #170).
+        M.ApplyPanelScale()
     end
     if applied then
         -- Show / Hide details keeps the panel's top where it was. The held

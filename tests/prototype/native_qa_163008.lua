@@ -215,9 +215,20 @@ C.scenario('N2 Options offers every route directly, with Appearance, inside the 
  if not Prefixed(top,'Update notices: ') then missing[#missing+1]='Update notices: *' end
  C.expect(#missing==0,'N2: every action is a direct choice (Appearance, Automation settings and Language keep their lists)',
   table.concat(missing,', '))
- local submenus=0
- for _,item in ipairs(top) do if item.hasArrow then submenus=submenus+1 end end
- C.expect(submenus==3,'N2: only Appearance, Automation settings and Language open a list',submenus)
+ -- Issue #170 added the Main panel size list (its sizes and Reset to 100%).
+ local submenus={}
+ for _,item in ipairs(top) do
+  if item.hasArrow then
+   local name=tostring(item.text)
+   for _,prefix in ipairs({'Appearance: ','Automation settings','Language','Main panel size: '}) do
+    if name:sub(1,#prefix)==prefix then name=prefix end
+   end
+   submenus[#submenus+1]=name
+  end
+ end
+ table.sort(submenus)
+ C.expect(table.concat(submenus,'|')=='Appearance: |Automation settings|Language|Main panel size: ',
+  'N2: only Appearance, Automation settings, Language and Main panel size open a list',table.concat(submenus,'|'))
  -- No stock row cap is claimed: the 3.3.5a UIDropDownMenu export starts at 8
  -- buttons per level and grows them per added item (build 12340, L1-5 and
  -- L178-229). The synthetic height below (16-unit rows plus a 32-unit
