@@ -392,6 +392,8 @@ NAMES += ['session_pause_auto','session_pause_orb','session_pause_sync','session
 NAMES += ['session_pause_final_boundaries','session_pause_sync_settlement']
 # Issue #171 second review repair: a correlated answer to a Sync request sent before a pause still settles after Resume; the old grant sends nothing more (native NOT_RUN).
 NAMES += ['session_pause_sync_receive']
+# Issue #171 third review repair: a pause raised inside the transport's pre-submit observers (send_settled, send_attempting) stops the stale packet before submission with no attempt counted; a send already entered keeps its result (native NOT_RUN).
+NAMES += ['session_pause_transport_observers']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
