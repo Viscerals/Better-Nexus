@@ -141,14 +141,14 @@ local function CheckHeader(W,why)
  local r={title=Rect(f._contextTitle,W),auto=Rect(auto,W),options=Rect(f._menuBtn,W),
   close=Rect(f._closeBtn,W),build=Rect(f._contextBuild,W),switch=Rect(f._switchBtn,W),
   wishlist=Rect(f._contextWishlist,W),change=Rect(f._contextChange,W),grip=Rect(f._dragGrip,W)}
- -- The visible Shift-drag grip (design/current) is a distinct target at the
+ -- The visible drag grip (design/current) is a distinct target at the
  -- left of line 1, before the title; the pairwise check below keeps it clear.
  assert(f._dragGrip:IsShown() and r.grip.x+r.grip.w<=r.title.x and r.grip.w>=22 and r.grip.h>=22,
   why..': the grip sits before the title as a 22 px target')
  -- Distinct, spaced targets on line 1 (design: no clumped Auto/Options/X).
  assert(r.auto.x+r.auto.w+slots.gap<=r.options.x+0.001 and r.options.x+r.options.w+slots.gap<=r.close.x+0.001,
   why..': Auto, Options and Close keep the design gap between them')
- -- The title starts after the Shift-drag grip (slots.titleLeft).
+ -- The title starts after the drag grip (slots.titleLeft).
  assert(r.title.w==W-slots.reserved-slots.titleLeft,why..': the title keeps the rest of line 1: '..r.title.w)
  assert(r.title.x==slots.titleLeft,why..': the title starts after the grip: '..r.title.x)
  assert(r.title.w>=150,why..': the title stays readable: '..r.title.w)

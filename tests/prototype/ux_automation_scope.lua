@@ -84,10 +84,23 @@ local function Settings()
  return table.concat(keys,';')
 end
 local function Auto() return Nexus.RecomputeStats().autoEnabled==true end
+-- Issue #169: the Auto hover is short, and the complete scope is one
+-- deliberate click away (Options > Auto explained, the Help Auto page with
+-- the current values). This reads both: the hover, then that page through
+-- the real Options row, which is closed again.
 local function AutoTooltip()
  local button=NexusPanel and NexusPanel._autoBtn
  if not button then return '' end
  local lines=V.TooltipLines(function() button:GetScript('OnEnter')(button) end)
+ for _,item in ipairs(Nexus.Panel.MoreMenuItems(NexusPanel._menuBtn)) do
+  if item.text=='Auto explained (full details)' and type(item.func)=='function' then
+   item.func(item)
+   if _G.NexusHelpWindow and NexusHelpWindow:IsShown() then
+    lines[#lines+1]=NexusHelpWindow.body:GetText()
+    Nexus.Help.Hide()
+   end
+  end
+ end
  return V.Plain(table.concat(lines,'\n'))
 end
 -- A print listener that never raises into the scenario: what was said and

@@ -23,7 +23,11 @@
 --    handlers and tooltip, then the Nexus menu again is filled again;
 -- M5 the Appearance menu (Theme.ShowMenu) and the Plan hub menu route through
 --    the same owner;
--- M6 a level only another addon ever showed stays stock.
+-- M6 a level only another addon ever showed stays stock;
+-- M7 (issue #165) the actual Options button toggles: a second click while its
+--    menu is shown leaves it closed (also from an open submenu), a later click
+--    opens it again; after a stock close or a timeout hide, another Nexus menu
+--    or another addon's menu, one click opens Options normally.
 -- The dropdown below is a synthetic stand-in written from the verified
 -- build-3.3.5.12340 export facts (DROPDOWN_LIFECYCLE_CONTRACT: UIDropDownMenu
 -- .lua 35-69, 178-229, 539-563, 576-789 and 794-810; UIDropDownMenu.xml 5-20;
@@ -174,15 +178,20 @@ local function ResetList(list)
  end
  list.numButtons=0
 end
--- Lua 35-69: the initializer is stored; another owner's shown list is reset
--- and hidden.
+-- Lua 35-69: another owner starts again at level one; every list at or above
+-- the current menu level (every list, for another owner) is reset and
+-- hidden, then the initializer is stored and called. The same owner at level
+-- one is hidden too: EasyMenu (17-22) initializes before it toggles, so it
+-- never reaches the same-owner toggle of an open root list (594-595).
+UIDROPDOWNMENU_MENU_LEVEL=1
 function UIDropDownMenu_Initialize(frame,init,displayMode,level,menuList)
  frame.menuList=menuList
- frame.initialize=init
- if frame~=UIDROPDOWNMENU_OPEN_MENU then
-  local list=_G[ListName(level or 1)]
-  if list then ResetList(list);list:Hide() end
+ if frame~=UIDROPDOWNMENU_OPEN_MENU then UIDROPDOWNMENU_MENU_LEVEL=1 end
+ for i=1,D.levels do
+  local list=_G[ListName(i)]
+  if list and (i>=UIDROPDOWNMENU_MENU_LEVEL or frame~=UIDROPDOWNMENU_OPEN_MENU) then ResetList(list);list:Hide() end
  end
+ if init then frame.initialize=init;init(frame,level,frame.menuList) end
 end
 function EasyMenu_Initialize(frame,level,menuList)
  for _,info in ipairs(menuList or {}) do UIDropDownMenu_AddButton(info,level) end
@@ -199,11 +208,11 @@ function ToggleDropDownMenu(level,value,dropDownFrame,anchorName,xOffset,yOffset
  if level==1 and list:IsShown() and UIDROPDOWNMENU_OPEN_MENU==dropDownFrame then list:Hide();return end
  list:Hide()
  if level==1 then UIDROPDOWNMENU_OPEN_MENU=dropDownFrame end
- ResetList(list)
- if dropDownFrame and dropDownFrame.initialize then dropDownFrame.initialize(dropDownFrame,level,menuList) end
  local name=list:GetName()
  local back,menu=_G[name..'Backdrop'],_G[name..'MenuBackdrop']
  if dropDownFrame and dropDownFrame.displayMode=='MENU' then back:Hide();menu:Show() else back:Show();menu:Hide() end
+ -- Lua 714-715: the level is initialized (reset, hidden and filled) again.
+ UIDropDownMenu_Initialize(dropDownFrame,dropDownFrame.initialize,nil,level,menuList)
  if (list.numButtons or 0)==0 then return end
  list:SetSize(180,list.numButtons*ROW_H+30)
  list:Show()
@@ -545,6 +554,56 @@ C.scenario('M6 a level only another addon ever showed stays stock',function()
  C.expect(not FillShown(1) and not FillShown(2) and not FillShown(3),'M6: no list Nexus filled before shows a fill for this menu')
  Stock(4,'MENU','M6')
  CloseDropDownMenus()
+end)
+
+C.scenario('M7 the Options button toggles its own shown menu; any other state opens it (issue #165)',function()
+ local before=Effects()
+ local btn=NexusPanel._menuBtn
+ local click=btn:GetScript('OnClick')
+ local function OptionsShown()
+  return List(1):IsShown() and UIDROPDOWNMENU_OPEN_MENU==_G.NexusPanelMoreMenu
+ end
+ CloseDropDownMenus()
+ click(btn)
+ C.setup(OptionsShown() and FillShown(1),'M7: fixture: the first click opens the filled Options menu')
+ local items=D.easy[#D.easy].list
+ click(btn)
+ C.expect(not List(1):IsShown() and not List(2):IsShown() and not FillShown(1),
+  'M7: a second click on Options while its menu shows leaves it closed, with no fill')
+ click(btn)
+ C.expect(OptionsShown() and FillShown(1) and RowsMatch(1,D.easy[#D.easy].list) and #D.easy[#D.easy].list==#items,
+  'M7: a third click opens it again with every row and handler and its fill')
+ local appearance=Row(1,'Appearance: ')
+ if C.setup(appearance~=nil,'M7: fixture: the Appearance row') then
+  appearance:GetScript('OnEnter')(appearance)
+  C.setup(List(2):IsShown() and UIDROPDOWNMENU_MENU_LEVEL==2,'M7: fixture: its submenu shows (menu level 2)')
+  click(btn)
+  C.expect(not List(1):IsShown() and not List(2):IsShown() and not FillShown(1) and not FillShown(2),
+   'M7: clicking Options with a submenu open closes the whole menu')
+ end
+ click(btn)
+ C.setup(OptionsShown(),'M7: fixture: open again')
+ CloseDropDownMenus()
+ C.setup(UIDROPDOWNMENU_OPEN_MENU==_G.NexusPanelMoreMenu and not List(1):IsShown(),
+  'M7: fixture: a stock close hides the menu while the open-menu global still names it')
+ click(btn)
+ C.expect(OptionsShown() and FillShown(1),'M7: after a stock close (Escape), one click opens Options')
+ List(1):Hide()
+ click(btn)
+ C.expect(OptionsShown() and FillShown(1),'M7: after a timeout hide of its list, one click opens Options')
+ C.setup(T.ShowMenu(btn)==true and UIDROPDOWNMENU_OPEN_MENU==_G.NexusAppearanceMenu and List(1):IsShown(),
+  'M7: fixture: another Nexus menu (Appearance) now shows in DropDownList1')
+ click(btn)
+ C.expect(OptionsShown() and FillShown(1),'M7: with another Nexus menu shown, one click opens Options')
+ local other=CreateFrame('Frame','FixtureOpenerAddonMenu',UIParent)
+ EasyMenu({{text='Foreign one'}},other,'cursor',0,0)
+ C.setup(UIDROPDOWNMENU_OPEN_MENU==other and List(1):IsShown() and not FillShown(1),
+  'M7: fixture: another addon\'s menu reused DropDownList1, unfilled')
+ click(btn)
+ C.expect(OptionsShown() and FillShown(1) and RowsMatch(1,D.easy[#D.easy].list),
+  'M7: with another addon\'s menu shown, one click opens Options with its own rows and fill')
+ CloseDropDownMenus()
+ C.guard(Effects()==before,'M7: opening and closing Options changed no saved data, Auto, action or send',Effects())
 end)
 
 Nexus.DisableOrdinaryAutomation()

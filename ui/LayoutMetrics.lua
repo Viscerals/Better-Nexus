@@ -333,15 +333,24 @@ end
 -- A fixed-size window wider or taller than the visible UI (a 1024 or 960 px
 -- wide UI at scale 1 on 4:3 and 5:4 screens) is scaled down to fit with a
 -- margin, so its edges and close button stay on screen; one that fits keeps
--- scale 1. An implausibly small reported UI size is not acted on.
-function M.FitToScreen(frame, margin)
+-- scale 1. An implausibly small reported UI size is not acted on. `ceiling`
+-- (the main panel's chosen size, issue #170) replaces that 1 as the largest
+-- scale; a missing or invalid ceiling is 1. Width and height are the frame's
+-- own size and the screen is UIParent's, both in UIParent-relative units, so
+-- no effective scale is multiplied in.
+function M.FitToScreen(frame, margin, ceiling)
     margin = tonumber(margin) or 24
+    ceiling = type(ceiling) == "number" and ceiling == ceiling and ceiling > 0
+        and ceiling < math.huge and ceiling or 1
     local width, height = tonumber(frame:GetWidth()), tonumber(frame:GetHeight())
     local screenW = UIParent and tonumber(UIParent:GetWidth())
     local screenH = UIParent and tonumber(UIParent:GetHeight())
-    if not (width and height and screenW and screenH) or width <= 0 or height <= 0
-        or screenW < 640 or screenH < 480 then return nil end
-    local scale = math.max(0.5, math.min(1, (screenW - margin) / width,
+    -- Finite sizes only (review of e1183fd): an infinite size would make a
+    -- ratio infinite or zero and step past the ceiling or the floor.
+    local function Finite(v) return v ~= nil and v == v and v > -math.huge and v < math.huge end
+    if not (Finite(width) and Finite(height) and Finite(screenW) and Finite(screenH))
+        or width <= 0 or height <= 0 or not (screenW >= 640 and screenH >= 480) then return nil end
+    local scale = math.max(0.5, math.min(ceiling, (screenW - margin) / width,
         (screenH - margin) / height))
     if math.abs((tonumber(frame:GetScale()) or 1) - scale) > 0.001 then
         frame:SetScale(scale)

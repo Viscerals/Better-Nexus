@@ -15,10 +15,11 @@ end
 local actions,sent=#H.actions,#H.sent
 local auto=Nexus.RecomputeStats().autoEnabled
 
--- Pages, ids and order are the existing ones (entry points depend on them).
+-- Pages, ids and order are the existing ones (entry points depend on them);
+-- issue #169 appended Questions (FAQ) last.
 local ids={}
 for _,p in ipairs(Nexus.Help.Pages) do ids[#ids+1]=p.id end
-check(table.concat(ids,',')=='start,wishlists,rolling,sharing,orbs,troubleshooting,about','page ids and order unchanged: '..table.concat(ids,','))
+check(table.concat(ids,',')=='start,wishlists,rolling,sharing,orbs,troubleshooting,about,faq','page ids and order unchanged: '..table.concat(ids,','))
 local function Page(id) Nexus.Help.Show(id);return NexusHelpWindow.body:GetText() end
 local start,wishlists,rolling,sharing,orbs,trouble=Page('start'),Page('wishlists'),Page('rolling'),Page('sharing'),Page('orbs'),Page('troubleshooting')
 local file=assert(io.open('README-PROTOTYPE.md','rb'));local guide=file:read('*a');file:close()
@@ -137,7 +138,7 @@ end
 SlashCmdList.NEXUS('reference');check(NexusHelpWindow:IsShown(),'/nexus reference opens the reference pages')
 local startButton
 for _,x in ipairs(H.frames) do if x:GetParent()==NexusHelpWindow and x.kind=='Button' and x:GetText()=='Start page' then startButton=x end end
-startButton:Click();check(NexusHelpWindow.page:GetText()=='Page 1 / 7','Start page returns to Getting started')
-for i=1,7 do check(#NexusHelpWindow.body:GetText()>300,'page '..i..' has its text');Nexus.Help.Show(ids[i]) end
+startButton:Click();check(NexusHelpWindow.page:GetText()=='Page 1 / 8','Start page returns to Getting started')
+for i=1,#ids do check(#NexusHelpWindow.body:GetText()>300,'page '..i..' has its text');Nexus.Help.Show(ids[i]) end
 check(#H.actions==actions and #H.sent==sent and Nexus.RecomputeStats().autoEnabled==auto,'reading Help sends, acts and changes nothing')
 print('PASS help_action_first checks='..checks)
