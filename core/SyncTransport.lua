@@ -942,6 +942,13 @@ function Transport.New(options)
         end
         local channel = resolveChannel()
         if not channel or not RefreshSelection() then return end
+        -- The dispatch and channel reads above can run other code: after a
+        -- Pause, or a Pause and Resume, this packet is not submitted now; the
+        -- next turn ends it through the epoch check above.
+        do
+            local pause = Nexus and Nexus.SessionPause
+            if pause and (pause.IsPaused() or pause.Status().epoch ~= (packet.pauseEpoch or 0)) then return end
+        end
         local escaped = packet.payload:gsub("|", "||")
         if #escaped > chatLimit then
             log("TX", "DROPPED oversize msg (%d>%d): %s",

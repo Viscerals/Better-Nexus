@@ -4155,6 +4155,7 @@ Session = SessionFactory.New({
         -- The diagnostic probe whisper bypasses the queue and the wire, so it
         -- asks the saved Sync mode and existing peer guard at submission.
         if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
+        local admitted = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
         local policy=Nexus.SyncModePolicy
         if policy then
             local allowed, why = policy.Allows("whisper")
@@ -4164,8 +4165,11 @@ Session = SessionFactory.New({
         if wire and wire.IsWhisperTargetBlocked(target) then
             return false, "peer offline"
         end
-        -- Final boundary: the guards above can run other code.
-        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
+        -- Final boundary: the guards above can run other code (a Pause, or a
+        -- Pause and Resume, since this whisper was asked for).
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() or (Nexus.SessionPause and Nexus.SessionPause.Status().epoch ~= admitted) then
+            return false, "Nexus paused for this session"
+        end
         return SendChatMessage(message, "WHISPER", nil, target)
     end,
     syncMode=function()

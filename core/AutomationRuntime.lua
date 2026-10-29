@@ -2964,6 +2964,13 @@ local function PreauthorizeActionIntent(intent, settings)
             return false, "target_changed_before_submit"
         end
     end
+    -- The reads above can run other code: a Pause, or a Pause and Resume,
+    -- since this intent was decided still supersedes it.
+    if pause and (pause.IsPaused() or pause.Status().epoch ~= intent.pauseEpoch) then
+        FinishActionIntent("superseded", "session_pause", false)
+        RequestStepAt(GetTime() + cadence.poll)
+        return false, "session_pause"
+    end
     return true
 end
 

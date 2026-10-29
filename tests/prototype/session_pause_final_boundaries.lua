@@ -32,16 +32,19 @@ end
 
 -- B1. Orb Select: Pause inside the "pick_call" boundary sink.
 Case('B1',function()
-for _,pause in ipairs({false,true}) do
+for _,mode in ipairs({'control','held','quick'}) do
+ local pause,quick=mode~='control',mode=='quick'
  Reset()
  local H=dofile('tests/prototype/orbs_support.lua');local M,B=H.M,H.A.Orbs
  H.OrbPlan({{spellId=410002,quality=2,stacks=3}});H.Approve(3)
- B.BoundarySink(function(event) if pause and event=='pick_call' then Nexus.SessionPause.Pause() end end)
+ B.BoundarySink(function(event) if pause and event=='pick_call' then Nexus.SessionPause.Pause();if quick then Nexus.SessionPause.Resume() end end end)
  H.Offer()
  if pause then
-  assert(H.Count('take')==0,'B1: no SelectPerk after a pause inside the pick boundary, takes='..H.Count('take'))
+  assert(H.Count('take')==0,'B1 '..mode..': no SelectPerk after a pause inside the pick boundary, takes='..H.Count('take'))
   local s=M.Status()
   assert(not s.running and s.pending and s.spent<=1 and (s.uncertain or 0)==0,'B1: the run is held, its receipt kept, no new exposure')
+  H.Advance(3)
+  assert(H.Count('take')==0 and not M.Status().running,'B1: nothing resumes the interrupted choice later ('..mode..')')
  else
   assert(H.Count('take')==1,'B1 control: the choice is selected')
  end
@@ -51,11 +54,12 @@ end)
 -- B2. Orb RequestRefresh: Pause inside the Orb count request. The count
 -- request already sent keeps its mark; the ownership request is not sent.
 Case('B2',function()
-for _,pause in ipairs({false,true}) do
+for _,mode in ipairs({'control','held','quick'}) do
+ local pause,quick=mode~='control',mode=='quick'
  Reset()
  local H=dofile('tests/prototype/orbs_support.lua');local B=H.A.Orbs
  local before=H.grantedRequests or 0
- local w=pause and PauseInside(ProjectEbonhold.OrbService,'RequestCharges')
+ local w=pause and PauseInside(ProjectEbonhold.OrbService,'RequestCharges',quick)
  local ok,why,mark=B.RequestRefresh(false)
  if pause then
   w.restore()
@@ -79,13 +83,14 @@ end
 
 -- B3. SetSoloPicker: Pause inside the option read.
 Case('B3',function()
-for _,pause in ipairs({false,true}) do
+for _,mode in ipairs({'control','held','quick'}) do
+ local pause,quick=mode~='control',mode=='quick'
  local H=Boot()
  local opts=ProjectEbonholdOptionsService
  opts:SetSetting('autoAcceptLoadoutEchoes',true)
  local sets=0;local set=opts.SetSetting
  opts.SetSetting=function(...)sets=sets+1;return set(...) end
- local w=pause and PauseInside(opts,'GetSetting')
+ local w=pause and PauseInside(opts,'GetSetting',quick)
  local ok=Nexus.GameAdapter.SetSoloPicker()
  if pause then
   w.restore()
@@ -100,14 +105,15 @@ end)
 
 -- B4. ToggleLever: Pause inside the tome member read.
 Case('B4',function()
-for _,pause in ipairs({false,true}) do
+for _,mode in ipairs({'control','held','quick'}) do
+ local pause,quick=mode~='control',mode=='quick'
  local H=Boot(function(h)
   h.names[777001]='Tome of Lever';h.AddEcho(300001,'Lever',1,1,0);h.db[300001].requiredSpell=777001
   h.discovered[300001]=true;h.perks.discoveredEchoes=h.discovered;h.playerLevel=1
  end)
  local toggles=0;local toggle=H.service.ToggleTomeEcho
  H.service.ToggleTomeEcho=function(...)toggles=toggles+1;return toggle(...) end
- local w=pause and PauseInside(H.service,'IsTomeEchoDisabled')
+ local w=pause and PauseInside(H.service,'IsTomeEchoDisabled',quick)
  local ok,why=Nexus.GameAdapter.ToggleLever(777001,true)
  if pause then
   w.restore()
@@ -122,7 +128,8 @@ end)
 
 -- B5. UploadWishlist: Pause inside the server slot read of its stale check.
 Case('B5',function()
-for _,pause in ipairs({false,true}) do
+for _,mode in ipairs({'control','held','quick'}) do
+ local pause,quick=mode~='control',mode=='quick'
  local H=Boot()
  H.perks.serverBuildSlots={[2]={name='Plan',echoes={{spellId=200001,quality=1,stacks=1}}}}
  H.Notify();H.Advance(1)
@@ -130,7 +137,7 @@ for _,pause in ipairs({false,true}) do
  local token=A.ServerWishlistSlotToken(2)
  local uploads=0
  for _,a in ipairs(H.actions) do if a[1]=='upload' then uploads=uploads+1 end end
- local w=pause and PauseInside(H.service,'GetServerBuildSlots')
+ local w=pause and PauseInside(H.service,'GetServerBuildSlots',quick)
  local ok,why=A.UploadWishlist(2,'Plan',{{spellId=200002,quality=2,stacks=1}},{[token or 'none']=true})
  local after=0
  for _,a in ipairs(H.actions) do if a[1]=='upload' then after=after+1 end end
@@ -146,10 +153,11 @@ end)
 -- B6. Direct Wire packet: Pause inside the channel-list read that proves the
 -- connection just before submission.
 Case('B6',function()
-for _,pause in ipairs({false,true}) do
+for _,mode in ipairs({'control','held','quick'}) do
+ local pause,quick=mode~='control',mode=='quick'
  local H=Boot()
  local n=#H.sent
- local w=pause and PauseInside(_G,'GetChannelList')
+ local w=pause and PauseInside(_G,'GetChannelList',quick)
  local ok=Nexus.SyncWire.SendPacket('WLRQ|PrototypeTester|0,0,0,0',{},1)
  if pause then
   w.restore()
@@ -163,16 +171,66 @@ end)
 
 -- B7. Diagnostic whisper: Pause inside its peer guard.
 Case('B7',function()
-for _,pause in ipairs({false,true}) do
+for _,mode in ipairs({'control','held','quick'}) do
+ local pause,quick=mode~='control',mode=='quick'
  local H=Boot()
  local n=#H.sent
- local w=pause and PauseInside(Nexus.SyncWire,'IsWhisperTargetBlocked')
+ local w=pause and PauseInside(Nexus.SyncWire,'IsWhisperTargetBlocked',quick)
  Nexus.Sync.SendStatusTo('Peer')
  if pause then
   w.restore()
   assert(#H.sent==n,'B7: no whisper after a pause inside its guard')
  else
   assert(#H.sent==n+1 and H.sent[#H.sent].kind=='WHISPER','B7 control: whispered')
+ end
+end
+end)
+
+-- B9. Queued handshake reply: Pause (left active, or a quick Pause and
+-- Resume) inside the bundled ChatThrottleLib availability read that the
+-- handshake pump reaches just before its send.
+Case('B9',function()
+for _,mode in ipairs({'control','held','quick'}) do
+ local pause,quick=mode~='control',mode=='quick'
+ local H=Boot()
+ H.combat=true
+ assert(Nexus.SyncWire.Receive(Nexus.SyncWire.PREFIX,'HELLO1','WHISPER','Peer')==true,'B9: HELLO admitted')
+ H.Advance(2);H.combat=false
+ local ctl=Nexus.ChatThrottleLib
+ local w=pause and PauseInside(ctl,'UpdateAvail',quick)
+ local n=#H.sent
+ H.Advance(3)
+ if w then w.restore() end
+ local acks=0
+ for i=n+1,#H.sent do if H.sent[i].text=='ACK1' then acks=acks+1 end end
+ if pause then
+  assert(w.calls>0,'B9 '..mode..': the availability read ran')
+  assert(acks==0,'B9 '..mode..': no stale ACK after a pause inside the CTL read, acks='..acks)
+  assert(Nexus.SyncWire.Stats().suspended==false,'B9: not a transport fault')
+ else
+  assert(acks==1,'B9 control: the ACK is sent')
+ end
+end
+end)
+
+-- B10. A queued Sync packet: Pause (left active, or a quick Pause and
+-- Resume) inside the wire dispatch check the transport pump runs just before
+-- its submission. The packet was admitted before the pause: it is not sent.
+Case('B10',function()
+for _,mode in ipairs({'control','held','quick'}) do
+ local pause,quick=mode~='control',mode=='quick'
+ local H=Boot()
+ H.combat=true
+ SlashCmdList.NEXUS('sync');H.Advance(5)
+ local n=#H.sent
+ local w=pause and PauseInside(Nexus.SyncWire,'CanDispatch',quick)
+ H.combat=false;H.Advance(3)
+ if w then w.restore() end
+ if pause then
+  assert(w.calls>0,'B10 '..mode..': the dispatch check ran')
+  assert(#H.sent==n,'B10 '..mode..': the pre-pause packet is not sent, sends='..(#H.sent-n))
+ else
+  assert(#H.sent>n,'B10 control: the queued packet is sent after combat')
  end
 end
 end)

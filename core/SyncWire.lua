@@ -300,6 +300,7 @@ function Wire.CanDispatch(payload,metadata)
 end
 function Wire.SendPacket(payload,metadata,channel)
     if SessionPaused() then return false,"session paused" end
+    local admitted=PauseEpoch()
     if type(metadata)=="table" and Wire.IsPeerBlocked(metadata.requester) then return false,"peer offline" end
     if Wire.suspended then return false,"transport suspended" end
     if type(payload)~="string" then return false,"invalid payload" end
@@ -315,8 +316,9 @@ function Wire.SendPacket(payload,metadata,channel)
     if not CheckConnection() then return false,"channel unavailable" end
     if type(metadata)=="table" and Wire.IsPeerBlocked(metadata.requester) then return false,"peer offline" end
     -- Final boundary: the policy, CTL and connection reads above can run
-    -- other code; a pause they raised still stops this packet.
-    if SessionPaused() then return false,"session paused" end
+    -- other code; a Pause, or a Pause and Resume, they raised still stops
+    -- this packet before CTL.
+    if SessionPaused() or PauseEpoch()~=admitted then return false,"session paused" end
     local submittedGeneration=generation
     local receipt,Done=ImmediateCallback(function()
         if route=="addon" and CheckConnection() and generation==submittedGeneration then
@@ -374,8 +376,10 @@ function Wire.PumpHandshake()
     if not ready or not HasAddonApi() then return end
     if not CheckConnection() then return end
     if Wire.IsPeerBlocked(name) or peers[name]~=p or item.generation~=generation then DropPending(name);return end
-    -- Final boundary: the reads above can run other code.
-    if SessionPaused() then return end
+    -- Final boundary: the CTL and connection reads above can run other code.
+    -- After a Pause, or a Pause and Resume, this queued item is stale: it is
+    -- dropped unsent (nothing was submitted, nothing is retried).
+    if SessionPaused() or item.pauseEpoch~=PauseEpoch() then DropPending(name);return end
     lastHandshake=Now()
     local receipt,Done=ImmediateCallback(function()
         if CheckConnection() and peers[name]==p and item.generation==generation and not Wire.IsPeerBlocked(name) then
