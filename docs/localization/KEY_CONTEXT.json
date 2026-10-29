@@ -3,6 +3,15 @@
   "schemaVersion": 1,
   "refs": ["#139", "#147"],
   "sourcePin": {"base": "5c77eec5b791f64468576e37a70b3855375b7fcb", "tree": "692c6693ba50ba5ffc2bf8f3f724b0bceeeda65c"},
+  "currentSourceBinding": {
+    "commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+    "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada",
+    "role": "current fact anchor for the key rows, consumer callsites and pack observations below; sourcePin above stays the historical declarative contract pin and is not moved",
+    "evidence": "docs/localization/CURRENT_COHORT_EVIDENCE.json and CURRENT_COHORT_EVIDENCE.md: exact input hashes, the per-key context and fallback inventory, the historical and current validator bindings and the remaining gates",
+    "observedCohort": "28 English keys (27 static texts, 1 template); 27 draft_unreviewed entries in each of frFR, deDE, esES, plPL, ptBR and ruRU (162 in total); panel.button.options is in no optional pack and resolves to the English base as a counted missing_candidate fallback",
+    "capNote": "MAX_BASE_ENTRIES = 64 in core/Localization.lua bounds the English base and each pack; 64 - 28 = 36 more English entries fit at this pin. The per-batch limit of 60 new keys does not raise that cap; any expansion is separate reviewed engineering work",
+    "acceptance": "none: family coverage PENDING, competent language review UNASSIGNED, localized native NOT_RUN"
+  },
   "contractKind": "declarative_metadata_only",
   "authority": "core/Localization.lua",
   "englishBase": "data/LocalizationEnglish.lua",
@@ -134,7 +143,7 @@
       "placeholders": [],
       "group": "panel",
       "meaning": "hover heading of the My Builds button",
-      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending; at 8393f5f4b61a0d62b5043b861539be868ebf80f6 also the tooltipTitle of the Plan hub dropdown row \"My Builds (game page)\" (ui/Panel.lua M.HubMenuItems, line 3363), whose row label is hard-coded English",
       "familySurface": "Main panel (HUD) My Builds button hover heading; family coverage PENDING"
     },
     {
@@ -144,7 +153,7 @@
       "placeholders": [],
       "group": "panel",
       "meaning": "complete consequence of the My Builds button: it opens the server My Builds page, where choosing a different Saved Build changes the active loadout; provider destination lines stay separate",
-      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending; at 8393f5f4b61a0d62b5043b861539be868ebf80f6 also the tooltipText of the Plan hub dropdown row \"My Builds (game page)\" (ui/Panel.lua M.HubMenuItems, line 3364), whose row label is hard-coded English",
       "familySurface": "Main panel (HUD) My Builds button hover body; family coverage PENDING"
     },
     {
@@ -164,7 +173,7 @@
       "placeholders": [],
       "group": "panel",
       "meaning": "hover heading of the first-run assignment button; same English bytes as panel.button.assign_wishlist, separate tooltip meaning",
-      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending; at 8393f5f4b61a0d62b5043b861539be868ebf80f6 also the tooltipTitle of the Plan hub dropdown row \"Assign Wishlist...\" (ui/Panel.lua M.HubMenuItems, line 3361), whose row label is hard-coded English",
       "familySurface": "Main panel (HUD) first-run Assign Wishlist hover heading; family coverage PENDING"
     },
     {
@@ -174,7 +183,7 @@
       "placeholders": [],
       "group": "panel",
       "meaning": "the button opens the Echo Journal Wishlist chooser for this loadout; nothing is assigned until the player chooses a Wishlist there",
-      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending; at 8393f5f4b61a0d62b5043b861539be868ebf80f6 also the tooltipText of the Plan hub dropdown row \"Assign Wishlist...\" (ui/Panel.lua M.HubMenuItems, line 3362), whose row label is hard-coded English",
       "familySurface": "Main panel (HUD) first-run Assign Wishlist hover body; family coverage PENDING"
     },
     {
@@ -214,7 +223,7 @@
       "placeholders": [],
       "group": "panel",
       "meaning": "the editor opens with a draft only; nothing is saved or assigned until one of the two editor actions Create & assign or Create unassigned is pressed",
-      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending",
+      "consumer": "ui/Panel.lua tooltip line; technical binding at 55d7350, final composition pending; at 8393f5f4b61a0d62b5043b861539be868ebf80f6 also the tooltipText of the Plan hub dropdown row \"Wishlist Editor\" (ui/Panel.lua M.HubMenuItems, line 3360), whose row label is hard-coded English",
       "familySurface": "Main panel (HUD) first-run Create Wishlist hover body; family coverage PENDING"
     },
     {
@@ -334,12 +343,12 @@
       "placeholders": [],
       "group": "panel",
       "meaning": "label of the Main panel header button that opens the Nexus settings and Manage menu (help and setup, settings, notices, logs and panel actions), also the heading of its hover; the label only: the leading \"! \" shown while a trusted update notice is carried is added by code and is never part of this text, and a resolved label that itself begins with ! is replaced by the English base",
-      "consumer": "ui/Panel.lua M.OptionsLabel via Nexus.Localization.Text, with M.OptionsText adding the code-owned \"! \" notice mark; bound for issue #165 in the current uncommitted working copy only (no commit or tree identified yet), final composition pending",
+      "consumer": "ui/Panel.lua M.OptionsLabel via Nexus.Localization.Text, with M.OptionsText adding the code-owned \"! \" notice mark; bound for issue #165, first committed in a50372ba485fd98043d68ec7d4f732ee947b0c28 (English blob 024557e8ffb9d6f587080e46b47b33daea25e492) and unchanged at 8393f5f4b61a0d62b5043b861539be868ebf80f6 (ui/Panel.lua:752 and :759 there); an earlier revision of this row described it as uncommitted, which is no longer true; final composition pending",
       "familySurface": "Main panel (HUD) header Options button label and hover heading; family coverage PENDING"
     }
   ],
   "currentAdoption": {
-    "scope": "the technical 28-key slice: the six English semantic keys adopted through the Localization seam at the base pin, in their original order, followed by the 21 panel keys bound in the Root-admitted technical reference 55d7350c0d5c60fc5bf39385f48027cd62498c71 (tree 9a7c51f0683a53adae1aecd833b1f13a590e2595), then the issue #165 Options button label bound only in the current uncommitted working copy (no commit or tree identified yet; no optional pack entry); final composition, button-fit and M7-span review pending; not whole-#139, #143 or full-UI coverage",
+    "scope": "the technical 28-key slice: the six English semantic keys adopted through the Localization seam at the base pin, in their original order, followed by the 21 panel keys bound in the Root-admitted technical reference 55d7350c0d5c60fc5bf39385f48027cd62498c71 (tree 9a7c51f0683a53adae1aecd833b1f13a590e2595), then the issue #165 Options button label (no optional pack entry), which an earlier revision of this document recorded as bound only in an uncommitted working copy; it is committed, first in a50372ba485fd98043d68ec7d4f732ee947b0c28 and unchanged at 8393f5f4b61a0d62b5043b861539be868ebf80f6; final composition, button-fit and M7-span review pending; not whole-#139, #143 or full-UI coverage",
     "keys": ["reason.save_in_progress", "reason.list_preparing", "reason.saved_data_reading", "reason.wait_three_choices", "reason.wait_pending_pick_count", "readout.charge_counts", "panel.button.my_builds", "panel.tooltip.open_my_builds", "panel.tooltip.my_builds_destination", "panel.button.assign_wishlist", "panel.tooltip.assignment_heading", "panel.tooltip.assignment_chooser", "panel.button.create_wishlist", "panel.tooltip.create_wishlist_heading", "panel.tooltip.create_wishlist_source", "panel.tooltip.create_wishlist_draft", "panel.heading.locked_targets", "panel.tooltip.locked_remaining", "panel.tooltip.locked_plan", "panel.tooltip.locked_acquire", "panel.tooltip.locked_placement", "panel.tooltip.locked_not_freeze", "panel.tooltip.locked_acquire_list", "panel.tooltip.open_wishlist_editor", "panel.heading.progress", "panel.heading.still_needed", "panel.heading.extra_copies", "panel.button.options"],
     "allWindowSemanticCoverage": "PENDING"
   },

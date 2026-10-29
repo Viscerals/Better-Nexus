@@ -4,7 +4,29 @@ Refs #139, #147. Source pin `5c77eec5b791f64468576e37a70b3855375b7fcb`
 (tree `692c6693ba50ba5ffc2bf8f3f724b0bceeeda65c`). Status: declarative plan.
 It accepts no issue: not #139, not #147 and no later gate.
 
-## State at the pin
+That source pin is the historical contract pin and stays unchanged. Current
+facts are anchored to `8393f5f4b61a0d62b5043b861539be868ebf80f6` (tree
+`8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada`) in
+[CURRENT_COHORT_EVIDENCE.md](CURRENT_COHORT_EVIDENCE.md) and its JSON ledger.
+
+## Current source at 8393f5f
+
+- 28 English keys: 27 static texts and the one template
+  `readout.charge_counts`.
+- 27 draft entries in each of the six optional packs (26 static texts and the
+  template), 162 in total. They are all `draft_unreviewed`: no entry equals
+  its English and no `entryReview` declaration exists.
+- `panel.button.options` (#165, committed since `a50372b`) is in no optional
+  pack. With a pack active it resolves to the exact English `Options` as a
+  counted `missing_candidate` fallback.
+- `MAX_BASE_ENTRIES` is 64 for the English base and for each pack. 64 - 28 =
+  36 more English entries fit. An English base above 64 entries adopts
+  nothing, and a pack above 64 is refused.
+- All 15 window families are PENDING, competent language review is
+  UNASSIGNED for every optional pack and localized native evidence is
+  NOT_RUN. These are draft cohorts and are not complete localization.
+
+## State at the historical pin
 
 - The #139 recorded public language decision resolves the selected product
   choices: `enUS` English baseline; `frFR`, `deDE`, `esES`, `plPL`, `ptBR`
@@ -134,7 +156,11 @@ inventory failure (`CONTRIBUTING.md`, `VALIDATION.md`). Required-CI
 registration is implemented in source; independent review and the human,
 native and full-UI gates are pending. Author execution of the new tests:
 NOT_RUN; host validation and hosted-CI receipts are recorded separately
-against the final source pin, and this document claims no host result.
+against the final source pin, and this document claims no host result. The
+bounded offline result at `8393f5f` (this file's 76 cases passing inside a
+full offline run) is recorded in
+[CURRENT_COHORT_EVIDENCE.md](CURRENT_COHORT_EVIDENCE.md); it is not
+translation, coverage or native evidence.
 
 ## Separate gates
 
@@ -144,7 +170,10 @@ Each gate needs its own evidence and acceptance; passing one accepts no other.
    UNASSIGNED and terminology is pending.
 2. #141 Automatic/default: OUTSTANDING. The base code defaults to `enUS` and
    has no Automatic chooser ID. Unknown or unsupported input resolves to
-   English. This contract makes no code change.
+   English. This contract makes no code change. At `8393f5f` the source also
+   has an explicit chooser and an Automatic preference value. Without an
+   evidenced client alias that preference still resolves to English, and
+   #141 acceptance remains open.
 3. #143, #144, #145 full UI: every window family below, in author batches.
 4. #146 native: client locale, alias, font, glyph and layout evidence;
    NOT_RUN.
@@ -154,7 +183,12 @@ Each gate needs its own evidence and acceptance; passing one accepts no other.
    charge-count template; independent review is pending. Plural variants,
    dynamic-key coverage per family, runtime load/fallback parity, per-pack
    translator provenance/rights and approved terminology validation
-   remain #147 criteria that this component does not implement.
+   remain #147 criteria that this component does not implement. The
+   runtime-registry staging reported on #147 is not integrated at
+   `8393f5f`. That covers U1 at `38662fa`, the U2 adoption packet and the
+   U3a parser at `5f5b462` (95/96). The reported U1 and U3a objects were
+   not found, so their results stay reported, unproven history. U3b is
+   pending (see [CURRENT_COHORT_EVIDENCE.md](CURRENT_COHORT_EVIDENCE.md)).
 6. #148 pack gate and #149 union gate: separate later acceptance.
 
 ## Author batches
@@ -164,9 +198,15 @@ measured inventory exceeds 60 is split before dispatch. A family is complete
 only when all its batches are accepted; current adopted keys do not make a
 family complete.
 
+That per-batch limit does not raise the runtime cap. At `8393f5f`,
+`MAX_BASE_ENTRIES = 64` admits at most 36 more English keys in total. A
+larger total needs a separately reviewed contract change to
+`core/Localization.lua`, `tools/l10n_catalog.py` and their tests. This plan
+does not widen the cap.
+
 | Window family | Issue | Status |
 |---|---|---|
-| Main panel (HUD) | #143 | PENDING (`readout.charge_counts` plus the 21 `panel.*` keys of the technical slice at `55d7350`; final composition pending; family incomplete) |
+| Main panel (HUD) | #143 | PENDING (`readout.charge_counts` plus the 21 `panel.*` keys of the technical slice at `55d7350`, and `panel.button.options` since `a50372b`: 23 adopted keys at `8393f5f`; Plan hub rows mix localized tooltips with English labels; final composition pending; family incomplete) |
 | Orb window | #143 | PENDING |
 | Echo Journal tab | #143 | PENDING |
 | Wishlist editor | #144 | PENDING |
@@ -204,6 +244,13 @@ Root-admitted technical reference `55d7350c0d5c60fc5bf39385f48027cd62498c71`
 `panel.*` keys. These are observed technical bindings only: final button fit,
 the M7 span and matching final validation remain pending, and fluent human
 review (UNASSIGNED), native evidence (NOT_RUN) and full-UI coverage stay open.
+At `8393f5f` the same 21 bindings remain, `panel.button.options` adds a
+28th English key, and five `panel.tooltip.*` keys are also used by the Plan
+hub dropdown (`M.HubMenuItems`). The PR #161 six-message delivery (18 added
+entries) and the current 27-entry-per-pack cohort are distinct; neither is
+full family coverage. Current Help/FAQ text at `8393f5f` is the baseline for
+#145; coordinate with accepted #131/FAQ wording, not old screenshots. English
+screenshots do not establish localized glyph, layout or input acceptance.
 This metadata draft migrates no source and changes no runtime, locale or
 English bytes. `README.md`, `INVENTORY.md`, `KEYS_AND_GLOSSARY.md`,
 `CLIENT_LOCALE_MATRIX.md` and `VALIDATION.md` are pinned historical evidence
