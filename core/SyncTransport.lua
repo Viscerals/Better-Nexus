@@ -457,6 +457,10 @@ function Transport.New(options)
     end
 
     local function Admit(packet, isControl)
+        -- The session pause transitions so far (issue #171): a packet admitted
+        -- before a Pause is never sent after it, even after a quick Resume.
+        local pause = Nexus and Nexus.SessionPause
+        packet.pauseEpoch = pause and pause.Status().epoch or 0
         if isControl then
             controlTail = controlTail + 1
             control[controlTail] = packet
@@ -916,6 +920,12 @@ function Transport.New(options)
         -- handling with the mode as its reason. It is not held at the head,
         -- where it would stall permitted work, and never released later.
         local permitted, modeWhy = permit(packet.metadata)
+        if permitted then
+            local pause = Nexus and Nexus.SessionPause
+            if pause and pause.Status().epoch ~= (packet.pauseEpoch or 0) then
+                permitted, modeWhy = false, "admitted before a session pause"
+            end
+        end
         if not RefreshSelection() then return end
         if not permitted then
             Pop(isControl, selectedIndex)

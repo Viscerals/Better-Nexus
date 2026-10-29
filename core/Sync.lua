@@ -1174,6 +1174,9 @@ Transport = TransportFactory.New({
     -- The saved Sync mode (core/SyncModePolicy.lua): the same decision the
     -- wire asks again at submission.
     permit=function(metadata)
+        -- The session pause (issue #171) admits no new packet and ends queued
+        -- ones through the same dropped handling; the saved mode is unchanged.
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false,"Nexus paused for this session" end
         if Nexus.SyncWire and type(metadata)=="table"
             and Nexus.SyncWire.IsPeerBlocked(metadata.requester) then return false,"peer offline" end
         local policy=Nexus.SyncModePolicy
@@ -4148,6 +4151,7 @@ Session = SessionFactory.New({
     sendWhisper=function(message, target)
         -- The diagnostic probe whisper bypasses the queue and the wire, so it
         -- asks the saved Sync mode and existing peer guard at submission.
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
         local policy=Nexus.SyncModePolicy
         if policy then
             local allowed, why = policy.Allows("whisper")
@@ -4170,6 +4174,8 @@ Session = SessionFactory.New({
 })
 
 function Sync.HandleIncoming(text, sender)
+    -- Session pause: no inbound producer work, catalog write or reply.
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "session paused" end
     -- Isolated: a failure of this passive read must never cost the message.
     pcall(Sync.NoteChannelTraffic)
     local accepted,reason=Inbound.HandleIncoming(text,sender)
@@ -4185,6 +4191,7 @@ end
 -- Keep the raw sender for diagnostics, peer/session state and other messages.
 -- Unknown entry points and addon whispers never receive this authority.
 function Sync.HandleNativeChannelIncoming(text, sender)
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false end
     if not Identity.ValidPlayer(sender) then return false end
     local channelOwnerSender
     if not sender:find("-", 1, true) then
@@ -4420,6 +4427,15 @@ Sync.OnUpdate = (function()
         -- correctly under hitching; then clear for the next 0.05s window.
         elapsed = updateAccum
         updateAccum = 0
+        -- Session pause (issue #171): passive expiry and the transport turn
+        -- (whose admission check ends queued work unsent) only. No response,
+        -- recovery, share, request, handshake, retry, join or admission runs.
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+            Sync.Housekeep()
+            Inbound.CleanExpired()
+            Transport.Pump(elapsed)
+            return
+        end
 
         -- The phase state lives on the module table because this chunk is at the
         -- Lua 5.1 local limit, which makes it writable from outside. Measurement

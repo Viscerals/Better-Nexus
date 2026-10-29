@@ -813,13 +813,17 @@ function Session.New(options)
         end
         local connected = options.isRequestChannelPresent and options.isRequestChannelPresent()
             or not options.isRequestChannelPresent and options.isConnected()
-        if not connected or now() >= Number(autoConverge.absoluteUntil) then
+        -- A request not yet sent when the session is paused (issue #171) ends
+        -- here, through the same identity-aware cancellation: Resume never
+        -- releases it later.
+        local paused = Nexus.SessionPause and Nexus.SessionPause.IsPaused()
+        if paused or not connected or now() >= Number(autoConverge.absoluteUntil) then
             local old = pendingRequest
             pendingHashRequest, pendingRequest = nil, nil
             autoConverge.active = false
             if old then cancelRequest(old.id, myName()) end
             SetQueueOutcome("dropped")
-            SetTerminal(not connected and "disconnected" or "expired")
+            SetTerminal(paused and "session_pause" or not connected and "disconnected" or "expired")
             return false
         end
         return true, autoConverge.active and autoConverge.mode == "manual"
@@ -865,6 +869,10 @@ function Session.New(options)
 
     function M.RequestSync()
         local current = now()
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+            log("SYNC", "sync request refused: Nexus is paused for this session")
+            return false, "Nexus is paused for this session. Type /nexus resume, then Sync again."
+        end
         if SyncMode() == "off" then
             -- The user's saved choice is not turned on silently.
             log("SYNC", "sync request refused: saved Sync mode is Off")
@@ -1129,6 +1137,7 @@ function Session.New(options)
 
     function M.SendStatusTo(target)
         if not target or target == "" then return false end
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
         if SyncMode() == "off" then return false, SyncModeText("off") end
         local token = BuildStatusToken()
         if not token then return false end

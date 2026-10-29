@@ -14,6 +14,7 @@ data\LocalizationEnglish.lua
 data\LocalizationPacks.lua
 core\Localization.lua
 core\UserText.lua
+core\SessionPause.lua
 core\Performance.lua
 core\StutterAlertIntegration.lua
 core\EchoCatalogSource.lua

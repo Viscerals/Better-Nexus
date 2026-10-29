@@ -75,6 +75,13 @@ function Commands.New(options)
             Invoke("legacy",nil,early)
             return
         end
+        -- The session pause answers BEFORE the initialization gate too: a
+        -- hidden HUD or an unfinished start-up must not trap a paused player.
+        -- It prepares no saved data and runs no step.
+        if early=="pause" or early=="resume" or early=="paused" then
+            Invoke("sessionPause",nil,early)
+            return
+        end
         if not isInitialized() then
             if type(notInitialized) == "function" then notInitialized() end
             return

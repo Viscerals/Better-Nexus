@@ -132,6 +132,8 @@ local sampleTicker     = 0
 local lastTargetGUID   = nil
 local lastTargetName   = nil
 local sessionCategory  = nil
+-- The session pause transitions when this combat's capture began (issue #171).
+local sessionPauseEpoch = 0
 local MAX_DEBUG_LINES   = 120
 local DEBUG_TRIM_AT     = 150
 local DEBUG_TEXT_BYTES  = 2048
@@ -4567,10 +4569,32 @@ end
 -- Events
 ------------------------------------------------------------------------
 
-function DPS.OnCombatStart() StartSession() end
+-- The whole-addon session pause (issue #171): only a combat that no pause
+-- transition crossed is recorded. Paused at its start, paused or resumed
+-- during it, or paused and resumed between two samples, it records nothing,
+-- shares nothing and leaves earlier records unchanged; the next complete
+-- combat is eligible under the unchanged rules.
+function DPS.OnCombatStart()
+    local pause = Nexus.SessionPause
+    if pause and pause.IsPaused() then
+        inCombat = false
+        sessionCategory = nil
+        Nexus.lastDpsNote = "ignored: Nexus was paused when this combat started"
+        return
+    end
+    StartSession()
+    sessionPauseEpoch = pause and pause.Status().epoch or 0
+end
 
 function DPS.OnCombatEnd()
     if not inCombat then return end
+    local pause = Nexus.SessionPause
+    if pause and (pause.IsPaused() or pause.Status().epoch ~= sessionPauseEpoch) then
+        inCombat = false
+        sessionCategory = nil
+        Nexus.lastDpsNote = "ignored: Nexus was paused during this combat"
+        return
+    end
     RememberTarget()
     local category = sessionCategory or ClassifyTarget(lastTargetGUID, lastTargetName)
     CommitSession(category)
@@ -4579,6 +4603,13 @@ end
 
 function DPS.OnUpdate(elapsed)
     if not inCombat then return end
+    local pause = Nexus.SessionPause
+    if pause and pause.IsPaused() then
+        inCombat = false
+        sessionCategory = nil
+        Nexus.lastDpsNote = "ignored: Nexus was paused during this combat"
+        return
+    end
     RememberTarget()
     sampleTicker = sampleTicker + (elapsed or 0)
     if sampleTicker >= SAMPLE_INTERVAL then

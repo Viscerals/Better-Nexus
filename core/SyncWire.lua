@@ -90,6 +90,9 @@ local function ModeAllows(kind,metadata)
     if not policy or type(policy.Allows)~="function" then return true end
     return policy.Allows(kind,metadata)
 end
+-- The whole-addon session pause (issue #171): no packet, handshake or inbound
+-- admission while it holds. It is not Wire.suspended (an ambiguous-CTL fault).
+local function SessionPaused() return Nexus.SessionPause and Nexus.SessionPause.IsPaused()==true end
 local function DropPending(name)
     if pending[name] then pending[name]=nil;pendingCount=pendingCount-1 end
 end
@@ -279,6 +282,7 @@ function Wire.Blocked()
     return nil
 end
 function Wire.CanDispatch(payload,metadata)
+    if SessionPaused() then return false,"session paused" end
     if type(metadata)=="table" and Wire.IsPeerBlocked(metadata.requester) then return false,"peer offline" end
     if Wire.suspended then return false,"transport suspended" end
     if type(payload)~="string" then return false,"invalid payload" end
@@ -288,6 +292,7 @@ function Wire.CanDispatch(payload,metadata)
     return Room(#text+(route=="addon" and #Wire.PREFIX+1 or 0))
 end
 function Wire.SendPacket(payload,metadata,channel)
+    if SessionPaused() then return false,"session paused" end
     if type(metadata)=="table" and Wire.IsPeerBlocked(metadata.requester) then return false,"peer offline" end
     if Wire.suspended then return false,"transport suspended" end
     if type(payload)~="string" then return false,"invalid payload" end
@@ -340,6 +345,8 @@ function Wire.SendPacket(payload,metadata,channel)
 end
 function Wire.PumpHandshake()
     Wire.Housekeep()
+    -- Held, not dropped: each pending handshake keeps its own expiry.
+    if SessionPaused() then return end
     if Wire.suspended or connected==false then return end
     if not ModeAllows("handshake") then
         if handshakeAllowed~=false then Wire.Housekeep(true) end
@@ -377,6 +384,7 @@ end
 function Wire.Receive(prefix,text,distribution,sender)
     if prefix~=Wire.PREFIX or distribution~="WHISPER" or type(text)~="string"
         or #text>254-#Wire.PREFIX-1 or not Name(sender) or Local(sender) then return false end
+    if SessionPaused() then return false end
     Wire.Housekeep()
     if not CheckConnection() then return false end
     if Wire.IsPeerBlocked(sender) then return false end

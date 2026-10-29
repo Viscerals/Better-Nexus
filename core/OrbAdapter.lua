@@ -374,6 +374,7 @@ function O.SameOwner(a,b)
         and a.orb==b.orb and a.guid==b.guid and a.generation==b.generation and a.level==b.level
 end
 function O.Rebind(token,expected)
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return nil,"Nexus is paused for this session." end
     if not owner or token~=owner then return nil,"This run no longer owns Orb actions." end
     local fresh,err=O.Read();if not fresh then return nil,err end
     if not O.SameOwner(ownerContext,fresh.context) or not expected or not same(expected.context,fresh.context)
@@ -535,7 +536,12 @@ function O.Watch(s,notify)
 end
 function O.Unwatch() watcherContext=nil;watcherNotify=nil end
 function O.IsOwned() return owner~=nil end
+-- The whole-addon session pause (issue #171): no new ownership, action or
+-- read request while it holds. Release, Read, Watch and capture stay available.
+local function sessionPaused() return Nexus.SessionPause and Nexus.SessionPause.IsPaused()==true end
+local PAUSED="Nexus is paused for this session. No Orb action was sent."
 function O.Acquire(s)
+    if sessionPaused() then return nil,PAUSED end
     if owner then return nil,"Orb mode already owns an operation." end
     local fresh,err=O.Read();if not fresh then return nil,err end
     if not s or not same(s.context,fresh.context) or s.grantedKey~=fresh.grantedKey
@@ -552,6 +558,7 @@ function O.Release(token)
     owner=nil;ownerContext=nil;return true
 end
 local function validate(token)
+    if sessionPaused() then return nil,PAUSED,"SESSION_PAUSED" end
     if not owner or token~=owner then return nil,"Orb action ownership is unavailable." end
     local s,err=O.Read();if not s then return nil,err,"READ_UNAVAILABLE" end
     if not same(ownerContext,s.context) then return nil,"The character, loadout, or game service changed. Orb mode is paused." end
@@ -603,6 +610,8 @@ function O.Spend(token,key,expected,guard)
     -- No diagnostic callback may intervene between the last guard and host.
     -- Report crossing after the invocation (also when it throws), before its
     -- typed return event; diagnostics never authorize or cancel this crossing.
+    -- A pause raised by the guard or a read above still stops it here.
+    if sessionPaused() then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     local ok,value=pcall(ownerContext.orb.ConfirmSpend,id,1)
     boundary("host_call",s)
     boundary(not ok and "host_error" or value==false and "host_false" or value==true and "host_true" or "host_other",nil)
@@ -630,6 +639,7 @@ function O.Select(token,index,expectedBoard,id,guard)
         end
         if allowed~=true then return nil,"REJECTED","The assigned target changed before selection. The original pending operation must be resolved." end
     end
+    if sessionPaused() then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     selfSelecting=true
     boundary("pick_call",s)
     local ok,v=pcall(ownerContext.svc.SelectPerk,id)
@@ -900,12 +910,14 @@ end
 -- A manual Recheck may still obtain the exact ownership result while a charge
 -- reply is outstanding. This sends no second charge request and no choice query.
 function O.RequestOwnershipRefresh()
+    if sessionPaused() then return false,"session_paused" end
     local pe=_G.ProjectEbonhold;local svc=pe and pe.PerkService
     if type(svc)~="table" or type(svc.RequestGrantedPerks)~="function" then return false,"refresh_unavailable" end
     if not pcall(svc.RequestGrantedPerks) then return false,"ownership_refresh_failed" end
     return true
 end
 function O.RequestRefresh(withChoice)
+    if sessionPaused() then return false,"session_paused" end
     local pe=_G.ProjectEbonhold;local orb=pe and pe.OrbService;local svc=pe and pe.PerkService
     local a=type(orb)=="table" and type(orb.RequestCharges)=="function"
     local b=type(svc)=="table" and type(svc.RequestGrantedPerks)=="function"
