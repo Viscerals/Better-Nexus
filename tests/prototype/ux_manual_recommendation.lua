@@ -23,13 +23,18 @@ local H,A,observer
 local PLAN={}
 for i=1,12 do PLAN[#PLAN+1]={spellId=200000+i,quality=i%4,stacks=1} end
 
-local function Boot()
+-- opt (optional): plan, a synthetic plan in place of PLAN; before(H), run on
+-- the fresh harness before its boot (synthetic catalog names).
+local function Boot(opt)
+ opt=opt or {}
+ local plan=opt.plan or PLAN
  Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil;NexusPanel=nil
  H=dofile('tests/prototype/harness.lua');H.pendingRolls=40
  H.perks.serverActiveSlot=1
- H.perks.serverBuildSlots={[1]={name='Synthetic plan',verified=true,echoes=PLAN}}
+ H.perks.serverBuildSlots={[1]={name='Synthetic plan',verified=true,echoes=plan}}
+ if opt.before then opt.before(H) end
  H.Boot();A=Nexus.GameAdapter
- assert(A.SetLoadoutWishlistIdentity(1,'Synthetic plan',PLAN),'assign the plan')
+ assert(A.SetLoadoutWishlistIdentity(1,'Synthetic plan',plan),'assign the plan')
  if _G.NexusQuickStart and _G.NexusQuickStart:IsShown() then _G.NexusQuickStart:Hide() end
  Nexus.Panel.Show();H.Advance(.5)
  observer=V.PresentationObserver(H)
@@ -42,10 +47,13 @@ local function Plain(t) return V.Plain(t) end
 -- shown card is read from its visible name, quality and tag lines. A choice
 -- carries the manual (Auto OFF) Take marker when its shown row starts ">> "
 -- or its shown card's tag is the Wishlist pick (ux_automation_scope's
--- ManualMarker). facts[i] keeps a card's visible lines apart.
+-- ManualMarker). facts[i] keeps a card's visible lines apart. freezes[i]:
+-- the shown choice is visibly identified as a Freeze target (its shown row
+-- starts "[Freeze] " or its shown card's tag starts "> Freeze"), which is
+-- never the Take marker.
 local function View()
  local f=NexusPanel
- local cards,marks,facts={},{},{}
+ local cards,marks,facts,freezes={},{},{},{}
  local tag=Nexus.Readout and Nexus.Readout.OFFER_PICK_TAG
  -- Only what is visible: a hidden roll area shows no card at all.
  if f._rollArea:IsVisible() then
@@ -54,6 +62,7 @@ local function View()
     and r:IsShown() and Plain(r:GetText() or '')~='' then
     local text=Plain(r:GetText())
     cards[#cards+1]=text;marks[#cards]=text:find('^>> ')~=nil
+    freezes[#cards]=text:find('^%[Freeze%] ')~=nil
     facts[#cards]={row=text}
    end
   end
@@ -64,17 +73,23 @@ local function View()
     for _,text in ipairs({name,quality,shown}) do if text~='' then parts[#parts+1]=text end end
     cards[#cards+1]=table.concat(parts,' ')
     marks[#cards]=type(tag)=='string' and shown==tag
+    freezes[#cards]=shown:find('^> Freeze')~=nil
     facts[#cards]={name=name,quality=quality,tag=shown}
    end
   end
  end
  local charges=f._chargesText
  return {head=Plain(f._rollStatus:GetText() or ''),body=Plain(f._rollRec:GetText() or ''),cards=cards,marks=marks,
-  facts=facts,charges=charges and charges:IsShown() and Plain(charges:GetText() or '') or nil,roll=f._rollArea:IsShown()}
+  facts=facts,freezes=freezes,charges=charges and charges:IsShown() and Plain(charges:GetText() or '') or nil,roll=f._rollArea:IsShown()}
 end
 local function Marked(v)
  local n,at=0,nil
  for i=1,3 do if v.marks[i] then n=n+1;at=i end end
+ return n,at
+end
+local function Frozen(v)
+ local n,at=0,nil
+ for i=1,3 do if v.freezes[i] then n=n+1;at=i end end
  return n,at
 end
 -- A shown choice is this Echo at this quality: its visible card name and
@@ -402,6 +417,210 @@ C.scenario('R6 producer: the runtime\'s own charge read reaches the HUD (Auto OF
  C.guard(Shown()==nil and Nexus.Panel._lastModel.charges==nil,'R6: with Auto ON the panel carries and shows no charges (unchanged)')
  C.guard(reads==decided,'R6: one read per decision throughout',reads..' / '..decided)
  Nexus.Policy.Decide,A.Charges,service.GetCurrentData=decide,charges,current
+end)
+
+-- UX-02/J4 successor (#131 all41 canonical UX-02: "Auto OFF heading never
+-- says active", "Two Needed cards -> exactly one marked and named", "No
+-- engine name in recommendations"). Real TOC boot, adapter, policy, runtime
+-- and Panel widgets; synthetic boards, plans, Orb service and run data only.
+-- Effects() is everything presentation must leave alone: game actions
+-- (uploads included), sends, assignment calls, settings and Auto.
+local function Ser(v,seen)
+ seen=seen or {}
+ if type(v)~='table' then return type(v)..':'..tostring(v) end
+ if seen[v] then return '<cycle>' end;seen[v]=true
+ local keys={};for k in pairs(v) do keys[#keys+1]=k end
+ table.sort(keys,function(a,b) return tostring(a)<tostring(b) end)
+ local o={};for _,k in ipairs(keys) do o[#o+1]=tostring(k)..'='..Ser(v[k],seen) end
+ return '{'..table.concat(o,',')..'}'
+end
+local assigned=0
+local function CountAssignments()
+ assigned=0
+ for _,n in ipairs({'SetLoadoutWishlist','SetLoadoutWishlistIdentity','SetFirstLoadoutWishlistIdentity'}) do
+  local real=A[n]
+  if type(real)=='function' then A[n]=function(...) assigned=assigned+1;return real(...) end end
+ end
+end
+local function Effects()
+ return {acts=Acts(),sent=#H.sent,assigned=assigned,settings=Ser(Nexus.Store.Settings()),auto=Auto()}
+end
+local function SameEffects(a,b)
+ return a.acts==b.acts and a.sent==b.sent and a.assigned==b.assigned and a.settings==b.settings and a.auto==b.auto
+end
+-- Every visible text of the HUD (recommendation, status, heading, cards).
+local function VisibleText()
+ local out={}
+ for _,f in ipairs(H.frames) do
+  if f.IsVisible and f:IsVisible() then
+   local value=f.GetText and f:GetText();if type(value)=='string' then out[#out+1]=Plain(value) end
+   for _,r in ipairs(f.regions or {}) do if r:IsShown() and r.GetText then
+    value=r:GetText();if type(value)=='string' then out[#out+1]=Plain(value) end
+   end end
+  end
+ end
+ return table.concat(out,'\n')
+end
+local function EngineFree(text) return not text:find('EchoWeaver',1,true) and not text:lower():find('experimental',1,true) end
+local function Line(d) return d and (tostring(d.type)..':'..tostring(d.index)..':'..tostring(d.spellId)..':'..tostring(d.reasonCode)) or 'nil' end
+-- The real policy's last decision (observed, not changed).
+local function WatchDecisions()
+ local decide=Nexus.Policy.Decide
+ local w={}
+ Nexus.Policy.Decide=function(...) local d=decide(...);w.last=d;return d end
+ function w.Stop() Nexus.Policy.Decide=decide end
+ return w
+end
+
+C.scenario('R7 Auto OFF with Orb guidance: the heading says you choose, never Active; reason and Open Orbs remain',function()
+ Boot()
+ CountAssignments()
+ C.setup(not Auto(),'R7: fixture: Auto is OFF')
+ -- A synthetic Orb service whose state the game cannot confirm.
+ ProjectEbonhold.OrbService={IsStateKnown=function() return false end,IsOfferPending=function() return false end}
+ local e0=Effects()
+ Offer({{spellId=200001,quality=1},{spellId=200050,quality=2},{spellId=200051,quality=3}})
+ for _=1,3 do Nexus.RequestRecompute();H.Advance(.4) end
+ local v=View()
+ local m=Nexus.Panel._lastModel
+ local g=type(m.orbGuidance)=='table' and m.orbGuidance or {}
+ local button=NexusPanel._orbsBtn
+ print('OBSERVED','R7 head=['..v.head..'] body=['..v.body..'] guide='..tostring(g.state))
+ C.setup(m.auto==false and m.paused==nil and g.state=='orb-state' and g.openOrbs==true and #v.cards==3,
+  'R7: fixture: Auto OFF (not held), an unknown Orb state with inspection guidance, and the board shown',tostring(g.state))
+ -- The short one-line form beside the Orb guidance (orb_guidance_geometry
+ -- pins its fit): who chooses and the destination.
+ C.expect(not v.head:find('Active',1,true) and v.head:lower():find('you choose',1,true)~=nil and v.head:find('Slot 1',1,true)~=nil,
+  'R7: the heading says the player chooses, with the destination, never Active',v.head)
+ C.guard(button and button:IsShown(),'R7: the Open Orbs button for inspection remains')
+ C.guard(v.body:find('Ordinary rolling paused',1,true)~=nil,'R7: the Orb pause reason remains in the body',v.body)
+ C.guard(Marked(v)==0 and Frozen(v)==0,'R7: a wait marks no card')
+ C.guard(not (NexusOrbPanel and NexusOrbPanel:IsShown()),'R7: nothing opens by itself')
+ C.guard(SameEffects(Effects(),e0),'R7: no action, send, assignment, setting or Auto change')
+ -- Control: the same Orb state with Auto ON keeps its paused heading.
+ SlashCmdList.NEXUS('auto');H.Advance(.5)
+ for _=1,3 do Nexus.RequestRecompute();H.Advance(.4) end
+ v=View()
+ C.setup(Auto(),'R7: fixture: Auto is ON')
+ C.guard(v.head:find('Auto ON',1,true)~=nil and v.head:find('paused',1,true)~=nil and not v.head:find('Active',1,true),
+  'R7: with Auto ON the Orb hold keeps its paused heading',v.head)
+ C.guard(button:IsShown(),'R7: and its Open Orbs button')
+ C.guard(Acts()==e0.acts,'R7: the held Auto performed nothing')
+ ProjectEbonhold.OrbService=nil
+end)
+
+C.scenario('R8 Auto OFF, two different Needed offers: the Freeze target is named and identified as a Freeze',function()
+ Boot()
+ CountAssignments()
+ C.setup(not Auto(),'R8: fixture: Auto is OFF')
+ local w=WatchDecisions()
+ local e0=Effects()
+ Offer({{spellId=200001,quality=1},{spellId=200002,quality=2},{spellId=200050,quality=2}})
+ local v=View()
+ local m=Nexus.Panel._lastModel
+ print('OBSERVED','R8 decision='..Line(w.last)..' head=['..v.head..'] body=['..v.body..'] cards=['..table.concat(v.cards,' | ')..']')
+ C.setup(w.last and w.last.type=='freeze' and w.last.reasonCode=='PAIR_FREEZE_SECOND_NEEDED' and w.last.index==1
+  and w.last.spellId==200001,'R8: fixture: the real adaptive decision Freezes card 1 of two different Needed offers',Line(w.last))
+ C.setup(m.charges and m.charges.freeze==10 and m.charges.trustworthy==true and #v.cards==3,
+  'R8: fixture: trusted Freeze charges and the board shown')
+ local n,at=Frozen(v)
+ C.expect(n==1 and at==1 and Shows(v,1,'Echo 1','Uncommon'),'R8: exactly the Freeze target is visibly identified as a Freeze',
+  table.concat(v.cards,' | '))
+ C.guard(Marked(v)==0,'R8: no card carries the Take marker: a Freeze is not a Wishlist pick',table.concat(v.cards,' | '))
+ C.expect(v.body:find('Echo 1 (Uncommon)',1,true)~=nil and v.body:lower():find('freeze',1,true)~=nil
+  and not v.body:find('Echo 2',1,true) and not v.body:find('Take',1,true),
+  'R8: the recommendation names its Freeze target with Freeze wording, not Take',v.body)
+ C.guard(v.head:find('you choose',1,true)~=nil and not v.head:find('Active',1,true),'R8: the heading says the player chooses',v.head)
+ C.expect(EngineFree(VisibleText()),'R8: no engine name in any visible recommendation or status text',v.body)
+ C.guard(m.cards[1].highlight~=true and m.cards[2].highlight~=true,'R8: the Take highlight (automation target) is not set for a Freeze')
+ -- The one-line rows (the fallback without a built layout) hold the same
+ -- identification, never the Take marker. Hidden rows keep their text.
+ local rows={}
+ for _,r in ipairs(NexusPanel._rollArea.regions or {}) do
+  local text=r.kind=='FontString' and Plain(r:GetText() or '') or ''
+  if text:find('^%[Freeze%] ') or text:find('^>> ') then rows[#rows+1]=text end
+ end
+ C.expect(#rows==1 and rows[1]:find('[Freeze] Echo 1 (Uncommon)',1,true)==1,'R8: the fallback row identifies the same Freeze card',table.concat(rows,' | '))
+ -- Re-rendering the same decision changes nothing saved and performs nothing.
+ local db=Ser(NexusDB)
+ Nexus.RefreshHudView()
+ C.guard(Ser(NexusDB)==db,'R8: a HUD re-render writes no saved data')
+ C.guard(SameEffects(Effects(),e0),'R8: Auto OFF performed, sent and assigned nothing; settings and Auto unchanged')
+ -- Auto ON consumer (held, so it cannot act): no Freeze or Take marker is added.
+ local held=Render(function(x) x.auto=true;x.paused='waiting for current Echo data';x.effective={state='paused'} end)
+ C.guard(Frozen(held)==0 and Marked(held)==0 and held.head=='Auto ON — paused','R8: a held Auto shows its paused heading and no marker',held.head)
+ C.expect(EngineFree(held.body),'R8: the held Auto body has no engine name',held.body)
+ local waiting=Render(function(x) x.auto=true;x.paused='waiting';x.effective={state='waiting',hold=true} end)
+ C.guard(waiting.head=='Auto waiting' and Frozen(waiting)==0,'R8: a waiting Auto is named as the wait, no marker',waiting.head)
+ Nexus.RefreshHudView()
+ -- Reordered board: the decision's own target, not the first card.
+ Offer({{spellId=200050,quality=2},{spellId=200003,quality=3},{spellId=200004,quality=0}})
+ v=View()
+ C.setup(w.last and w.last.type=='freeze' and w.last.index==2 and w.last.spellId==200003,'R8: fixture: reordered, the decision Freezes card 2',Line(w.last))
+ n,at=Frozen(v)
+ C.expect(n==1 and at==2 and Shows(v,2,'Echo 3','Epic') and not v.freezes[1],'R8: the Freeze mark follows the decision on a new board',
+  table.concat(v.cards,' | '))
+ C.expect(v.body:find('Echo 3 (Epic)',1,true)~=nil and not v.body:find('Echo 1',1,true),'R8: the body names the new target only',v.body)
+ -- Ordinary Take board: the Take marker, no Freeze mark survives.
+ Offer({{spellId=200060,quality=1},{spellId=200061,quality=2},{spellId=200005,quality=1}})
+ v=View()
+ C.setup(w.last and w.last.type=='take' and w.last.spellId==200005,'R8: fixture: one Needed offer, a Take',Line(w.last))
+ n,at=Marked(v)
+ C.guard(n==1 and at==3 and Frozen(v)==0,'R8: an ordinary Take keeps its Wishlist pick marker; no Freeze mark remains',table.concat(v.cards,' | '))
+ C.guard(v.body:find('Take a needed Echo',1,true)~=nil and v.body:find('Echo 5 (Uncommon)',1,true)~=nil,'R8: and its named Take recommendation',v.body)
+ -- No choice: nothing marked.
+ H.Board({});H.Notify();H.Advance(.6)
+ v=View()
+ C.guard(Marked(v)==0 and Frozen(v)==0,'R8: with no choice nothing is marked')
+ C.guard(SameEffects(Effects(),e0),'R8: across every board nothing was performed, sent or assigned')
+ w.Stop()
+end)
+
+C.scenario('R9 Freeze controls: duplicate same Echo, unknown charges and a long name',function()
+ -- The same Echo needed twice and offered twice: the decision Freezes one
+ -- copy, but the two cards are the same Echo; no card is guessed.
+ local plan={}
+ for _,e in ipairs(PLAN) do plan[#plan+1]={spellId=e.spellId,quality=e.quality,stacks=e.spellId==200003 and 2 or 1} end
+ Boot({plan=plan})
+ CountAssignments()
+ local w=WatchDecisions()
+ local e0=Effects()
+ Offer({{spellId=200003,quality=3},{spellId=200003,quality=3},{spellId=200050,quality=2}})
+ local v=View()
+ C.setup(w.last and w.last.type=='freeze' and w.last.reasonCode=='PAIR_FREEZE_SECOND_NEEDED' and w.last.spellId==200003,
+  'R9: fixture: two copies of an Echo needed twice: the decision Freezes one',Line(w.last))
+ C.guard(Frozen(v)==0 and Marked(v)==0,'R9: with two equal targets no card is marked',table.concat(v.cards,' | '))
+ C.guard(not v.body:find('(Epic)',1,true) and v.body~='','R9: and none is named; the reason is still shown',v.body)
+ C.expect(EngineFree(VisibleText()),'R9: the unnamed Freeze reason has no engine name',v.body)
+ C.guard(SameEffects(Effects(),e0),'R9: nothing performed')
+ w.Stop()
+ -- Unknown charges: the policy cannot Freeze; the ordinary Take stays.
+ Boot()
+ CountAssignments()
+ w=WatchDecisions()
+ e0=Effects()
+ H.run={}
+ Offer({{spellId=200001,quality=1},{spellId=200002,quality=2},{spellId=200050,quality=2}})
+ v=View()
+ C.setup(w.last and w.last.type=='take' and v.charges=='B:? R:? F:?','R9: fixture: unreported charges, the decision is a Take',Line(w.last)..' '..tostring(v.charges))
+ local n,at=Marked(v)
+ C.guard(n==1 and at==1 and Frozen(v)==0 and Shows(v,1,'Echo 1','Uncommon'),'R9: unknown charges keep the Take marker, no Freeze mark',table.concat(v.cards,' | '))
+ C.guard(SameEffects(Effects(),e0),'R9: nothing performed')
+ w.Stop()
+ -- A long synthetic Echo name as the Freeze target: named whole.
+ local long='Echo of an Exceptionally Long Synthetic Name for Fit'
+ Boot({before=function(h) h.AddEcho(200001,long,1,5) end})
+ CountAssignments()
+ w=WatchDecisions()
+ e0=Effects()
+ Offer({{spellId=200001,quality=1},{spellId=200002,quality=2},{spellId=200050,quality=2}})
+ v=View()
+ C.setup(w.last and w.last.type=='freeze' and w.last.spellId==200001,'R9: fixture: the long-named Echo is the Freeze target',Line(w.last))
+ n,at=Frozen(v)
+ C.expect(n==1 and at==1 and Shows(v,1,long,'Uncommon'),'R9: the long-named Freeze target is identified',table.concat(v.cards,' | '))
+ C.expect(v.body:find(long..' (Uncommon)',1,true)~=nil,'R9: and named whole in the recommendation',v.body)
+ C.guard(SameEffects(Effects(),e0),'R9: nothing performed')
+ w.Stop()
 end)
 
 C.finish('(manual recommendation marked and named only when definite; Auto ON unchanged; charges unknown is not zero)')

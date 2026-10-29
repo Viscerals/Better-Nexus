@@ -91,6 +91,23 @@ function M.MarkedCard(cards)
     return found
 end
 
+-- The card the current recommendation freezes: exactly one card that the
+-- runtime marked as offering the Freeze target's Echo (card.freeze, display
+-- metadata only, apart from the Take highlight that automation reads). None,
+-- or several (the same Echo offered twice), gives nil, so no card is guessed.
+function M.FreezeCard(cards)
+    if type(cards) ~= "table" then return nil end
+    local found
+    for i = 1, math.min(#cards, 3) do
+        local c = cards[i]
+        if type(c) == "table" and c.freeze == true then
+            if found then return nil end
+            found = i
+        end
+    end
+    return found
+end
+
 -- The quality token CardLine wrote: CardLine puts " (Quality)" directly after
 -- the whole name and only an annotation after it, so the token is the LAST
 -- known " (Quality)" in the line, never the first. A name that itself holds
@@ -192,12 +209,16 @@ end
 -- the card's own CardFacts, which the HUD model carries beside the text; with
 -- them the name is the whole name and the quality is the card's own, never
 -- read from the text, so an unknown quality stays unknown even when the name
--- ends in " (Rare)" (LineFacts). Text only; it decides and chooses nothing.
--- -> {name, quality, tag, shown, full, marked, guaranteed}
+-- ends in " (Rare)" (LineFacts). `freeze` (optional): this unmarked card is
+-- the one the recommendation freezes (Readout.FreezeCard); its tag says
+-- Freeze, never the pick, since the pick means Take. Text only; it decides
+-- and chooses nothing.
+-- -> {name, quality, tag, shown, full, marked, freeze, guaranteed}
 M.OFFER_PICK_TAG = "> Wishlist pick"
 M.OFFER_RECOMMENDED_TAG = "> Recommended"
+M.OFFER_FREEZE_TAG = "> Freeze"
 M.OFFER_GUARANTEED_TAG = "[Guaranteed offer]"
-function M.OfferCard(text, marked, auto, facts)
+function M.OfferCard(text, marked, auto, facts, freeze)
     local full = tostring(text or "")
     local body, guaranteed = full, false
     if body:find("^%[Guaranteed offer%] ") then
@@ -214,12 +235,13 @@ function M.OfferCard(text, marked, auto, facts)
         end
     end
     local card = {full = full, marked = marked == true, guaranteed = guaranteed}
+    card.freeze = freeze == true and not card.marked
     local note
     if quality then
         card.name = name
         note = rest:gsub("^%s+", ""):gsub("%s+$", "")
         if note == "" then note = nil end
-        card.quality = quality .. ((guaranteed and card.marked) and " - guaranteed" or "")
+        card.quality = quality .. ((guaranteed and (card.marked or card.freeze)) and " - guaranteed" or "")
     elseif name then
         -- The card's own facts hold no quality: the whole name, and what
         -- follows it is its annotation.
@@ -233,6 +255,9 @@ function M.OfferCard(text, marked, auto, facts)
     end
     if card.marked then
         card.tag = auto == false and M.OFFER_PICK_TAG or M.OFFER_RECOMMENDED_TAG
+        card.shown = card.tag
+    elseif card.freeze then
+        card.tag = M.OFFER_FREEZE_TAG
         card.shown = card.tag
     else
         card.tag = note or ""

@@ -3599,9 +3599,12 @@ end
 -- selection, `responsive` whether ApplyPanelLayout will place them, `facts`
 -- (optional) the model cards' own Readout.CardFacts by index, so a card's
 -- name and quality are its own and an unknown quality is never read from the
--- text. Returns whether the cards show; while they do, the one-line rows are
--- hidden and keep their text. No old card survives a new board.
-function M.RenderOfferCards(lines, marked, auto, responsive, facts)
+-- text. `frozen` (optional) Readout.FreezeCard's index, which the caller
+-- passes only with Auto OFF: that card is tagged as a Freeze
+-- (Readout.OfferCard). Returns whether the cards show; while they do, the
+-- one-line rows are hidden and keep their text. No old card survives a new
+-- board.
+function M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)
     local readout = Nexus.Readout
     local any = false
     for index = 1, 3 do
@@ -3614,7 +3617,7 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts)
         local line = type(lines) == "table" and SafeText(lines[index]) or ""
         if card and show and line ~= "" then
             local own = type(facts) == "table" and type(facts[index]) == "table" and facts[index] or nil
-            local shown = readout.OfferCard(line, marked == index, auto, own)
+            local shown = readout.OfferCard(line, marked == index, auto, own, frozen == index)
             card.name:SetText(shown.name)
             -- The name in its Echo quality colour (the design's quality on the
             -- name), only from the card's own quality fact and the addon's
@@ -3628,7 +3631,7 @@ function M.RenderOfferCards(lines, marked, auto, responsive, facts)
             card._nexusQuality = qc and q or nil
             card.quality:SetText(shown.quality)
             card.tag:SetText(shown.shown or shown.tag)
-            if shown.marked then
+            if shown.marked or shown.freeze then
                 card.tag:SetTextColor(OFFER.mark[1], OFFER.mark[2], OFFER.mark[3])
             else
                 card.tag:SetTextColor(0.75, 0.75, 0.75)
@@ -4961,8 +4964,14 @@ local function ApplyModel(model, signatures, roll)
             statusText:SetText("|cff7fd5ffRoll status|r")
         elseif guide and guide.openOrbs and guideText ~= "" then
             -- With the Orb guidance and its button: the short form, which
-            -- stays one line at every font scale.
-            statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Slot " .. activeSlot) or "|cff888888Preview|r")
+            -- stays one line at every font scale. With Auto OFF the player
+            -- chooses (Readout.OfferHeadingForms' shortest form), never
+            -- "Active".
+            if model.auto == false then
+                statusText:SetText("|cff7fd5ffYou choose|r" .. (activeSlot > 0 and (" · Slot " .. activeSlot) or " · Preview"))
+            else
+                statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Slot " .. activeSlot) or "|cff888888Preview|r")
+            end
         elseif #cards > 0 and Nexus.Readout and Nexus.Readout.OfferHeading then
             -- The design's offer heading (whose choice it is), with the
             -- destination it applies to: a Saved Build slot or a preview. It
@@ -4985,15 +4994,22 @@ local function ApplyModel(model, signatures, roll)
         -- read, so no older marker survives a new board.
         local marked = model.auto == false and Nexus.Readout and Nexus.Readout.MarkedCard
             and Nexus.Readout.MarkedCard(cards) or nil
+        -- Likewise the one card the recommendation freezes
+        -- (Readout.FreezeCard: exactly one, else none). It is shown as a
+        -- Freeze, never with the Take marker or the Wishlist pick tag.
+        local frozen = model.auto == false and not marked and Nexus.Readout and Nexus.Readout.FreezeCard
+            and Nexus.Readout.FreezeCard(cards) or nil
         for i = 1, 3 do
             local c = cards[i]
             local line = type(c) == "table" and SafeText(c.text) or ""
             if marked == i and line ~= "" then line = "|cff4dff80>>|r " .. line end
+            if frozen == i and line ~= "" then line = "|cff7fd5ff[Freeze]|r " .. line end
             cardTexts[i]:SetText(line)
         end
         -- The design's offer cards over these rows (M.RenderOfferCards). The
         -- marked card is the runtime's own Take target in either Auto mode;
-        -- the card's tag says what that means in each.
+        -- the card's tag says what that means in each. The Freeze card is
+        -- tagged only with Auto OFF.
         do
             local lines, facts = {}, {}
             for i = 1, 3 do
@@ -5001,16 +5017,19 @@ local function ApplyModel(model, signatures, roll)
                 facts[i] = type(cards[i]) == "table" and type(cards[i].facts) == "table" and cards[i].facts or false
             end
             M.RenderOfferCards(lines, Nexus.Readout and Nexus.Readout.MarkedCard
-                and Nexus.Readout.MarkedCard(cards) or nil, model.auto, responsiveLayout ~= nil, facts)
+                and Nexus.Readout.MarkedCard(cards) or nil, model.auto, responsiveLayout ~= nil, facts, frozen)
         end
         -- An unresolved Orb action's own reason is more specific than the
         -- general pause text; otherwise the recommendation stays first. A
         -- reserved block has no current choice: it says so, and no more.
+        -- An unstepped recommendation names its one Take or Freeze card; the
+        -- Freeze reason's own words say the action.
         local body = activeRoll and bodyText or "|cff888888No Echo choice is showing.|r"
-        if marked and activeRoll and bodyText == recommendation
-            and not (guide and guide.openOrbs) and type(cards[marked]) == "table" then
-            body = Nexus.Readout.RecommendationWithTarget(recommendation, SafeText(cards[marked].text),
-                type(cards[marked].facts) == "table" and cards[marked].facts or nil)
+        local named = marked or (recommendation ~= "" and frozen)
+        if named and activeRoll and bodyText == recommendation
+            and not (guide and guide.openOrbs) and type(cards[named]) == "table" then
+            body = Nexus.Readout.RecommendationWithTarget(recommendation, SafeText(cards[named].text),
+                type(cards[named].facts) == "table" and cards[named].facts or nil)
         end
         -- The inline Auto line follows whatever the body shows, on its own line.
         if autoNote ~= "" then body = (body ~= "" and (body .. "\n") or "") .. autoNote end

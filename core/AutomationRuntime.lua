@@ -3274,6 +3274,11 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
                 action.deltas and action.deltas[i]),
             highlight = (action.type == "take"
                 and board.cards[i].spellId == action.spellId),
+            -- Display only: the card offers the Echo the recommendation
+            -- freezes (Readout.FreezeCard names one only when exactly one
+            -- card does). It grants and requests nothing.
+            freeze = (action.type == "freeze"
+                and board.cards[i].spellId == action.spellId) or nil,
             -- The whole name and own quality the line was written from, so
             -- the offer cards never read a quality from the text.
             facts = Readout.CardFacts and Readout.CardFacts(card) or nil,
