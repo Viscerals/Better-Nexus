@@ -384,6 +384,8 @@ NAMES += ['native_dropdown_ownership']
 NAMES += ['native_details_measurement']
 # Issue #126: the mirrored difficulty is only the hardmode service's confirmed state (IsDifficultyKnown exactly true, GetCurrentDifficulty 1..6), read passively; compact HUD text and the selected Hardcore draft are never the difficulty; unknown stays the generic caption through the real TOC/Main/ViewModel/Panel (EXPECT fails at 9bfb2bb9 by design; native NOT_RUN).
 NAMES += ['server_status_difficulty_authority']
+# Issue #21 Stage A: a Community or Leaderboard scroll that keeps the exact bound virtual window (same rows, revisions, selection, layout and checked-out frames) does not release and rebind it; wheel steps, clamping, the overflow cue and every data, dirty, filter, selection, layout, resize and failure rebind are kept (EXPECT fails at 9bfb2bb9 by design; native flicker and frame timing NOT_RUN).
+NAMES += ['community_scroll_same_window','leaderboard_scroll_same_window']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

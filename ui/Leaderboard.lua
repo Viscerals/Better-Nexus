@@ -1093,16 +1093,50 @@ local function UpdateScrollCue(visibleH)
     if scrollValue < scrollMax then cue:Show() else cue:Hide() end
 end
 
+-- #21 Stage A: what the last completed bind showed. A scroll whose window,
+-- published rows, category, selection and checked-out rows all still match
+-- only moves the ScrollFrame (setScrollValue has done that) and its cue. Any
+-- other change, a pending refresh or a failure rebinds as before.
+local boundRows = nil
+local BOUND_ROW_FIELDS = {
+    "rows", "active", "activeCount", "count", "visibleH", "first", "last",
+    "maxOffset", "category", "selected",
+}
+local function BoundRowsKey(virtual, visibleH)
+    return {
+        rows=currentRows, active=activeRows, activeCount=#activeRows,
+        count=#currentRows, visibleH=visibleH, first=virtual.first,
+        last=virtual.last, maxOffset=virtual.maxOffset, category=category,
+        selected=selectedKey or false,
+    }
+end
+local function SameBoundRows(virtual, visibleH)
+    if not boundRows or refreshDirty or #currentRows == 0 then return false end
+    if scrollValue ~= virtual.offset or scrollMax ~= virtual.maxOffset then return false end
+    local key = BoundRowsKey(virtual, visibleH)
+    for _, field in ipairs(BOUND_ROW_FIELDS) do
+        if key[field] ~= boundRows[field] then return false end
+    end
+    return true
+end
+
 local function BindRows(reason)
     if rowBinding then return end
     rowBinding = true
     local ok, err = pcall(function()
-        ReleaseRows()
         local rowHeight = ROW_H + 2
         local visibleH = math.max(100,
             (listScroll and listScroll:GetHeight()) or 458)
         local virtual = Nexus.VirtualList.Window(
             #currentRows, rowHeight, visibleH, scrollValue, 2)
+        if reason == "scroll" and SameBoundRows(virtual, visibleH) then
+            -- The bound rows stay; the cue and reported offset follow the view.
+            UpdateScrollCue(visibleH)
+            virtualStats.offset = virtual.offset
+            return
+        end
+        boundRows = nil
+        ReleaseRows()
         for index = virtual.first, virtual.last do
             local row = currentRows[index]
             local r = GetRow(listChild)
@@ -1157,9 +1191,11 @@ local function BindRows(reason)
         if reason=="scroll" then virtualStats.scrollBinds=virtualStats.scrollBinds+1
         elseif reason=="resize" then virtualStats.resizeBinds=virtualStats.resizeBinds+1
         else virtualStats.dataBinds=virtualStats.dataBinds+1 end
+        boundRows = BoundRowsKey(virtual, visibleH)
     end)
     rowBinding = false
     if not ok then
+        boundRows = nil
         pcall(ReleaseRows)
         virtualStats.active=0
         virtualStats.first,virtualStats.last=1,0
