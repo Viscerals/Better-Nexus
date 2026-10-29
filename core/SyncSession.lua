@@ -805,6 +805,27 @@ function Session.New(options)
     -- Lifetime checks do not consume catalog/hash state or enqueue work. They
     -- must still run while the lifecycle withholds transport for preparation.
     function M.UpdatePendingRequestStatus()
+        -- A convergence begun before a session pause transition (issue #171),
+        -- even a Pause and Resume between two updates, ends here through the
+        -- identity-aware cancellation: an unsent or still-preparing request
+        -- never goes out later under that old grant. Requests already sent
+        -- keep their own receive windows.
+        if autoConverge.active then
+            local pause = Nexus.SessionPause
+            local epoch = pause and pause.Status().epoch or 0
+            if autoConverge.pauseEpoch ~= epoch then
+                local old = pendingRequest
+                local unsent = pendingRequest ~= nil or pendingHashRequest ~= nil
+                pendingHashRequest, pendingRequest = nil, nil
+                autoConverge.active = false
+                autoConverge.terminal = "session_pause"
+                if old then cancelRequest(old.id, myName()) end
+                if unsent then SetQueueOutcome("dropped") end
+                SetTerminal("session_pause")
+                log("SYNC", "convergence ended by a session pause")
+                return false
+            end
+        end
         if not pendingHashRequest and not pendingRequest then
             -- A sent request no longer owns either pending slot. Its absolute
             -- deadline still applies if later catalog work gates full updates.
@@ -907,6 +928,7 @@ function Session.New(options)
         autoSyncPending = false
         manualPreparationOwner = {}
         autoConverge.active = true
+        autoConverge.pauseEpoch = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
         autoConverge.pass = 0
         autoConverge.stable = 0
         autoConverge.terminal = nil
@@ -934,6 +956,7 @@ function Session.New(options)
         end
         autoSyncPending = false
         autoConverge.active = true
+        autoConverge.pauseEpoch = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
         autoConverge.pass = 0
         autoConverge.stable = 0
         autoConverge.terminal = nil

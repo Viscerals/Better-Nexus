@@ -4268,6 +4268,11 @@ function A.ToggleLever(leverId, wantDisabled)
         A.TomeObservationAttempt(leverId,wantDisabled,"already",lv.members[1],"not_evaluated",cur)
         return false, "already"
     end
+    -- Final boundary: the reads above can run other code.
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+        A.TomeObservationAttempt(leverId,wantDisabled,"pause",lv.members[1],"not_evaluated",cur)
+        return false, "Nexus paused for this session"
+    end
     local ok = SafeCall(svc.ToggleTomeEcho, lv.members[1])
     if ok then
         -- `pending` belongs to the read snapshot. The entry is written into
@@ -5109,6 +5114,8 @@ function A.UploadWishlist(slot, name, echoes, expected)
     -- list are treated as after a send. (Only this call; SafeCall is unchanged.)
     local upload = svc and svc.UploadServerBuildSlot
     if type(upload) ~= "function" then return false, "refused" end
+    -- Final boundary: the catalog and slot reads above can run other code.
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     local called, ok = pcall(upload, tonumber(slot) or 0, tostring(name or "Nexus"), clean)
     if not called then
         lastBuildOpAt = GetTime()
@@ -5186,6 +5193,9 @@ function A.SetSoloPicker()
     local opt = OptSvc()
     if not (opt and opt.SetSetting and opt.GetSetting) then return false end
     local cur = SafeCall(function() return opt:GetSetting("autoAcceptLoadoutEchoes") end)
+    -- The read above can run other code: no lease and no option change after
+    -- a pause it raised.
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if cur then
         UpdateStoreState(function(state)
             if state.priorAutoAccept == nil then state.priorAutoAccept = true end

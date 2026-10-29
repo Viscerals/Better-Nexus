@@ -642,6 +642,10 @@ function O.Select(token,index,expectedBoard,id,guard)
     if sessionPaused() then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     selfSelecting=true
     boundary("pick_call",s)
+    -- The boundary sink runs other code: a pause it raised still stops the
+    -- choice before the host. The journal then shows pick_call with no pick
+    -- outcome, followed by the caller's select_rejected.
+    if sessionPaused() then selfSelecting=false;return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     local ok,v=pcall(ownerContext.svc.SelectPerk,id)
     selfSelecting=false
     boundary((not ok or (v~=true and v~=false)) and "pick_unknown" or v==false and "pick_false" or "pick_true",nil)
@@ -930,6 +934,8 @@ function O.RequestRefresh(withChoice)
         if type(opts)=="table" and type(opts.GetSetting)=="function" then ok,value=pcall(opts.GetSetting,opts,"autoAcceptLoadoutEchoes") end
         if not ok or value~=false then return false,"auto_accept" end
     end
+    -- The option read above can run other code: nothing is sent yet.
+    if sessionPaused() then return false,"session_paused" end
     -- Keep the pre-existing charge/ownership refresh when the optional choice
     -- query is missing, but report failure: partial facts authorize no recovery.
     local ord=T.ord
@@ -939,8 +945,15 @@ function O.RequestRefresh(withChoice)
     -- before the call, so a synchronous reply is included in serialization too.
     T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=ord
     local mark={ord=ord,n=T.requests,epoch=T.epoch,ownBare=T.ownBare}
+    -- A pause raised inside a request already sent keeps that request and its
+    -- mark; only the requests not yet sent are refused.
+    if sessionPaused() then return false,"session_paused",mark end
     local okB=pcall(svc.RequestGrantedPerks)
     if not okB then return false,"ownership_refresh_failed",mark end
+    if withChoice and choiceReady and sessionPaused() then
+        mark.ownBare=T.ownBare;mark.choiceUnverified=true
+        return false,"session_paused",mark
+    end
     local bareBefore,framedBefore=T.ownBare,T.ownFramed
     local okCall=not withChoice or (choiceReady and pcall(svc.RequestChoice))
     local okChoice=okCall

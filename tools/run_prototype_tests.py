@@ -388,6 +388,8 @@ NAMES += ['server_status_difficulty_authority']
 NAMES += ['community_scroll_same_window','leaderboard_scroll_same_window']
 # Issue #171: whole-addon session pause (Nexus.SessionPause): ordinary Auto held without an OFF/ON toggle, Orb runs held and never resumed by Resume, Sync/share/DPS quiet, memory-only lifetime (synthetic fixtures; native NOT_RUN).
 NAMES += ['session_pause_auto','session_pause_orb','session_pause_sync','session_pause_dps','session_pause_lifetime']
+# Issue #171 review repairs: pauses raised inside final callbacks (Orb pick boundary/refresh, option, tome, upload, wire, whisper, Details) stop the unsent work; a timely ACK settles a pre-pause HELLO; stale preparing Sync and queued handshakes end; paused start-up joins nothing (native NOT_RUN).
+NAMES += ['session_pause_final_boundaries','session_pause_sync_settlement']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

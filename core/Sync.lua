@@ -1061,6 +1061,9 @@ function Sync.EnsureChannel()
         HideChannelFromChat()
         return true
     end
+    -- No channel join while the session is paused (issue #171); a later
+    -- unpaused turn joins. Channel membership already held is unchanged.
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false end
     if JoinTemporaryChannel then pcall(JoinTemporaryChannel, SYNC_CHANNEL)
     elseif JoinChannelByName then pcall(JoinChannelByName, SYNC_CHANNEL) end
     idx = FindSyncChannel()
@@ -4161,6 +4164,8 @@ Session = SessionFactory.New({
         if wire and wire.IsWhisperTargetBlocked(target) then
             return false, "peer offline"
         end
+        -- Final boundary: the guards above can run other code.
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
         return SendChatMessage(message, "WHISPER", nil, target)
     end,
     syncMode=function()
