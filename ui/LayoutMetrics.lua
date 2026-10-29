@@ -385,6 +385,7 @@ local function PanelKey(spec)
         spec.planDetails and 1 or 0,spec.orbLine and 1 or 0,
         tonumber(spec.autoScopeRows) or 0,
         spec.noOffer and 1 or 0,
+        math.ceil(tonumber(spec.detailNamesH) or 0),
     }, "|")
 end
 
@@ -566,7 +567,13 @@ function M.Panel(spec)
             Add(layout,"planExtra",12,cursor,columnWidth,small)
             Add(layout,"planLocked",rightX,cursor,rightW,small)
             cursor = cursor + small + gap
-            local columnHeight = small * 4 + math.max(3,math.floor(gap/2))
+            -- Each name column: its heading, a gap, then its three one-line
+            -- name rows (two names and "+N more"), modelled at the small
+            -- row; when the client measured those rows taller in their real
+            -- font, width and text (Panel.PanelLayout, spec.detailNamesH),
+            -- that measured stack instead, so the last row is never cut.
+            local namesH = math.max(small * 3, math.ceil(tonumber(spec.detailNamesH) or 0))
+            local columnHeight = small + math.max(3,math.floor(gap/2)) + namesH
             Add(layout,"needed",12,cursor,columnWidth,columnHeight)
             Add(layout,"shed",rightX,cursor,rightW,columnHeight)
             cursor = cursor + columnHeight + gap

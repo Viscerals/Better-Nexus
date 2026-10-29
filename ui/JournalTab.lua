@@ -972,7 +972,14 @@ end
 local function MenuOpen(items, anchor)
     if type(EasyMenu) ~= "function" then return end
     M._menuFrame = M._menuFrame or CreateFrame("Frame", "NexusJournalAssociationMenu", UIParent, "UIDropDownMenuTemplate")
-    EasyMenu(items, M._menuFrame, anchor, 0, 0, "MENU")
+    -- Theme.OpenMenu: the same EasyMenu call, with the shared list opaque
+    -- while it shows this Nexus menu.
+    local theme = Nexus.Theme
+    if theme and type(theme.OpenMenu) == "function" then
+        theme.OpenMenu(items, M._menuFrame, anchor, 0, 0)
+    else
+        EasyMenu(items, M._menuFrame, anchor, 0, 0, "MENU")
+    end
 end
 
 local function FrameText(frame)

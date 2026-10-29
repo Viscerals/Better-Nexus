@@ -2453,7 +2453,7 @@ local function EnsureFrame()
         if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
         NexusDB = NexusDB or {}
         M._moreMenu = M._moreMenu or CreateFrame("Frame", "NexusPanelMoreMenu", UIParent, "UIDropDownMenuTemplate")
-        EasyMenu(M.MoreMenuItems(self), M._moreMenu, self, 0, 0, "MENU")
+        M.OpenMenu(M.MoreMenuItems(self), M._moreMenu, self)
     end)
     menuBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
@@ -3161,7 +3161,19 @@ function M.ShowHub(kind, anchor)
     if type(EasyMenu) ~= "function" then return false end
     if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
     M._hubMenu = M._hubMenu or CreateFrame("Frame", "NexusPanelHubMenu", UIParent, "UIDropDownMenuTemplate")
-    EasyMenu(M.HubMenuItems(kind), M._hubMenu, anchor or "cursor", 0, 0, "MENU")
+    M.OpenMenu(M.HubMenuItems(kind), M._hubMenu, anchor or "cursor")
+    return true
+end
+
+-- Every Panel menu opens through Theme.OpenMenu: the same EasyMenu call, with
+-- the shared list that shows it opaque while it is this Nexus menu (Theme:
+-- native menus Nexus opens). Without Theme it is the plain EasyMenu call.
+function M.OpenMenu(items, menuFrame, anchor)
+    local theme = Nexus.Theme
+    if theme and type(theme.OpenMenu) == "function" then
+        return theme.OpenMenu(items, menuFrame, anchor, 0, 0)
+    end
+    EasyMenu(items, menuFrame, anchor, 0, 0, "MENU")
     return true
 end
 
@@ -3339,12 +3351,163 @@ local function RenderPerformance(pr, completed)
     AddDpsTooltip(lkHit, "Lich King", myLK, topLK)
 end
 
+------------------------------------------------------------------------
+-- The STILL NEEDED and EXTRA COPIES name columns (native acceptance of
+-- test.163009, default scale: with many distinct missing or extra Echoes the
+-- expanded Details face showed only the first name, with neither the second
+-- name nor "+N more"). The face was one no-wrap FontString holding
+-- "first\nsecond\n+N more" in a box modelled at three 11-unit rows. Whether
+-- the client drew one line because of no-wrap, its line height or that box
+-- is not established, so the face no longer depends on any of them: each
+-- line is its own one-line FontString (the column's own FontString is the
+-- first; two more are made once, in its font and colour), measured by the
+-- client at its final font and width and stacked by those heights, and
+-- LayoutMetrics.Panel reserves that measured stack when it is taller than
+-- the modelled rows (M.PanelLayout). The column keeps its box, so its hover
+-- (HitFrame) still covers every line and lists every complete name; the
+-- words, counts, colours and the two-names-then-"+N more" rule are as
+-- before. Built lazily, through M and frame fields: EnsureFrame is at the
+-- Lua 5.1 upvalue ceiling.
+------------------------------------------------------------------------
+-- The face's lines: the first two names, then "+N more" for the rest. A
+-- name stays one line (a line break inside it is a space); `stripDetail`
+-- drops a " (Quality:xN ...)" breakdown, which the hover shows.
+function M.DetailNameLines(names, stripDetail)
+    names = type(names) == "table" and names or {}
+    local lines = {}
+    local shown = math.min(#names, 2)
+    for i = 1, shown do
+        local name = (tostring(names[i]):gsub("[\r\n]+", " "))
+        if stripDetail then name = (name:gsub("%s+%b()", "")) end
+        lines[#lines + 1] = name
+    end
+    if #names > shown then lines[#lines + 1] = "+" .. (#names - shown) .. " more" end
+    return lines
+end
+
+-- The column's three one-line rows: the column itself, then two made once.
+function M.DetailRows(column, r, g, b)
+    local rows = column._nexusRows
+    if rows then return rows end
+    local metrics = Nexus.LayoutMetrics
+    local font = metrics and metrics.FontObject and metrics.FontObject("small") or "GameFontHighlightSmall"
+    rows = {column}
+    for index = 2, 3 do
+        local row = frame:CreateFontString(nil, "OVERLAY", font)
+        row:SetJustifyH("LEFT")
+        row:SetJustifyV("TOP")
+        if type(row.SetWordWrap) == "function" then pcall(row.SetWordWrap, row, false) end
+        row:SetTextColor(r, g, b)
+        row:Hide()
+        rows[index] = row
+    end
+    column._nexusRows = rows
+    return rows
+end
+
+-- The client's height of one row's text at its width, by the measurement
+-- LayoutMetrics.WrapHeight and Overflows already use (height 0, then
+-- GetStringHeight; the box height is restored). Without a measurement, the
+-- conservative model's line.
+function M.DetailLineHeight(row)
+    local height = row:GetHeight()
+    row:SetHeight(0)
+    local ok, measured = pcall(row.GetStringHeight, row)
+    row:SetHeight(height)
+    measured = ok and tonumber(measured) or nil
+    if measured and measured > 0 and measured < math.huge then return math.ceil(measured) end
+    local metrics = Nexus.LayoutMetrics
+    if metrics and metrics.ConservativeText and metrics.RuntimeMetrics then
+        local _, line = metrics.ConservativeText((metrics.RuntimeMetrics()))
+        return line
+    end
+    return 17
+end
+
+-- Rows two and three, each under the one above at its measured height, at
+-- the column's width. Returns the height of the column's lines.
+function M.PlaceDetailRows(column)
+    local rows = column and column._nexusRows
+    if not rows then return 0 end
+    local width = math.max(1, tonumber(column:GetWidth()) or 1)
+    local top = 0
+    for index = 1, #rows do
+        local row = rows[index]
+        if (row:GetText() or "") ~= "" then
+            if index > 1 then row:SetWidth(width) end
+            local height = M.DetailLineHeight(row)
+            if index > 1 then
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", column, "TOPLEFT", 0, -top)
+                row:SetSize(width, height)
+            end
+            top = top + height
+        end
+    end
+    return top
+end
+
+-- Rows two and three follow the column's own visibility while they hold a
+-- line.
+function M.ShowDetailRows(column)
+    local rows = column and column._nexusRows
+    if not rows then return end
+    local shown = column:IsShown() and true or false
+    for index = 2, #rows do
+        SetVisible(rows[index], shown and (rows[index]:GetText() or "") ~= "")
+    end
+end
+
+function M.SetDetailNames(column, lines, empty, r, g, b)
+    if not column then return 0 end
+    local rows = M.DetailRows(column, r, g, b)
+    for index = 1, #rows do
+        rows[index]:SetText(lines[index] or (index == 1 and empty) or "")
+    end
+    M.ShowDetailRows(column)
+    return M.PlaceDetailRows(column)
+end
+
+-- Both columns' lines from the run's lists; returns the taller column's
+-- measured lines.
+function M.RenderDetailNames(missing, shed)
+    local need = M.SetDetailNames(needText, M.DetailNameLines(missing, true),
+        "|cff888888No remaining demand|r", 1, 0.5, 0.2)
+    local extra = M.SetDetailNames(shedText, M.DetailNameLines(shed, false),
+        "|cff888888None|r", 0.72, 0.52, 1)
+    return math.max(need, extra)
+end
+
+-- LayoutMetrics.Panel, with the open Details name columns reserved at the
+-- client's measured height of their real lines when that is taller than the
+-- modelled rows. Collapsed Details measures nothing and keeps the model.
+function M.PanelLayout(spec, progress)
+    local metrics = Nexus.LayoutMetrics
+    local layout = metrics.Panel(spec)
+    local boxes = type(layout) == "table" and layout.boxes or nil
+    if not (spec.planDetails and boxes and boxes.needed and boxes.shed and needText and shedText) then
+        return layout
+    end
+    local pr = type(progress) == "table" and progress or {}
+    needText:SetWidth(boxes.needed.w)
+    shedText:SetWidth(boxes.shed.w)
+    local height = M.RenderDetailNames(type(pr.missing) == "table" and pr.missing or {},
+        type(pr.shed) == "table" and pr.shed or {})
+    if height > layout.small * 3 then
+        spec.detailNamesH = height
+        layout = metrics.Panel(spec)
+    end
+    return layout
+end
+
 local function ShowCoreProgress(show)
     SetVisible(progressLabel, show); SetVisible(progressValue, show)
     SetVisible(needLabel, show); SetVisible(needText, show); SetVisible(needHit, show)
+    M.ShowDetailRows(needText)
     local showTomes = show and #unknownTomesCache > 0
     SetVisible(tomesLabel, showTomes); SetVisible(tomesValue, showTomes); SetVisible(tomesHit, showTomes)
     SetVisible(shedLabel, show); SetVisible(shedText, show); SetVisible(shedHit, show)
+    M.ShowDetailRows(shedText)
     local showToLock = show and #toLockNamesCache > 0
     if frame then
         SetVisible(frame.toLockLabel, showToLock); SetVisible(frame.toLockText, showToLock); SetVisible(frame.toLockHit, showToLock)
@@ -3893,6 +4056,7 @@ function M.RenderPlaySummary(model, layout)
     if play then
         SetVisible(needLabel, details); SetVisible(needText, details); SetVisible(needHit, details)
         SetVisible(shedLabel, details); SetVisible(shedText, details); SetVisible(shedHit, details)
+        M.ShowDetailRows(needText); M.ShowDetailRows(shedText)
         SetVisible(frame._needLabelHit, details); SetVisible(frame._shedLabelHit, details)
         local toLock = details and #toLockNamesCache > 0
         SetVisible(frame.toLockLabel, toLock); SetVisible(frame.toLockText, toLock); SetVisible(frame.toLockHit, toLock)
@@ -4567,6 +4731,7 @@ local function ApplyPanelLayout(layout, completed)
         PlacePanelRect(needText,boxes.needed.x,
             boxes.needed.y+layout.small+labelGap,boxes.needed.w,
             boxes.needed.h-layout.small-labelGap)
+        M.PlaceDetailRows(needText)
     end
     if boxes.shed then
         PlacePanelRect(shedLabel,boxes.shed.x,boxes.shed.y,
@@ -4574,6 +4739,7 @@ local function ApplyPanelLayout(layout, completed)
         PlacePanelRect(shedText,boxes.shed.x,
             boxes.shed.y+layout.small+labelGap,boxes.shed.w,
             boxes.shed.h-layout.small-labelGap)
+        M.PlaceDetailRows(shedText)
     end
     if boxes.toLock and frame.toLockLabel then
         PlacePanelRect(frame.toLockLabel,boxes.toLock.x,boxes.toLock.y,
@@ -4711,7 +4877,9 @@ local function ApplyModel(model, signatures, roll)
         local metricsOk, fontScale, uiScale, revision =
             pcall(Nexus.LayoutMetrics.RuntimeMetrics)
         if metricsOk then
-            local layoutOk, candidate = pcall(Nexus.LayoutMetrics.Panel,{
+            -- M.PanelLayout: LayoutMetrics.Panel, with open Details name
+            -- columns at their measured height.
+            local layoutOk, candidate = pcall(M.PanelLayout,{
                 width=420,fontScale=fontScale,uiScale=uiScale,
                 revision=revision,activeRoll=rollBlock,
                 statusVisible=statusVisible,noBuild=noBuild,
@@ -4745,7 +4913,7 @@ local function ApplyModel(model, signatures, roll)
                     and Nexus.Readout and Nexus.Readout.AUTO_ON_NOTE
                     and Nexus.LayoutMetrics.TextRows(Nexus.Readout.AUTO_ON_NOTE, 396, fontScale)
                     or 0,
-            })
+            }, pr)
             if layoutOk and type(candidate) == "table" then
                 responsiveLayout = candidate
             end
@@ -5027,24 +5195,13 @@ local function ApplyModel(model, signatures, roll)
         needText:SetWidth(112)
 
         SetPoint(needText, "TOPLEFT", frame, "TOPLEFT", 12, progressTop - 58)
-        local needLines = {}
-        local shown = math.min(#missingNamesCache, 2)
-        for i = 1, shown do
-            -- Strip " (Poor:×N Common:×N ...)" from HUD label — quality
-            -- breakdown is in the tooltip on mouseover instead.
-            needLines[#needLines + 1] = missingNamesCache[i]:gsub("%s+%b()", "")
-        end
-        if #missingNamesCache > shown then needLines[#needLines + 1] = "+" .. (#missingNamesCache - shown) .. " more" end
-        needText:SetText(#needLines > 0 and table.concat(needLines, "\n") or "|cff888888No remaining demand|r")
-
         SetPoint(shedLabel, "TOPLEFT", frame, "TOPLEFT", 142, progressTop - 42)
         SetPoint(shedText, "TOPLEFT", frame, "TOPLEFT", 142, progressTop - 58)
         shedText:SetWidth(108)
-        local shedLines = {}
-        local shedShown = math.min(#shedNamesCache, 2)
-        for i = 1, shedShown do shedLines[#shedLines + 1] = shedNamesCache[i] end
-        if #shedNamesCache > shedShown then shedLines[#shedLines + 1] = "+" .. (#shedNamesCache - shedShown) .. " more" end
-        shedText:SetText(#shedLines > 0 and table.concat(shedLines, "\n") or "|cff888888None|r")
+        -- Two names, then "+N more", one line each (M.DetailNameLines). The
+        -- STILL NEEDED face drops " (Poor:×N Common:×N ...)": the quality
+        -- breakdown is in the tooltip on mouseover instead.
+        M.RenderDetailNames(missingNamesCache, shedNamesCache)
 
         if #toLockNamesCache > 0 then
             SetPoint(frame.toLockLabel, "TOPLEFT", frame, "TOPLEFT", 12, progressTop - 90)

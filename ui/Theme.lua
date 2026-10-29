@@ -19,6 +19,7 @@ local stats = {
     buttonsStyled=0, virtualRows=0, hooks=0, textures=0,
     windowsStyled=0, exemptTrees=0, resolves=0, reapplies=0,
     reappliedControls=0, preferenceChanges=0, windowBases=0, tooltipBases=0,
+    menuFills=0,
 }
 
 local WHITE = "Interface\\Buttons\\WHITE8X8"
@@ -90,6 +91,12 @@ local windows = setmetatable({}, weak)
 local rows = setmetatable({}, weak)
 local selectables = setmetatable({}, weak)
 local labels = setmetatable({}, weak)
+-- Native menus Nexus opens (T.OpenMenu): the initializer frames it opened
+-- them with, each shared list's own fill, and the lists that show a Nexus
+-- menu now (list -> its initializer).
+local menuOwners = setmetatable({}, weak)
+local menuFills = setmetatable({}, weak)
+local menuLists = setmetatable({}, weak)
 -- An explicit choice the Store owner could not keep (read-only saved data or
 -- no owner yet). It lasts for this session only and is never written anywhere.
 local session = {}
@@ -443,14 +450,15 @@ function T.StyleWindow(window, alpha)
 end
 
 -- A Nexus tooltip gets the same solid floor: a base under GameTooltip, shown
--- only while the tooltip's owner lies inside a styled Nexus window, and hidden
--- for every other owner and whenever the tooltip hides. GameTooltip's own
+-- only while the tooltip's owner lies inside a styled Nexus window or a
+-- shared menu list that shows a Nexus menu now (T.OpenMenu), and hidden for
+-- every other owner and whenever the tooltip hides. GameTooltip's own
 -- backdrop, size and lines are unchanged. Created and hooked once.
 local tooltipHooked = false
 local function StyledOwner(owner)
     local node, depth = owner, 0
     while node and depth < 16 do
-        if windows[node] then return node end
+        if windows[node] or menuLists[node] then return node end
         if type(node.GetParent) ~= "function" then return nil end
         local ok, parent = pcall(node.GetParent, node)
         node = ok and parent or nil
@@ -504,6 +512,115 @@ function T.EnsureTooltipBase()
         if self._nexusSolidBase then self._nexusSolidBase:Hide() end
     end)
     stats.hooks = stats.hooks + 3
+    return true
+end
+
+-- Native menus Nexus opens (native acceptance of test.163009: the Options
+-- menu fitted the screen, but main-panel text stayed readable through it).
+-- EasyMenu initializes the Nexus anchor frame and then displays the menu in
+-- the shared DropDownList<n> frames that every game and addon menu reuses
+-- (3.3.5 export, build 12340: UIDropDownMenu.xml 5-20; UIDropDownMenu.lua
+-- 178-201, 576-722 and 794-810; EasyMenu.lua 17-22), so styling the anchor
+-- never reached the surface on screen. Such a list gets one solid fill: a
+-- BACKGROUND texture of the list itself over its stock MenuBackdrop's
+-- background area (that backdrop's own 5-unit insets, UIDropDownMenuTemplates
+-- .xml 163-196, so no square corner shows past its rounded border),
+-- so that backdrop, its border and every row (all child frames of the list)
+-- still draw over it, in the list's own FULLSCREEN_DIALOG strata; no frame
+-- level is assumed. The fill shows only while its list is shown and the root
+-- menu open in it (UIDROPDOWNMENU_OPEN_MENU: set for level 1 and kept by its
+-- submenus, lines 622-624 and 690-693) is a frame T.OpenMenu opened. Another
+-- menu reusing the list, a hide and a close hide it again; the lists keep
+-- every script (HookScript), size, anchor, row, callback and timeout, and
+-- ToggleDropDownMenu is only post-hooked. Native effective opacity is not
+-- established here.
+local MENU_INSET = 5
+local menuHooked = false
+
+local function SyncMenuList(list)
+    local fill = list and menuFills[list]
+    if not fill then return false end
+    local open = _G.UIDROPDOWNMENU_OPEN_MENU
+    if not (open ~= nil and menuOwners[open] and list:IsShown()) then
+        fill:Hide()
+        menuLists[list] = nil
+        return false
+    end
+    if not active then Active() end
+    local c = active.style.baseColor or active.style.windowColor
+    pcall(fill.SetVertexColor, fill, c[1], c[2], c[3], 1)
+    fill:Show()
+    menuLists[list] = open
+    return true
+end
+
+local function HideMenuFill(list)
+    local fill = menuFills[list]
+    if fill then fill:Hide() end
+    menuLists[list] = nil
+end
+
+-- Made once per shared list, the first time a Nexus menu shows in it.
+local function MenuFill(list)
+    local fill = menuFills[list]
+    if fill then return fill end
+    if not (list.CreateTexture and list.HookScript) then return nil end
+    fill = list:CreateTexture(nil, "BACKGROUND")
+    stats.textures = stats.textures + 1
+    fill:SetTexture(WHITE)
+    local name = list.GetName and list:GetName()
+    local surface = name and _G[name .. "MenuBackdrop"] or list
+    fill:SetPoint("TOPLEFT", surface, "TOPLEFT", MENU_INSET, -MENU_INSET)
+    fill:SetPoint("BOTTOMRIGHT", surface, "BOTTOMRIGHT", -MENU_INSET, MENU_INSET)
+    fill:Hide()
+    menuFills[list] = fill
+    stats.menuFills = stats.menuFills + 1
+    -- A list shown or redrawn for another owner, or hidden by a close or a
+    -- timeout, follows at once.
+    list:HookScript("OnShow", SyncMenuList)
+    list:HookScript("OnHide", HideMenuFill)
+    stats.hooks = stats.hooks + 2
+    return fill
+end
+
+-- Every shared list, levels made on demand included: a list a Nexus menu
+-- shows gets its fill, every other list has it hidden. Returns how many
+-- lists show a Nexus menu.
+function T.SyncMenus()
+    local open = _G.UIDROPDOWNMENU_OPEN_MENU
+    local owned = open ~= nil and menuOwners[open] == true
+    local treated, level = 0, 1
+    local list = _G.DropDownList1
+    while list do
+        if owned and list:IsShown() then MenuFill(list) end
+        if SyncMenuList(list) then treated = treated + 1 end
+        level = level + 1
+        list = _G["DropDownList" .. level]
+    end
+    return treated
+end
+
+-- Submenus open from a row's hover or its arrow, both through
+-- ToggleDropDownMenu (UIDropDownMenuTemplates.xml 87-101 and 130-150).
+local function EnsureMenuHook()
+    if menuHooked then return true end
+    if not (type(hooksecurefunc) == "function" and type(ToggleDropDownMenu) == "function") then
+        return false
+    end
+    menuHooked = true
+    hooksecurefunc("ToggleDropDownMenu", function() pcall(T.SyncMenus) end)
+    stats.hooks = stats.hooks + 1
+    return true
+end
+
+-- Opens a Nexus menu exactly as EasyMenu(items, frame, anchor, x, y, "MENU")
+-- does, with `frame` recorded as a Nexus initializer.
+function T.OpenMenu(items, frame, anchor, x, y)
+    if type(EasyMenu) ~= "function" or not frame then return false end
+    menuOwners[frame] = true
+    EnsureMenuHook()
+    EasyMenu(items, frame, anchor, x or 0, y or 0, "MENU")
+    T.SyncMenus()
     return true
 end
 
@@ -779,8 +896,7 @@ function T.ShowMenu(anchor)
     if type(EasyMenu) ~= "function" then return false end
     if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
     T._menu = T._menu or CreateFrame("Frame", "NexusAppearanceMenu", UIParent, "UIDropDownMenuTemplate")
-    EasyMenu(T.MenuItems(CloseDropDownMenus), T._menu, anchor or "cursor", 0, 0, "MENU")
-    return true
+    return T.OpenMenu(T.MenuItems(CloseDropDownMenus), T._menu, anchor or "cursor", 0, 0)
 end
 
 -- Re-reads the choice and repaints styled controls if it changed.

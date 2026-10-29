@@ -378,6 +378,10 @@ NAMES += ['native_qa_163008']
 NAMES += ['visual_guide_context_163009']
 # Issue #163 workspace composition: opaque bases under styled windows and Nexus tooltips, the Theme primary fill; Records title/scope/selection prompt/scroll cue; Explore catalog version on hover and a no-selection detail; Plan search placeholder, primary Save and an Auto-manage label clear of My Builds; the Orb window's Start reason under Start (EXPECT fails at 9bf92559 by design; offline model only, native NOT_RUN).
 NAMES += ['visual_workspaces_163009']
+# Native acceptance of test.163009, Options menu: the shared DropDownList<n> showing a Nexus menu gets one opaque fill under its rows only while it shows that menu (UIDROPDOWNMENU_OPEN_MENU plus visibility); submenus, a level made on demand, close/reopen, other addons' and game menus reusing the lists, stock handlers and tooltip ownership, over a synthetic FrameXML dropdown written from the build-12340 export contract (EXPECT fails at a9ff2eda by design; native opacity NOT_RUN).
+NAMES += ['native_dropdown_ownership']
+# Native acceptance of test.163009, Play Details: five missing and seven extra distinct names show two names and +3 / +5 more as separate measured one-line rows, whole inside their columns at default, taller and 125% text and both no-wrap readings; held top, downward growth / edge clamp, collapse of all four categories and every row, memory-only reload (EXPECT fails at a9ff2eda by design; native fit NOT_RUN).
+NAMES += ['native_details_measurement']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
