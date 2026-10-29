@@ -345,7 +345,10 @@ function M.FitToScreen(frame, margin, ceiling)
     local width, height = tonumber(frame:GetWidth()), tonumber(frame:GetHeight())
     local screenW = UIParent and tonumber(UIParent:GetWidth())
     local screenH = UIParent and tonumber(UIParent:GetHeight())
-    if not (width and height and screenW and screenH) or width ~= width or height ~= height
+    -- Finite sizes only (review of e1183fd): an infinite size would make a
+    -- ratio infinite or zero and step past the ceiling or the floor.
+    local function Finite(v) return v ~= nil and v == v and v > -math.huge and v < math.huge end
+    if not (Finite(width) and Finite(height) and Finite(screenW) and Finite(screenH))
         or width <= 0 or height <= 0 or not (screenW >= 640 and screenH >= 480) then return nil end
     local scale = math.max(0.5, math.min(ceiling, (screenW - margin) / width,
         (screenH - margin) / height))

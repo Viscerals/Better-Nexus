@@ -394,6 +394,8 @@ NAMES += ['crimson_panel_scale']
 NAMES += ['crimson_panel_pause']
 # Issue #169 (panelA): short Auto hover (state, next action, consequence; OFF, selected ON, held, refused click, session pause) naming Options > Auto explained, which opens the Help Auto page with every former disclosure and current permission values; Options > Questions (FAQ) page and tab; reading changes nothing (EXPECT fails at e1183fd by design; native tooltip drawing NOT_RUN).
 NAMES += ['crimson_panel_auto_help']
+# Independent review of the panelA slices (#168, #170, #171, #169): a render's hide reaching the drag origin keeps the move while a real hide or origin removal ends it once; Charges, recommendation and Details-heading hovers fit their text; Callboard title/objective tooltips suppressed after their producers during a move; a centre saved at a fitted size survives a fresh load; FitToScreen refuses infinite sizes; an unreadable pause Status is unknown, not unpaused; a confirmed pause is the Auto hold over stale state words (EXPECT fails at 4358349 by design; native NOT_RUN).
+NAMES += ['crimson_panel_review_fixes']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

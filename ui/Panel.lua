@@ -1877,6 +1877,7 @@ function M.ApplyPanelScale()
     local metrics = Nexus.LayoutMetrics
     local effective = metrics and type(metrics.FitToScreen) == "function"
         and metrics.FitToScreen(frame, nil, requested) or nil
+    local fitted = effective ~= nil
     if not effective then
         local current = tonumber(frame:GetScale())
         if not (Finite(current) and current >= SCALE_MIN and current <= SCALE_MAX) then
@@ -1886,6 +1887,17 @@ function M.ApplyPanelScale()
     end
     M._panelScaleStatus = {requested = requested, effective = effective}
     local okA, after = pcall(frame.GetEffectiveScale, frame)
+    local restore = M._restorePlacement
+    if restore and fitted then
+        M._restorePlacement = nil
+        local okU, uiScale = pcall(UIParent.GetEffectiveScale, UIParent)
+        if restore.x and okA and okU and Finite(after) and after > 0 and Finite(uiScale) and uiScale > 0 then
+            local ratio = after / uiScale
+            frame:ClearAllPoints()
+            frame:SetPoint("CENTER", UIParent, "CENTER", restore.x / ratio, restore.y / ratio)
+        end
+        return effective
+    end
     if okB and okA and okL and okT and Finite(before) and Finite(after) and before > 0
         and math.abs(before - after) > 0.0005 and Finite(left) and Finite(top) then
         M.PlacePanelTopLeft(left * before, top * before)
@@ -1895,6 +1907,11 @@ end
 
 -- The saved position at the chosen size (EnsureFrame): panelX / panelY are
 -- UIParent units, a point offset is in the panel's own.
+-- The first fit after this restore places the saved centre again at the
+-- size that fit applies (M._restorePlacement), instead of keeping the
+-- corner of this provisional placement: a saved centre is not moved by a
+-- reduction to fit (review of e1183fd). The default placement keeps its
+-- right-edge anchor.
 function M.RestorePanelPosition()
     local saved = M.SavedLayoutRoot()
     local scale = M.PanelScale()
@@ -1903,8 +1920,10 @@ function M.RestorePanelPosition()
     local x, y = tonumber(saved.panelX), tonumber(saved.panelY)
     if Finite(x) and Finite(y) then
         frame:SetPoint("CENTER", UIParent, "CENTER", x / scale, y / scale)
+        M._restorePlacement = {x = x, y = y}
     else
         frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
+        M._restorePlacement = {default = true}
     end
 end
 
@@ -1939,6 +1958,7 @@ function M.BeginPanelDrag(origin, button)
     local x, y = M.PanelCenterOffset()
     if not pcall(frame.StartMoving, frame) then return false end
     M._panelDrag = {origin = origin or frame, x = x, y = y}
+    M._restorePlacement = nil
     M.HidePanelTooltip(origin)
     return true
 end
@@ -1956,6 +1976,20 @@ function M.FinishPanelDrag()
     return true
 end
 
+-- After a render: a move continues only while the panel is shown and the
+-- surface it began on is still shown; otherwise it is finished (stopped and
+-- saved once) as a real hide would.
+function M.SettlePanelDrag()
+    local drag = M._panelDrag
+    if not drag then return false end
+    local origin = drag.origin
+    local okF, shown = pcall(frame.IsShown, frame)
+    local okO, originShown = true, true
+    if origin and origin ~= frame then okO, originShown = pcall(origin.IsShown, origin) end
+    if okF and shown and okO and originShown then return false end
+    return M.FinishPanelDrag()
+end
+
 -- Closes the shared tooltip only while `owner` (a panel surface) owns it.
 function M.HidePanelTooltip(owner)
     if not (owner and GameTooltip) then return end
@@ -1970,7 +2004,7 @@ end
 -- text takes no mouse; one this made mouse-less takes it again once it has
 -- text. Mouse input set by the label's owner is otherwise left alone.
 local PASSIVE_PAD = 4
-function M.FitPassiveHover(hit, text)
+function M.FitPassiveHover(hit, text, wrapped)
     if not (hit and text) then return nil end
     local box = tonumber(text:GetWidth()) or 0
     local value = text:GetText()
@@ -1981,9 +2015,20 @@ function M.FitPassiveHover(hit, text)
     local justify = text.GetJustifyH and text:GetJustifyH() or "LEFT"
     local point = justify == "RIGHT" and "TOPRIGHT" or justify == "CENTER" and "TOP" or "TOPLEFT"
     local fitted = width > 0 and math.min(box, width + (justify == "CENTER" and 2 or 1) * PASSIVE_PAD) or 0
+    local height = tonumber(text:GetHeight()) or 1
+    if wrapped and fitted > 0 then
+        -- A wrapped text box (top-aligned): the rows its text needs, never
+        -- taller than the box; measured at height 0 and the box restored,
+        -- as LayoutMetrics.Overflows does.
+        text:SetHeight(0)
+        local okH, measured = pcall(text.GetStringHeight, text)
+        text:SetHeight(height)
+        measured = okH and tonumber(measured) or nil
+        if measured and measured == measured and measured > 0 and measured < height then height = measured end
+    end
     hit:ClearAllPoints()
     hit:SetPoint(point, text, point, 0, 0)
-    hit:SetSize(math.max(1, fitted), math.max(1, tonumber(text:GetHeight()) or 1))
+    hit:SetSize(math.max(1, fitted), math.max(1, height))
     if fitted <= 0 then
         if not hit._nexusFitEmpty then hit._nexusFitEmpty = true; hit:EnableMouse(false) end
     elseif hit._nexusFitEmpty then
@@ -1994,7 +2039,10 @@ function M.FitPassiveHover(hit, text)
 end
 
 -- Every passive label hover of the main panel, after a render has set its
--- texts and boxes.
+-- texts and boxes. The Charges line, the recommendation, the Details
+-- headings and the Extra copies list are fitted only while shown (a hidden
+-- one takes no input). The destination row's hovers stay with their hidden
+-- row; the counts that open the Wishlist Editor are not passive.
 function M.FitPassiveHovers()
     if not frame then return end
     local p = frame._play or {}
@@ -2005,6 +2053,15 @@ function M.FitPassiveHovers()
         {frame._callboardTitleHit, frame._callboardTitle}, {frame._callboardLineHit, frame._callboardLine},
     }
     for i = 1, #pairs_ do M.FitPassiveHover(pairs_[i][1], pairs_[i][2]) end
+    local shownOnly = {
+        {frame._chargesHover, frame._chargesText}, {frame._recommendationHover, recText, true},
+        {frame._progressLabelHit, progressLabel}, {frame._needLabelHit, needLabel},
+        {frame._shedLabelHit, shedLabel}, {shedHit, shedText, true},
+    }
+    for i = 1, #shownOnly do
+        local hit = shownOnly[i][1]
+        if hit and hit:IsShown() then M.FitPassiveHover(hit, shownOnly[i][2], shownOnly[i][3]) end
+    end
 end
 
 -- A passive surface that takes the mouse for its hover (a label, count,
@@ -2020,9 +2077,12 @@ function M.PassiveDragSurface(hit)
     hit:RegisterForDrag("LeftButton")
     hit:SetScript("OnDragStart", function(self, button) M.BeginPanelDrag(self, button) end)
     hit:SetScript("OnDragStop", function() M.FinishPanelDrag() end)
+    -- A render hides the panel (and so its shown descendants) while it
+    -- applies and shows it again in the same call; that hide is not a
+    -- removal. M.SettlePanelDrag checks the origin once the render is done.
     hit:HookScript("OnHide", function(self)
         local drag = M._panelDrag
-        if drag and drag.origin == self then M.FinishPanelDrag() end
+        if drag and drag.origin == self and not renderState.applying then M.FinishPanelDrag() end
     end)
     hit:HookScript("OnEnter", function(self)
         if M._panelDrag then M.HidePanelTooltip(self) end
@@ -3270,6 +3330,7 @@ function M.MoreMenuItems(anchor)
         func = MenuAction(function()
             local saved = M.SavedLayoutRoot()
             saved.panelX, saved.panelY = nil, nil
+            M._restorePlacement = nil
             frame:ClearAllPoints()
             frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
         end) })
@@ -4538,7 +4599,6 @@ local function EnsureCallboardWidgets()
     frame._callboardTitle = title
     local titleHit = CreateFrame("Frame", nil, frame)
     titleHit:EnableMouse(true)
-    M.PassiveDragSurface(titleHit)
     frame._callboardTitleHit = titleHit
     local line = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     line:SetJustifyH("LEFT")
@@ -4548,7 +4608,6 @@ local function EnsureCallboardWidgets()
     frame._callboardLine = line
     local lineHit = CreateFrame("Frame", nil, frame)
     lineHit:EnableMouse(true)
-    M.PassiveDragSurface(lineHit)
     frame._callboardLineHit = lineHit
     -- The detail row shows the first objective line and +N more. Its hover
     -- shows every complete line in order, from the lines the last render
@@ -4574,6 +4633,11 @@ local function EnsureCallboardWidgets()
         -- hover, so that hover is not added to this row.
         Nexus.LayoutMetrics.OneLineLabel(line, nil, 17)
     end
+    -- Last, after every tooltip-producing OnEnter of the two rows (the
+    -- title's complete-text hover from OneLineLabel included), so a move's
+    -- tooltip suppression runs after them.
+    M.PassiveDragSurface(titleHit)
+    M.PassiveDragSurface(lineHit)
     local divider = frame:CreateTexture(nil, "ARTWORK")
     divider:SetHeight(1)
     pcall(function() divider:SetTexture(0.3, 0.3, 0.3, 0.65) end)
@@ -5755,6 +5819,7 @@ function M.Render(model)
         renderState.hadFailure = true
         renderStats.failures = renderStats.failures + 1
         frame:Hide()
+        M.SettlePanelDrag()
         if not ok then error(result, 0) end
         return false
     end
@@ -5773,6 +5838,7 @@ function M.Render(model)
         renderState.hadFailure = false
     end
     ApplyWantedVisibility()
+    M.SettlePanelDrag()
     return true
 end
 
@@ -5794,13 +5860,16 @@ local function ValidPause(status)
     return type(status) == "table" and type(status.paused) == "boolean" and type(epoch) == "number"
         and epoch >= 0 and epoch < math.huge and math.floor(epoch) == epoch
 end
+-- unknown: the API is there but its Status failed or was malformed, so
+-- whether Nexus is paused cannot be said either way (never "not paused").
 function M.PauseStatus()
     local api = PauseAPI()
     if not api then return {available = false, paused = false} end
     local ok, status = pcall(api.Status)
-    if not (ok and ValidPause(status)) then return {available = false, paused = false} end
+    if not (ok and ValidPause(status)) then return {available = false, paused = false, unknown = true} end
     return {available = true, paused = status.paused}
 end
+local PAUSE_UNKNOWN = "The session pause cannot be read right now, so Nexus may or may not be paused."
 
 -- After a transition the committed model is drawn again (Render only: no
 -- refresh step, no action is prepared).
@@ -5827,10 +5896,14 @@ function M.ResumeNexus() return Transition("Resume", false, "resume") end
 -- unavailable control. Building it reads Status only.
 function M.SessionMenuItems()
     local status = M.PauseStatus()
+    if status.unknown then
+        return {{ text = "Session pause: cannot be read right now", notCheckable = true, disabled = true,
+            tooltipTitle = "Session pause", tooltipText = PAUSE_UNKNOWN }}
+    end
     if not status.available then
         return {{ text = "Pause Nexus for this session (not available)", notCheckable = true, disabled = true,
             tooltipTitle = "Pause Nexus for this session",
-            tooltipText = "This build cannot pause Nexus for the session, so nothing is paused." }}
+            tooltipText = "This build has no session pause control." }}
     end
     if status.paused then
         return {{ text = "Resume Nexus", notCheckable = true, tooltipTitle = "Resume Nexus",
@@ -5903,6 +5976,15 @@ function M.AutoDetailLines()
             lines[#lines + 1] = line
         end
     end
+    local pause = M.PauseStatus()
+    if pause.paused then
+        -- The confirmed session pause is the current hold, over the
+        -- committed model's own state words.
+        lines[#lines + 1] = "Paused because: Nexus is paused for this session (Options > Resume Nexus)."
+        lines[#lines + 1] = "Now: paused for this session"
+        return lines
+    end
+    if pause.unknown then lines[#lines + 1] = PAUSE_UNKNOWN end
     local now = AutoNowLine(model, 600)
     if now then lines[#lines + 1] = now end
     return lines
@@ -5913,28 +5995,33 @@ end
 function M.AutoSummaryLines()
     local model, held = AutoFacts()
     local lines = {}
-    if M.PauseStatus().paused then
+    local pause = M.PauseStatus()
+    if pause.unknown then lines[1] = PAUSE_UNKNOWN end
+    if pause.paused then
         lines[1] = "Nexus is paused for this session: Auto, Orb actions, sharing and DPS recording wait."
         lines[2] = "To continue: Options > Resume Nexus. " .. RESUME_NOTE
     else
         local refusal = model.auto ~= true and type(M._autoRefusal) == "table" and M._autoRefusal.text or nil
+        local state, action
         if refusal then
-            lines[1] = "Your last click left Auto OFF: " .. Bounded(refusal, 160)
-            lines[2] = "Fix that, then click Auto again; a warning asks first."
+            state = "Your last click left Auto OFF: " .. Bounded(refusal, 160)
+            action = "Fix that, then click Auto again; a warning asks first."
         elseif model.auto == true and held then
-            lines[1] = "Auto is selected ON but held: " .. HoldWords(held)
-            lines[2] = "It continues when that clears. Click Auto to turn it OFF."
+            state = "Auto is selected ON but held: " .. HoldWords(held)
+            action = "It continues when that clears. Click Auto to turn it OFF."
         elseif model.auto == true then
-            lines[1] = "Auto is selected ON: your enabled actions may Take, Banish, Reroll and Freeze for you."
-            lines[2] = "Click Auto to turn it OFF."
+            state = "Auto is selected ON: your enabled actions may Take, Banish, Reroll and Freeze for you."
+            action = "Click Auto to turn it OFF."
         elseif model.auto == false then
-            lines[1] = "Auto is OFF: Nexus only recommends; you choose."
-            lines[2] = "Click Auto to turn it ON; a warning asks first."
+            state = "Auto is OFF: Nexus only recommends; you choose."
+            action = "Click Auto to turn it ON; a warning asks first."
         else
-            lines[1] = "Auto is not known yet."
-            lines[2] = "Wait for Nexus to finish loading."
+            state = "Auto is not known yet."
+            action = "Wait for Nexus to finish loading."
         end
-        lines[3] = "When ON it may spend charges and change your Saved Build. Orb runs need their own approval."
+        lines[#lines + 1] = state
+        lines[#lines + 1] = action
+        lines[#lines + 1] = "When ON it may spend charges and change your Saved Build. Orb runs need their own approval."
     end
     lines[#lines + 1] = "Full details: Options > Auto explained."
     return lines
@@ -5949,7 +6036,9 @@ function M.ShowAutoTooltip(owner)
         if i == #lines then GameTooltip:AddLine(lines[i], 1, 0.82, 0, true)
         else GameTooltip:AddLine(lines[i], 0.9, 0.9, 0.9, true) end
     end
-    local now = AutoNowLine(M._lastModel, 120)
+    -- A confirmed session pause is what holds Auto now, whatever the last
+    -- committed model's state words were.
+    local now = M.PauseStatus().paused and "Now: paused for this session" or AutoNowLine(M._lastModel, 120)
     if now then GameTooltip:AddLine(now, 1, 0.82, 0, true) end
     GameTooltip:Show()
 end

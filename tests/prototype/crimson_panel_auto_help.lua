@@ -32,7 +32,9 @@ local function Model(o)
   progress={wishlistName=o.wishlist or 'Auto plan',total=6,owned=2,missing={'Hollow Bell'},shed={},toLock={},unknownTomes={}}}
 end
 local function Effects()
- return table.concat({'actions='..#H.actions,'sent='..#H.sent,'saved='..F.Serialize(NexusDB),
+ -- Outbound ownership and slot refreshes are counted apart from H.sent.
+ return table.concat({'actions='..#H.actions,'sent='..#H.sent,'granted='..tostring(H.grantedRequests or 0),
+  'slots='..tostring(H.slotRequests or 0),'saved='..F.Serialize(NexusDB),
   'auto='..tostring(Nexus.RecomputeStats().autoEnabled==true)},' ')
 end
 local function Hover()

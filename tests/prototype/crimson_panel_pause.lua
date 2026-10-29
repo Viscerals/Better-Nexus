@@ -28,7 +28,9 @@ local function Model()
   progress={wishlistName='Pause plan',total=6,owned=2,missing={'Hollow Bell'},shed={},toLock={},unknownTomes={}}}
 end
 local function Effects()
- return table.concat({'actions='..#H.actions,'sent='..#H.sent,'saved='..F.Serialize(NexusDB),
+ -- Outbound ownership and slot refreshes are counted apart from H.sent.
+ return table.concat({'actions='..#H.actions,'sent='..#H.sent,'granted='..tostring(H.grantedRequests or 0),
+  'slots='..tostring(H.slotRequests or 0),'saved='..F.Serialize(NexusDB),
   'auto='..tostring(Nexus.RecomputeStats().autoEnabled==true)},' ')
 end
 -- The frozen API as a boundary double: pure reads, idempotent transitions.
@@ -54,6 +56,7 @@ local function Session()
  for _,item in ipairs(P.MoreMenuItems(NexusPanel._menuBtn)) do
   local t=type(item.text)=='string' and V.Plain(item.text) or ''
   if t:find('Pause Nexus',1,true) or t:find('Resume Nexus',1,true) or t:find('Pauses Auto',1,true)
+   or t:find('Session pause',1,true)
    or t:find('Auto can continue',1,true) or t:find('An action already sent',1,true)
    or t:find('Orb runs stay paused',1,true) then out[#out+1]=item end
  end
@@ -86,9 +89,14 @@ C.scenario('U1 without a usable API the control is unavailable and nothing says 
   Nexus.SessionPause=case[2]
   C.setup(P.Render(Model())==true,'U1: fixture: the panel renders with '..case[1])
   local rows=Session()
-  local pause=Find(rows,'Pause Nexus for this session')
-  C.expect(pause~=nil and pause.disabled==true and pause.func==nil and V.Plain(pause.text):find('not available',1,true)~=nil,
-   'U1: with '..case[1]..' the Pause row is shown as not available',pause and pause.text)
+  -- Review of 2578d17: a Status that fails or is malformed is unknown, not
+  -- unpaused; no module (or no Status) is a build without the control.
+  local unknown=case[2]~=nil and type(case[2].Status)=='function'
+  local pause=unknown and Find(rows,'Session pause: cannot be read') or Find(rows,'Pause Nexus for this session')
+  local word=unknown and 'cannot be read' or 'not available'
+  C.expect(pause~=nil and pause.disabled==true and pause.func==nil and V.Plain(pause.text):find(word,1,true)~=nil
+   and not tostring(pause.tooltipText):find('nothing is paused',1,true),
+   'U1: with '..case[1]..' the control is shown disabled as '..word,pause and pause.text)
   C.expect(Find(rows,'Resume Nexus')==nil and not Title():find('paused',1,true) and not Heading():find('Nexus paused',1,true),
    'U1: with '..case[1]..' nothing is labelled paused',Title()..' / '..Heading())
  end
