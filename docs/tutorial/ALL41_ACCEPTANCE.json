@@ -10,30 +10,37 @@
   "dispositionStatus": "author dispositions; independent Spec/Standards review of this rebinding is pending"
  },
  "sourcePin": {
-  "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-  "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+  "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+  "tree": "afd9170c34459ef5a976d989ab106535327724f5"
  },
  "baselineStatus": {
   "kind": "final-source-pin",
   "boundTo": {
-   "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-   "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+   "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+   "tree": "afd9170c34459ef5a976d989ab106535327724f5"
   },
-  "statement": "Source symbols, line citations and assertions are rebound to the final pin above. Final-pin execution: The root coordinator's final full CI at this pin is terminal and FAILED: Lua 579 of 580 listed fixtures passed, 1 failed (lifecycle_counter_accounting), 0 not run; both registered Python test files passed (84 cases); the source was unchanged during the run. Every fixture cited by a row passed in that run. The failed fixture is cited by no row; its file is unchanged since 9bfb2bb and it passed in the intermediate 6dcb46c full CI. It is not diagnosed here. The complete-suite gate is therefore not green at this pin. Each row keeps its 9bfb2bb results as historicalExecution; they are not proof of changed code. Lane runs and the intermediate 6dcb46c CI are not this code's execution."
+  "statement": "Source symbols, line citations and assertions are rebound to the final pin above. Final-pin execution: The root coordinator's complete CI at this pin is terminal and PASSED: Lua 580 of 580 listed fixtures passed, 0 failed, 0 not run; both registered Python test files passed (84 cases); the source was unchanged during the run. Every fixture cited by a row passed. Line citations were rebound against f399dd0, whose cited source and fixture blobs are identical at c7d2b74. Each row keeps its 9bfb2bb results as historicalExecution; they are not proof of changed code. The failed f399dd0 complete CI, lane runs and the intermediate 6dcb46c CI are historical, not this pin's execution."
  },
  "revision": {
   "supersedes": {
-   "commit": "2aaaecca766df39198780be1303f5352aca446d1",
-   "tree": "6c6a3a79ddee591fed2f3ff6cf326a3146e168e5",
-   "note": "That matrix text is integrated byte-identically in f399dd0 and described 9bfb2bb."
+   "commit": "8ae217f37df2e5c60942e20c3688a3652a3f8a23",
+   "tree": "98e698454f07059fd84a2d090d7a6dde467e6856",
+   "note": "That matrix text is integrated byte-identically in c7d2b74 and described f399dd0, including its failed complete CI."
   },
+  "earlier": [
+   {
+    "commit": "2aaaecca766df39198780be1303f5352aca446d1",
+    "described": "9bfb2bb"
+   }
+  ],
   "corrections": [
    "Every source and test citation is rebound to f399dd0: shifted lines are remapped mechanically; changed regions are re-read and rewritten.",
    "UX-02 and J4: partial -> met-offline-adopted-interpretation. G-UX02-a and G-UX02-b are resolved by 82b7695; the adopted reading of 'marked' (a separate Freeze mark) is recorded.",
    "UX-13: partial -> met-offline-adopted-interpretation. G-UX13 is resolved by 62f16c7; the literal 'planned' interpretation is recorded as a retained conflict.",
    "LP-13, LP-15, UX-07, UX-15 and the other partial rows stay partial; their citations are updated only.",
-   "Each row now separates final-pin execution (from the root receipt), lane runs and historical 9bfb2bb execution.",
-   "Trailing whitespace after empty Spec notes is removed from the Markdown."
+   "Each row separates final-pin execution, lane runs and historical 9bfb2bb execution.",
+   "This revision: the final pin is now c7d2b74. Every cited source and fixture blob was verified identical to f399dd0, so citations are unchanged. Per-row execution (status, exit, checks) is re-read from the passing c7d2b74 complete CI.",
+   "This revision: the failed f399dd0 complete CI is kept as historical, with its fixture-level cause and repair recorded; the CI blocker is removed from current obligations. Dispositions and counts are unchanged."
   ],
   "productOrTestChange": false,
   "rerun": false
@@ -97,13 +104,32 @@
     "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
    },
    "final": {
+    "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+    "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+   },
+   "finalParents": [
+    "0c6e0db572685b65288902080a43edf16a11db4d",
+    "63ff47019ac1b3e9b6f209d14fc6cff9ba672d0b"
+   ],
+   "codeUnion": {
     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
    },
-   "finalParents": [
+   "codeUnionParents": [
     "e6b67035b4c25c53348e4a301139f1579d440222",
     "82b7695d27d6f870547f7638942c74f81604affd"
    ],
+   "deltaFromCodeUnion": {
+    "paths": [
+     "docs/tutorial/ALL41_ACCEPTANCE.json",
+     "docs/tutorial/ALL41_ACCEPTANCE.md",
+     "tests/prototype/lifecycle_counter_accounting.lua"
+    ],
+    "docsEqual": "8ae217f37df2e5c60942e20c3688a3652a3f8a23",
+    "fixtureEqual": "63ff47019ac1b3e9b6f209d14fc6cff9ba672d0b",
+    "citedBlobsIdenticalToCodeUnion": true,
+    "audit": "Mechanical corrected-union audit passed: every other tree entry byte-identical to f399dd0; no extra merge edits; registry byte-identical with 580 unique fixtures."
+   },
    "lanes": [
     {
      "lane": "prior reviewed union (#126 difficulty, #21 scroll)",
@@ -127,43 +153,60 @@
     }
    ],
    "unionAudit": "Mechanical exact-author-blob audit passed: every changed tree entry equals its lane author blob or the base; no extra merge edits; registry byte-identical to 6dcb46c with 580 unique fixtures.",
-   "changedFromBase": 21
+   "changedFromBase": 22
   },
   "finalFullCI": {
    "pin": {
-    "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-    "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+    "tree": "afd9170c34459ef5a976d989ab106535327724f5"
    },
    "owner": "root coordinator",
    "scope": "complete registered Lua inventory and registered Python tests",
-   "status": "failed",
-   "observedUTC": "2026-10-29T13:35:38.617789+00:00",
-   "statement": "The root coordinator's final full CI at this pin is terminal and FAILED: Lua 579 of 580 listed fixtures passed, 1 failed (lifecycle_counter_accounting), 0 not run; both registered Python test files passed (84 cases); the source was unchanged during the run. Every fixture cited by a row passed in that run. The failed fixture is cited by no row; its file is unchanged since 9bfb2bb and it passed in the intermediate 6dcb46c full CI. It is not diagnosed here. The complete-suite gate is therefore not green at this pin.",
-   "startedUTC": "2026-10-29T13:21:36.778886+00:00",
-   "finishedUTC": "2026-10-29T13:35:38.617789+00:00",
-   "exitCode": 1,
+   "status": "passed",
+   "observedUTC": "2026-10-29T14:22:09.633211+00:00",
+   "statement": "The root coordinator's complete CI at this pin is terminal and PASSED: Lua 580 of 580 listed fixtures passed, 0 failed, 0 not run; both registered Python test files passed (84 cases); the source was unchanged during the run. Every fixture cited by a row passed.",
+   "startedUTC": "2026-10-29T14:06:34.291475+00:00",
+   "finishedUTC": "2026-10-29T14:22:09.633211+00:00",
+   "exitCode": 0,
    "sourceUnchanged": true,
    "lua": {
     "listed": 580,
-    "passed": 579,
-    "failed": 1,
-    "not_run": 0,
-    "failedFixtures": [
-     {
-      "test": "lifecycle_counter_accounting",
-      "assertion": "tests/prototype/lifecycle_counter_accounting.lua:13 check, called at :126: 'later full lifecycle query observes a root replaced after counter read'",
-      "citedByThisMatrix": false,
-      "fixtureChangedSince9bfb2bb": false,
-      "passedInIntermediate6dcb46cFullCI": true,
-      "diagnosis": "not diagnosed here; owned by the root coordinator"
-     }
-    ]
+    "passed": 580,
+    "failed": 0,
+    "not_run": 0
    },
    "python": {
     "registeredFiles": 2,
     "passedFiles": 2,
     "cases": 84
    }
+  },
+  "validationCauseResolved": {
+   "fixture": "tests/prototype/lifecycle_counter_accounting.lua",
+   "repairCommit": "63ff47019ac1b3e9b6f209d14fc6cff9ba672d0b",
+   "repairTree": "37e60d40bbf3d59bf0d106c1edf1480111a078c5",
+   "citedByThisMatrix": false,
+   "cause": "Validation cause in the synthetic fixture: after the fixture's warm-up frames, a function upvalue the fixture replaced with debug.setupvalue could stay constant in a compiled LuaJIT trace, so the injected root replacement was not observed. As diagnosed by the fixture author and accepted by the independent fixture reviews.",
+   "repair": "The fixture flushes compiled traces around its own debug-upvalue injection and restoration and now checks that the wrapper is installed and restored, is entered exactly once, and actually replaces the bound root. It does not disable JIT and changes no production code or production freshness rule. The original late full-query, Sync hash-gate and no-old-digest assertions remain.",
+   "independentRootExecutionAt63ff470": {
+    "focused": {
+     "passed": 20,
+     "failed": 0,
+     "not_run": 0,
+     "sourceUnchanged": true
+    },
+    "boundedControls": {
+     "positiveCases": 13,
+     "expectedNegativeCases": 8,
+     "unexpectedOutcomes": 0,
+     "plan": "12 JIT-on and 1 JIT-off positive runs; 4 negative controls in each JIT mode; fixed case count, no retry"
+    }
+   },
+   "reviews": {
+    "spec": "PASS, zero material findings",
+    "standards": "zero material findings"
+   },
+   "use": "Resolves the f399dd0 complete-suite blocker at the fixture level. Separate from the complete c7d2b74 CI above. No native, package or production-performance claim."
   },
   "laneRuns": {
    "ux13-focused-62f16c7": {
@@ -189,7 +232,7 @@
     "not_run": 0,
     "sourceUnchanged": true,
     "date": "2026-10-29",
-    "use": "Root-run focused check of the UX-13 lane commit. Its changed files are byte-identical in the final pin, but the run is not execution of the final pin."
+    "use": "Root-run focused check of the UX-13 lane commit. Its changed files are byte-identical in the final pin c7d2b74, but the run is not execution of that pin."
    },
    "ux02-focused-82b7695": {
     "commit": "82b7695d27d6f870547f7638942c74f81604affd",
@@ -227,7 +270,7 @@
     "not_run": 0,
     "sourceUnchanged": true,
     "date": "2026-10-29",
-    "use": "Root-run focused check of the UX-02/J4 lane commit. Its changed files are byte-identical in the final pin, but the run is not execution of the final pin."
+    "use": "Root-run focused check of the UX-02/J4 lane commit. Its changed files are byte-identical in the final pin c7d2b74, but the run is not execution of that pin."
    },
    "ux02-predecessor-red-0d16ba7": {
     "predecessor": "0d16ba7f05fa01f6ae5315399d40496072dc927d",
@@ -243,6 +286,16 @@
    }
   },
   "independentReviews": {
+   "final2Reconciliation": {
+    "pin": {
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
+    },
+    "comparison": "git diff f399dd09700e739fd27b187069bd4c83278c86c4...c7d2b740a5574c79a61c2ab9e84fc488eefe4504 (3 paths)",
+    "spec": "PASS, zero material findings",
+    "standards": "zero material findings",
+    "notes": "Thin reconciliation: both documents equal 8ae217f, the fixture equals 63ff470, every other path equals f399dd0. Reviewers ran no tests; the complete CI was still running when they read it."
+   },
    "finalCombined": {
     "pin": {
      "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
@@ -251,7 +304,7 @@
     "comparison": "git diff 9bfb2bb922123e0b60f8b7f0506fc508c4476052...f399dd09700e739fd27b187069bd4c83278c86c4 (21 paths)",
     "spec": "PASS, zero material findings",
     "standards": "zero material findings",
-    "notes": "Fixed-source reviews by independent Codex reviewers. Reviewers ran no tests. Both describe this matrix's previous text as explicitly historical 9bfb evidence awaiting rebinding. The Standards review's trailing-whitespace advisory on the historical Markdown is addressed in this revision."
+    "notes": "Fixed-source reviews by independent Codex reviewers. Reviewers ran no tests. Their product conclusions carry to c7d2b74 because production and every other fixture are unchanged from f399dd0."
    },
    "lanes": [
     {
@@ -281,9 +334,53 @@
      "commit": "82b7695d27d6f870547f7638942c74f81604affd",
      "spec": "PASS, prior P2 (exact-count wording) resolved",
      "standards": "zero material findings"
+    },
+    {
+     "lane": "lifecycle_counter_accounting fixture repair (uncited)",
+     "commit": "63ff47019ac1b3e9b6f209d14fc6cff9ba672d0b",
+     "spec": "PASS, zero material findings",
+     "standards": "zero material findings"
+    },
+    {
+     "lane": "all41 matrix rebinding to f399dd0 (this file's predecessor)",
+     "commit": "8ae217f37df2e5c60942e20c3688a3652a3f8a23",
+     "note": "covered by the final2 reconciliation reviews as a held f399dd0 snapshot"
     }
    ],
-   "use": "Source and test-oracle reviews of the code. Not execution, native acceptance or acceptance of this matrix. This rebinding revision itself has no independent review yet."
+   "use": "Source and test-oracle reviews. Not execution, native acceptance or acceptance of this matrix. This c7d2b74 rebinding revision itself has no independent review yet."
+  },
+  "historicalFailedFullCIf399dd0": {
+   "pin": {
+    "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+    "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+   },
+   "status": "failed",
+   "startedUTC": "2026-10-29T13:21:36.778886+00:00",
+   "finishedUTC": "2026-10-29T13:35:38.617789+00:00",
+   "exitCode": 1,
+   "sourceUnchanged": true,
+   "lua": {
+    "listed": 580,
+    "passed": 579,
+    "failed": 1,
+    "not_run": 0,
+    "failedFixtures": [
+     {
+      "test": "lifecycle_counter_accounting",
+      "assertion": "tests/prototype/lifecycle_counter_accounting.lua:13 check, called at :126: 'later full lifecycle query observes a root replaced after counter read'",
+      "citedByThisMatrix": false,
+      "fixtureChangedSince9bfb2bb": false,
+      "passedInIntermediate6dcb46cFullCI": true,
+      "diagnosis": "not diagnosed here; owned by the root coordinator"
+     }
+    ]
+   },
+   "python": {
+    "registeredFiles": 2,
+    "passedFiles": 2,
+    "cases": 84
+   },
+   "use": "Historical complete CI of f399dd0. It stays failed; it is not reclassified. Its only failure was the uncited lifecycle_counter_accounting fixture, repaired separately (see validationCauseResolved)."
   },
   "historicalAt9bfb": {
    "focused-61": {
@@ -414,7 +511,8 @@
   "Issue #131 top-of-issue status paragraphs are historical checkpoints; present claims come from the final pin.",
   "An earlier e8 matrix recorded zero whole items accepted and is historical.",
   "Older static/projected all41 maps and five-boundary review data are preparation only.",
-  "The 9bfb2bb matrix revisions (8b1f221, 2aaaecca) and their results are historical."
+  "The 9bfb2bb matrix revisions (8b1f221, 2aaaecca) and their results are historical.",
+  "The f399dd0 matrix revision (8ae217f) and the failed f399dd0 complete CI (Lua 579/580) are historical."
  ],
  "dispositionVocabulary": {
   "met-offline": "every canonical acceptance proposal has a discriminating passing offline assertion at the pin",
@@ -440,23 +538,23 @@
    "gap": "UX-02 G-UX02-a",
    "resolvedIn": "82b7695d27d6f870547f7638942c74f81604affd",
    "via": "0d16ba7f05fa01f6ae5315399d40496072dc927d, then count-neutral wording",
-   "finalPin": "f399dd09700e739fd27b187069bd4c83278c86c4"
+   "finalPin": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504"
   },
   {
    "gap": "UX-02 G-UX02-b",
    "resolvedIn": "0d16ba7f05fa01f6ae5315399d40496072dc927d",
    "unchangedThrough": "82b7695d27d6f870547f7638942c74f81604affd",
-   "finalPin": "f399dd09700e739fd27b187069bd4c83278c86c4"
+   "finalPin": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504"
   },
   {
    "gap": "UX-13 G-UX13",
    "resolvedIn": "62f16c70d2bb438abdb5f581ba2e58c612d2f348",
-   "finalPin": "f399dd09700e739fd27b187069bd4c83278c86c4"
+   "finalPin": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504"
   },
   {
    "gap": "J4 inherited UX-02 G-UX02-a/b",
    "resolvedIn": "82b7695d27d6f870547f7638942c74f81604affd",
-   "finalPin": "f399dd09700e739fd27b187069bd4c83278c86c4"
+   "finalPin": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504"
   }
  ],
  "summary": {
@@ -469,7 +567,7 @@
   "nativePending": 38,
   "nativeNoneBeyondOfflineScope": 3,
   "acceptedWholeRows": 0,
-  "finalPinExecution": "complete suite FAILED (Lua 579/580; the one failure is uncited); all 63 cited fixtures PASS; Python 2/2 files"
+  "finalPinExecution": "complete suite PASSED at c7d2b74 (Lua 580/580, 0 not run; Python 2/2 files, 84 cases); all 63 cited fixtures PASS"
  },
  "rows": [
   {
@@ -517,39 +615,53 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_setup_replay",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 229
      },
      {
       "test": "overwrite_warning",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "overwrite_warning_welcome",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 26
      },
      {
       "test": "overwrite_warning_lifecycle",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 76
      },
      {
       "test": "overwrite_auto_gate",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "quickstart_seen_guard",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 76
      },
      {
       "test": "guided_first_entry",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 195
      }
     ]
    },
@@ -655,31 +767,41 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_setup_checklist",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 192
      },
      {
       "test": "guided_setup_flow",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 2878
      },
      {
       "test": "guided_setup_resume",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 138
      },
      {
       "test": "guided_setup_readback",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 135
      },
      {
       "test": "ux_setup_replay",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 229
      }
     ]
    },
@@ -787,27 +909,35 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_manual_recommendation",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 124
      },
      {
       "test": "terminology_consumers",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "terminology",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "orb_guidance_navigation",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 70
      }
     ]
    },
@@ -842,7 +972,7 @@
    },
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
-    "notes": "All three canonical proposals now have discriminating offline assertions through the real TOC boot, adapter, policy, runtime and Panel: two (and three) different Needed offers -> exactly the decision's card identified with a Freeze mark and named (R8, R10); Auto OFF heading never Active, including with Orb guidance (R7, orb_guidance_navigation); no engine name in visible recommendation or status text (R8-R10, terminology_consumers). Met under the adopted reading of 'marked' above. The former candidate gaps G-UX02-a and G-UX02-b are resolved in the final source. Its cited fixtures passed in the terminal final-pin run; that run's complete suite failed on one uncited fixture, so no integration gate is green.",
+    "notes": "All three canonical proposals now have discriminating offline assertions through the real TOC boot, adapter, policy, runtime and Panel: two (and three) different Needed offers -> exactly the decision's card identified with a Freeze mark and named (R8, R10); Auto OFF heading never Active, including with Orb guidance (R7, orb_guidance_navigation); no engine name in visible recommendation or status text (R8-R10, terminology_consumers). Met under the adopted reading of 'marked' above. The former candidate gaps G-UX02-a and G-UX02-b are resolved in the final source. Its cited fixtures passed in the terminal complete passing run at c7d2b74.",
     "source": "canonical object above; issue #131; independent UX-02/J4 Spec and Standards reviews of 82b7695 and final combined reviews of f399dd0 (zero material findings)"
    },
    "standards": {
@@ -866,7 +996,7 @@
      "Heading and Freeze tag fit at supported font and UI scales"
     ]
    },
-   "rowDisposition": "offline-supported under the adopted reading of 'marked'; cited fixtures pass at the final pin; full CI failed on an uncited fixture; native pending"
+   "rowDisposition": "offline-supported under the adopted reading of 'marked'; cited fixtures pass in the complete passing run at c7d2b74; native pending"
   },
   {
    "id": "LP-02",
@@ -898,15 +1028,17 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_manual_recommendation",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 124
      }
     ]
    },
@@ -983,27 +1115,35 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_save_assignment_result",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 155
      },
      {
       "test": "ux_save_intents",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 149
      },
      {
       "test": "ux_auto_assignment_consent",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 57
      },
      {
       "test": "ux_save_retry_intent",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 82
      }
     ]
    },
@@ -1086,23 +1226,29 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_save_intents",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 149
      },
      {
       "test": "ux_save_retry_intent",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 82
      },
      {
       "test": "ux_auto_assignment_consent",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 57
      }
     ]
    },
@@ -1183,19 +1329,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_captured_destination_labels",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 452
      },
      {
       "test": "ux_destination_context",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 54
      }
     ]
    },
@@ -1267,19 +1417,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_destination_context",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 54
      },
      {
       "test": "ux_captured_destination_labels",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 452
      }
     ]
    },
@@ -1360,23 +1514,29 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_auto_assignment_consent",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 57
      },
      {
       "test": "ux_assignment_consent_routes",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 104
      },
      {
       "test": "guided_setup_readback",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 135
      }
     ]
    },
@@ -1454,23 +1614,29 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "guided_setup_readback",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 135
      },
      {
       "test": "ux_setup_checklist",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 192
      },
      {
       "test": "guided_setup_flow",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 2878
      }
     ]
    },
@@ -1550,19 +1716,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_help_navigation",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 32
      },
      {
       "test": "ux_setup_checklist",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 192
      }
     ]
    },
@@ -1631,19 +1801,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_setup_checklist",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 192
      },
      {
       "test": "guided_setup_flow",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 2878
      }
     ]
    },
@@ -1723,23 +1897,29 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "orb_target_review",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 152
      },
      {
       "test": "orb_review_identity",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 77
      },
      {
       "test": "orbs_target_changes",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
@@ -1815,19 +1995,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "orb_target_review",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 152
      },
      {
       "test": "orb_review_identity",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 77
      }
     ]
    },
@@ -1903,19 +2087,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "orb_fixed_pause_resume",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 51
      },
      {
       "test": "orb_mini_panel",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
@@ -1987,19 +2175,23 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "orb_fixed_pause_resume",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 51
      },
      {
       "test": "orb_mini_panel",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
@@ -2079,23 +2271,29 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_automation_scope",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 97
      },
      {
       "test": "ux_status_composition",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 81
      },
      {
       "test": "overwrite_auto_gate",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
@@ -2173,19 +2371,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_status_composition",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 81
      },
      {
       "test": "ux_setup_checklist",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 192
      }
     ]
    },
@@ -2264,19 +2466,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_automation_scope",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 97
      },
      {
       "test": "session_permissions",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
@@ -2348,19 +2554,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_automation_scope",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 97
      },
      {
       "test": "full_ui_settings",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
@@ -2440,27 +2650,35 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_share_confirmation",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 327
      },
      {
       "test": "ux_share_approval_retirement",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 40
      },
      {
       "test": "ux_retry_share_feedback",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 36
      },
      {
       "test": "ux_share_admission",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 129
      }
     ]
    },
@@ -2538,15 +2756,17 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_share_confirmation",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 327
      }
     ]
    },
@@ -2619,31 +2839,41 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_sync_disclosure",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 154
      },
      {
       "test": "ux_sync_disclosure_sends",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 27
      },
      {
       "test": "ux_sync_dps_page",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 256
      },
      {
       "test": "ux_share_linked_dps",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 71
      },
      {
       "test": "ux_sync_status_fit",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 7945
      }
     ]
    },
@@ -2734,19 +2964,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_sync_mode_choice",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 628
      },
      {
       "test": "ux_sync_mode_transitions",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 79
      }
     ]
    },
@@ -2830,27 +3064,35 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_qualified_counts",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 33
      },
      {
       "test": "ux_record_scope_terms",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 37
      },
      {
       "test": "terminology",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "saved_mirror_assigned_description",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 76
      }
     ]
    },
@@ -2884,7 +3126,7 @@
    },
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
-    "notes": "'No complete while locked targets remain' met (Q1). 'No 79/79 next to saved/assigned without planned' met under the retained interpretation recorded as this row's Conflict: the generated assigned-Saved-Build description and the Library card both qualify the count with the Saved Build unit (Q5, D1, D2, D4, D5). The former candidate gap G-UX13 is resolved in the final source. Its cited fixtures passed in the terminal final-pin run; that run's complete suite failed on one uncited fixture, so no integration gate is green.",
+    "notes": "'No complete while locked targets remain' met (Q1). 'No 79/79 next to saved/assigned without planned' met under the retained interpretation recorded as this row's Conflict: the generated assigned-Saved-Build description and the Library card both qualify the count with the Saved Build unit (Q5, D1, D2, D4, D5). The former candidate gap G-UX13 is resolved in the final source. Its cited fixtures passed in the terminal complete passing run at c7d2b74.",
     "source": "canonical object above; issue #131; independent UX-13 Spec and Standards reviews of 62f16c7 and final combined reviews of f399dd0"
    },
    "standards": {
@@ -2906,7 +3148,7 @@
      "First load after upgrading from an earlier build's SavedVariables rewrites the generated description once locally and sends nothing"
     ]
    },
-   "rowDisposition": "offline-supported under a retained interpretation; cited fixtures pass at the final pin; full CI failed on an uncited fixture; native pending"
+   "rowDisposition": "offline-supported under a retained interpretation; cited fixtures pass in the complete passing run at c7d2b74; native pending"
   },
   {
    "id": "LP-13",
@@ -2932,23 +3174,29 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_qualified_counts",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 33
      },
      {
       "test": "ux_record_scope_terms",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 37
      },
      {
       "test": "saved_mirror_assigned_description",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 76
      }
     ]
    },
@@ -3027,15 +3275,17 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_record_scope_terms",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 37
      }
     ]
    },
@@ -3102,15 +3352,17 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_record_scope_terms",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 37
      }
     ]
    },
@@ -3179,23 +3431,29 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_record_scope_terms",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 37
      },
      {
       "test": "terminology",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "terminology_consumers",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
@@ -3264,15 +3522,17 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_record_scope_terms",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 37
      }
     ]
    },
@@ -3343,27 +3603,35 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "orb_recovery_layers",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 124
      },
      {
       "test": "orb_recovery_vocabulary",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 50
      },
      {
       "test": "batch_orb_restored_wording",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 23
      },
      {
       "test": "orb_continue_affordance",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
@@ -3441,23 +3709,29 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "orb_recovery_vocabulary",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 50
      },
      {
       "test": "orb_recovery_layers",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 124
      },
      {
       "test": "orb_continue_affordance",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
@@ -3537,27 +3811,35 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_help_navigation",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 32
      },
      {
       "test": "setup_help_entry_points",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 105
      },
      {
       "test": "help",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "help_action_first",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 6052
      }
     ]
    },
@@ -3641,19 +3923,23 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_context_help_access",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 146
      },
      {
       "test": "setup_help_entry_points",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 105
      }
     ]
    },
@@ -3729,23 +4015,29 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_context_help_access",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 146
      },
      {
       "test": "ux_setup_checklist",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 192
      },
      {
       "test": "guided_setup_flow",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 2878
      }
     ]
    },
@@ -3819,23 +4111,29 @@
    "negativeControls": [],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_context_help_access",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 146
      },
      {
       "test": "guided_setup_flow",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 2878
      },
      {
       "test": "ux_sync_status_fit",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 7945
      }
     ]
    },
@@ -3932,31 +4230,41 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_setup_checklist",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 192
      },
      {
       "test": "guided_setup_readback",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 135
      },
      {
       "test": "guided_setup_flow",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 2878
      },
      {
       "test": "guided_first_entry",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 195
      },
      {
       "test": "quickstart_seen_guard",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 76
      }
     ]
    },
@@ -4055,31 +4363,41 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_setup_checklist",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 192
      },
      {
       "test": "ux_help_navigation",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 32
      },
      {
       "test": "ux_save_assignment_result",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 155
      },
      {
       "test": "ux_auto_assignment_consent",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 57
      },
      {
       "test": "guided_setup_readback",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 135
      }
     ]
    },
@@ -4179,43 +4497,59 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "wishlist_assignment_action_token",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 132
      },
      {
       "test": "assignment_identity",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "stale_server_slot_save",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "saved_build_wishlist_destination_guards",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 23
      },
      {
       "test": "ux_captured_destination_labels",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 452
      },
      {
       "test": "ux_destination_context",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 54
      },
      {
       "test": "ux_auto_assignment_consent",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 57
      },
      {
       "test": "wishlist_upload_context",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
@@ -4338,39 +4672,53 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "ux_manual_recommendation",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 124
      },
      {
       "test": "ux_automation_scope",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 97
      },
      {
       "test": "overwrite_auto_gate",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "guided_setup_flow",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 2878
      },
      {
       "test": "full_ui_settings",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "ux_status_composition",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 81
      },
      {
       "test": "orb_guidance_navigation",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 70
      }
     ]
    },
@@ -4419,7 +4767,7 @@
    },
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
-    "notes": "The journey's recorded partial basis was only the two candidate gaps inherited from UX-02 (truthful OFF under Orb guidance; named selection for two distinct Needed offers). Both now have discriminating offline assertions through the real TOC path (R7, R8, R10, orb_guidance_navigation), and the other traced paths are unchanged: no-choice ready state, explicit Auto consent, and Setup/Help/Settings/coach starting no Auto. Met under the same adopted reading of 'named selection' as UX-02 (a Freeze target is named and marked as a Freeze, not as a Take). Its cited fixtures passed in the terminal final-pin run; that run's complete suite failed on one uncited fixture, so no integration gate is green.",
+    "notes": "The journey's recorded partial basis was only the two candidate gaps inherited from UX-02 (truthful OFF under Orb guidance; named selection for two distinct Needed offers). Both now have discriminating offline assertions through the real TOC path (R7, R8, R10, orb_guidance_navigation), and the other traced paths are unchanged: no-choice ready state, explicit Auto consent, and Setup/Help/Settings/coach starting no Auto. Met under the same adopted reading of 'named selection' as UX-02 (a Freeze target is named and marked as a Freeze, not as a Take). Its cited fixtures passed in the terminal complete passing run at c7d2b74.",
     "source": "canonical object above; issue #131; independent UX-02/J4 reviews of 82b7695 and final combined reviews of f399dd0"
    },
    "standards": {
@@ -4438,7 +4786,7 @@
      "Manual recommendation, Auto warning Yes/No, and opening Setup/Help/Settings without starting Auto in the client"
     ]
    },
-   "rowDisposition": "offline-supported under the UX-02 adopted reading; cited fixtures pass at the final pin; full CI failed on an uncited fixture; native pending"
+   "rowDisposition": "offline-supported under the UX-02 adopted reading; cited fixtures pass in the complete passing run at c7d2b74; native pending"
   },
   {
    "id": "J5",
@@ -4480,43 +4828,59 @@
    ],
    "execution": {
     "pin": {
-     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
-     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+     "commit": "c7d2b740a5574c79a61c2ab9e84fc488eefe4504",
+     "tree": "afd9170c34459ef5a976d989ab106535327724f5"
     },
-    "run": "final-full-f399dd0",
-    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "run": "final2-full-c7d2b74",
+    "status": "terminal: complete suite PASSED at c7d2b74; every fixture cited by this row PASS",
     "tests": [
      {
       "test": "orb_target_review",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 152
      },
      {
       "test": "orbs_target_changes",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "orb_recovery_continue",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 180
      },
      {
       "test": "orb_recovery_refusals",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 477
      },
      {
       "test": "orb_bounded_recovery",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 534
      },
      {
       "test": "orb_guidance_passive_open",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": 25
      },
      {
       "test": "orb_continue_affordance",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      },
      {
       "test": "orb_mini_panel",
-      "status": "PASS"
+      "status": "PASS",
+      "exit": 0,
+      "checks": null
      }
     ]
    },
