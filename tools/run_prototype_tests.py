@@ -382,6 +382,8 @@ NAMES += ['visual_workspaces_163009']
 NAMES += ['native_dropdown_ownership']
 # Native acceptance of test.163009, Play Details: five missing and seven extra distinct names show two names and +3 / +5 more as separate measured one-line rows, whole inside their columns at default, taller and 125% text and both no-wrap readings; held top, downward growth / edge clamp, collapse of all four categories and every row, memory-only reload (EXPECT fails at a9ff2eda by design; native fit NOT_RUN).
 NAMES += ['native_details_measurement']
+# Issue #126: the mirrored difficulty is only the hardmode service's confirmed state (IsDifficultyKnown exactly true, GetCurrentDifficulty 1..6), read passively; compact HUD text and the selected Hardcore draft are never the difficulty; unknown stays the generic caption through the real TOC/Main/ViewModel/Panel (EXPECT fails at 9bfb2bb9 by design; native NOT_RUN).
+NAMES += ['server_status_difficulty_authority']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

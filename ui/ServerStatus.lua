@@ -1,6 +1,9 @@
 -- Nexus: ui/ServerStatus.lua
 -- Two-mode integration for Project Ebonhold's difficulty / Soul Ash HUD.
 -- Default: hide the server HUD and mirror its values on the Nexus panel.
+-- #126: the difficulty mirrored here is only the hardmode service's own
+-- confirmed value, read passively (ReadDifficulty below). HUD text and the
+-- Hardcore window's selected draft are never read as the difficulty.
 
 Nexus = Nexus or {}
 local M = {}
@@ -117,20 +120,13 @@ end
 
 -- `namedAsh` (NamedSoulAsh): the named field's balance, false when the named
 -- field holds no balance, nil when there is none and the texts are scanned.
+-- #126: the texts give the Soul Ash balance, its multiplier and the raw text
+-- only. They are never read as the difficulty: the compact tier label starts
+-- as a literal Normal and is repainted on its own schedule, and numbers,
+-- Roman numerals, multipliers, levels and tooltips beside it confirm nothing.
+-- mode and tier are left unknown here; ReadDifficulty supplies them.
 local function ParseSummary(texts, namedAsh)
     local clean = Strip(table.concat(texts or {}, "  "))
-
-    local tier = clean:match("[Hh][Cc]%s*([1-5])")
-        or clean:match("[Hh]ardcore%s*[VvIiXx]*%s*([1-5])")
-        or clean:match("[Hh]ardcore%s*([1-5])")
-        or clean:match("[Ww]orld%s*[Tt]ier%s*[:%-]?%s*([1-5])")
-
-    local mode
-    if tier then
-        mode = "HC" .. tier
-    elseif clean:find("[Nn]ormal") then
-        mode = "Normal"
-    end
 
     local gain = clean:match("([%+%-]%d+%%)")
         or clean:match("[Mm]ultiplier%s*[:%-]?%s*([%+%-]?%d+%%)")
@@ -157,48 +153,57 @@ local function ParseSummary(texts, namedAsh)
     end
 
     return {
-        tier = tier and ("HC" .. tier) or nil,
-        mode = mode,
+        tier = nil,
+        mode = nil,
         ash = ash,
         gain = gain,
         raw = clean,
     }
 end
 
-local function CollectSelectedDifficultyTexts(frame, out, seen, depth)
-    out = out or {}
-    seen = seen or {}
-    depth = depth or 0
-    if not frame or seen[frame] or depth > 8 then return out end
-    seen[frame] = true
+-- #126: the difficulty, from Project Ebonhold's hardmode service alone and
+-- read passively: ProjectEbonhold.HardmodeService.IsDifficultyKnown() and
+-- GetCurrentDifficulty(), both called with no arguments under protection,
+-- from the current globals on every read, so a service that loads late or is
+-- replaced is the one read. The service's cached value is a placeholder 1
+-- until a reply confirms it, so the value is trusted only once
+-- IsDifficultyKnown() answers exactly true, and only as a finite integer
+-- 1..6: 1 is Normal, 2..6 are Hardcore I..V (HC1..HC5). Anything else -- no
+-- service, a missing or raising function, readiness that is not exactly true,
+-- a value of another type, a fraction, NaN, an infinity or a value outside
+-- 1..6 -- is unknown (nil, nil), and the panel shows its generic Difficulty
+-- caption. Nothing is coerced or remembered, and no earlier answer stands in.
+-- The known flag means last confirmed this session (the service does not
+-- clear it at world entry), not confirmed in this zone, and the service itself
+-- turns a malformed nonempty reply into 1; neither is visible to this reader,
+-- so it claims no more than the service does. It requests, sets, registers
+-- and hooks nothing: the service routes its replies through one handler per
+-- id, and registering for them would replace the service's own handler.
+local DIFFICULTY_MODES = {
+    [1] = "Normal", [2] = "HC1", [3] = "HC2", [4] = "HC3", [5] = "HC4", [6] = "HC5",
+}
 
-    local selected = false
-    if type(frame.GetChecked) == "function" then
-        local ok, value = pcall(frame.GetChecked, frame)
-        selected = ok and value and true or false
-    end
-
-    if selected then
-        CollectTexts(frame, out, {}, 0)
-    elseif type(frame.GetChildren) == "function" then
-        local ok, children = pcall(function() return { frame:GetChildren() } end)
-        if ok then
-            for i = 1, #children do
-                CollectSelectedDifficultyTexts(children[i], out, seen, depth + 1)
-            end
+local function ReadDifficulty()
+    local ok, value = pcall(function()
+        local pe = _G.ProjectEbonhold
+        local service = type(pe) == "table" and pe.HardmodeService or nil
+        if type(service) ~= "table" then return nil end
+        local isKnown = service.IsDifficultyKnown
+        local getCurrent = service.GetCurrentDifficulty
+        if type(isKnown) ~= "function" or type(getCurrent) ~= "function" then
+            return nil
         end
-    end
-    return out
-end
-
-local function GetSelectedDifficultySummary()
-    local hard = _G.HardmodeFrame
-    if not hard then return nil end
-    local texts = CollectSelectedDifficultyTexts(hard)
-    if #texts == 0 then return nil end
-    local parsed = ParseSummary(texts)
-    if parsed and parsed.tier then return parsed end
-    return nil
+        if isKnown() ~= true then return nil end
+        local current = getCurrent()
+        if type(current) ~= "number" or current ~= current
+            or current ~= math.floor(current) or current < 1 or current > 6 then
+            return nil
+        end
+        return current
+    end)
+    local mode = ok and value ~= nil and DIFFICULTY_MODES[value] or nil
+    if not mode then return nil, nil end
+    return mode, value > 1 and mode or nil
 end
 
 -- The game's Intensity constants (ProjectEbonhold.Constants: MAX_INTENSITY
@@ -487,6 +492,23 @@ local function ApplyVisibility(retry)
     end
 end
 
+-- #126: one summary, built the same way for the cold GetSummary read and for
+-- every scanner pass, so the two cannot disagree about where a value comes
+-- from. Soul Ash, gain and raw text come from the HUD, the difficulty from
+-- ReadDifficulty alone, and Intensity from its own data and constants.
+local function BuildSummary()
+    if not rootFrame then FindFrames() end
+    local summary = ParseSummary(GetAllSourceTexts(), NamedSoulAsh())
+    summary.mode, summary.tier = ReadDifficulty()
+    summary.intensity, summary.intensityLevel, summary.intensityMax,
+        summary.intensityThresholds = ReadIntensity()
+    return summary
+end
+
+local function SummarySignature(summary)
+    return table.concat({ tostring(summary.mode), tostring(summary.tier), tostring(summary.ash), tostring(summary.gain), tostring(summary.intensity), tostring(summary.intensityLevel), tostring(summary.intensityMax), tostring(UsingNexusHud()) }, "|")
+end
+
 function M.Init()
     NexusDB = NexusDB or {}
     EnsureDefaultMode()
@@ -494,6 +516,8 @@ function M.Init()
 
     scanner = CreateFrame("Frame", "NexusServerStatusScanner", UIParent)
     scanner:RegisterEvent("PLAYER_ENTERING_WORLD")
+    -- World entry only drops the frame reference. The difficulty is not reset
+    -- here: the next scan reads the service's own known flag again.
     scanner:SetScript("OnEvent", function()
         rootFrame = nil
         -- A world entry is a lifecycle point: the first scan after it may
@@ -509,15 +533,8 @@ function M.Init()
         local retry = retryAfterWorld
         retryAfterWorld = false
         ApplyVisibility(retry)
-        local summary = ParseSummary(GetAllSourceTexts(), NamedSoulAsh())
-        local selectedDifficulty = GetSelectedDifficultySummary()
-        if selectedDifficulty and selectedDifficulty.tier then
-            summary.tier = selectedDifficulty.tier
-            summary.mode = selectedDifficulty.mode or selectedDifficulty.tier
-        end
-        summary.intensity, summary.intensityLevel, summary.intensityMax,
-            summary.intensityThresholds = ReadIntensity()
-        local sig = table.concat({ tostring(summary.mode), tostring(summary.tier), tostring(summary.ash), tostring(summary.gain), tostring(summary.intensity), tostring(summary.intensityLevel), tostring(summary.intensityMax), tostring(UsingNexusHud()) }, "|")
+        local summary = BuildSummary()
+        local sig = SummarySignature(summary)
         if sig ~= cachedSignature then
             cachedSignature = sig
             cachedSummary = summary
@@ -528,16 +545,8 @@ end
 
 function M.GetSummary()
     if cachedSignature == "" then
-        if not rootFrame then FindFrames() end
-        cachedSummary = ParseSummary(GetAllSourceTexts(), NamedSoulAsh())
-        local selectedDifficulty = GetSelectedDifficultySummary()
-        if selectedDifficulty and selectedDifficulty.tier then
-            cachedSummary.tier = selectedDifficulty.tier
-            cachedSummary.mode = selectedDifficulty.mode or selectedDifficulty.tier
-        end
-        cachedSummary.intensity, cachedSummary.intensityLevel,
-            cachedSummary.intensityMax, cachedSummary.intensityThresholds = ReadIntensity()
-        cachedSignature = table.concat({ tostring(cachedSummary.mode), tostring(cachedSummary.tier), tostring(cachedSummary.ash), tostring(cachedSummary.gain), tostring(cachedSummary.intensity), tostring(cachedSummary.intensityLevel), tostring(cachedSummary.intensityMax), tostring(UsingNexusHud()) }, "|")
+        cachedSummary = BuildSummary()
+        cachedSignature = SummarySignature(cachedSummary)
     end
     return cachedSummary
 end

@@ -1,12 +1,25 @@
--- Consumer contract only: synthetic HUD text through the real TOC boot,
--- ServerStatus scanner, Main display input, MainViewModel and Panel renderer.
--- This does not implement the foreign Ebonhold producer or prove realm tier.
+-- Consumer contract only: synthetic HUD text and a synthetic ready hardmode
+-- service through the real TOC boot, ServerStatus scanner, Main display input,
+-- MainViewModel and Panel renderer. Since #126 the difficulty comes only from
+-- ProjectEbonhold.HardmodeService: IsDifficultyKnown() exactly true, then
+-- GetCurrentDifficulty() 1..6 (the provided zero-argument contract). The HUD
+-- tier text is still installed, but it is not the difficulty. This does not
+-- implement the foreign Ebonhold producer or prove realm tier.
 -- F.Reload round-trips synthetic saved data and reloads modules offline; it
--- does not model the producer's native ReloadUI/default/request behavior.
+-- does not model the producer's native ReloadUI/default/request behavior, so
+-- each reload below installs the synthetic producer state it names.
 local F=dofile('tests/prototype/format5_support.lua')
 local checks=0
 local function check(value,message) assert(value,message);checks=checks+1 end
-local function InstallHud(H,text)
+-- A synthetic stand-in for the two passive service functions, holding only a
+-- cached value and a known flag. It requests, sends and replies nothing.
+local function Service(current,known)
+ local s={current=current,known=known}
+ s.api={GetCurrentDifficulty=function() return s.current end,
+  IsDifficultyKnown=function() return s.known end}
+ return s
+end
+local function InstallHud(H,text,service)
  HardmodeFrame=nil;EbonholdIntensityData=nil
  local root=CreateFrame('Frame','ProjectEbonholdPlayerRunFrame',UIParent)
  local header=CreateFrame('Frame',nil,root)
@@ -16,12 +29,14 @@ local function InstallHud(H,text)
  local ash=header:CreateFontString(nil);ash:SetText('76,054')
  local gain=header:CreateFontString(nil);gain:SetText('+188%')
  root.hardmodeTierText=tier;root.soulPointsText=ash;root.multiplierText=gain
- H.difficultyHud={root=root,tier=tier}
- -- Only the existing named balance contract is supplied. No tier getter or
- -- foreign update callback is invented, and Hide never changes the text.
+ H.difficultyHud={root=root,tier=tier,service=service}
+ -- Only the existing named balance contract and the provided hardmode
+ -- service functions are supplied. No foreign update callback is invented,
+ -- and Hide never changes the text.
  ProjectEbonhold.PlayerRunUI={GetUIElements=function()
   return {soulPointsText=ash}
  end}
+ ProjectEbonhold.HardmodeService=service and service.api or nil
 end
 local function Settle(H) H.Advance(2.5,.05) end
 local function ExpectCaption(H,mode,tier,label)
@@ -51,10 +66,12 @@ local function ExpectCaption(H,mode,tier,label)
  print('CONSUMER '..label..' mode='..tostring(mode)..' tier='..tostring(tier)
   ..' caption='..box.regions[1]:GetText())
 end
-local function Before(text) return function(H) InstallHud(H,text) end end
+local function Before(text,current,known)
+ return function(H) InstallHud(H,text,current~=nil and Service(current,known) or nil) end
+end
 
 local db=F.Database({});db.soulAshHudMode='nexus'
-local H=F.Boot(db,Before('Hardcore 1'));Settle(H)
+local H=F.Boot(db,Before('Hardcore 1',2,true));Settle(H)
 ExpectCaption(H,'HC1','HC1','fresh boot HC1')
 check(not H.difficultyHud.root:IsShown(),'committed Nexus panel suppresses synthetic HUD')
 check(H.difficultyHud.tier:GetText()=='Hardcore 1','suppression does not edit HUD tier text')
@@ -63,24 +80,28 @@ H.Fire('PLAYER_ENTERING_WORLD');Settle(H)
 ExpectCaption(H,'HC1','HC1','world entry unchanged HC1')
 
 -- The scanner must rediscover the replacement frame object after world entry.
-InstallHud(H,'Hardcore 1');H.Fire('PLAYER_ENTERING_WORLD');Settle(H)
+-- The producer keeps its known flag across world entry, so the same service
+-- state is carried into the new HUD.
+InstallHud(H,'Hardcore 1',H.difficultyHud.service);H.Fire('PLAYER_ENTERING_WORLD');Settle(H)
 ExpectCaption(H,'HC1','HC1','world entry replacement HC1')
 check(not H.difficultyHud.root:IsShown(),'world entry replacement HC1: new root is discovered and suppressed')
 
-H=F.Reload(Before('Hardcore 1'));Settle(H)
-ExpectCaption(H,'HC1','HC1','offline module reload unchanged HC1')
+H=F.Reload(Before('Hardcore 1',2,true));Settle(H)
+ExpectCaption(H,'HC1','HC1','offline module reload confirmed HC1')
 
 -- A consumer that remembers HC1 as authority would reject these legitimate
--- new input states. Only the supplied text is asserted, never server state.
-H.difficultyHud.tier:SetText('Normal');Settle(H)
-ExpectCaption(H,'Normal',nil,'explicit Normal after HC1')
-H=F.Reload(Before('Normal'));Settle(H)
-ExpectCaption(H,'Normal',nil,'offline module reload explicit Normal')
+-- new producer states. Only the synthetic service state is asserted, never
+-- server state.
+H.difficultyHud.service.current=1;H.difficultyHud.tier:SetText('Normal');Settle(H)
+ExpectCaption(H,'Normal',nil,'confirmed Normal after HC1')
+H=F.Reload(Before('Normal',1,true));Settle(H)
+ExpectCaption(H,'Normal',nil,'offline module reload confirmed Normal')
 
-H.difficultyHud.tier:SetText('');Settle(H)
-ExpectCaption(H,nil,nil,'absent difficulty text')
+-- No confirmed difficulty: the service goes away and the HUD text is empty.
+ProjectEbonhold.HardmodeService=nil;H.difficultyHud.tier:SetText('');Settle(H)
+ExpectCaption(H,nil,nil,'unloaded difficulty service')
 H=F.Reload(Before(''));Settle(H)
-ExpectCaption(H,nil,nil,'offline module reload absent difficulty')
+ExpectCaption(H,nil,nil,'offline module reload without difficulty service')
 
 -- Issue #164: Hide Nexus Panel is the player's saved display choice. While
 -- the panel is hidden the game's own Difficulty/Soul Ash widget is on screen,
