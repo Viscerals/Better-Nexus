@@ -698,23 +698,26 @@ H.Advance(1.2);replacementStock:Show()
 check(replacementStock:IsShown()==false,
  'the hook is installed once, not stacked on every scan')
 
--- 12b. Mid-render, the panel is NOT a replacement: Render hides its own frame
--- while applying, and a HUD that is halfway through being built cannot be
--- shown to anyone. Observed from inside the real transaction, through the
--- real panel, rather than asserted about it from outside.
+-- 12b. Mid-render, the panel is NOT a replacement: a HUD that is halfway
+-- through being built cannot be offered to anyone. Observed from inside the
+-- real transaction, through the real panel, rather than asserted about it
+-- from outside.
 do
- -- The transaction hides the panel's own frame while it applies, so that
- -- frame's OnHide runs INSIDE the window. Observed there, through the real
- -- frame, rather than asserted about it from outside.
+ -- A shown panel is no longer hidden while it applies (native test.163012,
+ -- native_panel_input_continuity), so the observation point is a step the
+ -- transaction itself runs: the context header update inside ApplyCandidate.
  local panelFrame=_G.NexusPanel
  check(panelFrame~=nil,'fixture: the real panel frame exists')
  Nexus.Panel.Show();H.Advance(.4)
  check(panelFrame:IsShown()==true,'fixture: it is on screen before the render')
  local seen={}
- panelFrame:HookScript('OnHide',function()
+ local header=Nexus.Panel.UpdateContextHeader
+ Nexus.Panel.UpdateContextHeader=function(...)
   seen[#seen+1]=Nexus.Panel.VisibilityFacts()
- end)
+  return header(...)
+ end
  Nexus.Panel.Refresh();H.Advance(.4)
+ Nexus.Panel.UpdateContextHeader=header
  check(#seen>0,'the observation point ran inside a real render transaction')
  local applying=0
  for _,facts in ipairs(seen) do

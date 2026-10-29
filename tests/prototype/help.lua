@@ -85,9 +85,13 @@ local function Card(tag,char,line)
    and f.topicOpen:IsEnabled(),tag..': the topic card shows '..p.id)
   local len=0;for _,l in ipairs(t.lines)do len=len+#l end
   check(#t.lines>=1 and #t.lines<=3 and len<=400 and len*3<#p.text,tag..': a few short lines beside the reference: '..p.id)
-  -- Issue #169: the Auto page adds the current values after its complete text.
+  -- Issue #169: the Auto page adds the current values after its complete text;
+  -- the FAQ shows its complete text with gold questions and one more blank
+  -- line between groups (faq_readability).
   local body=f.body:GetText()
-  check((body==p.text or p.id=='rolling' and body:sub(1,#p.text+2)==p.text..'\n\n') and f.body:IsShown(),
+  local plain=body:gsub('|cffffd100',''):gsub('|r','')
+  check((body==p.text or p.id=='rolling' and body:sub(1,#p.text+2)==p.text..'\n\n'
+   or p.id=='faq' and body==Nexus.Help.FormatQuestions(p.text) and plain:gsub('\n\n\n','\n\n')==p.text) and f.body:IsShown(),
    tag..': the complete reference stays below the topic: '..p.id)
   check(f.reference:GetText():find('Reference',1,true)==1,tag..': the reference is labelled: '..p.id)
   for _,x in ipairs(H.frames)do
