@@ -2,34 +2,38 @@
  "schema": "nexus-all41-acceptance/1",
  "issue": "https://github.com/Viscerals/Better-Nexus/issues/131",
  "nativeTicket": "https://github.com/Viscerals/Better-Nexus/issues/133",
- "statement": "Source/offline reconciliation of the canonical 41 rows against the pinned source. Not tester, native, release or whole-feature acceptance. No row is accepted from fixture registration, header IDs, grep, aggregate totals or older projected maps.",
+ "statement": "Source/offline reconciliation of the canonical 41 rows against the final source pin. Not tester, native, release or whole-feature acceptance. No row is accepted from fixture registration, header IDs, grep, aggregate totals, lane runs or older projected maps.",
  "authoring": {
   "author": "Claude Opus 5.5 (claude-opus-5-5)",
   "accountableOwner": "existing Nexus coordinator",
-  "independentReview": "Codex (pending)",
-  "dispositionStatus": "author dispositions; independent Spec/Standards review of this matrix is pending"
+  "independentReview": "Codex (pending for this rebinding revision)",
+  "dispositionStatus": "author dispositions; independent Spec/Standards review of this rebinding is pending"
  },
  "sourcePin": {
-  "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
-  "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
+  "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+  "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
  },
  "baselineStatus": {
-  "kind": "historical-baseline",
+  "kind": "final-source-pin",
   "boundTo": {
-   "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
-   "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
+   "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+   "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
   },
-  "statement": "All source, execution and native evidence here is bound to the pin above. Integration of #126/#21 is in progress elsewhere. Rebinding to a successor source is pending; the root coordinator will provide the exact integrated source and full CI evidence. Historical tests in this matrix are not proof of changed code."
+  "statement": "Source symbols, line citations and assertions are rebound to the final pin above. Final-pin execution: The root coordinator's final full CI at this pin is terminal and FAILED: Lua 579 of 580 listed fixtures passed, 1 failed (lifecycle_counter_accounting), 0 not run; both registered Python test files passed (84 cases); the source was unchanged during the run. Every fixture cited by a row passed in that run. The failed fixture is cited by no row; its file is unchanged since 9bfb2bb and it passed in the intermediate 6dcb46c full CI. It is not diagnosed here. The complete-suite gate is therefore not green at this pin. Each row keeps its 9bfb2bb results as historicalExecution; they are not proof of changed code. Lane runs and the intermediate 6dcb46c CI are not this code's execution."
  },
  "revision": {
   "supersedes": {
-   "commit": "8b1f22169961058fa22e12a7a552b6f35062a903",
-   "tree": "01172576875660c2b13f70a04bced1096d25fd3f"
+   "commit": "2aaaecca766df39198780be1303f5352aca446d1",
+   "tree": "6c6a3a79ddee591fed2f3ff6cf326a3146e168e5",
+   "note": "That matrix text is integrated byte-identically in f399dd0 and described 9bfb2bb."
   },
   "corrections": [
-   "Independent Spec review: J4, UX-07 and UX-15 changed from unqualified met-offline to partial, because their own evidence keeps contract, interpretation or coverage gaps.",
-   "Independent Standards review: the displayed focused-run command now uses the valid comma-separated --only form, with labelled shorthand pointing to the complete selected list.",
-   "Rows whose native criteria are empty now carry the status none-beyond-offline-scope instead of pending."
+   "Every source and test citation is rebound to f399dd0: shifted lines are remapped mechanically; changed regions are re-read and rewritten.",
+   "UX-02 and J4: partial -> met-offline-adopted-interpretation. G-UX02-a and G-UX02-b are resolved by 82b7695; the adopted reading of 'marked' (a separate Freeze mark) is recorded.",
+   "UX-13: partial -> met-offline-adopted-interpretation. G-UX13 is resolved by 62f16c7; the literal 'planned' interpretation is recorded as a retained conflict.",
+   "LP-13, LP-15, UX-07, UX-15 and the other partial rows stay partial; their citations are updated only.",
+   "Each row now separates final-pin execution (from the root receipt), lane runs and historical 9bfb2bb execution.",
+   "Trailing whitespace after empty Spec notes is removed from the Markdown."
   ],
   "productOrTestChange": false,
   "rerun": false
@@ -87,152 +91,385 @@
   "note": "Maintainer-held sanitized input; each row's `canonical` object is copied from it unchanged."
  },
  "evidence": {
-  "focused-61": {
-   "pin": {
+  "sourceLineage": {
+   "base": {
     "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
     "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
    },
-   "runtime": "LuaJIT 2.1 (LuaJIT)",
-   "command": "python -B tools/run_prototype_tests.py --runtime luajit --only ux_setup_replay,ux_manual_recommendation,ux_help_navigation,ux_save_assignment_result,ux_captured_destination_labels,ux_save_intents,ux_auto_assignment_consent,ux_automation_scope,ux_save_retry_intent,ux_assignment_consent_routes,ux_destination_context,ux_qualified_counts,ux_record_scope_terms,ux_share_confirmation,ux_sync_disclosure,ux_sync_disclosure_sends,ux_sync_mode_choice,ux_sync_mode_transitions,ux_sync_status_fit,ux_sync_dps_page,ux_share_admission,orb_target_review,orb_fixed_pause_resume,orb_recovery_layers,ux_setup_checklist,ux_status_composition,orb_review_identity,orb_recovery_vocabulary,ux_share_approval_retirement,ux_share_linked_dps,ux_retry_share_feedback,ux_context_help_access,guided_setup_flow,guided_setup_readback,guided_first_entry,guided_setup_resume,setup_help_entry_points,overwrite_warning,overwrite_warning_welcome,overwrite_warning_lifecycle,overwrite_auto_gate,quickstart_seen_guard,help,help_action_first,terminology,terminology_consumers,orb_bounded_recovery,orb_recovery_continue,orb_recovery_refusals,orb_continue_affordance,orb_guidance_passive_open,orbs_target_changes,saved_build_wishlist_destination_guards,wishlist_assignment_action_token,assignment_identity,stale_server_slot_save,wishlist_upload_context,session_permissions,full_ui_settings,batch_orb_restored_wording,orb_mini_panel --output <local result file outside the repository>",
-   "commandNote": "The --only value is exactly the comma-separated `selected` list below, in that order. Only the output location is withheld. This records the historical run at the pin; nothing was rerun for this revision.",
-   "selected": [
-    "ux_setup_replay",
-    "ux_manual_recommendation",
-    "ux_help_navigation",
-    "ux_save_assignment_result",
-    "ux_captured_destination_labels",
-    "ux_save_intents",
-    "ux_auto_assignment_consent",
-    "ux_automation_scope",
-    "ux_save_retry_intent",
-    "ux_assignment_consent_routes",
-    "ux_destination_context",
-    "ux_qualified_counts",
-    "ux_record_scope_terms",
-    "ux_share_confirmation",
-    "ux_sync_disclosure",
-    "ux_sync_disclosure_sends",
-    "ux_sync_mode_choice",
-    "ux_sync_mode_transitions",
-    "ux_sync_status_fit",
-    "ux_sync_dps_page",
-    "ux_share_admission",
-    "orb_target_review",
-    "orb_fixed_pause_resume",
-    "orb_recovery_layers",
-    "ux_setup_checklist",
-    "ux_status_composition",
-    "orb_review_identity",
-    "orb_recovery_vocabulary",
-    "ux_share_approval_retirement",
-    "ux_share_linked_dps",
-    "ux_retry_share_feedback",
-    "ux_context_help_access",
-    "guided_setup_flow",
-    "guided_setup_readback",
-    "guided_first_entry",
-    "guided_setup_resume",
-    "setup_help_entry_points",
-    "overwrite_warning",
-    "overwrite_warning_welcome",
-    "overwrite_warning_lifecycle",
-    "overwrite_auto_gate",
-    "quickstart_seen_guard",
-    "help",
-    "help_action_first",
-    "terminology",
-    "terminology_consumers",
-    "orb_bounded_recovery",
-    "orb_recovery_continue",
-    "orb_recovery_refusals",
-    "orb_continue_affordance",
-    "orb_guidance_passive_open",
-    "orbs_target_changes",
-    "saved_build_wishlist_destination_guards",
-    "wishlist_assignment_action_token",
-    "assignment_identity",
-    "stale_server_slot_save",
-    "wishlist_upload_context",
-    "session_permissions",
-    "full_ui_settings",
-    "batch_orb_restored_wording",
-    "orb_mini_panel"
+   "final": {
+    "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+    "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+   },
+   "finalParents": [
+    "e6b67035b4c25c53348e4a301139f1579d440222",
+    "82b7695d27d6f870547f7638942c74f81604affd"
    ],
-   "passed": 61,
-   "failed": 0,
-   "not_run": 0,
-   "worktreeCleanAfter": true,
-   "date": "2026-10-29",
-   "scope": "Synthetic offline fixtures; not native WoW validation."
+   "lanes": [
+    {
+     "lane": "prior reviewed union (#126 difficulty, #21 scroll)",
+     "commit": "6dcb46c9f84bb71ff4523d72a671fcfbe874f9f1",
+     "paths": 9
+    },
+    {
+     "lane": "all41 matrix correction (this file's predecessor)",
+     "commit": "2aaaecca766df39198780be1303f5352aca446d1",
+     "paths": 2
+    },
+    {
+     "lane": "UX-13 counts",
+     "commit": "62f16c70d2bb438abdb5f581ba2e58c612d2f348",
+     "paths": 3
+    },
+    {
+     "lane": "UX-02/J4 manual",
+     "commit": "82b7695d27d6f870547f7638942c74f81604affd",
+     "paths": 7
+    }
+   ],
+   "unionAudit": "Mechanical exact-author-blob audit passed: every changed tree entry equals its lane author blob or the base; no extra merge edits; registry byte-identical to 6dcb46c with 580 unique fixtures.",
+   "changedFromBase": 21
   },
-  "fullSuiteAtPin": {
+  "finalFullCI": {
    "pin": {
-    "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
-    "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
+    "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+    "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
    },
+   "owner": "root coordinator",
+   "scope": "complete registered Lua inventory and registered Python tests",
+   "status": "failed",
+   "observedUTC": "2026-10-29T13:35:38.617789+00:00",
+   "statement": "The root coordinator's final full CI at this pin is terminal and FAILED: Lua 579 of 580 listed fixtures passed, 1 failed (lifecycle_counter_accounting), 0 not run; both registered Python test files passed (84 cases); the source was unchanged during the run. Every fixture cited by a row passed in that run. The failed fixture is cited by no row; its file is unchanged since 9bfb2bb and it passed in the intermediate 6dcb46c full CI. It is not diagnosed here. The complete-suite gate is therefore not green at this pin.",
+   "startedUTC": "2026-10-29T13:21:36.778886+00:00",
+   "finishedUTC": "2026-10-29T13:35:38.617789+00:00",
+   "exitCode": 1,
+   "sourceUnchanged": true,
    "lua": {
-    "passed": 577,
-    "failed": 0,
-    "not_run": 0
+    "listed": 580,
+    "passed": 579,
+    "failed": 1,
+    "not_run": 0,
+    "failedFixtures": [
+     {
+      "test": "lifecycle_counter_accounting",
+      "assertion": "tests/prototype/lifecycle_counter_accounting.lua:13 check, called at :126: 'later full lifecycle query observes a root replaced after counter read'",
+      "citedByThisMatrix": false,
+      "fixtureChangedSince9bfb2bb": false,
+      "passedInIntermediate6dcb46cFullCI": true,
+      "diagnosis": "not diagnosed here; owned by the root coordinator"
+     }
+    ]
    },
    "python": {
-    "files": 2,
-    "passed": 2
+    "registeredFiles": 2,
+    "passedFiles": 2,
+    "cases": 84
+   }
+  },
+  "laneRuns": {
+   "ux13-focused-62f16c7": {
+    "commit": "62f16c70d2bb438abdb5f581ba2e58c612d2f348",
+    "tree": "d46cc953a4fee1ff9f1f736009cd609d09bc4f3d",
+    "base": "6dcb46c9f84bb71ff4523d72a671fcfbe874f9f1",
+    "runtime": "LuaJIT",
+    "command": "python -B tools/ci_check.py --output <local result file> --only <selected>",
+    "selected": [
+     "terminology_consumers",
+     "readonly_profile_preservation",
+     "saved_mirror_assigned_description",
+     "saved_mirror_owner_description_reimport",
+     "saved_mirror_link_only_description",
+     "saved_mirror_title_only_description",
+     "saved_mirror_description_provenance",
+     "saved_mirror_pipe_resubmit",
+     "saved_mirror_pipe_controls",
+     "ux_qualified_counts"
+    ],
+    "passed": 10,
+    "failed": 0,
+    "not_run": 0,
+    "sourceUnchanged": true,
+    "date": "2026-10-29",
+    "use": "Root-run focused check of the UX-13 lane commit. Its changed files are byte-identical in the final pin, but the run is not execution of the final pin."
    },
-   "use": "Aggregate only; establishes the pin is green, never row acceptance."
+   "ux02-focused-82b7695": {
+    "commit": "82b7695d27d6f870547f7638942c74f81604affd",
+    "tree": "50185acb55e02b136171241a70a9fa5493ac2809",
+    "base": "6dcb46c9f84bb71ff4523d72a671fcfbe874f9f1",
+    "runtime": "LuaJIT",
+    "command": "python -B tools/ci_check.py --output <local result file> --only <selected>",
+    "selected": [
+     "terminology_consumers",
+     "automation_world_transition",
+     "auto_port_notice",
+     "auto_port_recovery",
+     "auto_port_review_edges",
+     "readonly_profile_preservation",
+     "automation_role_deficit",
+     "automation_tier_annotation",
+     "orb_guidance_navigation",
+     "orb_guidance_passive_open",
+     "orb_guidance_geometry",
+     "adaptive_policy_rules",
+     "adaptive_policy_parity",
+     "roll_recorder_unit",
+     "roll_recorder_runtime",
+     "roll_recorder_freeze_observation",
+     "auto_lock_absent_empty_bucket",
+     "automation_refused_freeze",
+     "ux_manual_recommendation",
+     "play_panel_summary",
+     "panel_options_label",
+     "native_dropdown_ownership",
+     "native_details_measurement"
+    ],
+    "passed": 23,
+    "failed": 0,
+    "not_run": 0,
+    "sourceUnchanged": true,
+    "date": "2026-10-29",
+    "use": "Root-run focused check of the UX-02/J4 lane commit. Its changed files are byte-identical in the final pin, but the run is not execution of the final pin."
+   },
+   "ux02-predecessor-red-0d16ba7": {
+    "predecessor": "0d16ba7f05fa01f6ae5315399d40496072dc927d",
+    "candidate": "82b7695d27d6f870547f7638942c74f81604affd",
+    "fixture": "tests/prototype/ux_manual_recommendation.lua from the candidate, run against the exact predecessor export",
+    "runtime": "LuaJIT",
+    "exitCode": 1,
+    "expectationFailures": 1,
+    "guardFailures": 0,
+    "setupFailures": 0,
+    "date": "2026-10-29",
+    "use": "Root-run discriminating RED: R10's count check fails on the predecessor's exact-two Freeze wording while every guard and setup holds."
+   }
   },
-  "boundedReviewsAtPin": {
-   "scope": "Independent Spec and Standards reviews of the eight-file menu-opacity/Details-names delta a9ff2eda8..9bfb2bb92; zero confirmed findings for that delta.",
-   "use": "Not all41 Spec/Standards sign-off."
+  "independentReviews": {
+   "finalCombined": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "comparison": "git diff 9bfb2bb922123e0b60f8b7f0506fc508c4476052...f399dd09700e739fd27b187069bd4c83278c86c4 (21 paths)",
+    "spec": "PASS, zero material findings",
+    "standards": "zero material findings",
+    "notes": "Fixed-source reviews by independent Codex reviewers. Reviewers ran no tests. Both describe this matrix's previous text as explicitly historical 9bfb evidence awaiting rebinding. The Standards review's trailing-whitespace advisory on the historical Markdown is addressed in this revision."
+   },
+   "lanes": [
+    {
+     "lane": "#126 difficulty read",
+     "commit": "dc47e652f52c0c3e0764888c9bd9e897db040890",
+     "spec": "PASS, zero material findings"
+    },
+    {
+     "lane": "#21 same-window scroll (fixture correction)",
+     "commit": "36eca60b1912bc365752bfc3dd3ee365927a1a2b",
+     "spec": "zero material findings"
+    },
+    {
+     "lane": "#131 all41 matrix correction (historical 9bfb text)",
+     "commit": "2aaaecca766df39198780be1303f5352aca446d1",
+     "spec": "zero material findings",
+     "standards": "zero material findings"
+    },
+    {
+     "lane": "UX-13 / LP-13 generated mirror counts",
+     "commit": "62f16c70d2bb438abdb5f581ba2e58c612d2f348",
+     "spec": "zero material findings",
+     "standards": "zero material findings"
+    },
+    {
+     "lane": "UX-02 / J4 manual recommendation",
+     "commit": "82b7695d27d6f870547f7638942c74f81604affd",
+     "spec": "PASS, prior P2 (exact-count wording) resolved",
+     "standards": "zero material findings"
+    }
+   ],
+   "use": "Source and test-oracle reviews of the code. Not execution, native acceptance or acceptance of this matrix. This rebinding revision itself has no independent review yet."
   },
-  "boundedNativeAtPin": {
-   "scope": "Private test build of this pin: build identity after reload, Options/submenu opacity, Details names, root Help callback opened the coach and Escape closed it, Auto remained OFF.",
-   "use": "Not all41 native acceptance; tracked under #133.",
-   "remainingNativeScope": [
-    "125% text and changed UI scale",
-    "edge/clamping and all menu entry families/levels",
-    "eight-lock Plan context",
-    "incomplete-owner Explore reuse",
-    "full Reference/back stack",
-    "other Orbs runtime states",
-    "My Builds resize/reopen",
-    "complete error-log audit"
-   ]
+  "historicalAt9bfb": {
+   "focused-61": {
+    "pin": {
+     "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
+     "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
+    },
+    "runtime": "LuaJIT 2.1 (LuaJIT)",
+    "command": "python -B tools/run_prototype_tests.py --runtime luajit --only ux_setup_replay,ux_manual_recommendation,ux_help_navigation,ux_save_assignment_result,ux_captured_destination_labels,ux_save_intents,ux_auto_assignment_consent,ux_automation_scope,ux_save_retry_intent,ux_assignment_consent_routes,ux_destination_context,ux_qualified_counts,ux_record_scope_terms,ux_share_confirmation,ux_sync_disclosure,ux_sync_disclosure_sends,ux_sync_mode_choice,ux_sync_mode_transitions,ux_sync_status_fit,ux_sync_dps_page,ux_share_admission,orb_target_review,orb_fixed_pause_resume,orb_recovery_layers,ux_setup_checklist,ux_status_composition,orb_review_identity,orb_recovery_vocabulary,ux_share_approval_retirement,ux_share_linked_dps,ux_retry_share_feedback,ux_context_help_access,guided_setup_flow,guided_setup_readback,guided_first_entry,guided_setup_resume,setup_help_entry_points,overwrite_warning,overwrite_warning_welcome,overwrite_warning_lifecycle,overwrite_auto_gate,quickstart_seen_guard,help,help_action_first,terminology,terminology_consumers,orb_bounded_recovery,orb_recovery_continue,orb_recovery_refusals,orb_continue_affordance,orb_guidance_passive_open,orbs_target_changes,saved_build_wishlist_destination_guards,wishlist_assignment_action_token,assignment_identity,stale_server_slot_save,wishlist_upload_context,session_permissions,full_ui_settings,batch_orb_restored_wording,orb_mini_panel --output <local result file outside the repository>",
+    "commandNote": "The --only value is exactly the comma-separated `selected` list below, in that order. Only the output location is withheld. Historical run at 9bfb2bb; not rerun.",
+    "selected": [
+     "ux_setup_replay",
+     "ux_manual_recommendation",
+     "ux_help_navigation",
+     "ux_save_assignment_result",
+     "ux_captured_destination_labels",
+     "ux_save_intents",
+     "ux_auto_assignment_consent",
+     "ux_automation_scope",
+     "ux_save_retry_intent",
+     "ux_assignment_consent_routes",
+     "ux_destination_context",
+     "ux_qualified_counts",
+     "ux_record_scope_terms",
+     "ux_share_confirmation",
+     "ux_sync_disclosure",
+     "ux_sync_disclosure_sends",
+     "ux_sync_mode_choice",
+     "ux_sync_mode_transitions",
+     "ux_sync_status_fit",
+     "ux_sync_dps_page",
+     "ux_share_admission",
+     "orb_target_review",
+     "orb_fixed_pause_resume",
+     "orb_recovery_layers",
+     "ux_setup_checklist",
+     "ux_status_composition",
+     "orb_review_identity",
+     "orb_recovery_vocabulary",
+     "ux_share_approval_retirement",
+     "ux_share_linked_dps",
+     "ux_retry_share_feedback",
+     "ux_context_help_access",
+     "guided_setup_flow",
+     "guided_setup_readback",
+     "guided_first_entry",
+     "guided_setup_resume",
+     "setup_help_entry_points",
+     "overwrite_warning",
+     "overwrite_warning_welcome",
+     "overwrite_warning_lifecycle",
+     "overwrite_auto_gate",
+     "quickstart_seen_guard",
+     "help",
+     "help_action_first",
+     "terminology",
+     "terminology_consumers",
+     "orb_bounded_recovery",
+     "orb_recovery_continue",
+     "orb_recovery_refusals",
+     "orb_continue_affordance",
+     "orb_guidance_passive_open",
+     "orbs_target_changes",
+     "saved_build_wishlist_destination_guards",
+     "wishlist_assignment_action_token",
+     "assignment_identity",
+     "stale_server_slot_save",
+     "wishlist_upload_context",
+     "session_permissions",
+     "full_ui_settings",
+     "batch_orb_restored_wording",
+     "orb_mini_panel"
+    ],
+    "passed": 61,
+    "failed": 0,
+    "not_run": 0,
+    "worktreeCleanAfter": true,
+    "date": "2026-10-29",
+    "scope": "Synthetic offline fixtures; not native WoW validation."
+   },
+   "fullSuite": {
+    "pin": {
+     "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
+     "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
+    },
+    "lua": {
+     "passed": 577,
+     "failed": 0,
+     "not_run": 0
+    },
+    "python": {
+     "files": 2,
+     "passed": 2
+    },
+    "use": "Historical aggregate at 9bfb2bb only; not this code's execution and never row acceptance."
+   },
+   "boundedReviews": {
+    "scope": "Independent Spec and Standards reviews of the eight-file menu-opacity/Details-names delta a9ff2eda8..9bfb2bb92; zero confirmed findings for that delta.",
+    "use": "Not all41 Spec/Standards sign-off."
+   },
+   "boundedNative": {
+    "scope": "Private test build of this pin: build identity after reload, Options/submenu opacity, Details names, root Help callback opened the coach and Escape closed it, Auto remained OFF.",
+    "use": "Historical native check of a private 9bfb2bb build; not all41 native acceptance and not evidence for the final pin; tracked under #133.",
+    "remainingNativeScope": [
+     "125% text and changed UI scale",
+     "edge/clamping and all menu entry families/levels",
+     "eight-lock Plan context",
+     "incomplete-owner Explore reuse",
+     "full Reference/back stack",
+     "other Orbs runtime states",
+     "My Builds resize/reopen",
+     "complete error-log audit"
+    ]
+   }
+  },
+  "historicalIntermediate6dcb46c": {
+   "commit": "6dcb46c9f84bb71ff4523d72a671fcfbe874f9f1",
+   "lua": {
+    "passed": 580
+   },
+   "python": {
+    "cases": 84
+   },
+   "use": "Full CI of an intermediate union before the UX-13 and UX-02/J4 lanes; not this code's execution."
   }
  },
  "historical": [
-  "Issue #131 top-of-issue status paragraphs are historical checkpoints; present claims come from this pin.",
+  "Issue #131 top-of-issue status paragraphs are historical checkpoints; present claims come from the final pin.",
   "An earlier e8 matrix recorded zero whole items accepted and is historical.",
-  "Older static/projected all41 maps and five-boundary review data are preparation only."
+  "Older static/projected all41 maps and five-boundary review data are preparation only.",
+  "The 9bfb2bb matrix revisions (8b1f221, 2aaaecca) and their results are historical."
  ],
  "dispositionVocabulary": {
   "met-offline": "every canonical acceptance proposal has a discriminating passing offline assertion at the pin",
   "met-offline-adopted-interpretation": "met under the recorded adopted interpretation",
   "partial": "a canonical criterion lacks offline evidence or a candidate gap is recorded",
-  "no-hard-violation-found": "no documented-repository-rule breach found; heuristic smells listed separately"
+  "no-hard-violation-found": "no documented-repository-rule breach found; heuristic smells listed separately",
+  "executionCondition": "'Passing at the pin' is taken from the root final-pin receipt. While it is pending, every met-offline and met-offline-adopted-interpretation disposition is provisional. A cited fixture that fails or is not run returns its row to partial. A cited fixture passing inside a failed complete suite supports that row's offline disposition only; it makes no integration, release or acceptance gate green."
  },
  "candidateGapsForSeparateLanes": [
-  "UX-02 G-UX02-a",
-  "UX-02 G-UX02-b",
-  "UX-13 G-UX13",
   "LP-14 G-LP14",
   "LP-15 G-LP15",
   "J3 G-J3",
   "LP-04 scope",
+  "LP-13 reach (formatter not used by every count surface)",
   "UX-16 interpretation",
   "UX-07 Play-line interpretation",
   "UX-15 coverage (with LP-15)",
-  "J4 inherits UX-02 G-UX02-a/b"
+  "UX-13 literal 'planned' interpretation (owner disposition)",
+  "UX-02/J4 Freeze-mark reading of 'marked' (owner disposition)"
+ ],
+ "resolvedCandidateGaps": [
+  {
+   "gap": "UX-02 G-UX02-a",
+   "resolvedIn": "82b7695d27d6f870547f7638942c74f81604affd",
+   "via": "0d16ba7f05fa01f6ae5315399d40496072dc927d, then count-neutral wording",
+   "finalPin": "f399dd09700e739fd27b187069bd4c83278c86c4"
+  },
+  {
+   "gap": "UX-02 G-UX02-b",
+   "resolvedIn": "0d16ba7f05fa01f6ae5315399d40496072dc927d",
+   "unchangedThrough": "82b7695d27d6f870547f7638942c74f81604affd",
+   "finalPin": "f399dd09700e739fd27b187069bd4c83278c86c4"
+  },
+  {
+   "gap": "UX-13 G-UX13",
+   "resolvedIn": "62f16c70d2bb438abdb5f581ba2e58c612d2f348",
+   "finalPin": "f399dd09700e739fd27b187069bd4c83278c86c4"
+  },
+  {
+   "gap": "J4 inherited UX-02 G-UX02-a/b",
+   "resolvedIn": "82b7695d27d6f870547f7638942c74f81604affd",
+   "finalPin": "f399dd09700e739fd27b187069bd4c83278c86c4"
+  }
  ],
  "summary": {
   "rows": 41,
   "specDispositions": {
-   "met-offline-adopted-interpretation": 4,
    "met-offline": 26,
-   "partial": 11
+   "met-offline-adopted-interpretation": 7,
+   "partial": 8
   },
   "nativePending": 38,
-  "acceptedWholeRows": 0
+  "nativeNoneBeyondOfflineScope": 3,
+  "acceptedWholeRows": 0,
+  "finalPinExecution": "complete suite FAILED (Lua 579/580; the one failure is uncited); all 63 cited fixtures PASS; Python 2/2 files"
  },
  "rows": [
   {
@@ -262,7 +499,7 @@
    ],
    "callbackChain": [
     "warning No/Close/Escape (ui/OverwriteWarning.lua:210,213,228) -> Finish(false,...,explicit=true) -> onboardingOutcome='declined' (:132) -> same root/owner check (:143-145) -> ShowInformation (:110) -> QuickStart.ShowSetup (ui/QuickStart.lua:461): _informational=true, SETUP_TITLE/SETUP_HINT, no write",
-    "later Auto click -> AutomationRuntime ToggleAuto (core/AutomationRuntime.lua:4648-4664) -> OverwriteWarning.RequestAuto (:327): onboarding is 'declined' not 'pending' -> Show('auto') unless the player saved its suppression"
+    "later Auto click -> AutomationRuntime ToggleAuto (core/AutomationRuntime.lua:4653-4669) -> OverwriteWarning.RequestAuto (:327): onboarding is 'declined' not 'pending' -> Show('auto') unless the player saved its suppression"
    ],
    "discriminatingAssertions": [
     "tests/prototype/ux_setup_replay.lua:204-205 S1 No declines; `NexusDB.overwriteWarnings==nil and Seen()==nil` (real warning handlers)",
@@ -279,6 +516,44 @@
     "Auto warning No/Close/Escape/CancelAuto open no Welcome (:275)"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_setup_replay",
+      "status": "PASS"
+     },
+     {
+      "test": "overwrite_warning",
+      "status": "PASS"
+     },
+     {
+      "test": "overwrite_warning_welcome",
+      "status": "PASS"
+     },
+     {
+      "test": "overwrite_warning_lifecycle",
+      "status": "PASS"
+     },
+     {
+      "test": "overwrite_auto_gate",
+      "status": "PASS"
+     },
+     {
+      "test": "quickstart_seen_guard",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_first_entry",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -320,7 +595,8 @@
       "status": "PASS",
       "checks": 195
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
@@ -379,6 +655,36 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_setup_checklist",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_flow",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_resume",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_readback",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_setup_replay",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -409,7 +715,8 @@
       "status": "PASS",
       "checks": 229
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -447,30 +754,68 @@
      "No engine name in recommendations"
     ]
    },
-   "adoptedInterpretation": "Auto OFF marks and names exactly one card only when the runtime's decision is a Take of a definite card (core/AutomationRuntime.lua:3275 highlight; ui/Readout.lua:81 MarkedCard). Reason text passes through UserText.Message (ui/Panel.lua:5396, core/UserText.lua:90).",
+   "adoptedInterpretation": "With Auto OFF the HUD identifies a card only when the runtime's current decision has one definite card target. A Take carries the Take marker ('>>' row, '> Wishlist pick' tag; core/AutomationRuntime.lua:3275-3276 highlight, ui/Readout.lua:81 MarkedCard). The adaptive Freeze for two or more different Needed offers (PAIR_FREEZE_SECOND_NEEDED) carries a separate, display-only Freeze mark ('[Freeze]' row, '> Freeze' tag; core/AutomationRuntime.lua:3280-3281, ui/Readout.lua:98 FreezeCard), never the Take marker, and the unstepped recommendation names that card. The canonical 'marked' is read as this action-specific mark: the Wishlist pick tag means Take, so a Freeze is not shown as a pick. The same Echo offered twice, or a decision without a card target, marks and names nothing (no guess). Reason text passes through UserText.Message (core/UserText.lua:93); its reasons table maps the three experimental adaptive labels without the engine name (:30-32). The Freeze wording is count-neutral ('Freeze one of the needed offers'). Policy (logic/EchoWeaver.lua) is unchanged.",
    "productionSymbols": [
-    "core/AutomationRuntime.lua:3268-3280 cardLines highlight",
-    "core/AutomationRuntime.lua:3288 recommendation = action.reason",
-    "ui/Readout.lua:81 MarkedCard, :167 RecommendationWithTarget",
-    "ui/Panel.lua:4950-4982 heading branches",
-    "core/UserText.lua:21-29 reasons, :90 T.Message",
-    "logic/EchoWeaver.lua:199-211 LABELS, :369-387 adaptive PAIR_FREEZE redirect"
+    "core/AutomationRuntime.lua:3268-3285 cardLines: highlight (Take, :3275-3276), freeze display flag (:3280-3281)",
+    "core/AutomationRuntime.lua:3293 recommendation = action.reason",
+    "ui/Readout.lua:81 MarkedCard, :98 FreezeCard, :184 RecommendationWithTarget, :219 OFFER_FREEZE_TAG, :221 OfferCard (Freeze tag :259-261)",
+    "ui/Panel.lua:4950-4991 heading branches; :4965-4974 Orb-guidance branch, Auto OFF 'You choose' at :4970-4971",
+    "ui/Panel.lua:4995-5008 marked/frozen rows, :5019-5020 RenderOfferCards(..., frozen), :5027-5033 named body",
+    "ui/Panel.lua:3607 M.RenderOfferCards(lines, marked, auto, responsive, facts, frozen)",
+    "core/UserText.lua:21-32 reasons (experimental adaptive labels :30-32), :93 T.Message",
+    "logic/EchoWeaver.lua:199-211 LABELS, :369-387 adaptive PAIR_FREEZE redirect (unchanged)"
    ],
    "callbackChain": [
-    "offer -> Policy/EchoWeaver.DecideNexus -> decision.reason=LABELS[code] (logic/EchoWeaver.lua:317) -> runtime panel model (core/AutomationRuntime.lua:3288-3307) -> Panel.Render Present -> UserText.Message -> heading + card marker"
+    "offer -> Policy/EchoWeaver.DecideNexus -> decision.reason=LABELS[code] (logic/EchoWeaver.lua:317) -> runtime panel model with highlight/freeze per card (core/AutomationRuntime.lua:3271-3285, :3293) -> Panel ApplyModel heading (ui/Panel.lua:4950-4991) -> MarkedCard or FreezeCard (:4995-5001) -> row prefix and offer-card tag (:5005-5006, :5019-5020) -> UserText.Message reason + RecommendationWithTarget body (:5027-5033)"
    ],
    "discriminatingAssertions": [
-    "tests/prototype/ux_manual_recommendation.lua:108 Auto OFF heading has 'you choose' and not 'active'",
-    ":111-112 exactly one marked and named card (single Needed card on the board)",
-    ":128 duplicate same Echo -> no mark, no name",
-    "tests/prototype/terminology_consumers.lua:28 no '(EchoWeaver)' on the real Take path"
+    "tests/prototype/ux_manual_recommendation.lua:123-124 R1 Auto OFF heading says you choose, not active; :126-128 exactly one marked and named Take card (single Needed card)",
+    ":142-144 R1 duplicate same Echo -> no mark, no name; :149-150 no Take target -> no mark, reason without a guessed target",
+    ":475-499 R7 Auto OFF with Orb guidance: heading says you choose with the destination, never Active (:494); Open Orbs button and pause reason remain (:495-496); no effect (:499)",
+    ":512-548 R8 two different Needed offers: the real adaptive decision Freezes card 1 (:523); exactly that card is identified as a Freeze (:527), no Take marker (:529), named with Freeze wording (:532), no engine name in visible text (:534); fallback row '[Freeze] Echo 1 (Uncommon)' (:543)",
+    ":628-654 R10 three different Needed offers: exactly the decision's Freeze card identified (:646), no Take marker (:647), visible text makes no 'two needed'/'of two' claim (:651), no engine name (:653)",
+    "tests/prototype/orb_guidance_navigation.lua:218-223 real HUD, unknown Orb state, Auto OFF: heading not Active and says you choose; pause reason and inspection button stay; nothing performed",
+    "tests/prototype/terminology_consumers.lua:28 no '(EchoWeaver)' on the real Take path; :49-51,:57-58 the three experimental labels reach the actual Panel without the engine name; :1740-1741 actual policy PAIR_FREEZE_SECOND_NEEDED -> runtime -> Panel fontstring carries no engine name"
    ],
    "negativeControls": [
-    "no needed offer / no offer (R4 :174)",
-    "Auto held/waiting (:163,:165)",
-    "no actions sent (:114,:136)"
+    "R1 duplicate same Echo and no Take target mark nothing (tests/prototype/ux_manual_recommendation.lua:142-150)",
+    "R9 duplicate same-Echo Freeze marks and names nothing (:592-594); unknown charges keep the Take marker without a Freeze mark (:607); long name named whole (:620-621)",
+    "R8 reordered board moves the Freeze mark (:561-563); an ordinary Take keeps its Wishlist pick marker and no Freeze mark remains (:569-570); no choice marks nothing (:574)",
+    "R3/R8 Auto ON held and waiting headings keep their own words and no marker (:178,:180,:551,:554)",
+    "R4 no Echo choice: no marker, nothing performed (:183-191)",
+    "effects captured after setup unchanged: actions, sends, assignment calls, settings, Auto (:499,:548,:575,:654)"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_manual_recommendation",
+      "status": "PASS"
+     },
+     {
+      "test": "terminology_consumers",
+      "status": "PASS"
+     },
+     {
+      "test": "terminology",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_guidance_navigation",
+      "status": "PASS"
+     }
+    ]
+   },
+   "laneExecution": [
+    "ux02-focused-82b7695",
+    "ux02-predecessor-red-0d16ba7"
+   ],
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -492,30 +837,36 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
-    "disposition": "partial",
-    "notes": "Single-Needed-card cases met offline. Two candidate gaps found by source reading for the canonical 'Two Needed cards' and 'never says active' proposals (not executed).",
-    "source": "canonical object above; issue #131"
+    "disposition": "met-offline-adopted-interpretation",
+    "notes": "All three canonical proposals now have discriminating offline assertions through the real TOC boot, adapter, policy, runtime and Panel: two (and three) different Needed offers -> exactly the decision's card identified with a Freeze mark and named (R8, R10); Auto OFF heading never Active, including with Orb guidance (R7, orb_guidance_navigation); no engine name in visible recommendation or status text (R8-R10, terminology_consumers). Met under the adopted reading of 'marked' above. The former candidate gaps G-UX02-a and G-UX02-b are resolved in the final source. Its cited fixtures passed in the terminal final-pin run; that run's complete suite failed on one uncited fixture, so no integration gate is green.",
+    "source": "canonical object above; issue #131; independent UX-02/J4 Spec and Standards reviews of 82b7695 and final combined reviews of f399dd0 (zero material findings)"
    },
    "standards": {
     "disposition": "no-hard-violation-found",
-    "notes": "Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
+    "notes": "The Freeze flag is display metadata only: no decision, permission or action consumer reads it, and the Take highlight that automation reads is unchanged. Policy, consent, adapter and saved-data owners are unchanged. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "CANDIDATE GAP G-UX02-a (source-only, not executed): predicate `#unheld>=2 and canFreeze and freeze charges>0 and horizon>=2 and frozenCount==0` in the default adaptive policy (logic/EchoWeaver.lua:378-387) yields reasonCode PAIR_FREEZE_SECOND_NEEDED with reason 'Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)' (:210). core/UserText.lua reasons (:21-29) and the gsub at :132 do not map it, so the engine name can reach the HUD; highlight (core/AutomationRuntime.lua:3275) is false for a Freeze, so 0 cards are marked. Same unmapped-label class for BANISH_BEFORE_REROLL and SETTLE_HELD_WANTED (:209,:211). Scope: logic/EchoWeaver.lua, core/UserText.lua, core/AutomationRuntime.lua; no current test offers two different Needed cards with Auto OFF.",
-    "CANDIDATE GAP G-UX02-b (source-only, not executed): ui/Panel.lua:4962-4965 `guide and guide.openOrbs and guideText ~= \"\"` precedes the `model.auto == false` branch (:4974) and sets 'Active: Slot N'. OrbGuidance (logic/OrbGuidance.lua:75-79) sets openOrbs for orb-run/orb-state independent of Auto, so Auto OFF + cards + blocked Orb state reads 'Active'. orb_guidance_navigation covers Auto ON only."
+    "RESOLVED in final source (was CANDIDATE GAP G-UX02-a): the experimental adaptive labels are mapped (core/UserText.lua:30-32) and the Freeze target is identified separately from the Take marker. Lineage 6dcb46c -> 0d16ba7 -> 82b7695 (count-neutral wording), integrated unchanged in f399dd0.",
+    "RESOLVED in final source (was CANDIDATE GAP G-UX02-b): the Orb-guidance heading branch says 'You choose' with Auto OFF (ui/Panel.lua:4970-4971) and keeps 'Active: Slot N' for Auto ON only (:4973).",
+    "Coverage advisory retained from the independent UX-02 Spec review: an unresolved earlier-Orb state with Auto OFF is not directly tested (the tests drive an unknown Orb state); the negative 'Active' checks are case-sensitive, while the positive 'you choose' checks discriminate.",
+    "With Orb guidance shown the body is not rewritten to name a target (ui/Panel.lua:5030), as before for the Take marker.",
+    "Native font, scale, edge fit and screenshot usability of the new heading and Freeze tag are unverified."
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
     "status": "pending",
     "criteria": [
-     "Live board with two Needed cards and Auto OFF: exactly one card marked and named, no engine name",
-     "Auto OFF heading never 'Active' including while Orb state is unknown"
+     "Live board with two (and three) different Needed offers and Auto OFF: exactly the Freeze target shows the Freeze tag, no card shows the Wishlist pick tag, the recommendation names it, no engine name",
+     "Live board with one Needed offer and Auto OFF: exactly one card marked and named",
+     "Auto OFF heading never 'Active' including while Orb state is unknown",
+     "Heading and Freeze tag fit at supported font and UI scales"
     ]
    },
-   "rowDisposition": "offline-partial; two candidate gaps for a separate lane; native pending"
+   "rowDisposition": "offline-supported under the adopted reading of 'marked'; cited fixtures pass at the final pin; full CI failed on an uncited fixture; native pending"
   },
   {
    "id": "LP-02",
@@ -528,24 +879,38 @@
    "adoptedInterpretation": "Compact charges row 'B:n R:n F:n' (unknown '?', untrusted '~') shown only with Auto OFF and a board.",
    "productionSymbols": [
     "core/AutomationRuntime.lua:3064 Adapter.Charges read once per decision",
-    "core/AutomationRuntime.lua:3319 model.charges (Auto OFF only)",
-    "ui/Panel.lua:5440 _nexusChargeLine, :5023-5031 show/hide",
-    "ui/Readout.lua:283 ChargesLine"
+    "core/AutomationRuntime.lua:3324 model.charges (Auto OFF only)",
+    "ui/Panel.lua:5459 _nexusChargeLine, :5042-5050 show/hide",
+    "ui/Readout.lua:308 ChargesLine"
    ],
    "callbackChain": [
     "GameAdapter A.Charges (core/GameAdapter.lua:948) -> state.charges -> panelModel.charges -> Panel.Render -> charges text"
    ],
    "discriminatingAssertions": [
-    "tests/prototype/ux_manual_recommendation.lua:336 'B:20 R:20 F:10' from the real producer",
-    ":356 unreported -> 'B:? R:? F:?' (unknown is not zero)",
-    ":362 untrusted '~'",
-    ":367 re-render makes no charge read",
-    ":375,:402 hidden between boards and with Auto ON"
+    "tests/prototype/ux_manual_recommendation.lua:351 'B:20 R:20 F:10' from the real producer",
+    ":371 unreported -> 'B:? R:? F:?' (unknown is not zero)",
+    ":377 untrusted '~'",
+    ":382 re-render makes no charge read",
+    ":390,:417 hidden between boards and with Auto ON"
    ],
    "negativeControls": [
-    "partial host push upstream limitation stated (:344-350)"
+    "partial host push upstream limitation stated (:359-365)"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_manual_recommendation",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -557,7 +922,8 @@
       "status": "PASS",
       "checks": 68
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -617,6 +983,32 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_save_assignment_result",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_save_intents",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_auto_assignment_consent",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_save_retry_intent",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -642,7 +1034,8 @@
       "status": "PASS",
       "checks": 82
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
@@ -693,6 +1086,28 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_save_intents",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_save_retry_intent",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_auto_assignment_consent",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -713,7 +1128,8 @@
       "status": "PASS",
       "checks": 57
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -749,7 +1165,7 @@
    "adoptedInterpretation": "Confirmations name the destination captured when editing began (WishlistController DestinationDescriptor), never the currently active slot; a first-run plan is labelled first-run (short Saved Build cell 'None' with state cell 'First run').",
    "productionSymbols": [
     "core/WishlistController.lua:1870 DestinationDescriptor",
-    "core/UserText.lua:205 SavedBuildLabel, :289 first-run short cell, :376 DestinationLines, :413 DestinationFields",
+    "core/UserText.lua:208 SavedBuildLabel, :286 first-run short cell, :379 DestinationLines, :416 DestinationFields",
     "ui/Panel.lua:920 DestinationFacts"
    ],
    "callbackChain": [
@@ -767,6 +1183,24 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_captured_destination_labels",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_destination_context",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -782,7 +1216,8 @@
       "status": "PASS",
       "checks": 54
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -814,9 +1249,9 @@
    },
    "adoptedInterpretation": "Shared four-cell destination strip (character / Saved Build / Wishlist / state) on the HUD and the editor; the setup checklist and coach word the destination from the same Panel.SetupFacts/TargetOptions facts but do not render the strip.",
    "productionSymbols": [
-    "ui/Panel.lua:645 CreateDestinationRow, :668 UpdateDestinationRow (HUD :1839,:5346)",
+    "ui/Panel.lua:645 CreateDestinationRow, :668 UpdateDestinationRow (HUD :1839,:5365)",
     "ui/WishlistRenderer.lua:1352,:2841 editor strip",
-    "core/UserText.lua:523 SetupChecklist",
+    "core/UserText.lua:526 SetupChecklist",
     "ui/GuidedSetup.lua:151 TargetLabel"
    ],
    "callbackChain": [
@@ -831,6 +1266,24 @@
     "nil/unavailable/empty states (D-scenarios)"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_destination_context",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_captured_destination_labels",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -847,7 +1300,8 @@
       "status": "PASS",
       "checks": 452
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "partial",
@@ -906,6 +1360,28 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_auto_assignment_consent",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_assignment_consent_routes",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_readback",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -926,7 +1402,8 @@
       "status": "PASS",
       "checks": 135
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -977,6 +1454,28 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "guided_setup_readback",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_setup_checklist",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_flow",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -997,7 +1496,8 @@
       "status": "PASS",
       "checks": 2878
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1050,6 +1550,24 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_help_navigation",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_setup_checklist",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -1065,7 +1583,8 @@
       "status": "PASS",
       "checks": 192
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1112,6 +1631,24 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_setup_checklist",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_flow",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -1127,7 +1664,8 @@
       "status": "PASS",
       "checks": 2878
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1185,6 +1723,28 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "orb_target_review",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_review_identity",
+      "status": "PASS"
+     },
+     {
+      "test": "orbs_target_changes",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -1205,7 +1765,8 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "partial",
@@ -1217,7 +1778,7 @@
     "notes": "Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "TEST GAP: no fixture clicks a still-enabled Resume after the assignment changed without a redraw (orb_target_review.lua:243-249 calls UI.Refresh first). Current code is correct (:602 re-reads, :612 compares).",
+    "TEST GAP: no fixture clicks a still-enabled Resume after the assignment changed without a redraw (orb_target_review.lua:243-249 calls UI.Refresh first). Current code is correct (ui/OrbPanel.lua:602 re-reads, :612 compares).",
     "INTERPRETATION: the Play-panel Orb line (ui/OrbPanel.lua:1626-1646 UI.PanelRunLine) shows state, usage, wait and reason, but not the changed target. It offers no Resume (Open only). Owner decision whether 'all surfaces' includes it."
    ],
    "nativeCriterion": {
@@ -1254,6 +1815,24 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "orb_target_review",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_review_identity",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -1269,7 +1848,8 @@
       "status": "PASS",
       "checks": 77
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1323,6 +1903,24 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "orb_fixed_pause_resume",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_mini_panel",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -1338,7 +1936,8 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1388,6 +1987,24 @@
    "negativeControls": [],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "orb_fixed_pause_resume",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_mini_panel",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -1403,7 +2020,8 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1441,10 +2059,10 @@
    "adoptedInterpretation": "A refused Auto click stores a visible reason shown in the roll block for 60 s ('Auto stayed OFF: ...' plus 'What helps:'); hold reasons visible in heading/body; ready state reads 'Roll status' / 'No Echo choice is showing.'.",
    "productionSymbols": [
     "ui/Panel.lua:2344-2353 Auto button OnClick",
-    "ui/Panel.lua:5804-5840 M.NoteAutoClick",
-    "ui/Panel.lua:5518-5552 M.AutoNoteFor",
-    "ui/Readout.lua:440 AutoRefusalText, :431 AutoHoldNote",
-    "core/AutomationRuntime.lua:4594 ToggleAuto, :4505 actionHold.Effective"
+    "ui/Panel.lua:5823-5859 M.NoteAutoClick",
+    "ui/Panel.lua:5537-5571 M.AutoNoteFor",
+    "ui/Readout.lua:465 AutoRefusalText, :456 AutoHoldNote",
+    "core/AutomationRuntime.lua:4599 ToggleAuto, :4510 actionHold.Effective"
    ],
    "callbackChain": [
     "Auto click -> callbacks.ToggleAuto (core/MainLifecycle.lua:809) -> AutomationRuntime.ToggleAuto -> refusal/RequestAuto -> Panel.NoteAutoClick -> re-render -> AutoNoteFor -> roll-block body"
@@ -1460,6 +2078,28 @@
     "P15 :523 answered No is not a refusal"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_automation_scope",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_status_composition",
+      "status": "PASS"
+     },
+     {
+      "test": "overwrite_auto_gate",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -1481,7 +2121,8 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1516,7 +2157,7 @@
    "adoptedInterpretation": "One shared three-line status (Auto / Sync / Orb) from Panel.SetupFacts via UserText.StatusLines in the setup checklist; reading does no work. A refused-click reason with Auto OFF appears in the roll block, not in this shared line.",
    "productionSymbols": [
     "ui/Panel.lua:1079-1109 SetupFacts",
-    "core/UserText.lua:636-655 StatusLines, :609 OrbLine",
+    "core/UserText.lua:639-658 StatusLines, :612 OrbLine",
     "ui/QuickStart.lua:562-563"
    ],
    "callbackChain": [
@@ -1531,6 +2172,24 @@
     ":239 reading turns nothing ON; :289; :354"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_status_composition",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_setup_checklist",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -1547,7 +2206,8 @@
       "status": "PASS",
       "checks": 192
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
@@ -1559,7 +2219,7 @@
     "notes": "Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "If LayoutMetrics failed to load, AutoNoteFor could return AUTO_ON_NOTE for an acting Auto (ui/Panel.lua:5537-5540) -> 'not acting now' would be untrue; TOC loads LayoutMetrics, so failure-mode only."
+    "If LayoutMetrics failed to load, AutoNoteFor could return AUTO_ON_NOTE for an acting Auto (ui/Panel.lua:5556-5559) -> 'not acting now' would be untrue; TOC loads LayoutMetrics, so failure-mode only."
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
@@ -1584,7 +2244,7 @@
    },
    "adoptedInterpretation": "Auto tooltip, Auto warning and Help list each permission Auto may use with on/off from current settings, and the tome paragraph.",
    "productionSymbols": [
-    "ui/Readout.lua:472-501 AutomationScopeLines, :507 TOME_PARAGRAPH",
+    "ui/Readout.lua:497-526 AutomationScopeLines, :532 TOME_PARAGRAPH",
     "ui/Panel.lua:2370-2389 Auto tooltip",
     "ui/OverwriteWarning.lua:18-38 BodyText",
     "ui/Help.lua:58 'rolling' page",
@@ -1604,6 +2264,24 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_automation_scope",
+      "status": "PASS"
+     },
+     {
+      "test": "session_permissions",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -1619,7 +2297,8 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1650,8 +2329,8 @@
    },
    "adoptedInterpretation": "Automation settings submenu/window over existing permissions: only Reroll and Freeze act, through their existing slash setters; other rows display or navigate.",
    "productionSymbols": [
-    "ui/Readout.lua:518-555 AutomationSettingsRows",
-    "ui/Panel.lua:5563-5606 AutomationMenuItems",
+    "ui/Readout.lua:543-580 AutomationSettingsRows",
+    "ui/Panel.lua:5582-5625 AutomationMenuItems",
     "ui/SettingsWindow.lua:66-69,:117"
    ],
    "callbackChain": [
@@ -1669,6 +2348,24 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_automation_scope",
+      "status": "PASS"
+     },
+     {
+      "test": "full_ui_settings",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -1684,7 +2381,8 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1723,7 +2421,7 @@
     "ui/CommunityRenderer.lua:2088-2126 Copy (:2103 never shares a Saved Build)",
     ":2384-2433 Share OnClick, :2253-2341 ConfirmedShare, :2343-2377 dialog and OnHide retirement",
     ":2151-2190 Retry Share",
-    "core/CommunityController.lua:3356-3524 PublishImportedBuild, :3051-3165 retry"
+    "core/CommunityController.lua:3364-3532 PublishImportedBuild, :3059-3173 retry"
    ],
    "callbackChain": [
     "Share click -> approval stored -> StaticPopup -> Accept -> ConfirmedShare (approval/identity/Library checks) -> PublishImportedBuild -> Finish re-checks -> BroadcastIfPossible -> actual admission line"
@@ -1741,6 +2439,32 @@
     "Escape, closed Library + late Accept, changed title/player, pending Share (:474)"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_share_confirmation",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_share_approval_retirement",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_retry_share_feedback",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_share_admission",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -1767,7 +2491,8 @@
       "status": "PASS",
       "checks": 129
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1813,6 +2538,20 @@
    "negativeControls": [],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_share_confirmation",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -1823,7 +2562,8 @@
       "status": "PASS",
       "checks": 327
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline-adopted-interpretation",
@@ -1861,7 +2601,7 @@
     "core/SyncModePolicy.lua:37 Mode, :46 Text, :146 Allows",
     "ui/QuickStart.lua:32-42 SyncNote",
     "ui/CommunityRenderer.lua:18, :3707-3716, :4008-4011",
-    "ui/Leaderboard.lua:1259-1271",
+    "ui/Leaderboard.lua:1295-1307",
     "ui/Help.lua sharing page"
    ],
    "callbackChain": [
@@ -1878,6 +2618,36 @@
     "ux_sync_disclosure.lua:223,:228 viewing changes no send/queue/mode/saved byte"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_sync_disclosure",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_sync_disclosure_sends",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_sync_dps_page",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_share_linked_dps",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_sync_status_fit",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -1909,7 +2679,8 @@
       "status": "PASS",
       "checks": 7945
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -1963,6 +2734,24 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_sync_mode_choice",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_sync_mode_transitions",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -1978,7 +2767,8 @@
       "status": "PASS",
       "checks": 79
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -2011,29 +2801,63 @@
      "No 79/79 next to saved/assigned without planned"
     ]
    },
-   "adoptedInterpretation": "Distinct count units via UserText.COUNT_UNITS/CountText/RunProgressText; 'complete' requires rolled copies met and no locked target outstanding (Panel inline rule).",
+   "adoptedInterpretation": "Distinct count units via UserText.COUNT_UNITS/CountText/RunProgressText; 'complete' requires rolled copies met and no locked target outstanding (Panel inline rule). The generated Saved Build mirror description gives its count in the shared Saved Build unit: 'Assigned Wishlist: X - N/M Wishlist copies in this Saved Build.' (core/CommunityController.lua:1378-1381). An ordinary unchanged-signature import rewrites a description this build would generate differently (:1473-1481); owner-kept and ambiguous legacy text is returned unchanged (:1367-1373). The numbers are CommunityController EchoProgress (:385, used at :1300): Wishlist copies found in this Saved Build, not planned copies and not copies rolled this run. Arithmetic is unchanged.",
+   "interpretationConflict": "INTERPRETATION RETAINED (kept explicit): the canonical proposal says 'No 79/79 next to saved/assigned without planned'. Labelling the Saved Build count 'planned' would misstate it, so the count is qualified with the existing truthful unit (core/UserText.lua:667 COUNT_UNITS.savedBuild) instead of the literal word. Recorded for coordinator/owner disposition; no mathematics changed to obtain green.",
    "productionSymbols": [
-    "core/UserText.lua:661-701 COUNT_UNITS, CountText, RunProgressText, ProgressComplete",
-    "ui/Panel.lua:1268,:4795,:4835 complete rule; :4074,:5163 RunProgressText",
-    "ui/CommunityRenderer.lua:4436 CountText('savedBuild')",
+    "core/UserText.lua:664-704 COUNT_UNITS (savedBuild :667), CountText, RunProgressText, ProgressComplete",
+    "ui/Panel.lua:1268,:4798,:4838 complete rule; :4077,:5182 RunProgressText",
+    "ui/CommunityRenderer.lua:4472 CountText('savedBuild')",
     "ui/WishlistRenderer.lua:2717 'Planned rolled copies'",
-    "core/CommunityController.lua:1367-1380 SavedMirrorDescription"
+    "core/CommunityController.lua:1367-1383 SavedMirrorDescription (unit wording :1378-1381); :1473-1481 unchanged-signature description refresh; :385 EchoProgress"
    ],
    "callbackChain": [
-    "model.progress -> Panel.Render -> RunProgressText / complete badge"
+    "model.progress -> Panel.Render -> RunProgressText / complete badge",
+    "Saved import FinalizeSavedSlot -> SavedMirrorDescription (core/CommunityController.lua:1367) -> rewrite when the signature or the generated description differs (:1473-1481) -> catalog save -> Build Library detail (ui/CommunityRenderer.lua:2549-2557)"
    ],
    "discriminatingAssertions": [
-    "tests/prototype/ux_qualified_counts.lua:85-87 no 'complete' at 79/79 with a target to lock",
-    ":93 '12 / 79 rolled copies this run'",
-    ":197 'N / M Wishlist copies in this Saved Build'",
-    ":280 'Planned rolled copies: 1/79'",
-    ":286 save notice 'planned'"
+    "tests/prototype/ux_qualified_counts.lua:85-87 Q1 no 'complete' at 79/79 with a target to lock",
+    ":96 Q2 '12 / 79 rolled copies this run'",
+    ":225 Q5 Library card 'Wishlist copies in this Saved Build'; :235-237 Q5 the mirror's generated description gives its count only in that unit",
+    ":295 Q7 editor footer 'Planned rolled copies: 1/79'; :303 Q7 save notice 'rolled copies planned'",
+    "tests/prototype/saved_mirror_assigned_description.lua:132-136 D1 real import: name, ratio and unit; :158-161 D2 detail pane; :295-299 D4 an earlier build's unqualified generated text is qualified on an ordinary import, :309 a further import writes nothing; :321 D5 title-only owner edit with a holding witness",
+    "tests/prototype/saved_mirror_assigned_description.lua:115-117 the unit is pinned to UserText.COUNT_UNITS.savedBuild"
    ],
    "negativeControls": [
     "Q3 79/79 with nothing to lock is complete",
-    ":86 counts change nothing"
+    ":89 counts change nothing",
+    "D3 owner-written description kept (tests/prototype/saved_mirror_assigned_description.lua:189); D6 ambiguous legacy text kept (:337-339)",
+    "IDs, link, signature, assignment, counts and an unknown field unchanged; unassigned wording kept; no game action, upload, send, request or assignment change (:270-279)"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_qualified_counts",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_record_scope_terms",
+      "status": "PASS"
+     },
+     {
+      "test": "terminology",
+      "status": "PASS"
+     },
+     {
+      "test": "saved_mirror_assigned_description",
+      "status": "PASS"
+     }
+    ]
+   },
+   "laneExecution": [
+    "ux13-focused-62f16c7"
+   ],
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -2055,28 +2879,34 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
-    "disposition": "partial",
-    "notes": "'No complete while locked targets remain' met. One candidate wording gap for 'No 79/79 next to saved/assigned without planned'.",
-    "source": "canonical object above; issue #131"
+    "disposition": "met-offline-adopted-interpretation",
+    "notes": "'No complete while locked targets remain' met (Q1). 'No 79/79 next to saved/assigned without planned' met under the retained interpretation recorded as this row's Conflict: the generated assigned-Saved-Build description and the Library card both qualify the count with the Saved Build unit (Q5, D1, D2, D4, D5). The former candidate gap G-UX13 is resolved in the final source. Its cited fixtures passed in the terminal final-pin run; that run's complete suite failed on one uncited fixture, so no integration gate is green.",
+    "source": "canonical object above; issue #131; independent UX-13 Spec and Standards reviews of 62f16c7 and final combined reviews of f399dd0"
    },
    "standards": {
     "disposition": "no-hard-violation-found",
-    "notes": "Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
+    "notes": "Ownership-aware refresh reuses the existing marker/witness gate; the witness bound is 1199 bytes, under the unchanged 2048-byte guard (core/CommunityController.lua:1336-1341). A one-time local rewrite advances the mirror's lastModified through the existing save path; it uploads and sends nothing. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "CANDIDATE GAP G-UX13 (source-verified, wording): core/CommunityController.lua:1374-1377 generates \"Assigned Wishlist: %s - target progress (%d/%d).\" as a Saved Build mirror description, shown in the Build Library detail (ui/CommunityRenderer.lua:2549-2557) and carried as the shared listing description. Predicate: assigned Saved Build detail contains N/M next to 'Assigned Wishlist' without 'planned' or a unit. tests/prototype/saved_mirror_assigned_description.lua:79 pins the bare N/M form. Owner decision whether 'target progress' suffices."
+    "RESOLVED in final source (was CANDIDATE GAP G-UX13): the generated description no longer shows a bare N/M; lineage 6dcb46c -> 62f16c7, integrated unchanged in f399dd0.",
+    "INTERPRETATION RETAINED: the canonical literal 'planned' versus the actual Saved Build unit (see Conflict). Labelling these numbers 'planned' would misstate them; recorded for coordinator/owner disposition, not a mathematics change.",
+    "Compact 'N/M' kept in the description (registered provenance and pipe-control fixtures match it) rather than CountText's 'N / M'.",
+    "Native: wrapping of the longer description in the detail pane and listing, font/scale, and a real upgrade from SavedVariables written by an earlier build are unverified."
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
     "status": "pending",
     "criteria": [
-     "Count wording on HUD, editor and Library at supported scales"
+     "Count wording on HUD, editor and Library at supported scales",
+     "Generated Saved Build description wraps legibly in the Library detail and listing",
+     "First load after upgrading from an earlier build's SavedVariables rewrites the generated description once locally and sends nothing"
     ]
    },
-   "rowDisposition": "offline-partial; candidate wording gap for a separate lane; native pending"
+   "rowDisposition": "offline-supported under a retained interpretation; cited fixtures pass at the final pin; full CI failed on an uncited fixture; native pending"
   },
   {
    "id": "LP-13",
@@ -2088,17 +2918,44 @@
    },
    "adoptedInterpretation": "Shared formatter exists in core/UserText.lua but reach is partial.",
    "productionSymbols": [
-    "core/UserText.lua:672 CountText, :684 RunProgressText, :697 ProgressComplete (no callers)"
+    "core/UserText.lua:675 CountText, :687 RunProgressText, :700 ProgressComplete (no callers)",
+    "core/CommunityController.lua:1378-1381 description uses the COUNT_UNITS.savedBuild unit in equivalent local wording, not CountText"
    ],
    "callbackChain": [
     "callers listed under UX-13"
    ],
    "discriminatingAssertions": [
-    "tests/prototype/ux_qualified_counts.lua (formatter outputs through real Panel/Library/editor)",
-    "tests/prototype/ux_record_scope_terms.lua:211-226 lint rules for old count phrases"
+    "tests/prototype/ux_qualified_counts.lua (formatter outputs through real Panel/Library/editor; Q5 :235-237 description unit)",
+    "tests/prototype/ux_record_scope_terms.lua:211-226 lint rules for old count phrases",
+    "tests/prototype/saved_mirror_assigned_description.lua:115-117 the description's unit is pinned to the shared vocabulary"
    ],
    "negativeControls": [],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_qualified_counts",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_record_scope_terms",
+      "status": "PASS"
+     },
+     {
+      "test": "saved_mirror_assigned_description",
+      "status": "PASS"
+     }
+    ]
+   },
+   "laneExecution": [
+    "ux13-focused-62f16c7"
+   ],
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -2115,16 +2972,17 @@
       "status": "PASS",
       "checks": 37
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "partial",
-    "notes": "Formatter not used by editor footer (ui/WishlistRenderer.lua:2717,3086,3220), save notice (core/WishlistController.lua:2512) or Saved Build description (core/CommunityController.lua:1376).",
+    "notes": "Formatter not used by editor footer (ui/WishlistRenderer.lua:2717,3086,3220) or save notice (core/WishlistController.lua:2512). The Saved Build description (core/CommunityController.lua:1378-1381) now uses the shared unit, but as local wording rather than a formatter call. Reach therefore stays partial.",
     "source": "canonical object above; issue #131"
    },
    "standards": {
     "disposition": "no-hard-violation-found",
-    "notes": "Judgement call, Duplicated Code: completion rule inlined at ui/Panel.lua:1268,4795,4835 while UserText.ProgressComplete is unused. Not a documented-standard violation."
+    "notes": "Judgement call, Duplicated Code: completion rule inlined at ui/Panel.lua:1268,4798,4838 while UserText.ProgressComplete is unused. Not a documented-standard violation."
    },
    "gapsAndLimits": [
     "No test that the shared formatter is used by every count surface."
@@ -2149,9 +3007,9 @@
    },
    "adoptedInterpretation": "No user-facing 'Global'; records say 'Best known' / shared-record qualifiers.",
    "productionSymbols": [
-    "ui/Panel.lua:1600-1625 AddDpsTooltip, :3324,:4015 BEST_KNOWN",
-    "ui/Leaderboard.lua:156 LeaderboardScope, :1444-1445, :1498",
-    "core/UserText.lua:704-707"
+    "ui/Panel.lua:1600-1625 AddDpsTooltip, :3324,:4018 BEST_KNOWN",
+    "ui/Leaderboard.lua:156 LeaderboardScope, :1480-1481, :1534",
+    "core/UserText.lua:707-710"
    ],
    "callbackChain": [
     "render/tooltip -> UserText scope words"
@@ -2169,6 +3027,20 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_record_scope_terms",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2179,7 +3051,8 @@
       "status": "PASS",
       "checks": 37
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -2212,7 +3085,7 @@
    },
    "adoptedInterpretation": "Record detail with carried duration/level/date (UserText.RecordDetailParts) on the Panel DPS tooltip and single-category Leaderboard detail.",
    "productionSymbols": [
-    "core/UserText.lua:719 RecordDetailParts, :743 OwnerLine",
+    "core/UserText.lua:722 RecordDetailParts, :746 OwnerLine",
     "ui/Panel.lua:1616-1619",
     "ui/Leaderboard.lua:1012-1018",
     "core/CommunityProjection.lua:114-125 RecordText (Library)"
@@ -2229,6 +3102,20 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_record_scope_terms",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2239,7 +3126,8 @@
       "status": "PASS",
       "checks": 37
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "partial",
@@ -2275,7 +3163,7 @@
    },
    "adoptedInterpretation": "Shared vocabulary in UserText.Terms/GLOSSARY shown in Help; 'Mine' scope vs the game's 'My Builds'; 'Options' button; internal ids unchanged.",
    "productionSymbols": [
-    "core/UserText.lua:752-774 Terms/GLOSSARY",
+    "core/UserText.lua:755-777 Terms/GLOSSARY",
     "ui/Help.lua glossary"
    ],
    "callbackChain": [
@@ -2290,6 +3178,28 @@
    ],
    "negativeControls": [],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_record_scope_terms",
+      "status": "PASS"
+     },
+     {
+      "test": "terminology",
+      "status": "PASS"
+     },
+     {
+      "test": "terminology_consumers",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -2311,7 +3221,8 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "partial",
@@ -2353,6 +3264,20 @@
    "negativeControls": [],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_record_scope_terms",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2363,7 +3288,8 @@
       "status": "PASS",
       "checks": 37
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "partial",
@@ -2375,7 +3301,7 @@
     "notes": "Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "COVERAGE GAP G-LP15: lint scope bounded; e.g. the UX-13 description string (core/CommunityController.lua:1376) is outside it."
+    "COVERAGE GAP G-LP15: lint scope bounded; e.g. core/CommunityController.lua is outside it (tests/prototype/ux_record_scope_terms.lua:202-207 UI_FILES). The UX-13 description string (core/CommunityController.lua:1379) is guarded by fixture assertions, not by the lint."
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
@@ -2417,6 +3343,32 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "orb_recovery_layers",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_recovery_vocabulary",
+      "status": "PASS"
+     },
+     {
+      "test": "batch_orb_restored_wording",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_continue_affordance",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2442,7 +3394,8 @@
       "status": "PASS",
       "checks": 7
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "partial",
@@ -2488,6 +3441,28 @@
    "negativeControls": [],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "orb_recovery_vocabulary",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_recovery_layers",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_continue_affordance",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2508,7 +3483,8 @@
       "status": "PASS",
       "checks": 7
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -2561,6 +3537,32 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_help_navigation",
+      "status": "PASS"
+     },
+     {
+      "test": "setup_help_entry_points",
+      "status": "PASS"
+     },
+     {
+      "test": "help",
+      "status": "PASS"
+     },
+     {
+      "test": "help_action_first",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2586,7 +3588,8 @@
       "status": "PASS",
       "checks": 6052
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -2598,7 +3601,7 @@
     "notes": "Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "163008 native report (Records Help opened the manual) is addressed in source at this pin (ui/Leaderboard.lua:1218 OpenHelp, :1219 OpenReference); native re-observation of every entry pending."
+    "163008 native report (Records Help opened the manual) is addressed in source at this pin (ui/Leaderboard.lua:1254 OpenHelp, :1255 OpenReference); native re-observation of every entry pending."
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
@@ -2620,7 +3623,7 @@
    "adoptedInterpretation": "Contextual Help and Reference per window family (Build Library, Leaderboard, Wishlist Editor, Orb window, Journal Build Progress) and Help's action row to the checklist.",
    "productionSymbols": [
     "ui/CommunityRenderer.lua:3486,:3495",
-    "ui/Leaderboard.lua:1218-1219",
+    "ui/Leaderboard.lua:1254-1255",
     "ui/OrbPanel.lua:722,:724",
     "ui/JournalTab.lua:626,:643",
     "ui/WishlistRenderer.lua:1444,:1451",
@@ -2638,6 +3641,24 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_context_help_access",
+      "status": "PASS"
+     },
+     {
+      "test": "setup_help_entry_points",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2653,7 +3674,8 @@
       "status": "PASS",
       "checks": 105
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -2707,6 +3729,28 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_context_help_access",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_setup_checklist",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_flow",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2727,7 +3771,8 @@
       "status": "PASS",
       "checks": 2878
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -2774,6 +3819,28 @@
    "negativeControls": [],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_context_help_access",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_flow",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_sync_status_fit",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2794,7 +3861,8 @@
       "status": "PASS",
       "checks": 7945
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -2864,6 +3932,36 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_setup_checklist",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_readback",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_flow",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_first_entry",
+      "status": "PASS"
+     },
+     {
+      "test": "quickstart_seen_guard",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2894,7 +3992,8 @@
       "status": "PASS",
       "checks": 76
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -2956,6 +4055,36 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_setup_checklist",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_help_navigation",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_save_assignment_result",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_auto_assignment_consent",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_readback",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -2986,7 +4115,8 @@
       "status": "PASS",
       "checks": 135
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
@@ -3049,6 +4179,48 @@
    ],
    "execution": {
     "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "wishlist_assignment_action_token",
+      "status": "PASS"
+     },
+     {
+      "test": "assignment_identity",
+      "status": "PASS"
+     },
+     {
+      "test": "stale_server_slot_save",
+      "status": "PASS"
+     },
+     {
+      "test": "saved_build_wishlist_destination_guards",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_captured_destination_labels",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_destination_context",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_auto_assignment_consent",
+      "status": "PASS"
+     },
+     {
+      "test": "wishlist_upload_context",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
+    "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
     },
@@ -3094,7 +4266,8 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "partial",
@@ -3136,21 +4309,25 @@
      "UX-18"
     ]
    },
-   "adoptedInterpretation": "Manual recommendation (named single Take) or no-choice ready state ('Roll status' / 'No Echo choice is showing.'); existing permission disclosure in tooltip, warning and Help; Auto turns ON only through the Auto button, /nexus auto or the level-1 tome popup Yes, each via OverwriteWarning.RequestAuto and its explicit Yes (or the player's own earlier saved opt-out); Setup/Help/Settings/guided coach call no Auto setter; hold and refusal reasons visible; OFF read truthfully.",
+   "adoptedInterpretation": "Manual recommendation (a named single Take, or the named Freeze target of the adaptive two-or-more-Needed decision, identified with its own Freeze mark as in UX-02) or no-choice ready state ('Roll status' / 'No Echo choice is showing.'); existing permission disclosure in tooltip, warning and Help; Auto turns ON only through the Auto button, /nexus auto or the level-1 tome popup Yes, each via OverwriteWarning.RequestAuto and its explicit Yes (or the player's own earlier saved opt-out); Setup/Help/Settings/guided coach call no Auto setter; hold and refusal reasons visible; OFF read truthfully, including the Orb-guidance heading.",
    "productionSymbols": [
     "ui/Panel.lua:2344-2353 Auto button",
-    "core/AutomationRuntime.lua:4594 ToggleAuto, :4648-4664 RequestAuto path, :4679-4711 accept/CommitToggle",
+    "core/AutomationRuntime.lua:4599 ToggleAuto, :4653-4669 RequestAuto path, :4684-4716 accept/CommitToggle",
     "ui/OverwriteWarning.lua:327 RequestAuto, :120 Finish",
     "core/Main.lua:889 /nexus auto",
     "core/GuidedSetup.lua:787 G.AutoState, :794 G.KeepAuto (no setter)",
-    "ui/GuidedSetup.lua:1020-1058 VIEW.auto (Keep/Review only)"
+    "ui/GuidedSetup.lua:1020-1058 VIEW.auto (Keep/Review only)",
+    "ui/Panel.lua:4965-4974 Orb-guidance heading (Auto OFF 'You choose' :4970-4971)",
+    "ui/Readout.lua:98 FreezeCard; core/AutomationRuntime.lua:3280-3281 freeze display flag"
    ],
    "callbackChain": [
     "Auto click -> ToggleAuto -> Orb block refusal or RequestAuto -> warning Yes -> accept re-checks Orb block and OFF -> CommitToggle -> Panel.SetAuto",
     "coach Auto step Keep -> G.KeepAuto records mode read now -> G.Next; Review -> Panel.Show only"
    ],
    "discriminatingAssertions": [
-    "tests/prototype/ux_manual_recommendation.lua:108-114 Auto OFF one named target, nothing performed; R4 :174-176 no-choice ready state",
+    "tests/prototype/ux_manual_recommendation.lua:123-129 Auto OFF one named Take target, nothing performed; R4 :189-191 no-choice ready state",
+    "tests/prototype/ux_manual_recommendation.lua:475-499 R7 Auto OFF with Orb guidance: 'you choose', never Active, reason and Open Orbs remain; :512-548 R8 and :628-654 R10 the Freeze target named and identified, no Take marker, no engine name, nothing performed",
+    "tests/prototype/orb_guidance_navigation.lua:218-223 real HUD unknown Orb state with Auto OFF: truthful heading, Auto stays OFF",
     "tests/prototype/ux_automation_scope.lua P17 :595 passive reads change nothing; :605 No keeps OFF; :609 next board still manual; :617 only Yes turns ON, no suppression saved; :627 action targets the board shown at acceptance",
     "tests/prototype/overwrite_auto_gate.lua every enable waits for Yes; disable cancels a pending Yes; Orb block re-checked at approval",
     "tests/prototype/guided_setup_flow.lua:888 Auto step toggles nothing; :283 Auto kept ON through the guide",
@@ -3160,6 +4337,47 @@
     "warning No/X/Escape/OnHide; first-launch Continue grants no Auto; refused click (UX-09)"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "ux_manual_recommendation",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_automation_scope",
+      "status": "PASS"
+     },
+     {
+      "test": "overwrite_auto_gate",
+      "status": "PASS"
+     },
+     {
+      "test": "guided_setup_flow",
+      "status": "PASS"
+     },
+     {
+      "test": "full_ui_settings",
+      "status": "PASS"
+     },
+     {
+      "test": "ux_status_composition",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_guidance_navigation",
+      "status": "PASS"
+     }
+    ]
+   },
+   "laneExecution": [
+    "ux02-focused-82b7695"
+   ],
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -3196,20 +4414,22 @@
       "status": "PASS",
       "checks": 81
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
-    "disposition": "partial",
-    "notes": "The traced paths pass offline: single Needed card, no-choice ready state, explicit Auto consent, and Setup/Help/Settings/coach starting no Auto. The journey's owner contract also requires a named selection and a truthful OFF. UX-02 G-UX02-b is a source counterexample: ui/Panel.lua:4962-4965 sets 'Active: Slot N' before the Auto-OFF branch, and logic/OrbGuidance.lua:75-79 sets openOrbs regardless of Auto. UX-02 G-UX02-a is another, for two distinct Needed cards: the experimental reason text is unmapped and no card is marked. The journey is therefore not met as a whole.",
-    "source": "canonical object above; issue #131"
+    "disposition": "met-offline-adopted-interpretation",
+    "notes": "The journey's recorded partial basis was only the two candidate gaps inherited from UX-02 (truthful OFF under Orb guidance; named selection for two distinct Needed offers). Both now have discriminating offline assertions through the real TOC path (R7, R8, R10, orb_guidance_navigation), and the other traced paths are unchanged: no-choice ready state, explicit Auto consent, and Setup/Help/Settings/coach starting no Auto. Met under the same adopted reading of 'named selection' as UX-02 (a Freeze target is named and marked as a Freeze, not as a Take). Its cited fixtures passed in the terminal final-pin run; that run's complete suite failed on one uncited fixture, so no integration gate is green.",
+    "source": "canonical object above; issue #131; independent UX-02/J4 reviews of 82b7695 and final combined reviews of f399dd0"
    },
    "standards": {
     "disposition": "no-hard-violation-found",
-    "notes": "Harness acknowledges warnings by default (tests/prototype/harness.lua:314); only P15, P17 and overwrite_auto_gate exercise the real Yes/No dialog - recorded as an evidence limit. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
+    "notes": "Harness acknowledges warnings by default (tests/prototype/harness.lua:314); only P15, P17 and overwrite_auto_gate exercise the real Yes/No dialog - recorded as an evidence limit. The UX-02 Freeze flag is display-only and grants nothing. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "CANDIDATE GAP (inherited from UX-02 G-UX02-b, source-only): with Auto OFF, cards shown and Orb guidance openOrbs, the heading reads 'Active: Slot N'. That contradicts the truthful-OFF contract.",
-    "CANDIDATE GAP (inherited from UX-02 G-UX02-a, source-only): with two distinct Needed cards, the adaptive Freeze recommendation keeps the '(EchoWeaver, experimental)' text and marks no card. That contradicts the named-selection contract."
+    "RESOLVED in final source: inherited UX-02 G-UX02-b (Auto OFF Orb-guidance heading) and G-UX02-a (two distinct Needed offers named and identified); see UX-02.",
+    "Evidence limit retained: the harness acknowledges warnings by default (tests/prototype/harness.lua:314); only P15, P17 and overwrite_auto_gate exercise the real Yes/No dialog.",
+    "Native client behaviour, font/scale fit and the separate first-time-player screenshot review are pending."
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
@@ -3218,7 +4438,7 @@
      "Manual recommendation, Auto warning Yes/No, and opening Setup/Help/Settings without starting Auto in the client"
     ]
    },
-   "rowDisposition": "offline-partial (traced paths pass; inherits UX-02 candidate gaps); native pending"
+   "rowDisposition": "offline-supported under the UX-02 adopted reading; cited fixtures pass at the final pin; full CI failed on an uncited fixture; native pending"
   },
   {
    "id": "J5",
@@ -3259,6 +4479,48 @@
     "context/level change, pending assignment change, stale token, closed window kills token, slot change withdraws confirm"
    ],
    "execution": {
+    "pin": {
+     "commit": "f399dd09700e739fd27b187069bd4c83278c86c4",
+     "tree": "721a42b3fed5cd14a432ce4ca58daeeed9356897"
+    },
+    "run": "final-full-f399dd0",
+    "status": "terminal: complete suite FAILED on one uncited fixture; every fixture cited by this row PASS",
+    "tests": [
+     {
+      "test": "orb_target_review",
+      "status": "PASS"
+     },
+     {
+      "test": "orbs_target_changes",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_recovery_continue",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_recovery_refusals",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_bounded_recovery",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_guidance_passive_open",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_continue_affordance",
+      "status": "PASS"
+     },
+     {
+      "test": "orb_mini_panel",
+      "status": "PASS"
+     }
+    ]
+   },
+   "historicalExecution": {
     "pin": {
      "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
      "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
@@ -3305,7 +4567,8 @@
       "status": "PASS",
       "checks": null
      }
-    ]
+    ],
+    "label": "historical (9bfb2bb, focused-61); not proof of changed code"
    },
    "spec": {
     "disposition": "met-offline",
