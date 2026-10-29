@@ -386,6 +386,8 @@ NAMES += ['native_details_measurement']
 NAMES += ['server_status_difficulty_authority']
 # Issue #21 Stage A: a Community or Leaderboard scroll that keeps the exact bound virtual window (same rows, revisions, selection, layout and checked-out frames) does not release and rebind it; wheel steps, clamping, the overflow cue and every data, dirty, filter, selection, layout, resize and failure rebind are kept (EXPECT fails at 9bfb2bb9 by design; native flicker and frame timing NOT_RUN).
 NAMES += ['community_scroll_same_window','leaderboard_scroll_same_window']
+# Issue #168 (panelA): plain-left drag of the main panel from its background, grip and every passive label, count, card and icon through one owner (one StartMoving / StopMovingOrSizing, panelX / panelY saved once in UIParent units, only after a real move with valid reads); clicks, right drags and a second start do nothing; editor counts, difficulty and buttons are excluded; root / origin hide ends a move, the render transaction does not; hover areas fit their text (EXPECT fails at c7e4d7cd by design; native pointer capture NOT_RUN).
+NAMES += ['crimson_panel_drag']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

@@ -730,7 +730,7 @@ end
 -- changes nothing.
 ------------------------------------------------------------------------
 -- design/current "Nexus Main Panel - Compact Redesign": line 1 holds only the
--- Shift-drag grip and the title at the left and Auto, Options and Close at
+-- drag grip and the title at the left and Auto, Options and Close at
 -- the right, with 8 px between the three controls (4 px before) so each is a
 -- distinct target; Close is the design's square-ish 24 px. The title starts
 -- after the grip (titleLeft) and keeps the rest: 150 px at 420 px.
@@ -1798,6 +1798,129 @@ function M.SavedLayoutRoot()
     return type(root) == "table" and root or NexusDB
 end
 
+-- The panel's centre as an offset from UIParent's centre, in UIParent units
+-- (panelX / panelY). The frame's own centre is in its own scale, so it is
+-- converted through both effective scales first. nil unless every read is a
+-- finite number and both scales are positive.
+function M.PanelCenterOffset()
+    if not frame then return nil end
+    local function Finite(v) return type(v) == "number" and v == v and v > -math.huge and v < math.huge end
+    local okF, x, y = pcall(frame.GetCenter, frame)
+    local okU, ux, uy = pcall(UIParent.GetCenter, UIParent)
+    local okS, fs = pcall(frame.GetEffectiveScale, frame)
+    local okP, us = pcall(UIParent.GetEffectiveScale, UIParent)
+    if not (okF and okU and okS and okP) then return nil end
+    if not (Finite(x) and Finite(y) and Finite(ux) and Finite(uy) and Finite(fs) and Finite(us)
+        and fs > 0 and us > 0) then return nil end
+    local ratio = fs / us
+    return math.floor(x * ratio - ux + 0.5), math.floor(y * ratio - uy + 0.5)
+end
+
+-- Moving the panel (issue #168). One owner: the root and every passive
+-- surface that takes the mouse (M.PassiveDragSurface) start and finish the
+-- same move of the root, with the client's drag threshold (RegisterForDrag)
+-- keeping a plain click a click. Only a left drag starts; a second start
+-- while one is active is refused. Finishing is idempotent: the move is
+-- cleared and stopped first, then the position is read and saved once,
+-- only when it changed and every read is valid. A release, the root's hide
+-- or the hide of the surface the move began on finishes it.
+function M.BeginPanelDrag(origin, button)
+    if M._panelDrag or not frame or (button ~= nil and button ~= "LeftButton") then return false end
+    if not frame:IsShown() then return false end
+    local x, y = M.PanelCenterOffset()
+    if not pcall(frame.StartMoving, frame) then return false end
+    M._panelDrag = {origin = origin or frame, x = x, y = y}
+    M.HidePanelTooltip(origin)
+    return true
+end
+
+function M.FinishPanelDrag()
+    local drag = M._panelDrag
+    if not drag then return false end
+    M._panelDrag = nil
+    if frame then pcall(frame.StopMovingOrSizing, frame) end
+    local ok, x, y = pcall(M.PanelCenterOffset)
+    if ok and x and y and (x ~= drag.x or y ~= drag.y) then
+        local saved = M.SavedLayoutRoot()
+        saved.panelX, saved.panelY = x, y
+    end
+    return true
+end
+
+-- Closes the shared tooltip only while `owner` (a panel surface) owns it.
+function M.HidePanelTooltip(owner)
+    if not (owner and GameTooltip) then return end
+    local ok, owned = pcall(function() return rawequal(GameTooltip:GetOwner(), owner) end)
+    if ok and owned == true then GameTooltip:Hide() end
+end
+
+-- A passive label's hover area covers the text it shows, not its whole box
+-- (issue #168): from the box's justified edge, the measured text width plus
+-- a 4 px pad, never wider than the box; the box's height. A shortened text
+-- keeps the whole visible box (and its complete text on hover). An empty
+-- text takes no mouse; one this made mouse-less takes it again once it has
+-- text. Mouse input set by the label's owner is otherwise left alone.
+local PASSIVE_PAD = 4
+function M.FitPassiveHover(hit, text)
+    if not (hit and text) then return nil end
+    local box = tonumber(text:GetWidth()) or 0
+    local value = text:GetText()
+    local ok, width = pcall(text.GetStringWidth, text)
+    width = ok and tonumber(width) or nil
+    if value == nil or value == "" then width = 0 end
+    if not width or width ~= width or width > box then width = box end
+    local justify = text.GetJustifyH and text:GetJustifyH() or "LEFT"
+    local point = justify == "RIGHT" and "TOPRIGHT" or justify == "CENTER" and "TOP" or "TOPLEFT"
+    local fitted = width > 0 and math.min(box, width + (justify == "CENTER" and 2 or 1) * PASSIVE_PAD) or 0
+    hit:ClearAllPoints()
+    hit:SetPoint(point, text, point, 0, 0)
+    hit:SetSize(math.max(1, fitted), math.max(1, tonumber(text:GetHeight()) or 1))
+    if fitted <= 0 then
+        if not hit._nexusFitEmpty then hit._nexusFitEmpty = true; hit:EnableMouse(false) end
+    elseif hit._nexusFitEmpty then
+        hit._nexusFitEmpty = nil
+        hit:EnableMouse(true)
+    end
+    return fitted
+end
+
+-- Every passive label hover of the main panel, after a render has set its
+-- texts and boxes.
+function M.FitPassiveHovers()
+    if not frame then return end
+    local p = frame._play or {}
+    local pairs_ = {
+        {frame._contextTitleHit, frame._contextTitle}, {frame._contextBuildHit, frame._contextBuild},
+        {frame._contextWishlistHit, frame._contextWishlist},
+        {p.tomesHit, p.tomes}, {p.extraHit, p.extra}, {p.bestHit, p.bestLabel}, {p.orbHit, p.orb},
+        {frame._callboardTitleHit, frame._callboardTitle}, {frame._callboardLineHit, frame._callboardLine},
+    }
+    for i = 1, #pairs_ do M.FitPassiveHover(pairs_[i][1], pairs_[i][2]) end
+end
+
+-- A passive surface that takes the mouse for its hover (a label, count,
+-- card or icon with no click of its own) also starts and finishes the
+-- panel's move: its release reaches it as OnDragStop (the client's own
+-- child-to-parent drag, FloatingChatFrame.xml, build 12340). It gets no
+-- click or mouse-up script. Its own scripts are kept; while a move is active
+-- its hover does not keep a tooltip open. Never for a control with its own
+-- action.
+function M.PassiveDragSurface(hit)
+    if not hit or hit._nexusPassiveDrag then return hit end
+    hit._nexusPassiveDrag = true
+    hit:RegisterForDrag("LeftButton")
+    hit:SetScript("OnDragStart", function(self, button) M.BeginPanelDrag(self, button) end)
+    hit:SetScript("OnDragStop", function() M.FinishPanelDrag() end)
+    hit:HookScript("OnHide", function(self)
+        local drag = M._panelDrag
+        if drag and drag.origin == self then M.FinishPanelDrag() end
+    end)
+    hit:HookScript("OnEnter", function(self)
+        if M._panelDrag then M.HidePanelTooltip(self) end
+    end)
+    return hit
+end
+
 local function EnsureFrame()
     if frame then return frame end
 
@@ -1813,16 +1936,9 @@ local function EnsureFrame()
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    frame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local x, y = self:GetCenter()
-        local ux, uy = UIParent:GetCenter()
-        if x and y and ux and uy then
-            local saved = M.SavedLayoutRoot()
-            saved.panelX, saved.panelY = math.floor(x - ux + 0.5), math.floor(y - uy + 0.5)
-        end
-    end)
+    frame:SetScript("OnDragStart", function(self, button) M.BeginPanelDrag(self, button) end)
+    frame:SetScript("OnDragStop", function() M.FinishPanelDrag() end)
+    frame:SetScript("OnMouseUp", function() M.FinishPanelDrag() end)
     frame:Hide()
 
     buildHeaderText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2550,7 +2666,31 @@ local function EnsureFrame()
         auto=autoBtn,plan=planBtn,explore=exploreBtn,orbs=orbsHub,
     }
     M.ApplyOwnedFonts()
+    M.InstallPanelDrag()
     return frame
+end
+
+-- The root's hide finishes a move, and the passive surfaces EnsureFrame made
+-- join it (lazily built ones join where they are made). The counts that open
+-- the Wishlist Editor (needHit, toLockHit), the difficulty line and every
+-- button keep their own input and are not drag surfaces.
+function M.InstallPanelDrag()
+    if not frame or frame._nexusDragInstalled then return end
+    frame._nexusDragInstalled = true
+    -- A render hides the panel while it applies and shows it again in the
+    -- same call (Render's transaction); only a real hide ends a move.
+    frame:HookScript("OnHide", function()
+        if not renderState.applying then M.FinishPanelDrag() end
+    end)
+    for _, hit in ipairs({frame._chargesHover, frame._recommendationHover, frame._progressLabelHit,
+        frame._needLabelHit, frame._shedLabelHit, tomesHit, shedHit, dummyHit, lkHit, bestDpsHit,
+        frame._contextTitleHit, frame._contextBuildHit, frame._contextWishlistHit}) do
+        M.PassiveDragSurface(hit)
+    end
+    local row = frame._destinationRow
+    for _, hit in ipairs(type(row) == "table" and type(row.hits) == "table" and row.hits or {}) do
+        M.PassiveDragSurface(hit)
+    end
 end
 
 ------------------------------------------------------------------------
@@ -2783,15 +2923,15 @@ function M.EnsureHeaderClose()
     return close
 end
 
--- The visible Shift-drag grip (design/current "Nexus Main Panel - Compact
+-- The visible drag grip (design/current "Nexus Main Panel - Compact
 -- Redesign"; design/PANEL_DIFFICULTY_SOURCE_REFERENCE.md "Discoverable panel
 -- drag handle"): six dots in the header's left corner with a hover highlight
--- and a "Shift-drag to move" tooltip. Holding Shift and dragging it moves the
--- panel through the panel's own existing drag handlers (clamped to the
--- screen; panelX / panelY saved as before); a plain click or a drag without
--- Shift does nothing. No other control becomes a drag target. Built lazily
+-- and a "Drag to move" tooltip. A plain left drag moves the panel through its
+-- one drag owner (issue #168: M.BeginPanelDrag, clamped to the screen;
+-- panelX / panelY saved as before), like the background and every passive
+-- label; Shift is not needed. A plain click does nothing. Built lazily
 -- (EnsureFrame is at the upvalue ceiling). Its dots are fixed colours, never
--- from the palette. Native Shift detection while dragging is NOT RUN.
+-- from the palette. Native pointer capture while dragging is NOT RUN.
 function M.EnsureHeaderGrip()
     if not frame then return nil end
     local grip = frame._dragGrip
@@ -2822,27 +2962,17 @@ function M.EnsureHeaderGrip()
         hover:SetAllPoints()
         hover:SetTexture(1, 1, 1, 0.12)
         grip.hover = hover
-        grip:SetScript("OnDragStart", function(self)
-            local shift = type(IsShiftKeyDown) == "function" and IsShiftKeyDown()
-            if not shift then return end
-            self._nexusMoving = true
-            frame:StartMoving()
-        end)
-        grip:SetScript("OnDragStop", function(self)
-            if not self._nexusMoving then return end
-            self._nexusMoving = nil
-            local stop = frame:GetScript("OnDragStop")
-            if stop then stop(frame) else frame:StopMovingOrSizing() end
-        end)
         grip:SetScript("OnEnter", function(self)
             if not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-            GameTooltip:AddLine("Shift-drag to move", 1, 1, 1)
-            GameTooltip:AddLine("Hold Shift, then drag this grip. A plain click does nothing. Options > "
-                .. "Reset Panel Position puts the panel back.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Drag to move", 1, 1, 1)
+            GameTooltip:AddLine("Drag this grip, or any part of the panel that is not a button, to move it. "
+                .. "A plain click does nothing. Options > Reset Panel Position puts the panel back.",
+                0.8, 0.8, 0.8, true)
             GameTooltip:Show()
         end)
         grip:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        M.PassiveDragSurface(grip)
         frame._dragGrip = grip
     end
     local slots = M.HeaderSlots()
@@ -3586,6 +3716,8 @@ function M.EnsureOfferCards()
             GameTooltip:Show()
         end)
         card:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        -- It chooses nothing, so a drag from it moves the panel.
+        M.PassiveDragSurface(card)
         card:Hide()
         cards[index] = card
     end
@@ -3858,8 +3990,8 @@ function M.EnsurePlayWidgets()
     -- The four counts; each keeps the hover (and click) of its former row.
     p.needed, p.tomes, p.extra, p.locked = Line(), Line(), Line(), Line()
     p.neededHit = Hover(p.needed, Delegate(needHit), OpenEditor)
-    p.tomesHit = Hover(p.tomes, Delegate(tomesHit))
-    p.extraHit = Hover(p.extra, Delegate(shedHit))
+    p.tomesHit = M.PassiveDragSurface(Hover(p.tomes, Delegate(tomesHit)))
+    p.extraHit = M.PassiveDragSurface(Hover(p.extra, Delegate(shedHit)))
     p.lockedHit = Hover(p.locked, function(self)
         local hit = frame.toLockHit
         local enter = hit and hit:GetScript("OnEnter")
@@ -3898,6 +4030,7 @@ function M.EnsurePlayWidgets()
         if text and text.RECORD_SCOPE then GameTooltip:AddLine(text.RECORD_SCOPE, 0.45, 0.75, 1, true) end
         GameTooltip:Show()
     end)
+    M.PassiveDragSurface(p.bestHit)
     -- One line of Orb run status and Open (the Orb window).
     p.orb = Line()
     p.orbHit = Hover(p.orb, function(self)
@@ -3908,6 +4041,7 @@ function M.EnsurePlayWidgets()
             .. "or spends nothing.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
+    M.PassiveDragSurface(p.orbHit)
     p.orbOpen = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     p.orbOpen:SetText("Open")
     p.orbOpen:SetScript("OnClick", function()
@@ -3962,14 +4096,17 @@ end
 -- closes) below it. If the taller panel would leave the bottom of the screen,
 -- the panel moves up just enough to stay whole (the client clamps it there
 -- too): the top then moves, and M._detailsGrowth says "clamped" instead of
--- "down". A layout that is not the Play view drops the hold. Nothing is
--- saved: panelX / panelY change only by a drag, as before.
+-- "down". A layout that is not the Play view drops the hold, and so does a
+-- move in progress. Nothing is saved: panelX / panelY change only by a drag.
 function M.HoldPanelTop(layout)
     local hold = M._detailsHold
     if not (hold and frame and type(layout) == "table" and type(layout.boxes) == "table") then return nil end
     if not layout.play then M._detailsHold = nil; return nil end
     if (layout.boxes.planNeeded ~= nil) ~= hold.details then return nil end
     M._detailsHold = nil
+    -- The player is moving the panel (issue #168): it stays under the
+    -- pointer, and the corner held before the move no longer applies.
+    if M._panelDrag then return nil end
     local okS, scale = pcall(frame.GetEffectiveScale, frame)
     scale = okS and tonumber(scale) or 1
     if not (scale and scale > 0) then return nil end
@@ -4295,6 +4432,7 @@ local function EnsureCallboardWidgets()
             Nexus.CallboardStatus.HideTooltip()
         end
     end)
+    M.PassiveDragSurface(icon)
     frame._callboardIcon = icon
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     title:SetJustifyH("LEFT")
@@ -4304,6 +4442,7 @@ local function EnsureCallboardWidgets()
     frame._callboardTitle = title
     local titleHit = CreateFrame("Frame", nil, frame)
     titleHit:EnableMouse(true)
+    M.PassiveDragSurface(titleHit)
     frame._callboardTitleHit = titleHit
     local line = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     line:SetJustifyH("LEFT")
@@ -4313,6 +4452,7 @@ local function EnsureCallboardWidgets()
     frame._callboardLine = line
     local lineHit = CreateFrame("Frame", nil, frame)
     lineHit:EnableMouse(true)
+    M.PassiveDragSurface(lineHit)
     frame._callboardLineHit = lineHit
     -- The detail row shows the first objective line and +N more. Its hover
     -- shows every complete line in order, from the lines the last render
@@ -5394,6 +5534,7 @@ local function ApplyCandidate(model, signatures, roll)
         M.UpdateContextHeader(model)
         -- The Orb line's words follow the run on settled renders too.
         M.RefreshOrbLine(model, frame._responsiveLayout)
+        M.FitPassiveHovers()
     end
     if applied and Nexus.LayoutMetrics and Nexus.LayoutMetrics.FitToScreen then
         -- The HUD can grow taller than the viewport with large fonts, an

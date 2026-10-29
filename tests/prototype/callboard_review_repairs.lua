@@ -261,12 +261,16 @@ do
   return priorAddLine(self,text,...)
  end
  Nexus.CallboardStatus.GetSummary=function() return snapshot end
+ -- Issue #168: a hover area starts at its row's left edge, has the row's
+ -- height, and is as wide as the text the row shows (plus a small pad),
+ -- never wider than the row. A shortened row keeps its whole width.
  local function SamePlace(hitArea,rowText)
   local p1,r1,q1,x1,y1=hitArea:GetPoint(1)
-  local p2,r2,q2,x2,y2=rowText:GetPoint(1)
-  return hitArea:GetNumPoints()==1 and rowText:GetNumPoints()==1 and p1==p2 and r1==r2
-   and q1==q2 and x1==x2 and y1==y2 and hitArea:GetWidth()==rowText:GetWidth()
+  local ok=hitArea:GetNumPoints()==1 and p1=='TOPLEFT' and r1==rowText and q1=='TOPLEFT' and x1==0 and y1==0
    and hitArea:GetHeight()==rowText:GetHeight()
+  local w,box=hitArea:GetWidth(),rowText:GetWidth()
+  local textW=rowText:GetStringWidth()
+  return ok and w<=box and (textW>=box and w==box or textW<box and w>=textW and w<box)
  end
  local function HoverTitle()
   tipLines={}

@@ -5,7 +5,7 @@
 -- best known means, and one line of Orb run status with Open. After
 -- design/current "Nexus Main Panel - Compact Redesign" also: Details in place
 -- (never Plan), the level-80 collapse and re-expand (S7), the card's hover,
--- Hardcore route and server-HUD hide (S8), the Shift-drag grip (S9) and the
+-- Hardcore route and server-HUD hide (S8), the drag grip (S9) and the
 -- Play geometry at 0.75-2.0 font scale (S10). Correction 3 adds the
 -- difficulty appearance by validated mode (S3b) and the held Details top
 -- across a fit-scale change (S12). Categories
@@ -378,10 +378,11 @@ C.scenario('S8 the difficulty card: hover facts, Hardcore click route, and no ca
  C.expect(card:IsShown() and NexusPanel:GetHeight()==withCard,'S8: with the Nexus HUD again the card is back',NexusPanel:GetHeight())
 end)
 
--- The visible Shift-drag grip (design/current, D1-D4): a plain drag or click
--- does nothing; a Shift-drag moves the panel through its own drag handlers and
--- saves panelX / panelY as before. Native modifier timing is NOT RUN.
-C.scenario('S9 the Shift-drag grip: visible, apart from the title and controls; only Shift-drag moves',function()
+-- The visible drag grip (design/current, D1-D4; issue #168 made plain-left
+-- dragging the contract): a plain click does nothing; a plain left drag, with
+-- or without Shift, moves the panel through its one drag owner and saves
+-- panelX / panelY. Native pointer capture is NOT RUN.
+C.scenario('S9 the drag grip: visible, apart from the title and controls; a plain left drag moves',function()
  P.Render(Model())
  local grip=NexusPanel._dragGrip
  if not C.setup(grip~=nil and grip:IsShown(),'S9: fixture: the grip is shown') then return end
@@ -393,24 +394,25 @@ C.scenario('S9 the Shift-drag grip: visible, apart from the title and controls; 
   end
  end
  local tip=table.concat(V.TooltipLines(grip:GetScript('OnEnter'),grip),' ')
- C.expect(tip:find('Shift-drag to move',1,true)~=nil,'S9: its hover says Shift-drag to move',tip)
+ C.expect(tip:find('Drag to move',1,true)~=nil and tip:find('Shift',1,true)==nil,'S9: its hover says Drag to move, without Shift',tip)
  C.expect(grip:GetScript('OnClick')==nil,'S9: a plain click on the grip has no action')
- local moves,stops=0,0
- local realStop=NexusPanel:GetScript('OnDragStop')
+ local moves,stops,cx=0,0,100
  NexusPanel.StartMoving=function() moves=moves+1 end
- NexusPanel:SetScript('OnDragStop',function(self) stops=stops+1;return realStop(self) end)
+ NexusPanel.StopMovingOrSizing=function() stops=stops+1 end
+ NexusPanel.GetCenter=function() return cx,50 end
  local shift=IsShiftKeyDown
  IsShiftKeyDown=function() return false end
- grip:GetScript('OnDragStart')(grip);grip:GetScript('OnDragStop')(grip)
- C.expect(moves==0 and stops==0,'S9: a drag without Shift does not move the panel',moves..'/'..stops)
- IsShiftKeyDown=function() return true end
- grip:GetScript('OnDragStart')(grip);grip:GetScript('OnDragStop')(grip)
- IsShiftKeyDown=shift
- NexusPanel.StartMoving=nil
- NexusPanel:SetScript('OnDragStop',realStop)
- C.expect(moves==1 and stops==1,'S9: a Shift-drag moves the panel through its own handlers',moves..'/'..stops)
+ grip:GetScript('OnDragStart')(grip,'LeftButton');cx=140;grip:GetScript('OnDragStop')(grip)
+ C.expect(moves==1 and stops==1,'S9: a plain left drag moves the panel',moves..'/'..stops)
  local saved=P.SavedLayoutRoot()
- C.expect(tonumber(saved.panelX)~=nil and tonumber(saved.panelY)~=nil,'S9: the position is saved as panelX / panelY')
+ C.expect(tonumber(saved.panelX)==140 and tonumber(saved.panelY)==50,'S9: the position is saved as panelX / panelY',
+  tostring(saved.panelX)..','..tostring(saved.panelY))
+ IsShiftKeyDown=function() return true end
+ grip:GetScript('OnDragStart')(grip,'LeftButton');cx=150;grip:GetScript('OnDragStop')(grip)
+ IsShiftKeyDown=shift
+ NexusPanel.StartMoving,NexusPanel.StopMovingOrSizing,NexusPanel.GetCenter=nil,nil,nil
+ C.expect(moves==2 and stops==2 and tonumber(saved.panelX)==150,'S9: a Shift-drag still moves it',moves..'/'..stops)
+ saved.panelX,saved.panelY=nil,nil
 end)
 
 -- The Play geometry at every supported font scale (LayoutMetrics clamps
