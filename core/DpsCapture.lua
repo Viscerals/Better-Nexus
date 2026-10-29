@@ -132,6 +132,8 @@ local sampleTicker     = 0
 local lastTargetGUID   = nil
 local lastTargetName   = nil
 local sessionCategory  = nil
+-- The session pause transitions when this combat's capture began (issue #171).
+local sessionPauseEpoch = 0
 local MAX_DEBUG_LINES   = 120
 local DEBUG_TRIM_AT     = 150
 local DEBUG_TEXT_BYTES  = 2048
@@ -3823,6 +3825,15 @@ end
 
 local function CommitSession(category)
     inCombat = false
+    -- The session pause transitions when this capture began (issue #171).
+    -- The final sample, the Echo reads and the Community calls below run other
+    -- code; a Pause (or Pause and Resume) inside any of them ends this capture
+    -- before its first write, its share and its later page cleanup.
+    local captureEpoch = sessionPauseEpoch
+    local function Crossed()
+        local pause = Nexus.SessionPause
+        return pause ~= nil and (pause.IsPaused() or pause.Status().epoch ~= captureEpoch)
+    end
     Debug("combat end; category=" .. tostring(category) .. ", target=" .. tostring(lastTargetName))
     if not category then
         Nexus.lastDpsNote = "ignored: target was not a training dummy or the Lich King"
@@ -3950,6 +3961,11 @@ local function CommitSession(category)
             Debug(Nexus.lastDpsNote)
             return
         end
+        if Crossed() then
+            Nexus.lastDpsNote = "ignored: Nexus was paused during this combat"
+            Debug(Nexus.lastDpsNote)
+            return
+        end
         local personalRow = {
             dps = dpsFloor, level = level, ts = stamp,
             duration = elapsed, player = player,
@@ -3979,6 +3995,8 @@ local function CommitSession(category)
             -- retained page creation and this removal are two catalog
             -- mutations, and the second must not race the first's candidate.
             local function RemoveSupersededPage(currentId)
+                -- A new catalog removal: not after a pause transition.
+                if Crossed() then return end
                 local oldBuildId = previousCharacterBest
                     and previousCharacterBest.buildId
                 if not (oldBuildId and oldBuildId ~= currentId and C
@@ -4058,7 +4076,8 @@ local function CommitSession(category)
         -- Global comparison is only meaningful when the exact current Echo
         -- set is already a published community build.
         local characterNow = CharacterBestStore()[category][pk]
-        if characterNow == personalRow and Sync and Sync.BroadcastDpsRecord then
+        if characterNow == personalRow and Sync and Sync.BroadcastDpsRecord
+            and not Crossed() then
             pcall(Sync.BroadcastDpsRecord, {
                 protocolVersion = PROTOCOL_VERSION, fingerprint = key,
                 echoes = snap, category = category, dps = dpsFloor,
@@ -4567,10 +4586,32 @@ end
 -- Events
 ------------------------------------------------------------------------
 
-function DPS.OnCombatStart() StartSession() end
+-- The whole-addon session pause (issue #171): only a combat that no pause
+-- transition crossed is recorded. Paused at its start, paused or resumed
+-- during it, or paused and resumed between two samples, it records nothing,
+-- shares nothing and leaves earlier records unchanged; the next complete
+-- combat is eligible under the unchanged rules.
+function DPS.OnCombatStart()
+    local pause = Nexus.SessionPause
+    if pause and pause.IsPaused() then
+        inCombat = false
+        sessionCategory = nil
+        Nexus.lastDpsNote = "ignored: Nexus was paused when this combat started"
+        return
+    end
+    StartSession()
+    sessionPauseEpoch = pause and pause.Status().epoch or 0
+end
 
 function DPS.OnCombatEnd()
     if not inCombat then return end
+    local pause = Nexus.SessionPause
+    if pause and (pause.IsPaused() or pause.Status().epoch ~= sessionPauseEpoch) then
+        inCombat = false
+        sessionCategory = nil
+        Nexus.lastDpsNote = "ignored: Nexus was paused during this combat"
+        return
+    end
     RememberTarget()
     local category = sessionCategory or ClassifyTarget(lastTargetGUID, lastTargetName)
     CommitSession(category)
@@ -4579,6 +4620,13 @@ end
 
 function DPS.OnUpdate(elapsed)
     if not inCombat then return end
+    local pause = Nexus.SessionPause
+    if pause and pause.IsPaused() then
+        inCombat = false
+        sessionCategory = nil
+        Nexus.lastDpsNote = "ignored: Nexus was paused during this combat"
+        return
+    end
     RememberTarget()
     sampleTicker = sampleTicker + (elapsed or 0)
     if sampleTicker >= SAMPLE_INTERVAL then

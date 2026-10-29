@@ -398,6 +398,14 @@ NAMES += ['crimson_panel_pause']
 NAMES += ['crimson_panel_auto_help']
 # Independent review of the panelA slices (#168, #170, #171, #169): a render's hide reaching the drag origin keeps the move while a real hide or origin removal ends it once; Charges, recommendation and Details-heading hovers fit their text; Callboard title/objective tooltips suppressed after their producers during a move; a centre saved at a fitted size survives a fresh load; FitToScreen refuses infinite sizes; an unreadable pause Status is unknown, not unpaused; a confirmed pause is the Auto hold over stale state words (EXPECT fails at 4358349 by design; native NOT_RUN).
 NAMES += ['crimson_panel_review_fixes']
+# Issue #171: whole-addon session pause (Nexus.SessionPause): ordinary Auto held without an OFF/ON toggle, Orb runs held and never resumed by Resume, Sync/share/DPS quiet, memory-only lifetime (synthetic fixtures; native NOT_RUN).
+NAMES += ['session_pause_auto','session_pause_orb','session_pause_sync','session_pause_dps','session_pause_lifetime']
+# Issue #171 review repairs: pauses raised inside final callbacks (Orb pick boundary/refresh, option, tome, upload, wire, whisper, Details) stop the unsent work; a timely ACK settles a pre-pause HELLO; stale preparing Sync and queued handshakes end; paused start-up joins nothing (native NOT_RUN).
+NAMES += ['session_pause_final_boundaries','session_pause_sync_settlement']
+# Issue #171 second review repair: a correlated answer to a Sync request sent before a pause still settles after Resume; the old grant sends nothing more (native NOT_RUN).
+NAMES += ['session_pause_sync_receive']
+# Issue #171 third review repair: a pause raised inside the transport's pre-submit observers (send_settled, send_attempting) stops the stale packet before submission with no attempt counted; a send already entered keeps its result (native NOT_RUN).
+NAMES += ['session_pause_transport_observers']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

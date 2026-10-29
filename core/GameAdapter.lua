@@ -1483,10 +1483,19 @@ end
 -- (A.RecheckSelect). It is the same request, but it does not use up the
 -- bounded owned-sync retries below.
 function A.RequestGranted(selectRecheck)
+    -- Session pause: no new read request, and no baseline, time or retry mark.
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false end
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     local svc = PS()
     if svc and svc.RequestGrantedPerks then
         if ownedRequestGeneration ~= ownedGeneration then
             local before = SafeCall(svc.GetGrantedPerks)
+            -- The read can run other code: no baseline and no request after
+            -- a Pause (or Pause and Resume) it raised.
+            if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+                or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false end
             ownedBaselineRef = before
             ownedBaselineSig = GrantedSignature(before)
             ownedRequestGeneration = ownedGeneration
@@ -3986,6 +3995,7 @@ end
 -- the time. Reads must never block writes.
 local lastSlotRequestAt = -10
 function A.RequestSlots()
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false end
     local svc = PS()
     if svc and svc.RequestServerBuildSlots and (GetTime() - lastSlotRequestAt) >= 3 then
         echoStatus.slotRequests = echoStatus.slotRequests + 1
@@ -4228,6 +4238,9 @@ function A.LeverMirrorKind(leverId)
 end
 
 function A.ToggleLever(leverId, wantDisabled)
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     if A.DIAGNOSTIC_PASSIVE then
         A.TomeObservationAttempt(leverId,wantDisabled,"passive",0,"not_evaluated")
         return false, "internal.6 passive diagnostic: write blocked"
@@ -4235,6 +4248,10 @@ function A.ToggleLever(leverId, wantDisabled)
     if A.TomeMutationPaused and A.TomeMutationPaused() then
         A.TomeObservationAttempt(leverId,wantDisabled,"pause",0,"not_evaluated")
         return false, "Tome of Echo transaction settling"
+    end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+        A.TomeObservationAttempt(leverId,wantDisabled,"pause",0,"not_evaluated")
+        return false, "Nexus paused for this session"
     end
     local cat = A.Catalog()
     local svc = PS()
@@ -4260,6 +4277,12 @@ function A.ToggleLever(leverId, wantDisabled)
     if cur == (wantDisabled and true or false) then
         A.TomeObservationAttempt(leverId,wantDisabled,"already",lv.members[1],"not_evaluated",cur)
         return false, "already"
+    end
+    -- Final boundary: the reads above can run other code.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then
+        A.TomeObservationAttempt(leverId,wantDisabled,"pause",lv.members[1],"not_evaluated",cur)
+        return false, "Nexus paused for this session"
     end
     local ok = SafeCall(svc.ToggleTomeEcho, lv.members[1])
     if ok then
@@ -4763,9 +4786,13 @@ function A.OrbCapability()
 end
 
 function A.Take(spellId)
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if A.InFlight() then return false, "in flight" end
     -- Native Select admission: only a readable Perks table whose Select field
     -- is nil admits a Select, checked before the client is called. A flag the
@@ -4786,6 +4813,9 @@ function A.Take(spellId)
     -- The count before the Select is sent: the only later proof of its grant
     -- is the mirror rising above this.
     local baseline = GrantedCountOf(spellId)
+    -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
     selfCalling = true
     local ok = svc and SafeCall(svc.SelectPerk, spellId)
     selfCalling = false
@@ -4808,9 +4838,13 @@ function A.Take(spellId)
 end
 
 function A.Banish(index0)
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if A.InFlight() then return false, "in flight" end
     local board = A.Board()
     if not board then return false, "no board" end
@@ -4825,6 +4859,9 @@ function A.Banish(index0)
         return false, "system off"
     end
     local svc = PS()
+    -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
     selfCalling = true
     local ok = svc and SafeCall(svc.BanishPerk, index0)
     selfCalling = false
@@ -4838,9 +4875,13 @@ function A.Banish(index0)
 end
 
 function A.Reroll()
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if A.InFlight() then return false, "in flight" end
     local ch = A.Charges()
     if ch.reroll <= 0 then return false, "no charges" end
@@ -4861,6 +4902,9 @@ function A.Reroll()
         and (not prior or (priorOutcome == "proven"
             and used == prior.used + 1 and total == prior.total))
     local svc = PS()
+    -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
     selfCalling = true
     local ok = svc and SafeCall(svc.RequestReroll)
     selfCalling = false
@@ -4929,9 +4973,13 @@ end
 -- WatchLatches/ResolveInFlight like every other mutator. Never at level
 -- 80 (no next board for a freeze to carry into). Never a blocked card.
 function A.Freeze(index0)
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     local allowed, reason = A.OrdinaryBoardAllowed()
     if not allowed then return false, reason end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if A.InFlight() then return false, "in flight" end
     if deadLatch.freeze then return false, "freeze dead this session" end
     if (UnitLevel("player") or 0) >= 80 then
@@ -4948,6 +4996,9 @@ function A.Freeze(index0)
     local ch = A.Charges()
     if ch.freeze <= 0 or ch.trustworthy == false then return false, "no charges" end
     local svc = PS()
+    -- Final submission boundary: no Pause, nor a Pause and Resume, since entry.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
     selfCalling = true
     local ok = svc and SafeCall(svc.FreezePerk, index0)
     selfCalling = false
@@ -4967,6 +5018,7 @@ end
 function A.Activate(slot)
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     local level = UnitLevel("player") or 0
     if level ~= 1 and level ~= 80 then return false, "not level 1/80" end
     if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
@@ -4985,6 +5037,7 @@ end
 function A.Save(slot, name)
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if (UnitLevel("player") or 0) ~= 80 then return false, "not level 80" end
     if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
     local svc = PS()
@@ -5039,8 +5092,12 @@ end
 -- sent. Slot 0 creates a new Wishlist and is never checked. A caller that passes
 -- no set keeps the earlier behavior.
 function A.UploadWishlist(slot, name, echoes, expected)
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     if type(echoes) ~= "table" or #echoes == 0 then return false, "no echoes" end
     if (GetTime() - lastBuildOpAt) < 3 then return false, "spacing" end
     local svc = PS()
@@ -5087,6 +5144,9 @@ function A.UploadWishlist(slot, name, echoes, expected)
     -- list are treated as after a send. (Only this call; SafeCall is unchanged.)
     local upload = svc and svc.UploadServerBuildSlot
     if type(upload) ~= "function" then return false, "refused" end
+    -- Final boundary: the catalog and slot reads above can run other code.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
     local called, ok = pcall(upload, tonumber(slot) or 0, tostring(name or "Nexus"), clean)
     if not called then
         lastBuildOpAt = GetTime()
@@ -5117,6 +5177,7 @@ local lastLockOpAt = -10
 function A.LockPerk(spellId)
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     spellId = tonumber(spellId)
     if not spellId then return false, "invalid spellId" end
     if (GetTime() - lastLockOpAt) < 3 then return false, "spacing" end
@@ -5125,7 +5186,9 @@ function A.LockPerk(spellId)
     if ok then
         lastLockOpAt = GetTime()
         lockedProjectionRevision = lockedProjectionRevision + 1
-        if svc and svc.RequestGrantedPerks then SafeCall(svc.RequestGrantedPerks) end
+        -- A synchronous callback may have paused the session: the accepted
+        -- action stands, only this new ownership read is not sent.
+        if svc and svc.RequestGrantedPerks and not (Nexus.SessionPause and Nexus.SessionPause.IsPaused()) then SafeCall(svc.RequestGrantedPerks) end
         return true
     end
     return false, "refused"
@@ -5134,6 +5197,7 @@ end
 function A.UnlockPerk(spellId)
     if Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary() then return false, A.OrbBlockReason("This change") or "An Orb refinement action is active or unresolved; this change is blocked" end
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     spellId = tonumber(spellId)
     if not spellId then return false, "invalid spellId" end
     if (GetTime() - lastLockOpAt) < 3 then return false, "spacing" end
@@ -5142,7 +5206,9 @@ function A.UnlockPerk(spellId)
     if ok then
         lastLockOpAt = GetTime()
         lockedProjectionRevision = lockedProjectionRevision + 1
-        if svc and svc.RequestGrantedPerks then SafeCall(svc.RequestGrantedPerks) end
+        -- A synchronous callback may have paused the session: the accepted
+        -- action stands, only this new ownership read is not sent.
+        if svc and svc.RequestGrantedPerks and not (Nexus.SessionPause and Nexus.SessionPause.IsPaused()) then SafeCall(svc.RequestGrantedPerks) end
         return true
     end
     return false, "refused"
@@ -5153,10 +5219,18 @@ end
 ------------------------------------------------------------------------
 
 function A.SetSoloPicker()
+    -- Session pause transitions at admission (issue #171): a Pause, or a Pause
+    -- and Resume, inside a later callback is seen even when it is over.
+    local pauseMark = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
     if A.DIAGNOSTIC_PASSIVE then return false, "internal.6 passive diagnostic: write blocked" end
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
     local opt = OptSvc()
     if not (opt and opt.SetSetting and opt.GetSetting) then return false end
     local cur = SafeCall(function() return opt:GetSetting("autoAcceptLoadoutEchoes") end)
+    -- The read above can run other code: no lease and no option change after
+    -- a Pause (or a Pause and Resume) it raised.
+    if Nexus.SessionPause and (Nexus.SessionPause.IsPaused()
+        or Nexus.SessionPause.Status().epoch ~= pauseMark) then return false, "Nexus paused for this session" end
     if cur then
         UpdateStoreState(function(state)
             if state.priorAutoAccept == nil then state.priorAutoAccept = true end
@@ -6628,7 +6702,9 @@ function A.Poll()
     ConfirmAwaitingGrant()
     WatchLatches()
     ReconcileTomePending()
-    ReconcileLegacyAssignments()
+    -- The passive settlement above always runs. Under a session pause this
+    -- background repair waits, and the read requests below refuse.
+    if not (Nexus.SessionPause and Nexus.SessionPause.IsPaused()) then ReconcileLegacyAssignments() end
     -- owned-sync retry loop: keep re-requesting granted until non-empty
     -- data has been seen at least once (handles the empty-{} window after a
     -- reset/reload); bounded so it never spins

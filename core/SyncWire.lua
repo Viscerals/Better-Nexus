@@ -90,6 +90,14 @@ local function ModeAllows(kind,metadata)
     if not policy or type(policy.Allows)~="function" then return true end
     return policy.Allows(kind,metadata)
 end
+-- The whole-addon session pause (issue #171): no packet, handshake or inbound
+-- admission while it holds. It is not Wire.suspended (an ambiguous-CTL fault).
+local function SessionPaused() return Nexus.SessionPause and Nexus.SessionPause.IsPaused()==true end
+-- Session pause transitions so far: a handshake queued before one is not sent.
+local function PauseEpoch()
+    local pause=Nexus.SessionPause
+    return pause and pause.Status().epoch or 0
+end
 local function DropPending(name)
     if pending[name] then pending[name]=nil;pendingCount=pendingCount-1 end
 end
@@ -211,12 +219,14 @@ local function QueueHandshake(name,kind)
         if handshakeAllowed~=false then Wire.Housekeep(true) end
         DropHandshakes();return
     end
+    local epoch=PauseEpoch()
+    if pending[name] and pending[name].pauseEpoch~=epoch then DropPending(name) end
     if pending[name] then
         if kind=="ACK1" then pending[name].kind=kind end
         return
     end
     if pendingCount>=MAX_HANDSHAKES then return end
-    pending[name]={kind=kind,expiresAt=Now()+HANDSHAKE_TTL,generation=generation}
+    pending[name]={kind=kind,expiresAt=Now()+HANDSHAKE_TTL,generation=generation,pauseEpoch=epoch}
     pendingCount=pendingCount+1
 end
 function Wire.ObservePeer(name)
@@ -279,6 +289,7 @@ function Wire.Blocked()
     return nil
 end
 function Wire.CanDispatch(payload,metadata)
+    if SessionPaused() then return false,"session paused" end
     if type(metadata)=="table" and Wire.IsPeerBlocked(metadata.requester) then return false,"peer offline" end
     if Wire.suspended then return false,"transport suspended" end
     if type(payload)~="string" then return false,"invalid payload" end
@@ -288,6 +299,8 @@ function Wire.CanDispatch(payload,metadata)
     return Room(#text+(route=="addon" and #Wire.PREFIX+1 or 0))
 end
 function Wire.SendPacket(payload,metadata,channel)
+    if SessionPaused() then return false,"session paused" end
+    local admitted=PauseEpoch()
     if type(metadata)=="table" and Wire.IsPeerBlocked(metadata.requester) then return false,"peer offline" end
     if Wire.suspended then return false,"transport suspended" end
     if type(payload)~="string" then return false,"invalid payload" end
@@ -302,6 +315,10 @@ function Wire.SendPacket(payload,metadata,channel)
     -- whose identity the Transport checks again after this call returns.
     if not CheckConnection() then return false,"channel unavailable" end
     if type(metadata)=="table" and Wire.IsPeerBlocked(metadata.requester) then return false,"peer offline" end
+    -- Final boundary: the policy, CTL and connection reads above can run
+    -- other code; a Pause, or a Pause and Resume, they raised still stops
+    -- this packet before CTL.
+    if SessionPaused() or PauseEpoch()~=admitted then return false,"session paused" end
     local submittedGeneration=generation
     local receipt,Done=ImmediateCallback(function()
         if route=="addon" and CheckConnection() and generation==submittedGeneration then
@@ -340,6 +357,8 @@ function Wire.SendPacket(payload,metadata,channel)
 end
 function Wire.PumpHandshake()
     Wire.Housekeep()
+    -- Held, not dropped: each pending handshake keeps its own expiry.
+    if SessionPaused() then return end
     if Wire.suspended or connected==false then return end
     if not ModeAllows("handshake") then
         if handshakeAllowed~=false then Wire.Housekeep(true) end
@@ -348,7 +367,8 @@ function Wire.PumpHandshake()
     if Combat() or Now()-lastHandshake<1 then return end
     local name,item=next(pending);if not name then return end
     local p=peers[name]
-    if not p or Now()>=item.expiresAt or item.generation~=generation or Wire.IsPeerBlocked(name) then
+    if not p or Now()>=item.expiresAt or item.generation~=generation or Wire.IsPeerBlocked(name)
+        or item.pauseEpoch~=PauseEpoch() then
         DropPending(name);return
     end
     local kind=item.kind
@@ -356,6 +376,10 @@ function Wire.PumpHandshake()
     if not ready or not HasAddonApi() then return end
     if not CheckConnection() then return end
     if Wire.IsPeerBlocked(name) or peers[name]~=p or item.generation~=generation then DropPending(name);return end
+    -- Final boundary: the CTL and connection reads above can run other code.
+    -- After a Pause, or a Pause and Resume, this queued item is stale: it is
+    -- dropped unsent (nothing was submitted, nothing is retried).
+    if SessionPaused() or item.pauseEpoch~=PauseEpoch() then DropPending(name);return end
     lastHandshake=Now()
     local receipt,Done=ImmediateCallback(function()
         if CheckConnection() and peers[name]==p and item.generation==generation and not Wire.IsPeerBlocked(name) then
@@ -377,6 +401,10 @@ end
 function Wire.Receive(prefix,text,distribution,sender)
     if prefix~=Wire.PREFIX or distribution~="WHISPER" or type(text)~="string"
         or #text>254-#Wire.PREFIX-1 or not Name(sender) or Local(sender) then return false end
+    -- Paused, only the passive acknowledgment of a HELLO already sent can
+    -- settle (its own peer, generation and window, once). Nothing new is
+    -- admitted or sent.
+    if SessionPaused() and text~="ACK1" then return false end
     Wire.Housekeep()
     if not CheckConnection() then return false end
     if Wire.IsPeerBlocked(sender) then return false end

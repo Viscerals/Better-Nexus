@@ -54,6 +54,13 @@ local life={epoch=0,phase="r",settleUntil=0}
 local RS={serial=0}
 -- Bounded recovery helpers (defined below; M.Confirm needs admission checks earlier).
 local RC={}
+-- The whole-addon session pause (issue #171, core/SessionPause.lua). It holds
+-- this owner like an explicit Pause and refuses every new admission; settling
+-- an operation already submitted from what the game reports stays passive.
+local function sessionPaused()
+    local pause=Nexus.SessionPause
+    return type(pause)=="table" and pause.IsPaused()==true
+end
 -- Versioned receipt identity, not a different character or invented loadout.
 -- Legacy owners cannot interpret this identity and therefore retain their
 -- existing other/unknown-owner gate, including their explicit Continue gate.
@@ -973,6 +980,7 @@ function M.NoteWorldEnter()
 end
 function M.Confirm(token,representedHistory)
     init();local a=approval
+    if sessionPaused() then return nil,"Nexus is paused for this session. Resume Nexus first; no Orb action was sent." end
     -- Late events that arrived before this new run belong to the old action, not to the run.
     if RS.after then pcall(RC.late) end
     if not a or a.token~=token or now()-a.created>60 then return nil,"The confirmation expired. Review the plan again." end
@@ -2085,6 +2093,7 @@ function RC.outstanding()
     return true
 end
 local function requestRefresh(withChoice)
+    if sessionPaused() then return false,"session_paused" end
     local ok,why,mark=B.RequestRefresh(withChoice)
     if type(mark)=="table" then mark.at=now();RS.reqMark=mark end
     return ok,why,mark
@@ -2258,6 +2267,7 @@ local RC_CONFIRM="Continue with an unconfirmed Orb outcome? The earlier Orb acti
 local RC_DONE="Continued with an unconfirmed outcome. The earlier Orb action is saved unchanged in the archive. Observed spend stays counted and unknown spend exposure stays unknown. Nothing was refunded, repeated or chosen. A new Orb run needs its own approval and every normal check."
 local RC_REFUSALS={
     no_receipt="There is no unresolved Orb action.",
+    session_paused="Nexus is paused for this session. No read-only check was sent; check again after Resume Nexus.",
     archive_reserved="Automatic recovery history limit reached. Two entry slots and their space are reserved for explicit recovery; existing records are retained.",
     no_empty_choice_reply="No usable empty-choice answer was observed. The choice remains unknown; the pending record and exposure are retained.",
     auto_accept="The game automatic acceptance setting changed. Automatic recovery stopped with its pending record retained.",
@@ -2675,6 +2685,7 @@ function RC.postReady(s,a)
 end
 function M.ContinueConfirm(token)
     init()
+    if sessionPaused() then return nil,"session_paused" end
     local rc=run.rc
     if rc and rc.automatic then return nil,"not_restored" end
     if rc and rc.stage=="done" and token~=nil and rc.doneToken==token then return true,"already" end
@@ -3008,6 +3019,12 @@ function M.Pump(passive)
         end
         flushEvidence()
     end
+    -- Session pause: the running run is held through its own Pause, and this
+    -- pump only observes (no live recovery, choice, spend or refresh).
+    if sessionPaused() then
+        if run.running then M.Pause() end
+        passive=true
+    end
     advancing=true
     local observed
     local function step()
@@ -3053,7 +3070,8 @@ function M.Pump(passive)
             -- ownership response: the read-only Recheck request. It sends no
             -- Orb and no choice, and settlement stays in finishResult.
             local gate=run.settleGate
-            if gate and gate.gate=="fresh" and gate.detail and gate.detail.exact and not run.autoRefreshAt then
+            if gate and gate.gate=="fresh" and gate.detail and gate.detail.exact and not run.autoRefreshAt
+                and not sessionPaused() then
                 run.autoRefreshAt=now();requestRefresh()
             end
             run.recovery={kind=kind,observing=observing,proposed=proposed==true or nil,
@@ -3300,6 +3318,12 @@ function M.Pump(passive)
     else run.resumeOwed=nil end
     if not ok then pause("Orb mode encountered an internal error. No automatic repeat will be sent.");error(err,0) end
 end
+-- Called by Nexus.SessionPause.Pause only. Holds a run that is actually
+-- running through Pause; otherwise it creates and reads nothing.
+function M.HoldForSessionPause()
+    if not (run and run.running) then return false end
+    return M.Pause()
+end
 function M.Pause()
     init();if not run.running then return false end
     run.running=false;setState("PAUSED",run.pending and "Paused. A submitted spend may still finish; the native offer remains available." or "Paused before the next spend.")
@@ -3355,6 +3379,7 @@ function M.RunLog(which,from,count)
 end
 function M.Resume()
     init();if run.state~="PAUSED" then return nil,"Only an explicitly paused run can resume." end
+    if sessionPaused() then return nil,"Nexus is paused for this session. Resume Nexus first; no Orb action was sent." end
     local unstable=worldUnstableReason()
     if unstable then return nil,unstable end
     local s,err=readState();if not s then if run.postRecovery then RC.postUnknown() end;return nil,err end
@@ -3414,7 +3439,9 @@ function M.ConfirmLimit(token)
     return true
 end
 function M.Recheck()
-    init();if run.lastRecheck and now()-run.lastRecheck<3 then return nil,"Please wait before requesting another refresh." end
+    init()
+    if sessionPaused() then return nil,"Nexus is paused for this session. No refresh was requested." end
+    if run.lastRecheck and now()-run.lastRecheck<3 then return nil,"Please wait before requesting another refresh." end
     if type(B.TransportStart)=="function" then pcall(B.TransportStart) end
     local ownershipOnly=false
     if RC.outstanding() then

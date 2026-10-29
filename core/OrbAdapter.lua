@@ -373,9 +373,19 @@ function O.SameOwner(a,b)
     return type(a)=="table" and type(b)=="table" and a.pe==b.pe and a.svc==b.svc
         and a.orb==b.orb and a.guid==b.guid and a.generation==b.generation and a.level==b.level
 end
+-- The whole-addon session pause (issue #171): no new ownership, action or
+-- read request while it holds. Release, Read, Watch and capture stay available.
+local function sessionPaused() return Nexus.SessionPause and Nexus.SessionPause.IsPaused()==true end
+-- The pause transition count when a call was admitted; crossed(mark) is true
+-- after a Pause, or a Pause and Resume, raised by any callback since then.
+local function pauseMark() local p=Nexus.SessionPause;return p and p.Status().epoch or 0 end
+local function crossed(mark) return sessionPaused() or pauseMark()~=mark end
 function O.Rebind(token,expected)
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return nil,"Nexus is paused for this session." end
+    local mark=pauseMark()
     if not owner or token~=owner then return nil,"This run no longer owns Orb actions." end
     local fresh,err=O.Read();if not fresh then return nil,err end
+    if crossed(mark) then return nil,"Nexus is paused for this session." end
     if not O.SameOwner(ownerContext,fresh.context) or not expected or not same(expected.context,fresh.context)
         or fresh.offerPending or #fresh.board>0 or fresh.hostPending or A.InFlight() then
         return nil,"The original owner or a pending action prevents resuming."
@@ -535,9 +545,13 @@ function O.Watch(s,notify)
 end
 function O.Unwatch() watcherContext=nil;watcherNotify=nil end
 function O.IsOwned() return owner~=nil end
+local PAUSED="Nexus is paused for this session. No Orb action was sent."
 function O.Acquire(s)
+    if sessionPaused() then return nil,PAUSED end
+    local mark=pauseMark()
     if owner then return nil,"Orb mode already owns an operation." end
     local fresh,err=O.Read();if not fresh then return nil,err end
+    if crossed(mark) then return nil,PAUSED end
     if not s or not same(s.context,fresh.context) or s.grantedKey~=fresh.grantedKey
         or s.lockedKey~=fresh.lockedKey or s.charges~=fresh.charges then return nil,"Your Echo state changed. Review the plan again." end
     if fresh.offerPending or #fresh.board>0 or fresh.hostPending or A.InFlight() then return nil,"Resolve the current Echo action first." end
@@ -552,6 +566,7 @@ function O.Release(token)
     owner=nil;ownerContext=nil;return true
 end
 local function validate(token)
+    if sessionPaused() then return nil,PAUSED,"SESSION_PAUSED" end
     if not owner or token~=owner then return nil,"Orb action ownership is unavailable." end
     local s,err=O.Read();if not s then return nil,err,"READ_UNAVAILABLE" end
     if not same(ownerContext,s.context) then return nil,"The character, loadout, or game service changed. Orb mode is paused." end
@@ -573,6 +588,7 @@ local function checkedValidation(token,source,reason)
     return s,err,code
 end
 function O.Spend(token,key,expected,guard)
+    local mark=pauseMark()
     local s,err,code=checkedValidation(token,"OrbAdapter.SpendValidation","The Orb state check failed. No Orb was sent.")
     if not s then return nil,"REJECTED",err,code end
     if s.choiceShape=="invalid" then
@@ -603,6 +619,9 @@ function O.Spend(token,key,expected,guard)
     -- No diagnostic callback may intervene between the last guard and host.
     -- Report crossing after the invocation (also when it throws), before its
     -- typed return event; diagnostics never authorize or cancel this crossing.
+    -- A Pause, or a Pause and Resume, raised by the guard or a read above
+    -- still stops it here, before the host.
+    if crossed(mark) then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     local ok,value=pcall(ownerContext.orb.ConfirmSpend,id,1)
     boundary("host_call",s)
     boundary(not ok and "host_error" or value==false and "host_false" or value==true and "host_true" or "host_other",nil)
@@ -611,6 +630,7 @@ function O.Spend(token,key,expected,guard)
     return true,"SUBMITTED"
 end
 function O.Select(token,index,expectedBoard,id,guard)
+    local mark=pauseMark()
     local s,err,code=checkedValidation(token,"OrbAdapter.SelectValidation","The Echo state check failed. No selection was sent.")
     if not s then return nil,"REJECTED",err,code end
     local c=s.board[index]
@@ -630,8 +650,13 @@ function O.Select(token,index,expectedBoard,id,guard)
         end
         if allowed~=true then return nil,"REJECTED","The assigned target changed before selection. The original pending operation must be resolved." end
     end
+    if crossed(mark) then return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     selfSelecting=true
     boundary("pick_call",s)
+    -- The boundary sink runs other code: a pause it raised still stops the
+    -- choice before the host. The journal then shows pick_call with no pick
+    -- outcome, followed by the caller's select_rejected.
+    if crossed(mark) then selfSelecting=false;return nil,"REJECTED",PAUSED,"SESSION_PAUSED" end
     local ok,v=pcall(ownerContext.svc.SelectPerk,id)
     selfSelecting=false
     boundary((not ok or (v~=true and v~=false)) and "pick_unknown" or v==false and "pick_false" or "pick_true",nil)
@@ -900,12 +925,15 @@ end
 -- A manual Recheck may still obtain the exact ownership result while a charge
 -- reply is outstanding. This sends no second charge request and no choice query.
 function O.RequestOwnershipRefresh()
+    if sessionPaused() then return false,"session_paused" end
     local pe=_G.ProjectEbonhold;local svc=pe and pe.PerkService
     if type(svc)~="table" or type(svc.RequestGrantedPerks)~="function" then return false,"refresh_unavailable" end
     if not pcall(svc.RequestGrantedPerks) then return false,"ownership_refresh_failed" end
     return true
 end
 function O.RequestRefresh(withChoice)
+    if sessionPaused() then return false,"session_paused" end
+    local admitted=pauseMark()
     local pe=_G.ProjectEbonhold;local orb=pe and pe.OrbService;local svc=pe and pe.PerkService
     local a=type(orb)=="table" and type(orb.RequestCharges)=="function"
     local b=type(svc)=="table" and type(svc.RequestGrantedPerks)=="function"
@@ -918,6 +946,8 @@ function O.RequestRefresh(withChoice)
         if type(opts)=="table" and type(opts.GetSetting)=="function" then ok,value=pcall(opts.GetSetting,opts,"autoAcceptLoadoutEchoes") end
         if not ok or value~=false then return false,"auto_accept" end
     end
+    -- The option read above can run other code: nothing is sent yet.
+    if crossed(admitted) then return false,"session_paused" end
     -- Keep the pre-existing charge/ownership refresh when the optional choice
     -- query is missing, but report failure: partial facts authorize no recovery.
     local ord=T.ord
@@ -927,8 +957,15 @@ function O.RequestRefresh(withChoice)
     -- before the call, so a synchronous reply is included in serialization too.
     T.requests=math.min(T.requests+1,COUNT_CAP);T.reqOrd=ord
     local mark={ord=ord,n=T.requests,epoch=T.epoch,ownBare=T.ownBare}
+    -- A pause raised inside a request already sent keeps that request and its
+    -- mark; only the requests not yet sent are refused.
+    if crossed(admitted) then return false,"session_paused",mark end
     local okB=pcall(svc.RequestGrantedPerks)
     if not okB then return false,"ownership_refresh_failed",mark end
+    if withChoice and choiceReady and crossed(admitted) then
+        mark.ownBare=T.ownBare;mark.choiceUnverified=true
+        return false,"session_paused",mark
+    end
     local bareBefore,framedBefore=T.ownBare,T.ownFramed
     local okCall=not withChoice or (choiceReady and pcall(svc.RequestChoice))
     local okChoice=okCall

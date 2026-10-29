@@ -856,6 +856,11 @@ end
 
 local function AutoAllowed()
     if not sched.autoEnabled then return false, "manual mode" end
+    -- The session pause holds the selection without changing it (issue #171).
+    -- It ends no world or result hold below; those keep their own rules.
+    if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+        return false, "Nexus paused for this session"
+    end
     if actionHold.worldLeaving then return false, "loading screen (waiting for world entry)" end
     if actionHold.worldSettleUntil then
         if GetTime() < actionHold.worldSettleUntil or not Adapter.Ready() then
@@ -2888,6 +2893,9 @@ local function PrepareActionIntent(board, action)
             and actionHold.rolling.decisionId or nil,
         preparedAt=now,readyAt=now + cadence.actionIntentBeat,
         mutationAttempted=false,state="idle",
+        -- The session pause transition count when it was decided: a Pause
+        -- (even with a Resume before the next turn) supersedes it.
+        pauseEpoch=Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0,
     }
     RecordActionLifecycle(actionIntent, "prepared", "intent_beat")
     RequestStepAt(actionIntent.readyAt)
@@ -2897,6 +2905,14 @@ end
 local function PreauthorizeActionIntent(intent, settings)
     if not intent or intent.state ~= "prepared" then
         return false, "intent_not_prepared"
+    end
+    -- Decided before a session pause (issue #171): never submitted later.
+    -- Only this unsubmitted intent ends; a fresh decision follows.
+    local pause = Nexus.SessionPause
+    if pause and (pause.IsPaused() or pause.Status().epoch ~= intent.pauseEpoch) then
+        FinishActionIntent("superseded", "session_pause", false)
+        RequestStepAt(GetTime() + cadence.poll)
+        return false, "session_pause"
     end
     if GetTime() < (intent.readyAt or math.huge) then
         RequestStepAt(intent.readyAt)
@@ -2947,6 +2963,13 @@ local function PreauthorizeActionIntent(intent, settings)
             FinishActionIntent("superseded", "target_changed_before_submit", false)
             return false, "target_changed_before_submit"
         end
+    end
+    -- The reads above can run other code: a Pause, or a Pause and Resume,
+    -- since this intent was decided still supersedes it.
+    if pause and (pause.IsPaused() or pause.Status().epoch ~= intent.pauseEpoch) then
+        FinishActionIntent("superseded", "session_pause", false)
+        RequestStepAt(GetTime() + cadence.poll)
+        return false, "session_pause"
     end
     return true
 end
@@ -3360,7 +3383,8 @@ local function StepRun(level, plan, slots, owned, flags, disabledLevers, static,
     if not (okAuto and settings.autoPick) then
         if actionIntent and actionIntent.boardSignature == board.signature
             and actionIntent.state == "prepared" then
-            FinishActionIntent("superseded", "authorization_changed", false)
+            FinishActionIntent("superseded", (Nexus.SessionPause and Nexus.SessionPause.IsPaused())
+                and "session_pause" or "authorization_changed", false)
         end
         if not okAuto then SetStatus("auto paused: " .. autoWhy) end
         return
@@ -3844,7 +3868,9 @@ local function ObservePendingSave(catalog)
         if Adapter.RequestSlots() then
             save.observeReadyAt = GetTime() + 0.4
             RequestStepAt(save.observeReadyAt)
-        else
+        elseif not (Nexus.SessionPause and Nexus.SessionPause.IsPaused()) then
+            -- Paused, the read waits without a step per poll: Resume changes
+            -- the gate key, and that evaluation asks again.
             RequestStepAt(GetTime() + cadence.poll)
         end
     elseif save.observeReadyAt and GetTime() >= save.observeReadyAt then
@@ -4661,6 +4687,11 @@ end
             SetStatus("Ordinary Automation stays OFF while the Orb operation is active or unresolved.")
             return false
         end
+        -- No new authority while the session is paused: OFF stays OFF.
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+            SetStatus("Auto stays OFF while Nexus is paused. Resume Nexus first.")
+            return false
+        end
         if not warning or type(warning.RequestAuto) ~= "function" then
             SetStatus("Auto stays OFF: its overwrite warning is unavailable.")
             return false
@@ -4684,7 +4715,8 @@ end
         return warning.RequestAuto(M, function()
             -- Approval belongs to this still-OFF request. Recheck interruption
             -- and Orb exclusion rather than authorizing a stale UI callback.
-            if sched.autoEnabled or (Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary()) then
+            if sched.autoEnabled or (Nexus.OrbRuntime and Nexus.OrbRuntime.BlocksOrdinary())
+                or (Nexus.SessionPause and Nexus.SessionPause.IsPaused()) then
                 arm.promptOverwritePending = false
                 return false
             end
@@ -5120,10 +5152,16 @@ end
         -- uses. It reads the gate only, invalidates no static state and
         -- submits nothing itself. State lives in recomputeStats because this
         -- chunk is at Lua's local-variable limit.
+        -- The session pause (issue #171) is part of this key: Pause and Resume
+        -- each give one such evaluation, and SelectPoll reads the paused key
+        -- as an actionable pause, so it sends no read-only recheck.
         if type(Adapter.OrdinaryBoardAllowed) == "function" then
             local okGate, gateAllowed, gateWhy = pcall(Adapter.OrdinaryBoardAllowed)
             local gateKey = not okGate and "error"
                 or (gateAllowed and "allowed" or ("blocked:" .. tostring(gateWhy)))
+            if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+                gateKey = "blocked:Nexus paused for this session"
+            end
             if gateKey ~= recomputeStats.ordinaryGateKey then
                 if recomputeStats.ordinaryGateKey ~= nil then
                     recomputeStats.ordinaryGateChanges =

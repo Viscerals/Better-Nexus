@@ -805,6 +805,37 @@ function Session.New(options)
     -- Lifetime checks do not consume catalog/hash state or enqueue work. They
     -- must still run while the lifecycle withholds transport for preparation.
     function M.UpdatePendingRequestStatus()
+        -- A convergence begun before a session pause transition (issue #171),
+        -- even a Pause and Resume between two updates, ends here through the
+        -- identity-aware cancellation: an unsent or still-preparing request
+        -- never goes out later under that old grant. Requests already sent
+        -- keep their own receive windows.
+        if autoConverge.active and not autoConverge.receiveOnly then
+            local pause = Nexus.SessionPause
+            local epoch = pause and pause.Status().epoch or 0
+            if autoConverge.pauseEpoch ~= epoch then
+                local old = pendingRequest
+                local unsent = pendingRequest ~= nil or pendingHashRequest ~= nil
+                pendingHashRequest, pendingRequest = nil, nil
+                if old then cancelRequest(old.id, myName()) end
+                if unsent then SetQueueOutcome("dropped") end
+                if lastRequestId and now() < receiveAbsoluteUntil then
+                    -- A request already sent keeps its exact identity and
+                    -- fixed windows: its correlated answers may still settle
+                    -- it once (AcceptsResponse/NoteInbound/NoteOutcome). The
+                    -- old grant sends nothing more: UpdateAutoConvergence
+                    -- starts no further pass and ends it when the window ends.
+                    autoConverge.receiveOnly = true
+                    log("SYNC", "session pause: no further pass; the sent request stays settleable")
+                else
+                    autoConverge.active = false
+                    autoConverge.terminal = "session_pause"
+                    SetTerminal("session_pause")
+                    log("SYNC", "convergence ended by a session pause")
+                end
+                return false
+            end
+        end
         if not pendingHashRequest and not pendingRequest then
             -- A sent request no longer owns either pending slot. Its absolute
             -- deadline still applies if later catalog work gates full updates.
@@ -813,13 +844,17 @@ function Session.New(options)
         end
         local connected = options.isRequestChannelPresent and options.isRequestChannelPresent()
             or not options.isRequestChannelPresent and options.isConnected()
-        if not connected or now() >= Number(autoConverge.absoluteUntil) then
+        -- A request not yet sent when the session is paused (issue #171) ends
+        -- here, through the same identity-aware cancellation: Resume never
+        -- releases it later.
+        local paused = Nexus.SessionPause and Nexus.SessionPause.IsPaused()
+        if paused or not connected or now() >= Number(autoConverge.absoluteUntil) then
             local old = pendingRequest
             pendingHashRequest, pendingRequest = nil, nil
             autoConverge.active = false
             if old then cancelRequest(old.id, myName()) end
             SetQueueOutcome("dropped")
-            SetTerminal(not connected and "disconnected" or "expired")
+            SetTerminal(paused and "session_pause" or not connected and "disconnected" or "expired")
             return false
         end
         return true, autoConverge.active and autoConverge.mode == "manual"
@@ -865,6 +900,10 @@ function Session.New(options)
 
     function M.RequestSync()
         local current = now()
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+            log("SYNC", "sync request refused: Nexus is paused for this session")
+            return false, "Nexus is paused for this session. Type /nexus resume, then Sync again."
+        end
         if SyncMode() == "off" then
             -- The user's saved choice is not turned on silently.
             log("SYNC", "sync request refused: saved Sync mode is Off")
@@ -879,8 +918,10 @@ function Session.New(options)
             pendingHashRequest = nil
             receiveWindowUntil, receiveAbsoluteUntil = 0, 0
         end
+        -- A receive-only convergence left by a session pause is superseded by
+        -- a fresh explicit request exactly like an automatic one.
         local supersedingAutomatic = autoConverge.active
-            and autoConverge.mode == "automatic"
+            and (autoConverge.mode == "automatic" or autoConverge.receiveOnly == true)
         if autoConverge.active and not supersedingAutomatic then
             if pendingHashRequest then return nil, "preparing sync data" end
             return true, "already syncing"
@@ -899,6 +940,8 @@ function Session.New(options)
         autoSyncPending = false
         manualPreparationOwner = {}
         autoConverge.active = true
+        autoConverge.pauseEpoch = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+        autoConverge.receiveOnly = nil
         autoConverge.pass = 0
         autoConverge.stable = 0
         autoConverge.terminal = nil
@@ -926,6 +969,8 @@ function Session.New(options)
         end
         autoSyncPending = false
         autoConverge.active = true
+        autoConverge.pauseEpoch = Nexus.SessionPause and Nexus.SessionPause.Status().epoch or 0
+        autoConverge.receiveOnly = nil
         autoConverge.pass = 0
         autoConverge.stable = 0
         autoConverge.terminal = nil
@@ -968,6 +1013,18 @@ function Session.New(options)
         end
         if ExpireActiveConvergence() then return end
         local current = now()
+        if autoConverge.receiveOnly then
+            -- Receive-only after a session pause: settle what was already sent,
+            -- then end without another pass.
+            if not M.IsReceiving() then
+                autoConverge.active = false
+                autoConverge.receiveOnly = nil
+                autoConverge.terminal = "session_pause"
+                SetTerminal("session_pause")
+                log("SYNC", "convergence ended after its sent request's window (session pause)")
+            end
+            return
+        end
         if pendingHashRequest or pendingRequest or M.IsReceiving() then return end
         if current - autoConverge.started < autoSyncMinPass then return end
         if current - autoConverge.lastInbound < autoSyncQuiet then return end
@@ -1129,6 +1186,7 @@ function Session.New(options)
 
     function M.SendStatusTo(target)
         if not target or target == "" then return false end
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return false, "Nexus paused for this session" end
         if SyncMode() == "off" then return false, SyncModeText("off") end
         local token = BuildStatusToken()
         if not token then return false end

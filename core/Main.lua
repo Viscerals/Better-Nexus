@@ -893,6 +893,11 @@ local function CommandAuto()
     end
     local runtime = Automation()
     local enabled = runtime and runtime.ToggleAuto() or false
+    if not enabled and Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+        Print("Automation OFF. Auto cannot be turned ON while Nexus is paused; type /nexus resume first.")
+        if Panel.SetAuto then Panel.SetAuto(enabled) end
+        return
+    end
     Print("Automation " .. (enabled and "ON" or "OFF"))
     if Panel.SetAuto then Panel.SetAuto(enabled) end
 end
@@ -1203,6 +1208,7 @@ local function CommandReference()
     Print("Nexus reference: /nexus help | guide | reference | editor | panel | status | loading | orbs | policy | trace")
     Print("Rolling permissions: /nexus reroll on|off, /nexus freeze on|off. Automation is a separate switch.")
     Print("Rolling strategy: /nexus policy adaptive|released. Local roll record: /nexus trace.")
+    Print("Session pause: /nexus pause, /nexus resume, /nexus paused. Pauses Auto, Orb actions, sharing and DPS recording until Resume or reload.")
 end
 
 -- /nexus help and /nexus tutorial (design/current "Nexus Setup Alternative":
@@ -1319,6 +1325,26 @@ EnsureMainCommands = function()
             end,
             loading=function()
                 if Nexus.LoadingStatus then Nexus.LoadingStatus.Show() end
+            end,
+            -- Session pause (answered before the initialization gate). Only
+            -- the session barrier changes: no step, save, send or toggle.
+            sessionPause=function(_,normalized)
+                local pause=Nexus.SessionPause
+                if not pause then Print("Session pause is unavailable.");return end
+                local was=pause.IsPaused()
+                if normalized=="pause" then
+                    pause.Pause()
+                    Print((was and "Nexus is already paused for this session. " or "Nexus paused for this session. ")
+                        .."Auto, Orb actions, sharing and DPS recording are held. An action already sent may still finish. Type /nexus resume to continue.")
+                elseif normalized=="resume" then
+                    pause.Resume()
+                    Print((was and "Nexus resumed. " or "Nexus was not paused. ")
+                        .."Auto can continue if it was already on. Orb runs stay paused.")
+                elseif pause.IsPaused() then
+                    Print("Nexus paused for this session. Type /nexus resume to continue.")
+                else
+                    Print("Nexus is not paused.")
+                end
             end,
             auto=function() CommandAuto() end,
             -- Rolling strategy selector. The saved setting is written at once;

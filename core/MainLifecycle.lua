@@ -1123,6 +1123,11 @@ function Lifecycle.New(options)
 
     local function CompleteSharedWorldEntry()
         if not communityReady or not sharedWorldEntryPending then return end
+        -- Session pause (issue #171): community start-up integrity reached
+        -- its safe boundary; the shared entry (retention request, Sync start
+        -- or world entry with its channel join, DPS start) stays pending
+        -- until the first unpaused update.
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then return end
         sharedWorldEntryPending = false
         -- Retention maintenance (first observation and expiry of retention
         -- markers) runs through its own scheduler once the shared catalog is
@@ -1441,6 +1446,32 @@ function Lifecycle.New(options)
                 local automation=EnsureAutomation()
                 if automation then automation.OnUpdate(elapsed) end
             end
+            return
+        end
+        -- Whole-addon session pause (issue #171). The authority rebind and
+        -- the Store slice above still reach their safe boundary. No routine
+        -- maintenance, shared world entry, catalog or hash admission, Share
+        -- pump or Sync producer runs. Retained Sync work keeps its absolute
+        -- expiry (Sync.OnUpdate does only that while paused), a combat
+        -- capture ends unrecorded, and automation still observes results
+        -- while every action it could take refuses at its own gate.
+        if Nexus.SessionPause and Nexus.SessionPause.IsPaused() then
+            syncGate.reason, syncGate.owner = "session-paused", "none"
+            if syncInitialized and Nexus.Sync
+                and type(Nexus.Sync.UpdatePendingRequestStatus)=="function" then
+                RunIsolatedOwner("Sync.UpdatePendingRequestStatus",
+                    Nexus.Sync.UpdatePendingRequestStatus)
+            end
+            if syncInitialized and Nexus.Sync then
+                RunIsolatedOwner("Sync.OnUpdate", Nexus.Sync.OnUpdate, elapsed)
+            end
+            if not dependencies.Adapter.Ready() then return end
+            if dpsInitialized and Nexus.DpsCapture then
+                RunIsolatedOwner("DpsCapture.OnUpdate",
+                    Nexus.DpsCapture.OnUpdate, elapsed)
+            end
+            local automation = EnsureAutomation()
+            if automation then automation.OnUpdate(elapsed) end
             return
         end
         phaseStarted = PhaseBegin("lifecycle.phase.maintenance")
