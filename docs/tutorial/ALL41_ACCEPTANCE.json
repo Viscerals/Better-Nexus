@@ -4808,7 +4808,7 @@
       "test": "orb_continue_affordance",
       "status": "PASS",
       "exit": 0,
-      "checks": null
+      "checks": 7
      }
     ]
    },
@@ -4948,7 +4948,7 @@
       "test": "orb_continue_affordance",
       "status": "PASS",
       "exit": 0,
-      "checks": null
+      "checks": 7
      }
     ]
    },
@@ -6463,7 +6463,7 @@
       "test": "orb_continue_affordance",
       "status": "PASS",
       "exit": 0,
-      "checks": null
+      "checks": 7
      },
      {
       "test": "orb_mini_panel",

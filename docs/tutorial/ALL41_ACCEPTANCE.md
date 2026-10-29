@@ -992,7 +992,7 @@ Canonical (verbatim):
   - tests/prototype/orb_recovery_vocabulary.lua:51,:96-103
   - tests/prototype/batch_orb_restored_wording.lua:68-82
 - **Negative controls:** no 'confirmed spend' wording (batch_orb_spend_wording)
-- **Execution at the final pin (`8393f5f`, complete CI PASSED):** `orb_recovery_layers` PASS (124), `orb_recovery_vocabulary` PASS (50), `batch_orb_restored_wording` PASS (23), `orb_continue_affordance` PASS
+- **Execution at the final pin (`8393f5f`, complete CI PASSED):** `orb_recovery_layers` PASS (124), `orb_recovery_vocabulary` PASS (50), `batch_orb_restored_wording` PASS (23), `orb_continue_affordance` PASS (7)
 - **Prior pin execution (`c7d2b74`, complete CI PASSED; historical):** `orb_recovery_layers` PASS (124), `orb_recovery_vocabulary` PASS (50), `batch_orb_restored_wording` PASS (23), `orb_continue_affordance` PASS
 - **Historical execution (`9bfb2bb`, focused-61; not proof of changed code):** `orb_recovery_layers` PASS (124), `orb_recovery_vocabulary` PASS (50), `batch_orb_restored_wording` PASS (23), `orb_continue_affordance` PASS (7)
 - **Source changes since c7d2b74 (re-read at 8393f5f):**
@@ -1019,7 +1019,7 @@ Canonical (verbatim):
   - tests/prototype/orb_recovery_vocabulary.lua:51-53 headline then action then Details
   - :70,:80 Continue/no-Continue headlines
   - :130,:138-139 history header/report wording
-- **Execution at the final pin (`8393f5f`, complete CI PASSED):** `orb_recovery_vocabulary` PASS (50), `orb_recovery_layers` PASS (124), `orb_continue_affordance` PASS
+- **Execution at the final pin (`8393f5f`, complete CI PASSED):** `orb_recovery_vocabulary` PASS (50), `orb_recovery_layers` PASS (124), `orb_continue_affordance` PASS (7)
 - **Prior pin execution (`c7d2b74`, complete CI PASSED; historical):** `orb_recovery_vocabulary` PASS (50), `orb_recovery_layers` PASS (124), `orb_continue_affordance` PASS
 - **Historical execution (`9bfb2bb`, focused-61; not proof of changed code):** `orb_recovery_vocabulary` PASS (50), `orb_recovery_layers` PASS (124), `orb_continue_affordance` PASS (7)
 - **Spec:** `met-offline`. orb_continue_affordance uses a stubbed ContinueView (labels only).
@@ -1275,7 +1275,7 @@ Canonical (verbatim):
   - tests/prototype/orb_bounded_recovery.lua (534 checks) UI exit sends no mutation
   - tests/prototype/orb_guidance_passive_open.lua:132,:161 opening changes nothing during run/recovery
 - **Negative controls:** context/level change, pending assignment change, stale token, closed window kills token, slot change withdraws confirm
-- **Execution at the final pin (`8393f5f`, complete CI PASSED):** `orb_target_review` PASS (152), `orbs_target_changes` PASS, `orb_recovery_continue` PASS (180), `orb_recovery_refusals` PASS (477), `orb_bounded_recovery` PASS (534), `orb_guidance_passive_open` PASS (25), `orb_continue_affordance` PASS, `orb_mini_panel` PASS
+- **Execution at the final pin (`8393f5f`, complete CI PASSED):** `orb_target_review` PASS (152), `orbs_target_changes` PASS, `orb_recovery_continue` PASS (180), `orb_recovery_refusals` PASS (477), `orb_bounded_recovery` PASS (534), `orb_guidance_passive_open` PASS (25), `orb_continue_affordance` PASS (7), `orb_mini_panel` PASS
 - **Prior pin execution (`c7d2b74`, complete CI PASSED; historical):** `orb_target_review` PASS (152), `orbs_target_changes` PASS, `orb_recovery_continue` PASS (180), `orb_recovery_refusals` PASS (477), `orb_bounded_recovery` PASS (534), `orb_guidance_passive_open` PASS (25), `orb_continue_affordance` PASS, `orb_mini_panel` PASS
 - **Historical execution (`9bfb2bb`, focused-61; not proof of changed code):** `orb_target_review` PASS (152), `orbs_target_changes` PASS, `orb_recovery_continue` PASS (180), `orb_recovery_refusals` PASS (477), `orb_bounded_recovery` PASS (534), `orb_guidance_passive_open` PASS (25), `orb_continue_affordance` PASS (7), `orb_mini_panel` PASS
 - **Source changes since c7d2b74 (re-read at 8393f5f):**
