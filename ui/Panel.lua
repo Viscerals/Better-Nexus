@@ -1977,16 +1977,18 @@ function M.FinishPanelDrag()
 end
 
 -- After a render: a move continues only while the panel is shown and the
--- surface it began on is still shown; otherwise it is finished (stopped and
--- saved once) as a real hide would.
+-- surface it began on is still visible, a hidden ancestor (the roll area of
+-- a board without an offer) included (IsVisible, not only its own shown
+-- flag); otherwise it is finished (stopped, and saved once if it moved) as
+-- a real hide would.
 function M.SettlePanelDrag()
     local drag = M._panelDrag
     if not drag then return false end
     local origin = drag.origin
     local okF, shown = pcall(frame.IsShown, frame)
-    local okO, originShown = true, true
-    if origin and origin ~= frame then okO, originShown = pcall(origin.IsShown, origin) end
-    if okF and shown and okO and originShown then return false end
+    local okO, originVisible = true, true
+    if origin and origin ~= frame then okO, originVisible = pcall(origin.IsVisible, origin) end
+    if okF and shown and okO and originVisible then return false end
     return M.FinishPanelDrag()
 end
 
@@ -5984,7 +5986,13 @@ function M.AutoDetailLines()
         lines[#lines + 1] = "Now: paused for this session"
         return lines
     end
-    if pause.unknown then lines[#lines + 1] = PAUSE_UNKNOWN end
+    if pause.unknown then
+        -- An established pause may still hold: the last committed model's
+        -- state words are not the current state.
+        lines[#lines + 1] = PAUSE_UNKNOWN
+        lines[#lines + 1] = "Now: unknown (the session pause cannot be read)"
+        return lines
+    end
     local now = AutoNowLine(model, 600)
     if now then lines[#lines + 1] = now end
     return lines
@@ -6038,7 +6046,11 @@ function M.ShowAutoTooltip(owner)
     end
     -- A confirmed session pause is what holds Auto now, whatever the last
     -- committed model's state words were.
-    local now = M.PauseStatus().paused and "Now: paused for this session" or AutoNowLine(M._lastModel, 120)
+    -- An unreadable status leaves the current state unknown as well.
+    local pause = M.PauseStatus()
+    local now = pause.paused and "Now: paused for this session"
+        or pause.unknown and "Now: unknown (the session pause cannot be read)"
+        or AutoNowLine(M._lastModel, 120)
     if now then GameTooltip:AddLine(now, 1, 0.82, 0, true) end
     GameTooltip:Show()
 end

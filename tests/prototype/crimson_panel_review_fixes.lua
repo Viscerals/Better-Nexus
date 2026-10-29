@@ -23,13 +23,20 @@
 -- V7 (#171, #169) with a committed model of Auto selected ON and ready, a
 --    confirmed pause through the Options row makes the Auto hover and the
 --    details say the session pause holds it (no "Now: ready"); Resume runs
---    no refresh step and restores the model's own state words.
+--    no refresh step and restores the model's own state words;
+-- V8 (#168, re-review of 6f9d04f) a render that hides the drag origin's
+--    parent (the roll area of a board without an offer) ends the move once,
+--    saving only movement, though the origin's own shown flag stays set;
+-- V9 (#171, #169, re-review of 6f9d04f) Auto selected ON and ready, then a
+--    confirmed Pause, then a Status that fails or is malformed: the hover and
+--    the details say the state is unknown, never "Now: ready" or paused.
 -- Native seams modelled by the test, not client proof: the propagation of a
 -- hide to shown descendants (as the client documents for OnHide), effective
 -- scale as the product of own scales, the root's centre and corner reads,
 -- the shared tooltip's owner, and UIParent's size. Nexus.SessionPause is a
 -- boundary double of its frozen API. Categories (view_regression_support):
--- EXPECT fails at 4358349 by design, GUARD already held, SETUP is the
+-- EXPECT fails at 4358349 (V1-V7) and 6f9d04f (V8, V9) by design, GUARD
+-- already held, SETUP is the
 -- fixture. Native NOT RUN.
 local F=dofile('tests/prototype/format5_support.lua')
 local V=dofile('tests/prototype/view_regression_support.lua')
@@ -321,6 +328,67 @@ C.scenario('V7 a confirmed pause overrides the committed Auto state words; Resum
  C.expect(Hover():find('Now: ready',1,true)~=nil,'V7: after Resume the model\'s own state words return')
  C.guard(CB.refresh==cb[1] and CB.toggle==cb[2],'V7: neither Pause nor Resume ran a refresh step or an Auto toggle')
  C.guard(Effects()==before,'V7: no action, send, ownership or slot request, saved change or Auto change',Effects())
+ Nexus.SessionPause=nil
+ P.Render(Model())
+end)
+
+-- Re-review of 6f9d04f, item 1: the origin can disappear with a hidden
+-- ancestor while its own shown flag stays set.
+C.scenario('V8 a render that hides the drag origin\'s parent ends the move once; a visible origin keeps it',function()
+ P.Render(Model())
+ local hover=root._recommendationHover
+ C.setup(hover:IsVisible() and root._rollArea:IsShown(),'V8: fixture: the recommendation hover is visible in the roll area')
+ Reset();Start(hover)
+ P.Render(Model())
+ C.guard(P._panelDrag~=nil and Move.stops==0 and Saved()==nil,'V8: a render that keeps the roll area keeps the move and saves nothing')
+ Move.x=440
+ P.Render(Model({cards={},recommendation=''}))
+ C.setup(not root._rollArea:IsShown() and hover:IsShown() and not hover:IsVisible(),
+  'V8: fixture: the no-offer render hides the roll area; the hover is shown but not visible')
+ C.expect(P._panelDrag==nil and Move.stops==1 and Saved()==-520,
+  'V8: the move from the now-invisible hover ends once and saves its movement',Move.stops..' '..tostring(Saved()))
+ P.Render(Model({cards={},recommendation=''}))
+ C.guard(Move.stops==1,'V8: a later render stops nothing again')
+ P.Render(Model())
+ Reset();Start(hover)
+ P.Render(Model({cards={},recommendation=''}))
+ C.expect(P._panelDrag==nil and Move.stops==1 and Saved()==nil,'V8: an origin that disappears without movement ends the move and saves nothing',
+  Move.stops..' '..tostring(Saved()))
+ P.Render(Model())
+end)
+
+-- Re-review of 6f9d04f, item 2: after a confirmed pause, an unreadable
+-- Status leaves the current state unknown, never the cached ready.
+C.scenario('V9 ready, then Pause, then an unreadable Status: the hover and details stay unknown',function()
+ Double()
+ P.Render(Model({auto=true,effective={state='ready'}}))
+ C.setup(Hover():find('Now: ready',1,true)~=nil,'V9: fixture: the committed model says Now: ready')
+ local pause=Row('Pause Nexus for this session')
+ pause.func(pause)
+ C.setup(D.paused and Hover():find('Now: paused for this session',1,true)~=nil,'V9: fixture: Nexus is confirmed paused')
+ local before=Effects()
+ local cb={CB.refresh,CB.toggle}
+ local status=Nexus.SessionPause.Status
+ for _,case in ipairs({{'fails',function() error('status read failed') end},{'is malformed',function() return {paused='?'} end}}) do
+  Nexus.SessionPause.Status=case[2]
+  local hover=Hover()
+  C.expect(hover:find('cannot be read',1,true)~=nil and hover:find('Now: ready',1,true)==nil
+   and hover:find('Now: paused for this session',1,true)==nil,
+   'V9: when Status '..case[1]..' the hover says unknown, neither ready nor paused',hover)
+  local body=Details()
+  C.expect(body:find('cannot be read',1,true)~=nil and body:find('Now: ready',1,true)==nil
+   and body:find('Now: paused for this session',1,true)==nil and body:find('(autoPick): ',1,true)~=nil
+   and body:find('Orb runs: never by Auto',1,true)~=nil,
+   'V9: when Status '..case[1]..' the details say unknown and keep every permission',body:sub(-400))
+ end
+ Nexus.SessionPause.Status=status
+ C.guard(Hover():find('Now: paused for this session',1,true)~=nil,'V9: a readable confirmed pause is said again')
+ local resume=Row('Resume Nexus')
+ resume.func(resume)
+ C.guard(Hover():find('Now: ready',1,true)~=nil and Details():find('Now: ready',1,true)~=nil,
+  'V9: a readable unpaused status gives back the model\'s own state words')
+ C.guard(CB.refresh==cb[1] and CB.toggle==cb[2] and D.resumes==1,'V9: no refresh step or Auto toggle; one Resume, by the click')
+ C.guard(Effects()==before,'V9: no action, send, ownership or slot request, saved change or Auto change',Effects())
  Nexus.SessionPause=nil
  P.Render(Model())
 end)
