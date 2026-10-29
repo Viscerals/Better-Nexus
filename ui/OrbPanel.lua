@@ -1338,6 +1338,36 @@ function UI.AttachMainPanel(parent)
     end)
     f.stop=button(f,137,-65,48,"Stop",function()Nexus.OrbRuntime.Stop();f.refresh()end)
     f.details=button(f,191,-65,69,"Details",function()UI.Show()end)
+    -- Hide for a settled, ended run only (issue #167). Presentation only: it
+    -- hides this strip, not Nexus, and spends, chooses, saves, releases or
+    -- resets nothing. It is remembered in memory only, for that one run of the
+    -- current runtime: a reload forgets it, and a new run (even with the same
+    -- numbers) or any active, pending, paused or recovery state is shown.
+    -- The run's identity is the runtime's own live run log; a run without one
+    -- (one restored after a reload) stays shown. Unknown exposure or an
+    -- unconfirmed outcome also keeps it shown. While offered, it takes the
+    -- place of Pause, Resume and Stop, which such a run disables anyway.
+    local SETTLED={FINISHED=true,COMPLETE=true,ROLLED_COMPLETE=true,STOPPED=true,OUT_OF_ORBS=true,NO_SOURCES=true}
+    local function settledRun(s)
+        if not (s and SETTLED[s.state] and not s.running and not s.pending and (s.reserved or 0)==0
+            and not s.canResume and s.recoveryPhase==nil and (s.uncertain or 0)==0
+            and (s.unconfirmedResults or 0)==0 and s.historyKnown and s.limitKnown~=false) then return nil end
+        local R=Nexus.OrbRuntime
+        local log=type(R.RunLog)=="function" and R.RunLog("current",1,0)
+        if not (log and log.runId~=nil and log.liveState==s.state) then return nil end
+        return {runtime=R,runId=log.runId,startedAt=log.startedAt}
+    end
+    local function sameRun(a,b)
+        return a~=nil and b~=nil and a.runtime==b.runtime and a.runId==b.runId and a.startedAt==b.startedAt
+    end
+    f.dismiss=button(f,8,-65,177,"Hide until next run",function()
+        -- Only the run this strip showed, read again at the click: a click
+        -- that arrives after a new run began hides nothing.
+        local now=settledRun(Nexus.OrbRuntime.CompactStatus())
+        if sameRun(now,f.shownRun) then f.dismissed=now end
+        f.refresh()
+    end)
+    f.dismiss:Hide()
     -- One line of the conservative 7 px model; the name is cut on a character
     -- boundary, then pipes are doubled so they show as written.
     local STRIP_CHARS=math.floor(252/7)
@@ -1358,7 +1388,13 @@ function UI.AttachMainPanel(parent)
     end
     f.refresh=function()
         local s=Nexus.OrbRuntime.CompactStatus()
-        if not s then f:Hide();return end
+        if not s then f.dismissed,f.shownRun=nil,nil;f:Hide();return end
+        local settled=settledRun(s)
+        if f.dismissed then
+            if sameRun(settled,f.dismissed) then f.shownRun=nil;f:Hide();return end
+            f.dismissed=nil
+        end
+        f.shownRun=settled
         f:Show()
         local usage=s.limitKnown==false and ("Orbs used: "..s.spent.."; max not recorded")
             or ("Orbs used: "..s.spent.." / "..s.limit.." approved")
@@ -1410,6 +1446,8 @@ function UI.AttachMainPanel(parent)
         f.primary:SetText(s.running and "Pause"or "Resume");enable(f.primary,s.running or resumable)
         enable(f.pause,s.running);enable(f.resume,resumable)
         enable(f.stop,s.running or s.pending or s.state=="PAUSED"or s.state=="LIMIT")
+        if settled then f.pause:Hide();f.resume:Hide();f.stop:Hide();f.dismiss:Show()
+        else f.pause:Show();f.resume:Show();f.stop:Show();f.dismiss:Hide() end
     end
     local elapsed=0
     parent:HookScript("OnUpdate",function(_,dt)elapsed=elapsed+(dt or 0);if elapsed>=.25 then elapsed=0;f.refresh()end end)
