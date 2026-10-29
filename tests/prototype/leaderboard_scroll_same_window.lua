@@ -49,17 +49,44 @@ C.setup(Stats().publishedRows==#NAMES,'fixture: every fixture record is listed',
 -- The rows the window has checked out: shown children holding a record. Each
 -- entry keeps the frame and its anchor table; ClearAllPoints replaces that
 -- table, so an unchanged table means the row was not released/rebound.
+-- The harness keeps SetPoint's arguments verbatim. A row has exactly one
+-- TOPLEFT anchor in one of the two supported forms: (point, x, y), which
+-- the Leaderboard uses, or (point, relativeTo, relativePoint, x, y). The
+-- distance below the list top is -y; any other shape reads as nil.
+local function AnchorTop(points)
+ if type(points)~='table' or #points~=1 then return nil end
+ local p=points[1]
+ if type(p)~='table' or p[1]~='TOPLEFT' then return nil end
+ local n=table.maxn(p)
+ if n==3 and type(p[2])=='number' and type(p[3])=='number' then return -p[3] end
+ if n==5 and type(p[4])=='number' and type(p[5])=='number' then return -p[5] end
+ return nil
+end
 local function Bound()
  local out={}
  for _,b in ipairs(child.children) do
   if b:IsShown() and b.data~=nil and b.rank and b.sel then
-   local p=b.points[1]
-   out[#out+1]={frame=b,points=b.points,y=p and -(tonumber(p[5]) or 0) or 0,
+   out[#out+1]={frame=b,points=b.points,y=AnchorTop(b.points),rank=tonumber(V.Plain(b.rank:GetText())),
     player=V.Plain(b.player:GetText()),dps=V.Plain(b.dps:GetText()),selected=b.sel:IsShown()}
   end
  end
- table.sort(out,function(a,b) return a.y<b.y end)
+ -- A malformed anchor sorts first; Positions() reports it.
+ table.sort(out,function(a,b) return (a.y or -1)<(b.y or -1) end)
  return out
+end
+-- The decoded anchors are usable as the displayed order: every row has one,
+-- they are distinct and increasing, and each row sits at its own rank's
+-- place (40 per row) with consecutive ranks. Returns ok and a description.
+local function Positions(list)
+ local t={}
+ local ok=#list>0
+ for i,r in ipairs(list) do
+  t[i]=tostring(r.rank)..'@'..tostring(r.y)
+  if r.y==nil or r.rank==nil or r.y~=(r.rank-1)*40 then ok=false end
+  if i>1 and (list[i-1].y==nil or r.y==nil or r.y<=list[i-1].y
+   or list[i-1].rank==nil or r.rank~=list[i-1].rank+1) then ok=false end
+ end
+ return ok,table.concat(t,',')
 end
 local function Names(list)
  local t={}
@@ -133,6 +160,7 @@ C.scenario('S1 repeated scrolls inside one window',function()
  C.setup(#offsets>=3,'S1: fixture: several offsets keep the first window',#offsets)
  local before,v0=Bound(),Stats()
  C.setup(#before>0 and Distinct(before),'S1: fixture: the first window is bound',Names(before))
+ C.setup(Positions(before),'S1: fixture: the row anchors decode to distinct ordered places',select(2,Positions(before)))
  local saved,sent,actions,n=F.Serialize(NexusDB),#H.sent,#H.actions,#calls
  for _,o in ipairs(offsets) do
   LB.ScrollTo(o)
@@ -194,6 +222,7 @@ C.scenario('G1 an ordinary wheel notch changes the window and binds once',functi
  C.guard((v1.first~=v0.first or v1.last~=v0.last) and Rebound(before,after),'G1: the new window is bound',
   v0.first..'-'..v0.last..' -> '..v1.first..'-'..v1.last)
  C.guard(Distinct(after) and #after==v1.last-v1.first+1,'G1: no duplicate or missing row',Names(after))
+ C.guard(Positions(after),'G1: each row sits at its own rank place, in order',select(2,Positions(after)))
 end)
 
 C.scenario('G2 rapid wheel input keeps the bound rows exact',function()
@@ -206,6 +235,8 @@ C.scenario('G2 rapid wheel input keeps the bound rows exact',function()
  C.guard(Distinct(quick) and #quick==v.last-v.first+1,'G2: no duplicate or missing row after rapid input',Names(quick))
  C.guard(Names(quick)==Names(fresh) and scroll:GetVerticalScroll()==offset,
   'G2: the same records as a fresh bind at that offset',Names(quick)..' / '..Names(fresh))
+ C.guard(Positions(quick) and Positions(fresh),'G2: both bindings place each row at its own rank, in order',
+  select(2,Positions(quick))..' / '..select(2,Positions(fresh)))
  C.guard(v.peakActive<=v.last-v.first+1+4,'G2: the visible pool stays bounded',v.peakActive)
  LB.ScrollTo(0)
 end)
@@ -315,6 +346,7 @@ C.scenario('G8 a failed bind is never skipped afterwards',function()
  local v1,after=Stats(),Bound()
  C.guard(#after>0 and v1.scrollBinds==v0.scrollBinds+1,'G8: the next scroll binds the window again',#after)
  C.guard(Distinct(after) and #after==v1.last-v1.first+1,'G8: with no duplicate or missing row',Names(after))
+ C.guard(Positions(after),'G8: and each row at its own rank place, in order',select(2,Positions(after)))
  LB.ScrollTo(0)
 end)
 
