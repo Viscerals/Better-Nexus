@@ -406,6 +406,8 @@ NAMES += ['session_pause_final_boundaries','session_pause_sync_settlement']
 NAMES += ['session_pause_sync_receive']
 # Issue #171 third review repair: a pause raised inside the transport's pre-submit observers (send_settled, send_attempting) stops the stale packet before submission with no attempt counted; a send already entered keeps its result (native NOT_RUN).
 NAMES += ['session_pause_transport_observers']
+# Crimson composition (#167, #171, #169): the real SessionPause loaded from Nexus.toc, driven through the panel's registered Options rows (Pause, Resume, Auto explained, Questions), its title, roll status and Help pages; an approved Orb run held by the global Pause stays PAUSED with the same run after the panel Resume; the attached strip of that run and of a finished run with unknown outcomes stays shown without Hide and a kept Hide callback cannot hide it, while a settled run's Hide works; Auto OFF, saved roots and counted calls unchanged (EXPECT fails before the core lane is merged; read-only EasyMenu observer; native NOT_RUN).
+NAMES += ['crimson_pause_panel_orb_integration']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
