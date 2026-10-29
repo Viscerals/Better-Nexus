@@ -201,6 +201,28 @@ do
  check(v.auto==true,'Auto stays ON')
  ProjectEbonhold.OrbService=nil
 end
+do
+ -- UX-02/J4: the same unknown Orb state with Auto OFF. The player chooses;
+ -- the heading never says Active, and the reason and the inspection button
+ -- remain. Nothing is performed and Auto stays OFF.
+ Boot({pendingRolls=3,auto=false,before=function(h)
+  ProjectEbonhold=ProjectEbonhold or {}
+  ProjectEbonhold.OrbService={IsStateKnown=function() return false end,IsOfferPending=function() return false end}
+ end})
+ local acts=#H.actions
+ H.Board({{spellId=200016,quality=0},{spellId=200020,quality=0},{spellId=200021,quality=1}})
+ H.Notify()
+ for _=1,4 do Nexus.RequestRecompute();H.Advance(.4) end
+ local v=View()
+ local body=NexusPanel._rollRec and NexusPanel._rollRec:GetText() or ''
+ check(v.auto==false and v.paused==nil,'fixture: Auto is OFF, not held: '..tostring(v.auto))
+ check(v.state=='orb-state' and v.button,'fixture: the unknown Orb state shows its inspection button: '..tostring(v.state))
+ check(not v.heading:find('Active',1,true),'Auto OFF: the heading does not claim active rolling: '..v.heading)
+ check(v.heading:lower():find('you choose',1,true),'Auto OFF: the heading says the player chooses: '..v.heading)
+ check(body:find('Ordinary rolling paused',1,true),'and the Orb pause reason stays: '..body)
+ check(#H.actions==acts and Nexus.RecomputeStats().autoEnabled~=true,'nothing is performed; Auto stays OFF')
+ ProjectEbonhold.OrbService=nil
+end
 
 ------------------------------------------------------------------------
 -- 3. The button is passive navigation. Every mutator is counted, refused

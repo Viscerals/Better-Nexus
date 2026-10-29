@@ -45,11 +45,18 @@ local rawLabels={
  {'ROOT_MUTATION_PENDING','Saving is still in progress'},
  {'MISSING_REVIEW_CODE','Details: MISSING_REVIEW_CODE'},
  {'payload changed','Reopen it and review'},
+ -- UX-02: the adaptive policy's live labels carry no engine name either.
+ {'Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)','Freeze one of the needed offers',true},
+ {'Banish an unwanted Echo before Reroll (EchoWeaver, experimental)','Banish an unneeded Echo before Reroll',true},
+ {'Take the held wanted Echo instead of searching (EchoWeaver, experimental)','Take the held needed Echo instead of searching',true},
 }
 for _,case in ipairs(rawLabels)do
  local model=H.Clone(Nexus.Panel._lastModel);model.recommendation=case[1];model.status=case[1]
  assert(quiet('direct raw/committed Render',Nexus.Panel.Render,model))
  check(texts():find(case[2],1,true),'actual recommendation consumer: '..case[1])
+ if case[3] then
+  check(not texts():find('EchoWeaver',1,true) and not texts():find('experimental',1,true),'no engine name on the actual Panel: '..case[1])
+ end
  check(model.recommendation==case[1],'raw producer remains unchanged')
  check(Nexus.Panel._lastModel.status:find(case[2],1,true),'normal status model maps same producer')
 end
@@ -1710,6 +1717,29 @@ do
   if tostring(row.text):find('six messages',1,true)then stale=true end
  end
  check(found and not stale and same(Effects(),before),'#143: the actual Language menu states the bounded coverage exactly, without the six-message claim, and opening it writes nothing')
+end
+
+-- UX-02: a fresh real boot with the shipped defaults (Freeze allowed, trusted
+-- synthetic charges): two different Needed offers reach the actual policy's
+-- PAIR_FREEZE_SECOND_NEEDED, and its label reaches the Panel fontstrings
+-- without the engine name. Auto stays OFF; nothing is performed.
+do
+ Nexus=nil;NexusDB=nil;WishlistRealizerDB=nil;SlashCmdList=nil;NexusPanel=nil
+ H=dofile('tests/prototype/harness.lua');H.pendingRolls=30;H.Boot()
+ assert(Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Review pair',{{spellId=200001,quality=1,stacks=1},{spellId=200002,quality=2,stacks=1}}))
+ if _G.NexusQuickStart and _G.NexusQuickStart:IsShown() then _G.NexusQuickStart:Hide() end
+ Nexus.Panel.Show();H.Advance(.5)
+ local decide,last=Nexus.Policy.Decide,nil
+ Nexus.Policy.Decide=function(...) last=decide(...);return last end
+ local acts=#H.actions
+ H.Board({{spellId=200001,quality=1},{spellId=200002,quality=2},{spellId=200020,quality=0}})
+ H.Notify();H.Advance(.5)
+ Nexus.Policy.Decide=decide
+ check(last and last.type=='freeze' and last.reasonCode=='PAIR_FREEZE_SECOND_NEEDED','SETUP actual adaptive policy Freezes one of two Needed offers')
+ local shown=texts()
+ check(shown:find('Freeze one of the needed offers',1,true) and not shown:find('EchoWeaver',1,true) and not shown:find('experimental',1,true),
+  'T19 Freeze: actual policy -> runtime -> Panel fontstring carries no engine name')
+ check(#H.actions==acts and Nexus.RecomputeStats().autoEnabled~=true,'the Auto OFF recommendation performs nothing')
 end
 
 print('PASS terminology actual consumer checks='..checks..'; native rendering not asserted')
