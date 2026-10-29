@@ -200,6 +200,21 @@ How do I get back to what I was doing?
 Close this window (Close or Escape). Reading these pages changed no setting, assignment or Auto.]]},
 }
 H.Pages=pages
+-- A question/answer page's text (groups apart by a blank line, the first
+-- line of each the question) with every question in the heading gold
+-- (|cffffd100, the panel's heading colour) and one more blank line between
+-- groups. Answers keep the body's own colour. Display only.
+function H.FormatQuestions(text)
+    local out={}
+    for block in (tostring(text or "").."\n\n"):gmatch("(.-)\n\n") do
+        if block~="" then
+            local q,a=block:match("^([^\n]*)\n(.*)$")
+            if q then out[#out+1]="|cffffd100"..q.."|r\n"..a
+            else out[#out+1]="|cffffd100"..block.."|r" end
+        end
+    end
+    return table.concat(out,"\n\n\n")
+end
 -- Short task topics (the full-UI design's Help: Getting started, Wishlists vs
 -- Saved Builds, Auto, Sync, Orbs, Support), one per page: a few lines and one
 -- Open action to the real screen (H.OpenTopic). Each page's text stays below
@@ -299,6 +314,11 @@ local function refresh()
             text=text.."\n\nAuto right now (read when this page opened):\n"..table.concat(lines,"\n")
         end
     end
+    -- Questions (FAQ), owner-approved readability (issue #169): each group's
+    -- first line is its question, drawn in the Nexus heading gold; the answer
+    -- keeps the white body font, and the groups are one more blank line
+    -- apart. The wording is unchanged and the height is measured below.
+    if p.id=="faq" then text=H.FormatQuestions(text) end
     frame.body:SetText(text)
     frame.page:SetText("Page "..index.." / "..#pages)
     layoutTopic(p)

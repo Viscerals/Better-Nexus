@@ -28,6 +28,15 @@
 --    menu is shown leaves it closed (also from an open submenu), a later click
 --    opens it again; after a stock close or a timeout hide, another Nexus menu
 --    or another addon's menu, one click opens Options normally.
+-- M8 (native test.163012) ordinary HUD renders before and after every
+--    Options click keep closed -> open -> closed -> open with one EasyMenu
+--    per opening, an open submenu and its fills, and a foreign menu that
+--    reused the list after Options (shown and unfilled through a render);
+-- M9 (native test.163012) Pause and Resume through the stock row click: the
+--    row's list hides before its callback, the real owner runs once, the
+--    title changes at once, and reopened Options offers the other choice.
+--    M8 and M9 are GUARD: they already held at b1ef408, so the native
+--    Resume failure is not reproduced by the stock dispatch modelled here.
 -- The dropdown below is a synthetic stand-in written from the verified
 -- build-3.3.5.12340 export facts (DROPDOWN_LIFECYCLE_CONTRACT: UIDropDownMenu
 -- .lua 35-69, 178-229, 539-563, 576-789 and 794-810; UIDropDownMenu.xml 5-20;
@@ -604,6 +613,94 @@ C.scenario('M7 the Options button toggles its own shown menu; any other state op
   'M7: with another addon\'s menu shown, one click opens Options with its own rows and fill')
  CloseDropDownMenus()
  C.guard(Effects()==before,'M7: opening and closing Options changed no saved data, Auto, action or send',Effects())
+end)
+
+C.scenario('M8 ordinary HUD renders between Options clicks keep the toggle; a foreign menu survives them (native test.163012)',function()
+ local before=Effects()
+ local btn=NexusPanel._menuBtn
+ local click=btn:GetScript('OnClick')
+ local function OptionsShown()
+  return List(1):IsShown() and UIDROPDOWNMENU_OPEN_MENU==_G.NexusPanelMoreMenu
+ end
+ CloseDropDownMenus()
+ local opens=#D.easy
+ local seq={}
+ for i=1,4 do
+  P.Render(Model())
+  click(btn)
+  P.Render(Model())
+  seq[#seq+1]=OptionsShown() and 'open' or 'closed'
+ end
+ C.guard(table.concat(seq,' ')=='open closed open closed' and #D.easy-opens==2,
+  'M8: closed, open, closed, open with a render before and after each click; one EasyMenu per opening',
+  table.concat(seq,' ')..' opens='..(#D.easy-opens))
+ click(btn)
+ local appearance=Row(1,'Appearance: ')
+ if C.setup(appearance~=nil,'M8: fixture: the Appearance row') then
+  appearance:GetScript('OnEnter')(appearance)
+  P.Render(Model())
+  C.guard(List(2):IsShown() and FillShown(1) and FillShown(2),'M8: a render keeps an open submenu and both fills')
+  click(btn)
+  C.guard(not List(1):IsShown() and not List(2):IsShown(),'M8: after the render one click still closes every level')
+ end
+ local other=CreateFrame('Frame','FixtureRenderAddonMenu',UIParent)
+ click(btn)
+ EasyMenu({{text='Foreign two'}},other,'cursor',0,0)
+ P.Render(Model())
+ C.guard(UIDROPDOWNMENU_OPEN_MENU==other and List(1):IsShown() and not FillShown(1) and Row(1,'Foreign two')~=nil,
+  'M8: a foreign menu that reused the list after Options stays shown and unfilled through a Nexus render')
+ click(btn)
+ C.guard(OptionsShown() and FillShown(1),'M8: then one click opens Options over it, not a close of the foreign menu')
+ CloseDropDownMenus()
+ C.guard(Effects()==before,'M8: clicks and renders changed no saved data, Auto, action or send',Effects())
+end)
+
+C.scenario('M9 Pause and Resume through the stock row click: the list hides, then the owner runs once (native test.163012)',function()
+ local SP=Nexus.SessionPause
+ local btn=NexusPanel._menuBtn
+ local click=btn:GetScript('OnClick')
+ local function Title() return V.Plain(NexusPanel._contextTitle:GetText() or '') end
+ local calls={pause=0,resume=0}
+ local pause,resume=SP.Pause,SP.Resume
+ SP.Pause=function(...) calls.pause=calls.pause+1;return pause(...) end
+ SP.Resume=function(...) calls.resume=calls.resume+1;return resume(...) end
+ local before=Effects()
+ if SP.IsPaused() then resume() end
+ local epoch=SP.Status().epoch
+ CloseDropDownMenus()
+ P.Render(Model())
+ click(btn)
+ P.Render(Model())
+ local row=Row(1,'Pause Nexus for this session')
+ if C.setup(row~=nil and FillShown(1),'M9: fixture: the open Options menu offers Pause after a render') then
+  local hiddenFirst
+  local func=row.func
+  row.func=function(...) hiddenFirst=not List(1):IsShown();return func(...) end
+  row:GetScript('OnClick')(row)
+  row.func=func
+  C.guard(hiddenFirst==true and calls.pause==1 and SP.IsPaused() and SP.Status().epoch==epoch+1,
+   'M9: the stock row hides its list before the callback, which pauses the owner once',tostring(hiddenFirst)..' '..calls.pause)
+  C.guard(Title():find('Nexus paused',1,true)~=nil and not List(1):IsShown() and not FillShown(1),
+   'M9: the title says Nexus paused at once and the menu is closed',Title())
+ end
+ P.Render(Model())
+ click(btn)
+ P.Render(Model())
+ row=Row(1,'Resume Nexus')
+ if C.setup(row~=nil and Row(1,'Pause Nexus')==nil,'M9: fixture: reopened after a render, Options offers Resume Nexus') then
+  row:GetScript('OnClick')(row)
+  C.guard(calls.resume==1 and not SP.IsPaused() and SP.Status().epoch==epoch+2,
+   'M9: the stock Resume row click resumes the owner exactly once',calls.resume..' '..SP.Status().epoch)
+  C.guard(Title():find('paused',1,true)==nil and not List(1):IsShown(),'M9: the paused title goes at once',Title())
+  P.Render(Model())
+  C.guard(Title():find('paused',1,true)==nil,'M9: an ordinary render after Resume keeps the title unpaused',Title())
+ end
+ click(btn)
+ C.guard(Row(1,'Pause Nexus for this session')~=nil and Row(1,'Resume Nexus')==nil,'M9: reopened Options offers Pause again')
+ CloseDropDownMenus()
+ SP.Pause,SP.Resume=pause,resume
+ C.guard(calls.pause==1 and calls.resume==1 and Effects()==before and Nexus.RecomputeStats().autoEnabled==false,
+  'M9: one Pause, one Resume; Auto stays OFF; no saved data, action or send',Effects())
 end)
 
 Nexus.DisableOrdinaryAutomation()

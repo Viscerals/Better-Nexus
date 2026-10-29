@@ -2079,8 +2079,8 @@ function M.PassiveDragSurface(hit)
     hit:RegisterForDrag("LeftButton")
     hit:SetScript("OnDragStart", function(self, button) M.BeginPanelDrag(self, button) end)
     hit:SetScript("OnDragStop", function() M.FinishPanelDrag() end)
-    -- A render hides the panel (and so its shown descendants) while it
-    -- applies and shows it again in the same call; that hide is not a
+    -- A render can hide this surface while it applies (a row it no longer
+    -- shows) and show it again in the same call; that hide is not a
     -- removal. M.SettlePanelDrag checks the origin once the render is done.
     hit:HookScript("OnHide", function(self)
         local drag = M._panelDrag
@@ -2790,8 +2790,9 @@ end
 function M.InstallPanelDrag()
     if not frame or frame._nexusDragInstalled then return end
     frame._nexusDragInstalled = true
-    -- A render hides the panel while it applies and shows it again in the
-    -- same call (Render's transaction); only a real hide ends a move.
+    -- A shown panel stays shown while a render applies; a failed render
+    -- hides it after applying ends, and that hide ends a move as any real
+    -- hide does.
     frame:HookScript("OnHide", function()
         if not renderState.applying then M.FinishPanelDrag() end
     end)
@@ -5800,14 +5801,18 @@ function M.Render(model)
 
     if Nexus.OrbPanel then Nexus.OrbPanel.AttachMainPanel(frame)end
 
-    -- A widget tree is a mutable object, so the visibility boundary is the
-    -- transaction: hide while applying, and publish commit/model/signature
-    -- state only after every required step succeeds.  On failure the prior
-    -- immutable model remains the sole last-good owner and no partial tree is
-    -- exposed.  Main retains the current input for the next ordinary retry.
+    -- A widget tree is a mutable object, so the render is a transaction:
+    -- publish commit/model/signature state only after every required step
+    -- succeeds.  On failure the prior immutable model remains the sole
+    -- last-good owner and the frame is hidden, so no partial tree is exposed.
+    -- Main retains the current input for the next ordinary retry.  A shown
+    -- panel is not hidden while it applies (native test.163012, issues #165
+    -- and #168): no frame is drawn inside this call, and that hide only
+    -- reached the root and every shown descendant while the player's pointer
+    -- could be pressing Options or moving the panel.  A hidden one stays
+    -- hidden until ApplyWantedVisibility shows it after the commit.
     local previousModel = M._lastModel
     renderState.applying = true
-    frame:Hide()
     local ok, result = pcall(ApplyCandidate, candidate, signatures, roll)
     renderState.applying = false
     if not ok or result == false then
