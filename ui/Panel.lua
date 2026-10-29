@@ -855,7 +855,9 @@ function M.UpdateContextHeader(model)
     end
     -- Line 1 is the title and its state cue only (the design's "Nexus"); the
     -- character stays first on the title's hover (tooltip[1]).
-    local title = "Nexus" .. (cue and (" [" .. cue .. "]") or "")
+    -- Issue #171: a confirmed session pause (M.PauseStatus) is said first.
+    local title = (model and model._nexusSessionPaused and "Nexus paused" or "Nexus")
+        .. (cue and (" [" .. cue .. "]") or "")
     local build = facts.preview and facts.kind == "none" and "None captured"
         or (facts.slot and fields[2].compact) or fields[2].value
     local wishlist = facts.empty and fields[3].compact or fields[3].value
@@ -1196,6 +1198,7 @@ local function ModelSignatures(model)
             assignment=model.assignment,
             orbGuidance=model.orbGuidance,
             paused=model.paused,
+            sessionPaused=model._nexusSessionPaused,
             -- The heading's wait word (Auto waiting / Auto rechecking) can
             -- change while the pause text stays the same; nil otherwise.
             heading=model.auto and model.paused and type(model.effective) == "table"
@@ -2568,62 +2571,9 @@ local function EnsureFrame()
             M.NoteAutoClick(before, ok, state)
         end
     end)
-    autoBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Automation and enabled actions", 1, 1, 1)
-        GameTooltip:AddLine("When ON: permits your enabled automatic actions. These may", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine("consume charges or change saved-build state. Locked-Echo slot", 0.9, 0.9, 0.9, true)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("management is a separate opt-in. Orb runs require separate approval.", 0.6, 1, 0.6, true)
-        GameTooltip:AddLine("OFF keeps recommendations visible; it does not turn off Sync.", 0.75, 0.75, 0.75, true)
-        GameTooltip:AddLine("An off-Wishlist pick may occur when no eligible target or", 0.75, 0.75, 0.75, true)
-        GameTooltip:AddLine("search action is available. Later improvement is not guaranteed.", 0.75, 0.75, 0.75, true)
-        -- What Auto may do (Readout.AutomationScopeLines): the session
-        -- selection, why it is not acting, and each permission the runtime
-        -- gates on with the existing control that changes it. Read from the
-        -- last committed model and Store.Settings only: hovering calls no gate,
-        -- requests, sends or writes nothing. Through the Nexus global (no new
-        -- upvalue: EnsureFrame is at the ceiling).
-        local readout = Nexus.Readout
-        if readout and type(readout.AutomationScopeLines) == "function" then
-            local model = type(M._lastModel) == "table" and M._lastModel or {}
-            local store = Nexus.Store
-            local okSettings, settings = false, nil
-            if store and type(store.Settings) == "function" then okSettings, settings = pcall(store.Settings) end
-            local internals = Nexus.MainInternals
-            local okRead, readOnly = false, nil
-            if internals and type(internals.SavedRootReadOnlyV1) == "function" then
-                okRead, readOnly = pcall(internals.SavedRootReadOnlyV1)
-            end
-            local held = model.auto and (type(model.paused) == "string" and model.paused
-                or (type(model.effective) == "table" and model.effective.hold and model.effective.reason)) or nil
-            GameTooltip:AddLine(" ")
-            for _, line in ipairs(readout.AutomationScopeLines({selected = model.auto == true,
-                held = held, settings = okSettings and settings or nil,
-                readOnly = okRead and readOnly ~= nil and readOnly ~= false})) do
-                GameTooltip:AddLine(line, 0.85, 0.85, 0.85, true)
-            end
-        end
-        -- The button is the selection; this is what it is doing now, from
-        -- the last committed model (memory only: waiting, rechecking,
-        -- paused or ready, with the reason). The reason is in the player's
-        -- wording (UserText) and cut on a UTF-8 character boundary
-        -- (Identity.Utf8Prefix). Both are reached through the Nexus global,
-        -- not new upvalues: EnsureFrame is at the 60-upvalue ceiling.
-        local effective = type(M._lastModel) == "table" and M._lastModel.effective
-        if type(effective) == "table" and type(effective.state) == "string" then
-            local reason = type(effective.reason) == "string" and effective.reason or nil
-            if reason and Nexus.UserText then reason = Nexus.UserText.Message(reason) end
-            if reason then
-                reason = Nexus.Identity and Nexus.Identity.Utf8Prefix
-                    and Nexus.Identity.Utf8Prefix(reason, 600) or ""
-            end
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Now: " .. effective.state
-                .. ((reason and reason ~= "") and (" -- " .. reason) or ""), 1, 0.82, 0, true)
-        end
-        GameTooltip:Show()
-    end)
+    -- Issue #169: a short hover (M.ShowAutoTooltip); the complete permission
+    -- and safety text is one deliberate click away (Options > Auto explained).
+    autoBtn:SetScript("OnEnter", function(self) M.ShowAutoTooltip(self) end)
     autoBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Footer hubs (issue #163, UI review P3): Plan, Explore and Orbs. Plan
@@ -3149,6 +3099,19 @@ function M.MoreMenuItems(anchor)
         tooltipTitle = "Reference",
         tooltipText = "The full Nexus manual, one page per topic, also /nexus reference. Reading it changes nothing.",
         func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("start") end end) })
+    -- Issue #169: the complete Auto explanation (every permission with its
+    -- current value, the hold and each consequence) and short answers, both
+    -- on Help pages. Reading them changes nothing.
+    Add({ text = "Auto explained (full details)", notCheckable = true,
+        tooltipTitle = "Auto explained",
+        tooltipText = "Everything Auto may do, each permission's current value and why it is held. Read it "
+            .. "before you turn Auto ON. Reading it changes nothing.",
+        func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("rolling") end end) })
+    Add({ text = "Questions (FAQ)", notCheckable = true,
+        tooltipTitle = "Questions (FAQ)",
+        tooltipText = "Short answers: what to do next, which Wishlist is used, Auto, Sync, pause or hide. "
+            .. "Reading it changes nothing.",
+        func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("faq") end end) })
     -- Setup / Welcome is the guided setup coach itself, as in Help (the
     -- original guided design: "Reopen: Nexus menu > Setup / Welcome", and the
     -- full UI's Help > Setup guide). It resumes at the step it left, with its
@@ -3297,6 +3260,9 @@ function M.MoreMenuItems(anchor)
     Add({ text = "Wishlist Editor", notCheckable = true,
         tooltipTitle = "Wishlist Editor", tooltipText = "Also under Plan on the panel footer.",
         func = MenuAction(OpenEditor) })
+
+    Add(MenuTitle("Session"))
+    for _, item in ipairs(M.SessionMenuItems()) do Add(item) end
 
     Add(MenuTitle("Panel"))
     Add(M.PanelSizeMenuItem())
@@ -5235,7 +5201,10 @@ local function ApplyModel(model, signatures, roll)
         -- effective state) is named as that wait; every other hold keeps the
         -- paused heading. The Auto button still shows the selection.
         local effective = type(model.effective) == "table" and model.effective.state
-        if model.auto and model.paused
+        if model._nexusSessionPaused then
+            -- Issue #171: the whole session is paused (Options > Resume Nexus).
+            statusText:SetText("|cffffd100Nexus paused|r")
+        elseif model.auto and model.paused
             and (effective == "waiting" or effective == "rechecking") then
             statusText:SetText("|cffffd100Auto " .. effective .. "|r")
         elseif model.auto and Nexus.Readout and Nexus.Readout.WaitingForOffer
@@ -5741,6 +5710,8 @@ function M.Render(model)
     -- The inline Auto line, from this model and the last refused Auto click
     -- (memory only); recomputed on every render, so an old one never stays.
     candidate.autoNote = M.AutoNoteFor(candidate)
+    -- Issue #171: the confirmed session pause, read (Status only) per render.
+    candidate._nexusSessionPaused = M.PauseStatus().paused == true or nil
     -- Format once per render; the visible output is part of the signature,
     -- so a changed presentation with identical raw counts cannot stay stale.
     candidate._nexusChargeLine = type(candidate.charges) == "table" and Nexus.Readout
@@ -5803,6 +5774,182 @@ function M.Render(model)
     end
     ApplyWantedVisibility()
     return true
+end
+
+-- Issue #171 (UI slice): the session pause is owned by Nexus.SessionPause
+-- (frozen API: IsPaused, Status, Pause, Resume). The panel only reads Status
+-- and calls Pause / Resume on the player's click; it keeps no paused flag of
+-- its own. Without a usable API the control says so and nothing is labelled
+-- paused. Status must answer {paused=boolean, epoch=whole number >= 0}.
+local PAUSE_EXPLAIN = "Pauses Auto, Orb actions, sharing and DPS recording. An action already sent may still finish."
+local RESUME_NOTE = "Auto can continue if it was already on. Orb runs stay paused."
+local function PauseAPI()
+    local api = Nexus.SessionPause
+    if type(api) == "table" and type(api.Status) == "function" and type(api.Pause) == "function"
+        and type(api.Resume) == "function" then return api end
+    return nil
+end
+local function ValidPause(status)
+    local epoch = type(status) == "table" and status.epoch
+    return type(status) == "table" and type(status.paused) == "boolean" and type(epoch) == "number"
+        and epoch >= 0 and epoch < math.huge and math.floor(epoch) == epoch
+end
+function M.PauseStatus()
+    local api = PauseAPI()
+    if not api then return {available = false, paused = false} end
+    local ok, status = pcall(api.Status)
+    if not (ok and ValidPause(status)) then return {available = false, paused = false} end
+    return {available = true, paused = status.paused}
+end
+
+-- After a transition the committed model is drawn again (Render only: no
+-- refresh step, no action is prepared).
+local function RepaintPause()
+    if M._lastModel then pcall(M.Render, M._lastModel) end
+end
+local function Transition(method, want, verb)
+    local api = PauseAPI()
+    local ok, status = false, nil
+    if api then ok, status = pcall(api[method]) end
+    RepaintPause()
+    if ok and ValidPause(status) and status.paused == want then return true end
+    print("|cffffd200Nexus:|r Nexus did not " .. verb .. ": "
+        .. (not api and "the session pause is not available in this build."
+            or not ok and "the session pause reported an error."
+            or "the session pause did not confirm it.")
+        .. " The panel shows the state the session pause reports.")
+    return false
+end
+function M.PauseNexus() return Transition("Pause", true, "pause") end
+function M.ResumeNexus() return Transition("Resume", false, "resume") end
+
+-- Options > Session: Pause or Resume with its note beside it, or the
+-- unavailable control. Building it reads Status only.
+function M.SessionMenuItems()
+    local status = M.PauseStatus()
+    if not status.available then
+        return {{ text = "Pause Nexus for this session (not available)", notCheckable = true, disabled = true,
+            tooltipTitle = "Pause Nexus for this session",
+            tooltipText = "This build cannot pause Nexus for the session, so nothing is paused." }}
+    end
+    if status.paused then
+        return {{ text = "Resume Nexus", notCheckable = true, tooltipTitle = "Resume Nexus",
+            tooltipText = RESUME_NOTE, func = MenuAction(function() M.ResumeNexus() end) },
+            MenuNote(RESUME_NOTE)}
+    end
+    return {{ text = "Pause Nexus for this session", notCheckable = true,
+        tooltipTitle = "Pause Nexus for this session", tooltipText = PAUSE_EXPLAIN,
+        func = MenuAction(function() M.PauseNexus() end) },
+        MenuNote(PAUSE_EXPLAIN)}
+end
+
+-- Issue #169: the Auto facts of the last committed model (memory only; no
+-- gate, request or write) and its effective-state line.
+local function AutoFacts()
+    local model = type(M._lastModel) == "table" and M._lastModel or {}
+    local held = model.auto and (type(model.paused) == "string" and model.paused
+        or (type(model.effective) == "table" and model.effective.hold and model.effective.reason)) or nil
+    return model, held
+end
+local function Bounded(text, limit)
+    text = tostring(text or "")
+    return Nexus.Identity and Nexus.Identity.Utf8Prefix and Nexus.Identity.Utf8Prefix(text, limit) or text:sub(1, limit)
+end
+-- The button is the selection; this is what it is doing now (waiting,
+-- rechecking, paused or ready, with the reason in the player's wording).
+local function AutoNowLine(model, limit)
+    local effective = type(model) == "table" and model.effective
+    if not (type(effective) == "table" and type(effective.state) == "string") then return nil end
+    local reason = type(effective.reason) == "string" and effective.reason or nil
+    if reason and Nexus.UserText then reason = Nexus.UserText.Message(reason) end
+    if reason then reason = Bounded(reason, limit) end
+    return "Now: " .. effective.state .. ((reason and reason ~= "") and (" -- " .. reason) or "")
+end
+local function HoldWords(held)
+    local readout = Nexus.Readout
+    return Bounded(readout and readout.AutoHoldText and readout.AutoHoldText(held) or held, 160)
+end
+
+-- The complete explanation (Options > Auto explained, the Help Auto page):
+-- every disclosure the Auto hover carried before issue #169, each
+-- permission the runtime gates on with its current value
+-- (Readout.AutomationScopeLines), why a selected Auto is held and its
+-- effective state. Read from the last committed model and Store.Settings.
+function M.AutoDetailLines()
+    local model, held = AutoFacts()
+    local lines = {
+        "Automation and enabled actions",
+        "When ON: permits your enabled automatic actions. These may consume charges or change saved-build state.",
+        "Locked-Echo slot management is a separate opt-in. Orb runs require separate approval.",
+        "OFF keeps recommendations visible; it does not turn off Sync.",
+        "An off-Wishlist pick may occur when no eligible target or search action is available. "
+            .. "Later improvement is not guaranteed.",
+    }
+    local readout = Nexus.Readout
+    if readout and type(readout.AutomationScopeLines) == "function" then
+        local store = Nexus.Store
+        local okSettings, settings = false, nil
+        if store and type(store.Settings) == "function" then okSettings, settings = pcall(store.Settings) end
+        local internals = Nexus.MainInternals
+        local okRead, readOnly = false, nil
+        if internals and type(internals.SavedRootReadOnlyV1) == "function" then
+            okRead, readOnly = pcall(internals.SavedRootReadOnlyV1)
+        end
+        for _, line in ipairs(readout.AutomationScopeLines({selected = model.auto == true,
+            held = held, settings = okSettings and settings or nil,
+            readOnly = okRead and readOnly ~= nil and readOnly ~= false})) do
+            lines[#lines + 1] = line
+        end
+    end
+    local now = AutoNowLine(model, 600)
+    if now then lines[#lines + 1] = now end
+    return lines
+end
+
+-- The first hover: the current state, what to click next and the essential
+-- consequence, then where the complete explanation is.
+function M.AutoSummaryLines()
+    local model, held = AutoFacts()
+    local lines = {}
+    if M.PauseStatus().paused then
+        lines[1] = "Nexus is paused for this session: Auto, Orb actions, sharing and DPS recording wait."
+        lines[2] = "To continue: Options > Resume Nexus. " .. RESUME_NOTE
+    else
+        local refusal = model.auto ~= true and type(M._autoRefusal) == "table" and M._autoRefusal.text or nil
+        if refusal then
+            lines[1] = "Your last click left Auto OFF: " .. Bounded(refusal, 160)
+            lines[2] = "Fix that, then click Auto again; a warning asks first."
+        elseif model.auto == true and held then
+            lines[1] = "Auto is selected ON but held: " .. HoldWords(held)
+            lines[2] = "It continues when that clears. Click Auto to turn it OFF."
+        elseif model.auto == true then
+            lines[1] = "Auto is selected ON: your enabled actions may Take, Banish, Reroll and Freeze for you."
+            lines[2] = "Click Auto to turn it OFF."
+        elseif model.auto == false then
+            lines[1] = "Auto is OFF: Nexus only recommends; you choose."
+            lines[2] = "Click Auto to turn it ON; a warning asks first."
+        else
+            lines[1] = "Auto: not known yet."
+            lines[2] = "Wait for Nexus to finish loading."
+        end
+        lines[3] = "When ON it may spend charges and change your Saved Build. Orb runs need their own approval."
+    end
+    lines[#lines + 1] = "Full details: Options > Auto explained."
+    return lines
+end
+
+function M.ShowAutoTooltip(owner)
+    if not GameTooltip then return end
+    GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+    GameTooltip:AddLine("Auto", 1, 1, 1)
+    local lines = M.AutoSummaryLines()
+    for i = 1, #lines do
+        if i == #lines then GameTooltip:AddLine(lines[i], 1, 0.82, 0, true)
+        else GameTooltip:AddLine(lines[i], 0.9, 0.9, 0.9, true) end
+    end
+    local now = AutoNowLine(M._lastModel, 120)
+    if now then GameTooltip:AddLine(now, 1, 0.82, 0, true) end
+    GameTooltip:Show()
 end
 
 function M.Refresh()

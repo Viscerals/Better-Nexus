@@ -361,7 +361,7 @@ C.scenario('S2 Close (X) during the delay opens the informational Welcome; the P
   Nexus.Help.Show('orbs');Nexus.Help.Hide()
   reference.func()
   local page=NexusHelpWindow and NexusHelpWindow.page and NexusHelpWindow.page:GetText() or ''
-  C.expect(NexusHelpWindow and NexusHelpWindow:IsShown() and page=='Page 1 / 7'
+  C.expect(NexusHelpWindow and NexusHelpWindow:IsShown() and page=='Page 1 / 8'
    and not (NexusGuidedSetup and NexusGuidedSetup:IsShown()),
    'S2: Reference (full manual) opens page 1 of the manual, not the page last shown and not the coach',page)
   if NexusHelpWindow then NexusHelpWindow:Hide() end

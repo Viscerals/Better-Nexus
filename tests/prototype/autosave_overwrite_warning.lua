@@ -70,7 +70,7 @@ local function honest(label,text)
 end
 
 -- 1. Help: Getting started (assignment step) and Rolling and settings.
-check(#Nexus.Help.Pages==7,'still seven Help pages')
+check(#Nexus.Help.Pages==8,'still eight Help pages (issue #169 added Questions (FAQ))')
 Nexus.Help.Show('start');local start=NexusHelpWindow.body:GetText()
 check(has(start,'select the intended Saved Build and assign the Wishlist to it'),'Help names the targeted Saved Build')
 check(has(start,'Assigning only chooses the target; by itself it does not change the Saved Build.'),'Help: assignment changes no Saved Build')

@@ -390,6 +390,10 @@ NAMES += ['community_scroll_same_window','leaderboard_scroll_same_window']
 NAMES += ['crimson_panel_drag']
 # Issue #170 (panelA): Options > Main panel size, 50%-150% in 5% steps with Reset to 100% (key removed); panelScale absent/malformed reads 100% without a write, explicit requests clamp and step; the choice is the main panel's FitToScreen ceiling (other callers keep 1) with Reduced to fit your screen shown and never saved; physical top-left kept on a size change, no panelX / panelY write; UIParent-unit drag save at 150%; no rescale during a drag; no other frame rescaled; read-only root session-only (EXPECT fails at 025d0ea by design; native pixels NOT_RUN).
 NAMES += ['crimson_panel_scale']
+# Issue #171 (panelA, UI slice): Options > Session over a boundary double of the frozen Nexus.SessionPause API: unavailable/malformed API shown as not available and never labelled paused; render/Options/Help call no Pause or Resume; one Pause / Resume per click, Nexus paused in the title and roll status, Resume with its note, no refresh step or Auto toggle; failing or unconfirmed Pause not shown as paused (EXPECT fails at e1183fd by design; whole-addon pause and native NOT_RUN).
+NAMES += ['crimson_panel_pause']
+# Issue #169 (panelA): short Auto hover (state, next action, consequence; OFF, selected ON, held, refused click, session pause) naming Options > Auto explained, which opens the Help Auto page with every former disclosure and current permission values; Options > Questions (FAQ) page and tab; reading changes nothing (EXPECT fails at e1183fd by design; native tooltip drawing NOT_RUN).
+NAMES += ['crimson_panel_auto_help']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

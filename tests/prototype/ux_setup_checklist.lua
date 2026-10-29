@@ -255,7 +255,7 @@ C.scenario('K6 its buttons and routes only navigate',function()
  if Nexus.GuidedSetupUI then Nexus.GuidedSetupUI.Hide() end
  f=Nexus.QuickStart.ShowChecklist()
  if f.reference then f.reference:Click() end
- C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() and V.Plain(NexusHelpWindow.page:GetText())=='Page 1 / 7'
+ C.expect(_G.NexusHelpWindow~=nil and NexusHelpWindow:IsShown() and V.Plain(NexusHelpWindow.page:GetText())=='Page 1 / 8'
   and f:IsShown() and not (_G.NexusGuidedSetup and NexusGuidedSetup:IsShown()),
   'K6: Reference opens Getting started of the manual above the checklist, not the coach')
  if NexusHelpWindow then NexusHelpWindow:Hide() end

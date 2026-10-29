@@ -144,7 +144,7 @@ If reporting fails: if the window says "Not prepared", or logs are unavailable, 
 
 Loading: the loading panel shows the current step and elapsed time; a percentage is for that step only. /nexus loading reopens it. A gray Explore control means shared views are loading or unavailable; check its tooltip or /nexus loading for the current status.
 
-Turning things off: Hide Nexus Panel (Options) or /nexus panel only hides the panel. Auto OFF only stops automatic actions. Neither turns Nexus off. To turn Nexus off, only when no action is active or pending: log out to character selection, click AddOns, untick Nexus, and log in again.
+Turning things off: Hide Nexus Panel (Options) or /nexus panel only hides the panel. Auto OFF only stops automatic actions. Pause Nexus for this session (Options) holds Auto, Orb actions, sharing and DPS recording until Resume Nexus, a reload or a logout; it is kept in memory only, windows, status and the checks on an action already sent stay available, an action already sent may still finish, and it cancels nothing that was sent. None of these turns Nexus off: it stays loaded. To turn Nexus off, only when no action is active or pending: log out to character selection, click AddOns, untick Nexus, and log in again.
 
 Commands:
 /nexus help or /nexus tutorial - Guided setup at your current step, also during loading
@@ -178,6 +178,26 @@ Advanced commands are troubleshooting tools, not generic fixes. Do not experimen
 /nexus prototype prints build/reference details. The installed README contains the current player guide.
 
 Known legacy compatibility and incomplete native validation remain disclosed. Offline tests are not native verification. Back up saved data and test voluntarily.]]},
+ {id="faq",title="Questions (FAQ)",text=[[What do I do next?
+Follow the step the panel shows, or Setup / Welcome (button above): it opens the guide at the step you left. Opening it changes nothing.
+
+Which Wishlist is Nexus using?
+The Wishlist line on the panel is the assigned Wishlist of your active Saved Build. A Wishlist you only selected, an example, or a Community build marked Preview is not used for rolling until you assign it in the Echo Journal chooser (Assign Wishlist... above).
+
+What does Auto do?
+Auto OFF: Nexus only recommends and you choose. Auto ON: your enabled actions may Take, Banish, Reroll and Freeze for you, and may save a better finished run over your Saved Build. Every permission and its current value: Options > Auto explained, or the Auto tab above.
+
+Does Auto OFF stop Sync?
+No. Sync has its own mode (Automatic, Manual or Off) in Sync settings; see the Sharing tab.
+
+Pause, hide or Auto OFF?
+Auto OFF stops automatic actions only. Hide Nexus Panel only hides the panel. Pause Nexus for this session (Options) holds Auto, Orb actions, sharing and DPS recording until you choose Resume Nexus, reload or log out. It is kept in memory only. Your windows, status and the checks on an action already sent stay available. An action already sent may still finish: pausing cancels nothing that was sent, Nexus stays loaded, and it does not stop all of its work on your computer. A reload does not decide a result that is still unknown. After Resume Nexus, Auto can continue if it was already on; Orb runs stay paused until you continue them in the Orb window.
+
+Can I make the panel smaller or move it?
+Options > Main panel size makes the main panel 50% to 150%; Reset to 100% puts it back. A screen too small for that size shows it smaller until it fits. Other Nexus windows, the Wishlist overlay, the game's own difficulty HUD and your UI scale keep their own size. Drag any part of the panel that is not a button to move it; Options > Reset Panel Position puts it back.
+
+How do I get back to what I was doing?
+Close this window (Close or Escape). Reading these pages changed no setting, assignment or Auto.]]},
 }
 H.Pages=pages
 -- Short task topics (the full-UI design's Help: Getting started, Wishlists vs
@@ -204,6 +224,9 @@ local topics={
  troubleshooting={title="Support",open="Open Support report",route=function() return H.OpenSupport() end,lines={
   "Something wrong? Type /nexus report before any reload, then Copy summary. Do not reload, reset or clear data to recreate it.",
   "Prepare report file keeps the report on this computer; send that file privately, never in public. Nothing is uploaded."}},
+ faq={title="Questions",open="Open Setup guide",route=function() return H.OpenGuide() end,lines={
+  "Short answers to common questions: what to do next, which Wishlist is used, Auto, Sync, pausing or hiding.",
+  "Reading this page changes nothing. Close or Escape takes you back."}},
  about={title="About Nexus",open="Open Log viewer",route=function() return H.OpenLogs() end,lines={
   "Where the rolling engine comes from, compatibility notes and the advanced commands.",
   "Advanced commands are troubleshooting tools, not generic fixes. Opening the Log viewer shows what Nexus recorded and changes nothing by itself."}},
@@ -212,7 +235,7 @@ H.Topics=topics
 local REFERENCE="Reference: every detail, warning and recovery step for this topic (scroll)."
 -- Short labels of the direct page buttons, by page id.
 local TAB_LABELS={start="Start",wishlists="Wishlists",rolling="Auto",sharing="Sharing",orbs="Orbs",
- troubleshooting="Problems",about="About"}
+ troubleshooting="Problems",about="About",faq="FAQ"}
 -- The topic card above the reference: its title and Open action on one row,
 -- its lines under them (wrapped to the text they need at the current font),
 -- then the Reference label and the scrolling page text below the card.
@@ -264,7 +287,19 @@ local function layoutTopic(p)
 end
 local function refresh()
     -- The manual is named Reference everywhere (Help is the guided coach).
-    local p=pages[index];frame.title:SetText("Nexus Reference - "..p.title);frame.body:SetText(p.text)
+    local p=pages[index];frame.title:SetText("Nexus Reference - "..p.title)
+    -- Issue #169: the Auto page adds what Auto may do now (Panel
+    -- .AutoDetailLines, from the last committed model and saved settings),
+    -- below the complete reference. Reading it changes nothing.
+    local text=p.text
+    local panel=Nexus.Panel
+    if p.id=="rolling" and panel and type(panel.AutoDetailLines)=="function" then
+        local ok,lines=pcall(panel.AutoDetailLines)
+        if ok and type(lines)=="table" and #lines>0 then
+            text=text.."\n\nAuto right now (read when this page opened):\n"..table.concat(lines,"\n")
+        end
+    end
+    frame.body:SetText(text)
     frame.page:SetText("Page "..index.." / "..#pages)
     layoutTopic(p)
     -- The current page's button is the disabled one; a page change clears an
@@ -311,9 +346,12 @@ local function ensure()
     frame.page=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall");frame.page:SetPoint("BOTTOM",0,26)
     -- Direct page buttons: any page in one click (deep links use H.Show(id)).
     frame.tabs={}
+    -- 83 px apart while every page fits (seven pages); narrower for more.
+    local step=83
+    if 20+(#pages-1)*step+79>640 then step=math.floor(620/#pages) end
     for i,p in ipairs(pages) do
         local t=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
-        t:SetPoint("TOPLEFT",20+(i-1)*83,-44);t:SetSize(79,20);t:SetText(TAB_LABELS[p.id] or p.title)
+        t:SetPoint("TOPLEFT",20+(i-1)*step,-44);t:SetSize(step-4,20);t:SetText(TAB_LABELS[p.id] or p.title)
         t:SetFrameLevel(HELP_LEVEL+2)
         t:SetScript("OnClick",function()index=i;refresh();scroll:SetVerticalScroll(0)end)
         frame.tabs[i]=t

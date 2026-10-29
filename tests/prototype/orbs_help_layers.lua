@@ -37,7 +37,7 @@ local function unchanged(before,reason)
 end
 local function open(orb)
  local before=snapshot();button(orb,'Reference'):Click();local help=assert(NexusHelpWindow)
- assert(help.page:GetText()=='Page 5 / 7','actual Orb Reference button opens the Orb topic')
+ assert(help.page:GetText()=='Page 5 / 8','actual Orb Reference button opens the Orb topic')
  foreground(orb,help);unchanged(before,'Reference opening');return help
 end
 H.OrbPlan({{spellId=410002,quality=2,stacks=3}});O.charges=0
