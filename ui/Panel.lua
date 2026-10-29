@@ -2450,7 +2450,11 @@ local function EnsureFrame()
     -- Its items are built by M.MoreMenuItems when it opens.
     menuBtn:SetScript("OnClick", function(self)
         if type(EasyMenu) ~= "function" then return end
+        -- Issue #165: a second click while this button's menu shows closes it
+        -- (EasyMenu initializes, hiding the list, before it toggles).
+        local shown = M.MenuShownFrom(M._moreMenu, self)
         if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
+        if shown then return end
         NexusDB = NexusDB or {}
         M._moreMenu = M._moreMenu or CreateFrame("Frame", "NexusPanelMoreMenu", UIParent, "UIDropDownMenuTemplate")
         M.OpenMenu(M.MoreMenuItems(self), M._moreMenu, self)
@@ -3165,10 +3169,21 @@ function M.ShowHub(kind, anchor)
     return true
 end
 
+-- True only while `menuFrame`'s menu is on screen now, opened from `anchor`:
+-- its root list is shown and the stock open-menu global names it. That global
+-- outlives a close, so the list's own visibility decides (contract item 6).
+function M.MenuShownFrom(menuFrame, anchor)
+    local list = _G.DropDownList1
+    return menuFrame ~= nil and menuFrame._nexusOpener == anchor
+        and _G.UIDROPDOWNMENU_OPEN_MENU == menuFrame
+        and list ~= nil and list.IsShown ~= nil and list:IsShown() == true
+end
+
 -- Every Panel menu opens through Theme.OpenMenu: the same EasyMenu call, with
 -- the shared list that shows it opaque while it is this Nexus menu (Theme:
 -- native menus Nexus opens). Without Theme it is the plain EasyMenu call.
 function M.OpenMenu(items, menuFrame, anchor)
+    if menuFrame then menuFrame._nexusOpener = anchor end
     local theme = Nexus.Theme
     if theme and type(theme.OpenMenu) == "function" then
         return theme.OpenMenu(items, menuFrame, anchor, 0, 0)
