@@ -13,6 +13,27 @@
   "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
   "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
  },
+ "baselineStatus": {
+  "kind": "historical-baseline",
+  "boundTo": {
+   "commit": "9bfb2bb922123e0b60f8b7f0506fc508c4476052",
+   "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
+  },
+  "statement": "All source, execution and native evidence here is bound to the pin above. Integration of #126/#21 is in progress elsewhere. Rebinding to a successor source is pending; the root coordinator will provide the exact integrated source and full CI evidence. Historical tests in this matrix are not proof of changed code."
+ },
+ "revision": {
+  "supersedes": {
+   "commit": "8b1f22169961058fa22e12a7a552b6f35062a903",
+   "tree": "01172576875660c2b13f70a04bced1096d25fd3f"
+  },
+  "corrections": [
+   "Independent Spec review: J4, UX-07 and UX-15 changed from unqualified met-offline to partial, because their own evidence keeps contract, interpretation or coverage gaps.",
+   "Independent Standards review: the displayed focused-run command now uses the valid comma-separated --only form, with labelled shorthand pointing to the complete selected list.",
+   "Rows whose native criteria are empty now carry the status none-beyond-offline-scope instead of pending."
+  ],
+  "productOrTestChange": false,
+  "rerun": false
+ },
  "canonicalInput": {
   "schema": "nexus-m7-current-sanitized-public41-requirements/1",
   "sha256": "ceb0e37ce467ebe5fe494c04db49aafc7d5b0dcf71d4ffd52e0b6e668f3a9e44",
@@ -72,7 +93,8 @@
     "tree": "78084628356cf2bfa72bbc9176ee1ed4bcc05dc2"
    },
    "runtime": "LuaJIT 2.1 (LuaJIT)",
-   "command": "python -B tools/run_prototype_tests.py --runtime luajit --only <selected>",
+   "command": "python -B tools/run_prototype_tests.py --runtime luajit --only ux_setup_replay,ux_manual_recommendation,ux_help_navigation,ux_save_assignment_result,ux_captured_destination_labels,ux_save_intents,ux_auto_assignment_consent,ux_automation_scope,ux_save_retry_intent,ux_assignment_consent_routes,ux_destination_context,ux_qualified_counts,ux_record_scope_terms,ux_share_confirmation,ux_sync_disclosure,ux_sync_disclosure_sends,ux_sync_mode_choice,ux_sync_mode_transitions,ux_sync_status_fit,ux_sync_dps_page,ux_share_admission,orb_target_review,orb_fixed_pause_resume,orb_recovery_layers,ux_setup_checklist,ux_status_composition,orb_review_identity,orb_recovery_vocabulary,ux_share_approval_retirement,ux_share_linked_dps,ux_retry_share_feedback,ux_context_help_access,guided_setup_flow,guided_setup_readback,guided_first_entry,guided_setup_resume,setup_help_entry_points,overwrite_warning,overwrite_warning_welcome,overwrite_warning_lifecycle,overwrite_auto_gate,quickstart_seen_guard,help,help_action_first,terminology,terminology_consumers,orb_bounded_recovery,orb_recovery_continue,orb_recovery_refusals,orb_continue_affordance,orb_guidance_passive_open,orbs_target_changes,saved_build_wishlist_destination_guards,wishlist_assignment_action_token,assignment_identity,stale_server_slot_save,wishlist_upload_context,session_permissions,full_ui_settings,batch_orb_restored_wording,orb_mini_panel --output <local result file outside the repository>",
+   "commandNote": "The --only value is exactly the comma-separated `selected` list below, in that order. Only the output location is withheld. This records the historical run at the pin; nothing was rerun for this revision.",
    "selected": [
     "ux_setup_replay",
     "ux_manual_recommendation",
@@ -197,14 +219,17 @@
   "LP-15 G-LP15",
   "J3 G-J3",
   "LP-04 scope",
-  "UX-16 interpretation"
+  "UX-16 interpretation",
+  "UX-07 Play-line interpretation",
+  "UX-15 coverage (with LP-15)",
+  "J4 inherits UX-02 G-UX02-a/b"
  ],
  "summary": {
   "rows": 41,
   "specDispositions": {
    "met-offline-adopted-interpretation": 4,
-   "met-offline": 29,
-   "partial": 8
+   "met-offline": 26,
+   "partial": 11
   },
   "nativePending": 38,
   "acceptedWholeRows": 0
@@ -1183,8 +1208,8 @@
     ]
    },
    "spec": {
-    "disposition": "met-offline",
-    "notes": "Rendered-key race not present at this pin (click re-reads and compares fresh key).",
+    "disposition": "partial",
+    "notes": "Window, strip and mini name the new target before Resume, and the rendered-key race is not present at this pin (the click re-reads and compares the fresh key). The canonical proposal says all surfaces, but the Play-panel Orb line does not name the changed target. Whether that line counts as a surface is an unresolved owner interpretation, so the row is not unqualified met.",
     "source": "canonical object above; issue #131"
    },
    "standards": {
@@ -1193,7 +1218,7 @@
    },
    "gapsAndLimits": [
     "TEST GAP: no fixture clicks a still-enabled Resume after the assignment changed without a redraw (orb_target_review.lua:243-249 calls UI.Refresh first). Current code is correct (:602 re-reads, :612 compares).",
-    "Play-panel Orb line (ui/OrbPanel.lua:1626-1646 UI.PanelRunLine) does not name a changed target; it has no Resume (Open only). Interpretation of 'all surfaces' for owner."
+    "INTERPRETATION: the Play-panel Orb line (ui/OrbPanel.lua:1626-1646 UI.PanelRunLine) shows state, usage, wait and reason, but not the changed target. It offers no Resume (Open only). Owner decision whether 'all surfaces' includes it."
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
@@ -1202,7 +1227,7 @@
      "Target change while paused in the client: window, strip and mini name the new target before Resume"
     ]
    },
-   "rowDisposition": "offline-supported; test gap recorded; native pending"
+   "rowDisposition": "offline-partial (Play-line interpretation open; test gap recorded); native pending"
   },
   {
    "id": "LP-07",
@@ -2106,7 +2131,7 @@
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
-    "status": "pending",
+    "status": "none-beyond-offline-scope",
     "criteria": []
    },
    "rowDisposition": "offline-partial (reach); no native-only criterion beyond UX-13"
@@ -2289,21 +2314,23 @@
     ]
    },
    "spec": {
-    "disposition": "met-offline",
-    "notes": "For the labels checked; whole-UI one-meaning coverage limited (see LP-15).",
+    "disposition": "partial",
+    "notes": "Met offline only for the labels the fixtures check. The canonical proposal covers every label across UI and Help, and no check establishes one meaning per label across the whole UI and Help (see LP-15 G-LP15). The row is therefore bounded by coverage.",
     "source": "canonical object above; issue #131"
    },
    "standards": {
     "disposition": "no-hard-violation-found",
     "notes": "Internal IDs unchanged. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
-   "gapsAndLimits": [],
+   "gapsAndLimits": [
+    "COVERAGE GAP: evidence covers only the labels checked by ux_record_scope_terms, terminology and terminology_consumers. One-meaning coverage across the whole UI and Help is absent (same scope as LP-15 G-LP15)."
+   ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
-    "status": "pending",
+    "status": "none-beyond-offline-scope",
     "criteria": []
    },
-   "rowDisposition": "offline-supported for checked labels"
+   "rowDisposition": "offline-partial (checked labels only; coverage gap shared with LP-15)"
   },
   {
    "id": "LP-15",
@@ -2352,7 +2379,7 @@
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
-    "status": "pending",
+    "status": "none-beyond-offline-scope",
     "criteria": []
    },
    "rowDisposition": "offline-partial (coverage)"
@@ -3172,8 +3199,8 @@
     ]
    },
    "spec": {
-    "disposition": "met-offline",
-    "notes": "Journey contract met offline on the single-Needed-card and no-choice paths; UX-02 candidate gaps (two Needed cards, Orb-guidance heading) are recorded on UX-02 and would affect this journey's 'named selection' and 'truthful OFF' wording if confirmed.",
+    "disposition": "partial",
+    "notes": "The traced paths pass offline: single Needed card, no-choice ready state, explicit Auto consent, and Setup/Help/Settings/coach starting no Auto. The journey's owner contract also requires a named selection and a truthful OFF. UX-02 G-UX02-b is a source counterexample: ui/Panel.lua:4962-4965 sets 'Active: Slot N' before the Auto-OFF branch, and logic/OrbGuidance.lua:75-79 sets openOrbs regardless of Auto. UX-02 G-UX02-a is another, for two distinct Needed cards: the experimental reason text is unmapped and no card is marked. The journey is therefore not met as a whole.",
     "source": "canonical object above; issue #131"
    },
    "standards": {
@@ -3181,7 +3208,8 @@
     "notes": "Harness acknowledges warnings by default (tests/prototype/harness.lua:314); only P15, P17 and overwrite_auto_gate exercise the real Yes/No dialog - recorded as an evidence limit. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only."
    },
    "gapsAndLimits": [
-    "Depends on UX-02 G-UX02-a/b for multi-Needed-card and Orb-guidance cases."
+    "CANDIDATE GAP (inherited from UX-02 G-UX02-b, source-only): with Auto OFF, cards shown and Orb guidance openOrbs, the heading reads 'Active: Slot N'. That contradicts the truthful-OFF contract.",
+    "CANDIDATE GAP (inherited from UX-02 G-UX02-a, source-only): with two distinct Needed cards, the adaptive Freeze recommendation keeps the '(EchoWeaver, experimental)' text and marks no card. That contradicts the named-selection contract."
    ],
    "nativeCriterion": {
     "ticket": "https://github.com/Viscerals/Better-Nexus/issues/133",
@@ -3190,7 +3218,7 @@
      "Manual recommendation, Auto warning Yes/No, and opening Setup/Help/Settings without starting Auto in the client"
     ]
    },
-   "rowDisposition": "offline-supported on traced paths; inherits UX-02 candidate gaps; native pending"
+   "rowDisposition": "offline-partial (traced paths pass; inherits UX-02 candidate gaps); native pending"
   },
   {
    "id": "J5",

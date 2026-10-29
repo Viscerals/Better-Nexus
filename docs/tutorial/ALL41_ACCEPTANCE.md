@@ -3,11 +3,20 @@
 Source/offline reconciliation of the canonical 41 rows (`UX-01`–`UX-18`, `LP-01`–`LP-18`, `J1`–`J5`) against source pin `9bfb2bb922123e0b60f8b7f0506fc508c4476052` (tree `78084628356cf2bfa72bbc9176ee1ed4bcc05dc2`). **This is not tester, native, release or whole-feature acceptance. No row is accepted.** Native criteria are pending under [#133](https://github.com/Viscerals/Better-Nexus/issues/133).
 
 The machine-readable companion is [`ALL41_ACCEPTANCE.json`](ALL41_ACCEPTANCE.json); each of its rows keeps the canonical object unchanged (input SHA-256 `ceb0e37ce467ebe5fe494c04db49aafc7d5b0dcf71d4ffd52e0b6e668f3a9e44`, schema `nexus-m7-current-sanitized-public41-requirements/1`).
-Claude Opus 5.5 wrote the matrix; the existing Nexus coordinator is accountable for it. Dispositions are the author's own. The independent Codex Spec/Standards review of this matrix is pending.
+Claude Opus 5.5 wrote the matrix; the existing Nexus coordinator is accountable for it. Dispositions are the author's own. Independent acceptance of this matrix remains pending with Codex.
+
+**Historical baseline.** All source, execution and native evidence is bound to `9bfb2bb922123e0b60f8b7f0506fc508c4476052` / tree `78084628356cf2bfa72bbc9176ee1ed4bcc05dc2`. Integration of #126/#21 is in progress elsewhere. Rebinding to a successor source is pending, and the root coordinator will provide the exact integrated source and full CI evidence for it. The historical tests cited here are not proof of any changed code.
+
+**Revision.** This revision supersedes `8b1f22169961058fa22e12a7a552b6f35062a903` and fixes two independent review findings:
+
+- J4, UX-07 and UX-15 are now `partial`. Each row's own evidence keeps a contract, interpretation or coverage gap, so none is unqualified `met-offline`.
+- The focused-run command is now valid; `<SELECTED>` is labelled shorthand for the full list in the JSON.
+
+Nothing was rerun, and no product, test or canonical requirement changed.
 
 ## Evidence used
 
-- **Focused run at the pin:** 61/61 registered fixtures passed (LuaJIT 2.1, `python -B tools/run_prototype_tests.py --runtime luajit --only …`). The worktree was clean afterwards. These are synthetic offline fixtures.
+- **Focused run at the pin (historical, 2026-10-29):** 61/61 registered fixtures passed under LuaJIT 2.1. Command: `python -B tools/run_prototype_tests.py --runtime luajit --only <SELECTED> --output <local file>`. Here `<SELECTED>` is shorthand for the 61 comma-separated fixture names in `evidence.focused-61.selected` of the JSON, in that order; the JSON also records the full expanded command. The worktree was clean afterwards. These are synthetic offline fixtures, and none was rerun for this revision.
 - **Full suite at the pin:** Lua 577/577 and Python 2/2 files. This aggregate only shows the pin is green; it is never row acceptance.
 - **Bounded reviews at the pin:** independent Spec and Standards reviews of the eight-file menu-opacity/Details delta found zero findings. They are not an all41 sign-off.
 - **Bounded native check of this pin:** build identity, menu opacity and Details names were checked; the root Help callback opened the coach and Escape closed it; Auto stayed OFF. This is not all41 native acceptance.
@@ -28,11 +37,15 @@ This adopted behaviour is recorded rather than changed to make the row pass. Cha
 - **UX-02:** CANDIDATE GAP G-UX02-a (source-only, not executed): predicate `#unheld>=2 and canFreeze and freeze charges>0 and horizon>=2 and frozenCount==0` in the default adaptive policy (logic/EchoWeaver.lua:378-387) yields reasonCode PAIR_FREEZE_SECOND_NEEDED with reason 'Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)' (:210). core/UserText.lua reasons (:21-29) and the gsub at :132 do not map it, so the engine name can reach the HUD; highlight (core/AutomationRuntime.lua:3275) is false for a Freeze, so 0 cards are marked. Same unmapped-label class for BANISH_BEFORE_REROLL and SETTLE_HELD_WANTED (:209,:211). Scope: logic/EchoWeaver.lua, core/UserText.lua, core/AutomationRuntime.lua; no current test offers two different Needed cards with Auto OFF.
 - **UX-02:** CANDIDATE GAP G-UX02-b (source-only, not executed): ui/Panel.lua:4962-4965 `guide and guide.openOrbs and guideText ~= ""` precedes the `model.auto == false` branch (:4974) and sets 'Active: Slot N'. OrbGuidance (logic/OrbGuidance.lua:75-79) sets openOrbs for orb-run/orb-state independent of Auto, so Auto OFF + cards + blocked Orb state reads 'Active'. orb_guidance_navigation covers Auto ON only.
 - **LP-04:** SCOPE GAP: setup checklist/coach do not render the shared strip (ui/QuickStart.lua checklist rows; ui/GuidedSetup.lua:151). Owner decision whether shared facts suffice or the strip itself is required.
+- **UX-07:** INTERPRETATION: the Play-panel Orb line (ui/OrbPanel.lua:1626-1646 UI.PanelRunLine) shows state, usage, wait and reason, but not the changed target. It offers no Resume (Open only). Owner decision whether 'all surfaces' includes it.
 - **UX-13:** CANDIDATE GAP G-UX13 (source-verified, wording): core/CommunityController.lua:1374-1377 generates "Assigned Wishlist: %s - target progress (%d/%d)." as a Saved Build mirror description, shown in the Build Library detail (ui/CommunityRenderer.lua:2549-2557) and carried as the shared listing description. Predicate: assigned Saved Build detail contains N/M next to 'Assigned Wishlist' without 'planned' or a unit. tests/prototype/saved_mirror_assigned_description.lua:79 pins the bare N/M form. Owner decision whether 'target progress' suffices.
 - **LP-14:** SCOPE GAP G-LP14: Build Library 'BEST RECORDS FOR THIS LOADOUT' lines (core/CommunityProjection.lua:114-125; ui/CommunityRenderer.lua:2784-2793) show DPS/holder/your best only - no qualifier, duration, level or date where a row carries them; combined rows (ui/Leaderboard.lua:1004-1007) likewise. Untested.
+- **UX-15:** COVERAGE GAP: evidence covers only the labels checked by ux_record_scope_terms, terminology and terminology_consumers. One-meaning coverage across the whole UI and Help is absent (same scope as LP-15 G-LP15).
 - **LP-15:** COVERAGE GAP G-LP15: lint scope bounded; e.g. the UX-13 description string (core/CommunityController.lua:1376) is outside it.
 - **UX-16:** INTERPRETATION: 'Same usage words on all three surfaces' - owner decision whether shared vocabulary with differing separators suffices.
 - **J3:** UNRESOLVED EDGE G-J3 (source-only): Saved Build slot contents replaced in the game between chooser click and a delayed Auto-ON accept. AssignWithConsent re-checks owner only (ui/JournalTab.lua:154-176); A.SetLoadoutWishlist checks the slot is populated (core/GameAdapter.lua:3238), not that it is the same Saved Build; the chat line names the captured loadoutName. Associations are keyed by slot index by design, so this may be intended; no test replaces a populated Saved Build before a delayed accept. Owner decision whether 'recycled slot' includes Saved Build slots.
+- **J4:** CANDIDATE GAP (inherited from UX-02 G-UX02-b, source-only): with Auto OFF, cards shown and Orb guidance openOrbs, the heading reads 'Active: Slot N'. That contradicts the truthful-OFF contract.
+- **J4:** CANDIDATE GAP (inherited from UX-02 G-UX02-a, source-only): with two distinct Needed cards, the adaptive Freeze recommendation keeps the '(EchoWeaver, experimental)' text and marks no card. That contradicts the named-selection contract.
 
 None of these was executed as a failing test; each is source-verified only. They are scoped to the cited paths, and this documentation-only change leaves production code and tests untouched.
 
@@ -52,7 +65,7 @@ None of these was executed as a failing test; each is source-verified only. They
 | LP-05 | Destination strip and setup checklist integration | met-offline | no-hard-violation-found | offline-supported; native pending |
 | UX-06 | Assign Wishlist lands on the game page, not the chooser | met-offline | no-hard-violation-found | offline-supported; native pending |
 | LP-06 | Checklist direct assignment links | met-offline | no-hard-violation-found | offline-supported; native pending |
-| UX-07 | Orb Resume after target change adopts a new target from unnamed compact controls | met-offline | no-hard-violation-found | offline-supported; test gap recorded; native pending |
+| UX-07 | Orb Resume after target change adopts a new target from unnamed compact controls | partial | no-hard-violation-found | offline-partial (Play-line interpretation open; test gap recorded); native pending |
 | LP-07 | Full-window re-review after changed Orb target | met-offline | no-hard-violation-found | offline-supported; test gap recorded; native pending |
 | UX-08 | Pause/Resume share a button in full window and main-panel strip | met-offline | no-hard-violation-found | offline-supported; native double-click pending |
 | LP-08 | Separate fixed Pause and Resume controls | met-offline | no-hard-violation-found | offline-supported; native pending |
@@ -68,7 +81,7 @@ None of these was executed as a failing test; each is source-verified only. They
 | LP-13 | Shared qualified count formatter | partial | no-hard-violation-found | offline-partial (reach); no native-only criterion beyond UX-13 |
 | UX-14 | DPS and Leaderboard labels overstate scope | met-offline | no-hard-violation-found | offline-supported; native pending |
 | LP-14 | Record detail with available date/duration/level | partial | no-hard-violation-found | offline-partial (scope gap for a separate lane); native pending |
-| UX-15 | Label collisions | met-offline | no-hard-violation-found | offline-supported for checked labels |
+| UX-15 | Label collisions | partial | no-hard-violation-found | offline-partial (checked labels only; coverage gap shared with LP-15) |
 | LP-15 | Terminology lint | partial | no-hard-violation-found | offline-partial (coverage) |
 | UX-16 | Orb wording: usage x3, dense blocks, reload advice conflict, history lost on reload | partial | no-hard-violation-found | offline-partial (interpretation); native pending |
 | LP-16 | Unified Orb status vocabulary | met-offline | no-hard-violation-found | offline-supported; native pending |
@@ -79,12 +92,12 @@ None of these was executed as a failing test; each is source-verified only. They
 | J1 | Fresh import/no Saved Build | met-offline | no-hard-violation-found | offline-supported; native pending |
 | J2 | Existing Saved Build/unassigned plan | met-offline | no-hard-violation-found | offline-supported; native pending |
 | J3 | Multiple characters/Saved Builds | partial | no-hard-violation-found | offline-partial (unresolved edge); native pending |
-| J4 | Manual recommendations then optional Automation | met-offline | no-hard-violation-found | offline-supported on traced paths; inherits UX-02 candidate gaps; native pending |
+| J4 | Manual recommendations then optional Automation | partial | no-hard-violation-found | offline-partial (traced paths pass; inherits UX-02 candidate gaps); native pending |
 | J5 | Optional Orb pause/target change/recovery | met-offline | no-hard-violation-found | offline-supported (optional journey, safety boundaries retained); native pending |
 
 Counts:
 - **Rows:** 41 (18 UX, 18 LP, 5 J).
-- **Spec:** met-offline 29, met-offline-adopted-interpretation 4, partial 8.
+- **Spec:** met-offline 26, met-offline-adopted-interpretation 4, partial 11.
 - **Rows with pending native criteria:** 38.
 - **Accepted whole rows:** 0.
 
@@ -402,13 +415,13 @@ Canonical (verbatim):
   - tests/prototype/orb_review_identity.lua:100-124 stale Review/Cancel
 - **Negative controls:** third assignment different key (:246-250); closing window clears review (:255); returned target (I3)
 - **Execution at the pin:** `orb_target_review` PASS (152), `orb_review_identity` PASS (77), `orbs_target_changes` PASS
-- **Spec:** `met-offline`. Rendered-key race not present at this pin (click re-reads and compares fresh key).
+- **Spec:** `partial`. Window, strip and mini name the new target before Resume, and the rendered-key race is not present at this pin (the click re-reads and compares the fresh key). The canonical proposal says all surfaces, but the Play-panel Orb line does not name the changed target. Whether that line counts as a surface is an unresolved owner interpretation, so the row is not unqualified met.
 - **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
 - **Gaps and limits:**
   - TEST GAP: no fixture clicks a still-enabled Resume after the assignment changed without a redraw (orb_target_review.lua:243-249 calls UI.Refresh first). Current code is correct (:602 re-reads, :612 compares).
-  - Play-panel Orb line (ui/OrbPanel.lua:1626-1646 UI.PanelRunLine) does not name a changed target; it has no Resume (Open only). Interpretation of 'all surfaces' for owner.
+  - INTERPRETATION: the Play-panel Orb line (ui/OrbPanel.lua:1626-1646 UI.PanelRunLine) shows state, usage, wait and reason, but not the changed target. It offers no Resume (Open only). Owner decision whether 'all surfaces' includes it.
 - **Native (#133, pending):** Target change while paused in the client: window, strip and mini name the new target before Resume
-- **Row disposition:** offline-supported; test gap recorded; native pending
+- **Row disposition:** offline-partial (Play-line interpretation open; test gap recorded); native pending
 
 ### LP-07 — Full-window re-review after changed Orb target
 
@@ -729,7 +742,7 @@ Canonical (verbatim):
 - **Standards:** `no-hard-violation-found`. Judgement call, Duplicated Code: completion rule inlined at ui/Panel.lua:1268,4795,4835 while UserText.ProgressComplete is unused. Not a documented-standard violation.
 - **Gaps and limits:**
   - No test that the shared formatter is used by every count surface.
-- **Native (#133, pending):** none beyond offline scope
+- **Native:** none beyond offline scope
 - **Row disposition:** offline-partial (reach); no native-only criterion beyond UX-13
 
 ### UX-14 — DPS and Leaderboard labels overstate scope
@@ -799,10 +812,12 @@ Canonical (verbatim):
   - :383 internal filterScope=='mine' unchanged
   - :291 real 'My Builds' labels kept
 - **Execution at the pin:** `ux_record_scope_terms` PASS (37), `terminology` PASS, `terminology_consumers` PASS
-- **Spec:** `met-offline`. For the labels checked; whole-UI one-meaning coverage limited (see LP-15).
+- **Spec:** `partial`. Met offline only for the labels the fixtures check. The canonical proposal covers every label across UI and Help, and no check establishes one meaning per label across the whole UI and Help (see LP-15 G-LP15). The row is therefore bounded by coverage.
 - **Standards:** `no-hard-violation-found`. Internal IDs unchanged. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
-- **Native (#133, pending):** none beyond offline scope
-- **Row disposition:** offline-supported for checked labels
+- **Gaps and limits:**
+  - COVERAGE GAP: evidence covers only the labels checked by ux_record_scope_terms, terminology and terminology_consumers. One-meaning coverage across the whole UI and Help is absent (same scope as LP-15 G-LP15).
+- **Native:** none beyond offline scope
+- **Row disposition:** offline-partial (checked labels only; coverage gap shared with LP-15)
 
 ### LP-15 — Terminology lint
 
@@ -822,7 +837,7 @@ Canonical (verbatim):
 - **Standards:** `no-hard-violation-found`. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
 - **Gaps and limits:**
   - COVERAGE GAP G-LP15: lint scope bounded; e.g. the UX-13 description string (core/CommunityController.lua:1376) is outside it.
-- **Native (#133, pending):** none beyond offline scope
+- **Native:** none beyond offline scope
 - **Row disposition:** offline-partial (coverage)
 
 ### UX-16 — Orb wording: usage x3, dense blocks, reload advice conflict, history lost on reload
@@ -1063,12 +1078,13 @@ Canonical (verbatim):
   - tests/prototype/full_ui_settings.lua:28-29 settings navigation leaves saved bytes unchanged
 - **Negative controls:** warning No/X/Escape/OnHide; first-launch Continue grants no Auto; refused click (UX-09)
 - **Execution at the pin:** `ux_manual_recommendation` PASS (68), `ux_automation_scope` PASS (97), `overwrite_auto_gate` PASS, `guided_setup_flow` PASS (2878), `full_ui_settings` PASS, `ux_status_composition` PASS (81)
-- **Spec:** `met-offline`. Journey contract met offline on the single-Needed-card and no-choice paths; UX-02 candidate gaps (two Needed cards, Orb-guidance heading) are recorded on UX-02 and would affect this journey's 'named selection' and 'truthful OFF' wording if confirmed.
+- **Spec:** `partial`. The traced paths pass offline: single Needed card, no-choice ready state, explicit Auto consent, and Setup/Help/Settings/coach starting no Auto. The journey's owner contract also requires a named selection and a truthful OFF. UX-02 G-UX02-b is a source counterexample: ui/Panel.lua:4962-4965 sets 'Active: Slot N' before the Auto-OFF branch, and logic/OrbGuidance.lua:75-79 sets openOrbs regardless of Auto. UX-02 G-UX02-a is another, for two distinct Needed cards: the experimental reason text is unmapped and no card is marked. The journey is therefore not met as a whole.
 - **Standards:** `no-hard-violation-found`. Harness acknowledges warnings by default (tests/prototype/harness.lua:314); only P15, P17 and overwrite_auto_gate exercise the real Yes/No dialog - recorded as an evidence limit. Checked against AGENTS.md/CONTRIBUTING.md (Lua 5.1, Nexus identity, NexusDB/WishlistRealizerDB compatibility, no live claim from offline checks) and AI_POLICY.md; Fowler smells are judgement calls only.
 - **Gaps and limits:**
-  - Depends on UX-02 G-UX02-a/b for multi-Needed-card and Orb-guidance cases.
+  - CANDIDATE GAP (inherited from UX-02 G-UX02-b, source-only): with Auto OFF, cards shown and Orb guidance openOrbs, the heading reads 'Active: Slot N'. That contradicts the truthful-OFF contract.
+  - CANDIDATE GAP (inherited from UX-02 G-UX02-a, source-only): with two distinct Needed cards, the adaptive Freeze recommendation keeps the '(EchoWeaver, experimental)' text and marks no card. That contradicts the named-selection contract.
 - **Native (#133, pending):** Manual recommendation, Auto warning Yes/No, and opening Setup/Help/Settings without starting Auto in the client
-- **Row disposition:** offline-supported on traced paths; inherits UX-02 candidate gaps; native pending
+- **Row disposition:** offline-partial (traced paths pass; inherits UX-02 candidate gaps); native pending
 
 ### J5 — Optional Orb pause/target change/recovery
 
