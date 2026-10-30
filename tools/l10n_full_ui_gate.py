@@ -1154,21 +1154,25 @@ def _git(root, *arguments):
 def source_identity(root, names=tuple(INPUT_PATHS)):
     """Commit, tree and per-input Git blob observations, or UNKNOWN without Git. The worktree
     blob is hashed by Git with the checkout's attributes; equal to the index blob, the supplied
-    bytes are the checkout of that blob, whatever their physical line ends."""
-    commit = _git(root, 'rev-parse', 'HEAD')
-    if not commit:
+    bytes are the checkout of that blob, whatever their physical line ends. Four Git processes
+    in all: one per fact, each over every input."""
+    head = (_git(root, 'rev-parse', 'HEAD', 'HEAD^{tree}') or '').split()
+    if len(head) != 2:
         return {'status': 'UNKNOWN', 'reason': 'not a Git checkout or Git unavailable'}
-    rows = []
-    for name in names:
-        path = INPUT_PATHS[name]
-        staged = _git(root, 'ls-files', '-s', '--', path)
-        worktree = _git(root, 'hash-object', '--', path)
-        index_blob = staged.split()[1] if staged else None
-        rows.append({'path': path, 'indexBlob': index_blob, 'worktreeBlob': worktree,
-                     'matchesIndex': bool(index_blob) and index_blob == worktree})
-    status = _git(root, 'status', '--porcelain', '--', *[INPUT_PATHS[n] for n in names])
-    return {'status': 'OBSERVED', 'commit': commit, 'tree': _git(root, 'rev-parse', 'HEAD^{tree}'),
-            'inputsClean': status == '', 'blobs': rows}
+    paths = [INPUT_PATHS[name] for name in names]
+    staged = {}
+    for line in (_git(root, 'ls-files', '-s', '--', *paths) or '').splitlines():
+        fields, _, path = line.partition('\t')
+        if len(fields.split()) == 3:
+            staged[path] = fields.split()[1]
+    hashed = (_git(root, 'hash-object', '--', *paths) or '').split()
+    worktree = dict(zip(paths, hashed)) if len(hashed) == len(paths) else {}
+    rows = [{'path': path, 'indexBlob': staged.get(path), 'worktreeBlob': worktree.get(path),
+             'matchesIndex': bool(staged.get(path)) and staged.get(path) == worktree.get(path)}
+            for path in paths]
+    status = _git(root, 'status', '--porcelain', '--', *paths)
+    return {'status': 'OBSERVED', 'commit': head[0], 'tree': head[1], 'inputsClean': status == '',
+            'blobs': rows}
 
 
 ARCHIVE_SCOPE = ('four localization runtime-input members only (Nexus/data/DefaultProfile.lua, '
