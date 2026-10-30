@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 1249,
+    "declaredKeys": 1451,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -4980,6 +4980,2555 @@
       "consumer": "Nameplate OrdinalSuffix",
       "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (value); family coverage PENDING review",
       "cohort": "fullui:hud"
+    },
+    {
+      "key": "journal.body.assign_note",
+      "kind": "text",
+      "english": "Assigning by itself does not change any Saved Build.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Saved Build\" is the game's saved build slot. Shared sentence appended after several hovers. Must keep: assigning alone never changes a Saved Build.",
+      "consumer": "AssignNote()",
+      "familySurface": "journal: Echo Journal: page, strip, picker hovers (body); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.body.change_in_my_builds",
+      "kind": "text",
+      "english": "Change the assigned Wishlist in My Builds.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"My Builds\" is the game's own page that lists Saved Builds (not the Nexus Build Library). Instruction where the assignment is changed.",
+      "consumer": "Show details",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details) (body); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.body.compare_active",
+      "kind": "text",
+      "english": "Compares the assigned Wishlist with the ACTIVE Saved Build.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Wishlist\" is a Nexus plan of target Echo copies. \"Saved Build\" is the game's saved build slot. \"ACTIVE\" is capitalised for emphasis (the Saved Build currently active in the game).",
+      "consumer": "IntroHover line; Show details",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (intro hover and Show details) (body); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.body.family_coverage",
+      "kind": "block",
+      "english": "Family coverage, not copies: a family counts as represented once one copy is known, so it may still need more requested copies.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "An Echo \"family\" is one kind of Echo regardless of how many copies; \"represented\" = at least one copy known. Must keep the distinction family coverage vs copy completeness.",
+      "consumer": "grey AddLine under the takeaway; CountsHover; IntroHover; Show details",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (page, counts hover, intro hover, Show details) (body); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.body.purpose",
+      "kind": "block",
+      "english": "See what your assigned Wishlist still needs. This page only shows information: opening it does not roll, spend Orbs, lock Echoes, or save or activate a Saved Build.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Passivity statement: must keep every listed thing the page does NOT do (roll, spend Orbs, lock Echoes, save, activate). \"Orbs\" are the game's Orbs (Lost Memories). One paragraph; no line breaks.",
+      "consumer": "IntroHover line; Show details \"About this page\"",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (intro hover and Show details) (body); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.body.set_in_my_builds",
+      "kind": "block",
+      "english": "Set associations in My Builds. Saved Build activation requires the server's supported level and state.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"My Builds\" is the game's own page that lists Saved Builds (not the Nexus Build Library). Grey note. \"associations\" = which Wishlist is assigned to which Saved Build. One paragraph.",
+      "consumer": "IntroHover line; Show details (grey colour added by code)",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (intro hover and Show details) (body); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.button.assign_cancel",
+      "kind": "text",
+      "english": "Cancel",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Cancel button: changes nothing.",
+      "consumer": "dialog button2",
+      "familySurface": "journal: Confirmation dialog shown before assigning a Wishlist while Auto is ON (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.button.assign_confirm",
+      "kind": "text",
+      "english": "Assign",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Accept button: assigns the Wishlist.",
+      "consumer": "dialog button1",
+      "familySurface": "journal: Confirmation dialog shown before assigning a Wishlist while Auto is ON (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.button.help",
+      "kind": "text",
+      "english": "Help",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Button and its hover title; opens the setup guide.",
+      "consumer": "PageButton(\"help\")",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.button.hide_details",
+      "kind": "text",
+      "english": "Hide details",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Same toggle while details are shown.",
+      "consumer": "toggle:SetText",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.button.new_wishlist",
+      "kind": "text",
+      "english": "New Wishlist",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Button and hover title; opens a blank editor.",
+      "consumer": "newWishlist",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.button.reference",
+      "kind": "text",
+      "english": "Reference",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Button and hover title; opens the manual.",
+      "consumer": "PageButton(\"reference\")",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.button.show_details",
+      "kind": "text",
+      "english": "Show details",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Toggle button (and hover title) that expands the details; other text refers to it by this name.",
+      "consumer": "toggle:SetText",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.chat.assigned",
+      "kind": "template",
+      "english": "'{wishlist}' is now the Wishlist for {target}. No Saved Build was changed or activated.",
+      "placeholders": [
+        {
+          "name": "wishlist",
+          "type": "text",
+          "meaning": "Wishlist name (player data, display-safe)"
+        },
+        {
+          "name": "target",
+          "type": "text",
+          "meaning": "the target phrase (journal.label.target_saved_build or journal.label.target_first_run)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "Receipt after an assignment. Must keep that no Saved Build was changed or activated.",
+      "consumer": "print",
+      "familySurface": "journal: Chat frame (Nexus message; the coloured \"Nexus:\" prefix is added by code) (chat); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.chat.associate_first",
+      "kind": "text",
+      "english": "Associate a wishlist first.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "The \"...\" edit button needs an assigned Wishlist. One line in chat; do not add line breaks.",
+      "consumer": "print",
+      "familySurface": "journal: Chat frame (Nexus message; the coloured \"Nexus:\" prefix is added by code) (chat); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.chat.chooser_coach",
+      "kind": "block",
+      "english": "The Echoes page is open. Click the Nexus Wishlist selector at its top to choose a Wishlist; nothing is assigned until you choose one.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Consent meaning must be kept: nothing is assigned until the player chooses. \"Echoes page\" = the game's Echo Journal page. One line in chat; do not add line breaks.",
+      "consumer": "print",
+      "familySurface": "journal: Chat frame (Nexus message; the coloured \"Nexus:\" prefix is added by code) (chat); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.chat.chooser_unconfirmed",
+      "kind": "block",
+      "english": "Nexus could not confirm that the Echoes page is open (if it was already open, the game's button may have closed it). Open Character Progression -> Echoes and click the Nexus Wishlist selector at its top; nothing is assigned until you choose one.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Consent meaning must be kept: nothing is assigned until the player chooses. Game menu names as in the client. One line in chat; do not add line breaks.",
+      "consumer": "print",
+      "familySurface": "journal: Chat frame (Nexus message; the coloured \"Nexus:\" prefix is added by code) (chat); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.chat.consent_unavailable",
+      "kind": "block",
+      "english": "Nothing was assigned: Auto is ON and the confirmation that names its consequence could not be shown. Turn Auto OFF to assign, or try again later.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Auto ON\"/\"Auto OFF\" name the Nexus Automation master switch; use the same wording as the switch label in the Nexus panel. Consent meaning must be kept: nothing is assigned until the player chooses.  One line in chat; do not add line breaks.",
+      "consumer": "print",
+      "familySurface": "journal: Chat frame (Nexus message; the coloured \"Nexus:\" prefix is added by code) (chat); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.chat.editor_unavailable",
+      "kind": "text",
+      "english": "Nexus Wishlist Editor is unavailable.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "The editor window cannot be opened. One line in chat; do not add line breaks.",
+      "consumer": "print",
+      "familySurface": "journal: Chat frame (Nexus message; the coloured \"Nexus:\" prefix is added by code) (chat); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.chat.first_run_unavailable",
+      "kind": "text",
+      "english": "first-run association unavailable",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Refusal reason (lower-case fragment shown after \"Nexus:\"): the first-run assignment is not available. One line in chat; do not add line breaks.",
+      "consumer": "print",
+      "familySurface": "journal: Chat frame (Nexus message; the coloured \"Nexus:\" prefix is added by code) (chat); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.chat.owner_changed",
+      "kind": "block",
+      "english": "Nothing was assigned: this character's saved data changed after you were asked. Open the Wishlist chooser again.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Consent meaning must be kept: nothing is assigned until the player chooses.  One line in chat; do not add line breaks.",
+      "consumer": "print",
+      "familySurface": "journal: Chat frame (Nexus message; the coloured \"Nexus:\" prefix is added by code) (chat); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.chat.progression_button_missing",
+      "kind": "block",
+      "english": "Could not find the server Character Progression button. Open Character Progression → Echoes manually.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Character Progression\" and \"Echoes\" are the game's own menu names (use the client's wording); the arrow is part of the text. One line in chat; do not add line breaks.",
+      "consumer": "print",
+      "familySurface": "journal: Chat frame (Nexus message; the coloured \"Nexus:\" prefix is added by code) (chat); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.chat.select_failed",
+      "kind": "text",
+      "english": "could not select wishlist",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Fallback refusal (lower-case) when no reason was supplied. One line in chat; do not add line breaks.",
+      "consumer": "print",
+      "familySurface": "journal: Chat frame (Nexus message; the coloured \"Nexus:\" prefix is added by code) (chat); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.heading.about_page",
+      "kind": "text",
+      "english": "About this page",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Small heading above the page notes when details are shown.",
+      "consumer": "Show details first line",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details) (heading); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.heading.build_progress",
+      "kind": "text",
+      "english": "Build Progress",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Page heading and heading of the intro hover. Progress of the assigned Wishlist against the active Saved Build.",
+      "consumer": "first AddLine of DoRefresh; IntroHover title",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (heading); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.heading.missing_count",
+      "kind": "template",
+      "english": "Missing ({count})",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "number of missing families listed below"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "journal",
+      "meaning": "Heading above the Missing family rows.",
+      "consumer": "DoRefresh",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (heading); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.heading.off_wishlist_count",
+      "kind": "template",
+      "english": "Off Wishlist ({count})",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "number of off-Wishlist families listed below"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "journal",
+      "meaning": "Heading above the Off Wishlist family rows.",
+      "consumer": "DoRefresh",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (heading); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.counts_missing",
+      "kind": "template",
+      "english": "{open}Missing{close} {count}",
+      "placeholders": [
+        {
+          "name": "open",
+          "type": "text",
+          "meaning": "code-owned colour code that starts the coloured label; keep it right before the label"
+        },
+        {
+          "name": "close",
+          "type": "text",
+          "meaning": "code-owned colour reset that ends the coloured label; keep it right after the label"
+        },
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "requested families with no known copy"
+        }
+      ],
+      "resultLimitBytes": 512,
+      "group": "journal",
+      "meaning": "Second segment of the counts row. Same word as journal.status.row_missing.",
+      "consumer": "counts AddLine",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.counts_off_listed",
+      "kind": "template",
+      "english": "{open}Off Wishlist{close} {count}",
+      "placeholders": [
+        {
+          "name": "open",
+          "type": "text",
+          "meaning": "code-owned colour code that starts the coloured label; keep it right before the label"
+        },
+        {
+          "name": "close",
+          "type": "text",
+          "meaning": "code-owned colour reset that ends the coloured label; keep it right after the label"
+        },
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "families in the active Saved Build that the Wishlist does not request"
+        }
+      ],
+      "resultLimitBytes": 512,
+      "group": "journal",
+      "meaning": "Third segment when the off-Wishlist list was confirmed and is not empty. \"Off Wishlist\" = not requested by the Wishlist.",
+      "consumer": "counts AddLine",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.counts_off_none",
+      "kind": "template",
+      "english": "{open}Off Wishlist:{close} none listed",
+      "placeholders": [
+        {
+          "name": "open",
+          "type": "text",
+          "meaning": "code-owned colour code that starts the coloured label; keep it right before the label"
+        },
+        {
+          "name": "close",
+          "type": "text",
+          "meaning": "code-owned colour reset that ends the coloured label; keep it right after the label"
+        }
+      ],
+      "resultLimitBytes": 512,
+      "group": "journal",
+      "meaning": "Third segment when the list is empty: \"none listed\", never 0 (an empty list may mean nothing was compared).",
+      "consumer": "counts AddLine",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.counts_off_unavailable",
+      "kind": "template",
+      "english": "{open}Off Wishlist:{close} unavailable",
+      "placeholders": [
+        {
+          "name": "open",
+          "type": "text",
+          "meaning": "code-owned colour code that starts the coloured label; keep it right before the label"
+        },
+        {
+          "name": "close",
+          "type": "text",
+          "meaning": "code-owned colour reset that ends the coloured label; keep it right after the label"
+        }
+      ],
+      "resultLimitBytes": 512,
+      "group": "journal",
+      "meaning": "Third segment when the list could not be read. Unavailable, never 0.",
+      "consumer": "counts AddLine",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.counts_represented",
+      "kind": "template",
+      "english": "{open}Represented{close} {represented} of {total}",
+      "placeholders": [
+        {
+          "name": "open",
+          "type": "text",
+          "meaning": "code-owned colour code that starts the coloured label; keep it right before the label"
+        },
+        {
+          "name": "close",
+          "type": "text",
+          "meaning": "code-owned colour reset that ends the coloured label; keep it right after the label"
+        },
+        {
+          "name": "represented",
+          "type": "count",
+          "meaning": "requested families with at least one known copy"
+        },
+        {
+          "name": "total",
+          "type": "count",
+          "meaning": "requested families in the Wishlist"
+        }
+      ],
+      "resultLimitBytes": 512,
+      "group": "journal",
+      "meaning": "First segment of the one-line counts row; code joins the three segments with three spaces. Keep {open}/{close} around the translated \"Represented\" label only.",
+      "consumer": "counts AddLine",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.empty_saved_build",
+      "kind": "text",
+      "english": "Empty Saved Build slot",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Shown in place of a build name when the selected Saved Build holds no Echoes.",
+      "consumer": "host.label; picker hover",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.intro",
+      "kind": "text",
+      "english": "Assigned Wishlist vs active Saved Build. Read-only.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Wishlist\" is a Nexus plan of target Echo copies. \"Saved Build\" is the game's saved build slot. Short intro line under the heading; \"Read-only\" = this page only reads data.",
+      "consumer": "AddLine under the heading",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.no_saved_build",
+      "kind": "text",
+      "english": "No Saved Build selected",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Shown in place of a build name (followed by \":\"). \"Saved Build\" is the game's saved build slot. ",
+      "consumer": "host.label; picker hover",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.picker_role_hint",
+      "kind": "text",
+      "english": "choose locked targets",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Orange hint in parentheses after a Wishlist name whose locked targets are not yet chosen (lower-case). Used only when the editor supplies no hint.",
+      "consumer": "nameButton text suffix",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector), row suffix (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.saved_build_number",
+      "kind": "template",
+      "english": "Saved Build {slot}",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "Saved Build slot number"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "journal",
+      "meaning": "Name shown for an unnamed Saved Build. \"Saved Build\" is the game's saved build slot. ",
+      "consumer": "host.label; picker title and hover",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.select_wishlist",
+      "kind": "text",
+      "english": "Select wishlist...",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Grey placeholder in the selector when no Wishlist is assigned; the \"...\" invites a choice.",
+      "consumer": "selector text",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.selected_marker",
+      "kind": "text",
+      "english": "[Selected]",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Green marker before the selected Wishlist name (brackets are part of the English). Display only.",
+      "consumer": "nameButton text",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector), row prefix (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.target_first_run",
+      "kind": "text",
+      "english": "the first-run target",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Target phrase inserted in \"Assign 'X' to {target}?\" and the receipt (lower-case, inside a sentence).",
+      "consumer": "AssociateWishlistOnly target",
+      "familySurface": "journal: Confirmation dialog shown before assigning a Wishlist while Auto is ON and chat (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.target_saved_build",
+      "kind": "template",
+      "english": "Saved Build '{name}'",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Saved Build name (player data, display-safe) or the reviewed Saved Build N"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "The target named in the Auto ON question and the assignment receipt. \"Saved Build\" is the game's saved build slot. ",
+      "consumer": "AssociateWishlistOnly target",
+      "familySurface": "journal: Confirmation dialog shown before assigning a Wishlist while Auto is ON and chat (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.label.unnamed_wishlist",
+      "kind": "text",
+      "english": "Unnamed Wishlist",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Name shown for a Wishlist without a name (also in the question and chat).",
+      "consumer": "nameButton text; SafeName fallback",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector) (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.popup.assign_auto_on",
+      "kind": "block",
+      "english": "Auto is ON. Assigning by itself does not change the Saved Build. But when it is active and a finished run at level 80 passes Auto's checks, Nexus may replace it with the run. Cancel changes nothing. To avoid that, choose Cancel, turn Auto OFF, then assign.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Auto ON\"/\"Auto OFF\" name the Nexus Automation master switch; use the same wording as the switch label in the Nexus panel. \"Cancel\" names the dialog button (journal.button.assign_cancel). Keep every condition and that Cancel changes nothing.",
+      "consumer": "AssignDialogText",
+      "familySurface": "journal: Confirmation dialog shown before assigning a Wishlist while Auto is ON (popup); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.popup.assign_question",
+      "kind": "template",
+      "english": "Assign '{wishlist}' to {target}?",
+      "placeholders": [
+        {
+          "name": "wishlist",
+          "type": "text",
+          "meaning": "Wishlist name (player data, display-safe)"
+        },
+        {
+          "name": "target",
+          "type": "text",
+          "meaning": "the target phrase: journal.label.target_saved_build, journal.label.target_first_run or the editor's own"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "First line of the Auto ON confirmation. Consent meaning must be kept: nothing is assigned until the player chooses. ",
+      "consumer": "AssignDialogText",
+      "familySurface": "journal: Confirmation dialog shown before assigning a Wishlist while Auto is ON (popup); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.data_unreadable",
+      "kind": "text",
+      "english": "Build Progress data could not be read. Nothing is assumed.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Grey line when the data provider failed. Distinct from no data yet.",
+      "consumer": "DoRefresh",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.data_unreadable_no_sections",
+      "kind": "text",
+      "english": "Build Progress data could not be read, so there are no sections to show.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Grey line in the details when the provider failed.",
+      "consumer": "Show details",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details) (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.estimate",
+      "kind": "template",
+      "english": "Estimate, not a prediction: {estimate}. Based only on what is known to be missing; no future offer is assumed.",
+      "placeholders": [
+        {
+          "name": "estimate",
+          "type": "text",
+          "meaning": "the estimate text written by the automation runtime (for example \"about 3 runs\"); shown as supplied"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "journal",
+      "meaning": "Grey estimate line. Must keep that this is an estimate, not a prediction, and that no future offer is assumed.",
+      "consumer": "EstimateLine",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.estimate_unavailable",
+      "kind": "text",
+      "english": "Estimate: unavailable.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Grey line when no run estimate exists. Unavailable, never zero.",
+      "consumer": "EstimateLine",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.listed_above",
+      "kind": "template",
+      "english": "Listed above under Missing ({count}).",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "number of missing families listed above"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "journal",
+      "meaning": "\"Missing\" names the heading journal.heading.missing_count above; keep the same word.",
+      "consumer": "Show details, in place of the duplicated Pending list",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details) (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.missing_families",
+      "kind": "template",
+      "english": "Still missing {count} Echo families: {names}.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "number of missing families (2 or 3 here)"
+        },
+        {
+          "name": "names",
+          "type": "text",
+          "meaning": "up to three Echo family names from game data, already joined with \", \" by code; not translated"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "pluralSelection: used for 2 or 3 missing families; see journal.status.missing_one_family.",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.missing_families_more",
+      "kind": "template",
+      "english": "Still missing {count} Echo families: {names} and {more} more.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "number of missing families (more than 3)"
+        },
+        {
+          "name": "names",
+          "type": "text",
+          "meaning": "the first three Echo family names from game data, joined with \", \" by code; not translated"
+        },
+        {
+          "name": "more",
+          "type": "count",
+          "meaning": "how many further missing families are not named"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "pluralSelection: used for more than three missing families; see journal.status.missing_one_family.",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.missing_one_family",
+      "kind": "template",
+      "english": "Still missing {count} Echo family: {names}.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "number of missing families (always 1 here)"
+        },
+        {
+          "name": "names",
+          "type": "text",
+          "meaning": "up to three Echo family names from game data, already joined with \", \" by code; not translated"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "pluralSelection: code uses this key when exactly one family is missing, journal.status.missing_families for 2-3 and journal.status.missing_families_more for more than three. No plural grammar exists.",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.no_data_yet",
+      "kind": "text",
+      "english": "no data yet",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Grey line before any data arrived (lower-case in English). Loading/empty, not an error.",
+      "consumer": "DoRefresh",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.no_families_requested",
+      "kind": "text",
+      "english": "This Wishlist requests no Echo families, so there is no family progress to show.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Takeaway when the Wishlist requests zero families (distinct from unknown and from none missing).",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.no_sections",
+      "kind": "text",
+      "english": "No sections were received.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Grey line in the details when the provider sent nothing.",
+      "consumer": "Show details",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details) (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.no_wishlist",
+      "kind": "text",
+      "english": "No Wishlist is assigned. Assign one in My Builds to see its progress.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"My Builds\" is the game's own page that lists Saved Builds (not the Nexus Build Library). \"Wishlist\" is a Nexus plan of target Echo copies. Takeaway when no Wishlist is assigned to the active target.",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.none_missing",
+      "kind": "block",
+      "english": "No requested Echo family is missing: each has at least one known copy. That is family coverage, not copy completeness; requested copies may still be missing.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Takeaway when every requested family has a known copy. Must keep that copies may still be missing.",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.picker_no_others",
+      "kind": "text",
+      "english": "No other wishlists found",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Picker lists only Wishlists other than the selected one, and there are none.",
+      "consumer": "emptyRow",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector) (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.picker_none_found",
+      "kind": "text",
+      "english": "No server wishlists found",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Empty picker: no Wishlists exist on the server.",
+      "consumer": "emptyRow",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector) (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.row_missing",
+      "kind": "text",
+      "english": "Missing",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Short right-aligned badge of a family row: no known copy of this requested family.",
+      "consumer": "AddRow",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, family row badge (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.row_off_wishlist",
+      "kind": "text",
+      "english": "Off Wishlist",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Short badge: the family is in the active Saved Build but not requested by the Wishlist.",
+      "consumer": "AddRow",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, family row badge (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.summary_missing",
+      "kind": "block",
+      "english": "Build Progress is unavailable: the Wishlist summary line is missing. The lines that were received are under Show details.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Show details\" names the button below (journal.button.show_details); keep the same wording. Unavailable, not zero.",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.tome_disable_pending",
+      "kind": "text",
+      "english": "Disable pending",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Badge of a tome (Echo availability control) request row. A request is not a confirmed change.",
+      "consumer": "AddTomeRow",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row badge (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.tome_enable_pending",
+      "kind": "text",
+      "english": "Enable pending",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Badge of a tome (Echo availability control) request row. A request is not a confirmed change.",
+      "consumer": "AddTomeRow",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row badge (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.tome_request_pending",
+      "kind": "text",
+      "english": "Request pending",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Badge of a tome (Echo availability control) request row. A request is not a confirmed change.",
+      "consumer": "AddTomeRow",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row badge (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.unknown_bad_pending",
+      "kind": "block",
+      "english": "Family progress is unknown: the list of missing families could not be read or does not match its count. Nothing is treated as complete; the original lines are under Show details.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "One complete reason why family progress is UNKNOWN (never shown as complete or zero). \"Show details\" names the details button. Four sibling keys differ only in the reason.",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.unknown_contradictory",
+      "kind": "block",
+      "english": "Family progress is unknown: the supplied counts and lists do not agree. Nothing is treated as complete; the original lines are under Show details.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "One complete reason why family progress is UNKNOWN (never shown as complete or zero). \"Show details\" names the details button. Four sibling keys differ only in the reason.",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.unknown_grammar",
+      "kind": "block",
+      "english": "Family progress is unknown: the Wishlist summary line could not be read. Nothing is treated as complete; the original lines are under Show details.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "One complete reason why family progress is UNKNOWN (never shown as complete or zero). \"Show details\" names the details button. Four sibling keys differ only in the reason.",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.status.unknown_no_pending",
+      "kind": "block",
+      "english": "Family progress is unknown: the list of missing families was not received. Nothing is treated as complete; the original lines are under Show details.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "One complete reason why family progress is UNKNOWN (never shown as complete or zero). \"Show details\" names the details button. Four sibling keys differ only in the reason.",
+      "consumer": "Takeaway",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tab.nexus_progress",
+      "kind": "text",
+      "english": "Nexus Progress",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Echo Journal\" is the game client's own window name (Project Ebonhold); translators should use the client's own wording for it. Name of the Nexus tab added to the game's Echo Journal. \"Nexus\" is the addon name (keep). \"Progress\" = progress of the assigned Wishlist. Also the heading of the tab hover.",
+      "consumer": "ourTab:SetText in Install; tab OnEnter title",
+      "familySurface": "journal: Echo Journal (the game window), tab row (tab); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.title.picker_assign_to",
+      "kind": "template",
+      "english": "Assign to: {name}",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Saved Build name (player data, shortened to 24 bytes) or the reviewed Saved Build N"
+        }
+      ],
+      "resultLimitBytes": 512,
+      "group": "journal",
+      "meaning": "Picker title naming the Saved Build the clicks act on.",
+      "consumer": "wishlistPicker.title",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector) (title); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.title.picker_empty_refused",
+      "kind": "text",
+      "english": "Empty Saved Build: assigning is refused",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Picker title when the target Saved Build is empty. Consent meaning must be kept: nothing is assigned until the player chooses. ",
+      "consumer": "wishlistPicker.title",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector) (title); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.title.picker_first_run",
+      "kind": "text",
+      "english": "Assign to: first-run target",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Picker title when no Saved Build is in use; \"first-run target\" = the destination when no Saved Build is used.",
+      "consumer": "wishlistPicker.title",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector) (title); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.title.picker_wishlists",
+      "kind": "text",
+      "english": "Wishlists",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Initial picker title (replaced at once).",
+      "consumer": "wishlistPicker.title",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector) (title); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.auto_replace_orbs",
+      "kind": "block",
+      "english": "The replaced build may hold an Echo you value, even one obtained with Orbs: Orb investment is not compared. Keep Auto OFF to leave the Saved Build unchanged.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Auto ON\"/\"Auto OFF\" name the Nexus Automation master switch; use the same wording as the switch label in the Nexus panel. Orbs = the game's Orbs (Lost Memories). Keep the advice to keep Auto OFF.",
+      "consumer": "selector and picker row hovers",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page and Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector) (hovers) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.auto_replace_warning",
+      "kind": "block",
+      "english": "With Auto ON, Nexus may replace the active Saved Build with a finished run that has more overall Wishlist progress, or equal progress after cleanup or an even swap of requested copies. At level 80, a changed assignment makes Auto check a finished run it has not saved yet. Saving edits to the assigned Wishlist can also lead to a replacement without a new run.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Auto ON\"/\"Auto OFF\" name the Nexus Automation master switch; use the same wording as the switch label in the Nexus panel. Consequence warning: keep every condition; no timing promise. One paragraph.",
+      "consumer": "selector and picker row hovers",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page and Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector) (hovers) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.builds_closes_page",
+      "kind": "text",
+      "english": "Closes this page onto the Journal's own assignment controls.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Journal\" = the game's Echo Journal. Followed by journal.body.assign_note.",
+      "consumer": "PageButton(\"builds\")",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, Assign in My Builds hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.counts_heading",
+      "kind": "text",
+      "english": "Wishlist family counts",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Hover title of the counts row.",
+      "consumer": "CountsHover",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, counts hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.details_contents",
+      "kind": "block",
+      "english": "The full page notes and every section as received: target, pending, extra copies, tome states and their coverage, notes, estimate and version. Tome states are listed as rows; hover a row for its complete entry.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Lists what the details contain.",
+      "consumer": "PageButton(\"details\")",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, details button hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.edit_assigned",
+      "kind": "block",
+      "english": "Open the Wishlist assigned to this Saved Build. This does not activate another build.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Must keep that no build is activated.",
+      "consumer": "design OnEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page, \"...\" button hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.edit_assigned_heading",
+      "kind": "text",
+      "english": "Edit assigned Wishlist",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Hover title when a Wishlist is assigned.",
+      "consumer": "design OnEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page, \"...\" button hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.edit_first_run",
+      "kind": "block",
+      "english": "Open the first-run Wishlist for editing. This Saved Build is empty and has no Wishlist of its own, so nothing is assigned to it. This does not activate another build.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Consent meaning must be kept: nothing is assigned until the player chooses. Must keep that nothing is assigned and no build is activated.",
+      "consumer": "design OnEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page, \"...\" button hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.edit_first_run_heading",
+      "kind": "text",
+      "english": "Edit first-run Wishlist",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Hover title when the Saved Build is empty.",
+      "consumer": "design OnEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page, \"...\" button hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.empty_slot_name_first_run",
+      "kind": "block",
+      "english": "A name shown here is the first-run Wishlist, not an assignment to this Saved Build.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"first-run Wishlist\" = the Wishlist used when no Saved Build is in use.",
+      "consumer": "EmptySlotSelector",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page, selector hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.empty_slot_no_assign",
+      "kind": "block",
+      "english": "This Saved Build is empty, so no Wishlist can be assigned to it until it holds Echoes.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Empty Saved Build refusal (selector).",
+      "consumer": "EmptySlotSelector",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page, selector hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.empty_slot_refused",
+      "kind": "block",
+      "english": "This Saved Build is empty, so assigning a Wishlist to it is refused until it holds Echoes.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Empty Saved Build refusal (picker row). Consent meaning must be kept: nothing is assigned until the player chooses. ",
+      "consumer": "EmptySlotAssign",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector), row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.help_opens_guide",
+      "kind": "block",
+      "english": "Opens the step-by-step setup guide where you left it. Opening it changes nothing on this page. Reference beside it has the full Wishlists page.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Reference\" names the neighbouring button (journal.button.reference).",
+      "consumer": "PageButton(\"help\")",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, Help hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.new_wishlist",
+      "kind": "text",
+      "english": "Open a blank Nexus Wishlist Editor for a new run.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Wishlist Editor\" is the Nexus editor window.",
+      "consumer": "newWishlist OnEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page, New Wishlist hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.off_wishlist_listed",
+      "kind": "block",
+      "english": "Off Wishlist: families in the active Saved Build that the assigned Wishlist does not request.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Explains a listed off-Wishlist count.",
+      "consumer": "CountsHover",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, counts hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.off_wishlist_none",
+      "kind": "block",
+      "english": "Off Wishlist: none listed. These families are listed only when the active Saved Build's contents are confirmed, so an empty list can also mean nothing was compared yet (for example on a first run). It does not show that there are none.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Must keep that an empty list does not prove there are none.",
+      "consumer": "CountsHover",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, counts hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.off_wishlist_unavailable",
+      "kind": "block",
+      "english": "Off Wishlist: unavailable. The list of these families could not be read, so nothing is assumed about them.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Explains an unreadable off-Wishlist list.",
+      "consumer": "CountsHover",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, counts hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.picker_edit_wishlist",
+      "kind": "text",
+      "english": "Edit wishlist",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Opens this Wishlist in the editor.",
+      "consumer": "row.gear OnEnter",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector), \"...\" row button hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.picker_row_heading",
+      "kind": "text",
+      "english": "Assign Wishlist",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Hover title of a picker row; a click assigns this Wishlist. Consent meaning must be kept: nothing is assigned until the player chooses. ",
+      "consumer": "nameButton OnEnter",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector), row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.picker_row_sets",
+      "kind": "text",
+      "english": "Sets this Wishlist as the target for this loadout.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"loadout\" = the selected Saved Build. Followed by journal.body.assign_note.",
+      "consumer": "nameButton OnEnter",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector), row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.picker_row_target",
+      "kind": "template",
+      "english": "Target: {name}",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Saved Build name (player data) or a reviewed placeholder such as No Saved Build selected"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "Names the target of the click.",
+      "consumer": "nameButton OnEnter",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector), row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.reference_opens_manual",
+      "kind": "block",
+      "english": "Opens the full manual on Wishlists and locked targets. Opening it changes nothing on this page.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"locked targets\" = planned copies for locked Echo slots.",
+      "consumer": "PageButton(\"reference\")",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, Reference hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.row_icon_neutral",
+      "kind": "text",
+      "english": "No single Echo family has exactly this name, so a neutral icon is shown.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Why the row shows a question-mark icon.",
+      "consumer": "RowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, family row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.row_missing",
+      "kind": "text",
+      "english": "Missing: no known copy of this requested Echo family.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Badge word followed by its explanation (same word as journal.status.row_missing).",
+      "consumer": "RowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, family row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.row_off_wishlist",
+      "kind": "block",
+      "english": "Off Wishlist: in the active Saved Build, but the assigned Wishlist does not request this family.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Badge word followed by its explanation (same word as journal.status.row_off_wishlist).",
+      "consumer": "RowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, family row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.selector_assigns",
+      "kind": "block",
+      "english": "Assigns a wishlist reference to the Saved Build currently selected in the server dropdown.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"server dropdown\" = the game's own Saved Build menu. Followed by journal.body.assign_note.",
+      "consumer": "ShowSelectorTooltip",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page, selector hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.selector_heading",
+      "kind": "text",
+      "english": "Automation Wishlist",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Hover title: the Wishlist that Nexus automation uses for this Saved Build.",
+      "consumer": "ShowSelectorTooltip",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Wishlist strip at the top of the My Builds (Loadouts) page, selector hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.source_text",
+      "kind": "template",
+      "english": "Source text: {text}",
+      "placeholders": [
+        {
+          "name": "text",
+          "type": "text",
+          "meaning": "the provider's original line for this row, shown as supplied"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "Label before the raw provider line.",
+      "consumer": "RowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page, family row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tab_opens_page",
+      "kind": "text",
+      "english": "Opens Nexus's progress page in the Echo Journal. Opening it changes nothing.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Echo Journal\" is the game client's own window name (Project Ebonhold); translators should use the client's own wording for it. Explains the tab. Must keep that opening it changes nothing (passive).",
+      "consumer": "tab OnEnter hook",
+      "familySurface": "journal: Echo Journal tab row, hover of the Nexus Progress tab (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_control_id",
+      "kind": "template",
+      "english": "Control ID: {id}",
+      "placeholders": [
+        {
+          "name": "id",
+          "type": "text",
+          "meaning": "raw numeric control identifier"
+        }
+      ],
+      "resultLimitBytes": 256,
+      "group": "journal",
+      "meaning": "Technical identifier of the availability control.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_disable_requested",
+      "kind": "text",
+      "english": "Disable requested; awaiting confirmation. A request is not a confirmed change.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Request line of a tome control. Must keep that a request is not a confirmed change.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_echo_many",
+      "kind": "template",
+      "english": "Echoes: {names}",
+      "placeholders": [
+        {
+          "name": "names",
+          "type": "text",
+          "meaning": "Echo names from game data joined with \", \" by code"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "pluralSelection: several Echoes; journal.tooltip.tome_echo_one for one.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_echo_one",
+      "kind": "template",
+      "english": "Echo: {names}",
+      "placeholders": [
+        {
+          "name": "names",
+          "type": "text",
+          "meaning": "one Echo name from game data"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "pluralSelection: one Echo; journal.tooltip.tome_echo_many for several.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_enable_requested",
+      "kind": "text",
+      "english": "Enable requested; awaiting confirmation. A request is not a confirmed change.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Request line of a tome control. Must keep that a request is not a confirmed change.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_icon_member",
+      "kind": "text",
+      "english": "Icon: a member Echo's spell icon; the tome's own icon was unavailable.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Where the row icon came from. \"tome\" = an Echo availability control item.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_icon_neutral",
+      "kind": "text",
+      "english": "No icon was supplied, so a neutral icon is shown.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Where the row icon came from. \"tome\" = an Echo availability control item.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_icon_spell",
+      "kind": "text",
+      "english": "Icon: the tome's spell icon.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Where the row icon came from. \"tome\" = an Echo availability control item.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_icon_unstated",
+      "kind": "text",
+      "english": "Icon: as supplied; its source was not stated.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Where the row icon came from. \"tome\" = an Echo availability control item.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_last_observed",
+      "kind": "template",
+      "english": "Last observed in the client mirror: {state}",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "the observed state text from the data provider, or the reviewed Unknown"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "journal",
+      "meaning": "\"client mirror\" = the game client's local copy of the server state (not confirmed by the server).",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_mirror",
+      "kind": "template",
+      "english": "Client mirror: {state}",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "the observed state text from the data provider, or the reviewed Unknown"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "journal",
+      "meaning": "See journal.tooltip.tome_last_observed.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_request_unknown",
+      "kind": "block",
+      "english": "Request direction unknown; awaiting confirmation. A request is not a confirmed change.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Request line of a tome control. Must keep that a request is not a confirmed change.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_scope",
+      "kind": "block",
+      "english": "Observed when this page was refreshed; server state and freshness are unverified.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Scope note: not confirmed by the server.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.tome_stale",
+      "kind": "text",
+      "english": "This reading may be stale; Tome state coverage gives the reason.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Tome state coverage\" names a provider section shown in the details.",
+      "consumer": "TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.unassign_empty_slot",
+      "kind": "block",
+      "english": "This Saved Build has no Wishlist of its own. This does not remove the first-run Wishlist.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Unassign on an empty Saved Build.",
+      "consumer": "clearRow OnEnter",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector), Unassign Wishlist row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.unassign_keeps",
+      "kind": "text",
+      "english": "Keeps the Wishlist; stops using it for this loadout.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Unassign keeps the Wishlist itself (nothing deleted).",
+      "consumer": "clearRow OnEnter",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector), Unassign Wishlist row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.tooltip.unassign_no_build_change",
+      "kind": "text",
+      "english": "Does not change or restore the Saved Build.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "\"Saved Build\" is the game's saved build slot. ",
+      "consumer": "clearRow OnEnter",
+      "familySurface": "journal: Echo Journal, Nexus Wishlist chooser (picker list opened from the Automation Wishlist selector), Unassign Wishlist row hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "journal.value.tome_unknown",
+      "kind": "text",
+      "english": "Unknown",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Observation of a tome control when no state was supplied. Unknown, not off.",
+      "consumer": "AddTomeRow; TomeRowEnter",
+      "familySurface": "journal: Echo Journal (the game window), Nexus Progress tab page (Show details), tome row badge and hover (value); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.add",
+      "kind": "text",
+      "english": "Add",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Adds this Echo to the pool.",
+      "consumer": "Button",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.added",
+      "kind": "text",
+      "english": "Added",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Disabled: already in the pool.",
+      "consumer": "Button",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.hide",
+      "kind": "text",
+      "english": "Hide",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Hides the window; the pool is kept until reload.",
+      "consumer": "Button",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.load_saved",
+      "kind": "text",
+      "english": "Load saved",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Restores the saved pool (asks first when unsaved changes exist).",
+      "consumer": "Button",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.open_draft",
+      "kind": "text",
+      "english": "Open as new Wishlist draft",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Opens a new Wishlist draft in the editor (not saved).",
+      "consumer": "Button",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.popup_cancel",
+      "kind": "text",
+      "english": "Cancel",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Cancel keeps everything.",
+      "consumer": "dialog button2",
+      "familySurface": "journal: Plan pool confirmation dialogs (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.popup_load_saved",
+      "kind": "text",
+      "english": "Load saved",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Accept button of the load question.",
+      "consumer": "dialog button1",
+      "familySurface": "journal: Load saved confirmation dialog (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.popup_remove_saved",
+      "kind": "text",
+      "english": "Remove saved",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Accept button of the remove question.",
+      "consumer": "dialog button1",
+      "familySurface": "journal: Remove saved confirmation dialog (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.remove",
+      "kind": "text",
+      "english": "Remove",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Removes this Echo from the pool.",
+      "consumer": "Button",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.reset_pool",
+      "kind": "text",
+      "english": "Reset pool",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clears this session only.",
+      "consumer": "Button",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.save_pool",
+      "kind": "text",
+      "english": "Save pool",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Stores the pool on this character (local saved data).",
+      "consumer": "Button",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.set",
+      "kind": "text",
+      "english": "Set",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Commits the typed count for this row.",
+      "consumer": "Button",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.button.set_pending",
+      "kind": "text",
+      "english": "Set *",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Same button while the typed count is not yet committed; keep the \" *\" marker.",
+      "consumer": "Button",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (button); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.heading.catalog",
+      "kind": "text",
+      "english": "Catalog",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Left list: the Echo catalog.",
+      "consumer": "EnsureFrame",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (heading); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.heading.pool",
+      "kind": "text",
+      "english": "Your pool / exact counts",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Right list: the pool with exact counts.",
+      "consumer": "EnsureFrame",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (heading); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.label.budget",
+      "kind": "template",
+      "english": "{alternatives} / 256 alternatives     Chosen: {chosen} / 79 ordinary copies",
+      "placeholders": [
+        {
+          "name": "alternatives",
+          "type": "count",
+          "meaning": "distinct Echo alternatives in the pool"
+        },
+        {
+          "name": "chosen",
+          "type": "count",
+          "meaning": "total chosen copies"
+        }
+      ],
+      "resultLimitBytes": 512,
+      "group": "plan",
+      "meaning": "256 and 79 are fixed limits; keep the five-space gap or an equivalent separator.",
+      "consumer": "budget:SetText",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), budget line (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.label.catalog_row",
+      "kind": "template",
+      "english": "#{id}  Q{quality}  {name}",
+      "placeholders": [
+        {
+          "name": "id",
+          "type": "text",
+          "meaning": "Echo spell ID number"
+        },
+        {
+          "name": "quality",
+          "type": "text",
+          "meaning": "Echo quality number (0-255)"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Echo name from the game catalog (display-safe); not translated"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "plan",
+      "meaning": "\"#\" marks the ID and \"Q\" abbreviates quality; keep the double spaces unless the language needs otherwise.",
+      "consumer": "Refresh catalog rows",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), catalog list row (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.label.count_help",
+      "kind": "block",
+      "english": "Add exact Echo IDs, then Set each count. Set: shows the committed count; * marks pending input. 0 unchooses.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Add\" and \"Set\" name the buttons; \"*\" is the pending marker of plan.button.set_pending.",
+      "consumer": "EnsureFrame help",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.label.pool_row",
+      "kind": "template",
+      "english": "Set: {count}  #{id}  Q{quality} / max {max_stack}  {name}",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "text",
+          "meaning": "the committed count (0 when unchosen)"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "meaning": "Echo spell ID number"
+        },
+        {
+          "name": "quality",
+          "type": "text",
+          "meaning": "Echo quality number"
+        },
+        {
+          "name": "max_stack",
+          "type": "text",
+          "meaning": "the Echo's maximum stack"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Echo name from the game catalog (display-safe); not translated"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "plan",
+      "meaning": "\"Set:\" refers to the Set button (the committed count); \"max\" = maximum stack.",
+      "consumer": "Refresh pool rows",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool list row (label); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_changed_after_asked",
+      "kind": "text",
+      "english": "the pool or the saved pool changed after you asked.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_count_pending",
+      "kind": "text",
+      "english": "Set each edited count first.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_future",
+      "kind": "text",
+      "english": "the saved pool is from a newer Nexus version and is kept unchanged.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_invalid_session",
+      "kind": "text",
+      "english": "this pool cannot be stored.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_load_invalid",
+      "kind": "text",
+      "english": "the saved pool cannot be used here.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_loading",
+      "kind": "text",
+      "english": "saved data is still loading.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_not_observed",
+      "kind": "text",
+      "english": "saved data had not been checked yet. Try again.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_read_only",
+      "kind": "text",
+      "english": "saved data is read-only.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_receipt_read_only",
+      "kind": "text",
+      "english": "saved data was read-only when this session read it.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_saved_data_changed",
+      "kind": "text",
+      "english": "saved data changed after this session last read it.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_saved_pool_changed",
+      "kind": "text",
+      "english": "the saved pool changed after this session last read it.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_unavailable",
+      "kind": "text",
+      "english": "saved data is unavailable right now.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.note.why_unreadable",
+      "kind": "text",
+      "english": "the saved pool cannot be read and is kept unchanged.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Clause that completes \"Not saved: / Not loaded: / Not removed: {reason} Your pool is kept.\" (plan.status.refused_*): starts lower-case unless it is its own sentence, ends with a period. ",
+      "consumer": "Outcome reason slot",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (note); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.popup.clear_consequence",
+      "kind": "text",
+      "english": "The current planning session is unchanged. Cancel keeps the saved pool.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Consequence line.",
+      "consumer": "PreparePopup(CLEAR)",
+      "familySurface": "journal: Remove saved confirmation dialog (popup); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.popup.clear_question",
+      "kind": "text",
+      "english": "Remove the pool saved on this character?",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Question line (asked when Save pool would store an empty pool over a saved one).",
+      "consumer": "PreparePopup(CLEAR)",
+      "familySurface": "journal: Remove saved confirmation dialog (popup); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.popup.load_consequence",
+      "kind": "block",
+      "english": "This replaces the current pool, its counts and any pending count input. Cancel keeps them.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Second line: the consequence. \"Cancel\" names the dialog button.",
+      "consumer": "PreparePopup(LOAD)",
+      "familySurface": "journal: Load saved confirmation dialog (popup); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.popup.load_question",
+      "kind": "text",
+      "english": "Load the pool saved on this character?",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Question line; local character data only (not sent).",
+      "consumer": "PreparePopup(LOAD)",
+      "familySurface": "journal: Load saved confirmation dialog (popup); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.catalog_changed_many",
+      "kind": "template",
+      "english": "{count} Echoes in this pool no longer match the catalog; their saved details and counts are kept.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "number of pool Echoes whose catalog details changed (2 or more)"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "plan",
+      "meaning": "pluralSelection: two or more Echoes; see plan.status.catalog_changed_one.",
+      "consumer": "CatalogNote",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.catalog_changed_one",
+      "kind": "block",
+      "english": "1 Echo in this pool no longer matches the catalog; its saved details and count are kept.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "pluralSelection: exactly one Echo; plan.status.catalog_changed_many for more.",
+      "consumer": "CatalogNote",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_ask_clear",
+      "kind": "text",
+      "english": "Waiting for your answer: remove the saved pool; Cancel keeps it.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_ask_load",
+      "kind": "text",
+      "english": "Waiting for your answer: Load saved replaces this pool; Cancel keeps it.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_changed",
+      "kind": "text",
+      "english": "Unsaved changes.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_cleared",
+      "kind": "text",
+      "english": "Saved pool removed from this character.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_empty",
+      "kind": "block",
+      "english": "Not saved. Save pool stores this character's planning pool; Load saved restores it. Hide keeps this session; Reset clears only this session.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_future",
+      "kind": "block",
+      "english": "The saved pool is from a newer Nexus version. It is kept unchanged; Save pool and removing it are refused.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_has_saved",
+      "kind": "text",
+      "english": "A pool is saved on this character. Load saved restores it.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_loaded",
+      "kind": "text",
+      "english": "Loaded the pool saved on this character.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_loading",
+      "kind": "text",
+      "english": "Saved data is still loading.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_matches",
+      "kind": "text",
+      "english": "This pool matches the saved pool.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_new",
+      "kind": "text",
+      "english": "Not saved. Save pool stores this pool on this character.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_none",
+      "kind": "block",
+      "english": "Saving is unavailable here. Hide keeps this pool until reload; Reset clears only this session.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_nothing",
+      "kind": "text",
+      "english": "Nothing is saved on this character. Your pool is unchanged.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_pending",
+      "kind": "text",
+      "english": "Unsaved changes: Set each edited count before Save pool.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_read_only",
+      "kind": "text",
+      "english": "Saved data is read-only; Save pool is refused.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_read_only_load",
+      "kind": "text",
+      "english": "Saved data is read-only: Load saved can restore it; Save pool is refused.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_saved",
+      "kind": "text",
+      "english": "Saved on this character.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_saved_empty",
+      "kind": "text",
+      "english": "Nothing to save: the pool is empty and nothing is saved.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_stale",
+      "kind": "block",
+      "english": "The saved pool changed elsewhere. Save pool is refused until you Load saved or Reset.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_unavailable",
+      "kind": "text",
+      "english": "Saved data is unavailable right now; this session is kept until reload.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_unreadable",
+      "kind": "block",
+      "english": "The saved pool cannot be read. It is kept unchanged; Save pool and removing it are refused.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_unsaved",
+      "kind": "text",
+      "english": "Unsaved changes. Save pool replaces the saved pool; Load saved restores it.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.persist_unsaved_empty",
+      "kind": "block",
+      "english": "Unsaved changes: the pool is empty. Save pool asks before removing the saved pool.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Several of these sentences are joined with a space.",
+      "consumer": "PersistText / Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_catalog_changed",
+      "kind": "text",
+      "english": "A chosen Echo's catalog details changed. Reset the pool and choose again.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code CATALOG_CHANGED). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_catalog_unavailable",
+      "kind": "text",
+      "english": "The Echo catalog is not available yet. Reopen when it has loaded.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code CATALOG_UNAVAILABLE). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_count_pending",
+      "kind": "text",
+      "english": "Count input is pending. Use Set for each edited count before opening a draft.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code COUNT_PENDING). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_default",
+      "kind": "text",
+      "english": "This choice cannot be opened. Review the pool and exact counts.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code DEFAULT). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_editor_changed",
+      "kind": "text",
+      "english": "The editor changed. Open the draft again to review its replacement.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code EDITOR_CHANGED). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_invalid_alternatives",
+      "kind": "text",
+      "english": "The pool can hold at most 256 distinct Echo alternatives.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code INVALID_ALTERNATIVES). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_invalid_catalog",
+      "kind": "block",
+      "english": "This Echo's required catalog details are unavailable. Review the pool when they are available.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code INVALID_CATALOG). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_invalid_selection",
+      "kind": "text",
+      "english": "Choose exact Echo counts before opening a draft.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code INVALID_SELECTION). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_ordinary_limit",
+      "kind": "text",
+      "english": "Choose at most 79 ordinary Echo copies.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code ORDINARY_LIMIT). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_plan_changed",
+      "kind": "text",
+      "english": "The pool or choice changed. Open the draft again to review your choice.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code PLAN_CHANGED). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_stack_limit",
+      "kind": "text",
+      "english": "That count exceeds this Echo's maximum stack.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code STACK_LIMIT). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.reason_unsupported_role",
+      "kind": "text",
+      "english": "This pool accepts ordinary Echo alternatives only.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Refusal shown in the pool status (refusal code UNSUPPORTED_ROLE). \"pool\" = the player's set of Echo alternatives; \"draft\" = a new Wishlist draft. \"Set\" names the row button (plan.button.set).",
+      "consumer": "Factory.Reason",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), pool status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.refused_clear",
+      "kind": "template",
+      "english": "Not removed: {reason} Your pool is kept.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "the reviewed refusal clause (plan.note.why_*), already translated"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "plan",
+      "meaning": "Refusal of removing the saved pool; nothing was written. Must keep \"Your pool is kept.\"",
+      "consumer": "Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.refused_load",
+      "kind": "template",
+      "english": "Not loaded: {reason} Your pool is kept.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "the reviewed refusal clause (plan.note.why_*), already translated"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "plan",
+      "meaning": "Refusal of Load saved; nothing was written. Must keep \"Your pool is kept.\"",
+      "consumer": "Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.refused_save",
+      "kind": "template",
+      "english": "Not saved: {reason} Your pool is kept.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "the reviewed refusal clause (plan.note.why_*), already translated"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "plan",
+      "meaning": "Refusal of Save pool; nothing was written. Must keep \"Your pool is kept.\"",
+      "consumer": "Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.unverified_clear",
+      "kind": "block",
+      "english": "Not confirmed: this removal could not be verified, so the saved pool may have changed. Load saved to check it. Your pool is kept.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Unverified outcome: never claim it was saved/removed.",
+      "consumer": "Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.unverified_clear_restored",
+      "kind": "block",
+      "english": "Not confirmed: this removal could not be verified; the earlier saved pool was restored. Your pool is kept.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Unverified outcome: never claim it was saved/removed.",
+      "consumer": "Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.unverified_save",
+      "kind": "block",
+      "english": "Not confirmed: this save could not be verified, so the saved pool may have changed. Load saved to check it. Your pool is kept.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Unverified outcome: never claim it was saved/removed.",
+      "consumer": "Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.status.unverified_save_restored",
+      "kind": "block",
+      "english": "Not confirmed: this save could not be verified; the earlier saved pool was restored. Your pool is kept.",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "\"Save pool\", \"Load saved\", \"Reset\" and \"Hide\" name the window buttons; keep the same wording as plan.button.*. Saved data is local to this character (never sent). Unverified outcome: never claim it was saved/removed.",
+      "consumer": "Outcome",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor), persistence status line (status); family coverage PENDING review",
+      "cohort": "fullui:journal"
+    },
+    {
+      "key": "plan.title.plan_alternatives",
+      "kind": "text",
+      "english": "Plan alternatives",
+      "placeholders": [],
+      "group": "plan",
+      "meaning": "Window title.",
+      "consumer": "EnsureFrame",
+      "familySurface": "journal: Plan alternatives window (Flexible plan chooser, opened from the Wishlist editor) (title); family coverage PENDING review",
+      "cohort": "fullui:journal"
     },
     {
       "key": "library.body.detail_incomplete",
@@ -17013,7 +19562,210 @@
       ],
       "semanticStatus": "PENDING",
       "coverageStatus": "PENDING",
-      "adoptedKeys": []
+      "adoptedKeys": [
+        "journal.body.assign_note",
+        "journal.body.change_in_my_builds",
+        "journal.body.compare_active",
+        "journal.body.family_coverage",
+        "journal.body.purpose",
+        "journal.body.set_in_my_builds",
+        "journal.button.assign_cancel",
+        "journal.button.assign_confirm",
+        "journal.button.help",
+        "journal.button.hide_details",
+        "journal.button.new_wishlist",
+        "journal.button.reference",
+        "journal.button.show_details",
+        "journal.chat.assigned",
+        "journal.chat.associate_first",
+        "journal.chat.chooser_coach",
+        "journal.chat.chooser_unconfirmed",
+        "journal.chat.consent_unavailable",
+        "journal.chat.editor_unavailable",
+        "journal.chat.first_run_unavailable",
+        "journal.chat.owner_changed",
+        "journal.chat.progression_button_missing",
+        "journal.chat.select_failed",
+        "journal.heading.about_page",
+        "journal.heading.build_progress",
+        "journal.heading.missing_count",
+        "journal.heading.off_wishlist_count",
+        "journal.label.counts_missing",
+        "journal.label.counts_off_listed",
+        "journal.label.counts_off_none",
+        "journal.label.counts_off_unavailable",
+        "journal.label.counts_represented",
+        "journal.label.empty_saved_build",
+        "journal.label.intro",
+        "journal.label.no_saved_build",
+        "journal.label.picker_role_hint",
+        "journal.label.saved_build_number",
+        "journal.label.select_wishlist",
+        "journal.label.selected_marker",
+        "journal.label.target_first_run",
+        "journal.label.target_saved_build",
+        "journal.label.unnamed_wishlist",
+        "journal.popup.assign_auto_on",
+        "journal.popup.assign_question",
+        "journal.status.data_unreadable",
+        "journal.status.data_unreadable_no_sections",
+        "journal.status.estimate",
+        "journal.status.estimate_unavailable",
+        "journal.status.listed_above",
+        "journal.status.missing_families",
+        "journal.status.missing_families_more",
+        "journal.status.missing_one_family",
+        "journal.status.no_data_yet",
+        "journal.status.no_families_requested",
+        "journal.status.no_sections",
+        "journal.status.no_wishlist",
+        "journal.status.none_missing",
+        "journal.status.picker_no_others",
+        "journal.status.picker_none_found",
+        "journal.status.row_missing",
+        "journal.status.row_off_wishlist",
+        "journal.status.summary_missing",
+        "journal.status.tome_disable_pending",
+        "journal.status.tome_enable_pending",
+        "journal.status.tome_request_pending",
+        "journal.status.unknown_bad_pending",
+        "journal.status.unknown_contradictory",
+        "journal.status.unknown_grammar",
+        "journal.status.unknown_no_pending",
+        "journal.tab.nexus_progress",
+        "journal.title.picker_assign_to",
+        "journal.title.picker_empty_refused",
+        "journal.title.picker_first_run",
+        "journal.title.picker_wishlists",
+        "journal.tooltip.auto_replace_orbs",
+        "journal.tooltip.auto_replace_warning",
+        "journal.tooltip.builds_closes_page",
+        "journal.tooltip.counts_heading",
+        "journal.tooltip.details_contents",
+        "journal.tooltip.edit_assigned",
+        "journal.tooltip.edit_assigned_heading",
+        "journal.tooltip.edit_first_run",
+        "journal.tooltip.edit_first_run_heading",
+        "journal.tooltip.empty_slot_name_first_run",
+        "journal.tooltip.empty_slot_no_assign",
+        "journal.tooltip.empty_slot_refused",
+        "journal.tooltip.help_opens_guide",
+        "journal.tooltip.new_wishlist",
+        "journal.tooltip.off_wishlist_listed",
+        "journal.tooltip.off_wishlist_none",
+        "journal.tooltip.off_wishlist_unavailable",
+        "journal.tooltip.picker_edit_wishlist",
+        "journal.tooltip.picker_row_heading",
+        "journal.tooltip.picker_row_sets",
+        "journal.tooltip.picker_row_target",
+        "journal.tooltip.reference_opens_manual",
+        "journal.tooltip.row_icon_neutral",
+        "journal.tooltip.row_missing",
+        "journal.tooltip.row_off_wishlist",
+        "journal.tooltip.selector_assigns",
+        "journal.tooltip.selector_heading",
+        "journal.tooltip.source_text",
+        "journal.tooltip.tab_opens_page",
+        "journal.tooltip.tome_control_id",
+        "journal.tooltip.tome_disable_requested",
+        "journal.tooltip.tome_echo_many",
+        "journal.tooltip.tome_echo_one",
+        "journal.tooltip.tome_enable_requested",
+        "journal.tooltip.tome_icon_member",
+        "journal.tooltip.tome_icon_neutral",
+        "journal.tooltip.tome_icon_spell",
+        "journal.tooltip.tome_icon_unstated",
+        "journal.tooltip.tome_last_observed",
+        "journal.tooltip.tome_mirror",
+        "journal.tooltip.tome_request_unknown",
+        "journal.tooltip.tome_scope",
+        "journal.tooltip.tome_stale",
+        "journal.tooltip.unassign_empty_slot",
+        "journal.tooltip.unassign_keeps",
+        "journal.tooltip.unassign_no_build_change",
+        "journal.value.tome_unknown",
+        "plan.button.add",
+        "plan.button.added",
+        "plan.button.hide",
+        "plan.button.load_saved",
+        "plan.button.open_draft",
+        "plan.button.popup_cancel",
+        "plan.button.popup_load_saved",
+        "plan.button.popup_remove_saved",
+        "plan.button.remove",
+        "plan.button.reset_pool",
+        "plan.button.save_pool",
+        "plan.button.set",
+        "plan.button.set_pending",
+        "plan.heading.catalog",
+        "plan.heading.pool",
+        "plan.label.budget",
+        "plan.label.catalog_row",
+        "plan.label.count_help",
+        "plan.label.pool_row",
+        "plan.note.why_changed_after_asked",
+        "plan.note.why_count_pending",
+        "plan.note.why_future",
+        "plan.note.why_invalid_session",
+        "plan.note.why_load_invalid",
+        "plan.note.why_loading",
+        "plan.note.why_not_observed",
+        "plan.note.why_read_only",
+        "plan.note.why_receipt_read_only",
+        "plan.note.why_saved_data_changed",
+        "plan.note.why_saved_pool_changed",
+        "plan.note.why_unavailable",
+        "plan.note.why_unreadable",
+        "plan.popup.clear_consequence",
+        "plan.popup.clear_question",
+        "plan.popup.load_consequence",
+        "plan.popup.load_question",
+        "plan.status.catalog_changed_many",
+        "plan.status.catalog_changed_one",
+        "plan.status.persist_ask_clear",
+        "plan.status.persist_ask_load",
+        "plan.status.persist_changed",
+        "plan.status.persist_cleared",
+        "plan.status.persist_empty",
+        "plan.status.persist_future",
+        "plan.status.persist_has_saved",
+        "plan.status.persist_loaded",
+        "plan.status.persist_loading",
+        "plan.status.persist_matches",
+        "plan.status.persist_new",
+        "plan.status.persist_none",
+        "plan.status.persist_nothing",
+        "plan.status.persist_pending",
+        "plan.status.persist_read_only",
+        "plan.status.persist_read_only_load",
+        "plan.status.persist_saved",
+        "plan.status.persist_saved_empty",
+        "plan.status.persist_stale",
+        "plan.status.persist_unavailable",
+        "plan.status.persist_unreadable",
+        "plan.status.persist_unsaved",
+        "plan.status.persist_unsaved_empty",
+        "plan.status.reason_catalog_changed",
+        "plan.status.reason_catalog_unavailable",
+        "plan.status.reason_count_pending",
+        "plan.status.reason_default",
+        "plan.status.reason_editor_changed",
+        "plan.status.reason_invalid_alternatives",
+        "plan.status.reason_invalid_catalog",
+        "plan.status.reason_invalid_selection",
+        "plan.status.reason_ordinary_limit",
+        "plan.status.reason_plan_changed",
+        "plan.status.reason_stack_limit",
+        "plan.status.reason_unsupported_role",
+        "plan.status.refused_clear",
+        "plan.status.refused_load",
+        "plan.status.refused_save",
+        "plan.status.unverified_clear",
+        "plan.status.unverified_clear_restored",
+        "plan.status.unverified_save",
+        "plan.status.unverified_save_restored",
+        "plan.title.plan_alternatives"
+      ]
     },
     {
       "name": "Wishlist editor",
@@ -17607,14 +20359,15 @@
       "format",
       "template"
     ],
-    "totalKeys": 1249,
+    "totalKeys": 1451,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
       "chat": 160,
       "records": 276,
       "hud": 166,
-      "usertext": 261
+      "usertext": 261,
+      "journal": 202
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

@@ -442,6 +442,8 @@ NAMES += ['l10n_ui_records']
 NAMES += ['l10n_ui_hud']
 # Full-UI family usertext (helper a1d43a30c9cab02fd): every visible UserText output except T.Guide through the seam from the real raw inputs; exact English, raw codes kept, count/zero/unknown distinct, one real Panel render (synthetic; native NOT_RUN).
 NAMES += ['l10n_ui_usertext']
+# Full-UI family journal (helper ad1d915f09b0c1c32): Echo Journal Nexus Progress tab and Plan alternatives chooser through the seam under a pseudo pack; dialogs, slots, missing-entry, English and UTF-8 boundary runs (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_journal']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
