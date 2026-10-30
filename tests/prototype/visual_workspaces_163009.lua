@@ -272,8 +272,14 @@ C.scenario('W4 Plan: search placeholder, primary Save, Auto-manage label clear o
     C.expect(cr[3]<=mr[1]-8+0.5 and G.Apart(cr,mr) and f._autoLockClear==true,
      tag..': the Auto-manage checkbox ends 8 px left of My Builds (game)',G.Text(cr)..' / '..G.Text(mr))
     C.expect(not label:IsShown() or (lr[3]<=mr[1]-8+0.5 and lr[1]>=cr[3]),tag..': its label, when shown, lies between the box and My Builds',G.Text(lr))
+    -- Owner-approved item 3 (#173): where the caption has no room beside the
+    -- strip (larger text), the box and caption take their own line under it.
+    -- Either way the box overlaps no slot.
     local sr=G.Rect(f._nexusLockedSlot(n),f)
-    C.expect(cr[1]>=sr[3]+6-0.5,tag..': the box stays at least 6 px right of the last slot',G.Text(sr)..' / '..G.Text(cr))
+    local clear=true
+    for i=1,n do if not G.Apart(cr,G.Rect(f._nexusLockedSlot(i),f)) then clear=false end end
+    C.expect(clear and (cr[1]>=sr[3]+6-0.5 or cr[2]>=sr[4]-0.5),
+     tag..': the box stays at least 6 px right of the last slot, or on its own line under the strip, clear of every slot',G.Text(sr)..' / '..G.Text(cr))
     -- The caption's own hover (its real OnEnter), cut or not.
     local hit=f._lockedLabelHit
     local lines=hit and V.TooltipLines(hit:GetScript('OnEnter'),hit) or {}

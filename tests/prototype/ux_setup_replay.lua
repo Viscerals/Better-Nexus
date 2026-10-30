@@ -314,18 +314,30 @@ C.scenario('S2 Close (X) during the delay opens the informational Welcome; the P
  if menu then menu:Click() end
  EasyMenu=realMenu
  local setup,info,help,reference
- -- Direct Options choices (native QA test.163008).
- for _,entry in ipairs(items or {}) do
-  if entry.text=='Setup / Welcome' then setup=entry end
-  if entry.text=='Setup information (read only)' then info=entry end
-  if entry.text=='Help / Getting Started' then help=entry end
-  if entry.text=='Reference (full manual)' then reference=entry end
+ -- Owner-approved item 2 (#165): Setup / Welcome is direct; the optional
+ -- windows are one list down under More help and windows. The retired Help /
+ -- Getting Started entry opened the same coach as Setup / Welcome.
+ local function Scan(list)
+  for _,entry in ipairs(list or {}) do
+   if entry.text=='Setup / Welcome' then setup=entry end
+   if entry.text=='Help / Getting Started' then help=entry end
+  end
  end
- C.setup(help~=nil,'S2: fixture: the menu lists Help / Getting Started')
+ Scan(items)
+ for _,entry in ipairs(items or {}) do
+  if entry.text=='More help and windows' and type(entry.menuList)=='table' then
+   Scan(entry.menuList)
+   for _,row in ipairs(entry.menuList) do
+    if row.text=='Setup information (read only)' then info=row end
+    if row.text=='Reference (full manual)' then reference=row end
+   end
+  end
+ end
+ C.expect(help==nil,'S2: the coach has one menu entry, Setup / Welcome (no duplicate Help / Getting Started)')
  C.expect(setup~=nil and type(setup.func)=='function','S2: the ... menu offers Setup / Welcome')
- C.expect(info~=nil and type(info.func)=='function','S2: the ... menu keeps the informational setup as a secondary entry')
+ C.expect(info~=nil and type(info.func)=='function','S2: the ... menu keeps the informational setup as a secondary entry, under More help and windows')
  C.expect(reference~=nil and type(reference.func)=='function',
-  'S2: the ... menu offers the full manual as its own optional entry, Reference (full manual)')
+  'S2: the ... menu offers the full manual as its own optional entry, More help and windows > Reference (full manual)')
  local savedBefore=Saved()
  -- The original guided design: "Reopen: Nexus menu > Setup / Welcome" opens
  -- the step-by-step coach, as Help's Setup / Welcome does.
@@ -338,16 +350,16 @@ C.scenario('S2 Close (X) during the delay opens the informational Welcome; the P
    'S2: opening and closing it records nothing, writes nothing and keeps Auto OFF')
  end
  -- design/current "Nexus Setup Alternative": Help and Setup open the coach,
- -- Reference on request. The menu's Help opens the coach as /nexus help
- -- does, not the long manual.
- if help then
+ -- Reference on request. The menu's coach entry opens the coach as
+ -- /nexus help does, not the long manual.
+ if setup then
   if NexusHelpWindow then NexusHelpWindow:Hide() end
-  help.func()
+  setup.func()
   local coach=NexusGuidedSetup
   C.expect(coach~=nil and coach:IsShown() and not (NexusHelpWindow and NexusHelpWindow:IsShown()) and not Shown(),
-   'S2: Help / Getting Started opens the guided setup coach, not the Reference manual or the information-only Welcome',Title())
+   'S2: Setup / Welcome opens the guided setup coach, not the Reference manual or the information-only Welcome',Title())
   C.expect(CloseCoach() and Seen()==nil and Saved()==savedBefore and not Auto(),
-   'S2: opening Help and closing the coach records nothing, writes nothing and keeps Auto OFF')
+   'S2: opening it again and closing the coach records nothing, writes nothing and keeps Auto OFF')
  end
  if info then
   info.func()

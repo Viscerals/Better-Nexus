@@ -92,7 +92,8 @@ local function ShowRecords()
  if button then button:GetScript('OnClick')(button) end
  -- A direct Options choice (native QA test.163008).
  for _,item in ipairs(captured or {}) do
-  if item.text=='Show DPS records' and type(item.func)=='function' then item.func();return true end
+  -- Owner-approved item 9 (#165): the action words plus the current value.
+  if item.text=='Show DPS records (now hidden)' and type(item.func)=='function' then item.func();return true end
  end
  return false
 end

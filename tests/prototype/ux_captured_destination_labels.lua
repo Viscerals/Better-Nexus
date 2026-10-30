@@ -887,13 +887,14 @@ C.scenario('C: a Preview title alone is not destination authority',function()
  end
 end)
 -- B2 (destination fit priority; fixture only): the reopened first-run plan
--- keeps its captured first-run target in the real 900 px destination row at
--- the largest supported font scale. The real A02 lifecycle runs for a short
--- and a long plan name. In the double model the compact whole state fits
--- (188+67+133+287, plus 12 for 3 gaps, = 687 <= 900). A long name needs only
--- the plan name shortened, never the early minimum (C:1). EXPECT: row
+-- keeps its captured first-run target in the real 972 px destination row at
+-- the largest supported font scale (the editor's full content width since
+-- owner-approved item 6, #173; formerly 900). The real A02 lifecycle runs for
+-- a short and a long plan name. In the double model the compact whole state
+-- fits (188+67+133+287, plus 12 for 3 gaps, = 687 <= 972). A long name needs
+-- only the plan name shortened, never the early minimum (C:1). EXPECT: row
 -- behaviour (a missing row fails one expectation and returns). GUARD: the
--- row keeps its 900 px width. SETUP: fixture state. Font methods, model and
+-- row keeps its 972 px width. SETUP: fixture state. Font methods, model and
 -- font object are restored before returning. Offline font model; native
 -- NOT_RUN.
 C.scenario('B2 first-run row keeps its captured first-run target at font scale 2',function()
@@ -959,7 +960,7 @@ C.scenario('B2 first-run row keeps its captured first-run target at font scale 2
    and type(row.IsVisible)=='function' and row:IsVisible()
   C.expect(present,tag..': the editor shows its destination row')
   if not present then return end
-  C.guard(row:GetWidth()==900,tag..': the destination row keeps its 900 px width',row:GetWidth())
+  C.guard(row:GetWidth()==972,tag..': the destination row keeps its 972 px width',row:GetWidth())
   local texts,bad=RowCells(row)
   local shown=table.concat(texts,' / ')
   local detail=shown..' | '..table.concat(bad,'; ')

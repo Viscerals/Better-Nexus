@@ -104,6 +104,8 @@ end)
 
 C.scenario('Q4 the plan count says copies, not Echoes',function()
  -- The real ... menu item turns the DPS records view on (its own handler).
+ -- Owner-approved item 9 (#165): the row keeps its action words and adds the
+ -- current value, so while records are hidden it reads (now hidden).
  local captured
  EasyMenu=function(items) captured=items end
  CloseDropDownMenus=CloseDropDownMenus or function() end
@@ -111,8 +113,8 @@ C.scenario('Q4 the plan count says copies, not Echoes',function()
  if button then button:GetScript('OnClick')(button) end
  local show
  -- A direct Options choice (native QA test.163008).
- for _,item in ipairs(captured or {}) do if item.text=='Show DPS records' then show=item end end
- C.setup(show~=nil and type(show.func)=='function','Q4: fixture: the menu offers Show DPS records')
+ for _,item in ipairs(captured or {}) do if item.text=='Show DPS records (now hidden)' then show=item end end
+ C.setup(show~=nil and type(show.func)=='function','Q4: fixture: the menu offers Show DPS records (now hidden)')
  if show then show.func() end
  C.setup(RenderCounts(12,79,{}),'Q4: fixture: the panel renders the plan with DPS records shown')
  local label=Shows('Target build') or ''

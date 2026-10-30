@@ -261,8 +261,9 @@ assert(opened and opened.anchor==menu and opened.frame==P._moreMenu,'the menu op
 local top=opened.list
 -- design/current "Nexus Main Panel - Compact Redesign": Appearance is a
 -- top-level Options entry, the shared Theme list with the current choice
--- checked. Native QA test.163008: every other route is a direct choice on
--- the same top level; there is no Manage submenu.
+-- checked. Native QA test.163008: there is no Manage submenu. Owner-approved
+-- item 2 (#165): the optional windows (Log viewer... among them) are one
+-- list down, under More help and windows.
 local appearanceItem,appearances=nil,0
 local found={}
 for _,item in ipairs(top)do
@@ -276,9 +277,14 @@ assert(appearances==1 and appearanceItem.hasArrow and type(appearanceItem.menuLi
 local checkedRows=0
 for _,item in ipairs(appearanceItem.menuList)do if item.checked then checkedRows=checkedRows+1 end end
 assert(checkedRows>=1,'the current appearance is checked in the direct Options list')
-for _,text in ipairs({'Open Settings...','Hide Nexus Panel','Log viewer...',Nexus.Updates.Status().menu or 'Open Releases page'})do
+for _,text in ipairs({'Open Settings...','Hide Nexus Panel',Nexus.Updates.Status().menu or 'Open Releases page'})do
  assert(found[text] and type(found[text].func)=='function','Options offers '..text..' directly')
 end
+local moreRow=found['More help and windows']
+local logs
+for _,item in ipairs(moreRow and moreRow.menuList or {})do if item.text=='Log viewer...' then logs=item end end
+assert(moreRow and moreRow.hasArrow and logs and type(logs.func)=='function' and not found['Log viewer...'],
+ 'Options offers Log viewer... under More help and windows')
 -- No stock row cap is asserted: the 3.3.5a dropdown export starts at 8 rows
 -- and grows them per item; whether the menu fits the screen is native NOT_RUN.
 local labelled=0
@@ -288,5 +294,5 @@ assert(T.Equal(db,NexusDB),'opening the menu writes no saved data')
 assert(#H.actions==actions,'opening the menu sends no game action')
 assert(P.AutoSelectedNow()==autoBefore and f._autoBtn:GetText()==autoText,'opening the menu leaves Auto as it was')
 assert(f:IsShown()==shownBefore,'opening the menu leaves the panel as it was')
-print('PASS Options click route: direct Options choices, nothing changed')
+print('PASS Options click route: direct choices and More help and windows, nothing changed')
 print('PASS panel options label')

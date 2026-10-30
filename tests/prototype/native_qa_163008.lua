@@ -8,11 +8,14 @@
 --    (composition review: Help never chooses the manual by itself). The
 --    Records (Leaderboard) Help no longer opens the seven-page manual. The
 --    manual keeps its privacy and consent warnings.
--- N2 The Options menu offers every established route as a direct choice (no
---    single Manage submenu), with Appearance, opened at the Options button;
---    Help text names those direct paths. No stock row cap or client minimum
---    height is claimed (the dropdown export grows its rows); native fit is
---    NOT_RUN.
+-- N2 The Options menu keeps every established route (no single Manage
+--    submenu), with Appearance, opened at the Options button; Help text names
+--    those paths. Owner-approved item 2 (#165) shortened it: the everyday
+--    choices stay direct and the optional windows are one list down under
+--    More help and windows; the duplicate Help / Getting Started coach entry
+--    is gone (Setup / Welcome is the coach). No stock row cap or client
+--    minimum height is claimed (the dropdown export grows its rows); native
+--    fit is NOT_RUN.
 -- N3 Hide details collapses the Play panel's detail section (the four counts
 --    and the names behind them) and its space; Show details restores them
 --    with the same counts; a reload starts collapsed with the same counts.
@@ -186,7 +189,11 @@ local function Prefixed(items,prefix)
  end
 end
 
-C.scenario('N2 Options offers every route directly, with Appearance, inside the dropdown limits',function()
+-- Owner-approved item 2 (#165): the optional windows, one list down.
+local MORE_WINDOWS={'Reference (full manual)','Setup information (read only)','Setup checklist and status',
+ 'Support report...','Log viewer...','Orbs / Lost Memories','Wishlist Editor'}
+
+C.scenario('N2 Options keeps every route, direct or under More help and windows, with Appearance, inside the dropdown limits',function()
  Close()
  Nexus.Panel.Show()
  C.setup(Nexus.Panel.Render(Model())==true and NexusPanel and NexusPanel._menuBtn,'N2: fixture: the panel renders with its Options button')
@@ -197,38 +204,50 @@ C.scenario('N2 Options offers every route directly, with Appearance, inside the 
  C.expect(opened.anchor==NexusPanel._menuBtn,'N2: the menu opens at the Options button')
  C.expect(Item(top,'Manage')==nil,'N2: there is no single Manage submenu')
  local missing={}
- for _,label in ipairs({'Help / Getting Started','Reference (full manual)','Setup / Welcome','Setup information (read only)',
-  'Setup checklist and status','Support report...','Open Settings...','Log viewer...','Orbs / Lost Memories',
-  'Wishlist Editor','Reset Panel Position','Hide Nexus Panel'}) do
+ for _,label in ipairs({'Questions (FAQ)','Setup / Welcome','Auto explained (full details)','Open Settings...',
+  'Reset Panel Position','Hide Nexus Panel'}) do
   local item=Item(top,label)
   if not (item and type(item.func)=='function') then missing[#missing+1]=label end
  end
+ local more=Item(top,'More help and windows')
+ local moreList=more and more.hasArrow and type(more.menuList)=='table' and more.menuList or nil
+ if not moreList then missing[#missing+1]='More help and windows>' end
+ for _,label in ipairs(MORE_WINDOWS) do
+  local item=Item(moreList,label)
+  if not (item and type(item.func)=='function') or Item(top,label) then missing[#missing+1]='More help and windows > '..label end
+ end
+ -- The coach has one entry: the retired duplicate opened the same coach.
+ if Item(top,'Help / Getting Started') or Item(moreList,'Help / Getting Started') then missing[#missing+1]='no Help / Getting Started' end
  for _,prefix in ipairs({'Appearance: ','Automation settings','Language'}) do
   local item=Prefixed(top,prefix)
   if not (item and item.hasArrow and type(item.menuList)=='table' and #item.menuList>0) then missing[#missing+1]=prefix..'>' end
  end
- if not (Item(top,'Show DPS records') or Item(top,'Hide DPS records')) then missing[#missing+1]='DPS records' end
- if not (Item(top,'Use Server Difficulty / Soul Ash HUD') or Item(top,'Use Nexus Difficulty / Soul Ash HUD')) then
+ -- Item 9: a setting row keeps its action words and adds the current value.
+ if not (Prefixed(top,'Show DPS records') or Prefixed(top,'Hide DPS records')) then missing[#missing+1]='DPS records' end
+ if not (Prefixed(top,'Use Server Difficulty / Soul Ash HUD') or Prefixed(top,'Use Nexus Difficulty / Soul Ash HUD')) then
   missing[#missing+1]='HUD mode'
  end
- if not (Item(top,'Disable Update Notices') or Item(top,'Enable Update Notices')) then missing[#missing+1]='Update Notices' end
- if not Prefixed(top,'Update notices: ') then missing[#missing+1]='Update notices: *' end
- C.expect(#missing==0,'N2: every action is a direct choice (Appearance, Automation settings and Language keep their lists)',
+ -- Update notices is one row; its On / Off choices are inside it.
+ local notices=Prefixed(top,'Update notices: ')
+ if not (notices and type(notices.menuList)=='table' and Item(notices.menuList,'On') and Item(notices.menuList,'Off')) then
+  missing[#missing+1]='Update notices: * > On / Off'
+ end
+ C.expect(#missing==0,'N2: every route is a direct choice or one list down under More help and windows (Appearance, Automation settings and Language keep their lists)',
   table.concat(missing,', '))
  -- Issue #170 added the Main panel size list (its sizes and Reset to 100%).
  local submenus={}
  for _,item in ipairs(top) do
   if item.hasArrow then
    local name=tostring(item.text)
-   for _,prefix in ipairs({'Appearance: ','Automation settings','Language','Main panel size: '}) do
+   for _,prefix in ipairs({'Appearance: ','Automation settings','Language','Main panel size: ','Update notices: '}) do
     if name:sub(1,#prefix)==prefix then name=prefix end
    end
    submenus[#submenus+1]=name
   end
  end
  table.sort(submenus)
- C.expect(table.concat(submenus,'|')=='Appearance: |Automation settings|Language|Main panel size: ',
-  'N2: only Appearance, Automation settings, Language and Main panel size open a list',table.concat(submenus,'|'))
+ C.expect(table.concat(submenus,'|')=='Appearance: |Automation settings|Language|Main panel size: |More help and windows|Update notices: ',
+  'N2: only Appearance, Automation settings, Language, Main panel size, More help and windows and Update notices open a list',table.concat(submenus,'|'))
  -- No stock row cap is claimed: the 3.3.5a UIDropDownMenu export starts at 8
  -- buttons per level and grows them per added item (build 12340, L1-5 and
  -- L178-229). The synthetic height below (16-unit rows plus a 32-unit
@@ -239,23 +258,26 @@ C.scenario('N2 Options offers every route directly, with Appearance, inside the 
  for _,item in ipairs(top) do if not (type(item.text)=='string' and item.text~='') then unlabelled=unlabelled+1 end end
  C.expect(#top>0 and unlabelled==0,'N2: every top-level row has a label',unlabelled)
  C.guard(Effects()==before,'N2: opening the menu changes nothing',Effects())
- -- Help is the coach; Reference is the manual's first page.
- local coach,manual=Routes(function() Item(top,'Help / Getting Started').func() end)
- C.expect(coach.n==1 and manual.n==0,'N2: Help / Getting Started opens the coach','coach='..coach.n..' manual='..manual.n)
- coach,manual=Routes(function() Item(top,'Reference (full manual)').func() end)
- C.expect(manual.n==1 and manual.args[1]=='start' and coach.n==0,'N2: Reference (full manual) opens the manual','manual='..manual.n)
+ -- Setup / Welcome is the coach; Reference is the manual's first page.
+ local coach,manual=Routes(function() Item(top,'Setup / Welcome').func() end)
+ C.expect(coach.n==1 and manual.n==0,'N2: Setup / Welcome opens the coach','coach='..coach.n..' manual='..manual.n)
+ coach,manual=Routes(function() Item(moreList,'Reference (full manual)').func() end)
+ C.expect(manual.n==1 and manual.args[1]=='start' and coach.n==0,'N2: More help and windows > Reference (full manual) opens the manual','manual='..manual.n)
  Close()
  C.guard(Effects()==before,'N2: Help and Reference change nothing',Effects())
 end)
 
-C.scenario('N2.1 Help, chat and hover text name the direct Options paths the menu has',function()
+C.scenario('N2.1 Help, chat and hover text name the Options paths the menu has',function()
  local all=''
  for _,p in ipairs(Nexus.Help.Pages) do all=all..p.text..'\n' end
  C.expect(not all:find('Manage',1,true),'N2.1: no manual page describes the retired Manage submenu')
  local top=OpenOptions().list
  for _,pair in ipairs({{'(Options > Setup / Welcome)','Setup / Welcome'},{'Options > Automation settings','Automation settings'},
-  {'Hide Nexus Panel (Options)','Hide Nexus Panel'},{'Orbs / Lost Memories in the Options menu','Orbs / Lost Memories'}}) do
-  C.expect(all:find(pair[1],1,true)~=nil and (Item(top,pair[2]) or Prefixed(top,pair[2]))~=nil,
+  {'Hide Nexus Panel (Options)','Hide Nexus Panel'},
+  {'Orbs / Lost Memories in the Options menu under More help and windows','More help and windows','Orbs / Lost Memories'}}) do
+  local row=Item(top,pair[2]) or Prefixed(top,pair[2])
+  if row and pair[3] then row=Item(row.menuList,pair[3]) end
+  C.expect(all:find(pair[1],1,true)~=nil and row~=nil,
    'N2.1: the manual names "'..pair[1]..'" and the menu has '..pair[2])
  end
  local chat=Nexus.UserText.Guide and Nexus.UserText.Guide.chat or {}

@@ -293,11 +293,13 @@ C.scenario('K6 its buttons and routes only navigate',function()
  if menu then menu:GetScript('OnClick')(menu) end
  EasyMenu,CloseDropDownMenus=realEasy,realClose
  local entry
- -- A direct Options choice (native QA test.163008).
+ -- Owner-approved item 2 (#165): one list down, under More help and windows.
  for _,item in ipairs(items or {}) do
-  if item.text=='Setup checklist and status' then entry=item end
+  if item.text=='More help and windows' and type(item.menuList)=='table' then
+   for _,row in ipairs(item.menuList) do if row.text=='Setup checklist and status' then entry=row end end
+  end
  end
- C.expect(entry~=nil and type(entry.func)=='function','K6: the Options menu offers Setup checklist and status')
+ C.expect(entry~=nil and type(entry.func)=='function','K6: the Options menu offers Setup checklist and status under More help and windows')
  if entry then
   Nexus.QuickStart.HideChecklist();CloseDropDownMenus=function() end
   entry.func()
@@ -571,8 +573,12 @@ local function J2OpenViaMenu(tag)
   CloseDropDownMenus=function() end
   local menu=NexusPanel and NexusPanel._menuBtn
   if menu and menu:GetScript('OnClick') then menu:GetScript('OnClick')(menu) end
-  -- A direct Options choice (native QA test.163008).
+  -- Owner-approved item 2 (#165): one list down, under More help and windows.
+  local more
   for _,row in ipairs(items or {}) do
+   if row.text=='More help and windows' and type(row.menuList)=='table' then more=row.menuList end
+  end
+  for _,row in ipairs(more or {}) do
    if row.text=='Setup checklist and status' and type(row.func)=='function' then
     if Nexus.QuickStart and Nexus.QuickStart.HideChecklist then Nexus.QuickStart.HideChecklist() end
     row.func();opened=true
@@ -583,7 +589,7 @@ local function J2OpenViaMenu(tag)
  if not ok then error(err,0) end
  local f=_G.NexusSetupChecklist
  local shown=opened==true and f~=nil and f:IsShown()
- C.expect(shown,tag..': the ... menu item Setup checklist and status opens the live checklist')
+ C.expect(shown,tag..': the ... menu item More help and windows > Setup checklist and status opens the live checklist')
  if shown then return f end
  return Open(tag..' (fallback: QuickStart.ShowChecklist)')
 end

@@ -89,8 +89,10 @@ end
 local MISSING={'Cinder Lattice x2 (Rare:x2 Epic:x1)','Hollow Bell','Rime Warden','Quill of Embers','Stoneveil Aegis'}
 local EXTRA={'Ashen Tithe','Gloam Lantern','Brine Oath','Sable Thorn','Vesper Coil','Duskmantle Cord','Ironpetal Ward'}
 -- Written out here, not taken from the code: two names, then the rest counted.
+-- Owner-approved item 7 (#174): the EXTRA COPIES count row also names its
+-- button, "+N more - Show all", which opens the complete list.
 local NEED_FACE={'Cinder Lattice x2','Hollow Bell','+3 more'}
-local EXTRA_FACE={'Ashen Tithe','Gloam Lantern','+5 more'}
+local EXTRA_FACE={'Ashen Tithe','Gloam Lantern','+5 more - Show all'}
 local NEED_HOVER={'Cinder Lattice x2','Rare:x2 Epic:x1','Hollow Bell','Rime Warden','Quill of Embers','Stoneveil Aegis'}
 
 local function Model(tag,o)
@@ -235,7 +237,7 @@ do
  local seen,distinct={},0
  for _,list in ipairs({MISSING,EXTRA}) do for _,name in ipairs(list) do if not seen[name] then seen[name]=true;distinct=distinct+1 end end end
  C.setup(#MISSING==5 and #EXTRA==7 and distinct==12,'fixture: five missing and seven extra names, all distinct')
- C.setup('+'..(#MISSING-2)..' more'==NEED_FACE[3] and '+'..(#EXTRA-2)..' more'==EXTRA_FACE[3],
+ C.setup('+'..(#MISSING-2)..' more'==NEED_FACE[3] and '+'..(#EXTRA-2)..' more - Show all'==EXTRA_FACE[3],
   'fixture: the expected suffixes are the remaining counts (5-2, 7-2)')
 end
 
@@ -275,7 +277,7 @@ C.scenario('D2 a taller face and names with a line break, under both readings of
   local before=Effects()
   local p=Open(Model('tall '..reading,{missing=missing,shed=shed}))
   if C.setup(p~=nil,tag..': fixture: Details is open') then
-   local need,sh,layout=CheckFace(tag,{'Rime Warden','Hollow Bell','+3 more'},{'Gloam Lantern','Ashen Tithe','+5 more'})
+   local need,sh,layout=CheckFace(tag,{'Rime Warden','Hollow Bell','+3 more'},{'Gloam Lantern','Ashen Tithe','+5 more - Show all'})
    if need then
     local labelGap=math.max(3,math.floor(layout.gap/2))
     C.expect(layout.boxes.needed.h==layout.small+labelGap+3*MODEL.line,
@@ -454,7 +456,7 @@ C.scenario('D6 fewer names: no suffix for two, +1 more for three, the empty text
  local before=Effects()
  local cases={
   {'three',{'Hollow Bell','Rime Warden','Quill of Embers'},{'Ashen Tithe','Gloam Lantern','Brine Oath'},
-   {'Hollow Bell','Rime Warden','+1 more'},{'Ashen Tithe','Gloam Lantern','+1 more'}},
+   {'Hollow Bell','Rime Warden','+1 more'},{'Ashen Tithe','Gloam Lantern','+1 more - Show all'}},
   {'two',{'Hollow Bell','Rime Warden'},{'Ashen Tithe','Gloam Lantern'},
    {'Hollow Bell','Rime Warden'},{'Ashen Tithe','Gloam Lantern'}},
   {'none',{},{'Ashen Tithe'},{'No remaining demand'},{'Ashen Tithe'}},

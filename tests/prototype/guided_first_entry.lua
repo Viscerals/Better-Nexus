@@ -439,7 +439,16 @@ C.scenario('E14 Help Getting started names the coach and the information-only vi
  local quick,ui=Nexus.QuickStart,Nexus.GuidedSetupUI
  local realSetup,realList,realShow=quick.ShowSetup,quick.ShowChecklist,ui.Show
  local coachLabel,infoLabel
+ -- Owner-approved item 2 (#165): the optional windows (the information-only
+ -- view among them) are one list down, under More help and windows.
+ local rows={}
  for _,item in ipairs(items) do
+  rows[#rows+1]=item
+  if item.text=='More help and windows' and type(item.menuList)=='table' then
+   for _,row in ipairs(item.menuList) do rows[#rows+1]=row end
+  end
+ end
+ for _,item in ipairs(rows) do
   if type(item.text)=='string' and item.text:find('Setup',1,true) and type(item.func)=='function' then
    local opened
    quick.ShowSetup=function() opened='info';return true end

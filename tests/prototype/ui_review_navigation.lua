@@ -138,18 +138,27 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
  local before=Effects()
  local menu=NexusPanel._menuBtn
  local top=Capture(function() menu:GetScript('OnClick')(menu) end)
- -- Native QA test.163008: every entry is a direct choice on the Options
- -- menu's top level; there is no nested Manage list.
+ -- Native QA test.163008: there is no nested Manage list. Owner-approved
+ -- item 2 (#165): the everyday entries are direct and the optional windows
+ -- are one list down under More help and windows, each under its own label.
  C.setup(type(top)=='table' and #top>0,'V2: the Options menu opens',Texts(top))
  C.expect(Item(top,'Manage')==nil,'V2: the Options menu has no Manage submenu',Texts(top))
  local items=top or {}
  print('OBSERVED','V2 menu='..Texts(items))
+ local moreRow=Item(items,'More help and windows')
+ local more=moreRow and moreRow.hasArrow and type(moreRow.menuList)=='table' and moreRow.menuList or {}
+ print('OBSERVED','V2 More help and windows='..Texts(more))
  local missing={}
- for _,label in ipairs({'Help / Getting Started','Setup / Welcome','Setup checklist and status','Orbs / Lost Memories',
-  'Automation settings','Wishlist Editor','Reset Panel Position','Hide Nexus Panel'}) do
+ for _,label in ipairs({'Setup / Welcome','Automation settings','Reset Panel Position','Hide Nexus Panel'}) do
   local item=Item(items,label)
   if not (item and type(item.func)=='function' or item and item.hasArrow) then missing[#missing+1]=label end
  end
+ for _,label in ipairs({'Setup checklist and status','Orbs / Lost Memories','Wishlist Editor'}) do
+  local item=Item(more,label)
+  if not (item and type(item.func)=='function') then missing[#missing+1]='More help and windows > '..label end
+ end
+ -- The retired Help / Getting Started opened the same coach as Setup / Welcome.
+ if Item(items,'Help / Getting Started') or Item(more,'Help / Getting Started') then missing[#missing+1]='no Help / Getting Started' end
  for _,prefix in ipairs({'Language','Update notices: '}) do
   if #Prefixed(items,prefix)~=1 then missing[#missing+1]=prefix..'*' end
  end
@@ -159,13 +168,15 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
  if #appearance~=1 then missing[#missing+1]='Appearance: * (once, top level)' end
  if appearance[1] and not (appearance[1].hasArrow and type(appearance[1].menuList)=='table'
   and #appearance[1].menuList==#Nexus.Theme.MenuItems()) then missing[#missing+1]='Appearance submenu = Theme.MenuItems' end
- if not (Item(items,'Show DPS records') or Item(items,'Hide DPS records')) then missing[#missing+1]='DPS records' end
- if not (Item(items,'Disable Update Notices') or Item(items,'Enable Update Notices')) then missing[#missing+1]='Update Notices' end
- if not (Item(items,'Use Server Difficulty / Soul Ash HUD') or Item(items,'Use Nexus Difficulty / Soul Ash HUD')) then
+ -- Item 9: a setting row keeps its action words and adds the current value.
+ if #Prefixed(items,'Show DPS records')+#Prefixed(items,'Hide DPS records')~=1 then missing[#missing+1]='DPS records' end
+ local notices=Prefixed(items,'Update notices: ')[1]
+ if not (notices and Item(notices.menuList,'On') and Item(notices.menuList,'Off')) then missing[#missing+1]='Update notices > On / Off' end
+ if #Prefixed(items,'Use Server Difficulty / Soul Ash HUD')+#Prefixed(items,'Use Nexus Difficulty / Soul Ash HUD')~=1 then
   missing[#missing+1]='HUD mode'
  end
- C.guard(#missing==0,'V2: every earlier entry remains reachable under its own label, directly in Options',table.concat(missing,', '))
- local order,last,unordered={'Help and setup','Settings','Notices','Logs','Also on the panel footer','Panel'},0,{}
+ C.guard(#missing==0,'V2: every earlier entry remains reachable under its own label, in Options or under More help and windows',table.concat(missing,', '))
+ local order,last,unordered={'Help and setup','Settings','Notices','Session','Panel'},0,{}
  for _,title in ipairs(order) do
   local at
   for index,item in ipairs(items) do if item.text==title and item.isTitle==true and item.notCheckable==true then at=index end end
@@ -173,22 +184,22 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
   last=at or last
  end
  C.expect(#unordered==0,'V2: the menu is grouped under titled sections, in order',table.concat(unordered,', '))
- local help,orbs,hide=Item(items,'Help / Getting Started'),Item(items,'Orbs / Lost Memories'),Item(items,'Hide Nexus Panel')
+ local orbs,hide=Item(more,'Orbs / Lost Memories'),Item(items,'Hide Nexus Panel')
  local function Index(item) for i,x in ipairs(items) do if x==item then return i end end end
  local function Under(item,title,nextTitle)
   local a,b=Index(Item(items,title)),nextTitle and Index(Item(items,nextTitle)) or #items+1
   local i=Index(item)
   return a and i and b and a<i and i<b
  end
- C.expect(Under(help,'Help and setup','Settings') and Under(orbs,'Also on the panel footer','Panel') and Under(hide,'Panel'),
-  'V2: help, the footer aliases and the panel actions sit in their groups')
+ C.expect(Under(moreRow,'Help and setup','Settings') and orbs~=nil and Under(hide,'Panel'),
+  'V2: More help and windows (with the footer aliases) sits under Help and setup and the panel actions under Panel')
  C.expect(orbs and orbs.tooltipText=='Also Orbs on the panel footer.' and hide and type(hide.tooltipText)=='string'
   and hide.tooltipText:find('/nexus panel',1,true)~=nil,'V2: moved and hiding entries say where else they are and how the panel returns')
  C.expect(hide and not hide.tooltipText:find('The Nexus panel is hidden',1,true),
   'V2: the pre-click Hide tooltip does not claim the still-visible panel is already hidden',hide and hide.tooltipText)
- local support,logs=Item(items,'Support report...'),Item(items,'Log viewer...')
+ local support,logs=Item(more,'Support report...'),Item(more,'Log viewer...')
  C.expect(support and type(support.func)=='function' and logs and type(logs.func)=='function',
-  'V2: Support report and the log viewer are reachable from the menu')
+  'V2: Support report and the log viewer are reachable from the menu, under More help and windows')
  C.guard(Effects()==before,'V2: opening the menu keeps measured actions, sends, saved data, assignments and Auto unchanged',Effects())
  if support then
   local spy=Spy(Nexus.SupportReportUI,'Show',function() support.func() end)
@@ -201,7 +212,7 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
  -- The original guided design reopens the coach itself from the menu's
  -- Setup / Welcome ("Reopen: Nexus menu > Setup / Welcome"), as Help does;
  -- the information-only Welcome stays reachable as a secondary entry.
- local setup,info=Item(items,'Setup / Welcome'),Item(items,'Setup information (read only)')
+ local setup,info=Item(items,'Setup / Welcome'),Item(more,'Setup information (read only)')
  C.expect(setup and type(setup.func)=='function' and Under(setup,'Help and setup','Settings'),
   'V2: Setup / Welcome sits under Help and setup',Texts(items))
  if setup then
@@ -211,8 +222,8 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
   end)
   C.expect(quick.n==0,'V2: it does not open the information-only Welcome instead',quick.n)
  end
- C.expect(info and type(info.func)=='function' and Under(info,'Help and setup','Settings'),
-  'V2: the information-only setup stays reachable as a secondary entry',Texts(items))
+ C.expect(info and type(info.func)=='function' and Under(moreRow,'Help and setup','Settings'),
+  'V2: the information-only setup stays reachable as a secondary entry, under More help and windows',Texts(more))
  if info then
   local coach=Spy(Nexus.GuidedSetupUI,'Show',function()
    local spy=Spy(Nexus.QuickStart,'ShowSetup',function() info.func() end)
@@ -222,26 +233,30 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
  end
  -- design/current "Nexus Setup Alternative": Help and Setup open the coach,
  -- Reference on request. The visible Help entry takes Help's guarded coach
- -- route (as /nexus help); the long manual is its own optional entry.
- local reference=Item(items,'Reference (full manual)')
- C.expect(reference and type(reference.func)=='function' and Under(reference,'Help and setup','Settings'),
-  'V2: the full manual is a separately named optional entry under Help and setup',Texts(items))
- if help then
+ -- route (as /nexus help); the long manual is its own optional entry. Since
+ -- owner-approved item 2 the coach's one menu entry is Setup / Welcome.
+ local reference=Item(more,'Reference (full manual)')
+ C.expect(reference and type(reference.func)=='function' and Under(moreRow,'Help and setup','Settings'),
+  'V2: the full manual is a separately named optional entry, under Help and setup > More help and windows',Texts(more))
+ if setup then
   local manual
   local coach=Spy(Nexus.GuidedSetupUI,'Show',function()
-   manual=Spy(Nexus.Help,'Show',function() help.func() end)
+   manual=Spy(Nexus.Help,'Show',function() setup.func() end)
   end)
-  C.expect(coach.n==1,'V2: Help / Getting Started opens the guided setup coach (GuidedSetupUI.Show)',coach.n)
-  C.expect(manual.n==0,'V2: Help / Getting Started does not open the long Reference manual (Help.Show)',manual.n)
+  C.expect(coach.n==1,'V2: Setup / Welcome opens the guided setup coach (GuidedSetupUI.Show)',coach.n)
+  C.expect(manual.n==0,'V2: Setup / Welcome does not open the long Reference manual (Help.Show)',manual.n)
   -- While an Auto warning waits for its answer the coach refuses and says
   -- why (Help.OpenGuide); nothing else opens: Reference is its own entry
   -- (composition review item 4 replaced the earlier fallback to the manual).
   local ui,real,refused=Nexus.GuidedSetupUI,Nexus.GuidedSetupUI.Show,0
   ui.Show=function() refused=refused+1;return false,'warning-open' end
-  local fallback=Spy(Nexus.Help,'Show',function() help.func() end)
+  local quickFallback
+  local fallback=Spy(Nexus.Help,'Show',function()
+   quickFallback=Spy(Nexus.QuickStart,'ShowSetup',function() setup.func() end)
+  end)
   ui.Show=real
-  C.expect(refused==1 and fallback.n==0,
-   'V2: a refused coach (Auto warning open) opens no Reference page in Help\'s place',
+  C.expect(refused==1 and fallback.n==0 and quickFallback.n==0,
+   'V2: a refused coach (Auto warning open) opens no Reference page or information-only Welcome in its place',
    'refused='..refused..' reference='..fallback.n)
  end
  if reference then
@@ -263,7 +278,7 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
  end
  C.expect(#entries==1,'V2: one guided setup entry under one label; no second Setup / Welcome or Setup guide item',
   table.concat(entries,', '))
- local editor=Item(items,'Wishlist Editor')
+ local editor=Item(more,'Wishlist Editor')
  if editor then
   local spy=Spy(Nexus.WishlistEditor,'Show',function() editor.func() end)
   C.guard(spy.n==1,'V2: the kept Wishlist Editor entry opens the editor',spy.n)
@@ -293,6 +308,86 @@ C.scenario('V2 the ... menu is grouped and keeps every earlier label and handler
    'V2: showing the panel clears the saved hide',tostring(NexusDB.panelHidden))
   C.guard(Effects()==before,'V2: after Show every saved field, action, send, assignment and Auto is as before the menu',Effects())
  end
+end)
+
+-- V2b (owner-approved item 2, #165): every direct and More help and windows
+-- route with its owner unavailable (the module absent), clicked through the
+-- real row. Nothing raises, no other window opens, nothing is acted, sent or
+-- saved, and a row that reports its refusal says it. Setup information's
+-- refusal while an Auto warning waits is said too. Chat lines are observed
+-- through print; native drawing NOT RUN.
+C.scenario('V2b each Options route with its owner unavailable opens nothing else and changes nothing',function()
+ P.Show()
+ local menu=NexusPanel._menuBtn
+ local top=Capture(function() menu:GetScript('OnClick')(menu) end) or {}
+ local moreRow=Item(top,'More help and windows')
+ local more=moreRow and type(moreRow.menuList)=='table' and moreRow.menuList or {}
+ local WATCH={{'Help','Show'},{'GuidedSetupUI','Show'},{'QuickStart','ShowSetup'},{'QuickStart','ShowChecklist'},
+  {'SupportReportUI','Show'},{'LogViewer','Show'},{'OrbPanel','Show'},{'WishlistEditor','Show'}}
+ local ROUTES={
+  {'Questions (FAQ)',top,'Help'},{'Auto explained (full details)',top,'Help'},
+  {'Setup / Welcome',top,'GuidedSetupUI','Setup / Welcome is not available right now.'},
+  {'Reference (full manual)',more,'Help'},
+  {'Setup information (read only)',more,'QuickStart','Setup information is not available right now.'},
+  {'Setup checklist and status',more,'QuickStart'},
+  {'Support report...',more,'SupportReportUI','the support report view is not loaded.'},
+  {'Log viewer...',more,'LogViewer'},{'Orbs / Lost Memories',more,'OrbPanel'},{'Wishlist Editor',more,'WishlistEditor'}}
+ -- Clicks row with Nexus[owner] absent; every other watched owner counts its
+ -- calls and opens nothing. Returns ok, error, other calls and chat text.
+ local function Unavailable(row,owner)
+  local realModules,realMethods,calls={},{},0
+  for _,w in ipairs(WATCH) do
+   local m=Nexus[w[1]]
+   if m and w[1]~=owner then
+    realMethods[#realMethods+1]={m,w[2],m[w[2]]}
+    m[w[2]]=function() calls=calls+1;return true end
+   end
+  end
+  realModules[owner]=Nexus[owner];Nexus[owner]=nil
+  local heard,realPrint={},print
+  print=function(...) heard[#heard+1]=V.Plain(tostring((...))) end
+  local easy,close=EasyMenu,CloseDropDownMenus
+  CloseDropDownMenus=function() end
+  local ok,err=pcall(row.func)
+  EasyMenu,CloseDropDownMenus=easy,close
+  print=realPrint
+  Nexus[owner]=realModules[owner]
+  for _,r in ipairs(realMethods) do r[1][r[2]]=r[3] end
+  return ok,err,calls,table.concat(heard,' / ')
+ end
+ local before=Effects()
+ for _,r in ipairs(ROUTES) do
+  local row=Item(r[2],r[1])
+  if C.setup(row and type(row.func)=='function','V2b: fixture: the '..r[1]..' row') then
+   local ok,err,calls,said=Unavailable(row,r[3])
+   print('OBSERVED','V2b '..r[1]..' without '..r[3]..': said='..said)
+   C.expect(ok and calls==0,'V2b: '..r[1]..' with no '..r[3]..' raises nothing and opens no other window',
+    tostring(err)..' other='..calls)
+   if r[4] then C.expect(said:find(r[4],1,true)~=nil,'V2b: '..r[1]..' says it is not available',said) end
+  end
+ end
+ C.guard(Effects()==before,'V2b: unavailable routes act, send, save and change Auto nothing',Effects())
+ -- Setup information refuses while an Auto warning waits, says why and opens
+ -- nothing in its place.
+ local info=Item(more,'Setup information (read only)')
+ if info then
+  local quick=Nexus.QuickStart
+  local real=quick.ShowSetup
+  quick.ShowSetup=function() return false,'warning-open' end
+  local heard,realPrint={},print
+  print=function(...) heard[#heard+1]=V.Plain(tostring((...))) end
+  local coach,manual
+  local ok,err=pcall(function()
+   coach=Spy(Nexus.GuidedSetupUI,'Show',function() manual=Spy(Nexus.Help,'Show',function() info.func() end) end)
+  end)
+  print=realPrint
+  quick.ShowSetup=real
+  local said=table.concat(heard,' / ')
+  C.expect(ok and coach.n==0 and manual.n==0
+   and said:find('Setup information did not open. Answer the open Auto warning (Yes or No), then open it again.',1,true)~=nil,
+   'V2b: a refused Setup information says why and opens neither the coach nor the manual',tostring(err)..' '..said)
+ end
+ C.guard(Effects()==before,'V2b: the refusal changes nothing',Effects())
 end)
 
 C.scenario('V3 header Auto and separate Plan, Explore and Orbs footer inside the 420 px Play panel',function()
@@ -534,7 +629,7 @@ C.scenario('V6 Help names the footer routes it describes',function()
  -- The menu is named by its visible Options label (issue #165), not the
  -- retired ellipsis, and the entry is a direct choice there (native QA
  -- test.163008: no Manage submenu).
- C.expect(orbs:find('Open /nexus orbs, Orbs on the Nexus panel, Orbs / Lost Memories in the Options menu, or Open Orbs...',1,true)~=nil
+ C.expect(orbs:find('Open /nexus orbs, Orbs on the Nexus panel, Orbs / Lost Memories in the Options menu under More help and windows, or Open Orbs...',1,true)~=nil
    and not orbs:find('in the ... menu',1,true) and not orbs:find('Manage',1,true),
   'V6: Help lists the footer Orbs route beside the kept ones, under the Options menu it names',orbs)
  C.expect(troubleshooting:find('Explore',1,true)~=nil and troubleshooting:find('loading or unavailable',1,true)~=nil
