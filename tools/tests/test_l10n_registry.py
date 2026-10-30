@@ -2428,9 +2428,10 @@ class ConsumerCommandLineTests(unittest.TestCase):
             target.write_bytes(value)
 
     def test_repository_root(self):
-        # main() on the actual repository root reads both TOCs and all 100
-        # loaded files itself and writes exactly the API receipt.
-        run = self.run_cli("--consumers")
+        # main() on the actual repository root (named explicitly, so the
+        # result never depends on where the tool file lives) reads both TOCs
+        # and all 100 loaded files itself and writes exactly the API receipt.
+        run = self.run_cli("--root", ROOT, "--consumers")
         self.assertEqual((run.returncode, run.stderr), (0, b""))
         record = json.loads(run.stdout)
         self.assertEqual((record["record"], record["exitCode"]), ("consumers", 0))
@@ -2451,7 +2452,7 @@ class ConsumerCommandLineTests(unittest.TestCase):
             self.assertEqual(process.stdout, self.run_cli("--root", temp, "--consumers").stdout)
             receipt = json.loads(process.stdout)["consumers"]
             self.assertEqual((len(receipt["sources"]), receipt["counts"]["UNBOUND"]), (4, 28))
-        held = self.run_cli("--consumers", "--require-complete")
+        held = self.run_cli("--root", ROOT, "--consumers", "--require-complete")
         self.assertEqual((held.returncode, json.loads(held.stdout)["exitCode"]), (1, 1))
         for args, code in ((("--consumers", "--consumers"), "argument-duplicate"),
                            (("--consumers", "--diagnose"), "argument-conflict"),
