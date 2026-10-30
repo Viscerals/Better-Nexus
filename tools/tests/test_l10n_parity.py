@@ -14,7 +14,12 @@ CatalogValidationError of parse_english, parse_packs and the tool's scoped
 English and pack checks (_check_english, _check_packs) against products made
 from the case's language enum, or "valid". The two sides keep their own
 category names; the declared mapping is the parity claim. LF and CRLF
-variants are derived in memory. P19 and P20 native WoW behaviour stays
+variants are derived in memory. Runtime cap: the tool applies the runtime
+MAX_BASE_ENTRIES (runtimeCap.current). The pilot cases keep their dated
+pilot-cap verdicts, reproduced by the offline counterpart of the Lua
+legacy-cap loader (the real tool with only its one entry-cap line set to
+runtimeCap.pilot, compiled in memory), and each derived 4096/4097 control has
+its own current-cap offline verdict. P19 and P20 native WoW behaviour stays
 UNKNOWN; only offline decoding and metadata are checked here.
 
 Registry interlock (G1). The declaration marker convention is exact and
@@ -132,24 +137,123 @@ def case_sources(case, cases_by_id):
     return english, packs
 
 
-def mismatches(catalog, cases):
+TOOL_CAP_LINE = re.compile(rb"^_MAX_BASE_ENTRIES = (\d+)\r?$", re.M)
+
+
+def legacy_cap_catalog(pilot, current):
+    """The offline counterpart of the Lua legacy-cap loader: the real tool's
+    bytes with exactly its one entry-cap line changed from the current to the
+    pilot cap, compiled in memory (no bytecode is written, nothing runs but
+    the tool's own definitions). Its scoped offline API gives the dated pilot
+    verdicts."""
+    source = CATALOG_TOOL.read_bytes()
+    old = b"\n_MAX_BASE_ENTRIES = %d" % current
+    if [int(value) for value in TOOL_CAP_LINE.findall(source)] != [current] \
+            or source.count(old) != 1:
+        raise AssertionError("the legacy-cap loader changes exactly the cap line")
+    module = types.ModuleType("l10n_catalog_parity_legacy_cap")
+    module.__file__ = str(CATALOG_TOOL)
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        exec(compile(source.replace(old, b"\n_MAX_BASE_ENTRIES = %d" % pilot), str(CATALOG_TOOL),
+                     "exec"), module.__dict__)
+    finally:
+        sys.dont_write_bytecode = previous
+    return module
+
+
+def mismatches(catalog, cases, pilot=None):
     """Every disagreement between the offline verdicts and the declared
-    mapping, over both line-break variants of each source."""
+    mapping, over both line-break variants of each source. pilot is
+    (legacy-cap catalog, pilot case IDs): those cases are judged by it."""
     problems = []
     by_id = {case["id"]: case for case in cases}
     for case in cases:
         english, packs = case_sources(case, by_id)
+        tool = pilot[0] if pilot and case["id"] in pilot[1] else catalog
         verdicts = {}
         for english_name, english_bytes in variants(english).items():
             for packs_name, packs_bytes in variants(packs).items():
                 label = "%s english=%s packs=%s" % (case["id"], english_name, packs_name)
-                verdict = offline_verdict(catalog, english_bytes, packs_bytes, case["enum"])
+                verdict = offline_verdict(tool, english_bytes, packs_bytes, case["enum"])
                 verdicts[label] = verdict
                 if verdict != case["offline"]:
                     problems.append("%s: offline %r, mapped %r" % (label, verdict, case["offline"]))
         if len({repr(v) for v in verdicts.values()}) != 1:
             problems.append("%s: LF and CRLF verdicts differ: %r" % (case["id"], verdicts))
     return problems
+
+
+def lua_string(text):
+    """A Lua 5.1 double-quoted literal of text (decimal escapes outside
+    printable ASCII), for the in-memory control sources."""
+    out = []
+    for byte in text.encode("utf-8"):
+        char = chr(byte)
+        out.append(char if 32 <= byte < 127 and char not in '"\\' else "\\%d" % byte)
+    return '"' + "".join(out) + '"'
+
+
+def grow(entries, count):
+    """The Lua harness rule: the entries, then parity.gNNNN = "Generated NNNN"
+    for N = 1, 2, ... (skipping a key already present) until there are count."""
+    out, index = dict(entries), 0
+    while len(out) < count:
+        index += 1
+        out.setdefault("parity.g%04d" % index, "Generated %04d" % index)
+    return out
+
+
+def control_sources(catalog, control, by_id):
+    """(english bytes, packs bytes, enum, declared keys) of a derived cap
+    control, built in memory from its committed case; declared keys is the
+    Lua harness's derived declaration list for a control that declares extra
+    keys, else None."""
+    source = by_id[control["from"]]
+    directory = CORPUS / source["id"]
+    english = catalog.parse_english((directory / "english.lua").read_bytes())
+    packs = catalog.parse_packs((directory / "packs.lua").read_bytes())
+    if control["file"] == "english":
+        english = grow(english, control["entries"])
+    else:
+        pack = packs[source["enum"][0]]
+        pack["entries"] = grow(pack["entries"], control["entries"])
+    english_bytes = ("Nexus = Nexus or {}\nNexus.LocalizationEnglish = {\n" + "".join(
+        "    [%s] = %s,\n" % (lua_string(key), lua_string(text)) for key, text in english.items())
+        + "}\n").encode("utf-8")
+    packs_bytes = ("Nexus = Nexus or {}\nNexus.LocalizationPacks = {\n" + "".join(
+        "    %s = { name = %s, entries = {\n%s    } },\n" % (pack_id, lua_string(pack["name"]), "".join(
+            "        [%s] = %s,\n" % (lua_string(key), lua_string(text))
+            for key, text in pack["entries"].items())) for pack_id, pack in packs.items())
+        + "}\n").encode("utf-8")
+    declared = None
+    if "extraDeclarations" in control:
+        cap = int(TOOL_CAP_LINE.findall(CATALOG_TOOL.read_bytes())[0])
+        declared = sorted(key for key in english if KEY_RULE.fullmatch(key))[:cap]
+        declared += list(control["extraDeclarations"])
+    return english_bytes, packs_bytes, source["enum"], declared
+
+
+KEY_RULE = re.compile(r"[a-z][a-z0-9_]*(?:[.][a-z][a-z0-9_]*)+")
+
+
+def control_verdict(catalog, control, by_id):
+    """The offline verdict of a derived cap control under the tool's cap: for
+    a control that declares extra keys, the registry-bound parser over the
+    derived declaration block (each a text declaration), else the scoped
+    English and pack checks of offline_verdict."""
+    english, packs, enum, declared = control_sources(catalog, control, by_id)
+    if declared is None:
+        return offline_verdict(catalog, english, packs, enum)
+    block = ("-- derived control block\n" + MARKER_OPEN.decode() + "\nlocal DECLARATIONS = {\n"
+             + "".join('    [%s] = {kind = "text"},\n' % lua_string(key) for key in declared)
+             + "}\n" + MARKER_CLOSE.decode() + "\n").encode("utf-8")
+    try:
+        getattr(catalog, REGISTRY_PARSER)(block)
+    except catalog.CatalogRegistryError as error:
+        return {"code": error.code}
+    return {"code": "valid"}
 
 
 def registry_sentinel(localization_source, catalog, registry):
@@ -369,6 +473,8 @@ class ParityCorpusTests(unittest.TestCase):
         cls.corpus = cls.catalog._parse_literal_table(CASES.read_bytes())
         cls.cases = cls.corpus["cases"]
         cls.by_id = {case["id"]: case for case in cls.cases}
+        cap = cls.corpus["runtimeCap"]
+        cls.pilot = (legacy_cap_catalog(cap["pilot"], cap["current"]), frozenset(cap["pilotCases"]))
 
     def test_corpus_metadata(self):
         corpus = self.corpus
@@ -412,7 +518,7 @@ class ParityCorpusTests(unittest.TestCase):
                 self.assertNotIn(pack_id.encode("ascii"), data, (path.name, pack_id))
 
     def test_offline_verdicts_follow_the_mapping(self):
-        self.assertEqual(mismatches(self.catalog, self.cases), [])
+        self.assertEqual(mismatches(self.catalog, self.cases, self.pilot), [])
 
     def test_line_break_variants_decode_identically(self):
         for case in self.cases:
@@ -480,17 +586,21 @@ class ParityCorpusTests(unittest.TestCase):
         for case in wrong:
             if case["id"] == "p15_pipe_colour":
                 case["offline"] = {"code": "valid"}
-        problems = mismatches(self.catalog, wrong)
+        problems = mismatches(self.catalog, wrong, self.pilot)
         self.assertEqual(len(problems), 4)
         self.assertTrue(all(problem.startswith("p15_pipe_colour") for problem in problems))
 
     def test_runtime_cap_records_agree_with_their_sources(self):
-        # The corpus records the cap of the real runtime and, apart, the pilot
-        # cap that the scoped offline API still applies (a preserved contract).
+        # The corpus records the cap of the real runtime, which the offline
+        # tool applies, and apart the dated pilot cap, which only the
+        # legacy-cap loader applies (exactly one tool line changed in memory).
         cap = self.corpus["runtimeCap"]
         found = re.findall(rb"^local MAX_BASE_ENTRIES = (\d+)\r?$", LOCALIZATION.read_bytes(), re.M)
         self.assertEqual([int(value) for value in found], [cap["current"]])
-        self.assertEqual(cap["pilot"], self.catalog._MAX_BASE_ENTRIES)
+        self.assertEqual(cap["current"], self.catalog._MAX_BASE_ENTRIES)
+        self.assertEqual([int(value) for value in TOOL_CAP_LINE.findall(CATALOG_TOOL.read_bytes())],
+                         [cap["current"]])
+        self.assertEqual(cap["pilot"], self.pilot[0]._MAX_BASE_ENTRIES)
         self.assertLess(cap["pilot"], cap["current"])
         # The pilot cases keep their committed bytes and their pilot-cap
         # offline verdicts; the current-runtime boundaries are derived controls.
@@ -509,6 +619,28 @@ class ParityCorpusTests(unittest.TestCase):
         for control in cap["controls"]:
             self.assertIn(control["from"], cap["pilotCases"])
             self.assertNotIn(control["id"], self.by_id)
+
+    def test_cap_controls_reproduce_their_offline_verdicts(self):
+        # Each derived 4096/4097 control has its own current-cap offline
+        # verdict: the same over-cap rule as the dated pilot cases, at the
+        # current cap. Every control above the cap is refused offline.
+        cap = self.corpus["runtimeCap"]
+        current = self.catalog._MAX_BASE_ENTRIES
+        for control in cap["controls"]:
+            with self.subTest(control["id"]):
+                self.assertIn("offline", control)
+                self.assertEqual(control_verdict(self.catalog, control, self.by_id),
+                                 control["offline"])
+                over = control["entries"] > current or "extraDeclarations" in control
+                self.assertEqual(control["offline"]["code"] in (
+                    "english-too-many", "pack-too-many-entries", "registry-too-many"), over)
+        # The control rule is causal: the legacy-cap tool refuses the
+        # at-cap controls too, for the same over-cap reason.
+        for control in cap["controls"]:
+            if control["entries"] == current and "extraDeclarations" not in control:
+                with self.subTest(pilot=control["id"]):
+                    verdict = control_verdict(self.pilot[0], control, self.by_id)
+                    self.assertIn(verdict["code"], ("english-too-many", "pack-too-many-entries"))
 
     def test_lua_side_reads_the_same_corpus(self):
         source = LUA_TEST.read_bytes()

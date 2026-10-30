@@ -6,9 +6,10 @@ Status: IMPLEMENTED_DRAFT_REVIEW_PENDING. parse_english and parse_packs
 below check syntax only, and a successful parse alone does not make a catalog
 valid. validate_catalog_data, appended after them, is a pure in-memory schema
 API: from the exact bytes of the English base, the packs file, KEY_CONTEXT.json
-and RELEASE_LANGUAGES.json it checks keys, text, the charge template grammar,
+and RELEASE_LANGUAGES.json it checks keys, text, blocks, the template grammar,
 pack IDs, autonyms and entries, the key-context rows and the release product
-metadata against the runtime contract of core/Localization.lua, and raises
+metadata against the runtime contract of core/Localization.lua (text, block,
+format and template kinds within its 4096-entry cap), and raises
 CatalogValidationError (stable .code) on a semantic failure. Missing translated
 entries are valid partial data. catalog_report, appended after that, is a pure
 in-memory coverage and evidence report API. It first calls
@@ -23,8 +24,9 @@ truth. main(), appended last, is the bounded read-only confined-root command
 line (B3b) around catalog_report. It adds only root, input and Nexus.toc
 load-order checks (CatalogCliError, stable .code) and passes the exact input
 bytes to catalog_report unchanged. The legacy fullValidation value
-IMPLEMENTED_DRAFT denotes a scoped draft for the currently adopted static
-keys and the single code-owned charge-count template, not whole #147;
+IMPLEMENTED_DRAFT denotes a scoped draft for the text, block and template
+keys of the key-context rows and the single code-owned charge-count format,
+not whole #147;
 NOTICE['validationScope'], copied into the catalog_report and command-line
 report records, states that plural variants, dynamic-key coverage per
 family, runtime load/fallback parity, per-pack translator provenance/rights
@@ -221,7 +223,7 @@ NOTICE = {
     'tool': 'tools/l10n_catalog.py',
     'status': STATUS,
     'fullValidation': 'IMPLEMENTED_DRAFT',
-    'validationScope': 'Scoped draft for currently adopted static keys and the single code-owned charge-count template; not whole #147. Plural variants, dynamic-key coverage per family, runtime load/fallback parity, per-pack translator provenance/rights and approved terminology validation are not implemented by this component.',
+    'validationScope': 'Scoped draft for the text, block and template keys of the key-context rows and the single code-owned charge-count format, within the runtime entry cap; not whole #147. Plural variants, dynamic-key coverage per family, runtime load/fallback parity, per-pack translator provenance/rights and approved terminology validation are not implemented by this component.',
     'message': 'scoped static-catalog draft registered in source for required CI; independent review and human, native and full-UI gates pending',
 }
 
@@ -461,12 +463,15 @@ class _Parser:
 def _parse(source, target, table):
     if not isinstance(source, (bytes, bytearray)):
         raise TypeError('source must be bytes, not %s' % type(source).__name__)
-    try:
-        text = bytes(source).decode('utf-8')
-    except UnicodeDecodeError:
-        raise CatalogSyntaxError('not-utf8') from None
-    parser = _Parser(_tokens(text))
-    return parser.chunk(target, getattr(parser, table))
+
+    def parse(data):
+        try:
+            text = bytes(data).decode('utf-8')
+        except UnicodeDecodeError:
+            raise CatalogSyntaxError('not-utf8') from None
+        parser = _Parser(_tokens(text))
+        return parser.chunk(target, getattr(parser, table))
+    return _memoized(target, source, parse)
 
 
 def parse_english(source: bytes) -> dict:
@@ -480,6 +485,70 @@ def parse_packs(source: bytes) -> dict:
     {pack ID: {'name': text, 'entries': {key: text}}} dict.
     Syntax only: no pack ID, name, key or text is validated."""
     return _parse(source, 'LocalizationPacks', 'packs')
+
+
+# ---------------------------------------------------------------------------
+# Full visible-UI scope (Refs #143-#148): the input memo. Every seam below
+# parses all of its inputs, and the registry-bound, diagnostic, provenance
+# and consumer receipts each also run the strict verdict, so the same exact
+# bytes of the 4078-key catalog were lexed and decoded many times per run.
+# _memoized keeps a successful parse of the exact bytes of one input, keyed by
+# the parser and the SHA-256 of those bytes: any changed byte is a new key and
+# is parsed afresh, so nothing is served for other bytes. A failure is never
+# kept: the same bytes raise the same error again. A hit returns new objects
+# (a marshal copy of the kept result: dicts in their order, lists, tuples,
+# strings, numbers, booleans and None only), so a caller that changes a
+# returned value cannot change a later result. At most _INPUT_MEMO_LIMIT
+# results are kept, the least recently used leaving first. Results never
+# depend on the memo.
+
+import functools
+import gc
+import hashlib
+import marshal
+import re
+
+_INPUT_MEMO = {}
+_INPUT_MEMO_LIMIT = 32
+# A lone UTF-16 surrogate code point (the JSON check json-surrogate).
+_SURROGATE = re.compile('[\ud800-\udfff]')
+
+
+def _memoized(kind, source, parse):
+    """parse(source), or a copy of its kept result for the same kind and the
+    exact same bytes (see above). source is one byte string, or a tuple of
+    them for a result of several inputs (each hashed apart, in order)."""
+    sources = source if type(source) is tuple else (source,)
+    key = (kind,) + tuple(hashlib.sha256(data).digest() for data in sources)
+    kept = _INPUT_MEMO.pop(key, None)
+    if kept is not None:
+        _INPUT_MEMO[key] = kept
+        return marshal.loads(kept)
+    result = parse(source)
+    while len(_INPUT_MEMO) >= _INPUT_MEMO_LIMIT:
+        del _INPUT_MEMO[next(iter(_INPUT_MEMO))]
+    _INPUT_MEMO[key] = marshal.dumps(result)
+    return result
+
+
+def _collector_paused(seam):
+    """seam with the cyclic collector paused for the whole call and always
+    restored as it was: the rule _parsed applies to one syntax-tree build
+    (S8 review fix 4), applied to a seam call. A call holds large acyclic
+    copies of its inputs (and a consumer receipt its search state) while it
+    runs; a collection meanwhile would promote them and then rescan every
+    memoized syntax tree. Reference counting still frees memory, and no
+    result depends on the collector."""
+    @functools.wraps(seam)
+    def call(*args, **kwargs):
+        collecting = gc.isenabled()
+        gc.disable()
+        try:
+            return seam(*args, **kwargs)
+        finally:
+            if collecting:
+                gc.enable()
+    return call
 
 
 # ---------------------------------------------------------------------------
@@ -512,18 +581,43 @@ VALIDATION_CODES = (
 # key-context document is checked against these; it cannot redefine them.
 _MAX_KEY_BYTES = 64
 _MAX_TEXT_BYTES = 256
-_MAX_BASE_ENTRIES = 64
+# Full visible-UI scope (issues #143-#148): the runtime's MAX_BASE_ENTRIES
+# bounds the declarations, the English base and each pack. It was 64 for the
+# pilot cohort; the runtime now declares 4096 and fails closed above it, and
+# so does every API here (english-too-many, registry-too-many,
+# pack-too-many-entries).
+_MAX_BASE_ENTRIES = 4096
+_MAX_BLOCK_BYTES = 1024
+_MAX_TEMPLATE_RESULT_BYTES = 2048
 _MAX_NAME_BYTES = 64
 _MAX_LANGUAGES = 16
 _ASCII_WHITESPACE = (9, 10, 11, 12, 13, 32)
+# The byte rules of _valid_text and _valid_key as patterns (one pass each in
+# C; the rules themselves are the docstrings'): only ASCII whitespace bytes,
+# a refused text byte (0-31, 127, |), a refused block byte (the same but the
+# line feed), and the whole key shape.
+_BLANK_BYTES = re.compile(rb'[\t\n\x0b\x0c\r ]*')
+_TEXT_FORBIDDEN = re.compile(rb'[\x00-\x1f\x7f|]')
+_BLOCK_FORBIDDEN = re.compile(rb'[\x00-\x09\x0b-\x1f\x7f|]')
+_KEY_SHAPE = re.compile('[a-z][a-z0-9_]*(?:[.][a-z][a-z0-9_]*)+')
 _SLOT_TYPE = 'count'
+_TEMPLATE_SLOTS = ('count', 'text')
+_KINDS = ('text', 'block', 'format', 'template')
+# The contract of one key that is not static text: its kind, its placeholder
+# fields and their slot types in order, its result limit (None for a block)
+# and whether the block contract applies to its own bytes (lines). A static
+# text key has no shape.
+_Shape = namedtuple('_Shape', 'kind fields slots limit lines')
+_BLOCK = _Shape('block', (), (), None, True)
 _FORMAT_FIELDS = types.MappingProxyType({'readout.charge_counts': ('banish', 'reroll', 'freeze')})
 _FORMAT_LIMITS = types.MappingProxyType({'readout.charge_counts': _MAX_TEXT_BYTES - 2})
-# The four-input API's fixed format schema as {key: (fields, result limit)}.
-# The registry-bound API (end of this file) passes the parsed declarations
-# instead and never reads these constants.
-_V1_FORMATS = types.MappingProxyType({key: (fields, _FORMAT_LIMITS[key])
-                                      for key, fields in _FORMAT_FIELDS.items()})
+# The four-input API's fixed, code-owned format shapes. The four-input API
+# adds the block and template shapes of the key-context rows to them
+# (_context_shapes); the registry-bound API (end of this file) passes the
+# shapes of the parsed declarations instead and never reads these constants.
+_V1_FORMATS = types.MappingProxyType({
+    key: _Shape('format', fields, (_SLOT_TYPE,) * len(fields), _FORMAT_LIMITS[key], False)
+    for key, fields in _FORMAT_FIELDS.items()})
 _LITERAL_BRACES = {'{{': '{', '}}': '}'}
 _CONTRACT_KIND = 'declarative_metadata_only'
 _AUTHORITY = 'core/Localization.lua'
@@ -535,8 +629,6 @@ _BASELINE, _OPTIONAL = 'english_baseline', 'optional_ui_pack'
 _PRODUCT_ROLES = (('enUS', _BASELINE), ('frFR', _OPTIONAL), ('deDE', _OPTIONAL),
                   ('esES', _OPTIONAL), ('plPL', _OPTIONAL), ('ptBR', _OPTIONAL),
                   ('ruRU', _OPTIONAL))
-_KEY_START = frozenset('abcdefghijklmnopqrstuvwxyz')
-_KEY_PART = _KEY_START | frozenset('0123456789_')
 _INFINITY = float('inf')
 
 
@@ -589,11 +681,16 @@ def _json_float(literal):
 
 
 def _has_surrogate(text):
-    return any(0xD800 <= ord(char) <= 0xDFFF for char in text)
+    return _SURROGATE.search(text) is not None
 
 
 def _strict_json(source, where):
-    """Decode one JSON object from strict UTF-8 bytes, without any repair."""
+    """Decode one JSON object from strict UTF-8 bytes, without any repair.
+    A successful decode is kept in the input memo (_memoized)."""
+    return _memoized('json', source, lambda data: _decode_json(data, where))
+
+
+def _decode_json(source, where):
     try:
         text = bytes(source).decode('utf-8')
     except UnicodeDecodeError:
@@ -626,16 +723,14 @@ def _valid_key(key):
     letters, digits and _, each starting with a letter."""
     if type(key) is not str or not 3 <= len(key) <= _MAX_KEY_BYTES:
         return False
-    segments = key.split('.')
-    return len(segments) >= 2 and all(
-        segment and segment[0] in _KEY_START and all(char in _KEY_PART for char in segment)
-        for segment in segments)
+    return _KEY_SHAPE.fullmatch(key) is not None
 
 
-def _valid_text(text, limit=_MAX_TEXT_BYTES):
+def _valid_text(text, limit=_MAX_TEXT_BYTES, line_feed=False):
     """The runtime text contract on the exact UTF-8 bytes: 1 to limit bytes, a
-    byte outside ASCII whitespace, no byte 0-31, 127 or |. Other Unicode
-    scalars are allowed and nothing is normalized."""
+    byte outside ASCII whitespace, no byte 0-31, 127 or |. With line_feed
+    (the block contract) the line feed, byte 10, is the one control byte
+    allowed. Other Unicode scalars are allowed and nothing is normalized."""
     if type(text) is not str:
         return False
     try:
@@ -644,16 +739,24 @@ def _valid_text(text, limit=_MAX_TEXT_BYTES):
         return False
     if not 1 <= len(data) <= limit:
         return False
-    if all(byte in _ASCII_WHITESPACE for byte in data):
+    if _BLANK_BYTES.fullmatch(data) is not None:
         return False
-    return not any(byte < 32 or byte == 127 or byte == 124 for byte in data)
+    return (_BLOCK_FORBIDDEN if line_feed else _TEXT_FORBIDDEN).search(data) is None
 
 
-def _valid_template(text, fields):
-    """The text contract plus the named count-template grammar: each field as
-    {name} exactly once in any order, {{ and }} literal braces, every other
-    character (% included) literal. Nothing is rendered or substituted."""
-    if not _valid_text(text):
+def _valid_block(text):
+    """The runtime block contract (ValidBlock): the text contract with at most
+    _MAX_BLOCK_BYTES bytes and the line feed allowed; carriage return, every
+    other control byte and | stay refused."""
+    return _valid_text(text, _MAX_BLOCK_BYTES, line_feed=True)
+
+
+def _valid_template(text, fields, lines=False):
+    """The text contract (the block contract with lines) plus the named
+    template grammar: each field as {name} exactly once in any order, {{ and
+    }} literal braces, every other character (% included) literal. Nothing
+    is rendered or substituted."""
+    if not (_valid_block(text) if lines else _valid_text(text)):
         return False
     seen, index, length = set(), 0, len(text)
     while index < length:
@@ -679,12 +782,17 @@ def _valid_template(text, fields):
     return len(seen) == len(fields)
 
 
-def _check_value(text, key, path, formats=_V1_FORMATS):
-    schema = formats.get(key)
-    if schema is None:
+def _check_value(text, key, path, shapes=_V1_FORMATS):
+    """One English or pack value under its key's shape: static text (no
+    shape) and a block are invalid-text, a format or template that does not
+    compile under its fields is invalid-template."""
+    shape = shapes.get(key)
+    if shape is None:
         _require(_valid_text(text), 'invalid-text', path, key)
+    elif shape.kind == 'block':
+        _require(_valid_block(text), 'invalid-text', path, key)
     else:
-        _require(_valid_template(text, schema[0]), 'invalid-template', path, key)
+        _require(_valid_template(text, shape.fields, shape.lines), 'invalid-template', path, key)
 
 
 def _slots_match(placeholders, fields):
@@ -698,18 +806,95 @@ def _slots_match(placeholders, fields):
     return len(names) == len(fields) and set(names) == set(fields)
 
 
-def _check_english(english, formats=_V1_FORMATS):
+def _valid_field(name):
+    """A placeholder field name as the runtime admits it: a lower-case word
+    of at most _MAX_KEY_BYTES bytes."""
+    return (type(name) is str and len(name) <= _MAX_KEY_BYTES
+            and _FIELD_NAME.fullmatch(name) is not None)
+
+
+def _template_slots(placeholders):
+    """(fields, slots) of complete typed template placeholders, or None: a
+    nonempty list of objects with exactly name, type and meaning, each name a
+    distinct field name, each type a template slot type and each meaning a
+    nonblank string, in placeholder order."""
+    if type(placeholders) is not list or not placeholders:
+        return None
+    fields, slots = [], []
+    for slot in placeholders:
+        if type(slot) is not dict or set(slot) != {'name', 'type', 'meaning'}:
+            return None
+        name, kind, meaning = slot['name'], slot['type'], slot['meaning']
+        if not _valid_field(name) or name in fields or type(kind) is not str \
+                or kind not in _TEMPLATE_SLOTS or type(meaning) is not str or not meaning.strip():
+            return None
+        fields.append(name)
+        slots.append(kind)
+    return tuple(fields), tuple(slots)
+
+
+def _row_template_shape(row, path, key):
+    """The template shape a key-context row of kind template declares,
+    checked in full: complete typed placeholders, a whole resultLimitBytes
+    from 1 to _MAX_TEMPLATE_RESULT_BYTES and lines absent or exactly true."""
+    found = _template_slots(row.get('placeholders'))
+    _require(found is not None, 'context-placeholders', path + '.placeholders', key)
+    limit = row.get('resultLimitBytes')
+    _require(type(limit) is int and 1 <= limit <= _MAX_TEMPLATE_RESULT_BYTES,
+             'context-result-limit', path + '.resultLimitBytes', key)
+    _require('lines' not in row or row['lines'] is True, 'context-kind', path + '.lines', key)
+    return _Shape('template', found[0], found[1], limit, 'lines' in row)
+
+
+def _context_shapes(document, formats=_V1_FORMATS):
+    """The shapes the four-input API applies: the code-owned formats, plus the
+    block and template shape each key-context row of kind block or template
+    declares, checked in full here (the four-input API has no declarations;
+    the registry-bound API takes them from the declarations instead and
+    requires each row to equal its declaration). A row for a code-owned
+    format key never redefines it, and malformed containers or rows are left
+    to _check_context."""
+    rows = document.get('keys')
+    shapes = dict(formats)
+    for index, row in enumerate(rows if type(rows) is list else ()):
+        key = row.get('key') if type(row) is dict else None
+        if not _valid_key(key) or key in formats or key in shapes:
+            continue
+        path = 'keyContext.keys[%d]' % index
+        if row.get('kind') == 'block':
+            shapes[key] = _BLOCK
+        elif row.get('kind') == 'template':
+            shapes[key] = _row_template_shape(row, path, key)
+    return types.MappingProxyType(shapes)
+
+
+def _context_keys(document):
+    """The keys of the key-context rows (malformed rows are left to
+    _check_context)."""
+    rows = document.get('keys')
+    return frozenset(row['key'] for row in (rows if type(rows) is list else ())
+                     if type(row) is dict and type(row.get('key')) is str)
+
+
+def _check_english(english, shapes=_V1_FORMATS, known=None):
+    """The English base: within the runtime cap, valid keys and each value
+    under its key's shape. When known is given (the keys whose kind a
+    key-context row or declaration states), the value of any other key is
+    not judged here: such a key has no kind, and the key-set check that
+    follows (context-key-mismatch or undeclared-entry) always refuses it."""
     _require(len(english) > 0, 'english-empty', 'english')
     _require(len(english) <= _MAX_BASE_ENTRIES, 'english-too-many', 'english')
     for key, text in english.items():
         _require(_valid_key(key), 'invalid-key', 'english', key)
-        _check_value(text, key, 'english', formats)
+        if known is None or key in known:
+            _check_value(text, key, 'english', shapes)
 
 
-def _check_context(document, english, formats=_V1_FORMATS):
+def _check_context(document, english, shapes=_V1_FORMATS):
     """The key-context document: header, containers, the limits this stage
     uses, and one row per English key whose kind, English text, meaning,
-    placeholders and result limit agree with the source and runtime schema."""
+    placeholders, result limit and lines flag agree with the source and the
+    governing shapes (runtime schema)."""
     where = 'keyContext'
     _require(document.get('schema') == 'nexus.l10n.key_context', 'context-schema',
              where + '.schema')
@@ -755,9 +940,8 @@ def _check_context(document, english, formats=_V1_FORMATS):
     drift = sorted(set(english).symmetric_difference(rows))
     _require(not drift, 'context-key-mismatch', where + '.keys', drift[0] if drift else None)
     for key, (path, row) in rows.items():
-        schema = formats.get(key)
-        fields = None if schema is None else schema[0]
-        _require(row.get('kind') == ('text' if fields is None else 'format'),
+        shape = shapes.get(key)
+        _require(row.get('kind') == ('text' if shape is None else shape.kind),
                  'context-kind', path + '.kind', key)
         _require(type(row.get('english')) is str and row['english'] == english[key],
                  'context-english-mismatch', path + '.english', key)
@@ -766,15 +950,25 @@ def _check_context(document, english, formats=_V1_FORMATS):
                  path + '.meaning', key)
         placeholders = row.get('placeholders')
         _require(type(placeholders) is list, 'context-structure', path + '.placeholders', key)
-        if fields is None:
+        if shape is None or shape.kind == 'block':
             _require(placeholders == [], 'context-placeholders', path + '.placeholders', key)
             _require('resultLimitBytes' not in row, 'context-result-limit',
                      path + '.resultLimitBytes', key)
-        else:
-            _require(_slots_match(placeholders, fields), 'context-placeholders',
+            _require('lines' not in row, 'context-kind', path + '.lines', key)
+        elif shape.kind == 'format':
+            _require(_slots_match(placeholders, shape.fields), 'context-placeholders',
                      path + '.placeholders', key)
-            _require(_is_int(row.get('resultLimitBytes'), schema[1]),
+            _require(_is_int(row.get('resultLimitBytes'), shape.limit),
                      'context-result-limit', path + '.resultLimitBytes', key)
+            _require('lines' not in row, 'context-kind', path + '.lines', key)
+        else:
+            _require(_template_slots(placeholders) == (shape.fields, shape.slots),
+                     'context-placeholders', path + '.placeholders', key)
+            _require(_is_int(row.get('resultLimitBytes'), shape.limit),
+                     'context-result-limit', path + '.resultLimitBytes', key)
+            _require(('lines' in row) == shape.lines
+                     and ('lines' not in row or row['lines'] is True),
+                     'context-kind', path + '.lines', key)
 
 
 def _check_release(document):
@@ -842,11 +1036,12 @@ def _check_pack_shape(pack_id, pack):
     return path + '.entries'
 
 
-def _check_entry(key, text, english, path, formats):
-    """One pack entry: a valid key of the English base with valid text."""
+def _check_entry(key, text, english, path, shapes):
+    """One pack entry: a valid key of the English base with a valid value
+    under that key's shape."""
     _require(_valid_key(key), 'invalid-key', path, key)
     _require(key in english, 'orphan-entry', path, key)
-    _check_value(text, key, path, formats)
+    _check_value(text, key, path, shapes)
 
 
 def _check_pack_autonym(pack_id, pack, products):
@@ -855,7 +1050,7 @@ def _check_pack_autonym(pack_id, pack, products):
              pack_id)
 
 
-def _check_packs(packs, english, products, formats=_V1_FORMATS):
+def _check_packs(packs, english, products, shapes=_V1_FORMATS):
     """The packs: within the runtime pack limit, no English pack, exactly the
     selected optional products, each autonym and entry inside the contract
     and each autonym equal to the release metadata. A missing entry is valid
@@ -864,10 +1059,11 @@ def _check_packs(packs, english, products, formats=_V1_FORMATS):
     for pack_id, pack in packs.items():
         path = _check_pack_shape(pack_id, pack)
         for key, text in pack['entries'].items():
-            _check_entry(key, text, english, path, formats)
+            _check_entry(key, text, english, path, shapes)
         _check_pack_autonym(pack_id, pack, products)
 
 
+@_collector_paused
 def validate_catalog_data(english_source: bytes, packs_source: bytes,
                           key_context_json: bytes, release_json: bytes) -> dict:
     """Validate the exact bytes of data/LocalizationEnglish.lua,
@@ -880,21 +1076,30 @@ def validate_catalog_data(english_source: bytes, packs_source: bytes,
     parsed by parse_english and parse_packs, whose CatalogSyntaxError codes
     are unchanged. Each JSON document must be one object in strict UTF-8,
     without a duplicate member, NaN, Infinity, an overflowing number or a lone
-    surrogate. A semantic failure raises CatalogValidationError. Missing
-    translated entries are valid partial data; nothing is rendered, and this
-    is not a coverage, review or evidence check."""
+    surrogate. A semantic failure raises CatalogValidationError. Without a
+    declaration input, the kind of each key is the code-owned charge format
+    or the block or template its key-context row declares (_context_shapes),
+    else static text. Missing translated entries are valid partial data;
+    nothing is rendered, and this is not a coverage, review or evidence
+    check."""
     for name, value in (('english_source', english_source), ('packs_source', packs_source),
                         ('key_context_json', key_context_json), ('release_json', release_json)):
         if not isinstance(value, (bytes, bytearray)):
             raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
+    return _memoized('catalog', (english_source, packs_source, key_context_json, release_json),
+                     lambda sources: _validate_catalog(*sources))
+
+
+def _validate_catalog(english_source, packs_source, key_context_json, release_json):
     english = parse_english(english_source)
     packs = parse_packs(packs_source)
     key_context = _strict_json(key_context_json, 'keyContext')
     release = _strict_json(release_json, 'release')
-    _check_english(english)
-    _check_context(key_context, english)
+    shapes = _context_shapes(key_context)
+    _check_english(english, shapes, _context_keys(key_context) | set(shapes))
+    _check_context(key_context, english, shapes)
     products = _check_release(release)
-    _check_packs(packs, english, products)
+    _check_packs(packs, english, products, shapes)
     return {'english': english, 'packs': packs, 'keyContext': key_context, 'release': release}
 
 
@@ -1186,6 +1391,7 @@ def _describe(row):
     return '; '.join('%s=%s' % (name, row[name]) for name in sorted(row))
 
 
+@_collector_paused
 def catalog_report(english_source: bytes, packs_source: bytes, key_context_json: bytes,
                    release_json: bytes) -> dict:
     """Return a deterministic coverage and evidence report dict for the exact
@@ -1799,25 +2005,31 @@ def _parse_literal_table(source):
 # in the restricted literal-table grammar of _parse_literal_table above, so
 # an expression, call, variable, operator, computed key, semicolon or second
 # statement is a CatalogSyntaxError with an existing CODES code and a
-# repeated key is duplicate-key. Each declaration must be exactly
-# {kind = "text"} or exactly {kind = "format", fields = {"name", ...},
-# slot = "count", resultLimit = 254}: one or more distinct lower-case field
-# names, the count slot type and the runtime's MAX_TEXT_BYTES - 2 limit. Any
-# other declaration, key or count is a CatalogRegistryError (REGISTRY_CODES).
-# The runtime leaves such a declaration out at load; offline it fails.
+# repeated key is duplicate-key. Each declaration must be one the runtime
+# admits (FormatSchema, TemplateSchema): exactly {kind = "text"}, exactly
+# {kind = "block"}, exactly {kind = "format", fields = {"name", ...},
+# slot = "count", resultLimit = 254} (the runtime's MAX_TEXT_BYTES - 2), or
+# exactly {kind = "template", fields = {"name", ...}, slots = {"count" or
+# "text", ...}, resultLimit = N} with optionally lines = true: one or more
+# distinct lower-case field names, a slot type per field and N a whole number
+# from 1 to MAX_TEMPLATE_RESULT_BYTES (2048). At most MAX_BASE_ENTRIES (4096)
+# declarations. Any other declaration, key or count is a CatalogRegistryError
+# (REGISTRY_CODES). The runtime leaves such a declaration out at load (or,
+# above the cap, every declaration); offline it fails.
 #
 # validate_registry_catalog_data and registry_catalog_report are the
 # five-input registry-bound API and report schemaVersion 2. They take the
 # exact bytes of the four catalog inputs plus core/Localization.lua, and the
-# parsed declarations, never _FORMAT_FIELDS or _FORMAT_LIMITS, govern the
-# English, pack and key-context checks. They add: every English key is
-# declared (undeclared-entry), every declared key has English
-# (english-incomplete), and each key-context row's kind, placeholder names in
-# order with their type, and result limit equal its declaration
-# (context-declaration-mismatch). validate_catalog_data and catalog_report
-# above keep four inputs, report schemaVersion 1 and their scoped label; they
-# are not registry validation. Nothing here reads a file: main() passes the
-# sixth fixed input only when --registry is given.
+# shapes of the parsed declarations, never _FORMAT_FIELDS, _FORMAT_LIMITS or
+# the key-context rows, govern the English, pack and key-context checks. They
+# add: every English key is declared (undeclared-entry), every declared key
+# has English (english-incomplete), and each key-context row's kind,
+# placeholder names in order with their type, result limit and lines flag
+# equal its declaration (context-declaration-mismatch).
+# validate_catalog_data and catalog_report above keep four inputs, report
+# schemaVersion 1 and their scoped label; they are not registry validation.
+# Nothing here reads a file: main() passes the sixth fixed input only when
+# --registry is given.
 
 REGISTRY_CODES = (
     'registry-marker', 'registry-structure', 'registry-too-many', 'registry-key',
@@ -1829,16 +2041,17 @@ REGISTRY_REPORT_SCHEMA_VERSION = 2
 REGISTRY_SCOPE = (
     'Registry-bound scoped draft: the English base, the packs and the key-context rows are '
     'checked against the declarations of core/Localization.lua, parsed without executing Lua, '
-    'for the currently declared static keys and the single charge-count template; not whole '
-    '#147. Plural variants, dynamic-key coverage per family, runtime load/fallback parity, '
-    'per-pack translator provenance/rights and approved terminology validation are not '
-    'implemented by this component.')
+    'for the currently declared text, block, format and template keys within the runtime '
+    'entry cap; not whole #147. Plural variants, dynamic-key coverage per family, runtime '
+    'load/fallback parity, per-pack translator provenance/rights and approved terminology '
+    'validation are not implemented by this component.')
 _REGISTRY_TOKEN = 'NEXUS-L10N-REGISTRY'
 _REGISTRY_OPEN = '-- NEXUS-L10N-REGISTRY BEGIN'
 _REGISTRY_CLOSE = '-- NEXUS-L10N-REGISTRY END'
 _REGISTRY_TABLE = 'DECLARATIONS'
 _TEXT_DECLARATION = frozenset(('kind',))
 _FORMAT_DECLARATION = frozenset(('kind', 'fields', 'slot', 'resultLimit'))
+_TEMPLATE_DECLARATION = frozenset(('kind', 'fields', 'slots', 'resultLimit'))
 _FIELD_NAME = re.compile('[a-z][a-z0-9_]*')
 _REGISTRY_INPUTS = _REPORT_INPUTS + (('localization', _AUTHORITY),)
 _NONEXECUTION = 'declarations are parsed from the supplied bytes; no Lua is executed'
@@ -1875,27 +2088,44 @@ def _declaration_block(text):
 
 
 def _declaration(key, value):
-    """One checked declaration as {'kind': 'text'} or {'kind': 'format',
-    'fields': (names...), 'slot': 'count', 'resultLimit': 254}."""
+    """One checked declaration as {'kind': 'text'}, {'kind': 'block'},
+    {'kind': 'format', 'fields': (names...), 'slot': 'count', 'resultLimit':
+    254} or {'kind': 'template', 'fields': (names...), 'slots': (types...),
+    'resultLimit': N}, the last with 'lines': True when declared."""
     path = '%s[%r]' % (_REGISTRY_TABLE, key)
     _registry(_valid_key(key), 'registry-key', path, key)
     _registry(type(value) is dict and value, 'registry-structure', path, key)
     kind = value.get('kind')
-    _registry(kind in ('text', 'format'), 'registry-kind', path + '.kind', key)
-    if kind == 'text':
+    _registry(type(kind) is str and kind in _KINDS, 'registry-kind', path + '.kind', key)
+    if kind in ('text', 'block'):
         _registry(set(value) == _TEXT_DECLARATION, 'registry-field', path, key)
-        return {'kind': 'text'}
-    _registry(set(value) == _FORMAT_DECLARATION, 'registry-field', path, key)
+        return {'kind': kind}
+    if kind == 'format':
+        _registry(set(value) == _FORMAT_DECLARATION, 'registry-field', path, key)
+    else:
+        _registry(set(value) - {'lines'} == _TEMPLATE_DECLARATION
+                  and value.get('lines', True) is True, 'registry-field', path, key)
     fields = value['fields']
     _registry(type(fields) is list and fields and len(set(map(repr, fields))) == len(fields)
-              and all(type(name) is str and len(name) <= _MAX_KEY_BYTES
-                      and _FIELD_NAME.fullmatch(name) is not None for name in fields),
+              and all(_valid_field(name) for name in fields),
               'registry-placeholders', path + '.fields', key)
-    _registry(value['slot'] == _SLOT_TYPE, 'registry-slot', path + '.slot', key)
-    _registry(_is_int(value['resultLimit'], _MAX_TEXT_BYTES - 2), 'registry-limit',
-              path + '.resultLimit', key)
-    return {'kind': 'format', 'fields': tuple(fields), 'slot': _SLOT_TYPE,
-            'resultLimit': value['resultLimit']}
+    if kind == 'format':
+        _registry(value['slot'] == _SLOT_TYPE, 'registry-slot', path + '.slot', key)
+        _registry(_is_int(value['resultLimit'], _MAX_TEXT_BYTES - 2), 'registry-limit',
+                  path + '.resultLimit', key)
+        return {'kind': 'format', 'fields': tuple(fields), 'slot': _SLOT_TYPE,
+                'resultLimit': value['resultLimit']}
+    slots, limit = value['slots'], value['resultLimit']
+    _registry(type(slots) is list and len(slots) == len(fields)
+              and all(type(slot) is str and slot in _TEMPLATE_SLOTS for slot in slots),
+              'registry-slot', path + '.slots', key)
+    _registry(type(limit) is int and 1 <= limit <= _MAX_TEMPLATE_RESULT_BYTES,
+              'registry-limit', path + '.resultLimit', key)
+    declaration = {'kind': 'template', 'fields': tuple(fields), 'slots': tuple(slots),
+                   'resultLimit': limit}
+    if 'lines' in value:
+        declaration['lines'] = True
+    return declaration
 
 
 def parse_registry_declarations(source: bytes) -> dict:
@@ -1906,6 +2136,10 @@ def parse_registry_declarations(source: bytes) -> dict:
     CatalogRegistryError (REGISTRY_CODES)."""
     if not isinstance(source, (bytes, bytearray)):
         raise TypeError('source must be bytes, not %s' % type(source).__name__)
+    return _memoized('declarations', source, _parse_declarations)
+
+
+def _parse_declarations(source):
     try:
         text = bytes(source).decode('utf-8')
     except UnicodeDecodeError:
@@ -1923,25 +2157,41 @@ def parse_registry_declarations(source: bytes) -> dict:
     return {key: _declaration(key, value) for key, value in table.items()}
 
 
-def _declared_formats(declarations):
-    return types.MappingProxyType({key: (value['fields'], value['resultLimit'])
-                                   for key, value in declarations.items()
-                                   if value['kind'] == 'format'})
+def _declared_shapes(declarations):
+    """The shape of each declared key that is not static text."""
+    shapes = {}
+    for key, value in declarations.items():
+        if value['kind'] == 'block':
+            shapes[key] = _BLOCK
+        elif value['kind'] == 'format':
+            shapes[key] = _Shape('format', value['fields'],
+                                 (value['slot'],) * len(value['fields']),
+                                 value['resultLimit'], False)
+        elif value['kind'] == 'template':
+            shapes[key] = _Shape('template', value['fields'], value['slots'],
+                                 value['resultLimit'], value.get('lines', False))
+    return types.MappingProxyType(shapes)
 
 
 def _context_shape(declaration):
-    """The key-context kind, placeholders and result limit a declaration
-    requires (None: no resultLimitBytes member)."""
-    if declaration['kind'] == 'text':
-        return 'text', [], None
-    return ('format', [{'name': name, 'type': declaration['slot']}
-                       for name in declaration['fields']], declaration['resultLimit'])
+    """The key-context kind, placeholder names and slot types in order,
+    result limit and lines flag a declaration requires (None: no
+    resultLimitBytes member; False: no lines member)."""
+    kind = declaration['kind']
+    if kind in ('text', 'block'):
+        return kind, [], None, False
+    fields = declaration['fields']
+    slots = declaration['slots'] if kind == 'template' else (declaration['slot'],) * len(fields)
+    return (kind, [{'name': name, 'type': slot} for name, slot in zip(fields, slots)],
+            declaration['resultLimit'], declaration.get('lines', False))
 
 
 def _check_registry(declarations, english, context):
     """Complete English against the declarations, then each key-context row
-    of a declared key against its declaration. Rows of other shapes are left
-    to _check_context."""
+    of a declared key against its declaration. A template row's placeholders
+    are compared by name and type in order (each also carries its meaning,
+    which _check_context requires); rows of other shapes are left to
+    _check_context."""
     for key in english:
         _registry(key in declarations, 'undeclared-entry', 'english', key)
     for key in declarations:
@@ -1951,13 +2201,19 @@ def _check_registry(declarations, english, context):
         key = row.get('key') if type(row) is dict else None
         if type(key) is not str or key not in declarations:
             continue
-        kind, placeholders, limit = _context_shape(declarations[key])
-        found = row.get('resultLimitBytes')
-        limit_ok = ('resultLimitBytes' not in row) if limit is None else _is_int(found, limit)
-        _registry(row.get('kind') == kind and row.get('placeholders') == placeholders
-                  and limit_ok, 'context-declaration-mismatch', 'keyContext.keys[%d]' % index, key)
+        kind, placeholders, limit, lines = _context_shape(declarations[key])
+        found = row.get('placeholders')
+        if kind == 'template' and type(found) is list:
+            found = [{'name': slot.get('name'), 'type': slot.get('type')}
+                     if type(slot) is dict else slot for slot in found]
+        limit_found = row.get('resultLimitBytes')
+        limit_ok = ('resultLimitBytes' not in row) if limit is None else _is_int(limit_found, limit)
+        lines_ok = row.get('lines') is True if lines else 'lines' not in row
+        _registry(row.get('kind') == kind and found == placeholders and limit_ok and lines_ok,
+                  'context-declaration-mismatch', 'keyContext.keys[%d]' % index, key)
 
 
+@_collector_paused
 def validate_registry_catalog_data(english_source: bytes, packs_source: bytes,
                                   key_context_json: bytes, release_json: bytes,
                                   localization_source: bytes) -> dict:
@@ -1972,21 +2228,29 @@ def validate_registry_catalog_data(english_source: bytes, packs_source: bytes,
                         ('localization_source', localization_source)):
         if not isinstance(value, (bytes, bytearray)):
             raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
+    return _memoized('registry', (english_source, packs_source, key_context_json, release_json,
+                                  localization_source),
+                     lambda sources: _validate_registry(*sources))
+
+
+def _validate_registry(english_source, packs_source, key_context_json, release_json,
+                       localization_source):
     english = parse_english(english_source)
     packs = parse_packs(packs_source)
     key_context = _strict_json(key_context_json, 'keyContext')
     release = _strict_json(release_json, 'release')
     declarations = parse_registry_declarations(localization_source)
-    formats = _declared_formats(declarations)
-    _check_english(english, formats)
+    shapes = _declared_shapes(declarations)
+    _check_english(english, shapes, declarations)
     _check_registry(declarations, english, key_context)
-    _check_context(key_context, english, formats)
+    _check_context(key_context, english, shapes)
     products = _check_release(release)
-    _check_packs(packs, english, products, formats)
+    _check_packs(packs, english, products, shapes)
     return {'english': english, 'packs': packs, 'keyContext': key_context, 'release': release,
             'declarations': declarations}
 
 
+@_collector_paused
 def registry_catalog_report(english_source: bytes, packs_source: bytes,
                             key_context_json: bytes, release_json: bytes,
                             localization_source: bytes) -> dict:
@@ -2007,10 +2271,12 @@ def _registry_section(validated):
     """The registry section of report schemaVersion 2."""
     rows = []
     for key, declaration in validated['declarations'].items():
-        kind, placeholders, limit = _context_shape(declaration)
+        kind, placeholders, limit, lines = _context_shape(declaration)
         row = {'key': key, 'kind': kind}
         if limit is not None:
             row.update({'placeholders': placeholders, 'resultLimitBytes': limit})
+        if lines:
+            row['lines'] = True
         rows.append(row)
     return {
         'source': _AUTHORITY,
@@ -2020,8 +2286,8 @@ def _registry_section(validated):
         'keyContextRows': len(validated['keyContext']['keys']),
         'declarations': rows,
         'rule': ('the declared keys, the English keys and the key-context rows are one set; '
-                 'kind, placeholder names in order with their type, and result limit come '
-                 'from the declarations'),
+                 'kind, placeholder names in order with their type, result limit and lines '
+                 'come from the declarations'),
         'nonexecution': _NONEXECUTION,
     }
 
@@ -2115,17 +2381,17 @@ def _check_retired(context, declarations):
 
 def _trusted_catalog(sources):
     """Every strict check except the pack entries, in the strict order, plus
-    the retired-key list. Returns (validated, retired keys, formats)."""
+    the retired-key list. Returns (validated, retired keys, shapes)."""
     english_source, packs_source, key_context_json, release_json, localization_source = sources
     english = parse_english(english_source)
     packs = parse_packs(packs_source)
     key_context = _strict_json(key_context_json, 'keyContext')
     release = _strict_json(release_json, 'release')
     declarations = parse_registry_declarations(localization_source)
-    formats = _declared_formats(declarations)
-    _check_english(english, formats)
+    shapes = _declared_shapes(declarations)
+    _check_english(english, shapes, declarations)
     _check_registry(declarations, english, key_context)
-    _check_context(key_context, english, formats)
+    _check_context(key_context, english, shapes)
     products = _check_release(release)
     retired = _check_retired(key_context, declarations)
     _check_pack_set(packs, products)
@@ -2134,19 +2400,19 @@ def _trusted_catalog(sources):
         _check_pack_autonym(pack_id, pack, products)
     validated = {'english': english, 'packs': packs, 'keyContext': key_context,
                  'release': release, 'declarations': declarations}
-    return validated, retired, formats
+    return validated, retired, shapes
 
 
-def _entry_code(key, text, english, path, formats):
+def _entry_code(key, text, english, path, shapes):
     """The strict code of one pack entry, or None when it is valid."""
     try:
-        _check_entry(key, text, english, path, formats)
+        _check_entry(key, text, english, path, shapes)
     except CatalogValidationError as error:
         return error.code
     return None
 
 
-def _entry_problems(validated, retired, formats):
+def _entry_problems(validated, retired, shapes):
     """Every entry problem of the optional packs in release order, keys
     sorted, and {product ID: (invalid keys, obsolete keys)}."""
     english, packs = validated['english'], validated['packs']
@@ -2159,7 +2425,7 @@ def _entry_problems(validated, retired, formats):
         path = 'packs[%r].entries' % (product_id,)
         invalid, obsolete = set(), []
         for key in sorted(entries):
-            code = _entry_code(key, entries[key], english, path, formats)
+            code = _entry_code(key, entries[key], english, path, shapes)
             if code is None:
                 continue
             if code in _INVALID_ENTRY_CODES:
@@ -2176,6 +2442,7 @@ def _entry_problems(validated, retired, formats):
     return rows, problems
 
 
+@_collector_paused
 def registry_catalog_diagnostics(english_source: bytes, packs_source: bytes,
                                  key_context_json: bytes, release_json: bytes,
                                  localization_source: bytes) -> dict:
@@ -2198,9 +2465,9 @@ def registry_catalog_diagnostics(english_source: bytes, packs_source: bytes,
         strict.update(_error_fields(error))
     retired, rows, coverage, boundary, stage = None, [], None, None, 'structure'
     try:
-        validated, retired_keys, formats = _trusted_catalog(sources)
+        validated, retired_keys, shapes = _trusted_catalog(sources)
         retired = retired_keys
-        rows, problems = _entry_problems(validated, frozenset(retired_keys), formats)
+        rows, problems = _entry_problems(validated, frozenset(retired_keys), shapes)
         stage = 'evidence'
         coverage = _coverage_report(validated, sources, _REGISTRY_INPUTS,
                                     REGISTRY_REPORT_SCHEMA_VERSION, REGISTRY_SCOPE, problems)
@@ -2491,6 +2758,7 @@ def _provenance_rows(records, optional_ids, observed):
     return rows, problems
 
 
+@_collector_paused
 def pack_provenance_diagnostics(english_source: bytes, packs_source: bytes,
                                 key_context_json: bytes, release_json: bytes,
                                 localization_source: bytes) -> dict:
@@ -2598,7 +2866,8 @@ def _cli_provenance(receipt, toc, require_complete):
 # are resolved lexically. A receiver is the global Nexus followed by
 # .Localization, directly or through a local alias that is never assigned
 # again; only Text, Resolve and Format are consumer methods, each bound to the
-# declared kind (text, text, format). A key is bound by:
+# declared kind class (text or block, text or block, format or template). A
+# key is bound by:
 #
 # - direct-call: a consumer method called on a receiver with a literal key;
 # - wrapper-call: a literal key passed to a local function whose parameter
@@ -2679,6 +2948,12 @@ _RECORD_FIELDS_S8 = frozenset(('path', 'sha256', 'byteLength', 'data'))
 _PATH_SEGMENT = re.compile('[A-Za-z0-9_][A-Za-z0-9_.-]*')
 _LOCALIZATION = 'Nexus.Localization'
 _KEY_METHODS = types.MappingProxyType({'Text': 'text', 'Resolve': 'text', 'Format': 'format'})
+# The consumer method class of each declared kind: the runtime answers a
+# block exactly as static text (Text, Resolve) and a template exactly as a
+# format (Format); the other method is wrong_key_kind or
+# format_requires_arguments there, so it is binding-kind here.
+_METHOD_KIND = types.MappingProxyType({'text': 'text', 'block': 'text', 'format': 'format',
+                                       'template': 'format'})
 _QUERY_METHODS = frozenset(('Has', 'Kind'))
 _SEAM_METHODS = frozenset(_KEY_METHODS) | _QUERY_METHODS
 _DIRECT, _MAPPED, _UNBOUND = BINDING_CLASSES
@@ -4799,6 +5074,7 @@ class _Linker:
         return proofs
 
 
+@_collector_paused
 def consumer_binding_report(english_source: bytes, packs_source: bytes, key_context_json: bytes,
                             release_json: bytes, localization_source: bytes, toc_records,
                             source_records) -> dict:
@@ -4856,7 +5132,7 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
                                                    method=method)))
             elif kind is None:
                 continue
-            elif declaration['kind'] != kind:
+            elif _METHOD_KIND[declaration['kind']] != kind:
                 problems.append(located(unit, dict(where, code='binding-kind', key=arg.value,
                                                    method=method,
                                                    declaredKind=declaration['kind'])))
@@ -4914,7 +5190,7 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
                 if declaration is None:
                     problems.append(located(unit, dict(where, code='binding-orphan',
                                                        key=value.value, method=info['method'])))
-                elif declaration['kind'] != info['kind']:
+                elif _METHOD_KIND[declaration['kind']] != info['kind']:
                     problems.append(located(unit, dict(where, code='binding-kind',
                                                        key=value.value, method=info['method'],
                                                        declaredKind=declaration['kind'])))

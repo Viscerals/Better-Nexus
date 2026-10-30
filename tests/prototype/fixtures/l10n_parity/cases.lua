@@ -36,8 +36,12 @@
 -- 4096/4097 boundaries, derived in memory from a committed case by adding
 -- generated entries (parity.gNNNN = "Generated NNNN") until the file holds
 -- `entries` entries, and optionally declaring extra keys without English.
--- The offline verdicts stay those of the scoped pilot API of
--- tools/l10n_catalog.py, a separate preserved contract (cap 64).
+-- The offline side (tools/tests/test_l10n_parity.py) applies the same caps:
+-- tools/l10n_catalog.py checks the current runtime cap, each pilot case keeps
+-- its dated offline verdict under the pilot cap (the real tool with only its
+-- one entry-cap line set to runtimeCap.pilot in memory), and each control
+-- records its own current-cap offline verdict (a control that declares extra
+-- keys is judged by the registry-bound parser over its derived block).
 -- base.undeclared and base.missingDeclared are the R-union load facts of
 -- that block. The two sides keep their own category
 -- names: the mapping, not an equal name, is the parity claim (an invalid
@@ -97,6 +101,7 @@ return {
                 from = "p03_english_65",
                 file = "english",
                 entries = 4096,
+                offline = {code = "valid"},
                 runtime = {
                     base = {present = true, accepted = 4096, rejected = 0, oversized = false, formatted = 0, undeclared = 0, missingDeclared = 0},
                     packs = {present = true, adopted = 0, refused = 0, rows = {}},
@@ -112,6 +117,7 @@ return {
                 from = "p03_english_65",
                 file = "english",
                 entries = 4097,
+                offline = {code = "english-too-many"},
                 runtime = {
                     base = {present = true, accepted = 0, rejected = 4097, oversized = true, formatted = 0, undeclared = 0, missingDeclared = 4096},
                     packs = {present = true, adopted = 0, refused = 0, rows = {}},
@@ -134,6 +140,7 @@ return {
                 file = "english",
                 entries = 4096,
                 extraDeclarations = {"parity.zz_declared_only"},
+                offline = {code = "registry-too-many"},
                 runtime = {
                     base = {present = true, accepted = 0, rejected = 4096, oversized = false, formatted = 0, undeclared = 4096, missingDeclared = 0},
                     packs = {present = true, adopted = 0, refused = 0, rows = {}},
@@ -155,6 +162,7 @@ return {
                 from = "p06_pack_65",
                 file = "packs",
                 entries = 4096,
+                offline = {code = "orphan-entry", key = "parity.k01"},
                 runtime = {
                     base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                     packs = {
@@ -177,6 +185,7 @@ return {
                 from = "p06_pack_65",
                 file = "packs",
                 entries = 4097,
+                offline = {code = "pack-too-many-entries", key = "qaQA"},
                 runtime = {
                     base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                     packs = {present = true, adopted = 0, refused = 1, rows = {}},

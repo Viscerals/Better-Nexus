@@ -78,6 +78,40 @@ CURRENT_KEYS = (
 )
 CHARGE_DECLARATION = {"kind": "format", "fields": CHARGE_FIELDS, "slot": "count",
                       "resultLimit": 254}
+# Full visible-UI scope (#143-#148): the reviewed catalog declares 4078 keys
+# (the runtime cap is 4096), the dated 28 above first and unchanged. The full
+# key order and each row's kind, slot types, limit and lines flag are read
+# from KEY_CONTEXT.json with the json module, apart from the tool under test.
+CURRENT_FULL_UI_KEYS = 4078
+RUNTIME_CAP = 4096
+
+
+def full_context_rows():
+    """The KEY_CONTEXT.json rows of the current source, in order; the dated
+    28 must be first."""
+    rows = json.loads((ROOT / INPUTS[2]).read_text(encoding="utf-8"))["keys"]
+    if [row["key"] for row in rows[:len(CURRENT_KEYS)]] != list(CURRENT_KEYS) \
+            or len(rows) != CURRENT_FULL_UI_KEYS:
+        raise AssertionError("the context rows are not the dated 28 then the full catalog")
+    return rows
+
+
+def full_keys():
+    return [row["key"] for row in full_context_rows()]
+
+
+def row_edit(data, key, old, new):
+    """KEY_CONTEXT bytes (LF) with old replaced by new exactly once inside the
+    row of key, every other byte kept."""
+    anchor = b'"key": "%s",' % key.encode()
+    if data.count(anchor) != 1:
+        raise AssertionError("expected exactly one row %s" % key)
+    start = data.index(anchor)
+    end = data.index(b"\n    }", start)
+    row = data[start:end]
+    if row.count(old) != 1:
+        raise AssertionError("expected exactly one %r in row %s" % (old, key))
+    return data[:start] + row.replace(old, new) + data[end:]
 EXPECTED_REGISTRY_CODES = (
     "registry-marker", "registry-structure", "registry-too-many", "registry-key",
     "registry-kind", "registry-field", "registry-placeholders", "registry-slot",
@@ -178,18 +212,34 @@ class RegistryParserTests(unittest.TestCase):
                          ["source"])
 
     def test_actual_block_declares_exactly_the_28_current_keys(self):
+        # Full visible-UI scope: the dated 28 stay first and unchanged; every
+        # declaration equals its independently read context row.
         declarations = self.parse(self.source)
-        self.assertEqual(list(declarations), list(CURRENT_KEYS))
-        self.assertEqual(len(declarations), 28)
+        self.assertEqual(list(declarations)[:len(CURRENT_KEYS)], list(CURRENT_KEYS))
+        self.assertEqual(list(declarations), full_keys())
+        self.assertEqual(len(declarations), CURRENT_FULL_UI_KEYS)
         self.assertEqual(declarations[CHARGE], CHARGE_DECLARATION)
         for key in CURRENT_KEYS:
             if key != CHARGE:
                 self.assertEqual(declarations[key], {"kind": "text"}, key)
+        for row in full_context_rows():
+            with self.subTest(key=row["key"]):
+                declaration = declarations[row["key"]]
+                self.assertEqual(declaration["kind"], row["kind"])
+                if row["kind"] == "template":
+                    self.assertEqual(declaration, dict(
+                        {"kind": "template",
+                         "fields": tuple(slot["name"] for slot in row["placeholders"]),
+                         "slots": tuple(slot["type"] for slot in row["placeholders"]),
+                         "resultLimit": row["resultLimitBytes"]},
+                        **({"lines": True} if row.get("lines") else {})))
+                elif row["kind"] in ("text", "block"):
+                    self.assertEqual(declaration, {"kind": row["kind"]})
         english = self.catalog.parse_english((ROOT / INPUTS[0]).read_bytes())
         context = json.loads((ROOT / INPUTS[2]).read_text(encoding="utf-8"))
         self.assertEqual(set(declarations), set(english))
         self.assertEqual(set(declarations), {row["key"] for row in context["keys"]})
-        self.assertEqual(len(context["keys"]), 28)
+        self.assertEqual(len(context["keys"]), CURRENT_FULL_UI_KEYS)
 
     def test_actual_marker_lines_are_the_s1_contract(self):
         lines = self.source.replace(b"\r\n", b"\n").split(b"\n")
@@ -325,10 +375,55 @@ class RegistryParserTests(unittest.TestCase):
         self.assertEqual(self.parse(block(charge % good)), {CHARGE: CHARGE_DECLARATION})
 
     def test_declaration_count_is_bounded_by_the_base_limit(self):
-        items = ['["reason.k%02d"] = {kind = "text"},' % index for index in range(64)]
-        self.assertEqual(len(self.parse(block(*items))), 64)
-        items.append('["reason.k64"] = {kind = "text"},')
+        # The runtime cap (MAX_BASE_ENTRIES, 64 for the pilot cohort): the cap
+        # is accepted and one more declaration is refused.
+        items = ['["reason.k%04d"] = {kind = "text"},' % index for index in range(RUNTIME_CAP)]
+        self.assertEqual(len(self.parse(block(*items))), RUNTIME_CAP)
+        items.append('["reason.k%04d"] = {kind = "text"},' % RUNTIME_CAP)
         self.refuse(block(*items), self.catalog.CatalogRegistryError, "registry-too-many")
+
+    def test_block_and_template_declarations_follow_the_runtime_schema(self):
+        # Full visible-UI kinds, as TemplateSchema admits them (count or text
+        # slots, a whole limit from 1 to 2048, lines absent or true).
+        error = self.catalog.CatalogRegistryError
+        template = ('["reason.alpha"] = {kind = "template", fields = %s, slots = %s,'
+                    ' resultLimit = %s%s},')
+        good = ('{"name", "count"}', '{"text", "count"}', "300", "")
+        self.assertEqual(self.parse(block('["reason.alpha"] = {kind = "block"},')),
+                         {"reason.alpha": {"kind": "block"}})
+        self.assertEqual(self.parse(block(template % good)), {"reason.alpha": {
+            "kind": "template", "fields": ("name", "count"), "slots": ("text", "count"),
+            "resultLimit": 300}})
+        self.assertEqual(self.parse(block(template % (good[:3] + (", lines = true",)))),
+                         {"reason.alpha": {"kind": "template", "fields": ("name", "count"),
+                                           "slots": ("text", "count"), "resultLimit": 300,
+                                           "lines": True}})
+        self.assertEqual(self.parse(block(template % (good[:2] + ("2048", ""))))
+                         ["reason.alpha"]["resultLimit"], 2048)
+        cases = (
+            ('["reason.alpha"] = {kind = "block", lines = true},', "registry-field"),
+            (template % (good[:3] + (", lines = false",)), "registry-field"),
+            (template % (good[:3] + (', lines = "true"',)), "registry-field"),
+            (template % (good[:3] + (", slot = \"count\"",)), "registry-field"),
+            ('["reason.alpha"] = {kind = "template", fields = {"name"}, resultLimit = 9},',
+             "registry-field"),
+            (template % ("{}", "{}", "300", ""), "registry-placeholders"),
+            (template % ('{"name", "name"}', good[1], "300", ""), "registry-placeholders"),
+            (template % ('{"Name"}', '{"text"}', "300", ""), "registry-placeholders"),
+            (template % (good[0], '{"text"}', "300", ""), "registry-slot"),
+            (template % (good[0], '{"text", "number"}', "300", ""), "registry-slot"),
+            (template % (good[0], '{"text", "count", "text"}', "300", ""), "registry-slot"),
+            (template % (good[0], '"text"', "300", ""), "registry-slot"),
+            (template % (good[0], good[1], "0", ""), "registry-limit"),
+            (template % (good[0], good[1], "2049", ""), "registry-limit"),
+            (template % (good[0], good[1], '"300"', ""), "registry-limit"),
+            (template % (good[0], good[1], "true", ""), "registry-limit"),
+            ('["reason.alpha"] = {kind = "Template"},', "registry-kind"),
+        )
+        for item, code in cases:
+            with self.subTest(item=item):
+                raised = self.refuse(block(item), error, code)
+                self.assertIn(raised.code, self.catalog.REGISTRY_CODES)
 
     def test_comments_inside_the_block_are_whitespace(self):
         source = block("-- a comment", TEXT_ITEM, "--[[ long ]]", CHARGE_ITEM)
@@ -373,8 +468,9 @@ class RegistryApiTests(unittest.TestCase):
         result = self.catalog.validate_registry_catalog_data(*self.inputs)
         self.assertEqual(sorted(result), ["declarations", "english", "keyContext", "packs",
                                           "release"])
-        self.assertEqual(list(result["declarations"]), list(CURRENT_KEYS))
-        self.assertEqual(set(result["english"]), set(CURRENT_KEYS))
+        self.assertEqual(list(result["declarations"]), full_keys())
+        self.assertEqual(list(result["declarations"])[:len(CURRENT_KEYS)], list(CURRENT_KEYS))
+        self.assertEqual(set(result["english"]), set(full_keys()))
         v1 = self.catalog.validate_catalog_data(*self.inputs[:4])
         for name in ("english", "packs", "keyContext", "release"):
             self.assertEqual(result[name], v1[name], name)
@@ -411,13 +507,14 @@ class RegistryApiTests(unittest.TestCase):
                 parsed = self.catalog.parse_english(english)
                 self.assertEqual(set(self.catalog.parse_english(data)) - set(parsed),
                                  {"panel.button.options"})
-                self.assertEqual(len(parsed), 27)
+                self.assertEqual(len(parsed), CURRENT_FULL_UI_KEYS - 1)
                 self.assertEqual(self.verdict(*self.with_input(0, data)), ("valid", None))
                 self.assertEqual(self.verdict(*self.with_input(0, english)),
                                  ("english-incomplete", "panel.button.options"))
 
     def test_invalid_english_for_a_declared_key_is_refused_as_invalid(self):
-        english = replace_once(self.inputs[0], b'"Options"', b'"Opt|ions"')
+        english = replace_once(self.inputs[0], OPTIONS_LINE, OPTIONS_LINE.replace(b'"Options"',
+                                                                                  b'"Opt|ions"'))
         self.assertEqual(self.verdict(*self.with_input(0, english)),
                          ("invalid-text", "panel.button.options"))
         english = replace_once(self.inputs[0], b'"B:{banish} R:{reroll} F:{freeze}"',
@@ -425,25 +522,41 @@ class RegistryApiTests(unittest.TestCase):
         self.assertEqual(self.verdict(*self.with_input(0, english)), ("invalid-template", CHARGE))
 
     def test_key_context_must_equal_its_declaration(self):
-        # R-P2 (C14): kind, placeholder names in order and type, and limit.
-        context = self.inputs[2]
-        placeholders = (b'{"name": "banish", "type": "count"},\n'
-                        b'        {"name": "reroll", "type": "count"},\n'
-                        b'        {"name": "freeze", "type": "count"}')
-        self.assertIn(placeholders, context.replace(b"\r\n", b"\n"))
-        lf = context.replace(b"\r\n", b"\n")
+        # R-P2 (C14): kind, placeholder names in order and type, limit and,
+        # for a template, the lines flag. Each edit is made inside one row of
+        # the actual (pretty-printed) document, every other byte kept.
+        lf = self.inputs[2].replace(b"\r\n", b"\n")
+        slot = b'{\n          "name": "%s",\n          "type": "%s"\n        }'
+        placeholders = b",\n        ".join(slot % (name.encode(), b"count") for name in CHARGE_FIELDS)
+        self.assertIn(placeholders, lf)
+        anchor, guide, block_key = ("command.chat.anchor_set", "guide.body.target_c_select",
+                                    "command.chat.wishlist_design_hint")
         cases = {
-            "kind": replace_once(lf, b'"kind": "format",', b'"kind": "text",'),
-            "text kind": replace_once(lf, b'"key": "panel.button.options",\n      "kind": "text",',
-                                      b'"key": "panel.button.options",\n      "kind": "format",'),
-            "order": replace_once(lf, placeholders, placeholders.replace(b"banish", b"@")
-                                  .replace(b"reroll", b"banish").replace(b"@", b"reroll")),
-            "slot type": replace_once(lf, b'{"name": "freeze", "type": "count"}',
-                                      b'{"name": "freeze", "type": "number"}'),
-            "missing slot": replace_once(lf, b',\n        {"name": "freeze", "type": "count"}', b""),
-            "limit": replace_once(lf, b'"resultLimitBytes": 254,', b'"resultLimitBytes": 253,'),
+            "kind": row_edit(lf, CHARGE, b'"kind": "format",', b'"kind": "text",'),
+            "text kind": row_edit(lf, "panel.button.options", b'"kind": "text",',
+                                  b'"kind": "format",'),
+            "order": row_edit(lf, CHARGE, placeholders, placeholders.replace(b"banish", b"@")
+                              .replace(b"reroll", b"banish").replace(b"@", b"reroll")),
+            "slot type": row_edit(lf, CHARGE, slot % (b"freeze", b"count"),
+                                  slot % (b"freeze", b"number")),
+            "missing slot": row_edit(lf, CHARGE, b",\n        " + slot % (b"freeze", b"count"), b""),
+            "limit": row_edit(lf, CHARGE, b'"resultLimitBytes": 254,', b'"resultLimitBytes": 253,'),
+            # Full visible-UI kinds under the same rule.
+            "template slot type": row_edit(lf, anchor, b'"type": "text",', b'"type": "count",'),
+            "template limit": row_edit(lf, anchor, b'"resultLimitBytes": 154,',
+                                       b'"resultLimitBytes": 155,'),
+            "template lines removed": row_edit(lf, guide, b'\n      "lines": true,', b""),
+            "template lines added": row_edit(lf, anchor, b'"resultLimitBytes": 154,',
+                                             b'"resultLimitBytes": 154,\n      "lines": true,'),
+            "block as text": row_edit(lf, block_key, b'"kind": "block",', b'"kind": "text",'),
+            "text as block": row_edit(lf, "panel.button.options", b'"kind": "text",',
+                                      b'"kind": "block",'),
         }
-        keys = {"text kind": "panel.button.options"}
+        keys = {"text kind": "panel.button.options", "text as block": "panel.button.options",
+                "template slot type": anchor, "template limit": anchor,
+                "template lines removed": guide, "template lines added": anchor,
+                "block as text": block_key}
+        self.assertEqual(self.verdict(*self.with_input(2, lf)), ("valid", None))
         for name, data in cases.items():
             with self.subTest(case=name):
                 self.assertEqual(self.verdict(*self.with_input(2, data)),
@@ -522,8 +635,24 @@ class RegistryReportTests(unittest.TestCase):
         self.assertEqual(registry["source"], "core/Localization.lua")
         self.assertEqual(registry["markers"], {"open": OPEN, "close": CLOSE})
         self.assertEqual((registry["declarationCount"], registry["englishKeys"],
-                          registry["keyContextRows"]), (28, 28, 28))
-        self.assertEqual([row["key"] for row in registry["declarations"]], list(CURRENT_KEYS))
+                          registry["keyContextRows"]), (CURRENT_FULL_UI_KEYS,) * 3)
+        self.assertEqual([row["key"] for row in registry["declarations"]], full_keys())
+        # A lines template row carries its typed placeholders, limit and flag.
+        rows = {row["key"]: row for row in full_context_rows()}
+        lines = [row for row in registry["declarations"] if row.get("lines")]
+        self.assertEqual([row["key"] for row in lines],
+                         [key for key, row in rows.items() if row.get("lines")])
+        for row in lines[:3] + [row for row in registry["declarations"]
+                                if row["kind"] in ("template", "block")][:3]:
+            source = rows[row["key"]]
+            expected = {"key": row["key"], "kind": source["kind"]}
+            if source["kind"] == "template":
+                expected.update({"placeholders": [{"name": slot["name"], "type": slot["type"]}
+                                                  for slot in source["placeholders"]],
+                                 "resultLimitBytes": source["resultLimitBytes"]})
+            if source.get("lines"):
+                expected["lines"] = True
+            self.assertEqual(row, expected)
         charge = [row for row in registry["declarations"] if row["key"] == CHARGE][0]
         self.assertEqual(charge, {"key": CHARGE, "kind": "format",
                                   "placeholders": [{"name": name, "type": "count"}
@@ -546,7 +675,7 @@ class RegistryReportTests(unittest.TestCase):
                 english = without_line(data, OPTIONS_LINE)
                 self.assertNotIn(b'"panel.button.options"', english)
                 self.assertEqual(self.catalog.registry_catalog_report(data, *self.inputs[1:])
-                                 ["registry"]["englishKeys"], 28)
+                                 ["registry"]["englishKeys"], CURRENT_FULL_UI_KEYS)
                 with self.assertRaises(self.catalog.CatalogRegistryError) as raised:
                     self.catalog.registry_catalog_report(english, *self.inputs[1:])
                 self.assertEqual((raised.exception.code, raised.exception.key),
@@ -609,7 +738,7 @@ class RegistryMetadataTests(unittest.TestCase):
         binding = context["registryBinding"]
         self.assertEqual(binding["declarations"], {"path": "core/Localization.lua",
                                                    "open": OPEN, "close": CLOSE})
-        self.assertEqual(binding["declaredKeys"], 28)
+        self.assertEqual(binding["declaredKeys"], CURRENT_FULL_UI_KEYS)
         self.assertEqual(binding["checkedFields"], ["kind", "placeholders", "resultLimitBytes"])
         self.assertEqual(binding["mismatchCode"], "context-declaration-mismatch")
         self.assertEqual(binding["status"], "IMPLEMENTED_DRAFT_REVIEW_PENDING")
@@ -630,9 +759,9 @@ class RegistryCommandLineTests(unittest.TestCase):
         record = json.loads(run.stdout)
         self.assertEqual(record["registryBinding"], "requested")
         self.assertEqual(record["report"]["schemaVersion"], 2)
-        self.assertEqual(record["report"]["registry"]["declarationCount"], 28)
+        self.assertEqual(record["report"]["registry"]["declarationCount"], CURRENT_FULL_UI_KEYS)
         self.assertEqual([row["source"] for row in record["report"]["inputs"]], list(INPUTS))
-        self.assertEqual(record["technicalCatalog"]["englishKeys"], 28)
+        self.assertEqual(record["technicalCatalog"]["englishKeys"], CURRENT_FULL_UI_KEYS)
         strict = self.run_cli("--registry", "--require-complete")
         self.assertEqual(strict.returncode, 1)
         default = json.loads(self.run_cli().stdout)
@@ -658,8 +787,9 @@ class RegistryCommandLineTests(unittest.TestCase):
                                                                  "core/Localization.lua"))
             target = root / "core" / "Localization.lua"
             target.parent.mkdir()
-            target.write_bytes(replace_once(current_inputs()[4], b'resultLimit = 254',
-                                            b'resultLimit = 253'))
+            target.write_bytes(replace_once(current_inputs()[4],
+                                            b'kind = "format", slot = "count", resultLimit = 254',
+                                            b'kind = "format", slot = "count", resultLimit = 253'))
             run = self.run_cli("--root", root, "--registry")
             self.assertEqual(run.returncode, 2)
             error = json.loads(run.stderr)
@@ -854,21 +984,24 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(receipt["collection"]["state"], "COMPLETE")
         rows = {row["productId"]: row for row in receipt["coverage"]["products"]}
         french = rows["frFR"]
-        self.assertEqual(french["denominator"], 28)
+        packed = self.catalog.parse_packs(self.inputs[1])["frFR"]["entries"]
+        self.assertEqual(french["denominator"], CURRENT_FULL_UI_KEYS)
         self.assertEqual(french["keys"]["invalid"], [CHARGE, "reason.save_in_progress"])
-        self.assertEqual(french["keys"]["missing"], ["panel.button.options"])
+        self.assertEqual(french["keys"]["missing"], sorted(set(full_keys()) - set(packed)))
+        self.assertIn("panel.button.options", french["keys"]["missing"])
         self.assertEqual(french["keys"]["obsolete"], [RETIRED])
         self.assertEqual(french["counts"]["translated_and_reviewed"], 0)
         self.assertEqual(french["counts"]["draft_unreviewed"], 25)
-        self.assertEqual(french["reconciliation"], {"denominator": 28, "inDenominatorTotal": 28})
+        self.assertEqual(french["reconciliation"], {"denominator": CURRENT_FULL_UI_KEYS,
+                                                    "inDenominatorTotal": CURRENT_FULL_UI_KEYS})
         for row in receipt["coverage"]["products"]:
             seen = [key for category in self.catalog.ENTRY_CATEGORIES[:6]
                     for key in row["keys"][category]]
-            self.assertEqual(sorted(seen), sorted(CURRENT_KEYS), row["productId"])
+            self.assertEqual(sorted(seen), sorted(full_keys()), row["productId"])
             self.assertNotIn(NEVER_KNOWN, row["keys"]["obsolete"])
             self.assertNotIn("Bad Key", sum(row["keys"].values(), []))
         self.assertEqual(rows["deDE"]["counts"], self.strict_report["products"][1]["counts"])
-        self.assertEqual(receipt["coverage"]["denominator"]["englishKeys"], 28)
+        self.assertEqual(receipt["coverage"]["denominator"]["englishKeys"], CURRENT_FULL_UI_KEYS)
         self.assertEqual(receipt["coverage"]["completeness"]["state"], "INCOMPLETE")
         codes = {reason["code"] for reason in receipt["coverage"]["completeness"]["reasons"]}
         self.assertTrue({"entries-invalid", "entries-obsolete"} <= codes)
@@ -900,7 +1033,8 @@ class DiagnosticTests(unittest.TestCase):
         rows = {row["productId"]: row["counts"] for row in report["products"]}
         self.assertEqual(rows["frFR"]["deliberate_english_placeholder"], 1)
         self.assertEqual(rows["deDE"]["translated_and_reviewed"], 1)
-        self.assertEqual(rows["frFR"]["missing"], 1)
+        packed = self.catalog.parse_packs(self.inputs[1])["frFR"]["entries"]
+        self.assertEqual(rows["frFR"]["missing"], len(set(full_keys()) - set(packed)))
         self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
 
     def test_d5_strict_apis_codes_and_inputs_are_unchanged(self):
@@ -942,7 +1076,8 @@ class DiagnosticTests(unittest.TestCase):
                                                               declaration + b" " + declaration)),
             "json": (2, context[:-3]),
             "unknown pack": (1, packs.replace(b"    frFR = {", b"    xxXX = {", 1)),
-            "invalid English": (0, replace_once(english, b'"Options"', b'"Opt|ions"')),
+            "invalid English": (0, replace_once(english, OPTIONS_LINE, OPTIONS_LINE.replace(
+                b'"Options"', b'"Opt|ions"'))),
             "invalid autonym": (1, replace_once(packs, b'name = "Fran\xc3\xa7ais"',
                                                 b'name = "Fr|an\xc3\xa7ais"')),
         }
@@ -997,7 +1132,8 @@ class DiagnosticCommandLineTests(unittest.TestCase):
         record = json.loads(run.stdout)
         self.assertEqual((record["record"], record["exitCode"]), ("diagnostics", 0))
         self.assertIs(record["diagnostics"]["valid"], True)
-        self.assertEqual(record["diagnostics"]["coverage"]["registry"]["declarationCount"], 28)
+        self.assertEqual(record["diagnostics"]["coverage"]["registry"]["declarationCount"],
+                         CURRENT_FULL_UI_KEYS)
         strict = self.run_cli("--diagnose", "--require-complete")
         self.assertEqual(strict.returncode, 1)
         self.assertEqual(json.loads(strict.stdout)["exitCode"], 1)
@@ -1195,10 +1331,11 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual((self.release["packProvenance"]["contract"],
                           self.release["packProvenance"]["contractVersion"]),
                          ("nexus.l10n.pack_provenance", 1))
-        # Entry and review facts are unchanged: 28 English keys, six packs of
-        # 27 draft entries (162), no review declaration or gate upgrade.
+        # Entry and review facts are unchanged: every current English key
+        # (the full visible-UI catalog), six packs of 27 draft entries (162),
+        # no review declaration or gate upgrade.
         report = self.catalog.registry_catalog_report(*self.inputs)
-        self.assertEqual(report["denominator"]["englishKeys"], 28)
+        self.assertEqual(report["denominator"]["englishKeys"], CURRENT_FULL_UI_KEYS)
         self.assertEqual([row["entriesPresent"] for row in report["products"]], [27] * 6)
         self.assertEqual(sum(row["entriesPresent"] for row in report["products"]), 162)
         for row in report["products"]:
