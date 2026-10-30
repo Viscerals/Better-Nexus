@@ -2686,6 +2686,12 @@ class ConsumerBindingTests(unittest.TestCase):
         )
         cases = [(name + ", same call", True, wrap + left + shown) for name, wrap in wraps]
         cases += [(name + ", wrong call", False, wrap + left + wrong) for name, wrap in wraps]
+        # A carrier made in a nested function whose invocation the value's
+        # call stack does not hold stays unproven.
+        cases.append(("carrier made in a nested function, wrong call", False, read
+                      + b'local function SpecWrap(target) local function SpecInner() local box='
+                      b'{SpecBridge=target.SpecSource}; return SpecRead(box) end; '
+                      b'return SpecInner() end; ' + left + wrong))
         # A value made inside the function reaches the carrier of every call.
         cases.append(("own value through a carrier", True, read + b'local function SpecMake() '
                       b'local box={SpecBridge=' + text + b'}; return SpecRead(box) end; '
