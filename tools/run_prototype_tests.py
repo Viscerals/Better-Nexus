@@ -434,6 +434,8 @@ NAMES += ['l10n_catalog_consumers']
 NAMES += ['l10n_pseudo_support_guards']
 # Full-UI family library (helper a6a913ced96885815): Build Library window, detail states, Sync mode dialog and hovers through the seam under a pseudo pack; English, long and missing-entry fallback runs; passive re-render/hover/select (synthetic; native NOT_RUN).
 NAMES += ['l10n_ui_library']
+# Full-UI family chat (helper a35a4b3aaf9604e36): chat lines, ~40 slash commands, lifecycle/update notices and view-model labels through the seam under a pseudo pack; exact English via the UserText rewrite path; fallback, slots, passivity (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_chat']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

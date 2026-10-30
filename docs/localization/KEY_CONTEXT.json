@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 386,
+    "declaredKeys": 546,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -408,6 +408,2277 @@
       "meaning": "label of the Main panel header button that opens the Nexus settings and Manage menu (help and setup, settings, notices, logs and panel actions), also the heading of its hover; the label only: the leading \"! \" shown while a trusted update notice is carried is added by code and is never part of this text, and a resolved label that itself begins with ! is replaced by the English base",
       "consumer": "ui/Panel.lua M.OptionsLabel via Nexus.Localization.Text, with M.OptionsText adding the code-owned \"! \" notice mark; bound for issue #165, first committed in a50372ba485fd98043d68ec7d4f732ee947b0c28 (English blob 024557e8ffb9d6f587080e46b47b33daea25e492) and unchanged at 8393f5f4b61a0d62b5043b861539be868ebf80f6 (ui/Panel.lua:752 and :759 there); historical statement, superseded: an earlier revision of this row described it as uncommitted; final composition pending",
       "familySurface": "Main panel (HUD) header Options button label and hover heading; family coverage PENDING"
+    },
+    {
+      "key": "command.chat.anchor_cleared",
+      "kind": "text",
+      "english": "Adaptive Power preference cleared",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result: the preferred Adaptive Power (a game Echo choice anchor) setting was removed. \"Adaptive Power\" is a game term.",
+      "consumer": "core/Main.lua CommandAnchor",
+      "familySurface": "chat: /nexus anchor reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.anchor_cleared_session",
+      "kind": "text",
+      "english": "Adaptive Power preference cleared for this session only (saved data is kept unchanged and read-only)",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result as command.chat.anchor_cleared, but \"for this session only\": the saved data is read-only, so the change lasts until reload and is not saved.",
+      "consumer": "core/Main.lua CommandAnchor",
+      "familySurface": "chat: /nexus anchor reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.anchor_set",
+      "kind": "template",
+      "english": "Adaptive Power preference set to {spell}",
+      "placeholders": [
+        {
+          "name": "spell",
+          "type": "text",
+          "meaning": "spell ID number the player typed (data; \"nil\" if it was not a number)"
+        }
+      ],
+      "resultLimitBytes": 154,
+      "group": "command",
+      "meaning": "Result: the preferred Adaptive Power is now this spell ID.",
+      "consumer": "core/Main.lua CommandAnchor",
+      "familySurface": "chat: /nexus anchor reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.anchor_set_session",
+      "kind": "template",
+      "english": "Adaptive Power preference set to {spell} for this session only (saved data is kept unchanged and read-only)",
+      "placeholders": [
+        {
+          "name": "spell",
+          "type": "text",
+          "meaning": "spell ID number (data)"
+        }
+      ],
+      "resultLimitBytes": 288,
+      "group": "command",
+      "meaning": "Result as command.chat.anchor_set, but \"for this session only\": the saved data is read-only, so the change lasts until reload and is not saved.",
+      "consumer": "core/Main.lua CommandAnchor",
+      "familySurface": "chat: /nexus anchor reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.auto_accept_restored",
+      "kind": "text",
+      "english": "client auto-accept restored",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result: the game client's own automatic-accept setting that Nexus had changed was put back. Lower-case status phrase.",
+      "consumer": "core/Main.lua CommandRestore",
+      "familySurface": "chat: /nexus restore reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.auto_blocked_by_orb",
+      "kind": "text",
+      "english": "Ordinary Automation stays OFF while an Orb run is active or unresolved. Stop and settle that operation first.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Refusal: the Automation master switch was not turned on because an Orb run is active or its outcome is unknown. \"Automation\" is the Nexus master switch (Auto). OFF is the switch state word; keep it as the same state word the HUD uses. \"Orb run\" = one Orb refining session.",
+      "consumer": "core/Main.lua CommandAuto via PrintText",
+      "familySurface": "chat: /nexus auto reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.auto_blocked_by_pause",
+      "kind": "text",
+      "english": "Automation OFF. Auto cannot be turned ON while Nexus is paused; type /nexus resume first.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Refusal while the session pause holds. ON/OFF are the Automation switch state words. \"Auto\" = the same master switch.",
+      "consumer": "core/Main.lua CommandAuto",
+      "familySurface": "chat: /nexus auto reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.automation_off",
+      "kind": "text",
+      "english": "Automation OFF",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result of /nexus auto: the Automation master switch is now off. Short status. OFF is the switch state word.",
+      "consumer": "core/Main.lua CommandAuto",
+      "familySurface": "chat: /nexus auto reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.automation_on",
+      "kind": "text",
+      "english": "Automation ON",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result of /nexus auto: the Automation master switch is now on. Short status. ON is the switch state word (same as the HUD Auto ON).",
+      "consumer": "core/Main.lua CommandAuto",
+      "familySurface": "chat: /nexus auto reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.builds_unavailable",
+      "kind": "text",
+      "english": "Nexus Builds unavailable",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Status: the Nexus Builds window is not loaded. \"Nexus Builds\" is a window name.",
+      "consumer": "core/Main.lua builds callback",
+      "familySurface": "chat: /nexus command reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.current_locks_off",
+      "kind": "text",
+      "english": "Unmarked Wishlist locked targets: choose intended locked targets manually. Existing confirmed plans are unchanged.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result of /nexus currentlocks off: the player chooses locked targets by hand.",
+      "consumer": "core/Main.lua rollingOption callback",
+      "familySurface": "chat: /nexus reroll, /nexus freeze and /nexus currentlocks reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.current_locks_on",
+      "kind": "text",
+      "english": "Unmarked Wishlist locked targets: suggest current matching locked Echoes on opening/import. Existing confirmed plans are unchanged.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result of /nexus currentlocks on: when a Wishlist without marked locked targets is opened or imported, Nexus suggests the currently locked matching Echoes.",
+      "consumer": "core/Main.lua rollingOption callback",
+      "familySurface": "chat: /nexus reroll, /nexus freeze and /nexus currentlocks reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.dps_active",
+      "kind": "text",
+      "english": "DPS capture is active.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Status shown in green (colour added by code): DPS recording works.",
+      "consumer": "core/Main.lua CommandDps (SayColored)",
+      "familySurface": "chat: /nexus dps reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.dps_current_key",
+      "kind": "template",
+      "english": "Current tracked Echo key: {key}",
+      "placeholders": [
+        {
+          "name": "key",
+          "type": "text",
+          "meaning": "internal Echo set key (identifier, not translated)"
+        }
+      ],
+      "resultLimitBytes": 372,
+      "group": "command",
+      "meaning": "Diagnostic label: the key of the Echo set currently tracked for DPS records.",
+      "consumer": "core/Main.lua CommandDps",
+      "familySurface": "chat: /nexus dps reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.dps_details_missing",
+      "kind": "text",
+      "english": "Details! damage meter is not installed.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Status shown in orange (colour added by code). \"Details!\" is another addon's product name: keep it exactly.",
+      "consumer": "core/Main.lua CommandDps (SayColored)",
+      "familySurface": "chat: /nexus dps reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.dps_install_details",
+      "kind": "text",
+      "english": "Install Details! to enable DPS tracking on your builds.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Advice. \"Details!\" is another addon's product name: keep it exactly.",
+      "consumer": "core/Main.lua CommandDps",
+      "familySurface": "chat: /nexus dps reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.dps_last_session",
+      "kind": "template",
+      "english": "Last session: {note}",
+      "placeholders": [
+        {
+          "name": "note",
+          "type": "text",
+          "meaning": "last DPS session note (data, sanitized)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "command",
+      "meaning": "Label before the last DPS recording note.",
+      "consumer": "core/Main.lua CommandDps (legacy English kept for an over-long note)",
+      "familySurface": "chat: /nexus dps reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.dps_log_hint",
+      "kind": "text",
+      "english": "Open /nexus log and select DPS for the full capture trace.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"DPS\" is the name of a log viewer tab; keep it as the tab shows it.",
+      "consumer": "core/Main.lua CommandDps",
+      "familySurface": "chat: /nexus dps reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.dps_module_missing",
+      "kind": "text",
+      "english": "DPS capture module not loaded",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Error status: the DPS recording part of Nexus is not loaded.",
+      "consumer": "core/Main.lua CommandDps",
+      "familySurface": "chat: /nexus dps reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.dps_record_hint",
+      "kind": "text",
+      "english": "Fight the Lich King or hit a training dummy to record your best.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Advice: how to record a best DPS result. \"Lich King\" is a game boss name; use the client's name. \"training dummy\" = the game's target dummy.",
+      "consumer": "core/Main.lua CommandDps",
+      "familySurface": "chat: /nexus dps reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.dps_selected_key",
+      "kind": "template",
+      "english": "Selected wishlist key: {key}",
+      "placeholders": [
+        {
+          "name": "key",
+          "type": "text",
+          "meaning": "internal Echo set key (identifier, not translated)"
+        }
+      ],
+      "resultLimitBytes": 366,
+      "group": "command",
+      "meaning": "Diagnostic label: the key of the selected Wishlist's Echo set used for DPS records.",
+      "consumer": "core/Main.lua CommandDps",
+      "familySurface": "chat: /nexus dps reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.editor_unavailable",
+      "kind": "text",
+      "english": "wishlist editor unavailable",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case status: the Wishlist editor is not loaded.",
+      "consumer": "core/Main.lua editor callback",
+      "familySurface": "chat: /nexus command reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.guide_not_opened",
+      "kind": "text",
+      "english": "Reference pages stay available: /nexus reference.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Reply when the coach did not open: the reference pages can still be opened.",
+      "consumer": "core/Main.lua guide callback",
+      "familySurface": "chat: /nexus guide reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.guide_opened",
+      "kind": "text",
+      "english": "Guided setup opened. Reference pages: /nexus reference.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Result: the Guided setup coach opened.",
+      "consumer": "core/Main.lua guide callback",
+      "familySurface": "chat: /nexus guide reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.help_not_opened",
+      "kind": "text",
+      "english": "Guided setup did not open; nothing else was opened. Type /nexus help again once it can open. The full manual: /nexus reference.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Refusal: the coach did not open (for example an Auto warning waits for an answer).",
+      "consumer": "core/Main.lua CommandHelp",
+      "familySurface": "chat: /nexus help and /nexus tutorial reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.help_opened",
+      "kind": "text",
+      "english": "Help opens Guided setup at your current step. The full manual: /nexus reference.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Result: Help opened the Guided setup coach at the step the player was on.",
+      "consumer": "core/Main.lua CommandHelp",
+      "familySurface": "chat: /nexus help and /nexus tutorial reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.help_unavailable",
+      "kind": "text",
+      "english": "Guided setup is not available yet. Nothing was opened. The full manual: /nexus reference.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Refusal: the Guided setup coach is not loaded. \"Guided setup\" is the name of the setup coach window.",
+      "consumer": "core/Main.lua CommandHelp",
+      "familySurface": "chat: /nexus help and /nexus tutorial reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.leaderboard_unavailable",
+      "kind": "text",
+      "english": "Nexus Leaderboard unavailable",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Status: the Nexus Leaderboard window is not loaded. \"Nexus Leaderboard\" is a window name.",
+      "consumer": "core/Main.lua leaderboard callback",
+      "familySurface": "chat: /nexus command reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_already_preserved",
+      "kind": "text",
+      "english": "Older data is already preserved. Type /reload to start Nexus with your current setup.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). Status: the archive was made before.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_blocked",
+      "kind": "template",
+      "english": "The older saved data cannot be kept automatically ({reason}). Nothing was changed. Your current setup is unchanged.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "refusal code and optional detail (data, not translated)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). Refusal: the older data cannot be archived automatically.",
+      "consumer": "core/Main.lua legacy callback (legacy English kept for an over-long reason)",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_current_code",
+      "kind": "text",
+      "english": "Type /nexus legacy for the current code.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). The typed code is not the current one.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_input_drift",
+      "kind": "text",
+      "english": "The saved data changed. Type /reload, then /nexus legacy again.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). The saved data changed since the offer; start again.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_not_changed",
+      "kind": "template",
+      "english": "Older data was not changed: {reason}.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "refusal code (data, not translated)"
+        }
+      ],
+      "resultLimitBytes": 900,
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). Refusal with its code.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_not_waiting",
+      "kind": "text",
+      "english": "No older-data decision is waiting.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). Nothing to decide.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_offer_confirm",
+      "kind": "template",
+      "english": "To keep your current setup and do this, type: {command}",
+      "placeholders": [
+        {
+          "name": "command",
+          "type": "text",
+          "meaning": "the exact command to type, \"/nexus legacy keep <code>\" (protocol, never translated)"
+        }
+      ],
+      "resultLimitBytes": 252,
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). Instruction to confirm.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_offer_effect",
+      "kind": "text",
+      "english": "Confirming stores a complete copy in an archive inside your saved data and then clears WishlistRealizerDB. Another addon that reads that variable would find it empty.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). Consequence of confirming: a full copy is archived, then the old variable is emptied.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_offer_found",
+      "kind": "text",
+      "english": "Older saved data (WishlistRealizerDB) was found next to your current data. Your current setup is unchanged. Nothing is deleted, imported or merged.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). First line of the offer.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_offer_reload",
+      "kind": "text",
+      "english": "Then type /reload.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Second step after confirming.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_offer_size",
+      "kind": "template",
+      "english": "Found: {tables} tables, about {bytes} bytes of data. Code: {code}",
+      "placeholders": [
+        {
+          "name": "tables",
+          "type": "text",
+          "meaning": "number of saved tables found (formatted number)"
+        },
+        {
+          "name": "bytes",
+          "type": "text",
+          "meaning": "approximate size in bytes (formatted number)"
+        },
+        {
+          "name": "code",
+          "type": "text",
+          "meaning": "confirmation code (data; the player types it back)"
+        }
+      ],
+      "resultLimitBytes": 252,
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). Size of the older data and the code needed to confirm.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_preserved_code",
+      "kind": "template",
+      "english": "Older data preserved separately (code {code}). Your current setup is unchanged. Type /reload to start Nexus with it.",
+      "placeholders": [
+        {
+          "name": "code",
+          "type": "text",
+          "meaning": "the confirmation code that was used (data)"
+        }
+      ],
+      "resultLimitBytes": 348,
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). Result of a successful confirmation.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_preserved_reload",
+      "kind": "text",
+      "english": "Older data is preserved. Type /reload to start Nexus with your current setup.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). Status after the older data was kept in an archive.",
+      "consumer": "core/Main.lua notInitialized",
+      "familySurface": "chat: Reply to most /nexus commands before start-up finished (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_rollback_incomplete",
+      "kind": "text",
+      "english": "The older data is safe in the archive, but the older copy could not be put back (ROLLBACK_INCOMPLETE). Type /reload; nothing is lost.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). ROLLBACK_INCOMPLETE is a support code: keep it exactly.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_usage",
+      "kind": "text",
+      "english": "Use /nexus legacy to review older saved data, then /nexus legacy keep <code>.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). \"<code>\" is a placeholder the player replaces with the code Nexus shows; you may translate the word inside the angle brackets.",
+      "consumer": "core/Main.lua legacy callback",
+      "familySurface": "chat: /nexus legacy reply (older saved data decision) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.legacy_waiting",
+      "kind": "text",
+      "english": "Older saved data needs your decision. Type /nexus legacy to review it. Nothing is changed unless you confirm.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"Older saved data\" is the previous addon's saved variable WishlistRealizerDB (keep that name). Start-up waits for the player's decision about older saved data.",
+      "consumer": "core/Main.lua notInitialized",
+      "familySurface": "chat: Reply to most /nexus commands before start-up finished (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.log_viewer_unavailable",
+      "kind": "text",
+      "english": "log viewer unavailable",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case status: the log viewer window is not loaded.",
+      "consumer": "core/Main.lua trace, syncdebug, errors, log callbacks",
+      "familySurface": "chat: /nexus trace, log, errors and syncdebug reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.logclear_done",
+      "kind": "text",
+      "english": "diagnostic history cleared",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case result: the local diagnostic history was deleted.",
+      "consumer": "core/Main.lua logclear callback",
+      "familySurface": "chat: /nexus logclear reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.logclear_failed",
+      "kind": "text",
+      "english": "could not clear diagnostic history",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case failure.",
+      "consumer": "core/Main.lua logclear callback",
+      "familySurface": "chat: /nexus logclear reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.nameplate_active",
+      "kind": "text",
+      "english": "Mouseover tooltip: active.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Status: Nexus adds its information to the mouseover unit tooltip.",
+      "consumer": "core/Main.lua nameplate callback",
+      "familySurface": "chat: /nexus nameplate reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.nameplate_missing",
+      "kind": "text",
+      "english": "Nameplate module not loaded.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Status: that part of Nexus is not loaded.",
+      "consumer": "core/Main.lua nameplate callback",
+      "familySurface": "chat: /nexus nameplate reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.nameplate_tagging",
+      "kind": "text",
+      "english": "Nexus users seen in shared records are tagged, with leaderboard data when available.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Explains what the tooltip shows.",
+      "consumer": "core/Main.lua nameplate callback",
+      "familySurface": "chat: /nexus nameplate reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.not_initialized",
+      "kind": "text",
+      "english": "not initialized yet",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case status: Nexus has not finished loading.",
+      "consumer": "core/Main.lua SlashCmdList",
+      "familySurface": "chat: /nexus reply before the command owner exists (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.nothing_to_restore",
+      "kind": "text",
+      "english": "nothing to restore",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result: there was no changed client auto-accept setting to put back. Lower-case status phrase.",
+      "consumer": "core/Main.lua CommandRestore",
+      "familySurface": "chat: /nexus restore reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.overlay_unavailable",
+      "kind": "text",
+      "english": "overlay unavailable",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case status: the On-Screen Wishlist overlay is not loaded.",
+      "consumer": "core/Main.lua overlay callback",
+      "familySurface": "chat: /nexus command reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.pause_already",
+      "kind": "text",
+      "english": "Nexus is already paused for this session. Auto, Orb actions, sharing and DPS recording are held. An action already sent may still finish. Type /nexus resume to continue.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Reply to /nexus pause when the session was already paused.",
+      "consumer": "core/Main.lua sessionPause callback",
+      "familySurface": "chat: /nexus pause, /nexus resume and /nexus paused reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.pause_started",
+      "kind": "text",
+      "english": "Nexus paused for this session. Auto, Orb actions, sharing and DPS recording are held. An action already sent may still finish. Type /nexus resume to continue.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Reply to /nexus pause: the pause starts now and lasts until resume or reload.",
+      "consumer": "core/Main.lua sessionPause callback",
+      "familySurface": "chat: /nexus pause, /nexus resume and /nexus paused reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.pause_status_paused",
+      "kind": "text",
+      "english": "Nexus paused for this session. Type /nexus resume to continue.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Reply to /nexus paused (a question) while paused.",
+      "consumer": "core/Main.lua sessionPause callback",
+      "familySurface": "chat: /nexus pause, /nexus resume and /nexus paused reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.pause_status_running",
+      "kind": "text",
+      "english": "Nexus is not paused.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Reply to /nexus paused while not paused.",
+      "consumer": "core/Main.lua sessionPause callback",
+      "familySurface": "chat: /nexus pause, /nexus resume and /nexus paused reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.pause_unavailable",
+      "kind": "text",
+      "english": "Session pause is unavailable.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "The session pause module is not loaded.",
+      "consumer": "core/Main.lua sessionPause callback",
+      "familySurface": "chat: /nexus pause, /nexus resume and /nexus paused reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.performance_unavailable",
+      "kind": "text",
+      "english": "performance diagnostics unavailable",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case status: the performance page of the log viewer is not loaded.",
+      "consumer": "core/Main.lua performance callback",
+      "familySurface": "chat: /nexus command reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.policy_selected",
+      "kind": "template",
+      "english": "Rolling strategy selected: {strategy}. It applies at the next safe action boundary; no pending action is cleared or repeated.",
+      "placeholders": [
+        {
+          "name": "strategy",
+          "type": "text",
+          "meaning": "selected strategy ID: adaptive or released (setting value, not translated)"
+        }
+      ],
+      "resultLimitBytes": 310,
+      "group": "command",
+      "meaning": "Result of /nexus policy adaptive|released: the saved setting changed; it takes effect where no action is in progress.",
+      "consumer": "core/Main.lua policy callback",
+      "familySurface": "chat: /nexus policy reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.policy_values",
+      "kind": "text",
+      "english": "adaptive = experimental strategy (default). released = the earlier strategy. See /nexus reference.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"adaptive\" and \"released\" are the setting values typed after /nexus policy: keep them untranslated before \"=\".",
+      "consumer": "core/Main.lua policy callback",
+      "familySurface": "chat: /nexus policy reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.progress_no_wishlist",
+      "kind": "text",
+      "english": "no wishlist set -- advisor only, nothing to track.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case status: no Wishlist is assigned, so there is no progress to show.",
+      "consumer": "core/Main.lua CommandProgress",
+      "familySurface": "chat: /nexus progress and /nexus missing reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.progress_this_run",
+      "kind": "template",
+      "english": "this run: {progress} echoes ({percent}%) -- {short} still short",
+      "placeholders": [
+        {
+          "name": "progress",
+          "type": "text",
+          "meaning": "coloured \"have/total\" pair of Echo copies (code-owned colour, numbers)"
+        },
+        {
+          "name": "percent",
+          "type": "text",
+          "meaning": "whole percentage number (formatted)"
+        },
+        {
+          "name": "short",
+          "type": "count",
+          "meaning": "number of Wishlist targets still missing"
+        }
+      ],
+      "resultLimitBytes": 198,
+      "group": "command",
+      "meaning": "Lower-case progress line of the current run. The literal % sign follows the percentage. \"still short\" = targets not yet reached.",
+      "consumer": "core/Main.lua CommandProgress",
+      "familySurface": "chat: /nexus progress and /nexus missing reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.prototype_backup",
+      "kind": "text",
+      "english": "Back up WTF and your previous Nexus folder before testing. No native gameplay acceptance is claimed.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "\"WTF\" is the game's settings folder name: keep it. Advice for testers.",
+      "consumer": "core/Main.lua prototype callback",
+      "familySurface": "chat: /nexus prototype reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.prototype_intro",
+      "kind": "text",
+      "english": "Experimental Nexus: plan Wishlists, follow or automate Echo choices, refine with approved Orbs, share builds, and compare DPS. /nexus reference explains each mode.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Overview of what this experimental build does.",
+      "consumer": "core/Main.lua prototype callback",
+      "familySurface": "chat: /nexus prototype reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.reference_commands",
+      "kind": "template",
+      "english": "Nexus reference: {commands}",
+      "placeholders": [
+        {
+          "name": "commands",
+          "type": "text",
+          "meaning": "slash command list \"/nexus help | guide | ...\" (protocol, never translated)"
+        }
+      ],
+      "resultLimitBytes": 226,
+      "group": "command",
+      "meaning": "Heading of the command summary. \"Nexus\" is the product name.",
+      "consumer": "core/Main.lua CommandReference",
+      "familySurface": "chat: /nexus reference reply (and any unknown command) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.reference_rolling_permissions",
+      "kind": "template",
+      "english": "Rolling permissions: {reroll}, {freeze}. Automation is a separate switch.",
+      "placeholders": [
+        {
+          "name": "reroll",
+          "type": "text",
+          "meaning": "command syntax \"/nexus reroll on|off\" (protocol)"
+        },
+        {
+          "name": "freeze",
+          "type": "text",
+          "meaning": "command syntax \"/nexus freeze on|off\" (protocol)"
+        }
+      ],
+      "resultLimitBytes": 258,
+      "group": "command",
+      "meaning": "Summary of the two rolling permission commands; they are separate from the Automation master switch. Reroll and Freeze are game board actions.",
+      "consumer": "core/Main.lua CommandReference",
+      "familySurface": "chat: /nexus reference reply (and any unknown command) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.reference_rolling_strategy",
+      "kind": "template",
+      "english": "Rolling strategy: {policy}. Local roll record: {trace}.",
+      "placeholders": [
+        {
+          "name": "policy",
+          "type": "text",
+          "meaning": "command syntax \"/nexus policy adaptive|released\" (protocol)"
+        },
+        {
+          "name": "trace",
+          "type": "text",
+          "meaning": "command \"/nexus trace\" (protocol)"
+        }
+      ],
+      "resultLimitBytes": 216,
+      "group": "command",
+      "meaning": "Summary of the strategy selector and the local roll record commands.",
+      "consumer": "core/Main.lua CommandReference",
+      "familySurface": "chat: /nexus reference reply (and any unknown command) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.reference_session_pause",
+      "kind": "text",
+      "english": "Session pause: /nexus pause, /nexus resume, /nexus paused. Pauses Auto, Orb actions, sharing and DPS recording until Resume or reload.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Summary of the session pause commands. \"Resume\" here means the resume command/button; \"reload\" the UI reload.",
+      "consumer": "core/Main.lua CommandReference",
+      "familySurface": "chat: /nexus reference reply (and any unknown command) (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.report_view_missing",
+      "kind": "text",
+      "english": "the support report view is not loaded. Reinstall the addon folder, or send the text of the error you are seeing.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Starts lower-case because it continues the code-owned red \"Nexus:\" prefix. Advice for a broken installation.",
+      "consumer": "core/Main.lua report callback (print)",
+      "familySurface": "chat: /nexus report reply when the support report view is missing (after a red \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.resume_done",
+      "kind": "text",
+      "english": "Nexus resumed. Auto can continue if it was already on. Orb runs stay paused.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Reply to /nexus resume after a pause. Orb runs are not resumed automatically.",
+      "consumer": "core/Main.lua sessionPause callback",
+      "familySurface": "chat: /nexus pause, /nexus resume and /nexus paused reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.resume_not_paused",
+      "kind": "text",
+      "english": "Nexus was not paused. Auto can continue if it was already on. Orb runs stay paused.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Reply to /nexus resume when there was no pause.",
+      "consumer": "core/Main.lua sessionPause callback",
+      "familySurface": "chat: /nexus pause, /nexus resume and /nexus paused reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.roll_recording_off",
+      "kind": "template",
+      "english": "roll recording: off, {saved} saved records (limit {limit}), {failed} failed, {dropped} dropped",
+      "placeholders": [
+        {
+          "name": "saved",
+          "type": "text",
+          "meaning": "number of kept roll records (formatted number)"
+        },
+        {
+          "name": "limit",
+          "type": "text",
+          "meaning": "record limit (formatted number, or ? when unknown)"
+        },
+        {
+          "name": "failed",
+          "type": "text",
+          "meaning": "failed record count (formatted value)"
+        },
+        {
+          "name": "dropped",
+          "type": "text",
+          "meaning": "dropped record count (formatted value)"
+        }
+      ],
+      "resultLimitBytes": 254,
+      "group": "command",
+      "meaning": "Status of the local roll recorder. \"off\": recording is off. The key is chosen by the recorder state in code.",
+      "consumer": "core/Main.lua SayRollingStatus",
+      "familySurface": "chat: /nexus status, /nexus policy and /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.roll_recording_on",
+      "kind": "template",
+      "english": "roll recording: on (local only), {saved} saved records (limit {limit}), {failed} failed, {dropped} dropped",
+      "placeholders": [
+        {
+          "name": "saved",
+          "type": "text",
+          "meaning": "number of kept roll records (formatted number)"
+        },
+        {
+          "name": "limit",
+          "type": "text",
+          "meaning": "record limit (formatted number, or ? when unknown)"
+        },
+        {
+          "name": "failed",
+          "type": "text",
+          "meaning": "failed record count (formatted value)"
+        },
+        {
+          "name": "dropped",
+          "type": "text",
+          "meaning": "dropped record count (formatted value)"
+        }
+      ],
+      "resultLimitBytes": 278,
+      "group": "command",
+      "meaning": "Status of the local roll recorder. \"on (local only)\": recording is on and nothing leaves this computer. The key is chosen by the recorder state in code.",
+      "consumer": "core/Main.lua SayRollingStatus",
+      "familySurface": "chat: /nexus status, /nexus policy and /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.rolling_last_decision",
+      "kind": "template",
+      "english": "rolling strategy last decision: {policy}",
+      "placeholders": [
+        {
+          "name": "policy",
+          "type": "text",
+          "meaning": "policy ID of the last decision (data), or the translated word of command.value.rolling_decision_none"
+        }
+      ],
+      "resultLimitBytes": 192,
+      "group": "command",
+      "meaning": "Status line naming the policy that made the last rolling decision.",
+      "consumer": "core/Main.lua SayRollingStatus",
+      "familySurface": "chat: /nexus status, /nexus policy and /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.rolling_last_decision_fallback",
+      "kind": "template",
+      "english": "rolling strategy last decision: {policy} (fell back to the released policy: {reason})",
+      "placeholders": [
+        {
+          "name": "policy",
+          "type": "text",
+          "meaning": "policy ID of the last decision (data) or the \"none\" word"
+        },
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "fallback reason code (data, not translated)"
+        }
+      ],
+      "resultLimitBytes": 394,
+      "group": "command",
+      "meaning": "Status line when the experimental strategy fell back to the released (earlier) one. \"released\" is the setting value name of that strategy; keep it untranslated.",
+      "consumer": "core/Main.lua SayRollingStatus",
+      "familySurface": "chat: /nexus status, /nexus policy and /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.rolling_option_usage",
+      "kind": "template",
+      "english": "Use {reroll}, {freeze}, or {currentlocks}",
+      "placeholders": [
+        {
+          "name": "reroll",
+          "type": "text",
+          "meaning": "command syntax \"/nexus reroll on|off\" (protocol)"
+        },
+        {
+          "name": "freeze",
+          "type": "text",
+          "meaning": "command syntax \"/nexus freeze on|off\" (protocol)"
+        },
+        {
+          "name": "currentlocks",
+          "type": "text",
+          "meaning": "command syntax \"/nexus currentlocks on|off\" (protocol)"
+        }
+      ],
+      "resultLimitBytes": 190,
+      "group": "command",
+      "meaning": "Usage hint for a wrong argument: the three accepted commands.",
+      "consumer": "core/Main.lua rollingOption callback",
+      "familySurface": "chat: /nexus reroll, /nexus freeze and /nexus currentlocks reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.rolling_permission",
+      "kind": "template",
+      "english": "{option} permission: {value}. The master Automation switch remains separate.",
+      "placeholders": [
+        {
+          "name": "option",
+          "type": "text",
+          "meaning": "command word \"reroll\" or \"freeze\" (protocol, never translated)"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "command word \"on\" or \"off\" (protocol, never translated)"
+        }
+      ],
+      "resultLimitBytes": 198,
+      "group": "command",
+      "meaning": "Result of /nexus reroll|freeze on|off: the rolling permission setting changed. The Automation master switch is not changed.",
+      "consumer": "core/Main.lua rollingOption callback",
+      "familySurface": "chat: /nexus reroll, /nexus freeze and /nexus currentlocks reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.rolling_strategy",
+      "kind": "template",
+      "english": "rolling strategy: {strategy}",
+      "placeholders": [
+        {
+          "name": "strategy",
+          "type": "text",
+          "meaning": "strategy ID in force: adaptive or released (setting value, not translated)"
+        }
+      ],
+      "resultLimitBytes": 132,
+      "group": "command",
+      "meaning": "Lower-case status line naming the rolling strategy in force. The strategy ID is a setting value and stays untranslated.",
+      "consumer": "core/Main.lua SayRollingStatus",
+      "familySurface": "chat: /nexus status, /nexus policy and /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.rolling_strategy_pending",
+      "kind": "template",
+      "english": "rolling strategy: {strategy} (selected: {selected}, applies at the next safe action boundary)",
+      "placeholders": [
+        {
+          "name": "strategy",
+          "type": "text",
+          "meaning": "strategy ID in force (setting value)"
+        },
+        {
+          "name": "selected",
+          "type": "text",
+          "meaning": "newly selected strategy ID that is not in force yet (setting value)"
+        }
+      ],
+      "resultLimitBytes": 274,
+      "group": "command",
+      "meaning": "Status line while a newly selected strategy waits: it takes effect at the next point where no action is in progress.",
+      "consumer": "core/Main.lua SayRollingStatus",
+      "familySurface": "chat: /nexus status, /nexus policy and /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.session_only_note",
+      "kind": "text",
+      "english": "This session only: saved data is kept unchanged and read-only.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Separate sentence appended (with a space) after a setting change when the saved data is read-only: the change lasts until reload and is not saved.",
+      "consumer": "core/Main.lua SayWithSessionNote",
+      "familySurface": "chat: /nexus policy, /nexus trace, /nexus reroll|freeze|currentlocks reply (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.startup_preparing",
+      "kind": "text",
+      "english": "Preparing local saved data; controls unlock after validation completes.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Status: Nexus is still checking its saved data; commands work once that is done.",
+      "consumer": "core/Main.lua notInitialized",
+      "familySurface": "chat: Reply to most /nexus commands before start-up finished (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.startup_stopped",
+      "kind": "template",
+      "english": "Startup stopped: {reason}",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "start-up refusal code (data, not translated), or the translated default command.value.startup_validation_failed"
+        }
+      ],
+      "resultLimitBytes": 1200,
+      "group": "command",
+      "meaning": "Nexus start-up stopped; the reason code follows for support.",
+      "consumer": "core/Main.lua notInitialized",
+      "familySurface": "chat: Reply to most /nexus commands before start-up finished (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_activation_candidate",
+      "kind": "template",
+      "english": "Saved-build activation candidate: slot {slot} when the server permits activation.",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "Saved Build slot number (data)"
+        }
+      ],
+      "resultLimitBytes": 222,
+      "group": "command",
+      "meaning": "Status line: which Saved Build slot Nexus would activate once the game server allows it. Nothing is activated by this line.",
+      "consumer": "core/Main.lua CommandStatus",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_active_desired_plan",
+      "kind": "template",
+      "english": "ACTIVE slot {slot} '{name}': desired plan (not a saved-run guarantee), {count} echoes",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "Saved Build slot number (data)"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Saved Build name from the game, not translated; \"?\" when nameless"
+        },
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "number of Echoes in that slot"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "command",
+      "meaning": "Status line for the active Saved Build slot. \"ACTIVE\" is an upper-case line label. Keep the quotes around the name. \"desired plan\" is a Wishlist plan that is not proven to be a saved run. \"echoes\" = Echo copies.",
+      "consumer": "core/Main.lua CommandStatus (English legacy line kept for a name above the slot bound)",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_active_none",
+      "kind": "text",
+      "english": "ACTIVE: no build activated right now.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Status line: no Saved Build slot is active. \"ACTIVE:\" is an upper-case line label.",
+      "consumer": "core/Main.lua CommandStatus",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_active_saved_build",
+      "kind": "template",
+      "english": "ACTIVE slot {slot} '{name}': Saved Build with confirmed saved-run behavior, {count} echoes",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "Saved Build slot number (data)"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Saved Build name from the game, not translated; \"?\" when nameless"
+        },
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "number of Echoes in that slot"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "command",
+      "meaning": "Status line for the active Saved Build slot. \"ACTIVE\" is an upper-case line label. Keep the quotes around the name. \"Saved Build\" is the game's saved build slot; \"saved-run behavior\" means the slot is known to keep a finished run. \"echoes\" = Echo copies.",
+      "consumer": "core/Main.lua CommandStatus (English legacy line kept for a name above the slot bound)",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_loadouts_waiting",
+      "kind": "text",
+      "english": "LOADOUTS: slot data not loaded yet (waiting on the server).",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Status line: the game has not sent the Saved Build slot data yet. \"LOADOUTS:\" is an upper-case line label (the Saved Build slots); keep a short upper-case label.",
+      "consumer": "core/Main.lua CommandStatus",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_no_saved_build",
+      "kind": "text",
+      "english": "No confirmed Saved Build yet; complete and save your first run.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Status line: there is no verified Saved Build yet. Imperative advice to finish and save a first run.",
+      "consumer": "core/Main.lua CommandStatus",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_readable",
+      "kind": "template",
+      "english": "READABLE: {saved} confirmed Saved Build(s), {plans} desired Wishlist plan(s)",
+      "placeholders": [
+        {
+          "name": "saved",
+          "type": "count",
+          "meaning": "number of confirmed Saved Builds; ? when unknown"
+        },
+        {
+          "name": "plans",
+          "type": "count",
+          "meaning": "number of desired Wishlist plans; ? when unknown"
+        }
+      ],
+      "resultLimitBytes": 212,
+      "group": "command",
+      "meaning": "Status line: how many Saved Build slots Nexus can read. \"READABLE:\" is an upper-case line label. English uses \"(s)\" instead of plural forms; there is no plural grammar, so write a form that reads correctly for any number.",
+      "consumer": "core/Main.lua CommandStatus",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_shared_failed",
+      "kind": "text",
+      "english": "Local controls ready; shared data preparation failed (see /nexus log errors).",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Start-up state: the local controls work, but preparing the shared (Community/Leaderboard/Sync) data failed.",
+      "consumer": "core/Main.lua CommandStatus",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_shared_preparing",
+      "kind": "text",
+      "english": "Local controls ready; Community, Leaderboard and Sync are preparing in the background.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Start-up state: local controls work; the shared features are still being prepared. Community, Leaderboard and Sync are Nexus feature names.",
+      "consumer": "core/Main.lua CommandStatus",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_version_auto_off",
+      "kind": "template",
+      "english": "v{version} build={build} -- level {level}, auto OFF",
+      "placeholders": [
+        {
+          "name": "version",
+          "type": "text",
+          "meaning": "installed Nexus version, e.g. 1.20.0-beta.1 (data)"
+        },
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "runtime build label, e.g. source or test.9029-2d576cf (data)"
+        },
+        {
+          "name": "level",
+          "type": "text",
+          "meaning": "character level number (data)"
+        }
+      ],
+      "resultLimitBytes": 296,
+      "group": "command",
+      "meaning": "First status line. \"v\", \"build=\" and the version data stay as they are (support reads them). Translate \"level\" and \"auto\"; OFF is the Automation switch state word. The pair of keys is chosen by the switch state in code.",
+      "consumer": "core/Main.lua CommandStatus",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.status_version_auto_on",
+      "kind": "template",
+      "english": "v{version} build={build} -- level {level}, auto ON",
+      "placeholders": [
+        {
+          "name": "version",
+          "type": "text",
+          "meaning": "installed Nexus version, e.g. 1.20.0-beta.1 (data)"
+        },
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "runtime build label, e.g. source or test.9029-2d576cf (data)"
+        },
+        {
+          "name": "level",
+          "type": "text",
+          "meaning": "character level number (data)"
+        }
+      ],
+      "resultLimitBytes": 294,
+      "group": "command",
+      "meaning": "First status line. \"v\", \"build=\" and the version data stay as they are (support reads them). Translate \"level\" and \"auto\"; ON is the Automation switch state word. The pair of keys is chosen by the switch state in code.",
+      "consumer": "core/Main.lua CommandStatus",
+      "familySurface": "chat: /nexus status reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.sync_preparing",
+      "kind": "text",
+      "english": "preparing sync data",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case status when Sync is not ready yet and gave no reason of its own.",
+      "consumer": "core/Main.lua CommandSync",
+      "familySurface": "chat: /nexus sync reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.sync_requested",
+      "kind": "text",
+      "english": "asking other players for their builds -- results appear in /nexus builds",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Lower-case status: a Sync request was sent to other players; answers appear in the Nexus Builds window.",
+      "consumer": "core/Main.lua CommandSync",
+      "familySurface": "chat: /nexus sync reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.sync_unavailable",
+      "kind": "text",
+      "english": "sync unavailable",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case status: the Sync module is not loaded.",
+      "consumer": "core/Main.lua CommandSync",
+      "familySurface": "chat: /nexus sync reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.trace_clear_failed",
+      "kind": "text",
+      "english": "The local roll record could not be cleared.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Failure of /nexus trace clear.",
+      "consumer": "core/Main.lua trace callback",
+      "familySurface": "chat: /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.trace_cleared",
+      "kind": "text",
+      "english": "Local roll record cleared.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result of /nexus trace clear.",
+      "consumer": "core/Main.lua trace callback",
+      "familySurface": "chat: /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.trace_now_off",
+      "kind": "text",
+      "english": "Local roll recording is now off. Nothing is ever sent from this computer.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result of /nexus trace off: the local roll recording setting is now off. The pair of keys is chosen in code. Records stay on this computer.",
+      "consumer": "core/Main.lua trace callback",
+      "familySurface": "chat: /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.trace_now_on",
+      "kind": "text",
+      "english": "Local roll recording is now on. Nothing is ever sent from this computer.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Result of /nexus trace on: the local roll recording setting is now on. The pair of keys is chosen in code. Records stay on this computer.",
+      "consumer": "core/Main.lua trace callback",
+      "familySurface": "chat: /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.trace_recorder_missing",
+      "kind": "text",
+      "english": "The roll recorder is not loaded.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "The local roll recorder module is not loaded.",
+      "consumer": "core/Main.lua trace callback",
+      "familySurface": "chat: /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.trace_tab_hint",
+      "kind": "text",
+      "english": "The Roll trace tab holds the report. Copy each page in order and send it privately, never in public.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "\"Roll trace\" is the name of a log viewer tab; keep it as the tab shows it. Privacy advice: send the report privately.",
+      "consumer": "core/Main.lua trace callback",
+      "familySurface": "chat: /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.update_releases_page",
+      "kind": "template",
+      "english": "Releases page: {url}",
+      "placeholders": [
+        {
+          "name": "url",
+          "type": "text",
+          "meaning": "the configured GitHub Releases page URL (data)"
+        }
+      ],
+      "resultLimitBytes": 254,
+      "group": "command",
+      "meaning": "Label before the Releases page link. \"Releases\" is the GitHub page name.",
+      "consumer": "core/Main.lua update callback",
+      "familySurface": "chat: /nexus update reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.update_unavailable",
+      "kind": "text",
+      "english": "Update status is unavailable.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "The update status module is not loaded.",
+      "consumer": "core/Main.lua update callback",
+      "familySurface": "chat: /nexus update reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.usage",
+      "kind": "template",
+      "english": "Use {usage}",
+      "placeholders": [
+        {
+          "name": "usage",
+          "type": "text",
+          "meaning": "command syntax such as \"/nexus policy adaptive|released\" (protocol)"
+        }
+      ],
+      "resultLimitBytes": 136,
+      "group": "command",
+      "meaning": "Short usage hint: \"Use\" + the correct command syntax. Imperative.",
+      "consumer": "core/Main.lua policy and trace callbacks",
+      "familySurface": "chat: /nexus policy and /nexus trace reply for a wrong argument (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.wishlist_design_hint",
+      "kind": "block",
+      "english": "Design one in the Echo Journal: 'New Wishlist' (the 'Echo Wishlist'\nsection), pick its echoes, and save it. The addon reads that build.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "One sentence printed as two chat lines; the line break is where the first chat line ends (keep one line break, place it where natural). 'New Wishlist' and 'Echo Wishlist' name game UI elements of the Echo Journal; use the client's wording for them.",
+      "consumer": "core/Main.lua CommandWishlist (SayLines)",
+      "familySurface": "chat: /nexus wishlist reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.wishlist_none_detected",
+      "kind": "text",
+      "english": "no wishlist detected -- running as advisor only.",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Lower-case status: no Wishlist is assigned, so Nexus only gives recommendations (\"advisor\").",
+      "consumer": "core/Main.lua CommandWishlist",
+      "familySurface": "chat: /nexus wishlist reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.chat.wishlist_reading",
+      "kind": "template",
+      "english": "reading {name} (from {source}) -- {echoes} echoes, {families} families",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Wishlist name in quotes with its code-owned colour (data, not translated)"
+        },
+        {
+          "name": "source",
+          "type": "text",
+          "meaning": "translated source phrase (command.value.wishlist_source_*)"
+        },
+        {
+          "name": "echoes",
+          "type": "count",
+          "meaning": "number of Echo entries"
+        },
+        {
+          "name": "families",
+          "type": "count",
+          "meaning": "number of distinct Echo families"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "command",
+      "meaning": "Lower-case status: Nexus is reading this Wishlist. \"families\" = distinct Echo families (each counted once).",
+      "consumer": "core/Main.lua CommandWishlist (legacy English kept for an over-long name)",
+      "familySurface": "chat: /nexus wishlist reply (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.value.rolling_decision_none",
+      "kind": "text",
+      "english": "none",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Inserted into command.chat.rolling_last_decision as {policy} when no decision was made yet. Means \"no decision\", not zero.",
+      "consumer": "core/Main.lua SayRollingStatus",
+      "familySurface": "chat: /nexus status, /nexus policy and /nexus trace reply (Chat line after the code-owned blue \"Nexus:\" prefix) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.value.startup_validation_failed",
+      "kind": "text",
+      "english": "validation failed",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Default reason inserted into command.chat.startup_stopped when start-up gave no reason code: the saved-data validation failed.",
+      "consumer": "core/Main.lua notInitialized",
+      "familySurface": "chat: Reply to most /nexus commands before start-up finished (Chat line after the code-owned blue \"Nexus:\" prefix) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.value.wishlist_source_active",
+      "kind": "text",
+      "english": "your active loadout",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Inserted as {source} into command.chat.wishlist_reading after \"from\": the source of the Wishlist being read: the active Saved Build slot.",
+      "consumer": "core/Main.lua CommandWishlist",
+      "familySurface": "chat: /nexus wishlist reply (Chat line after the code-owned blue \"Nexus:\" prefix) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.value.wishlist_source_designed",
+      "kind": "text",
+      "english": "your Echo Wishlist build",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Inserted as {source} into command.chat.wishlist_reading after \"from\": the source of the Wishlist being read: a Wishlist designed in the Echo Journal.",
+      "consumer": "core/Main.lua CommandWishlist",
+      "familySurface": "chat: /nexus wishlist reply (Chat line after the code-owned blue \"Nexus:\" prefix) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "command.value.wishlist_source_other",
+      "kind": "text",
+      "english": "your wishlist",
+      "placeholders": [],
+      "group": "command",
+      "meaning": "Inserted as {source} into command.chat.wishlist_reading after \"from\": the source of the Wishlist being read: any other Wishlist source.",
+      "consumer": "core/Main.lua CommandWishlist",
+      "familySurface": "chat: /nexus wishlist reply (Chat line after the code-owned blue \"Nexus:\" prefix) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.chat.auto_off",
+      "kind": "text",
+      "english": "auto OFF",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "Lower-case \"auto\" + switch state word OFF.",
+      "consumer": "core/MainLifecycle.lua Panel.Init ToggleAuto",
+      "familySurface": "chat: Chat feedback after the HUD Auto button (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.chat.auto_on",
+      "kind": "text",
+      "english": "auto ON",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "Lower-case \"auto\" + switch state word ON: the Automation master switch was turned on from the HUD button.",
+      "consumer": "core/MainLifecycle.lua Panel.Init ToggleAuto",
+      "familySurface": "chat: Chat feedback after the HUD Auto button (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.chat.echo_optimizer_conflict",
+      "kind": "text",
+      "english": "EchoOptimizer detected -- it conflicts with Nexus's board hook. Disable EchoOptimizer; Nexus replaces its functionality.",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "\"EchoOptimizer\" is another addon's name: keep it. Warning shown in red (colour added by code).",
+      "consumer": "core/MainLifecycle.lua Initialize",
+      "familySurface": "chat: Automatic chat notice (Chat line after the code-owned blue \"Nexus:\" prefix), red (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.chat.loaded",
+      "kind": "template",
+      "english": "v{version} build={build} -- type /nexus for commands.",
+      "placeholders": [
+        {
+          "name": "version",
+          "type": "text",
+          "meaning": "installed Nexus version (data)"
+        },
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "build label, possibly followed by \" internal\" (release identity data, not translated)"
+        }
+      ],
+      "resultLimitBytes": 298,
+      "group": "main",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). \"v\" and \"build=\" with their data stay as they are for support.",
+      "consumer": "core/MainLifecycle.lua Initialize",
+      "familySurface": "chat: Chat notice once Nexus has loaded (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.chat.saturation_barriers",
+      "kind": "text",
+      "english": "Community retention markers full: older shared builds are kept instead of removed.",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "First sentence of a one-time notice: a bounded part of the Community catalog is full. Followed (code-joined with a space) by main.chat.saturation_still_available.",
+      "consumer": "core/MainLifecycle.lua OnUpdate saturation notice",
+      "familySurface": "chat: Automatic chat notice (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.chat.saturation_builds",
+      "kind": "text",
+      "english": "Community catalog full: new shared builds are refused.",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "First sentence of a one-time notice: a bounded part of the Community catalog is full. Followed (code-joined with a space) by main.chat.saturation_still_available.",
+      "consumer": "core/MainLifecycle.lua OnUpdate saturation notice",
+      "familySurface": "chat: Automatic chat notice (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.chat.saturation_catalog",
+      "kind": "text",
+      "english": "Community catalog full: new shared data is refused.",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "First sentence of a one-time notice: a bounded part of the Community catalog is full. Followed (code-joined with a space) by main.chat.saturation_still_available.",
+      "consumer": "core/MainLifecycle.lua OnUpdate saturation notice",
+      "familySurface": "chat: Automatic chat notice (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.chat.saturation_still_available",
+      "kind": "text",
+      "english": "Your existing Community builds and Leaderboard stay available. See /nexus status.",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Second part of each catalog-full notice: what still works.",
+      "consumer": "core/MainLifecycle.lua OnUpdate saturation notice",
+      "familySurface": "chat: Automatic chat notice (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.chat.saturation_tombstones",
+      "kind": "text",
+      "english": "Community removal markers full: new build removals are refused.",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "First sentence of a one-time notice: a bounded part of the Community catalog is full. Followed (code-joined with a space) by main.chat.saturation_still_available.",
+      "consumer": "core/MainLifecycle.lua OnUpdate saturation notice",
+      "familySurface": "chat: Automatic chat notice (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.chat.update_notice_fallback",
+      "kind": "template",
+      "english": "Nexus build {version}: see /nexus update. Installation is manual.",
+      "placeholders": [
+        {
+          "name": "version",
+          "type": "text",
+          "meaning": "announced build (data)"
+        }
+      ],
+      "resultLimitBytes": 240,
+      "group": "main",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). Fallback update notice if the update module gives no wording. Nexus never installs anything itself.",
+      "consumer": "core/MainLifecycle.lua Updates.Init notify",
+      "familySurface": "chat: Automatic chat notice (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.value.quality_common",
+      "kind": "text",
+      "english": "Common",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "Echo quality tier name, shown in parentheses after an Echo name (e.g. \"Name (Common) x2\") and as \"Common:x1\" in a tier list. Use the game client's own item-quality word.",
+      "consumer": "core/MainViewModel.lua QualityName/QualityLabel",
+      "familySurface": "chat: HUD Wishlist progress lists and /nexus missing (Echo labels) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.value.quality_epic",
+      "kind": "text",
+      "english": "Epic",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "Echo quality tier name, shown in parentheses after an Echo name (e.g. \"Name (Epic) x2\") and as \"Epic:x1\" in a tier list. Use the game client's own item-quality word.",
+      "consumer": "core/MainViewModel.lua QualityName/QualityLabel",
+      "familySurface": "chat: HUD Wishlist progress lists and /nexus missing (Echo labels) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.value.quality_legendary",
+      "kind": "text",
+      "english": "Legendary",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "Echo quality tier name, shown in parentheses after an Echo name (e.g. \"Name (Legendary) x2\") and as \"Legendary:x1\" in a tier list. Use the game client's own item-quality word.",
+      "consumer": "core/MainViewModel.lua QualityName/QualityLabel",
+      "familySurface": "chat: HUD Wishlist progress lists and /nexus missing (Echo labels) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.value.quality_rare",
+      "kind": "text",
+      "english": "Rare",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "Echo quality tier name, shown in parentheses after an Echo name (e.g. \"Name (Rare) x2\") and as \"Rare:x1\" in a tier list. Use the game client's own item-quality word.",
+      "consumer": "core/MainViewModel.lua QualityName/QualityLabel",
+      "familySurface": "chat: HUD Wishlist progress lists and /nexus missing (Echo labels) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.value.quality_uncommon",
+      "kind": "text",
+      "english": "Uncommon",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "Echo quality tier name, shown in parentheses after an Echo name (e.g. \"Name (Uncommon) x2\") and as \"Uncommon:x1\" in a tier list. Use the game client's own item-quality word.",
+      "consumer": "core/MainViewModel.lua QualityName/QualityLabel",
+      "familySurface": "chat: HUD Wishlist progress lists and /nexus missing (Echo labels) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.value.unknown_spell",
+      "kind": "template",
+      "english": "spell {id}",
+      "placeholders": [
+        {
+          "name": "id",
+          "type": "text",
+          "meaning": "game spell ID number (data)"
+        }
+      ],
+      "resultLimitBytes": 88,
+      "group": "main",
+      "meaning": "Label of an Echo whose name the catalog does not know yet: \"spell\" followed by its numeric ID. Lower-case.",
+      "consumer": "core/Main.lua CommandWishlist; core/MainViewModel.lua (UnknownSpell)",
+      "familySurface": "chat: /nexus wishlist reply and HUD Wishlist progress lists (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "main.value.unnamed_wishlist",
+      "kind": "text",
+      "english": "(unnamed)",
+      "placeholders": [],
+      "group": "main",
+      "meaning": "Shown in place of a Wishlist name when the Wishlist has none. Keep the parentheses.",
+      "consumer": "core/Main.lua CommandWishlist; core/MainViewModel.lua BuildProgress (wishlistName)",
+      "familySurface": "chat: /nexus wishlist reply and HUD progress model (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.hint_also_reported",
+      "kind": "template",
+      "english": "Another client also reports {build} (unverified, not checked against GitHub).",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "another reported build (data)"
+        }
+      ],
+      "resultLimitBytes": 268,
+      "group": "update",
+      "meaning": "Status line: an additional unverified report.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.hint_check_releases",
+      "kind": "text",
+      "english": "Check the Better Nexus Releases page before updating.",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "\"Better Nexus\" is the project name; \"Releases page\" the GitHub page.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.hint_reported",
+      "kind": "template",
+      "english": "Newer public test reported: {build}.",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "reported test build (data)"
+        }
+      ],
+      "resultLimitBytes": 186,
+      "group": "update",
+      "meaning": "Status line: another client reported this test build (unverified).",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.hint_unverified",
+      "kind": "text",
+      "english": "Reported by another client; not checked against GitHub.",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Status line: the hint is unverified.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.installed",
+      "kind": "template",
+      "english": "Installed: {build} ({channel}).",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "installed build display (data)"
+        },
+        {
+          "name": "channel",
+          "type": "text",
+          "meaning": "translated package kind (update.value.channel_*) or a raw channel ID"
+        }
+      ],
+      "resultLimitBytes": 222,
+      "group": "update",
+      "meaning": "First status line: the exact installed build for support.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.installed_label",
+      "kind": "template",
+      "english": "Installed: {build} ({channel}, {label}).",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "installed build display (data)"
+        },
+        {
+          "name": "channel",
+          "type": "text",
+          "meaning": "translated package kind"
+        },
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "build label such as test.9029-2d576cf (data)"
+        }
+      ],
+      "resultLimitBytes": 322,
+      "group": "update",
+      "meaning": "First status line with the build label.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.no_hint_received",
+      "kind": "text",
+      "english": "No newer public-test announcement was received.",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Status line for public test installations.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.no_verified_info",
+      "kind": "text",
+      "english": "No verified update information. Nexus cannot check for updates by itself.",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Status line: unknown is not \"latest\". Nexus has no network access.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.not_proof_latest",
+      "kind": "text",
+      "english": "That is not proof that this build is the latest: to check, open the Releases page.",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Status line: never claim the build is up to date.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.notices_off",
+      "kind": "text",
+      "english": "Update notices are off, so Nexus names no newer build. To check yourself, open the Releases page.",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Status line when notices are off. Nexus never downloads or installs anything; \"Releases page\" is the GitHub page name.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.notices_off_all",
+      "kind": "text",
+      "english": "Update notices: off (when on: stable releases and public test builds).",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Last status line: the notice setting (off; when switched on, stable and test). One of four keys chosen in code.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.notices_off_stable_only",
+      "kind": "text",
+      "english": "Update notices: off (when on: stable releases only).",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Last status line: the notice setting (off; when switched on, stable only). One of four keys chosen in code.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.notices_on_all",
+      "kind": "text",
+      "english": "Update notices: on, stable releases and public test builds.",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Last status line: the notice setting (on; stable and test builds). One of four keys chosen in code.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.notices_on_stable_only",
+      "kind": "text",
+      "english": "Update notices: on, stable releases only.",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Last status line: the notice setting (on; only stable releases are announced). One of four keys chosen in code.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.peer_versions_not_release",
+      "kind": "text",
+      "english": "Versions stated by other players' clients are not release information.",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Status line: peer reports are not evidence.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.release_available",
+      "kind": "template",
+      "english": "New Nexus release available: {build}.",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "newer stable release (data)"
+        }
+      ],
+      "resultLimitBytes": 188,
+      "group": "update",
+      "meaning": "Status sentence after the Installed line (code-joined with a space).",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.test_build_available",
+      "kind": "template",
+      "english": "New Nexus test build available: {build}.",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "newer test build (data)"
+        }
+      ],
+      "resultLimitBytes": 194,
+      "group": "update",
+      "meaning": "Status sentence after the Installed line.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.body.test_hidden_stable_only",
+      "kind": "template",
+      "english": "A newer test build ({build}) is not announced because notices are set to stable releases only.",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "newer test build (data)"
+        }
+      ],
+      "resultLimitBytes": 302,
+      "group": "update",
+      "meaning": "Status line: a newer test build exists but the preference hides test builds.",
+      "consumer": "core/Updates.lua Status().detail",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (body); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.chat.hint_reported",
+      "kind": "template",
+      "english": "Another player's client reports a newer public test build: {build}. UNVERIFIED: Nexus did not check GitHub and cannot confirm that this build exists or is safe. Check the Releases page yourself: /nexus update.",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "the reported test build (data from another client)"
+        }
+      ],
+      "resultLimitBytes": 532,
+      "group": "update",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). A peer's unverified report. \"UNVERIFIED:\" is an upper-case warning label; keep it prominent. Never imply the build was checked.",
+      "consumer": "core/Updates.lua HintMessage via notify",
+      "familySurface": "chat: Automatic update notice in chat (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.chat.release_available",
+      "kind": "template",
+      "english": "New Nexus release available: {build}. You have {installed}. Installation is manual: /nexus update shows the Releases page.",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "the newer release version (data)"
+        },
+        {
+          "name": "installed",
+          "type": "text",
+          "meaning": "installed build display (data)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "update",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). A newer stable release is known from the bundled release data. Nexus never downloads or installs anything; \"Releases page\" is the GitHub page name.",
+      "consumer": "core/Updates.lua Message via notify",
+      "familySurface": "chat: Automatic update notice in chat (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.chat.test_build_available",
+      "kind": "template",
+      "english": "New Nexus test build available: {build}. You have {installed}. Installation is manual: /nexus update shows the Releases page.",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "the newer public test build (data)"
+        },
+        {
+          "name": "installed",
+          "type": "text",
+          "meaning": "installed build display (data)"
+        }
+      ],
+      "resultLimitBytes": 406,
+      "group": "update",
+      "meaning": "Must stay untranslated: slash commands and their argument words (/nexus ..., /reload, on, off, adaptive, released, keep). A newer public test build is known from the bundled release data. Nexus never downloads or installs anything; \"Releases page\" is the GitHub page name.",
+      "consumer": "core/Updates.lua Message via notify",
+      "familySurface": "chat: Automatic update notice in chat (Chat line after the code-owned blue \"Nexus:\" prefix) (chat); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.menu.available",
+      "kind": "template",
+      "english": "Update available: {build}",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "newer build (data)"
+        }
+      ],
+      "resultLimitBytes": 164,
+      "group": "update",
+      "meaning": "Menu row when bundled release data names a newer build.",
+      "consumer": "core/Updates.lua Status().menu",
+      "familySurface": "chat: Nexus panel More menu, Notices section: the version/update row (menu); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.menu.hint_reported",
+      "kind": "template",
+      "english": "Newer public test reported: {build} (unverified)",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "reported test build (data)"
+        }
+      ],
+      "resultLimitBytes": 210,
+      "group": "update",
+      "meaning": "Menu row when another client reported a newer public test build; it is not verified.",
+      "consumer": "core/Updates.lua Status().menu",
+      "familySurface": "chat: Nexus panel More menu, Notices section: the version/update row (menu); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.menu.no_verified_info",
+      "kind": "text",
+      "english": "Version and updates: no verified update info",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Menu row when Nexus has no verified update information (not the same as \"up to date\").",
+      "consumer": "core/Updates.lua Status().menu",
+      "familySurface": "chat: Nexus panel More menu, Notices section: the version/update row (menu); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.menu.notices_off",
+      "kind": "text",
+      "english": "Version and updates: notices off",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Menu row when update notices are switched off. \"Version and updates\" is the row's subject.",
+      "consumer": "core/Updates.lua Status().menu -> ui/Panel.lua",
+      "familySurface": "chat: Nexus panel More menu, Notices section: the version/update row (menu); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.value.channel_development",
+      "kind": "text",
+      "english": "development source",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Kind of the installed package, inserted as {channel} into update.body.installed*.",
+      "consumer": "core/Updates.lua Status().channelLabel",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.value.channel_internal",
+      "kind": "text",
+      "english": "internal test package",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Kind of the installed package, inserted as {channel} into update.body.installed*.",
+      "consumer": "core/Updates.lua Status().channelLabel",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.value.channel_public_test",
+      "kind": "text",
+      "english": "public test build",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Kind of the installed package, inserted as {channel} into update.body.installed*.",
+      "consumer": "core/Updates.lua Status().channelLabel",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
+    },
+    {
+      "key": "update.value.channel_stable",
+      "kind": "text",
+      "english": "stable release",
+      "placeholders": [],
+      "group": "update",
+      "meaning": "Kind of the installed package, inserted as {channel} into update.body.installed*.",
+      "consumer": "core/Updates.lua Status().channelLabel",
+      "familySurface": "chat: Version and updates status: /nexus update chat reply and the Releases popup (one line each) (value); family coverage PENDING review",
+      "cohort": "fullui:chat"
     },
     {
       "key": "library.body.detail_incomplete",
@@ -5803,10 +8074,11 @@
       "format",
       "template"
     ],
-    "totalKeys": 386,
+    "totalKeys": 546,
     "originalKeys": 28,
     "byFamily": {
-      "library": 358
+      "library": 358,
+      "chat": 160
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }
