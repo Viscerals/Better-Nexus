@@ -431,6 +431,8 @@ NAMES += ['localization_parity']
 PYTHON_TESTS=['tools/tests/test_l10n_inventory.py','tools/tests/test_l10n_catalog.py']
 # Issue #147 S1: offline side of the shared parity corpus and the G1 registry interlock sentinel.
 PYTHON_TESTS += ['tools/tests/test_l10n_parity.py']
+# Issue #147 R union: nonexecuting declaration parser of core/Localization.lua and the five-input registry-bound API and report v2.
+PYTHON_TESTS += ['tools/tests/test_l10n_registry.py']
 # Wall-clock limit for one Python test process, read by tools/ci_check.py.
 PYTHON_TEST_TIMEOUT_SECONDS=DEFAULT_TIMEOUT_SECONDS
 
