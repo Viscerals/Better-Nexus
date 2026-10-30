@@ -239,7 +239,8 @@ end
 -- Each Panel entry is its actual binding in ui/Panel.lua plus the exact
 -- English the real seam gives the key, stated here as an independent literal
 -- (not read from the data); the hover still names the server's own My Builds
--- page. The other file keeps its source literal.
+-- page. The Journal tab's shortcut is bound the same way (full-UI
+-- localization owner follow-up).
 local GAME_PAGE_LABELS={{file='ui/Panel.lua',phrase='switchBtn:SetText((Nexus.Localization.Text("panel.button.my_builds")))',
   key='panel.button.my_builds',english='My Builds'},
  {file='ui/Panel.lua',phrase='GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.open_my_builds")',
@@ -247,7 +248,8 @@ local GAME_PAGE_LABELS={{file='ui/Panel.lua',phrase='switchBtn:SetText((Nexus.Lo
  {file='ui/Panel.lua',phrase='GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.my_builds_destination")',
   key='panel.tooltip.my_builds_destination',
   english='Open the server My Builds page. Choosing a different Saved Build there changes the active loadout.'},
- {file='ui/JournalTab.lua',phrase='"Assign in My Builds"'}}
+ {file='ui/JournalTab.lua',phrase='b:SetText(T("journal.button.assign_in_my_builds"))',
+  key='journal.button.assign_in_my_builds',english='Assign in My Builds'}}
 
 C.scenario('R5 terminology lint: no deprecated unqualified form in the shipped UI sources',function()
  local found,read,sources={},0,{}

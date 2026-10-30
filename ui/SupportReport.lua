@@ -189,9 +189,9 @@ local function ensure()
     frame.incident = text(frame, 20, -124, 680, 150)
 
     frame.storage = text(frame, 20, -282, 680, 32)
-    -- "Copy summary" and "Prepare report file" stay literal: Help quotes them
-    -- by name (tests/prototype/help_action_first.lua checks the source).
-    button(frame, 20, -318, 130, "Copy summary", function()
+    -- Help quotes these two labels by name; help_action_first finds them as
+    -- reviewed keys bound here with the exact English.
+    button(frame, 20, -318, 130, T("support.button.copy_summary"), function()
         local builder = report()
         if not builder then return end
         local body, meta = builder.Summary(selected())
@@ -200,7 +200,7 @@ local function ensure()
             "Select this text and copy it (Ctrl+A, Ctrl+C). " .. size .. " of " .. limit
             .. " bytes. Nothing was sent anywhere."))
     end)
-    button(frame, 156, -318, 160, "Prepare report file", function()
+    button(frame, 156, -318, 160, T("support.button.prepare_report_file"), function()
         UI.PrepareFile(false)
     end)
     frame.advanced = CreateFrame("CheckButton", "NexusSupportExtended", frame,

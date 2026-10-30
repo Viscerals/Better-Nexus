@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 1451,
+    "declaredKeys": 1459,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -4980,6 +4980,94 @@
       "consumer": "Nameplate OrdinalSuffix",
       "familySurface": "hud: Unit tooltip (mouse over another player): Nexus lines (value); family coverage PENDING review",
       "cohort": "fullui:hud"
+    },
+    {
+      "key": "journal.button.assign_in_my_builds",
+      "kind": "text",
+      "english": "Assign in My Builds",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Navigation button. 'My Builds' is the name of the game's own page that lists your Saved Builds (keep the game's wording for that page name). Also the heading of its hover.",
+      "consumer": "b:SetText and its hover title",
+      "familySurface": "integration: Echo Journal, Nexus Progress tab (button); family coverage PENDING review",
+      "cohort": "fullui:integration"
+    },
+    {
+      "key": "journal.menu.unassign_wishlist",
+      "kind": "text",
+      "english": "Unassign Wishlist",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Imperative picker row: stop using this Wishlist for the shown target. Help quotes it by name. Also the heading of its hover.",
+      "consumer": "row.text:SetText and its hover title",
+      "familySurface": "integration: Echo Journal, Nexus Progress tab, Wishlist picker (menu); family coverage PENDING review",
+      "cohort": "fullui:integration"
+    },
+    {
+      "key": "library.button.stop_sharing",
+      "kind": "text",
+      "english": "Stop Sharing",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Imperative button label that starts withdrawing your own shared build. Same words as the confirmation dialog's button (library.button.stop_sharing_confirm) but a different role: this one only opens the confirmation. Help quotes it by name.",
+      "consumer": "detailPanel.deleteBtn:SetText",
+      "familySurface": "integration: Build Library window, build detail action row (button); family coverage PENDING review",
+      "cohort": "fullui:integration"
+    },
+    {
+      "key": "library.status.updating_results",
+      "kind": "text",
+      "english": "Updating results...",
+      "placeholders": [],
+      "group": "library",
+      "meaning": "Short progress status: the build list is being recomputed for the chosen filters. The trailing three dots are part of the text. Distinct from 'no builds match' (an empty published result) and from loading the library at startup. Help quotes this status by name.",
+      "consumer": "resultText:SetText in RenderRefresh (two sites)",
+      "familySurface": "integration: Build Library window, results line above the build list (status); family coverage PENDING review",
+      "cohort": "fullui:integration"
+    },
+    {
+      "key": "log.button.prepare_full_report",
+      "kind": "text",
+      "english": "Prepare full diagnostic report",
+      "placeholders": [],
+      "group": "log",
+      "meaning": "Imperative button label: build the complete diagnostic report (larger than the support summary). Help quotes it by name.",
+      "consumer": "exportButton:SetText",
+      "familySurface": "integration: Log viewer window (/nexus log) (button); family coverage PENDING review",
+      "cohort": "fullui:integration"
+    },
+    {
+      "key": "log.button.select_page",
+      "kind": "text",
+      "english": "Select this page",
+      "placeholders": [],
+      "group": "log",
+      "meaning": "Imperative button label: highlight the whole text of the page now shown, ready to copy. 'Page' = the current tab of the log viewer. Help quotes it by name.",
+      "consumer": "selectAll:SetText",
+      "familySurface": "integration: Log viewer window (/nexus log) (button); family coverage PENDING review",
+      "cohort": "fullui:integration"
+    },
+    {
+      "key": "support.button.copy_summary",
+      "kind": "text",
+      "english": "Copy summary",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "Imperative button label: show the short incident summary so the player can copy it. 'Summary' is the short text report, not the full diagnostic file. Help quotes it by name.",
+      "consumer": "button(frame, 20, -318, 130, ...)",
+      "familySurface": "integration: Support report window (/nexus report) (button); family coverage PENDING review",
+      "cohort": "fullui:integration"
+    },
+    {
+      "key": "support.button.prepare_report_file",
+      "kind": "text",
+      "english": "Prepare report file",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "Imperative button label: prepare the report as a file in the Nexus Support companion's storage. Help quotes it by name.",
+      "consumer": "button(frame, 156, -318, 160, ...)",
+      "familySurface": "integration: Support report window (/nexus report) (button); family coverage PENDING review",
+      "cohort": "fullui:integration"
     },
     {
       "key": "journal.body.assign_note",
@@ -20359,7 +20447,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 1451,
+    "totalKeys": 1459,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -20367,7 +20455,8 @@
       "records": 276,
       "hud": 166,
       "usertext": 261,
-      "journal": 202
+      "journal": 202,
+      "integration": 8
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

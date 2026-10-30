@@ -672,6 +672,15 @@ local DECLARATIONS = {
     ["unit_tooltip.value.rank_rd"] = {kind = "template", fields = {"rank"}, slots = {"text"}, resultLimit = 256},
     ["unit_tooltip.value.rank_st"] = {kind = "template", fields = {"rank"}, slots = {"text"}, resultLimit = 256},
     ["unit_tooltip.value.rank_th"] = {kind = "template", fields = {"rank"}, slots = {"text"}, resultLimit = 256},
+    -- integration (8)
+    ["journal.button.assign_in_my_builds"] = {kind = "text"},
+    ["journal.menu.unassign_wishlist"] = {kind = "text"},
+    ["library.button.stop_sharing"] = {kind = "text"},
+    ["library.status.updating_results"] = {kind = "text"},
+    ["log.button.prepare_full_report"] = {kind = "text"},
+    ["log.button.select_page"] = {kind = "text"},
+    ["support.button.copy_summary"] = {kind = "text"},
+    ["support.button.prepare_report_file"] = {kind = "text"},
     -- journal (202)
     ["journal.body.assign_note"] = {kind = "text"},
     ["journal.body.change_in_my_builds"] = {kind = "text"},

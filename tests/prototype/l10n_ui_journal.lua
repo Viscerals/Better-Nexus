@@ -285,7 +285,7 @@ local function SameSnapshot(a,b)
  return a.db==b.db and a.wr==b.wr and a.sent==b.sent and a.actions==b.actions and a.state==b.state and a.popup==b.popup
 end
 
-local PENDING_LITERALS={['Assign in My Builds']=true,['Unassign Wishlist']=true}
+local PENDING_LITERALS={}
 -- Owner integration (pseudo helper fix f571dd5): a seam text that the code
 -- shortens (ShortName: a prefix plus "...") has no closing marker. It counts
 -- as reviewed text only when it is the opener plus a prefix, cut on a UTF-8

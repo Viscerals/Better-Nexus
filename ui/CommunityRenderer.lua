@@ -2839,9 +2839,7 @@ local function RefreshDetailPanel(buildId, listPending)
             detailPanel.deleteBtn:Hide()
         else
             detailPanel.deleteBtn:Show()
-            -- Still a source literal: help_action_first lints this label in the
-            -- UI source (pending the owner's keyed-label decision).
-            detailPanel.deleteBtn:SetText("Stop Sharing")
+            detailPanel.deleteBtn:SetText(T("library.button.stop_sharing"))
         end
     elseif admin then
         detailPanel.editBtn:Hide()
@@ -4370,7 +4368,7 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
         -- The rows still shown are the last published ones, not the result
         -- of the current filters.
         -- Still a source literal (help_action_first lints it; see Stop Sharing).
-        if resultText then resultText:SetText("|cff7fd5ffUpdating results...|r") end
+        if resultText then resultText:SetText("|cff7fd5ff" .. T("library.status.updating_results") .. "|r") end
         if frame._emptyState then frame._emptyState:Hide() end
         frame._resultsStale = true
         viewDiagnostic.projectionPending = false
@@ -4396,7 +4394,7 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
     if type(builds) ~= "table" then
         if projectionError == "pending" then
             refreshDirty = true
-            if resultText then resultText:SetText("|cff7fd5ffUpdating results...|r") end
+            if resultText then resultText:SetText("|cff7fd5ff" .. T("library.status.updating_results") .. "|r") end
             -- "No builds match the current ... filters" belongs to the last
             -- published result, not to the filters now being prepared.
             if frame._emptyState then frame._emptyState:Hide() end

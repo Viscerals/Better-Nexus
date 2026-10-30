@@ -111,8 +111,8 @@ local function Skip(item,frame)
  for _,b in pairs(tabs) do
   if item.frame==b or (b.GetFontString and item.frame==b:GetFontString()) then return true end
  end
- local plain=S.Unmarked(item.text)
- return plain=='Updating results...' or plain=='Stop Sharing'
+  -- ("Updating results..." and the detail "Stop Sharing" are reviewed keys now.)
+ return false
 end
 local function Scan(root,label,frame)
  local texts=S.VisibleTexts(root)

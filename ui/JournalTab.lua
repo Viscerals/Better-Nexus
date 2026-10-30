@@ -697,16 +697,15 @@ local function PageButton(kind)
     else
         buildsButton = b
         b:SetSize(150, 22)
-        -- PENDING (not localized): this label and its hover title stay the
-        -- source literal "Assign in My Builds", which the terminology guard
-        -- (ux_record_scope_terms GAME_PAGE_LABELS) requires in this file.
-        b:SetText("Assign in My Builds")
+        -- My Builds names the game's own page (ux_record_scope_terms
+        -- GAME_PAGE_LABELS checks this binding and its exact English).
+        b:SetText(T("journal.button.assign_in_my_builds"))
         b:SetScript("OnClick", function()
             pcall(function() if panel and panel:IsShown() then DeselectOurTab(true) end end)
         end)
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Assign in My Builds", 1, 1, 1)
+            GameTooltip:AddLine(T("journal.button.assign_in_my_builds"), 1, 1, 1)
             GameTooltip:AddLine(T("journal.tooltip.builds_closes_page") .. " " .. AssignNote(),
                 0.82, 0.82, 0.82, true)
             GameTooltip:Show()
@@ -1598,13 +1597,12 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             row = CreateFrame("Button", nil, wishlistPicker)
             row:SetHeight(20)
             row.text = row:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-            -- PENDING (not localized): the row label and its hover title stay
-            -- the source literal "Unassign Wishlist", which the control-label
-            -- guard (help_action_first) requires in a UI source.
-            row.text:SetPoint("LEFT",6,0); row.text:SetText("Unassign Wishlist")
+            -- Help quotes "Unassign Wishlist"; help_action_first finds it as
+            -- this reviewed key bound here with the exact English.
+            row.text:SetPoint("LEFT",6,0); row.text:SetText(T("journal.menu.unassign_wishlist"))
             row:SetScript("OnEnter",function(self)
                 GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
-                GameTooltip:AddLine("Unassign Wishlist",1,1,1)
+                GameTooltip:AddLine(T("journal.menu.unassign_wishlist"),1,1,1)
                 GameTooltip:AddLine(T(self.emptySlot and "journal.tooltip.unassign_empty_slot"
                     or "journal.tooltip.unassign_keeps"),.8,.8,.8,true)
                 GameTooltip:AddLine(T("journal.tooltip.unassign_no_build_change"),.8,.8,.8,true)

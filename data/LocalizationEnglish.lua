@@ -380,6 +380,15 @@ Nexus.LocalizationEnglish = {
     ["unit_tooltip.value.rank_rd"] = "{rank}rd",
     ["unit_tooltip.value.rank_st"] = "{rank}st",
     ["unit_tooltip.value.rank_th"] = "{rank}th",
+    -- integration (8)
+    ["journal.button.assign_in_my_builds"] = "Assign in My Builds",
+    ["journal.menu.unassign_wishlist"] = "Unassign Wishlist",
+    ["library.button.stop_sharing"] = "Stop Sharing",
+    ["library.status.updating_results"] = "Updating results...",
+    ["log.button.prepare_full_report"] = "Prepare full diagnostic report",
+    ["log.button.select_page"] = "Select this page",
+    ["support.button.copy_summary"] = "Copy summary",
+    ["support.button.prepare_report_file"] = "Prepare report file",
     -- journal (202)
     ["journal.body.assign_note"] = "Assigning by itself does not change any Saved Build.",
     ["journal.body.change_in_my_builds"] = "Change the assigned Wishlist in My Builds.",

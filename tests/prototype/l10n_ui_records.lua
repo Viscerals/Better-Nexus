@@ -75,8 +75,11 @@ local function FindRegion(root,pred)
  for _,r in ipairs(root.regions or {}) do if pred(r) then return r end end
  for _,c in ipairs(root.children or {}) do local hit=FindRegion(c,pred);if hit then return hit end end
 end
+-- A button by its English label, or by that label as reviewed pseudo text in
+-- a pseudo session (the owner adopted the Help-quoted labels as keys).
 local function Button(text,parent)
- return Find(function(f) return f.kind=='Button' and f:GetText()==text and (not parent or f:GetParent()==parent) end)
+ local marked=S.OPEN..text..S.CLOSE
+ return Find(function(f) local t=f.kind=='Button' and f:GetText() return (t==text or t==marked) and (not parent or f:GetParent()==parent) end)
 end
 local function Hover(f)
  local enter=assert(f and f:GetScript('OnEnter'),'a hover script')
@@ -179,7 +182,7 @@ end
 -- Pending literals (see the fragment): Help quotes these four button labels
 -- and help_action_first checks them as source literals; ux_status_composition
 -- checks the receiving-count sentence. Allowed only as the whole shown text.
-local PENDING_EXACT={['Copy summary']=true,['Prepare report file']=true,['Select this page']=true,['Prepare full diagnostic report']=true}
+local PENDING_EXACT={}
 local function allow(word,text)
  local whole=plain(text)
  if PENDING_EXACT[whole] or whole:find('^Syncing \226\128\162 %d+ receiving$') then return true end

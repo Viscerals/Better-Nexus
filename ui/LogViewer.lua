@@ -346,9 +346,9 @@ local function EnsureFrame()
     local selectAll = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     selectAll:SetSize(116, 22)
     selectAll:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -30, -82)
-    -- "Select this page" and "Prepare full diagnostic report" stay literal:
-    -- Help quotes them by name (help_action_first checks the source).
-    selectAll:SetText("Select this page")
+    -- Help quotes "Select this page" and "Prepare full diagnostic report" by
+    -- name; help_action_first finds them as reviewed keys bound here.
+    selectAll:SetText(T("log.button.select_page"))
     selectAll:SetScript("OnClick", function()
         if editBox then
             editBox:SetFocus()
@@ -418,7 +418,7 @@ local function EnsureFrame()
     exportButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     exportButton:SetSize(220, 22)
     exportButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 7)
-    exportButton:SetText("Prepare full diagnostic report")
+    exportButton:SetText(T("log.button.prepare_full_report"))
     exportButton:SetScript("OnClick", StartExport)
     exportButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
