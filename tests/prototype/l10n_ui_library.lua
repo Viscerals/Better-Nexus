@@ -104,14 +104,10 @@ local function Allow(word,text)
  return false
 end
 
--- Other families' widgets shown on this window (FullUIWorkspaces tab labels)
--- and the two labels kept as source literals (pending, help_action_first lint).
+-- Nothing on this window is skipped any more: the FullUIWorkspaces tab labels
+-- (guide family) and "Updating results..." / the detail "Stop Sharing" (owner
+-- integration keys) are reviewed text at their receivers (B1 reconciliation).
 local function Skip(item,frame)
- local tabs=frame and frame._workspaceTabs or {}
- for _,b in pairs(tabs) do
-  if item.frame==b or (b.GetFontString and item.frame==b:GetFontString()) then return true end
- end
-  -- ("Updating results..." and the detail "Stop Sharing" are reviewed keys now.)
  return false
 end
 local function Scan(root,label,frame)
@@ -306,7 +302,9 @@ check(edit:IsShown(),'Edit dialog shown')
 Scan(edit,'Edit dialog')
 edit:Hide()
 
--- Stop Sharing confirmation: real popup text and buttons.
+-- Stop Sharing: the detail button's own label, then its real confirmation.
+check(p.deleteBtn:IsShown() and p.deleteBtn:GetText()==S.OPEN..'Stop Sharing'..S.CLOSE,
+ 'the detail Stop Sharing button shows its reviewed label: '..tostring(p.deleteBtn:GetText()))
 p.deleteBtn:Click()
 local dialog=StaticPopupDialogs.NEXUS_STOP_SHARING_BUILD
 check(H.popup and H.popup.which=='NEXUS_STOP_SHARING_BUILD' and S.IsPseudo(dialog.text) and S.IsPseudo(dialog.button1) and S.IsPseudo(dialog.button2),
@@ -314,6 +312,30 @@ check(H.popup and H.popup.which=='NEXUS_STOP_SHARING_BUILD' and S.IsPseudo(dialo
 local shown=string.format(dialog.text,tostring(H.popup.arg1),tostring(H.popup.arg2))
 check(shown:find('Tester shared build',1,true) and S.LooksUntranslated(shown,Allow)==nil,'confirmation shows the title verbatim inside translated text: '..shown)
 StaticPopup_Hide('NEXUS_STOP_SHARING_BUILD')
+
+-- The pending result line: an explicit filter click defers the projection
+-- (as in community_dps_filter), and the result line says so in reviewed text;
+-- the next publication replaces it. The same click is made again to restore.
+do
+ local frame=NexusCommunityBuildsFrame
+ local box=frame._qualifiedBtn
+ check(box and box:IsVisible() and box:IsEnabled(),'SETUP the real qualified-only check box')
+ local function Settle()
+  for _=1,4000 do
+   local d=Nexus.CommunityBuilds.DiagnosticSnapshot()
+   if d.projectionCurrent and not d.projectionPending and not d.projectionDirty then return end
+   H.Advance(.05,.05)
+  end
+  error('the Community projection did not settle')
+ end
+ box:SetChecked(not box:GetChecked());box:Click()
+ local pending=frame._resultText:GetText()
+ check(tostring(pending):find(S.OPEN..'Updating results...'..S.CLOSE,1,true)~=nil,
+  'the pending result line shows its reviewed text: '..tostring(pending))
+ Settle()
+ check(not tostring(frame._resultText:GetText()):find('Updating results',1,true),'the published result replaces the pending line')
+ box:SetChecked(not box:GetChecked());box:Click();Settle()
+end
 
 -- Chat: a Copy refusal for a build still syncing is a real print path.
 local lines=S.CaptureChat(function()
