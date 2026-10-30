@@ -3948,11 +3948,12 @@ local DECLARATIONS = {
     ["usertext.value.wishlist_unavailable_cell"] = {kind = "text"},
     ["usertext.value.wishlist_unavailable_named"] = {kind = "template", fields = {"name"}, slots = {"text"}, resultLimit = 1400},
     ["usertext.value.wishlist_unknown_named"] = {kind = "template", fields = {"name"}, slots = {"text"}, resultLimit = 1400},
-    -- v5_source86_supplemental (21)
+    -- v5_source86_supplemental (22)
     ["editor.value.imported_wishlist_default"] = {kind = "text"},
     ["guide.body.target_c_active"] = {kind = "text"},
     ["leaderboard.value.generated_build"] = {kind = "text"},
     ["leaderboard.value.generated_player_loadout"] = {kind = "template", fields = {"player"}, slots = {"text"}, resultLimit = 1100},
+    ["main.value.unknown_tome"] = {kind = "template", fields = {"echo"}, slots = {"text"}, resultLimit = 1100},
     ["settings.title.window"] = {kind = "text"},
     ["support.reason.report_chunk_not_text"] = {kind = "template", fields = {"index"}, slots = {"count"}, resultLimit = 1200},
     ["support.reason.report_chunk_too_large"] = {kind = "template", fields = {"index", "limit"}, slots = {"count", "count"}, resultLimit = 1200},

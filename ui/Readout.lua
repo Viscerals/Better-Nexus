@@ -77,6 +77,24 @@ local function NameOf(t)
     if t.spellId ~= nil then return "spell " .. tostring(t.spellId) end
     return "?"
 end
+-- The name a reader sees: a supplied name as it is; the generated fallback
+-- of a card without one (NameOf's "spell <id>", which the line text and its
+-- parsing keep raw) through main.value.unknown_spell. Display only.
+local function ShownNameOf(t)
+    if type(t) == "table" and t.name == nil and t.spellId ~= nil then
+        return TF("main.value.unknown_spell", {id = tostring(t.spellId)}, "spell " .. tostring(t.spellId))
+    end
+    return NameOf(t)
+end
+-- A name parsed from a line with the card's facts: the generated fallback
+-- (facts.generated, carried from CardFacts) is shown through its key; a
+-- supplied name, even one that reads like "spell 123", stays as it is.
+local function DisplayName(name, facts)
+    if type(facts) == "table" and facts.generated == true and name == facts.name and facts.spellId ~= nil then
+        return TF("main.value.unknown_spell", {id = tostring(facts.spellId)}, name)
+    end
+    return name
+end
 
 -- One honest sentence. model = { text=s|nil (verbatim main clause),
 -- level=n|nil, advisorOnly=b, synced=b|nil, charges=charges|nil }.
@@ -201,7 +219,11 @@ M.QualityToken = QualityToken
 -- unknown, as CardLine then prints none).
 function M.CardFacts(card)
     if type(card) ~= "table" then return nil end
-    return {name = NameOf(card), quality = QUALITY_NAMES[card.quality] and card.quality or nil}
+    -- generated: the card had no name, so NameOf wrote its fallback; the
+    -- display says that fallback through its key (DisplayName).
+    local generated = card.name == nil and card.spellId ~= nil or nil
+    return {name = NameOf(card), quality = QUALITY_NAMES[card.quality] and card.quality or nil,
+        generated = generated, spellId = generated and card.spellId or nil}
 end
 
 -- A CardLine body (without the guarantee prefix) split with the card's own
@@ -254,7 +276,7 @@ function M.RecommendationWithTarget(recommendation, cardText, facts)
     if text:find("^%d+%. ") or text:find("\n%d+%. ") then return text end
     local name, quality = TargetParts(cardText, facts)
     if not name then return text end
-    local target = TargetShown(name, quality)
+    local target = TargetShown(DisplayName(name, facts), quality)
     if text == "" then return TF("readout.body.take_target", {target = target}, "Take: " .. target) end
     return TF("readout.body.recommendation_target", {recommendation = text, target = target},
         text .. ": " .. target)
@@ -322,7 +344,9 @@ function M.CardLineShown(text, facts)
     local guaranteed, body, name, quality, rest = ParseOfferLine(full, facts)
     local shown = body
     if quality and name and rest and (name .. " (" .. quality .. ")" .. rest) == body then
-        shown = TargetShown(name, quality) .. rest
+        shown = TargetShown(DisplayName(name, facts), quality) .. rest
+    elseif name and rest and (name .. rest) == body and DisplayName(name, facts) ~= name then
+        shown = DisplayName(name, facts) .. rest
     end
     return (guaranteed and (GuaranteedShown() .. " ") or "") .. shown
 end
@@ -336,7 +360,7 @@ function M.OfferCard(text, marked, auto, facts, freeze)
     local note
     local unknown = "? " .. T("readout.value.quality_unknown", "Quality unknown")
     if quality then
-        card.name = name
+        card.name = DisplayName(name, facts)
         note = rest:gsub("^%s+", ""):gsub("%s+$", "")
         if note == "" then note = nil end
         local word = QualityShown(quality)
@@ -347,7 +371,7 @@ function M.OfferCard(text, marked, auto, facts, freeze)
     elseif name then
         -- The card's own facts hold no quality: the whole name, and what
         -- follows it is its annotation.
-        card.name = name
+        card.name = DisplayName(name, facts)
         note = rest:gsub("^%s+", ""):gsub("%s+$", "")
         if note == "" then note = nil end
         card.quality = unknown
@@ -758,7 +782,7 @@ function M.QueueLines(queue, n)
     for i = 1, math.min(#entries, limit) do
         local e = entries[i]
         if type(e) == "table" then
-            local index, name = string.format("%d", i), NameOf(e)
+            local index, name = string.format("%d", i), ShownNameOf(e)
             if e.wanted then
                 out[#out + 1] = TF("readout.value.queue_wanted", {index = index, name = name},
                     index .. ". " .. name .. " [wanted] (predicted)")

@@ -2473,6 +2473,13 @@ local function EnsureFrame()
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.missing_tomes_list"), 1, 0.8, 0.4)
         for i, name in ipairs(unknownTomesCache) do
+            -- A generated "Tome of <Echo>" (GameAdapter marks it) through its
+            -- key; a catalog tome name as it is.
+            local generated = type(unknownTomesCache.generated) == "table" and unknownTomesCache.generated[i]
+            if type(generated) == "table" then
+                local shown, source = Nexus.Localization.Format("main.value.unknown_tome", {echo = tostring(generated.echo)})
+                if source ~= "unavailable" then name = shown end
+            end
             GameTooltip:AddLine("  • " .. name, 1, 0.45, 0.45)
             if i >= 25 then
                 if #unknownTomesCache > i then

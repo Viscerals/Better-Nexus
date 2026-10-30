@@ -27,7 +27,7 @@ local function check(v,m) assert(v,m);checks=checks+1 end
 local LONGNAME='Ünïcødé Flamebringer of the Very Long Ember Name That Never Fits'
 -- Fixture data shown verbatim (names, never translated).
 local DATA={'Owner14 plan','Frostwake Sigil','Hollow Bell','Cinder Vow','Gale Rune','Extra Echo','Locked Echo',
- 'Tome Echo','Pipe','Echo',LONGNAME,'Pseudo','English','Deutsch','Fran','Espa','Polski','Portugu','Русский',
+ 'Tome Echo','Pipe','Echo',LONGNAME,'Tome of Kaltherz','Pseudo','English','Deutsch','Fran','Espa','Polski','Portugu','Русский',
  'Uncommon','Common','Rare','Epic','HC3','Normal','Pinned Sigil','Callboard Hunt','Slay','wolves','again','thrice'}
 
 local function Model(o)
@@ -137,6 +137,31 @@ local function Scenario(H,P,langStatus)
  Render('progress',Model{performance=PERF,bestDps=BEST,serverStatus=SS})
  if not P._playDetails then P.TogglePlanDetails() end
  Render('details',Model{performance=PERF,bestDps=BEST,serverStatus=SS,shed={'Extra Echo 1 ×1 (Uncommon:×1)','Extra Echo 2 ×1 (Uncommon:×1)','Extra Echo 3 ×1 (Common:×1)','Extra Echo 4 ×1 (Common:×1)'}})
+ -- R5 P73: the missing-tome list. The producer marks only a generated
+ -- "Tome of <Echo>" (no catalog tome name) beside its raw text; discovery,
+ -- dedup, count and the raw sort are unchanged. The hover says a generated
+ -- name through main.value.unknown_tome and a catalog tome name as it is.
+ do
+  local A,svc=Nexus.GameAdapter,ProjectEbonhold.PerkService
+  local realCat,realDisc=A.Catalog,svc.GetDiscoveredEchoes
+  A.Catalog=function() return {rows={[1]={name='Kaltherz',requiredSpell=50},[2]={name='Aschen',requiredSpell=60},[3]={requiredSpell=70}},
+   levers={[50]={members={1},tomeName='Tome of Kaltherz'},[60]={members={2}}}} end
+  svc.GetDiscoveredEchoes=function() return {} end
+  local out=A.UnknownTomesForEchoes({{spellId=1},{spellId=2},{spellId=3},{spellId=2}})
+  A.Catalog,svc.GetDiscoveredEchoes=realCat,realDisc
+  check(#out==3 and out[1]=='Tome of 3' and out[2]=='Tome of Aschen' and out[3]=='Tome of Kaltherz',
+   'R5 P73: raw texts, dedup and raw sort unchanged: '..table.concat(out,' | '))
+  check(out.generated and out.generated[1].echo=='3' and out.generated[2].echo=='Aschen' and out.generated[3]==nil,
+   'R5 P73: only the generated names carry provenance')
+  Render('tomes',Model{performance=PERF,bestDps=BEST,serverStatus=SS,unknownTomes=out})
+  local hit=P.EnsurePlayWidgets().tomesHit
+  local lines=S.CaptureTooltip(hit:GetScript('OnEnter'),hit)
+  local L=Nexus.Localization
+  local function Has(want) for _,l in ipairs(lines) do if l==want then return true end end return false end
+  local g1,g2=L.Format('main.value.unknown_tome',{echo='3'}),L.Format('main.value.unknown_tome',{echo='Aschen'})
+  check(Has('  • '..g1) and Has('  • '..g2) and Has('  • Tome of Kaltherz'),'R5 P73: the hover says generated names through the key, the catalog name as it is: '..table.concat(lines,' | '))
+  check(L.ActiveLanguage()=='enUS' or (g1~='Tome of 3' and not Has('  • Tome of 3')),'R5 P73: in a translated session the generated name is not the raw English')
+ end
  -- A Callboard objective (its words are ui/CallboardStatus.lua data) and the
  -- Orb guidance with its Open Orbs... and Orb mini panel buttons.
  local cb=Nexus.CallboardStatus and Nexus.CallboardStatus.GetSummary

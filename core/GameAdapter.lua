@@ -4048,7 +4048,7 @@ function A.UnknownTomesForEchoes(echoes)
     if not cat or not svc or type(echoes) ~= "table" then return {} end
     local discovered = SafeCall(svc.GetDiscoveredEchoes)
     if type(discovered) ~= "table" then return {} end
-    local seen, out = {}, {}
+    local seen, found = {}, {}
     for _, entry in ipairs(echoes) do
         local spellId = tonumber(entry and (entry.spellId or entry.id))
         local row = spellId and cat.rows[spellId]
@@ -4065,11 +4065,25 @@ function A.UnknownTomesForEchoes(echoes)
             end
             if not known then
                 seen[lever] = true
-                out[#out + 1] = (lv and lv.tomeName) or ("Tome of " .. tostring(row.name or spellId))
+                -- A catalog tome name is data; without one the generated
+                -- "Tome of <Echo name or id>" stands in, and its Echo is kept
+                -- as provenance so a display can word it (out.generated).
+                local echo = tostring(row.name or spellId)
+                found[#found + 1] = (lv and lv.tomeName) and {text = lv.tomeName}
+                    or {text = "Tome of " .. echo, echo = echo}
             end
         end
     end
-    table.sort(out)
+    -- Sorted by the raw text, as before; generated[i] marks entry i.
+    table.sort(found, function(a, b) return a.text < b.text end)
+    local out = {}
+    for i, item in ipairs(found) do
+        out[i] = item.text
+        if item.echo then
+            out.generated = out.generated or {}
+            out.generated[i] = {echo = item.echo}
+        end
+    end
     return out
 end
 

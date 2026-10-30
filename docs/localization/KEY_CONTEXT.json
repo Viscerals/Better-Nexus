@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 4016,
+    "declaredKeys": 4017,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -46089,6 +46089,24 @@
       "cohort": "fullui:v5_source86_supplemental"
     },
     {
+      "key": "main.value.unknown_tome",
+      "kind": "template",
+      "english": "Tome of {echo}",
+      "placeholders": [
+        {
+          "name": "echo",
+          "type": "text",
+          "meaning": "the Echo name from the game catalog (game data, verbatim), or its numeric ID when the catalog has no name"
+        }
+      ],
+      "resultLimitBytes": 1100,
+      "group": "main",
+      "meaning": "Stands in for a tome the game catalog does not name: the tome that unlocks this Echo. A real catalog tome name is shown as the game gives it; only this generated name uses the key. Keep it name-like.",
+      "consumer": "Main panel Details: missing tomes hover list value",
+      "familySurface": "v5_source86_supplemental: Main panel Details: missing tomes hover list (value); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
       "key": "settings.title.window",
       "kind": "text",
       "english": "Nexus Options",
@@ -53708,7 +53726,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 4016,
+    "totalKeys": 4017,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -53732,7 +53750,7 @@
       "remainder_runtime_status": 35,
       "v4_long_paragraphs": 0,
       "v5_source86_amendments": 0,
-      "v5_source86_supplemental": 21
+      "v5_source86_supplemental": 22
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

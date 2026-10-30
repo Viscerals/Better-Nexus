@@ -369,6 +369,25 @@ do
  check((L.Format('readout.charge_counts',{banish=L.Count(nil),reroll=L.Count(0),freeze=L.Count(4)}))==P('B:? R:0 F:4'),
   'count slots: nil is ?, zero is 0 (seam contract on the family row)')
  check(R.ChargesLine({banish=0,reroll=0/0,freeze=-1,arrived=true})==P('B:0 R:? F:?'),'ChargesLine: invalid counts are ?, zero stays 0')
+ -- R5 P37: a card without a supplied name carries its generated fallback
+ -- as a fact; the line text and its parsing keep "spell <id>" raw, and the
+ -- display says the fallback through main.value.unknown_spell. A supplied
+ -- name that reads like "spell 123" stays as it is.
+ local nameless={spellId=200123,quality=2}
+ local facts=R.CardFacts(nameless)
+ local line=R.CardLine(nameless,'wanted')
+ check(facts.generated==true and facts.spellId==200123 and facts.name=='spell 200123' and line:find('^spell 200123 %(Rare%)')~=nil,
+  'R5 P37: the raw line and facts keep the generated name: '..line)
+ local o=R.OfferCard(line,false,false,facts)
+ check(o.name==P('spell 200123'),'R5 P37: the offer card says the generated name through its key: '..tostring(o.name))
+ check(R.CardLineShown(line,facts):find(P(P('spell 200123')..' ('..P('Rare')..')'),1,true)==1,'R5 P37: the one-line row says it too: '..R.CardLineShown(line,facts))
+ check(R.RecommendationWithTarget('',line,facts)==P('Take: '..P(P('spell 200123')..' ('..P('Rare')..')')),'R5 P37: the take target says it too')
+ local real={name='spell 123',spellId=200999,quality=2}
+ local realFacts=R.CardFacts(real)
+ local ro=R.OfferCard(R.CardLine(real),false,false,realFacts)
+ check(not realFacts.generated and ro.name=='spell 123','R5 P37: a supplied name that reads like the fallback stays verbatim: '..tostring(ro.name))
+ local q=R.QueueLines({entries={{spellId=200124,wanted=true},{name='spell 7'}}},2)
+ check(q[1]==P('1. '..P('spell 200124')..' [wanted] (predicted)') and q[2]==P('2. spell 7 (predicted)'),'R5 P37: queue lines: generated through its key, supplied verbatim: '..table.concat(q,' | '))
 end
 
 ------------------------------------------------------------------------
@@ -454,6 +473,16 @@ Same('AutomationScopeLines',R.AutomationScopeLines,{selected=true,held='user act
 Same('AutomationSettingsRows',R.AutomationSettingsRows,{selected=true,readOnly=true,settings={autoReroll=false,autoFreeze=true}})
 Same('QueueLines',R.QueueLines,{entries={{name='A',wanted=true},{name='B'}}},2)
 Same('RecommendationWithTarget',R.RecommendationWithTarget,'Take a needed Echo',CARDS[1].text,CARDS[1].facts)
+-- R5 P37: the generated fallback's English is the raw bytes.
+do
+ local nameless={spellId=200123,quality=2}
+ local facts=R.CardFacts(nameless)
+ local line=R.CardLine(nameless,'wanted')
+ Same('OfferCard generated name',R.OfferCard,line,false,false,facts,false)
+ Same('CardLineShown generated name',R.CardLineShown,line,facts)
+ Same('QueueLines generated name',R.QueueLines,{entries={{spellId=200124,wanted=true}}},1)
+ check(R.OfferCard(line,false,false,facts).name=='spell 200123','R5 P37 English: the generated name is the exact English')
+end
 for _,k in ipairs({'OFFER_PICK_TAG','OFFER_RECOMMENDED_TAG','OFFER_FREEZE_TAG','OFFER_GUARANTEED_TAG','WAITING_OFFER_HEADING',
  'WAITING_OFFER_NOTE','AUTO_ON_NOTE','TOME_PARAGRAPH'}) do Same(k,function() return R[k] end) end
 Same('Theme.MenuItems',function() local t={} for _,i in ipairs(Nexus.Theme.MenuItems()) do t[#t+1]={i.text,i.tooltipTitle,i.tooltipText} end return t end)
