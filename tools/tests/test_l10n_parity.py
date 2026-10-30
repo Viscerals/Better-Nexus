@@ -582,9 +582,25 @@ class RegistrySentinelTests(unittest.TestCase):
         del flagged["rows"][2]["input"]
         self.assertEqual(registry_binding(catalog, flagged, self.inputs),
                          ["R-P3: not a bound row with an input and an expected verdict"])
-        drifted = list(self.inputs)
-        drifted[0] = drifted[0].replace(b'    ["panel.button.options"] = "Options",\r\n', b"")
-        self.assertTrue(registry_binding(catalog, self.registry, drifted))
+        # Drift of the real English in both line-break representations: the
+        # unedited bytes bind, and removing exactly the Options row does not.
+        for name, data in variants(self.inputs[0]).items():
+            with self.subTest(representation=name):
+                drifted = list(self.inputs)
+                drifted[0] = data
+                self.assertEqual(registry_binding(catalog, self.registry, drifted), [])
+                edited = edited_input(data, {"remove": '    ["panel.button.options"] = "Options",'})
+                self.assertNotEqual(edited, data)
+                parsed = catalog.parse_english(edited)
+                self.assertEqual(set(catalog.parse_english(data)) - set(parsed),
+                                 {"panel.button.options"})
+                self.assertEqual(len(parsed), 27)
+                drifted[0] = edited
+                problems = registry_binding(catalog, self.registry, drifted)
+                self.assertTrue(any("key sets differ" in problem for problem in problems), problems)
+                self.assertTrue(any("english-incomplete" in problem for problem in problems), problems)
+        with self.assertRaises(ValueError):
+            edited_input(self.inputs[0], {"remove": '    ["panel.button.options"] = "Option",'})
 
     def test_u1_only_marker_fails(self):
         problems = registry_sentinel(self.marked(), self.without_parser(), self.pending())

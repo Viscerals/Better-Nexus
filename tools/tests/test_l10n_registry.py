@@ -109,6 +109,35 @@ def replace_once(data, old, new):
     return data.replace(old, new)
 
 
+OPTIONS_LINE = b'    ["panel.button.options"] = "Options",'
+
+
+def representations(data):
+    """The canonical LF (Git blob) and the CRLF (checkout) representation of
+    source bytes that are one of the two; a lone CR is refused."""
+    lf = data.replace(b"\r\n", b"\n")
+    if b"\r" in lf:
+        raise AssertionError("lone CR")
+    return {"lf": lf, "crlf": lf.replace(b"\n", b"\r\n")}
+
+
+def without_line(data, line):
+    """data without its one whole line equal to line, whichever line break
+    (LF or CRLF) ends it; every other byte is kept. The line must occur
+    exactly once, and the removal must change the bytes by that line and
+    its break."""
+    lines = data.split(b"\n")
+    hits = [index for index, text in enumerate(lines)
+            if (text[:-1] if text.endswith(b"\r") else text) == line]
+    if len(hits) != 1:
+        raise AssertionError("expected exactly one line %r, found %d" % (line, len(hits)))
+    del lines[hits[0]]
+    result = b"\n".join(lines)
+    if result == data or len(data) - len(result) not in (len(line) + 1, len(line) + 2):
+        raise AssertionError("the line was not removed exactly once")
+    return result
+
+
 class RegistryParserTests(unittest.TestCase):
     """S2: the nonexecuting parser of the delimited declaration block."""
 
@@ -359,10 +388,18 @@ class RegistryApiTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "context-key-mismatch")
 
     def test_declared_key_without_english_is_refused(self):
-        # R-P3 (C14).
-        english = replace_once(self.inputs[0], b'    ["panel.button.options"] = "Options",\r\n', b"")
-        self.assertEqual(self.verdict(*self.with_input(0, english)),
-                         ("english-incomplete", "panel.button.options"))
+        # R-P3 (C14), in both line-break representations of the English base:
+        # the unedited bytes pass, and removing exactly the Options row is refused.
+        for name, data in representations(self.inputs[0]).items():
+            with self.subTest(representation=name):
+                english = without_line(data, OPTIONS_LINE)
+                parsed = self.catalog.parse_english(english)
+                self.assertEqual(set(self.catalog.parse_english(data)) - set(parsed),
+                                 {"panel.button.options"})
+                self.assertEqual(len(parsed), 27)
+                self.assertEqual(self.verdict(*self.with_input(0, data)), ("valid", None))
+                self.assertEqual(self.verdict(*self.with_input(0, english)),
+                                 ("english-incomplete", "panel.button.options"))
 
     def test_invalid_english_for_a_declared_key_is_refused_as_invalid(self):
         english = replace_once(self.inputs[0], b'"Options"', b'"Opt|ions"')
@@ -487,10 +524,31 @@ class RegistryReportTests(unittest.TestCase):
         self.assertEqual(self.v2["inputs"][:4], self.v1["inputs"])
 
     def test_invalid_registry_input_gets_no_report(self):
-        english = replace_once(self.inputs[0], b'    ["panel.button.options"] = "Options",\r\n', b"")
-        with self.assertRaises(self.catalog.CatalogRegistryError) as raised:
-            self.catalog.registry_catalog_report(english, *self.inputs[1:])
-        self.assertEqual(raised.exception.code, "english-incomplete")
+        # In both line-break representations: the unedited English gets a
+        # report; without exactly the Options row it gets none.
+        for name, data in representations(self.inputs[0]).items():
+            with self.subTest(representation=name):
+                english = without_line(data, OPTIONS_LINE)
+                self.assertNotIn(b'"panel.button.options"', english)
+                self.assertEqual(self.catalog.registry_catalog_report(data, *self.inputs[1:])
+                                 ["registry"]["englishKeys"], 28)
+                with self.assertRaises(self.catalog.CatalogRegistryError) as raised:
+                    self.catalog.registry_catalog_report(english, *self.inputs[1:])
+                self.assertEqual((raised.exception.code, raised.exception.key),
+                                 ("english-incomplete", "panel.button.options"))
+
+    def test_line_removal_is_exact_once_in_both_representations(self):
+        for name, data in representations(self.inputs[0]).items():
+            with self.subTest(representation=name):
+                removed = without_line(data, OPTIONS_LINE)
+                self.assertEqual(len(data) - len(removed),
+                                 len(OPTIONS_LINE) + (2 if name == "crlf" else 1))
+                with self.assertRaises(AssertionError):
+                    without_line(removed, OPTIONS_LINE)
+                with self.assertRaises(AssertionError):
+                    without_line(data + OPTIONS_LINE + b"\n", OPTIONS_LINE)
+                with self.assertRaises(AssertionError):
+                    without_line(data, OPTIONS_LINE + b" ")
 
 
 class EnumCrossCheckTests(unittest.TestCase):
