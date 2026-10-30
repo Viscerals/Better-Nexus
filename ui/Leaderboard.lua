@@ -382,13 +382,11 @@ local function OrdinaryComplete(row)
     return ok and type(verdict) == "table" and verdict.complete == true
 end
 
+-- Issue #144 passivity: selecting a record only reads it; an incomplete
+-- record's build is not requested by the selection.
 local function SelectRow(row)
     selectedKey = RecordKey(row)
     if applySelection then applySelection(row) end
-    if row and row.buildId and not OrdinaryComplete(row)
-        and Nexus.Sync and Nexus.Sync.RequestLoadout then
-        Nexus.Sync.RequestLoadout(row.buildId)
-    end
 end
 
 local function GetRow(parent)

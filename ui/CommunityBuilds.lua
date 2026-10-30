@@ -402,12 +402,11 @@ function M.ShowBuild(id)
     if M.WaitForStartup("Community",function() M.ShowBuild(id) end) then
         return false,"pending"
     end
+    -- Issue #144 passivity: showing a build only reads it. An incomplete
+    -- build is not requested here; its detail says the full list is still
+    -- arriving, and the explicit Copy / lock-in actions still request it.
     ControllerInstance().Select(id)
     M.Show()
-    local build = id and ControllerInstance().Build(id)
-    if build and (not build.echoes or #build.echoes == 0) then
-        ControllerInstance().RequestLoadout(id)
-    end
     M.Refresh()
 end
 

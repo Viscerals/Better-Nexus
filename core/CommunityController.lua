@@ -401,7 +401,10 @@ function Controller.New(options)
         return matched, total
     end
 
-    local function FilterSettings()
+    -- The saved build filters, or nil when none exist and `create` is not
+    -- true. Issue #144 passivity: only an explicit filter choice (SetFilter)
+    -- creates the table; reading the view (Filters) never writes to it.
+    local function FilterSettings(create)
         if type(options.filterSettings) == "function" then
             local filters = options.filterSettings()
             if type(filters) == "table" then return filters end
@@ -412,8 +415,9 @@ function Controller.New(options)
         local writable = Nexus.MainInternals and Nexus.MainInternals.WritableRootV1
         local root = type(writable) == "function"
             and writable(NexusDB, {"buildFilters"}) or NexusDB
-        root.buildFilters = type(root.buildFilters) == "table"
-            and root.buildFilters or {}
+        if type(root.buildFilters) == "table" then return root.buildFilters end
+        if create ~= true then return nil end
+        root.buildFilters = {}
         return root.buildFilters
     end
 
@@ -749,26 +753,35 @@ function Controller.New(options)
         return nil, reason ~= "" and reason or nil, result
     end
 
-    function M.Filters()
-        local settings = FilterSettings()
+    -- An explicit filter choice also stores the defaults and the legacy
+    -- fields older readers expect, in place, so legacy and future preference
+    -- fields keep their table identity: current-class and qualification
+    -- restrictions stay on unless explicitly false, the page size is 20 and
+    -- the legacy class field is current. The view derives the same values
+    -- without writing them (M.Filters).
+    local function SaveFilterDefaults(settings)
         local currentClass = CurrentClass()
-        -- Add new filters in place so legacy and future preference fields keep
-        -- their table identity. Current-class and qualification restrictions
-        -- remain on by default; only an explicit false opts out.
-        if settings.currentClassOnly == nil then
-            settings.currentClassOnly = true
-        end
+        if settings.currentClassOnly == nil then settings.currentClassOnly = true end
         if settings.qualifiedOnly == nil then settings.qualifiedOnly = true end
-        local page = tonumber(settings.page)
-        settings.page = page and page >= 1 and math.floor(page) or 1
         settings.pageSize = 20
-        -- Keep the legacy class field current for older readers. The additive
-        -- boolean decides whether the projection uses it.
         if currentClass and settings.classFilter ~= currentClass then
             settings.classFilter = currentClass
         end
+    end
+
+    -- The view's filters: a copy of the saved choices with the defaults
+    -- derived (page at least 1, page size 20, current-class and
+    -- qualification restrictions on unless explicitly false). Issue #144
+    -- passivity: reading them never creates, normalizes or writes the saved
+    -- filters; only SetFilter does.
+    function M.Filters()
+        local settings = FilterSettings(false) or {}
+        local currentClass = CurrentClass()
         local out = {}
         for key, value in pairs(settings) do out[key] = value end
+        local page = tonumber(settings.page)
+        out.page = page and page >= 1 and math.floor(page) or 1
+        out.pageSize = 20
         out.currentClassOnly = settings.currentClassOnly ~= false
         out.qualifiedOnly = settings.qualifiedOnly ~= false
         if out.currentClassOnly then out.classFilter = currentClass
@@ -782,16 +795,18 @@ function Controller.New(options)
             if not currentClass or NormalizeClass(value) ~= currentClass then
                 return false
             end
-            local settings = FilterSettings()
+            local settings = FilterSettings(true)
             settings.classFilter = currentClass
             settings.page = 1
+            SaveFilterDefaults(settings)
             return true
         end
         if key == "currentClassOnly" or key == "qualifiedOnly" then
             if type(value) ~= "boolean" then return false end
-            local settings = FilterSettings()
+            local settings = FilterSettings(true)
             settings[key] = value
             settings.page = 1
+            SaveFilterDefaults(settings)
             return true
         end
         if key == "page" then
@@ -799,7 +814,9 @@ function Controller.New(options)
             if not value or value < 1 or value ~= math.floor(value) then
                 return false
             end
-            FilterSettings().page = value
+            local settings = FilterSettings(true)
+            settings.page = value
+            SaveFilterDefaults(settings)
             return true
         end
         local valid = (key == "search" and type(value) == "string")
@@ -808,9 +825,10 @@ function Controller.New(options)
                 and (value == "dps" or value == "recent"
                     or value == "title"))
         if not valid then return false end
-        local settings = FilterSettings()
+        local settings = FilterSettings(true)
         settings[key] = value
         settings.page = 1
+        SaveFilterDefaults(settings)
         return true
     end
 

@@ -2637,9 +2637,8 @@ local function RefreshDetailPanel(buildId, listPending)
     if not detail then
         bySpell = ProjectionContext().ownedBySpell or {}
     end
-    if not hasLoadout then
-        ControllerInstance().RequestLoadout(build.id)
-    end
+    -- Issue #144 passivity: drawing the detail never requests a loadout;
+    -- only the explicit Copy / lock-in actions do.
     for i, ic in ipairs(detailPanel.echoIcons) do
         local e = echoes[i]
         if e then
