@@ -20,6 +20,14 @@
 --     every extra copy of the last committed model, whole and in order; the
 --     first hover keeps its 25-row bound; empty, unknown and stale are
 --     distinct; reading, refreshing and closing change nothing.
+-- X2  item 7: an actual failed render (the context header raises) marks an
+--     already-open list not current at once, in its title and above the
+--     names; the failed candidate never reaches it; the next good render
+--     makes it current again; nothing is queried, sent or saved.
+-- X3  item 7: at the default, 16 px and double font models, in the listed,
+--     stale, unknown and empty forms, the title, status, note, scrolling
+--     names, scroll bar and Close keep apart inside the window, the names
+--     keep a viewport of four rows, and every name stays in the body.
 -- H1  item 8: X and Hide Nexus Panel say once how to bring the panel back and
 --     light the minimap button; a repeat hide says nothing; showing clears it.
 -- U1  item 12: plain version and update words keep the exact installed build;
@@ -359,6 +367,106 @@ C.scenario('X1 the complete extra-copies list',function()
  P._playDetails=false
  P.Render(Model(Extras(41)))
  C.expect(not (NexusPanel._extraAllBtn and NexusPanel._extraAllBtn:IsShown()),'X1: hidden Details hide Show all with the list')
+end)
+
+C.scenario('X2 a failed panel render marks an open extra list not current, without its failed candidate',function()
+ Nexus.SessionPause=REAL_PAUSE
+ P._playDetails=true
+ local names=Extras(41)
+ C.setup(P.Render(Model(names))==true and NexusPanel:IsShown(),'X2: fixture: a good render with 41 extra copies')
+ local facts=P.ShowExtraList and P.ShowExtraList()
+ local list=_G.NexusExtraCopiesList
+ C.setup(list~=nil and list:IsShown() and facts and facts.stale==false,'X2: fixture: the complete list is open and current')
+ if not list then return end
+ local before=Effects()
+ -- The actual apply failure: the context header (ApplyModel) raises.
+ local realHeader=P.UpdateContextHeader
+ P.UpdateContextHeader=function() error('injected header failure',0) end
+ local ok,err=pcall(P.Render,Model({'Failed Candidate Echo ×9 (Epic:×9)'}))
+ P.UpdateContextHeader=realHeader
+ C.setup(not ok and tostring(err):find('injected header failure',1,true)~=nil,'X2: fixture: that render failed at the header',err)
+ C.guard(not NexusPanel:IsShown() and P.ExtraListFacts().stale==true,'X2: the panel hides and its facts say stale')
+ local shown=list:IsShown()
+ local title=Plain(list.title:GetText())
+ local status=Plain(list.status and list.status:GetText())
+ local body=list.body:GetText() or ''
+ C.expect(not shown or (list._nexusFacts and list._nexusFacts.stale==true),'X2: an open list takes the stale facts at once',
+  list._nexusFacts and tostring(list._nexusFacts.stale))
+ C.expect(not shown or (title:find('not current',1,true)~=nil and status:find('Not current',1,true)==1
+  and list.status:IsShown()),'X2: it says not current in its title and above the names',title..' / '..status)
+ C.expect(not body:find('Failed Candidate Echo',1,true),'X2: the failed candidate never reaches the list')
+ C.guard(not shown or body:find('41. Extra Echo 41',1,true)~=nil,'X2: it keeps the last committed names, whole')
+ C.guard(Effects()==before,'X2: marking it stale queries, sends, saves and spends nothing',Effects())
+ -- The next good render makes it current again.
+ C.setup(P.Render(Model(Extras(3)))==true,'X2: fixture: the next render succeeds')
+ C.expect(list:IsShown() and Plain(list.title:GetText())=='Extra rolled copies: 3' and Plain(list.status:GetText())==''
+  and not list.status:IsShown(),'X2: a good render makes the open list current again',list.title:GetText())
+ list:Hide()
+ P._playDetails=false
+end)
+
+C.scenario('X3 the list keeps title, note, names, scroll bar and Close apart at every supported font model',function()
+ local G=dofile('tests/prototype/layout_geometry_support.lua')
+ local methods=G.RegionMethods()
+ local saved={GetStringHeight=methods.GetStringHeight,GetStringWidth=methods.GetStringWidth,
+  GetTextWidth=methods.GetTextWidth,GetFont=methods.GetFont}
+ P._playDetails=true
+ C.setup(P.Render(Model(Extras(41)))==true,'X3: fixture: 41 extra copies')
+ for _,key in ipairs({'default','px16','double'}) do
+  local model=G.MODELS[key]
+  G.UseFont(model)
+  for _,form in ipairs({'listed','stale','unknown','empty'}) do
+   local committed=nil
+   if form=='stale' then
+    P.Render(Model(Extras(41)))
+    P.ShowExtraList()
+    local realHeader=P.UpdateContextHeader
+    P.UpdateContextHeader=function() error('injected',0) end
+    pcall(P.Render,Model(Extras(2)))
+    P.UpdateContextHeader=realHeader
+   else
+    P.Render(Model(form=='listed' and Extras(41) or form=='empty' and {} or nil))
+    P.ShowExtraList()
+   end
+   local list=_G.NexusExtraCopiesList
+   local why='X3 '..model.name..' '..form
+   if not C.setup(list and list:IsShown(),why..': fixture: the list is open') then break end
+   local function R(region) return G.Rect(region,list) end
+   -- A text's box reaches as far down as its wrapped rows under the model,
+   -- whatever height the region was given (the reviewer's measurement).
+   local function T(text)
+    local r=R(text)
+    local need=G.Rows(text:GetText(),text:GetWidth(),model.char)*model.line
+    r[4]=math.max(r[4],r[2]+need)
+    return r
+   end
+   local box=R(list)
+   local title,note,scroll,close,closeX=T(list.title),T(list.note),R(list.scroll),R(list.close),R(list.closeX)
+   local status=list.status and list.status:IsShown() and T(list.status) or nil
+   local above=status or title
+   C.expect(title[4]<=(status and status[2] or note[2]) and (not status or status[4]<=note[2]),
+    why..': title, status and note do not overlap',G.Text(title)..' '..(status and G.Text(status) or '-')..' '..G.Text(note))
+   C.expect(note[4]<=scroll[2],why..': the note ends above the scrolling names',G.Text(note)..' / '..G.Text(scroll))
+   C.expect(G.Apart(title,closeX),why..': the title stays clear of the X',G.Text(title)..' / '..G.Text(closeX))
+   C.expect(scroll[4]<=close[2],why..': Close sits below the names',G.Text(scroll)..' / '..G.Text(close))
+   C.expect(scroll[4]-scroll[2]>=4*model.line,why..': the names keep a viewport of four rows at least',scroll[4]-scroll[2])
+   C.expect(G.Inside(title,box) and G.Inside(note,box) and G.Inside(scroll,box) and G.Inside(close,box),
+    why..': every part is inside the window',G.Text(box))
+   if form=='listed' or form=='stale' then
+    local body=list.body:GetText() or ''
+    local missing=0
+    for i=1,41 do if not body:find(i..'. ',1,true) then missing=missing+1 end end
+    C.guard(missing==0 and body:find(LONG,1,true)~=nil,why..': every name is still in the scrolling body, whole',missing)
+    C.expect(list.child:GetHeight()>=G.Rows(body,list.body:GetWidth(),model.char)*model.line,
+     why..': the scroll child is as tall as the wrapped names',list.child:GetHeight())
+   end
+   C.guard(above~=nil,why..': fixture')
+   list:Hide()
+  end
+ end
+ for key,fn in pairs(saved) do methods[key]=fn end
+ P._playDetails=false
+ P.Render(Model(Extras(41)))
 end)
 
 C.scenario('H1 hiding says once how to bring the panel back',function()

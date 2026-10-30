@@ -3961,48 +3961,57 @@ function M.SyncExtraListLink()
     return true
 end
 
+-- The list window's geometry (M.LayoutExtraList): its width, insets, the
+-- room kept for its X and scroll bar, the gaps, the footer that holds Close,
+-- and the least height and names viewport it keeps at any text size.
+M.EXTRA_LIST = {width = 340, inset = 14, top = 12, gap = 6, closeXRoom = 32, scrollBarRoom = 32,
+    bodyWidth = 290, footer = 42, closeBottom = 12, minHeight = 380, minView = 120}
+
 function M.EnsureExtraList()
     local list = M._extraList
     if list then return list end
     list = CreateFrame("Frame", "NexusExtraCopiesList", UIParent)
     list:SetFrameStrata("DIALOG")
-    list:SetSize(340, 380)
+    list:SetSize(M.EXTRA_LIST.width, M.EXTRA_LIST.minHeight)
     list:SetClampedToScreen(true)
     list:EnableMouse(true)
     list:SetBackdrop({bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 16,
         insets = {left = 4, right = 4, top = 4, bottom = 4}})
     list:SetBackdropColor(0.04, 0.04, 0.07, 0.96)
-    list.title = list:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    list.title:SetPoint("TOPLEFT", list, "TOPLEFT", 14, -12)
-    list.title:SetWidth(280)
-    list.title:SetJustifyH("LEFT")
-    list.note = list:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    list.note:SetPoint("TOPLEFT", list.title, "BOTTOMLEFT", 0, -6)
-    list.note:SetWidth(312)
-    list.note:SetJustifyH("LEFT")
+    local function Text(font, r, g, b)
+        local text = list:CreateFontString(nil, "OVERLAY", font)
+        text:SetJustifyH("LEFT")
+        text:SetJustifyV("TOP")
+        text:SetWordWrap(true)
+        if r then text:SetTextColor(r, g, b) end
+        return text
+    end
+    list.title = Text("GameFontNormal")
+    -- Shown only for a list that is not current (kept from before a failed
+    -- panel update): above the names, never scrolled away.
+    list.status = Text("GameFontNormalSmall", 1, 0.45, 0.35)
+    list.note = Text("GameFontHighlightSmall")
     list.note:SetText("Rolled copies above your exact Wishlist targets, including unrequested or different-quality "
         .. "copies. This is a comparison, not a delete action. Locked copies protected by this Saved Build are "
         .. "never listed here.")
     list.closeX = CreateFrame("Button", nil, list, "UIPanelCloseButton")
     list.closeX:SetPoint("TOPRIGHT", list, "TOPRIGHT", -2, -2)
+    list.closeX:SetSize(32, 32)
     list.scroll = CreateFrame("ScrollFrame", "NexusExtraCopiesListScroll", list, "UIPanelScrollFrameTemplate")
-    list.scroll:SetPoint("TOPLEFT", list, "TOPLEFT", 14, -84)
-    list.scroll:SetPoint("BOTTOMRIGHT", list, "BOTTOMRIGHT", -32, 40)
     list.child = CreateFrame("Frame", nil, list.scroll)
-    list.child:SetSize(290, 1)
+    list.child:SetSize(M.EXTRA_LIST.bodyWidth, 1)
     list.scroll:SetScrollChild(list.child)
     list.body = list.child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     list.body:SetPoint("TOPLEFT", list.child, "TOPLEFT", 0, 0)
-    list.body:SetWidth(290)
+    list.body:SetWidth(M.EXTRA_LIST.bodyWidth)
     list.body:SetJustifyH("LEFT")
     list.body:SetJustifyV("TOP")
     list.body:SetWordWrap(true)
-    list.body:SetTextColor(0.78, 0.66, 1)
     list.close = CreateFrame("Button", nil, list, "UIPanelButtonTemplate")
     list.close:SetText("Close")
     list.close:SetSize(90, 22)
-    list.close:SetPoint("BOTTOM", list, "BOTTOM", 0, 12)
+    list.close:SetPoint("BOTTOM", list, "BOTTOM", 0, M.EXTRA_LIST.closeBottom)
     list.close:SetScript("OnClick", function() list:Hide() end)
     if type(UISpecialFrames) == "table" then table.insert(UISpecialFrames, "NexusExtraCopiesList") end
     if Nexus.Theme and Nexus.Theme.StyleButton then pcall(Nexus.Theme.StyleButton, list.close) end
@@ -4011,24 +4020,81 @@ function M.EnsureExtraList()
     return list
 end
 
--- The window's words from M.ExtraListFacts; returns those facts.
+-- A text's height at its width, measured as LayoutMetrics.WrapHeight and
+-- M.DetailLineHeight do (height 0, then GetStringHeight); without a usable
+-- measurement, a conservative estimate (7 units a character, 14 a row).
+-- The text keeps the height it needs.
+function M.FitListText(text, width)
+    text:SetWidth(width)
+    if (text:GetText() or "") == "" then text:SetHeight(1); return 0 end
+    text:SetHeight(0)
+    local ok, height = pcall(text.GetStringHeight, text)
+    height = ok and tonumber(height) or nil
+    if not height or height ~= height or height <= 0 or height == math.huge then
+        local chars = #((text:GetText() or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+        height = 14 * math.max(1, math.ceil(chars * 7 / math.max(1, width)))
+    end
+    height = math.ceil(height)
+    text:SetHeight(height)
+    return height
+end
+
+-- Title, status, note, the scrolling names and Close, top to bottom, each
+-- below the one before at its measured height. The window grows so the
+-- names keep a viewport of at least M.EXTRA_LIST.minView; Close stays below it.
+function M.LayoutExtraList(list)
+    local L = M.EXTRA_LIST
+    local inner = L.width - 2 * L.inset
+    local y = L.top
+    local function Place(text, width, gap)
+        local height = M.FitListText(text, width)
+        text:ClearAllPoints()
+        text:SetPoint("TOPLEFT", list, "TOPLEFT", L.inset, -y)
+        if height > 0 then
+            text:Show()
+            y = y + height + gap
+        else
+            text:Hide()
+        end
+    end
+    Place(list.title, inner - L.closeXRoom, L.gap)
+    Place(list.status, inner, L.gap)
+    Place(list.note, inner, L.gap + 2)
+    local height = math.max(L.minHeight, y + L.minView + L.footer)
+    list:SetHeight(height)
+    list.scroll:ClearAllPoints()
+    list.scroll:SetPoint("TOPLEFT", list, "TOPLEFT", L.inset, -y)
+    list.scroll:SetPoint("BOTTOMRIGHT", list, "BOTTOMRIGHT", -L.scrollBarRoom, L.footer)
+    -- The harness and the client both read the viewport from these anchors;
+    -- the size is stated too, for a reader that does not resolve them.
+    list.scroll:SetSize(L.width - L.inset - L.scrollBarRoom, height - y - L.footer)
+    list._nexusLayout = {scrollTop = y, height = height}
+    return list._nexusLayout
+end
+
+-- The window's words from M.ExtraListFacts; returns those facts. A list kept
+-- from before a failed panel update says so first, in its title and above
+-- the names, and shows them dimmed: they are the last completed update's,
+-- not current.
 function M.FillExtraList(list)
     local facts = M.ExtraListFacts()
     local lines = {}
-    if facts.stale then
-        lines[#lines + 1] = "|cffd9d9d9From the last completed panel update; it may be out of date.|r"
-    end
+    local mark = facts.stale and " (not current)" or ""
     if facts.state == "unknown" then
-        list.title:SetText("Extra rolled copies: not known")
+        list.title:SetText("Extra rolled copies: not known" .. mark)
         lines[#lines + 1] = "|cffd9d9d9The extra copies of this run are not known yet.|r"
     elseif facts.state == "empty" then
-        list.title:SetText("Extra rolled copies: none")
+        list.title:SetText("Extra rolled copies: none" .. mark)
         lines[#lines + 1] = "|cffd9d9d9No extra rolled copies are listed.|r"
     else
-        list.title:SetText("Extra rolled copies: " .. #facts.names)
+        list.title:SetText("Extra rolled copies: " .. #facts.names .. mark)
         for index, name in ipairs(facts.names) do lines[#lines + 1] = index .. ". " .. name end
     end
+    list.status:SetText(facts.stale and ("Not current: the last panel update did not complete. This is the list "
+        .. "from the last update that did; it may have changed since.") or "")
+    if facts.stale then list.body:SetTextColor(0.62, 0.6, 0.66) else list.body:SetTextColor(0.78, 0.66, 1) end
     list.body:SetText(table.concat(lines, "\n"))
+    M.LayoutExtraList(list)
     local ok, height = pcall(list.body.GetStringHeight, list.body)
     height = ok and tonumber(height) or nil
     -- At least one 12-unit row per line: a short measurement never makes a
@@ -6115,6 +6181,10 @@ function M.Render(model)
         renderStats.failures = renderStats.failures + 1
         frame:Hide()
         M.SettlePanelDrag()
+        -- An open extra-copies list (a separate window) says at once that it
+        -- is not current: it keeps the last committed names, never this
+        -- failed candidate's (M.FillExtraList).
+        pcall(M.RefreshExtraList)
         if not ok then error(result, 0) end
         return false
     end
