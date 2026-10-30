@@ -36,31 +36,32 @@ local theirTabCount = 0
 local linePool, linesUsed = {}, 0
 
 local ASSET ="Interface\\AddOns\\ProjectEbonhold\\assets\\"
-local NOTE1 = "Compares the assigned Wishlist with the ACTIVE Saved Build."
-local NOTE2 = "|cff8a8a8aSet associations in My Builds. Saved Build activation requires the server's supported level and state.|r"
+
+-- Full UI localization (issues #143-#148): every code-owned visible text of
+-- this page and its Journal controls is a reviewed key of the "journal."
+-- family, looked up through Nexus.Localization when it is shown (never cached
+-- at load, so the session's language applies). Code-owned colour codes,
+-- separators and line joins stay here around the translated text. Provider
+-- section titles and lines, Wishlist, Saved Build and Echo names stay as
+-- supplied. TF falls back to the exact English legacy bytes the caller passes
+-- when the seam cannot format a template (for example an over-long name).
+local function T(key) return (Nexus.Localization.Text(key)) end
+local function TF(key, args, english)
+    local text, source = Nexus.Localization.Format(key, args)
+    if source == "unavailable" and english ~= nil then return english end
+    return text
+end
+local function N(value) return Nexus.Localization.Count(value) end
+local function Gray(text) return "|cff8a8a8a" .. text .. "|r" end
+
 -- Build Progress (the tab was "Nexus Advisor"): a short read-only intro, the
 -- takeaway and display-only Echo rows first, every provider section unchanged
 -- behind Show details. The full explanations sit in the intro tooltip and in
 -- the details. The page only reads.
-local TAB_LABEL = "Nexus Progress"
-local HEADER = "Build Progress"
-local INTRO = "Assigned Wishlist vs active Saved Build. Read-only."
-local PURPOSE = "See what your assigned Wishlist still needs. This page only shows information: opening it "
-    .. "does not roll, spend Orbs, lock Echoes, or save or activate a Saved Build."
-local FAMILY_NOTE = "Family coverage, not copies: a family counts as represented once one copy is known, "
-    .. "so it may still need more requested copies."
-local NO_TARGET = "No Wishlist is assigned. Assign one in My Builds to see its progress."
-local MISSING_EXPLAIN = "no known copy of this requested Echo family."
-local OFF_EXPLAIN = "in the active Saved Build, but the assigned Wishlist does not request this family."
 -- The off-Wishlist list is filled only from an active Saved Build whose
 -- contents are confirmed, and it arrives empty when none was. An empty list
--- therefore shows nothing about the Saved Build, so it is never shown as 0.
-local OFF_LISTED = "Off Wishlist: families in the active Saved Build that the assigned Wishlist does not request."
-local OFF_NONE = "Off Wishlist: none listed. These families are listed only when the active Saved Build's "
-    .. "contents are confirmed, so an empty list can also mean nothing was compared yet (for example "
-    .. "on a first run). It does not show that there are none."
-local OFF_UNAVAILABLE = "Off Wishlist: unavailable. The list of these families could not be read, "
-    .. "so nothing is assumed about them."
+-- therefore shows nothing about the Saved Build, so it is never shown as 0
+-- (journal.tooltip.off_wishlist_none).
 local NEUTRAL_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 local ROW_H, TILE = 26, 24
 local detailsShown = false
@@ -74,50 +75,64 @@ local tomePool, tomesUsed = {}, 0
 local TOME_STATUS_W = 120
 -- The provider's request section. Its title does not begin with "Pending",
 -- which Summarize reads as the Wishlist's missing-family list.
+-- The provider's request section title: an identity matched against the
+-- provider's own English title, never shown from here (not translated).
 local TOME_REQUESTS = "Tome requests awaiting confirmation"
-local PENDING_BADGE = { enable = "Enable pending", disable = "Disable pending" }
-local TOME_SCOPE = "Observed when this page was refreshed; server state and freshness are unverified."
-local TOME_STALE = "This reading may be stale; Tome state coverage gives the reason."
+local PENDING_BADGE = { enable = "journal.status.tome_enable_pending", disable = "journal.status.tome_disable_pending" }
 local DeselectOurTab
 -- Assignment only records the target. The automatic save (Auto ON, autoSave,
 -- Ratchet.Dominates) is what may replace the active Saved Build. A changed
 -- assignment marks the adapter's data dirty (MarkWishlistProjectionDirty);
 -- Auto's next update step (AutomationRuntime RunUpdate -> StepSave) then
 -- checks a finished level-80 run not yet saved this visit against the newly
--- assigned Wishlist. M4 (FN7): the copy states that trigger, not a latency.
-local ASSIGN_NOTE = "Assigning by itself does not change any Saved Build."
+-- assigned Wishlist. M4 (FN7): the copy states that trigger, not a latency
+-- (journal.body.assign_note).
+local function AssignNote() return T("journal.body.assign_note") end
 -- An empty numbered Saved Build holds no Wishlist of its own and refuses an
 -- assignment. The name the Journal shows beside it is the retained first-run
 -- Wishlist, which the gear opens for editing without a destination. These
 -- wordings say that; no action behind them changes.
-local EMPTY_SLOT_ASSIGN = "This Saved Build is empty, so assigning a Wishlist to it is refused until it holds Echoes. "
-    .. ASSIGN_NOTE
-local EMPTY_SLOT_SELECTOR = "This Saved Build is empty, so no Wishlist can be assigned to it until it holds Echoes. "
-    .. "A name shown here is the first-run Wishlist, not an assignment to this Saved Build. " .. ASSIGN_NOTE
-local AUTO_SAVE_WARNING = "With Auto ON, Nexus may replace the active Saved Build with a finished run that "
-    .. "has more overall Wishlist progress, or equal progress after cleanup or an even swap of requested "
-    .. "copies. At level 80, a changed assignment makes Auto check a finished run it has not saved yet. "
-    .. "Saving edits to the assigned Wishlist can also lead to a replacement without a new run."
-local AUTO_SAVE_ORBS = "The replaced build may hold an Echo you value, even one obtained with Orbs: "
-    .. "Orb investment is not compared. Keep Auto OFF to leave the Saved Build unchanged."
+local function EmptySlotAssign() return T("journal.tooltip.empty_slot_refused") .. " " .. AssignNote() end
+local function EmptySlotSelector()
+    return T("journal.tooltip.empty_slot_no_assign") .. " " .. T("journal.tooltip.empty_slot_name_first_run")
+        .. " " .. AssignNote()
+end
 
 -- UX-05: an assignment to a numbered Saved Build while Auto is selected (ON,
 -- also while held) asks first, naming the Wishlist, the target captured when
 -- the player chose it and the conditional replacement (no timing promise).
 -- Cancel changes nothing; nothing here changes Auto. With Auto OFF the choice
 -- assigns at once. Used by the Journal picker and the editor's candidates.
+-- At load its text is the format form ("Assign '%s' to %s?" and the
+-- consequence, in the language active at load: English, since the session
+-- language is chosen later). Its text and buttons are set again by
+-- AssignDialogText just before each Show.
+local ASSIGN_POPUP = "NEXUS_ASSIGN_WISHLIST_AUTO_ON"
+-- The refusal reason the guide receipt records when the adapter has no
+-- first-run assignment (raw, never shown; chat shows its reviewed key).
+local FIRST_RUN_UNAVAILABLE = "first-run association unavailable"
 StaticPopupDialogs = StaticPopupDialogs or {}
-StaticPopupDialogs["NEXUS_ASSIGN_WISHLIST_AUTO_ON"] = {
-    text = "Assign '%s' to %s?\n" .. "Auto is ON. Assigning by itself does not change the Saved Build. But "
-        .. "when it is active and a finished run at level 80 passes Auto's checks, Nexus may replace it with "
-        .. "the run. Cancel changes nothing. To avoid that, choose Cancel, turn Auto OFF, then assign.",
-    button1 = "Assign",
-    button2 = "Cancel",
+StaticPopupDialogs[ASSIGN_POPUP] = {
+    text = TF("journal.popup.assign_question", {wishlist = "%s", target = "%s"}) .. "\n"
+        .. (T("journal.popup.assign_auto_on"):gsub("%%", "%%%%")),
+    button1 = T("journal.button.assign_confirm"),
+    button2 = T("journal.button.assign_cancel"),
     OnAccept = function(_, data)
         if type(data) == "table" and type(data.assign) == "function" then data.assign() end
     end,
     timeout = 0, whileDead = true, hideOnEscape = true,
 }
+
+-- The complete question for one Show: the names are inserted once, here, and
+-- every "%" is escaped, so the client's own formatting of the dialog text with
+-- the same two names (still passed as its arguments) shows these exact bytes.
+local function AssignDialogText(dialog, wishlistName, targetLabel)
+    local name, target = tostring(wishlistName or ""), tostring(targetLabel or "")
+    local question = TF("journal.popup.assign_question", {wishlist = name, target = target},
+        "Assign '" .. name .. "' to " .. target .. "?")
+    dialog.text = (question .. "\n" .. T("journal.popup.assign_auto_on")):gsub("%%", "%%%%")
+    dialog.button1, dialog.button2 = T("journal.button.assign_confirm"), T("journal.button.assign_cancel")
+end
 
 -- Whether Auto is selected (ON, also while held), from the runtime's
 -- counters (memory only).
@@ -157,18 +172,17 @@ function M.AssignWithConsent(wishlistName, targetLabel, numbered, assign)
         return false
     end
     if type(StaticPopup_Show) ~= "function" or type(StaticPopupDialogs) ~= "table"
-        or type(StaticPopupDialogs["NEXUS_ASSIGN_WISHLIST_AUTO_ON"]) ~= "table" then
-        print("|cffff6060Nexus:|r Nothing was assigned: Auto is ON and the confirmation that names its "
-            .. "consequence could not be shown. Turn Auto OFF to assign, or try again later.")
+        or type(StaticPopupDialogs[ASSIGN_POPUP]) ~= "table" then
+        print("|cffff6060Nexus:|r " .. T("journal.chat.consent_unavailable"))
         return nil, "consent_unavailable"
     end
     local owner, answered = OwnerKeyNow(), false
-    StaticPopup_Show("NEXUS_ASSIGN_WISHLIST_AUTO_ON", wishlistName, targetLabel, {assign = function()
+    AssignDialogText(StaticPopupDialogs[ASSIGN_POPUP], wishlistName, targetLabel)
+    StaticPopup_Show(ASSIGN_POPUP, wishlistName, targetLabel, {assign = function()
         if answered then return end
         answered = true
         if OwnerKeyNow() ~= owner then
-            print("|cffff6060Nexus:|r Nothing was assigned: this character's saved data changed after you "
-                .. "were asked. Open the Wishlist chooser again.")
+            print("|cffff6060Nexus:|r " .. T("journal.chat.owner_changed"))
             return
         end
         assign()
@@ -241,10 +255,12 @@ local NOTES_FIRST = "Compares the assigned Wishlist with the active Saved Build;
 -- nothing to estimate: no Wishlist, no requested family, or no result.
 local NO_ESTIMATE = { ["no estimate (advisor mode)"] = true, ["estimate unavailable"] = true,
     ["no wishlist target - advisor mode"] = true }
-local UNKNOWN_NO_PENDING = "the list of missing families was not received."
-local UNKNOWN_BAD_PENDING = "the list of missing families could not be read or does not match its count."
-local UNKNOWN_CONTRADICTORY = "the supplied counts and lists do not agree."
-local UNKNOWN_GRAMMAR = "the Wishlist summary line could not be read."
+-- Why family progress is unknown: a code-owned identity (s.problem), shown as
+-- its complete reviewed sentence by Takeaway.
+local UNKNOWN_NO_PENDING = "journal.status.unknown_no_pending"
+local UNKNOWN_BAD_PENDING = "journal.status.unknown_bad_pending"
+local UNKNOWN_CONTRADICTORY = "journal.status.unknown_contradictory"
+local UNKNOWN_GRAMMAR = "journal.status.unknown_grammar"
 
 -- A provider list, or nil unless it is a plain sequence of non-empty strings.
 local function TextLines(lines)
@@ -310,29 +326,30 @@ end
 
 -- The first line of the page: what is still missing, or why that is unknown.
 local function Takeaway(s)
-    if s.noTarget then return NO_TARGET end
-    if not s.targetLine then
-        return "Build Progress is unavailable: the Wishlist summary line is missing. "
-            .. "The lines that were received are under Show details."
-    end
-    if not s.known then
-        return "Family progress is unknown: " .. s.problem
-            .. " Nothing is treated as complete; the original lines are under Show details."
-    end
+    if s.noTarget then return T("journal.status.no_wishlist") end
+    if not s.targetLine then return T("journal.status.summary_missing") end
+    -- One complete sentence per reason; the reason is an identity, not text.
+    if not s.known then return T(s.problem) end
     -- A Wishlist that requests no family has no family progress, so nothing
     -- is said to be represented or missing.
-    if s.total == 0 then
-        return "This Wishlist requests no Echo families, so there is no family progress to show."
-    end
+    if s.total == 0 then return T("journal.status.no_families_requested") end
     local names = s.pending
-    if #names == 0 then
-        return "No requested Echo family is missing: each has at least one known copy. "
-            .. "That is family coverage, not copy completeness; requested copies may still be missing."
-    end
+    if #names == 0 then return T("journal.status.none_missing") end
     local shown = {}
     for i = 1, math.min(3, #names) do shown[i] = names[i] end
-    return "Still missing " .. #names .. (#names == 1 and " Echo family: " or " Echo families: ")
-        .. table.concat(shown, ", ") .. (#names > 3 and (" and " .. (#names - 3) .. " more") or "") .. "."
+    -- The provider's family names are data, joined with the code-owned ", ".
+    -- English chooses between three wordings; so does this code (no plural
+    -- grammar): one family, up to three, or three named and the rest counted.
+    local list = table.concat(shown, ", ")
+    local english = "Still missing " .. #names .. (#names == 1 and " Echo family: " or " Echo families: ")
+        .. list .. (#names > 3 and (" and " .. (#names - 3) .. " more") or "") .. "."
+    if #names == 1 then
+        return TF("journal.status.missing_one_family", {count = N(1), names = list}, english)
+    elseif #names <= 3 then
+        return TF("journal.status.missing_families", {count = N(#names), names = list}, english)
+    end
+    return TF("journal.status.missing_families_more", {count = N(#names), names = list, more = N(#names - 3)},
+        english)
 end
 
 -- The Notes estimate, only in the exact two-line form JournalData writes. The
@@ -342,9 +359,10 @@ local function EstimateLine(sections)
     local lines = notes and TextLines(notes.lines)
     if not (lines and #lines == 2 and lines[1] == NOTES_FIRST) then return nil end
     local est = lines[2]
-    if NO_ESTIMATE[est] then return "Estimate: unavailable." end
-    return "Estimate, not a prediction: " .. est
-        .. ". Based only on what is known to be missing; no future offer is assumed."
+    if NO_ESTIMATE[est] then return T("journal.status.estimate_unavailable") end
+    -- The estimate itself is the provider's text, inserted as supplied.
+    return TF("journal.status.estimate", {estimate = est}, "Estimate, not a prediction: " .. est
+        .. ". Based only on what is known to be missing; no future offer is assumed.")
 end
 
 -- An off-Wishlist line is a family name plus one of the provider's known
@@ -422,7 +440,10 @@ local function RowEnter(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:AddLine(self.tipName, 1, 1, 1, true)
     GameTooltip:AddLine(self.tipStatus, 0.82, 0.82, 0.82, true)
-    if self.tipRaw then GameTooltip:AddLine("Source text: " .. self.tipRaw, 0.82, 0.82, 0.82, true) end
+    if self.tipRaw then
+        GameTooltip:AddLine(TF("journal.tooltip.source_text", {text = self.tipRaw}, "Source text: " .. self.tipRaw),
+            0.82, 0.82, 0.82, true)
+    end
     if self.tipIcon then GameTooltip:AddLine(self.tipIcon, 0.6, 0.6, 0.6, true) end
     GameTooltip:Show()
 end
@@ -438,9 +459,9 @@ local function Filled(value)
 end
 
 local function RequestText(pending)
-    local request = pending == "enable" and "Enable requested"
-        or pending == "disable" and "Disable requested" or "Request direction unknown"
-    return request .. "; awaiting confirmation. A request is not a confirmed change."
+    return T(pending == "enable" and "journal.tooltip.tome_enable_requested"
+        or pending == "disable" and "journal.tooltip.tome_disable_requested"
+        or "journal.tooltip.tome_request_unknown")
 end
 
 -- The complete tome entry: the observation and any request kept apart, the
@@ -452,12 +473,16 @@ local function TomeRowEnter(self)
     if not (GameTooltip and type(t) == "table") then return end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:AddLine(t.name, 1, 1, 1, true)
-    local observed = Filled(t.status) or "Unknown"
+    -- The observation (t.status), reason, plan and names are the provider's
+    -- text, shown as supplied; only the words around them are reviewed keys.
+    local observed = Filled(t.status) or T("journal.value.tome_unknown")
     if self.tomeRequest then
         GameTooltip:AddLine(RequestText(t.pending), 1, 0.82, 0, true)
-        GameTooltip:AddLine("Last observed in the client mirror: " .. observed, 0.82, 0.82, 0.82, true)
+        GameTooltip:AddLine(TF("journal.tooltip.tome_last_observed", {state = observed},
+            "Last observed in the client mirror: " .. observed), 0.82, 0.82, 0.82, true)
     else
-        GameTooltip:AddLine("Client mirror: " .. observed, 0.82, 0.82, 0.82, true)
+        GameTooltip:AddLine(TF("journal.tooltip.tome_mirror", {state = observed}, "Client mirror: " .. observed),
+            0.82, 0.82, 0.82, true)
         if t.pending ~= nil then GameTooltip:AddLine(RequestText(t.pending), 1, 0.82, 0, true) end
     end
     if Filled(t.reason) then GameTooltip:AddLine(t.reason, 0.82, 0.82, 0.82, true) end
@@ -467,18 +492,24 @@ local function TomeRowEnter(self)
         for i = 1, #t.echoNames do names[#names + 1] = Filled(t.echoNames[i]) end
     end
     if #names > 0 then
-        GameTooltip:AddLine((#names == 1 and "Echo: " or "Echoes: ") .. table.concat(names, ", "),
+        -- English chooses Echo or Echoes; so does this code (two keys).
+        local list = table.concat(names, ", ")
+        GameTooltip:AddLine(#names == 1 and TF("journal.tooltip.tome_echo_one", {names = list}, "Echo: " .. list)
+            or TF("journal.tooltip.tome_echo_many", {names = list}, "Echoes: " .. list),
             0.82, 0.82, 0.82, true)
     end
-    if t.leverId ~= nil then GameTooltip:AddLine("Control ID: " .. tostring(t.leverId), 0.6, 0.6, 0.6, true) end
-    local icon = not self.tomeIcon and "No icon was supplied, so a neutral icon is shown."
-        or t.iconSource == "tome spell" and "Icon: the tome's spell icon."
-        or t.iconSource == "representative Echo spell"
-            and "Icon: a member Echo's spell icon; the tome's own icon was unavailable."
-        or "Icon: as supplied; its source was not stated."
-    GameTooltip:AddLine(icon, 0.6, 0.6, 0.6, true)
-    if t.stale == true then GameTooltip:AddLine(TOME_STALE, 1, 0.63, 0.25, true) end
-    GameTooltip:AddLine(TOME_SCOPE, 0.6, 0.6, 0.6, true)
+    if t.leverId ~= nil then
+        local id = tostring(t.leverId)
+        GameTooltip:AddLine(TF("journal.tooltip.tome_control_id", {id = id}, "Control ID: " .. id),
+            0.6, 0.6, 0.6, true)
+    end
+    local icon = not self.tomeIcon and "journal.tooltip.tome_icon_neutral"
+        or t.iconSource == "tome spell" and "journal.tooltip.tome_icon_spell"
+        or t.iconSource == "representative Echo spell" and "journal.tooltip.tome_icon_member"
+        or "journal.tooltip.tome_icon_unstated"
+    GameTooltip:AddLine(T(icon), 0.6, 0.6, 0.6, true)
+    if t.stale == true then GameTooltip:AddLine(T("journal.tooltip.tome_stale"), 1, 0.63, 0.25, true) end
+    GameTooltip:AddLine(T("journal.tooltip.tome_scope"), 0.6, 0.6, 0.6, true)
     GameTooltip:Show()
 end
 
@@ -580,11 +611,11 @@ local function IntroHover()
     introHover:EnableMouse(true)
     introHover:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(HEADER, 1, 0.82, 0)
-        GameTooltip:AddLine(PURPOSE, 0.82, 0.82, 0.82, true)
-        GameTooltip:AddLine(NOTE1, 0.82, 0.82, 0.82, true)
-        GameTooltip:AddLine(NOTE2, 0.82, 0.82, 0.82, true)
-        GameTooltip:AddLine(FAMILY_NOTE, 0.82, 0.82, 0.82, true)
+        GameTooltip:AddLine(T("journal.heading.build_progress"), 1, 0.82, 0)
+        GameTooltip:AddLine(T("journal.body.purpose"), 0.82, 0.82, 0.82, true)
+        GameTooltip:AddLine(T("journal.body.compare_active"), 0.82, 0.82, 0.82, true)
+        GameTooltip:AddLine(Gray(T("journal.body.set_in_my_builds")), 0.82, 0.82, 0.82, true)
+        GameTooltip:AddLine(T("journal.body.family_coverage"), 0.82, 0.82, 0.82, true)
         GameTooltip:Show()
     end)
     introHover:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -599,8 +630,8 @@ local function CountsHover()
     countsHover:EnableMouse(true)
     countsHover:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Wishlist family counts", 1, 0.82, 0)
-        GameTooltip:AddLine(FAMILY_NOTE, 0.82, 0.82, 0.82, true)
+        GameTooltip:AddLine(T("journal.tooltip.counts_heading"), 1, 0.82, 0)
+        GameTooltip:AddLine(T("journal.body.family_coverage"), 0.82, 0.82, 0.82, true)
         if self.offTip then GameTooltip:AddLine(self.offTip, 0.82, 0.82, 0.82, true) end
         GameTooltip:Show()
     end)
@@ -621,15 +652,14 @@ local function PageButton(kind)
         -- rolls, spends and turns nothing on. Kept on the module table.
         M._pageHelpButton = b
         b:SetSize(56, 22)
-        b:SetText("Help")
+        b:SetText(T("journal.button.help"))
         b:SetScript("OnClick", function()
             if Nexus.Help and Nexus.Help.OpenHelp then Nexus.Help.OpenHelp("wishlists") end
         end)
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Help", 1, 1, 1)
-            GameTooltip:AddLine("Opens the step-by-step setup guide where you left it. Opening it changes nothing "
-                .. "on this page. Reference beside it has the full Wishlists page.", 0.82, 0.82, 0.82, true)
+            GameTooltip:AddLine(T("journal.button.help"), 1, 1, 1)
+            GameTooltip:AddLine(T("journal.tooltip.help_opens_guide"), 0.82, 0.82, 0.82, true)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -638,15 +668,14 @@ local function PageButton(kind)
         -- under its own name. Passive, as Help.
         M._pageReferenceButton = b
         b:SetSize(80, 22)
-        b:SetText("Reference")
+        b:SetText(T("journal.button.reference"))
         b:SetScript("OnClick", function()
             if Nexus.Help and Nexus.Help.OpenReference then Nexus.Help.OpenReference("wishlists") end
         end)
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Reference", 1, 1, 1)
-            GameTooltip:AddLine("Opens the full manual on Wishlists and locked targets. Opening it changes nothing "
-                .. "on this page.", 0.82, 0.82, 0.82, true)
+            GameTooltip:AddLine(T("journal.button.reference"), 1, 1, 1)
+            GameTooltip:AddLine(T("journal.tooltip.reference_opens_manual"), 0.82, 0.82, 0.82, true)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -659,16 +688,18 @@ local function PageButton(kind)
         end)
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine(detailsShown and "Hide details" or "Show details", 1, 1, 1)
-            GameTooltip:AddLine("The full page notes and every section as received: target, pending, "
-                .. "extra copies, tome states and their coverage, notes, estimate and version. Tome states "
-                .. "are listed as rows; hover a row for its complete entry.", 0.82, 0.82, 0.82, true)
+            GameTooltip:AddLine(T(detailsShown and "journal.button.hide_details" or "journal.button.show_details"),
+                1, 1, 1)
+            GameTooltip:AddLine(T("journal.tooltip.details_contents"), 0.82, 0.82, 0.82, true)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
     else
         buildsButton = b
         b:SetSize(150, 22)
+        -- PENDING (not localized): this label and its hover title stay the
+        -- source literal "Assign in My Builds", which the terminology guard
+        -- (ux_record_scope_terms GAME_PAGE_LABELS) requires in this file.
         b:SetText("Assign in My Builds")
         b:SetScript("OnClick", function()
             pcall(function() if panel and panel:IsShown() then DeselectOurTab(true) end end)
@@ -676,7 +707,7 @@ local function PageButton(kind)
         b:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:AddLine("Assign in My Builds", 1, 1, 1)
-            GameTooltip:AddLine("Closes this page onto the Journal's own assignment controls. " .. ASSIGN_NOTE,
+            GameTooltip:AddLine(T("journal.tooltip.builds_closes_page") .. " " .. AssignNote(),
                 0.82, 0.82, 0.82, true)
             GameTooltip:Show()
         end)
@@ -740,7 +771,9 @@ local function DoRefresh()
 
     -- One display-only row for a supplied family name. `name` is looked up
     -- for an icon by exact family name only; `raw` is the provider's line.
-    local function AddRow(name, status, explain, raw)
+    -- `missing` (true for a Missing row, false for an Off Wishlist row) is the
+    -- row's identity: its colour follows it, never the shown word.
+    local function AddRow(name, missing, raw)
         if not catalogRead then catalog, catalogRead = CurrentCatalog(), true end
         local icon = FamilyIcon(catalog, name)
         local row = AcquireRow()
@@ -750,13 +783,13 @@ local function DoRefresh()
         row.icon:SetTexture(icon or NEUTRAL_ICON)
         row.icon:SetAlpha(icon and 1 or 0.5)
         row.label:SetText(name)
-        row.status:SetText(status)
-        if status == "Missing" then row.status:SetTextColor(1, 0.63, 0.25)
+        row.status:SetText(T(missing and "journal.status.row_missing" or "journal.status.row_off_wishlist"))
+        if missing then row.status:SetTextColor(1, 0.63, 0.25)
         else row.status:SetTextColor(0.62, 0.70, 0.80) end
-        row.tipName, row.tipStatus = name, status .. ": " .. explain
+        row.tipName = name
+        row.tipStatus = T(missing and "journal.tooltip.row_missing" or "journal.tooltip.row_off_wishlist")
         row.tipRaw = raw ~= name and raw or nil
-        row.tipIcon = not icon and "No single Echo family has exactly this name, so a neutral icon is shown."
-            or nil
+        row.tipIcon = not icon and T("journal.tooltip.row_icon_neutral") or nil
         cy = cy - ROW_H
     end
 
@@ -775,8 +808,10 @@ local function DoRefresh()
         row.background:SetVertexColor(0.55, 0.60, 0.68, index % 2 == 1 and 0.08 or 0.03)
         local request = requests and t.pending ~= nil
         row.label:SetText(t.name)
-        row.status:SetText(request and (PENDING_BADGE[t.pending] or "Request pending")
-            or Filled(t.status) or "Unknown")
+        -- A request shows its reviewed badge; an observation shows the
+        -- provider's status text as supplied, or Unknown without one.
+        row.status:SetText(request and T(PENDING_BADGE[t.pending] or "journal.status.tome_request_pending")
+            or Filled(t.status) or T("journal.value.tome_unknown"))
         -- Requests and clean observations take the palette accent; mixed,
         -- unknown, undiscovered and possibly stale readings are muted.
         local clean = t.stale ~= true and (t.observed == "disabled"
@@ -790,8 +825,11 @@ local function DoRefresh()
         cy = cy - ROW_H
     end
 
-    AddLine(HEADER, "GameFontNormal")
-    local intro = AddLine(INTRO)
+    -- Reviewed text is shown as resolved (plain): it never passes through the
+    -- English rewrite of UserText.Message, which leaves these English bytes
+    -- unchanged. Provider titles and lines below still go through it.
+    AddLine(T("journal.heading.build_progress"), "GameFontNormal", nil, true)
+    local intro = AddLine(T("journal.label.intro"), nil, nil, true)
     local hover = IntroHover()
     hover:ClearAllPoints()
     hover:SetPoint("TOPLEFT", intro, "TOPLEFT", 0, 0)
@@ -806,16 +844,27 @@ local function DoRefresh()
     local countsShown = false
     if hasSections then
         AddLine(Takeaway(s), "GameFontNormalSmall", nil, true)
-        if s.known and #s.pending > 0 then AddLine("|cff8a8a8a" .. FAMILY_NOTE .. "|r") end
+        if s.known and #s.pending > 0 then AddLine(Gray(T("journal.body.family_coverage")), nil, nil, true) end
         if s.known then
             AddLine(s.title, nil, 8, true)
             -- A listed count is shown as supplied; an empty list is "none
-            -- listed", never 0 (see OFF_NONE).
-            local off, offTip = "|cff9eb2c8Off Wishlist:|r unavailable", OFF_UNAVAILABLE
-            if s.off and #s.off > 0 then off, offTip = "|cff9eb2c8Off Wishlist|r " .. s.offCount, OFF_LISTED
-            elseif s.off then off, offTip = "|cff9eb2c8Off Wishlist:|r none listed", OFF_NONE end
-            local counts = AddLine("|cff7fd17fRepresented|r " .. s.represented .. " of " .. s.total
-                .. "   |cffffa040Missing|r " .. s.missing .. "   " .. off, nil, 8, true)
+            -- listed", never 0 (see journal.tooltip.off_wishlist_none). Each
+            -- segment keeps its code-owned colour around the reviewed label
+            -- (open/close slots) and the code-owned three-space separators.
+            local OFF, REP, MISS = "|cff9eb2c8", "|cff7fd17f", "|cffffa040"
+            local off = TF("journal.label.counts_off_unavailable", {open = OFF, close = "|r"})
+            local offTip = T("journal.tooltip.off_wishlist_unavailable")
+            if s.off and #s.off > 0 then
+                off = TF("journal.label.counts_off_listed", {open = OFF, close = "|r", count = N(s.offCount)})
+                offTip = T("journal.tooltip.off_wishlist_listed")
+            elseif s.off then
+                off = TF("journal.label.counts_off_none", {open = OFF, close = "|r"})
+                offTip = T("journal.tooltip.off_wishlist_none")
+            end
+            local counts = AddLine(TF("journal.label.counts_represented", {open = REP, close = "|r",
+                represented = N(s.represented), total = N(s.total)})
+                .. "   " .. TF("journal.label.counts_missing", {open = MISS, close = "|r", count = N(s.missing)})
+                .. "   " .. off, nil, 8, true)
             local hit = CountsHover()
             hit:ClearAllPoints()
             hit:SetPoint("TOPLEFT", counts, "TOPLEFT", 0, 0)
@@ -828,9 +877,9 @@ local function DoRefresh()
             AddLine(s.targetLine, nil, 8, true)
         end
     elseif failed then
-        AddLine("|cff8a8a8aBuild Progress data could not be read. Nothing is assumed.|r")
+        AddLine(Gray(T("journal.status.data_unreadable")), nil, nil, true)
     else
-        AddLine("|cff8a8a8ano data yet|r")
+        AddLine(Gray(T("journal.status.no_data_yet")), nil, nil, true)
     end
     if countsHover and not countsShown then countsHover:Hide() end
 
@@ -838,13 +887,13 @@ local function DoRefresh()
     -- count in the line above: the provider does not list them.
     if s.known and #s.pending > 0 then
         cy = cy - 4
-        AddLine("Missing (" .. #s.pending .. ")", "GameFontNormalSmall")
-        for i = 1, #s.pending do AddRow(s.pending[i], "Missing", MISSING_EXPLAIN, s.pending[i]) end
+        AddLine(TF("journal.heading.missing_count", {count = N(#s.pending)}), "GameFontNormalSmall", nil, true)
+        for i = 1, #s.pending do AddRow(s.pending[i], true, s.pending[i]) end
     end
     if s.known and s.off and #s.off > 0 then
         cy = cy - 4
-        AddLine("Off Wishlist (" .. #s.off .. ")", "GameFontNormalSmall")
-        for i = 1, #s.off do AddRow(SplitOffLine(s.off[i]), "Off Wishlist", OFF_EXPLAIN, s.off[i]) end
+        AddLine(TF("journal.heading.off_wishlist_count", {count = N(#s.off)}), "GameFontNormalSmall", nil, true)
+        for i = 1, #s.off do AddRow(SplitOffLine(s.off[i]), false, s.off[i]) end
     end
     local estimate = s.targetLine and EstimateLine(sections)
     if estimate then
@@ -859,7 +908,7 @@ local function DoRefresh()
     local toggle = PageButton("details")
     toggle:ClearAllPoints()
     toggle:SetPoint("TOPLEFT", child, "TOPLEFT", 6, cy)
-    toggle:SetText(detailsShown and "Hide details" or "Show details")
+    toggle:SetText(T(detailsShown and "journal.button.hide_details" or "journal.button.show_details"))
     toggle:Show()
     local builds = PageButton("builds")
     if noTarget then
@@ -894,16 +943,16 @@ local function DoRefresh()
     cy = cy - 30
 
     if detailsShown then
-        AddLine("About this page", "GameFontNormalSmall")
-        AddLine(PURPOSE, nil, 8)
-        AddLine(NOTE1, nil, 8)
-        AddLine(NOTE2, nil, 8)
-        AddLine(FAMILY_NOTE, nil, 8)
-        AddLine("Change the assigned Wishlist in My Builds.", nil, 8)
+        AddLine(T("journal.heading.about_page"), "GameFontNormalSmall", nil, true)
+        AddLine(T("journal.body.purpose"), nil, 8, true)
+        AddLine(T("journal.body.compare_active"), nil, 8, true)
+        AddLine(Gray(T("journal.body.set_in_my_builds")), nil, 8, true)
+        AddLine(T("journal.body.family_coverage"), nil, 8, true)
+        AddLine(T("journal.body.change_in_my_builds"), nil, 8, true)
         cy = cy - 6
         if not hasSections then
-            AddLine(failed and "|cff8a8a8aBuild Progress data could not be read, so there are no sections to show.|r"
-                or "|cff8a8a8aNo sections were received.|r")
+            AddLine(Gray(T(failed and "journal.status.data_unreadable_no_sections"
+                or "journal.status.no_sections")), nil, nil, true)
         end
         if hasSections then
             for i = 1, #sections do
@@ -922,7 +971,7 @@ local function DoRefresh()
                         -- are not listed twice. Any other section, or a
                         -- Pending list the summary did not validate, keeps
                         -- its lines as received. The data is not changed.
-                        AddLine("|cff8a8a8aListed above under Missing (" .. #s.pending .. ").|r", nil, 8)
+                        AddLine(Gray(TF("journal.status.listed_above", {count = N(#s.pending)})), nil, 8, true)
                     else
                         local lines = sec.lines
                         if type(lines) == "table" then
@@ -1116,12 +1165,11 @@ end
 local function ShowSelectorTooltip(selector)
     local besidePicker = wishlistPicker and wishlistPicker:IsShown()
     GameTooltip:SetOwner(selector, besidePicker and "ANCHOR_NONE" or "ANCHOR_TOP")
-    GameTooltip:AddLine("Automation Wishlist", 0.35, 0.8, 1)
-    GameTooltip:AddLine(associationPanel and associationPanel.emptySlot and EMPTY_SLOT_SELECTOR
-        or ("Assigns a wishlist reference to the Saved Build currently selected in the server dropdown. "
-        .. ASSIGN_NOTE), 0.82, 0.82, 0.82, true)
-    GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, 0.82, 0.25, true)
-    GameTooltip:AddLine(AUTO_SAVE_ORBS, 1, 0.82, 0.25, true)
+    GameTooltip:AddLine(T("journal.tooltip.selector_heading"), 0.35, 0.8, 1)
+    GameTooltip:AddLine(associationPanel and associationPanel.emptySlot and EmptySlotSelector()
+        or (T("journal.tooltip.selector_assigns") .. " " .. AssignNote()), 0.82, 0.82, 0.82, true)
+    GameTooltip:AddLine(T("journal.tooltip.auto_replace_warning"), 1, 0.82, 0.25, true)
+    GameTooltip:AddLine(T("journal.tooltip.auto_replace_orbs"), 1, 0.82, 0.25, true)
     GameTooltip:Show()
     if not besidePicker then return end
     local gap = 4
@@ -1226,11 +1274,11 @@ local function EnsureAssociationPanel(journal)
         associationPanel.newWishlist = CreateFrame("Button", nil, associationPanel, "UIPanelButtonTemplate")
         associationPanel.newWishlist:SetSize(150, 19)
         associationPanel.newWishlist:SetPoint("BOTTOMRIGHT", -7, 5)
-        associationPanel.newWishlist:SetText("New Wishlist")
+        associationPanel.newWishlist:SetText(T("journal.button.new_wishlist"))
         associationPanel.newWishlist:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("New Wishlist", 0.35, 0.8, 1)
-            GameTooltip:AddLine("Open a blank Nexus Wishlist Editor for a new run.", 0.82, 0.82, 0.82, true)
+            GameTooltip:AddLine(T("journal.button.new_wishlist"), 0.35, 0.8, 1)
+            GameTooltip:AddLine(T("journal.tooltip.new_wishlist"), 0.82, 0.82, 0.82, true)
             GameTooltip:Show()
         end)
         associationPanel.newWishlist:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1238,11 +1286,11 @@ local function EnsureAssociationPanel(journal)
         associationPanel.design:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             if associationPanel and associationPanel.emptySlot then
-                GameTooltip:AddLine("Edit first-run Wishlist", 0.35, 0.8, 1)
-                GameTooltip:AddLine("Open the first-run Wishlist for editing. This Saved Build is empty and has no Wishlist of its own, so nothing is assigned to it. This does not activate another build.", 0.82, 0.82, 0.82, true)
+                GameTooltip:AddLine(T("journal.tooltip.edit_first_run_heading"), 0.35, 0.8, 1)
+                GameTooltip:AddLine(T("journal.tooltip.edit_first_run"), 0.82, 0.82, 0.82, true)
             else
-                GameTooltip:AddLine("Edit assigned Wishlist", 0.35, 0.8, 1)
-                GameTooltip:AddLine("Open the Wishlist assigned to this Saved Build. This does not activate another build.", 0.82, 0.82, 0.82, true)
+                GameTooltip:AddLine(T("journal.tooltip.edit_assigned_heading"), 0.35, 0.8, 1)
+                GameTooltip:AddLine(T("journal.tooltip.edit_assigned"), 0.82, 0.82, 0.82, true)
             end
             GameTooltip:Show()
         end)
@@ -1301,7 +1349,11 @@ end
 -- `emptySlot` is the empty-Saved-Build context `active` and `loadoutName` were taken
 -- in. The picker's tooltips use it, not the live Journal context, so their words
 -- always describe the target its click handlers act on while it stays open.
-local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A, emptySlot)
+-- `loadoutName` is the raw value handed on to the editor unchanged;
+-- `loadoutLabel` is what the picker shows for it (the same name, or the
+-- reviewed text for a code-owned placeholder such as "Saved Build N").
+local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A, emptySlot, loadoutLabel)
+    loadoutLabel = loadoutLabel or tostring(loadoutName or "")
     if not wishlistPicker then
         wishlistPicker = CreateFrame("Frame", "NexusWishlistOnlyPicker", UIParent)
         wishlistPicker:SetFrameStrata("TOOLTIP")
@@ -1325,13 +1377,14 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
         wishlistPicker.border:SetFrameLevel(wishlistPicker:GetFrameLevel() + 1)
         wishlistPicker.title = wishlistPicker:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         wishlistPicker.title:SetPoint("TOPLEFT", 10, -8)
-        wishlistPicker.title:SetText("Wishlists")
+        wishlistPicker.title:SetText(T("journal.title.picker_wishlists"))
     end
     -- The title names the target this picker's clicks act on (the context
     -- captured with it), not only that these are Wishlists.
-    wishlistPicker.title:SetText(emptySlot and "Empty Saved Build: assigning is refused"
-        or ((tonumber(active) or 0) < 1 and "Assign to: first-run target")
-        or ("Assign to: " .. ShortName(tostring(loadoutName or ""), 24)))
+    local shortTarget = ShortName(loadoutLabel, 24)
+    wishlistPicker.title:SetText(emptySlot and T("journal.title.picker_empty_refused")
+        or ((tonumber(active) or 0) < 1 and T("journal.title.picker_first_run"))
+        or TF("journal.title.picker_assign_to", {name = shortTarget}, "Assign to: " .. shortTarget))
     for i=1,#wishlistPickerRows do wishlistPickerRows[i]:Hide() end
     if wishlistPicker.emptyRow then wishlistPicker.emptyRow:Hide() end
     if wishlistPicker.clearRow then wishlistPicker.clearRow:Hide() end
@@ -1360,7 +1413,8 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             wishlistPicker.emptyRow = row
         end
         row:ClearAllPoints(); row:SetPoint("TOPLEFT", 10, -28)
-        row:SetText(#wishes == 0 and "No server wishlists found" or "No other wishlists found"); row:Show()
+        row:SetText(T(#wishes == 0 and "journal.status.picker_none_found" or "journal.status.picker_no_others"))
+        row:Show()
     else
         for i=1,#shown do
             local c = shown[i]
@@ -1395,7 +1449,8 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 row.gear.glyph:SetTextColor(1, 0.82, 0.2)
                 row.gear:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
                 row.gear:SetScript("OnEnter", function(self)
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("Edit wishlist", .35,.8,1); GameTooltip:Show()
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:AddLine(T("journal.tooltip.picker_edit_wishlist"), .35,.8,1); GameTooltip:Show()
                 end)
                 row.gear:SetScript("OnLeave", function() GameTooltip:Hide() end)
                 wishlistPickerRows[i] = row
@@ -1403,11 +1458,15 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             row:ClearAllPoints(); row:SetPoint("TOPLEFT", 6, -24 - (i-1)*rowH)
             local selected = IsAssignedPickerRow(linked, c)
             local editor=Nexus.WishlistEditor
-            local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or "choose locked targets"
+            -- The editor's hint is the editor's own text; only the fallback is ours.
+            local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint()
+                or T("journal.label.picker_role_hint")
             local evidenceSuffix = c.lockEvidenceStatus == "unavailable"
                 and ("  |cffff9040("..hint..")|r") or ""
-            row.nameButton.text:SetText((selected and "|cff55ff55[Selected] |r" or "")
-                .. ((cName ~= "" and cName) or "Unnamed Wishlist")
+            -- The marker is display only: `selected` is the row's identity
+            -- (IsAssignedPickerRow), never this text.
+            row.nameButton.text:SetText((selected and ("|cff55ff55" .. T("journal.label.selected_marker") .. " |r") or "")
+                .. ((cName ~= "" and cName) or T("journal.label.unnamed_wishlist"))
                 .. evidenceSuffix)
             local cEchoes = c.echoes
             local cSnapshot = {
@@ -1427,9 +1486,12 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             end
             local function AssociateWishlistOnly()
                 local numbered = tonumber(active) and tonumber(active) > 0
-                local shownName = M.SafeName(cName, "Unnamed Wishlist")
-                local target = numbered and ("Saved Build '" .. M.SafeName(loadoutName, tostring(active)) .. "'")
-                    or "the first-run target"
+                local shownName = M.SafeName(cName, T("journal.label.unnamed_wishlist"))
+                -- The target as shown in the question and the receipt (display
+                -- only; the assignment itself uses `active` and the snapshot).
+                local buildName = M.SafeName(loadoutLabel, tostring(active))
+                local target = numbered and TF("journal.label.target_saved_build", {name = buildName},
+                    "Saved Build '" .. buildName .. "'") or T("journal.label.target_first_run")
                 -- The guide request this operation began under, taken now, before
                 -- any confirmation or role choice, and carried to every result.
                 local origin = GuideOrigin(numbered, active, cSnapshot)
@@ -1455,11 +1517,15 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     elseif type(A.SetFirstRunWishlist) == "function" then
                         ok, err = A.SetFirstRunWishlist(cSlot, cSnapshot)
                     else
-                        ok, err = false, "first-run association unavailable"
+                        ok, err = false, FIRST_RUN_UNAVAILABLE
                     end
                     if not ok then
+                        -- The guide records the raw reason; chat shows it: the
+                        -- adapter's own text as supplied, or a reviewed key.
                         GuideAssign(numbered, active, false, err, cSnapshot, origin)
-                        print("|cffff6060Nexus:|r " .. tostring(err or "could not select wishlist"))
+                        local shownErr = err == FIRST_RUN_UNAVAILABLE and T("journal.chat.first_run_unavailable")
+                            or err and tostring(err) or T("journal.chat.select_failed")
+                        print("|cffff6060Nexus:|r " .. shownErr)
                         return
                     end
                     GuideAssign(numbered, active, true, nil, cSnapshot, origin)
@@ -1467,8 +1533,9 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     M.RefreshAssociations()
                     if Nexus.Panel and Nexus.Panel.Refresh then pcall(Nexus.Panel.Refresh) end
                     -- A visible confirmation of what changed, and only that.
-                    print("|cff4dff80Nexus:|r '" .. shownName .. "' is now the Wishlist for " .. target
-                        .. ". No Saved Build was changed or activated.")
+                    print("|cff4dff80Nexus:|r " .. TF("journal.chat.assigned", {wishlist = shownName, target = target},
+                        "'" .. shownName .. "' is now the Wishlist for " .. target
+                        .. ". No Saved Build was changed or activated."))
                 end)
                 if asked == nil then GuideAssign(numbered, active, false, why, cSnapshot, origin) end
             end
@@ -1488,7 +1555,7 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                         loadoutName = loadoutName,
                     }, (tonumber(active) and tonumber(active) > 0) and active or nil)
                 else
-                    print("|cffff6060Nexus:|r Nexus Wishlist Editor is unavailable.")
+                    print("|cffff6060Nexus:|r " .. T("journal.chat.editor_unavailable"))
                 end
             end
             row.nameButton:SetScript("OnClick", AssociateWishlistOnly)
@@ -1496,13 +1563,14 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                 -- Anchor at the row edge: the name button ends 28 px inside
                 -- the picker, which shares the TOOLTIP strata.
                 GameTooltip:SetOwner(self:GetParent() or self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine("Assign Wishlist", .35, .8, 1)
-                GameTooltip:AddLine("Target: " .. tostring(loadoutName or ""), 1, 1, 1, true)
-                GameTooltip:AddLine(emptySlot and EMPTY_SLOT_ASSIGN
-                    or ("Sets this Wishlist as the target for this loadout. " .. ASSIGN_NOTE),
+                GameTooltip:AddLine(T("journal.tooltip.picker_row_heading"), .35, .8, 1)
+                GameTooltip:AddLine(TF("journal.tooltip.picker_row_target", {name = loadoutLabel},
+                    "Target: " .. loadoutLabel), 1, 1, 1, true)
+                GameTooltip:AddLine(emptySlot and EmptySlotAssign()
+                    or (T("journal.tooltip.picker_row_sets") .. " " .. AssignNote()),
                     .82, .82, .82, true)
-                GameTooltip:AddLine(AUTO_SAVE_WARNING, 1, .82, .25, true)
-                GameTooltip:AddLine(AUTO_SAVE_ORBS, 1, .82, .25, true)
+                GameTooltip:AddLine(T("journal.tooltip.auto_replace_warning"), 1, .82, .25, true)
+                GameTooltip:AddLine(T("journal.tooltip.auto_replace_orbs"), 1, .82, .25, true)
                 if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Shortened(self.text) then
                     GameTooltip:AddLine(self.text:GetText(), 1, 1, 1, true)
                 end
@@ -1520,14 +1588,16 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
             row = CreateFrame("Button", nil, wishlistPicker)
             row:SetHeight(20)
             row.text = row:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
+            -- PENDING (not localized): the row label and its hover title stay
+            -- the source literal "Unassign Wishlist", which the control-label
+            -- guard (help_action_first) requires in a UI source.
             row.text:SetPoint("LEFT",6,0); row.text:SetText("Unassign Wishlist")
             row:SetScript("OnEnter",function(self)
                 GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
                 GameTooltip:AddLine("Unassign Wishlist",1,1,1)
-                GameTooltip:AddLine(self.emptySlot
-                    and "This Saved Build has no Wishlist of its own. This does not remove the first-run Wishlist."
-                    or "Keeps the Wishlist; stops using it for this loadout.",.8,.8,.8,true)
-                GameTooltip:AddLine("Does not change or restore the Saved Build.",.8,.8,.8,true)
+                GameTooltip:AddLine(T(self.emptySlot and "journal.tooltip.unassign_empty_slot"
+                    or "journal.tooltip.unassign_keeps"),.8,.8,.8,true)
+                GameTooltip:AddLine(T("journal.tooltip.unassign_no_build_change"),.8,.8,.8,true)
                 GameTooltip:Show()
             end)
             row:SetScript("OnLeave",function()GameTooltip:Hide()end)
@@ -1566,7 +1636,7 @@ local function RefreshAssociationRows()
     local activeRow = slots.bySlot and slots.bySlot[active]
     local populated = activeRow and type(activeRow.echoes) == "table" and #activeRow.echoes > 0
     local firstRun = active < 1 or active > maxSlots or not populated
-    -- A numbered Saved Build that holds no Echoes (see EMPTY_SLOT_*).
+    -- A numbered Saved Build that holds no Echoes (see journal.tooltip.empty_slot_*).
     local emptySlot = firstRun and active >= 1 and active <= maxSlots
 
     local host = EnsureAssociationPanel(journal)
@@ -1579,10 +1649,22 @@ local function RefreshAssociationRows()
     -- selector follow every change, announced or not.
     local linked = firstRun and (A.GetFirstRunWishlist and A.GetFirstRunWishlist())
         or (A.GetLoadoutWishlist and A.GetLoadoutWishlist(active))
-    local loadoutName = (active < 1 or active > maxSlots) and "No Saved Build selected"
-        or not populated and "Empty Saved Build slot" or tostring(activeRow.name or "")
-    if not firstRun and loadoutName == "" then loadoutName = "Saved Build " .. tostring(active) end
-    host.label:SetText("|cffffffff" .. ShortName(loadoutName, 21) .. ":|r")
+    -- `loadoutName` keeps its raw value (the editor receives it unchanged);
+    -- `loadoutLabel` is what this strip and the picker show for it.
+    local loadoutName, loadoutLabel
+    if active < 1 or active > maxSlots then
+        loadoutName, loadoutLabel = "No Saved Build selected", T("journal.label.no_saved_build")
+    elseif not populated then
+        loadoutName, loadoutLabel = "Empty Saved Build slot", T("journal.label.empty_saved_build")
+    else
+        loadoutName = tostring(activeRow.name or "")
+        loadoutLabel = loadoutName
+    end
+    if not firstRun and loadoutName == "" then
+        loadoutName = "Saved Build " .. tostring(active)
+        loadoutLabel = TF("journal.label.saved_build_number", {slot = tostring(active)}, loadoutName)
+    end
+    host.label:SetText("|cffffffff" .. ShortName(loadoutLabel, 21) .. ":|r")
 
     local linkedName = linked and tostring(linked.name or "") or ""
     if linkedName ~= "" then
@@ -1590,14 +1672,14 @@ local function RefreshAssociationRows()
         host.design:Enable()
         if host.design.icon then host.design.icon:SetDesaturated(false); host.design.icon:SetAlpha(1) end
     else
-        host.selector.text:SetText("|cff8a8a8aSelect wishlist...|r")
+        host.selector.text:SetText(Gray(T("journal.label.select_wishlist")))
         host.design:Disable()
         if host.design.icon then host.design.icon:SetDesaturated(true); host.design.icon:SetAlpha(0.45) end
     end
     host.design:SetScript("OnClick", function()
         local editor = Nexus and Nexus.WishlistEditor
         if not linked then
-            print("|cffff6060Nexus:|r Associate a wishlist first.")
+            print("|cffff6060Nexus:|r " .. T("journal.chat.associate_first"))
         elseif editor and type(editor.OpenForWishlist) == "function" then
             HideWishlistPicker()
             -- Zero/empty slots use the first-run assignment. Lua's
@@ -1614,20 +1696,20 @@ local function RefreshAssociationRows()
                 loadoutName = loadoutName,
             }, not firstRun and active or nil)
         else
-            print("|cffff6060Nexus:|r Nexus Wishlist Editor is unavailable.")
+            print("|cffff6060Nexus:|r " .. T("journal.chat.editor_unavailable"))
         end
     end)
 
     host.selector:SetScript("OnClick", function(self)
         if wishlistPicker and wishlistPicker:IsShown() then HideWishlistPicker(); return end
         local wishes = A.GetWishlistCandidates and A.GetWishlistCandidates() or {}
-        ShowWishlistPicker(self, wishes, linked, active, loadoutName, A, emptySlot)
+        ShowWishlistPicker(self, wishes, linked, active, loadoutName, A, emptySlot, loadoutLabel)
     end)
     host.newWishlist:SetScript("OnClick", function()
         HideWishlistPicker()
         local editor = Nexus and Nexus.WishlistEditor
         if editor and type(editor.NewWishlist) == "function" then editor.NewWishlist()
-        else print("|cffff6060Nexus:|r Nexus Wishlist Editor is unavailable.") end
+        else print("|cffff6060Nexus:|r " .. T("journal.chat.editor_unavailable")) end
     end)
     host:Show()
 end
@@ -1767,7 +1849,7 @@ local function Install()
     -- A second Install after a partial failure reuses every frame and hook.
     ourTab = ourTab or CreateFrame("Button", "NexusJournalTab",
         journal, "CharacterFrameTabButtonTemplate")
-    ourTab:SetText(TAB_LABEL)
+    ourTab:SetText(T("journal.tab.nexus_progress"))
     Attach.target, Attach.mode = nil, "none"
     Attach.Apply()
     -- A fresh template tab shows BOTH texture sets until its state is
@@ -1788,8 +1870,8 @@ local function Install()
         ourTab:HookScript("OnEnter", function(self)
             if not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine(TAB_LABEL, 1, 0.82, 0)
-            GameTooltip:AddLine("Opens Nexus's progress page in the Echo Journal. Opening it changes nothing.", 0.85, 0.85, 0.85, true)
+            GameTooltip:AddLine(T("journal.tab.nexus_progress"), 1, 0.82, 0)
+            GameTooltip:AddLine(T("journal.tooltip.tab_opens_page"), 0.85, 0.85, 0.85, true)
             GameTooltip:Show()
         end)
         ourTab:HookScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -2019,9 +2101,6 @@ local function OpenChooserNow()
     return wishlistPicker ~= nil and wishlistPicker:IsShown()
 end
 
-local CHOOSER_COACH = "The Echoes page is open. Click the Nexus Wishlist selector at its top to choose a "
-    .. "Wishlist; nothing is assigned until you choose one."
-
 -- `openChooser`: also open the Wishlist chooser once the strip is attached
 -- (Assign Wishlist, Set up current build, Help and the editor's Assign now);
 -- when the strip cannot be shown, say what to click instead. Without it the
@@ -2045,7 +2124,7 @@ function M.OpenBuilds(openChooser, beforeOpen, onSettled)
     EnsureAssociationScanner()
 
     if not EchoesPageVisible() and not ClickCurrentEchoesMicroButton() then
-        print("|cffff6060Nexus:|r Could not find the server Character Progression button. Open Character Progression → Echoes manually.")
+        print("|cffff6060Nexus:|r " .. T("journal.chat.progression_button_missing"))
         return false
     end
 
@@ -2092,11 +2171,8 @@ function M.OpenBuilds(openChooser, beforeOpen, onSettled)
                     -- no claim is made.
                     local strip = associationPanel
                     local shown = strip and strip.IsVisible and strip:IsVisible()
-                    print("|cffffd200Nexus:|r " .. (shown and CHOOSER_COACH
-                        or ("Nexus could not confirm that the Echoes page is open (if it was already open, "
-                            .. "the game's button may have closed it). Open Character Progression -> Echoes "
-                            .. "and click the Nexus Wishlist selector at its top; nothing is assigned until "
-                            .. "you choose one.")))
+                    print("|cffffd200Nexus:|r " .. T(shown and "journal.chat.chooser_coach"
+                        or "journal.chat.chooser_unconfirmed"))
                 end
             end
         end)

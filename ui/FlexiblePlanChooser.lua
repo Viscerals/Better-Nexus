@@ -10,6 +10,19 @@ local ROWS, HEIGHT = 12, 32
 -- Remove button must end by 495.
 local SET_MIN, SET_MAX = 52, 81
 local function Plain(value) return type(value) == "table" and getmetatable(value) == nil end
+-- Full UI localization (issues #143-#148): every code-owned visible text of
+-- the chooser is a reviewed "plan." key, looked up through Nexus.Localization
+-- when shown (never cached at load). Echo names, IDs and counts are data and
+-- stay as supplied; refusal and persistence codes stay codes and are mapped to
+-- their text only here, at display. TF falls back to the exact English legacy
+-- bytes the caller passes when the seam cannot format a template.
+local function T(key) return (Nexus.Localization.Text(key)) end
+local function TF(key, args, english)
+    local text, source = Nexus.Localization.Format(key, args)
+    if source == "unavailable" and english ~= nil then return english end
+    return text
+end
+local function N(value) return Nexus.Localization.Count(value) end
 local function Display(value)
     local identity = Nexus.Identity
     return identity and identity.DisplaySafeText
@@ -22,18 +35,19 @@ local function SetActionLabel(button, text)
     local metrics = Nexus.LayoutMetrics
     if metrics and metrics.FitButtonWidth then metrics.FitButtonWidth(button, SET_MIN, SET_MAX) end
 end
+-- Refusal code -> its reviewed sentence (the code is the identity).
 local REASONS = {
-    INVALID_SELECTION="Choose exact Echo counts before opening a draft.",
-    INVALID_ALTERNATIVES="The pool can hold at most 256 distinct Echo alternatives.",
-    STACK_LIMIT="That count exceeds this Echo's maximum stack.",
-    ORDINARY_LIMIT="Choose at most 79 ordinary Echo copies.",
-    CATALOG_UNAVAILABLE="The Echo catalog is not available yet. Reopen when it has loaded.",
-    INVALID_CATALOG="This Echo's required catalog details are unavailable. Review the pool when they are available.",
-    UNSUPPORTED_ROLE="This pool accepts ordinary Echo alternatives only.",
-    CATALOG_CHANGED="A chosen Echo's catalog details changed. Reset the pool and choose again.",
-    EDITOR_CHANGED="The editor changed. Open the draft again to review its replacement.",
-    PLAN_CHANGED="The pool or choice changed. Open the draft again to review your choice.",
-    COUNT_PENDING="Count input is pending. Use Set for each edited count before opening a draft.",
+    INVALID_SELECTION="plan.status.reason_invalid_selection",
+    INVALID_ALTERNATIVES="plan.status.reason_invalid_alternatives",
+    STACK_LIMIT="plan.status.reason_stack_limit",
+    ORDINARY_LIMIT="plan.status.reason_ordinary_limit",
+    CATALOG_UNAVAILABLE="plan.status.reason_catalog_unavailable",
+    INVALID_CATALOG="plan.status.reason_invalid_catalog",
+    UNSUPPORTED_ROLE="plan.status.reason_unsupported_role",
+    CATALOG_CHANGED="plan.status.reason_catalog_changed",
+    EDITOR_CHANGED="plan.status.reason_editor_changed",
+    PLAN_CHANGED="plan.status.reason_plan_changed",
+    COUNT_PENDING="plan.status.reason_count_pending",
 }
 -- #151 explicit local pool consent. Each dialog's data is one owned single-use
 -- request. OnAccept returns nil, like NEXUS_FLEXIBLE_PLAN_REPLACE. A late or
@@ -46,73 +60,89 @@ end
 local function PopupCancel(_, request)
     if type(request) == "table" and type(request.Cancel) == "function" then request.Cancel() end
 end
+-- Each dialog's question, consequence and buttons are reviewed keys, set
+-- again just before each Show (PreparePopup). Every "%" is escaped because the
+-- client formats the dialog text.
+local POPUP_TEXT = {
+    [LOAD_POPUP] = {"plan.popup.load_question", "plan.popup.load_consequence", "plan.button.popup_load_saved"},
+    [CLEAR_POPUP] = {"plan.popup.clear_question", "plan.popup.clear_consequence", "plan.button.popup_remove_saved"},
+}
+local function PreparePopup(which)
+    local dialog, keys = type(StaticPopupDialogs) == "table" and StaticPopupDialogs[which], POPUP_TEXT[which]
+    if type(dialog) ~= "table" or not keys then return end
+    dialog.text = (T(keys[1]) .. "\n" .. T(keys[2])):gsub("%%", "%%%%")
+    dialog.button1, dialog.button2 = T(keys[3]), T("plan.button.popup_cancel")
+end
 if type(StaticPopupDialogs) == "table" then
     StaticPopupDialogs[LOAD_POPUP] = {
-        text = "Load the pool saved on this character?\nThis replaces the current pool, its counts and any pending count input. Cancel keeps them.",
-        button1 = "Load saved", button2 = "Cancel", OnAccept = PopupAccept, OnCancel = PopupCancel,
+        OnAccept = PopupAccept, OnCancel = PopupCancel,
         timeout = 0, whileDead = true, hideOnEscape = true,
     }
     StaticPopupDialogs[CLEAR_POPUP] = {
-        text = "Remove the pool saved on this character?\nThe current planning session is unchanged. Cancel keeps the saved pool.",
-        button1 = "Remove saved", button2 = "Cancel", OnAccept = PopupAccept, OnCancel = PopupCancel,
+        OnAccept = PopupAccept, OnCancel = PopupCancel,
         timeout = 0, whileDead = true, hideOnEscape = true,
     }
+    PreparePopup(LOAD_POPUP)
+    PreparePopup(CLEAR_POPUP)
 end
 
 -- #151 visible persistence status: the fixed line under the count help, apart
 -- from the pool status at the bottom. Plain player text only: no Store, API or
 -- refusal code is shown.
+-- Status name -> its reviewed sentence (P below shows it).
 local PERSIST = {
-    NONE="Saving is unavailable here. Hide keeps this pool until reload; Reset clears only this session.",
-    EMPTY="Not saved. Save pool stores this character's planning pool; Load saved restores it. Hide keeps this session; Reset clears only this session.",
-    NEW="Not saved. Save pool stores this pool on this character.",
-    UNSAVED="Unsaved changes. Save pool replaces the saved pool; Load saved restores it.",
-    UNSAVED_EMPTY="Unsaved changes: the pool is empty. Save pool asks before removing the saved pool.",
-    CHANGED="Unsaved changes.",
-    PENDING="Unsaved changes: Set each edited count before Save pool.",
-    HAS_SAVED="A pool is saved on this character. Load saved restores it.",
-    MATCHES="This pool matches the saved pool.",
-    SAVED="Saved on this character.",
-    SAVED_EMPTY="Nothing to save: the pool is empty and nothing is saved.",
-    CLEARED="Saved pool removed from this character.",
-    LOADED="Loaded the pool saved on this character.",
-    NOTHING="Nothing is saved on this character. Your pool is unchanged.",
-    ASK_LOAD="Waiting for your answer: Load saved replaces this pool; Cancel keeps it.",
-    ASK_CLEAR="Waiting for your answer: remove the saved pool; Cancel keeps it.",
-    LOADING="Saved data is still loading.",
-    UNAVAILABLE="Saved data is unavailable right now; this session is kept until reload.",
-    READ_ONLY="Saved data is read-only; Save pool is refused.",
-    READ_ONLY_LOAD="Saved data is read-only: Load saved can restore it; Save pool is refused.",
-    STALE="The saved pool changed elsewhere. Save pool is refused until you Load saved or Reset.",
-    FUTURE="The saved pool is from a newer Nexus version. It is kept unchanged; Save pool and removing it are refused.",
-    UNREADABLE="The saved pool cannot be read. It is kept unchanged; Save pool and removing it are refused.",
+    NONE="plan.status.persist_none",
+    EMPTY="plan.status.persist_empty",
+    NEW="plan.status.persist_new",
+    UNSAVED="plan.status.persist_unsaved",
+    UNSAVED_EMPTY="plan.status.persist_unsaved_empty",
+    CHANGED="plan.status.persist_changed",
+    PENDING="plan.status.persist_pending",
+    HAS_SAVED="plan.status.persist_has_saved",
+    MATCHES="plan.status.persist_matches",
+    SAVED="plan.status.persist_saved",
+    SAVED_EMPTY="plan.status.persist_saved_empty",
+    CLEARED="plan.status.persist_cleared",
+    LOADED="plan.status.persist_loaded",
+    NOTHING="plan.status.persist_nothing",
+    ASK_LOAD="plan.status.persist_ask_load",
+    ASK_CLEAR="plan.status.persist_ask_clear",
+    LOADING="plan.status.persist_loading",
+    UNAVAILABLE="plan.status.persist_unavailable",
+    READ_ONLY="plan.status.persist_read_only",
+    READ_ONLY_LOAD="plan.status.persist_read_only_load",
+    STALE="plan.status.persist_stale",
+    FUTURE="plan.status.persist_future",
+    UNREADABLE="plan.status.persist_unreadable",
 }
-local WHY_CHANGED = "saved data changed after this session last read it."
-local WHY_ASKED = "the pool or the saved pool changed after you asked."
-local WHY_UNREADABLE = "the saved pool cannot be read and is kept unchanged."
+local function P(name) return T(PERSIST[name]) end
+-- Refusal code -> the reviewed clause that completes "Not saved: ...",
+-- "Not loaded: ..." or "Not removed: ..." (plan.status.refused_*).
+local WHY_CHANGED = "plan.note.why_saved_data_changed"
+local WHY_ASKED = "plan.note.why_changed_after_asked"
+local WHY_UNREADABLE = "plan.note.why_unreadable"
 local PERSIST_WHY = {
-    COUNT_PENDING="Set each edited count first.",
-    NOT_OBSERVED="saved data had not been checked yet. Try again.",
-    INVALID_SESSION="this pool cannot be stored.",
-    LOAD_INVALID="the saved pool cannot be used here.",
-    SAVED_CHANGED="the saved pool changed after this session last read it.",
+    COUNT_PENDING="plan.note.why_count_pending",
+    NOT_OBSERVED="plan.note.why_not_observed",
+    INVALID_SESSION="plan.note.why_invalid_session",
+    LOAD_INVALID="plan.note.why_load_invalid",
+    SAVED_CHANGED="plan.note.why_saved_pool_changed",
     OWNER_CHANGED=WHY_CHANGED, ROOT_CHANGED=WHY_CHANGED, RECEIPT_UNKNOWN=WHY_CHANGED,
     STORE_OWNER_MISMATCH=WHY_CHANGED, LOAD_CHANGED=WHY_ASKED, PLAN_CHANGED=WHY_ASKED,
-    RECEIPT_NOT_DURABLE="saved data was read-only when this session read it.",
-    READ_ONLY="saved data is read-only.", LOADING="saved data is still loading.",
-    SAVED_FUTURE="the saved pool is from a newer Nexus version and is kept unchanged.",
+    RECEIPT_NOT_DURABLE="plan.note.why_receipt_read_only",
+    READ_ONLY="plan.note.why_read_only", LOADING="plan.note.why_loading",
+    SAVED_FUTURE="plan.note.why_future",
     SAVED_MALFORMED=WHY_UNREADABLE, SAVED_UNSUPPORTED=WHY_UNREADABLE, SAVED_OVERSIZED=WHY_UNREADABLE,
 }
--- What a shown refusal already explains, so the status does not repeat it.
 local PERSIST_COVERS = {COUNT_PENDING="pending", SAVED_CHANGED="stale", OWNER_CHANGED="stale",
     ROOT_CHANGED="stale", RECEIPT_UNKNOWN="stale", STORE_OWNER_MISMATCH="stale", LOAD_CHANGED="stale",
     RECEIPT_NOT_DURABLE="mode", READ_ONLY="mode", LOADING="mode", SAVED_FUTURE="mode",
     SAVED_MALFORMED="mode", SAVED_UNSUPPORTED="mode", SAVED_OVERSIZED="mode"}
+-- English chooses between one and several Echoes; so does this code (two
+-- keys, no plural grammar). n >= 1.
 local function CatalogNote(n)
-    if n == 1 then
-        return "1 Echo in this pool no longer matches the catalog; its saved details and count are kept."
-    end
-    return n .. " Echoes in this pool no longer match the catalog; their saved details and counts are kept."
+    if n == 1 then return T("plan.status.catalog_changed_one") end
+    return TF("plan.status.catalog_changed_many", {count = N(n)})
 end
 -- A pool row's saved facts differ from the current catalog row, or it is gone.
 local function Drifted(saved, live)
@@ -123,7 +153,7 @@ local function Drifted(saved, live)
 end
 
 function Factory.Reason(code)
-    return REASONS[code] or "This choice cannot be opened. Review the pool and exact counts."
+    return T(REASONS[code] or "plan.status.reason_default")
 end
 
 function Factory.New(options)
@@ -133,6 +163,8 @@ function Factory.New(options)
     local pool, frame, status, budget, search, catalogArea, poolArea
     local catalogRows, poolRows = {}, {}
     local catalogOffset, poolOffset, revision = 0, 0, 0
+    -- The shown refusal as its code ("" for none); its text is resolved only
+    -- when shown, so the pending-count check compares the code, never text.
     local note = ""
     -- #151 visible persistence presentation, assigned with the persistence
     -- state below (Refresh and the row scripts run only after New returns).
@@ -141,10 +173,11 @@ function Factory.New(options)
 
     local function HasPending() return next(pending) ~= nil end
     local function StatusText()
-        if HasPending() and note ~= Factory.Reason("COUNT_PENDING") then
-            return note..(note ~= "" and " " or "")..Factory.Reason("COUNT_PENDING")
+        local text = note ~= "" and Factory.Reason(note) or ""
+        if HasPending() and note ~= "COUNT_PENDING" then
+            return text..(text ~= "" and " " or "")..Factory.Reason("COUNT_PENDING")
         end
-        return note
+        return text
     end
 
     local function Selection()
@@ -155,7 +188,9 @@ function Factory.New(options)
         return out
     end
     local function Say(code)
-        note = Factory.Reason(code)
+        -- Any code without a reviewed sentence shows the default reason, as
+        -- Factory.Reason does (nil included).
+        note = (code == nil or code == "") and "?" or tostring(code)
         if status then status:SetText(StatusText()) end
         return false, code
     end
@@ -183,8 +218,12 @@ function Factory.New(options)
             row.spellId = id
             if id then
                 local value = catalog.rows[id]
-                row.label:SetText("#"..id.."  Q"..tostring(value.quality).."  "..Display(value.name))
-                row.action:SetText(captured.rows[id] and "Added" or "Add")
+                -- ID, quality and name are data; "#", "Q" and the spacing
+                -- are the reviewed template's.
+                local quality, name = tostring(value.quality), Display(value.name)
+                row.label:SetText(TF("plan.label.catalog_row", {id = tostring(id), quality = quality, name = name},
+                    "#"..id.."  Q"..quality.."  "..name))
+                row.action:SetText(T(captured.rows[id] and "plan.button.added" or "plan.button.add"))
                 if captured.rows[id] then row.action:Disable() else row.action:Enable() end
                 row:Show()
             else row:Hide() end
@@ -194,18 +233,21 @@ function Factory.New(options)
                 local value = captured.rows[id]
                 -- One line, the committed count first: it stays visible before a
                 -- long exact name, and the row tooltip shows the whole line.
-                row.label:SetText("Set: "..tostring(chosen[id] or 0).."  #"..id.."  Q"..value.quality
-                    .." / max "..value.maxStack.."  "..Display(value.name))
+                local english = "Set: "..tostring(chosen[id] or 0).."  #"..id.."  Q"..value.quality
+                    .." / max "..value.maxStack.."  "..Display(value.name)
+                row.label:SetText(TF("plan.label.pool_row", {count = tostring(chosen[id] or 0), id = tostring(id),
+                    quality = tostring(value.quality), max_stack = tostring(value.maxStack),
+                    name = Display(value.name)}, english))
                 bindingCounts = true
                 row.count:SetText(pending[id] or tostring(chosen[id] or 0))
                 bindingCounts = false
-                SetActionLabel(row.action, pending[id] and "Set *" or "Set")
+                SetActionLabel(row.action, T(pending[id] and "plan.button.set_pending" or "plan.button.set"))
                 row:Show()
             else row:Hide() end
         end
         local total = 0
         for _, count in pairs(chosen) do total = total + count end
-        budget:SetText(#ids.." / 256 alternatives     Chosen: "..total.." / 79 ordinary copies")
+        budget:SetText(TF("plan.label.budget", {alternatives = N(#ids), chosen = N(total)}))
         if available then
             -- Saved facts of the current pool against the catalog this Refresh
             -- already read: no further catalog or Store read, at most 256 rows.
@@ -306,11 +348,11 @@ function Factory.New(options)
         frame:SetSize(1020,650);frame:SetPoint("CENTER");frame:SetFrameStrata("HIGH");frame:SetFrameLevel(60)
         frame:SetClampedToScreen(true);frame:EnableMouse(true)
         if type(UISpecialFrames)=="table" then table.insert(UISpecialFrames,"NexusFlexiblePlanChooser") end
-        Label(frame,"Plan alternatives",900,24,22,-16)
-        local help=Label(frame,"Add exact Echo IDs, then Set each count. Set: shows the committed count; * marks pending input. 0 unchooses.",970,20,22,-44)
+        Label(frame,T("plan.title.plan_alternatives"),900,24,22,-16)
+        local help=Label(frame,T("plan.label.count_help"),970,20,22,-44)
         -- #151 persistence status, distinct from the pool status at -570.
         persistLabel=Label(frame,"",970,20,22,-66)
-        Label(frame,"Catalog",430,20,22,-94);Label(frame,"Your pool / exact counts",480,20,505,-94)
+        Label(frame,T("plan.heading.catalog"),430,20,22,-94);Label(frame,T("plan.heading.pool"),480,20,505,-94)
         search=CreateFrame("EditBox","NexusFlexiblePlanSearch",frame,"InputBoxTemplate")
         search:SetSize(430,22);search:SetPoint("TOPLEFT",22,-120);search:SetAutoFocus(false);search:SetMaxLetters(96)
         search:SetScript("OnTextChanged",function() catalogOffset=0;Refresh() end)
@@ -327,7 +369,7 @@ function Factory.New(options)
             row:SetSize(460,HEIGHT);row:SetPoint("TOPLEFT",0,-(i-1)*HEIGHT)
             row.label=Label(row,"",375,30,0,0)
             local catalogRow = row
-            row.action=Button(row,nil,"Add",62,function() return Add(catalogRow.spellId) end)
+            row.action=Button(row,nil,T("plan.button.add"),62,function() return Add(catalogRow.spellId) end)
             row.action:SetPoint("TOPRIGHT",0,-3)
             catalogRows[i]=row
             row=CreateFrame("Frame",nil,poolArea)
@@ -347,13 +389,13 @@ function Factory.New(options)
                 if text == (pending[id] or committed) then return end
                 pending[id] = text ~= committed and text or nil
                 revision, note = revision+1, ""
-                SetActionLabel(row.action, pending[id] and "Set *" or "Set")
+                SetActionLabel(row.action, T(pending[id] and "plan.button.set_pending" or "plan.button.set"))
                 status:SetText(StatusText())
                 if RenderPersistence then RenderPersistence() end
             end)
-            row.action=Button(row,nil,"Set",SET_MIN,function() row.count:ClearFocus();return SetCount(row.spellId,row.count:GetText()) end)
+            row.action=Button(row,nil,T("plan.button.set"),SET_MIN,function() row.count:ClearFocus();return SetCount(row.spellId,row.count:GetText()) end)
             row.action:SetPoint("LEFT",row.count,"RIGHT",4,0)
-            row.remove=Button(row,nil,"Remove",84,function() return Remove(row.spellId) end)
+            row.remove=Button(row,nil,T("plan.button.remove"),84,function() return Remove(row.spellId) end)
             row.remove:SetPoint("LEFT",row.action,"RIGHT",4,0)
             poolRows[i]=row
         end
@@ -369,18 +411,18 @@ function Factory.New(options)
             metrics.FullTextTooltip(status, frame)
             metrics.FullTextTooltip(persistLabel, frame)
         end
-        local open=Button(frame,"NexusFlexiblePlanOpen","Open as new Wishlist draft",224,Open)
+        local open=Button(frame,"NexusFlexiblePlanOpen",T("plan.button.open_draft"),224,Open)
         open:SetPoint("BOTTOMRIGHT",-22,18)
         -- #151 explicit local pool controls in the free left part of the action
         -- row; Open and Reset keep their places. They call the tested callbacks.
-        saveButton=Button(frame,"NexusFlexiblePlanSave","Save pool",100,function() return M.SavePool() end)
+        saveButton=Button(frame,"NexusFlexiblePlanSave",T("plan.button.save_pool"),100,function() return M.SavePool() end)
         saveButton:SetPoint("BOTTOMLEFT",22,18)
-        loadButton=Button(frame,"NexusFlexiblePlanLoad","Load saved",100,function() return M.LoadPool() end)
+        loadButton=Button(frame,"NexusFlexiblePlanLoad",T("plan.button.load_saved"),100,function() return M.LoadPool() end)
         loadButton:SetPoint("LEFT",saveButton,"RIGHT",8,0)
         if metrics and metrics.FitButtonWidth then
             metrics.FitButtonWidth(saveButton,100,170);metrics.FitButtonWidth(loadButton,100,170)
         end
-        local reset=Button(frame,"NexusFlexiblePlanReset","Reset pool",100,function()
+        local reset=Button(frame,"NexusFlexiblePlanReset",T("plan.button.reset_pool"),100,function()
             ids,captured,chosen,pool={},{rows={}},{},nil
             pending={}
             catalogOffset,poolOffset,revision,note=0,0,revision+1,""
@@ -388,7 +430,7 @@ function Factory.New(options)
             Refresh()
         end)
         reset:SetPoint("RIGHT",open,"LEFT",-8,0)
-        local hide=Button(frame,"NexusFlexiblePlanHide","Hide",70,function() frame:Hide() end)
+        local hide=Button(frame,"NexusFlexiblePlanHide",T("plan.button.hide"),70,function() frame:Hide() end)
         hide:SetPoint("TOPRIGHT",-20,-16)
         frame:SetScript("OnShow",function(self)
             if Nexus.LayoutMetrics then Nexus.LayoutMetrics.FitToScreen(self) end
@@ -466,73 +508,78 @@ function Factory.New(options)
         -- shows other saved data, owner, root or mode: never a stale Saved.
         if stale and (phase == "saved" or phase == "loaded") then return nil end
         if phase == "saved" then
-            if phaseOp == "clear" then return PERSIST.CLEARED, "done" end
-            return cleanBytes == nil and PERSIST.SAVED_EMPTY or PERSIST.SAVED, "done"
+            if phaseOp == "clear" then return P("CLEARED"), "done" end
+            return cleanBytes == nil and P("SAVED_EMPTY") or P("SAVED"), "done"
         elseif phase == "loaded" then
-            return PERSIST.LOADED, "done"
+            return P("LOADED"), "done"
         elseif phase == "unverified" then
-            local what = phaseOp == "clear" and "this removal" or "this save"
+            -- One complete sentence per operation (removal or save) and
+            -- whether the earlier saved pool was restored.
+            local clear = phaseOp == "clear"
             if restored == true then
-                return "Not confirmed: " .. what .. " could not be verified; the earlier saved pool was restored. Your pool is kept."
+                return T(clear and "plan.status.unverified_clear_restored" or "plan.status.unverified_save_restored")
             end
-            return "Not confirmed: " .. what .. " could not be verified, so the saved pool may have changed. Load saved to check it. Your pool is kept."
+            return T(clear and "plan.status.unverified_clear" or "plan.status.unverified_save")
         elseif phase ~= "refused" then
             return nil
         end
-        if persistCode == "NOTHING_SAVED" then return PERSIST.NOTHING end
-        local verb = phaseOp == "load" and "Not loaded: " or phaseOp == "clear" and "Not removed: " or "Not saved: "
+        if persistCode == "NOTHING_SAVED" then return P("NOTHING") end
+        -- "Not loaded: / Not removed: / Not saved: {reason} Your pool is kept."
+        -- with the refusal code's reviewed clause as {reason}.
+        local verb = phaseOp == "load" and "plan.status.refused_load" or phaseOp == "clear"
+            and "plan.status.refused_clear" or "plan.status.refused_save"
         local why = PERSIST_WHY[persistCode]
-        if why then return verb .. why .. " Your pool is kept.", PERSIST_COVERS[persistCode] end
+        if why then return TF(verb, {reason = T(why)}), PERSIST_COVERS[persistCode] end
         local mode = seen and seen.mode
         why = mode == "loading" and PERSIST_WHY.LOADING or mode == "readOnly" and PERSIST_WHY.READ_ONLY
-            or "saved data is unavailable right now."
-        return verb .. why .. " Your pool is kept.", "mode"
+            or "plan.note.why_unavailable"
+        return TF(verb, {reason = T(why)}), "mode"
     end
     local function PersistText()
-        if not persistence then return PERSIST.NONE end
+        if not persistence then return P("NONE") end
         local seen = latest or observed
         local mode, class = seen and seen.mode, seen and seen.class
         local stale = observed ~= nil and observed.class ~= nil
             and (staleFlag == true or Differs(latest, observed))
         local parts = {}
-        if loadRequest then parts[1] = PERSIST.ASK_LOAD elseif clearRequest then parts[1] = PERSIST.ASK_CLEAR end
+        if loadRequest then parts[1] = P("ASK_LOAD") elseif clearRequest then parts[1] = P("ASK_CLEAR") end
         local outcome, covers = Outcome(seen, stale)
         parts[#parts + 1] = outcome
         local writable = mode == "durable" and not stale
         if Dirty() then
             if HasPending() then
-                if covers ~= "pending" then parts[#parts + 1] = PERSIST.PENDING end
+                if covers ~= "pending" then parts[#parts + 1] = P("PENDING") end
             elseif writable and class == "CURRENT" then
-                parts[#parts + 1] = #ids == 0 and PERSIST.UNSAVED_EMPTY or PERSIST.UNSAVED
+                parts[#parts + 1] = #ids == 0 and P("UNSAVED_EMPTY") or P("UNSAVED")
             elseif writable and class == "ABSENT" then
-                parts[#parts + 1] = PERSIST.NEW
+                parts[#parts + 1] = P("NEW")
             else
-                parts[#parts + 1] = PERSIST.CHANGED
+                parts[#parts + 1] = P("CHANGED")
             end
         elseif not outcome then
             if class == "CURRENT" and #ids == 0 then
-                parts[#parts + 1] = PERSIST.HAS_SAVED
+                parts[#parts + 1] = P("HAS_SAVED")
             elseif class == "CURRENT" and not stale and observed and observed.bytes == cleanBytes then
-                parts[#parts + 1] = PERSIST.MATCHES
+                parts[#parts + 1] = P("MATCHES")
             elseif writable and class == "ABSENT" and #ids == 0 then
-                parts[#parts + 1] = PERSIST.EMPTY
+                parts[#parts + 1] = P("EMPTY")
             end
         end
         if covers ~= "mode" then
             if class == "FUTURE" then
-                parts[#parts + 1] = PERSIST.FUTURE
+                parts[#parts + 1] = P("FUTURE")
             elseif class == "MALFORMED" or class == "UNSUPPORTED" or class == "OVERSIZED" then
-                parts[#parts + 1] = PERSIST.UNREADABLE
+                parts[#parts + 1] = P("UNREADABLE")
             elseif mode == "loading" then
-                parts[#parts + 1] = PERSIST.LOADING
+                parts[#parts + 1] = P("LOADING")
             elseif mode == "readOnly" then
-                parts[#parts + 1] = class == "CURRENT" and PERSIST.READ_ONLY_LOAD or PERSIST.READ_ONLY
+                parts[#parts + 1] = class == "CURRENT" and P("READ_ONLY_LOAD") or P("READ_ONLY")
             elseif mode ~= nil and mode ~= "durable" then
-                parts[#parts + 1] = PERSIST.UNAVAILABLE
+                parts[#parts + 1] = P("UNAVAILABLE")
             end
         end
         if stale and covers ~= "stale" and (mode == "durable" or mode == "readOnly") then
-            parts[#parts + 1] = PERSIST.STALE
+            parts[#parts + 1] = P("STALE")
         end
         if changedMembers > 0 and #ids > 0 then parts[#parts + 1] = CatalogNote(changedMembers) end
         return table.concat(parts, " ")
@@ -656,6 +703,7 @@ function Factory.New(options)
                 if clearRequest == request then clearRequest = nil; RenderPersistence() end
             end
             clearRequest = request
+            PreparePopup(CLEAR_POPUP)
             StaticPopup_Show(CLEAR_POPUP, nil, nil, request)
             RenderPersistence()
             return "confirm", "CLEAR_CONFIRM"
@@ -692,6 +740,7 @@ function Factory.New(options)
             if loadRequest == request then loadRequest = nil; RenderPersistence() end
         end
         loadRequest = request
+        PreparePopup(LOAD_POPUP)
         StaticPopup_Show(LOAD_POPUP, nil, nil, request)
         RenderPersistence()
         return "confirm", "LOAD_CONFIRM"
