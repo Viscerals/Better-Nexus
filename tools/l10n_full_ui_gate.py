@@ -20,38 +20,46 @@ optional `lines = true`. Every text is well-formed UTF-8 without "|". Declaratio
 each pack fail closed above 4096 entries. The English base, KEY_CONTEXT.json rows, the TOC load
 order, the uiLanguages enum and the products and autonyms of RELEASE_LANGUAGES.json must agree.
 No key count, family total or contract version is hard-coded: a later declaration change is
-followed, and a supplied composition receipt binds it explicitly (see check_receipt).
+followed. A supplied composition receipt is checked against the current bytes and declaration
+shapes only; its claimed prior version and lineage stay NOT_VERIFIED (see check_receipt).
 Each optional product must ship a complete pack: every active key holds a valid entry of its
 kind. Entries are classified separately (CATEGORIES). English fallback never counts: missing,
 invalid, unknown, orphan, obsolete and english_placeholder (byte-identical to English without a
 matching legitimately_identical entryReview declaration) fail. draft (valid and different from
-English; no entry review declared) and the two declared categories are reported, not failed; a
-declaration is matched by exact text hash only and grants no review.
+English; no entry review declared) and the two declared categories are reported, not failed. An
+entryReview declaration counts only after the existing complete record contract of
+tools/l10n_catalog.py _check_declarations accepts it (_entry_reviews); it is a documented claim
+and grants no review, rights or native acceptance.
 
 Runtime cross-check (runtime_check). The same files are loaded by the real Nexus.toc boot of
 the offline harness (tests/prototype/format5_support.lua) under LuaJIT, once per optional
 language, with missing and invalid variants. Every active key resolves through the real seam
 (L.Text / L.Format of the session pack) and must give exactly the source, reason and bytes this
 module predicts; the load facts of L.Diagnostics and L.Languages must agree too. A bounded list
-of real receivers (RECEIVER_PROBES) is driven; each must show the predicted candidate, and the
-exact English when its entry is removed or invalid. A probe that shows English while a valid
-candidate exists is receiver-not-localized; one that shows another key's text is
-receiver-wrong-key. This proves those receivers only: it is not general reachability of every
-key, and a raw key in a comment, list or unused value is not a receiver.
+of real receivers (RECEIVER_PROBES, each naming the production function or property read) is
+driven; each must show the predicted candidate, and the exact English when its entry is removed or
+invalid. One of them reads a whole Help page and must hold a lines = true template's rendering as a
+contiguous segment. A probe that shows English while a valid candidate exists is
+receiver-not-localized; one that shows another key's text is receiver-wrong-key. This proves those
+receivers only: it is not general reachability of every key or family, and a raw key in a comment,
+list or unused value is not a receiver. The report keeps catalog validity, every-key seam checks
+and the listed display receivers apart (coverage).
 
 Provenance. The report records the SHA-256 and length of every exact input, and, when Git is
 available, the commit, tree, index blob and the worktree blob of each input (hashed by Git under
 the checkout's own attribute contract). Raw Git LF and physical CRLF bytes are different
 observations; nothing is normalized except where a comparison records its contract. An archive
-built by tools/build_package.py holds HEAD blobs, so --archive compares each runtime input member
-with the supplied bytes with every CRLF as LF, under contract ARCHIVE_CONTRACT. A hash agreement
-is byte agreement only: it is not drafting history, language quality or rights acceptance.
+built by tools/build_package.py holds HEAD blobs, so --archive compares the four localization
+runtime-input members with the supplied bytes with every CRLF as LF, under contract
+ARCHIVE_CONTRACT; agreement is FOUR_MEMBER_SUBSET_MATCHED (ARCHIVE_SCOPE), never the whole
+archive or the packaged revision. A hash agreement is byte agreement only: it is not drafting
+history, language quality or rights acceptance.
 
 Reused seam: the literal lexer and parsers of tools/l10n_catalog.py (_tokens, _LiteralParser,
-_declaration_block, _parse_literal_table, parse_english, parse_packs), loaded read-only from its
-file. Their public pilot validators cap at 64 keys and know only text/format, so this module adds
-its own checks instead of changing that reserved file. A later change of those private helpers
-is a compatibility dependency of this gate.
+_declaration_block, _parse_literal_table, parse_english, parse_packs) and its entry-review record
+validator (_check_declarations), loaded read-only from its file. Their public pilot validators cap
+at 64 keys and know only text/format, so this module adds its own checks instead of changing that
+reserved file. A later change of those private helpers is a compatibility dependency of this gate.
 """
 from __future__ import annotations
 import argparse, hashlib, io, json, pathlib, re, shutil, subprocess, sys, tempfile, time, types, zipfile
@@ -96,24 +104,42 @@ FAILING = frozenset(('english_placeholder', 'missing', 'invalid', 'unknown', 'or
 
 # Real receivers driven by the runtime cross-check. `slots` gives the value each placeholder
 # must show: a literal, or {'key': k} for the text another key resolves to in the same run.
+# `receiver` names the production function or property whose value is observed. With
+# match = 'segment' the observed value is a whole displayed text (a Help page body) that must
+# hold the predicted rendering as one contiguous segment; otherwise it must equal it.
 RECEIVER_PROBES = (
     {'id': 'usertext.message.root_mutation_pending', 'key': 'reason.save_in_progress',
+     'receiver': 'core/UserText.lua T.Message (LocalizedReason)',
      'code': "return (Nexus.UserText.Message('ROOT_MUTATION_PENDING'))"},
     {'id': 'usertext.message.three_card_board', 'key': 'reason.wait_three_choices',
+     'receiver': 'core/UserText.lua T.Message (LocalizedReason)',
      'code': "return (Nexus.UserText.Message('waiting for three-card board'))"},
     {'id': 'readout.charges_line', 'key': 'readout.charge_counts',
+     'receiver': 'ui/Readout.lua M.ChargesLine',
      'code': 'return Nexus.Readout.ChargesLine({banish = 3, reroll = 0, arrived = true})',
      'slots': {'banish': '3', 'reroll': '0', 'freeze': '?'}},
     {'id': 'panel.detail_name_lines', 'key': 'panel.label.more_count',
+     'receiver': 'ui/Panel.lua M.DetailNameLines',
      'code': "return Nexus.Panel.DetailNameLines({'a', 'b', 'c', 'd'})[3]",
      'slots': {'count': '2'}},
     {'id': 'panel.size_menu_hover', 'key': 'panel.tooltip.size_explained',
+     'receiver': 'ui/Panel.lua M.PanelSizeMenuItem().tooltipText',
      'code': 'return Nexus.Panel.PanelSizeMenuItem().tooltipText'},
     {'id': 'panel.language_refused', 'key': 'panel.chat.language_refused',
+     'receiver': 'ui/Panel.lua M.LanguageResultText',
      'code': "return Nexus.Panel.LanguageResultText({state = 'refused', reason = 'nope'})",
      'slots': {'reason': {'key': 'panel.status.language_reason_refused'}}},
     {'id': 'usertext.glossary', 'key': 'usertext.body.glossary',
+     'receiver': 'core/UserText.lua T.GLOSSARY (display-time field)',
      'code': 'return Nexus.UserText.GLOSSARY'},
+    # A lines = true template: the Reference window's Troubleshooting page, opened by H.Show and
+    # read back from the FontString refresh() filled with PageText; then hidden again.
+    {'id': 'help.page_troubleshooting_body', 'key': 'help.body.troubleshooting_commands_2',
+     'receiver': 'ui/Help.lua H.Show("troubleshooting") -> NexusHelpWindow.body:GetText()',
+     'match': 'segment',
+     'code': "local frame = Nexus.Help.Show('troubleshooting')\n"
+             "local text = frame.body:GetText()\nframe:Hide()\nreturn text",
+     'slots': {'policy_command': '/nexus policy adaptive|released'}},
 )
 RECEIVER_SCOPE = ('bounded subset: the listed real receiver paths under every optional language, '
                   'with missing and invalid variants; not general reachability of every key, not '
@@ -433,7 +459,6 @@ def evaluate(sources: dict, receipt: bytes = None, require_receipt: bool = False
     optional_ids = _check_languages(sources, problems)
     release = _strict_json(sources['release'], INPUT_PATHS['release'], problems) or {}
     products = _check_products(release, optional_ids, problems)
-    reviews = _entry_reviews(release, problems)
 
     # Packs.
     packs = {}
@@ -444,6 +469,8 @@ def evaluate(sources: dict, receipt: bytes = None, require_receipt: bool = False
     if list(packs) != [row['productId'] for row in products]:
         problems.append(_problem('pack-set', INPUT_PATHS['packs'], detail='packs %r, products %r' % (
             list(packs), [row['productId'] for row in products])))
+    reviews, report['entryReview'] = _entry_reviews(release, english, packs,
+                                                    [row['productId'] for row in products], problems)
     report['products'] = []
     for row in products:
         product = row['productId']
@@ -547,29 +574,66 @@ def _check_products(release, optional_ids, problems):
     return optional
 
 
-def _entry_reviews(release, problems):
-    """{(productId, key): (decision, sha256)} from entryReview.declarations."""
+ENTRY_REVIEW_VALIDATOR = ('tools/l10n_catalog.py _check_declarations, unchanged: the container contract once, '
+                          'then each record alone against the supplied English and packs')
+ENTRY_REVIEW_NOT_EVIDENCE = ('A declaration is a documented claim: it is not evidence of fluent review, '
+                             'contributor rights or native acceptance, which stay UNKNOWN or pending.')
+# A refused record's catalog code, and the gate code it is reported under.
+_REVIEW_CODES = {'evidence-stale': 'entry-review-stale', 'evidence-decision-mismatch': 'entry-review-contradiction'}
+
+
+def _entry_reviews(release, english, packs, product_ids, problems):
+    """The exemptions the entry-review declarations grant, ({(productId, key): (decision, sha256)},
+    report section). Every record must pass the existing complete record contract of
+    tools/l10n_catalog.py (contract and version, exact seven string fields, declared status, known
+    optional product and English key, a present entry with the recorded hash, an assigned reviewer, an
+    https reference and a decision that agrees with the entry). It is applied to each record alone, so
+    one refused record grants nothing and leaves the others as they are; two records for one entry
+    grant nothing. A container outside the contract grants no exemption at all."""
     where = INPUT_PATHS['release']
-    record = release.get('entryReview') if isinstance(release, dict) else None
-    rows = record.get('declarations') if isinstance(record, dict) else None
-    if not isinstance(rows, list):
-        problems.append(_problem('entry-review-structure', where))
-        return {}
+    container = release.get('entryReview') if isinstance(release, dict) else None
+    section = {'validator': ENTRY_REVIEW_VALIDATOR, 'notEvidenceOf': ENTRY_REVIEW_NOT_EVIDENCE}
+    errors = (_CATALOG.CatalogEvidenceError,)
+
+    def check(records):
+        copy = dict(container, declarations=records)
+        _CATALOG._check_declarations(dict(release, entryReview=copy), english, packs, list(product_ids))
+
+    try:
+        if not isinstance(container, dict):
+            raise _CATALOG.CatalogEvidenceError('evidence-contract', 'release.entryReview')
+        check([])
+    except errors as error:
+        problems.append(_problem('entry-review-invalid', where + ' ' + (error.path or ''), detail=error.code))
+        section.update(status='REFUSED', records=None, accepted=0)
+        return {}, section
+    records = container['declarations']
+    valid = {}
+    for index, record in enumerate(records):
+        path = '%s entryReview.declarations[%d]' % (where, index)
+        key = record.get('key') if isinstance(record, dict) else None
+        product = record.get('productId') if isinstance(record, dict) else None
+        try:
+            check([record])
+        except errors as error:
+            problems.append(_problem(_REVIEW_CODES.get(error.code, 'entry-review-invalid'), path,
+                                     key if isinstance(key, str) else None,
+                                     product if isinstance(product, str) else None, error.code))
+            continue
+        except KeyError:  # a known optional product whose pack is absent holds no entry
+            problems.append(_problem('entry-review-invalid', path, key, product, 'evidence-no-entry'))
+            continue
+        valid.setdefault((product, key), []).append(record)
     out = {}
-    for row in rows:
-        if not (isinstance(row, dict) and row.get('status') == 'declared'
-                and row.get('decision') in ('translated', 'legitimately_identical')
-                and isinstance(row.get('translatedTextSha256'), str)
-                and re.fullmatch('[0-9a-f]{64}', row['translatedTextSha256'])):
-            problems.append(_problem('entry-review-structure', where, row.get('key') if isinstance(
-                row, dict) else None))
+    for (product, key), rows in valid.items():
+        if len(rows) > 1:
+            detail = 'evidence-duplicate' if all(row == rows[0] for row in rows) else 'evidence-conflict'
+            problems.append(_problem('entry-review-duplicate', where + ' entryReview.declarations', key,
+                                     product, detail))
             continue
-        index = (row.get('productId'), row.get('key'))
-        if index in out:
-            problems.append(_problem('entry-review-duplicate', where, index[1], index[0]))
-            continue
-        out[index] = (row['decision'], row['translatedTextSha256'])
-    return out
+        out[(product, key)] = (rows[0]['decision'], rows[0]['translatedTextSha256'])
+    section.update(status='RECORDS_CHECKED', records=len(records), accepted=len(out))
+    return out, section
 
 
 def classify_pack(product, pack, release_row, declarations, active, retired, reviews, problems):
@@ -648,10 +712,32 @@ def _basis_bytes(data, basis):
     return None if b'\r' in canonical else canonical
 
 
+RECEIPT_LINEAGE = ('NOT_VERIFIED: no authoritative prior source or version is supplied; contractVersion and '
+                   'previousKind are caller claims, and this receipt format is a proposal Root has not adopted')
+RECEIPT_VERIFIED = ('the current English, packs and core/Localization.lua bytes under the stated hash basis, the '
+                    'product list, and the current kind, lines and result limit of each override key')
+_OVERRIDE_FIELDS = frozenset(('key', 'kind', 'previousKind'))
+_OVERRIDE_OPTIONAL = frozenset(('lines', 'resultLimit'))
+
+
+def _override_shape(override):
+    """Whether an override is well formed: the three fields, optional lines (exactly true) and
+    resultLimit (a whole number), a key string, and a current and a prior kind of KINDS."""
+    if not (isinstance(override, dict) and _OVERRIDE_FIELDS <= set(override) <= _OVERRIDE_FIELDS | _OVERRIDE_OPTIONAL):
+        return False
+    return (isinstance(override['key'], str) and override['kind'] in KINDS and override['previousKind'] in KINDS
+            and ('lines' not in override or override['lines'] is True)
+            and ('resultLimit' not in override or type(override['resultLimit']) is int))
+
+
 def check_receipt(receipt, sources, declarations, product_ids, problems, required):
-    """A supplied composition receipt binds the composed bytes and the declared contract
-    version with its explicit overrides; a stale or mismatched one fails. Without one the gate
-    reports NOT_SUPPLIED, which fails only when it is required."""
+    """A supplied composition receipt is checked against the current supplied bytes only: its input
+    hashes under its stated basis, its product list, and for each override the current
+    declaration's kind, lines and result limit. A malformed override (an unknown or non-string
+    prior kind, a lines value other than true, a missing or extra field) or a repeated key is
+    refused. The prior version and lineage cannot be verified (RECEIPT_LINEAGE): a successful check
+    is CURRENT_INPUTS_MATCHED, never an approved version or a verified transition. Without a
+    receipt the gate reports NOT_SUPPLIED, which fails only when one is required."""
     where = 'composition receipt'
     if receipt is None:
         if required:
@@ -666,38 +752,50 @@ def check_receipt(receipt, sources, declarations, product_ids, problems, require
             and document['hashBasis'] in RECEIPT_BASES and isinstance(document['inputs'], dict)
             and isinstance(document['contractOverrides'], list)):
         problems.append(_problem('receipt-structure', where))
-        return {'status': 'REFUSED', 'sha256': sha256(receipt)}
-    status = 'MATCHED'
+        return {'status': 'REFUSED', 'sha256': sha256(receipt), 'priorVersionAndLineage': 'NOT_VERIFIED'}
+    refused = False
     names = {path: name for name, path in INPUTS}
     for required_path in (INPUT_PATHS['english'], INPUT_PATHS['packs'], INPUT_PATHS['localization']):
         if required_path not in document['inputs']:
             problems.append(_problem('receipt-structure', where, detail='inputs lack ' + required_path))
-            status = 'REFUSED'
+            refused = True
     for path, digest in document['inputs'].items():
         data = sources.get(names.get(path)) if path in names else None
         basis = _basis_bytes(data, document['hashBasis']) if data is not None else None
         if basis is None or sha256(basis) != digest:
             problems.append(_problem('receipt-stale', where, detail=path))
-            status = 'REFUSED'
+            refused = True
     if document['products'] != list(product_ids):
         problems.append(_problem('receipt-products', where))
-        status = 'REFUSED'
-    for override in document['contractOverrides']:
-        key = override.get('key') if isinstance(override, dict) else None
+        refused = True
+    seen = set()
+    for index, override in enumerate(document['contractOverrides']):
+        at = '%s contractOverrides[%d]' % (where, index)
+        if not _override_shape(override):
+            key = override.get('key') if isinstance(override, dict) else None
+            problems.append(_problem('receipt-override-malformed', at, key if isinstance(key, str) else None))
+            refused = True
+            continue
+        key = override['key']
+        if key in seen:
+            problems.append(_problem('receipt-override-duplicate', at, key))
+            refused = True
+            continue
+        seen.add(key)
         declaration = declarations.get(key)
-        shaped = (isinstance(override, dict) and {'key', 'kind', 'previousKind'} <= set(override)
-                  <= {'key', 'kind', 'previousKind', 'lines', 'resultLimit'})
-        if not (shaped and declaration is not None and declaration['kind'] == override['kind']
+        if not (declaration is not None and declaration['kind'] == override['kind']
                 and declaration.get('lines') is override.get('lines')
                 and declaration.get('resultLimit') == override.get('resultLimit',
                                                                     declaration.get('resultLimit'))):
-            problems.append(_problem('receipt-override-mismatch', where, key))
-            status = 'REFUSED'
+            problems.append(_problem('receipt-override-mismatch', at, key))
+            refused = True
         elif override['previousKind'] == override['kind'] and 'lines' not in override:
-            problems.append(_problem('receipt-override-noop', where, key))
-            status = 'REFUSED'
-    return {'status': status, 'sha256': sha256(receipt), 'contractVersion': document['contractVersion'],
-            'hashBasis': document['hashBasis'], 'overrides': len(document['contractOverrides'])}
+            problems.append(_problem('receipt-override-noop', at, key))
+            refused = True
+    return {'status': 'REFUSED' if refused else 'CURRENT_INPUTS_MATCHED', 'sha256': sha256(receipt),
+            'verified': RECEIPT_VERIFIED, 'priorVersionAndLineage': 'NOT_VERIFIED', 'lineageNote': RECEIPT_LINEAGE,
+            'claimedContractVersion': document['contractVersion'], 'hashBasis': document['hashBasis'],
+            'overrides': len(document['contractOverrides'])}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -974,13 +1072,14 @@ def runtime_check(root, model, paths=None, probes=RECEIVER_PROBES, luajit=None, 
             want = _probe_expected(model, probe, admitted)
             got = unhex(shown)
             code = None
+            segment = probe.get('match') == 'segment'
             if status != 'ok':
                 code = 'receiver-error'
-            elif got != want:
+            elif not want or (want not in got if segment else got != want):
                 english = _probe_expected(model, probe, {})
-                if got == english and want != english:
+                if want != english and (english in got if segment else got == english):
                     code = 'receiver-not-localized'
-                elif got in texts and texts[got] != probe['key']:
+                elif not segment and got in texts and texts[got] != probe['key']:
                     code = 'receiver-wrong-key'
                 else:
                     code = 'receiver-mismatch'
@@ -1072,14 +1171,22 @@ def source_identity(root, names=tuple(INPUT_PATHS)):
             'inputsClean': status == '', 'blobs': rows}
 
 
+ARCHIVE_SCOPE = ('four localization runtime-input members only (Nexus/data/DefaultProfile.lua, '
+                 'Nexus/data/LocalizationEnglish.lua, Nexus/data/LocalizationPacks.lua, '
+                 'Nexus/core/Localization.lua); not the whole archive: the package inventory, TOC, Release, '
+                 'notices, every other source file and the packaged or delivered revision are not compared')
+
+
 def check_archive(archive: bytes, sources, problems):
-    """Each runtime input member of a package archive against the supplied bytes."""
+    """The four localization runtime-input members of a package archive against the supplied bytes
+    (ARCHIVE_SCOPE, ARCHIVE_CONTRACT). Agreement is FOUR_MEMBER_SUBSET_MATCHED: it says nothing
+    about any other member or about which revision was packaged."""
     rows = []
     try:
         bundle = zipfile.ZipFile(io.BytesIO(archive))
     except zipfile.BadZipFile as error:
         problems.append(_problem('archive-unreadable', 'archive', detail=str(error)))
-        return {'status': 'REFUSED'}
+        return {'status': 'REFUSED', 'scope': ARCHIVE_SCOPE}
     with bundle:
         members = set(bundle.namelist())
         for name in RUNTIME_INPUTS:
@@ -1095,7 +1202,8 @@ def check_archive(archive: bytes, sources, problems):
             if not same:
                 problems.append(_problem('archive-mismatch', member))
             rows.append({'member': member, 'sha256': sha256(data), 'result': 'MATCHED' if same else 'MISMATCH'})
-    return {'status': 'MATCHED' if all(row['result'] == 'MATCHED' for row in rows) else 'REFUSED',
+    matched = all(row['result'] == 'MATCHED' for row in rows)
+    return {'status': 'FOUR_MEMBER_SUBSET_MATCHED' if matched else 'REFUSED', 'scope': ARCHIVE_SCOPE,
             'sha256': sha256(archive), 'contract': ARCHIVE_CONTRACT, 'members': rows}
 
 
@@ -1122,10 +1230,37 @@ def gate(root=ROOT, sources=None, receipt=None, require_receipt=False, archive=N
     report['sourceIdentity'] = source_identity(root)
     report['archive'] = (check_archive(archive, sources, report['problems'])
                          if archive is not None else {'status': 'NOT_SUPPLIED'})
+    report['coverage'] = coverage(report, model, probes)
     report['verdict'] = 'FAIL' if report['problems'] else 'PASS'
     report['notEvidenceOf'] = ('fluent or human translation acceptance, rights, native glyph, '
                                'font, layout, reload or full visible-UI completeness')
     return report
+
+
+def coverage(report, model, probes):
+    """Three separate facts: catalog validity, every-key seam resolution and the listed real display
+    receivers, each with its own scope. Neither count proves that every UI consumer uses its key."""
+    runtime = report.get('runtime', {})
+    complete_runs = [row for row in runtime.get('runs', []) if row['id'].startswith('complete:')]
+    outcomes = {}
+    for row in runtime.get('probes', []):
+        condition, product = row['run'].split(':', 1)
+        outcomes.setdefault(row['probe'], {}).setdefault(condition, {})[product] = '%s (%s shown)' % (
+            row['result'], row['source'])
+    return {
+        'catalog': {'activeKeys': len(model['active']), 'products': list(model['optionalIds']),
+                    'scope': 'declarations, English, key context, TOC, languages and every pack entry, '
+                             'checked statically over the supplied bytes'},
+        'seam': {'keysPerRun': complete_runs[0]['keysChecked'] if complete_runs else 0,
+                 'completeRuns': len(complete_runs),
+                 'scope': 'every active key resolved through L.Text / L.Format of the session pack in the '
+                          'real TOC boot; a seam result, not a display: it does not show that any UI '
+                          'consumer uses the key'},
+        'displayReceivers': {'scope': RECEIVER_SCOPE, 'probes': [
+            {'id': probe['id'], 'key': probe['key'], 'receiver': probe.get('receiver', 'UNSPECIFIED'),
+             'match': probe.get('match', 'exact'), 'outcomes': outcomes.get(probe['id'], {})}
+            for probe in probes]},
+    }
 
 
 def summary_lines(report, limit=12):
@@ -1148,8 +1283,18 @@ def summary_lines(report, limit=12):
     lines.append('runtime: %s; %d runs; receiver probes %d PASS of %d (%s)' % (
         runtime.get('status'), len(runtime.get('runs', [])),
         sum(1 for row in probes if row['result'] == 'PASS'), len(probes), RECEIVER_SCOPE))
-    lines.append('receipt: %s; archive: %s' % (report['compositionReceipt'].get('status'),
-                                               report['archive'].get('status')))
+    for row in (report.get('coverage') or {}).get('displayReceivers', {}).get('probes', []):
+        shown = '; '.join('%s %s' % (condition, ','.join(sorted(set(results.values()))))
+                          for condition, results in sorted(row['outcomes'].items()))
+        lines.append('receiver %s: %s via %s: %s' % (row['id'], row['key'], row['receiver'], shown or 'NOT_RUN'))
+    receipt, archive = report['compositionReceipt'], report['archive']
+    lines.append('receipt: %s%s; archive: %s%s' % (
+        receipt.get('status'),
+        ' (current inputs and shape only; prior version and lineage NOT_VERIFIED)'
+        if receipt.get('status') != 'NOT_SUPPLIED' else '',
+        archive.get('status'),
+        ' (four localization runtime-input members only; not the whole archive or the packaged revision)'
+        if archive.get('status') != 'NOT_SUPPLIED' else ''))
     by_code = {}
     for problem in report['problems']:
         by_code.setdefault(problem['code'], []).append(problem)

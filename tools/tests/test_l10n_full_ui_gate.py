@@ -89,7 +89,8 @@ MODEL = STATIC['model']
 REDUCED_KEYS = [row[0] for row in ORIGINAL_28] + [
     'panel.label.more_count', 'panel.tooltip.size_explained', 'panel.chat.language_refused',
     'panel.status.language_reason_refused', 'usertext.body.glossary', 'guide.body.target_c_select',
-    'leaderboard.column.rank', 'panel.tooltip.extra_above_targets']
+    'leaderboard.column.rank', 'panel.tooltip.extra_above_targets',
+    'help.body.troubleshooting_commands_2']
 
 
 def declaration_line(key, declaration):
@@ -320,9 +321,8 @@ class SyntheticComposition(unittest.TestCase):
     """A clean synthetic six-pack composition passes the same gate."""
 
     def test_complete_synthetic_composition_passes_static_runtime_and_receivers(self):
-        sources, _ = full_composition()
-        with tempfile.TemporaryDirectory(prefix='nexus-gate-test-') as scratch:
-            report = G.gate(ROOT, sources=sources, paths=synthetic_paths(scratch, sources))
+        # One shared run of the same inputs (synthetic_full_gate) also serves RealReceivers.
+        report = synthetic_full_gate()
         self.assertEqual(report['problems'], [])
         self.assertEqual(report['verdict'], 'PASS')
         for product in report['products']:
@@ -582,7 +582,7 @@ class CompositionReceipt(unittest.TestCase):
         sources = composed()
         report = G.evaluate(sources, self.receipt(sources), require_receipt=True)
         self.assertEqual(report['problems'], [])
-        self.assertEqual(report['compositionReceipt']['status'], 'MATCHED')
+        self.assertEqual(report['compositionReceipt']['status'], 'CURRENT_INPUTS_MATCHED')
         self.assertEqual(codes(G.evaluate(sources, None, require_receipt=True)), ['receipt-missing'])
         self.assertEqual(G.evaluate(sources)['compositionReceipt'], {'status': 'NOT_SUPPLIED'})
 
@@ -593,7 +593,7 @@ class CompositionReceipt(unittest.TestCase):
         self.assertEqual(codes(G.evaluate(sources, self.receipt(sources, products=['frFR']))), ['receipt-products'])
         # A Git-LF hash is a different fact from the physical CRLF bytes: it binds only under its basis.
         lf = self.receipt(sources, basis='crlf-as-lf')
-        self.assertEqual(G.evaluate(sources, lf)['compositionReceipt']['status'], 'MATCHED')
+        self.assertEqual(G.evaluate(sources, lf)['compositionReceipt']['status'], 'CURRENT_INPUTS_MATCHED')
         forged = json.loads(lf)
         forged['hashBasis'] = 'exact-supplied-bytes'
         self.assertEqual(codes(G.evaluate(sources, json.dumps(forged).encode())), ['receipt-stale'])
@@ -610,7 +610,7 @@ class CompositionReceipt(unittest.TestCase):
         self.assertEqual(MODEL['declarations'][key], {'kind': 'text'})
         upgraded = composed(localization=with_declarations(replace=[(line, '["%s"] = {kind = "block"},' % key)]))
         report = G.evaluate(upgraded, self.receipt(upgraded, overrides=[override]))
-        self.assertEqual(report['compositionReceipt']['status'], 'MATCHED')
+        self.assertEqual(report['compositionReceipt']['status'], 'CURRENT_INPUTS_MATCHED')
         self.assertEqual([c for c in codes(report) if c.startswith('receipt-')], [])
         self.assertIn('context-mismatch', codes(report))  # the context rows must follow too
         noop = {'key': key, 'kind': 'block', 'previousKind': 'block'}
@@ -631,7 +631,7 @@ class ArchiveBinding(unittest.TestCase):
     def test_archive_members_bind_under_the_recorded_contract(self):
         problems = []
         result = G.check_archive(self.archive(self.members(ACTUAL)), ACTUAL, problems)
-        self.assertEqual((result['status'], problems), ('MATCHED', []))
+        self.assertEqual((result['status'], problems), ('FOUR_MEMBER_SUBSET_MATCHED', []))
         self.assertEqual(result['contract'], G.ARCHIVE_CONTRACT)
 
     def test_mismatched_or_missing_archive_member_fails(self):
@@ -654,32 +654,313 @@ class ReceiverControls(unittest.TestCase):
     """A probe passes only for a real receiver; orphan and wrong receivers fail for their reason."""
 
     def test_orphan_and_wrong_receiver_fail_and_a_real_consumer_passes(self):
-        sources, model = full_composition()
-        probes = (
-            {'id': 'control.real', 'key': 'panel.label.more_count',
-             'code': "return Nexus.Panel.DetailNameLines({'a', 'b', 'c', 'd'})[3]", 'slots': {'count': '2'}},
-            {'id': 'control.orphan', 'key': 'panel.label.more_count',
-             'code': "-- panel.label.more_count\nlocal unused = {'panel.label.more_count'}\nreturn '+2 more'",
-             'slots': {'count': '2'}},
-            {'id': 'control.wrong', 'key': 'panel.button.my_builds',
-             'code': "return (Nexus.UserText.Message('ROOT_MUTATION_PENDING'))"},
-            {'id': 'control.error', 'key': 'panel.button.my_builds', 'code': 'error("boom")'},
-        )
-        with tempfile.TemporaryDirectory(prefix='nexus-gate-test-') as scratch:
-            problems, evidence = G.runtime_check(ROOT, model, synthetic_paths(scratch, sources), probes)
+        # Its four probes run in the shared controls gate run (controls_gate), through G.gate.
+        report = controls_gate()
         results = {}
-        for row in evidence['probes']:
-            if row['run'] == 'complete:frFR':
+        for row in report['runtime']['probes']:
+            if row['run'] == 'complete:frFR' and row['probe'] in ORPHAN_IDS:
                 results[row['probe']] = row['result']
         self.assertEqual(results, {'control.real': 'PASS', 'control.orphan': 'receiver-not-localized',
                                    'control.wrong': 'receiver-wrong-key', 'control.error': 'receiver-error'})
-        self.assertEqual(sorted({problem['code'] for problem in problems}),
-                         ['receiver-error', 'receiver-not-localized', 'receiver-wrong-key'])
+        own = {row['result'] for row in report['runtime']['probes'] if row['probe'] in ORPHAN_IDS} - {'PASS'}
+        self.assertEqual(sorted(own), ['receiver-error', 'receiver-not-localized', 'receiver-wrong-key'])
+        self.assertLessEqual(set(own), set(codes(report)))
 
     def test_missing_runtime_fails_the_gate(self):
         problems, evidence = G.runtime_check(ROOT, MODEL, luajit=str(ROOT / 'no-such-luajit'))
         self.assertEqual([p['code'] for p in problems], ['runtime-failed'])
         self.assertEqual(evidence['status'], 'FAILED')
+
+
+# Review fix 1 (RF1) and the retro item: the entry-review record contract, the limited receipt and
+# archive results, the real multiline receiver and the discarded-localization regression.
+
+HELP_PROBE = 'help.page_troubleshooting_body'
+HELP_KEY = 'help.body.troubleshooting_commands_2'
+HELP_SLOTS = "{policy_command = '/nexus policy adaptive|released'}"
+
+
+def synthetic_full_gate():
+    """The full-size synthetic composition through the whole gate, once per process."""
+    if 'syntheticGate' not in FULL:
+        sources, _ = full_composition()
+        with tempfile.TemporaryDirectory(prefix='nexus-gate-test-') as scratch:
+            FULL['syntheticGate'] = G.gate(ROOT, sources=sources, paths=synthetic_paths(scratch, sources))
+    return FULL['syntheticGate']
+
+
+# The original receiver controls: a real consumer, a comment/list-only orphan, another key's
+# receiver and a raising probe.
+ORPHAN_CONTROLS = (
+    {'id': 'control.real', 'key': 'panel.label.more_count',
+     'code': "return Nexus.Panel.DetailNameLines({'a', 'b', 'c', 'd'})[3]", 'slots': {'count': '2'}},
+    {'id': 'control.orphan', 'key': 'panel.label.more_count',
+     'code': "-- panel.label.more_count\nlocal unused = {'panel.label.more_count'}\nreturn '+2 more'",
+     'slots': {'count': '2'}},
+    {'id': 'control.wrong', 'key': 'panel.button.my_builds',
+     'code': "return (Nexus.UserText.Message('ROOT_MUTATION_PENDING'))"},
+    {'id': 'control.error', 'key': 'panel.button.my_builds', 'code': 'error("boom")'},
+)
+# The discarded-localization controls: the real producer or the Help page runs (the seam is
+# called), its localized value is discarded, and English or another page is shown instead.
+DISCARD_CONTROLS = (
+    {'id': 'control.discarded_panel', 'key': 'panel.label.more_count', 'slots': {'count': '2'},
+     'receiver': 'test-only: Panel.DetailNameLines result discarded',
+     'code': "local localized = Nexus.Panel.DetailNameLines({'a', 'b', 'c', 'd'})[3]\n"
+             "assert(type(localized) == 'string')\n"
+             "return (Nexus.LocalizationEnglish['panel.label.more_count']:gsub('{count}', '2'))"},
+    {'id': 'control.discarded_help', 'key': HELP_KEY, 'match': 'segment',
+     'slots': {'policy_command': '/nexus policy adaptive|released'},
+     'receiver': 'test-only: Help page body read, then the English template shown',
+     'code': "local L = Nexus.Localization\n"
+             "local f = Nexus.Help.Show('troubleshooting'); local localized = f.body:GetText(); f:Hide()\n"
+             "assert(type(localized) == 'string')\n"
+             "return 'Reference\\n' .. L.Format('%s', %s, {})" % (HELP_KEY, HELP_SLOTS)},
+    {'id': 'control.wrong_help_page', 'key': HELP_KEY, 'match': 'segment',
+     'slots': {'policy_command': '/nexus policy adaptive|released'},
+     'receiver': 'test-only: another Help page',
+     'code': "local f = Nexus.Help.Show('about'); local text = f.body:GetText(); f:Hide(); return text"},
+)
+ORPHAN_IDS = {probe['id'] for probe in ORPHAN_CONTROLS}
+DISCARD_IDS = {probe['id'] for probe in DISCARD_CONTROLS}
+
+
+def controls_gate():
+    """The full synthetic composition through G.gate with the real receivers and both control sets:
+    one run serves the orphan and the discarded-localization tests, which share these inputs."""
+    if 'controlsGate' not in FULL:
+        sources, _ = full_composition()
+        with tempfile.TemporaryDirectory(prefix='nexus-gate-test-') as scratch:
+            FULL['controlsGate'] = G.gate(ROOT, sources=sources, paths=synthetic_paths(scratch, sources),
+                                          probes=G.RECEIVER_PROBES + ORPHAN_CONTROLS + DISCARD_CONTROLS)
+    return FULL['controlsGate']
+
+
+def declaration_mutant(change, key='leaderboard.column.rank', product='frFR'):
+    """The reduced composition with one complete legitimately_identical record changed in place."""
+    packs = synthetic_packs()
+    release = json.loads(synthetic_release(packs))
+    record = next(r for r in release['entryReview']['declarations']
+                  if r['productId'] == product and r['key'] == key)
+    change(record, release)
+    return G.evaluate(dict(REDUCED, packs=packs_source(packs),
+                           release=json.dumps(release, ensure_ascii=False).encode('utf-8')))
+
+
+class EntryReviewContract(unittest.TestCase):
+    """The existing complete entry-review record contract decides every exemption."""
+
+    def product(self, report, product_id):
+        return next(row for row in report['products'] if row['productId'] == product_id)
+
+    def test_full_english_copy_with_incomplete_records_fails_the_same_gate(self):
+        # The Spec counterexample: every entry of all six full packs is the English, and every
+        # declaration lacks reviewer and evidenceReference.
+        def mutate(packs):
+            for _, entries in packs.values():
+                entries.update(MODEL['active'])
+        packs = synthetic_packs(MODEL)
+        mutate(packs)
+        release = json.loads(synthetic_release(packs, model=MODEL))
+        records = release['entryReview']['declarations']
+        self.assertEqual(len(records), 6 * len(MODEL['active']))
+        for record in records:
+            del record['reviewer'], record['evidenceReference']
+        sources = dict(ACTUAL, packs=packs_source(packs),
+                       release=json.dumps(release, ensure_ascii=False).encode('utf-8'))
+        with tempfile.TemporaryDirectory(prefix='nexus-gate-test-') as scratch:
+            report = G.gate(ROOT, sources=sources, paths=synthetic_paths(scratch, sources))
+        self.assertEqual(report['verdict'], 'FAIL')
+        self.assertEqual(codes(report), ['entry-english-placeholder', 'entry-review-invalid'])
+        invalid = [p for p in report['problems'] if p['code'] == 'entry-review-invalid']
+        self.assertEqual(len(invalid), len(records))
+        self.assertEqual({p.get('detail') for p in invalid}, {'evidence-field'})
+        for product in report['products']:
+            self.assertEqual(product['counts']['english_placeholder'], len(MODEL['active']))
+            self.assertEqual(product['counts']['legitimately_identical'], 0)
+            self.assertFalse(product['complete'])
+
+    def test_complete_coherent_records_classify_legitimately_identical_terms(self):
+        report = G.evaluate(composed())
+        self.assertEqual(report['problems'], [])
+        for product in report['products']:
+            self.assertIn('leaderboard.column.rank', product['categories']['legitimately_identical'])
+            self.assertEqual(product['counts']['english_placeholder'], 0)
+        self.assertEqual(report['entryReview']['status'], 'RECORDS_CHECKED')
+        self.assertIn('not evidence', report['entryReview']['notEvidenceOf'])
+
+    def test_malformed_records_grant_no_exemption(self):
+        cases = {
+            'missing reviewer and reference': (lambda r, _: (r.pop('reviewer'), r.pop('evidenceReference')),
+                                               'evidence-field'),
+            'blank reviewer': (lambda r, _: r.__setitem__('reviewer', ''), 'evidence-reviewer'),
+            'UNASSIGNED reviewer': (lambda r, _: r.__setitem__('reviewer', 'UNASSIGNED'), 'evidence-reviewer'),
+            'non-https reference': (lambda r, _: r.__setitem__('evidenceReference', 'http://example.invalid/x'),
+                                    'evidence-reference'),
+            'reviewer not a string': (lambda r, _: r.__setitem__('reviewer', 7), 'evidence-type'),
+            'status not declared': (lambda r, _: r.__setitem__('status', 'accepted'), 'evidence-status'),
+            'extra field': (lambda r, _: r.__setitem__('approved', 'yes'), 'evidence-field'),
+            'unknown key': (lambda r, _: r.__setitem__('key', 'panel.never_declared'), 'evidence-unknown-key'),
+            'decision unknown': (lambda r, _: r.__setitem__('decision', 'approved'), 'evidence-decision'),
+        }
+        for name, (change, detail) in cases.items():
+            with self.subTest(name=name):
+                report = declaration_mutant(change)
+                rows = [p for p in report['problems'] if p['code'].startswith('entry-review-')]
+                self.assertEqual([(p['code'], p.get('detail')) for p in rows], [('entry-review-invalid', detail)])
+                self.assertEqual(self.product(report, 'frFR')['categories']['english_placeholder'],
+                                 ['leaderboard.column.rank'])
+                self.assertIn('entry-english-placeholder', codes(report))
+                # The other products keep their own complete records.
+                self.assertIn('leaderboard.column.rank',
+                              self.product(report, 'deDE')['categories']['legitimately_identical'])
+
+    def test_wrong_product_or_entry_and_container_contract_are_refused(self):
+        report = declaration_mutant(lambda r, _: r.__setitem__('productId', 'qaQA'))
+        self.assertEqual([p.get('detail') for p in report['problems'] if p['code'] == 'entry-review-invalid'],
+                         ['evidence-unknown-product'])
+        self.assertIn('leaderboard.column.rank', self.product(report, 'frFR')['categories']['english_placeholder'])
+        # A record for a key whose entry is absent from its pack names no present entry.
+        def absent(record, release):
+            record['key'] = 'panel.button.my_builds'
+        packs = synthetic_packs()
+        del packs['frFR'][1]['panel.button.my_builds']
+        release = json.loads(synthetic_release(packs))
+        record = next(r for r in release['entryReview']['declarations']
+                      if r['productId'] == 'frFR' and r['key'] == 'leaderboard.column.rank')
+        absent(record, release)
+        report = G.evaluate(dict(REDUCED, packs=packs_source(packs), release=json.dumps(release).encode('utf-8')))
+        self.assertIn('evidence-no-entry',
+                      [p.get('detail') for p in report['problems'] if p['code'] == 'entry-review-invalid'])
+        for version in (2, '1', None):
+            with self.subTest(contractVersion=version):
+                report = declaration_mutant(lambda r, rel: rel['entryReview'].__setitem__('contractVersion', version))
+                self.assertIn(('entry-review-invalid', 'evidence-contract'),
+                              [(p['code'], p.get('detail')) for p in report['problems']])
+                for product in report['products']:
+                    self.assertEqual(product['counts']['legitimately_identical'], 0)
+                self.assertEqual(report['entryReview']['status'], 'REFUSED')
+
+    def test_duplicate_records_are_refused(self):
+        report = declaration_mutant(lambda r, rel: rel['entryReview']['declarations'].append(dict(r)))
+        self.assertEqual([p['code'] for p in report['problems'] if p['code'].startswith('entry-review-')],
+                         ['entry-review-duplicate'])
+        self.assertIn('leaderboard.column.rank', self.product(report, 'frFR')['categories']['english_placeholder'])
+
+
+class ReceiptLimits(unittest.TestCase):
+    """A receipt binds only the current inputs and shape; prior versions and lineage stay unverified."""
+
+    receipt = CompositionReceipt.receipt
+
+    def test_a_matching_receipt_reports_current_agreement_only(self):
+        sources = composed()
+        report = G.evaluate(sources, self.receipt(sources), require_receipt=True)
+        result = report['compositionReceipt']
+        self.assertEqual(result['status'], 'CURRENT_INPUTS_MATCHED')
+        self.assertEqual(result['priorVersionAndLineage'], 'NOT_VERIFIED')
+        report.pop('model', None)
+        line = next(line for line in G.summary_lines(dict(report, sourceIdentity={}, runtime={}, verdict='PASS',
+                                                          notEvidenceOf='', archive={'status': 'NOT_SUPPLIED'}))
+                    if line.startswith('receipt:'))
+        self.assertIn('prior version and lineage NOT_VERIFIED', line)
+
+    def test_malformed_prior_kind_and_repeated_key_are_refused(self):
+        key = 'panel.button.my_builds'
+        sources = composed()
+        cases = {
+            'unknown prior kind': ([{'key': key, 'kind': 'text', 'previousKind': 'NOT_A_KIND'}],
+                                   'receipt-override-malformed'),
+            'prior kind not a string': ([{'key': key, 'kind': 'text', 'previousKind': 3}],
+                                        'receipt-override-malformed'),
+            'repeated key': ([{'key': key, 'kind': 'text', 'previousKind': 'block'}] * 2,
+                             'receipt-override-duplicate'),
+            'lines not exactly true': ([{'key': key, 'kind': 'text', 'previousKind': 'block', 'lines': False}],
+                                       'receipt-override-malformed'),
+            'wrong current limit': ([{'key': 'panel.label.more_count', 'kind': 'template', 'previousKind': 'text',
+                                      'resultLimit': 121}], 'receipt-override-mismatch'),
+            'wrong current lines': ([{'key': 'panel.label.more_count', 'kind': 'template', 'previousKind': 'text',
+                                      'lines': True}], 'receipt-override-mismatch'),
+        }
+        for name, (overrides, code) in cases.items():
+            with self.subTest(name=name):
+                report = G.evaluate(sources, self.receipt(sources, overrides=overrides), require_receipt=True)
+                self.assertIn(code, codes(report))
+                self.assertEqual(report['compositionReceipt']['status'], 'REFUSED')
+
+
+class ArchiveSubset(unittest.TestCase):
+    def test_archive_result_names_the_four_member_subset_only(self):
+        members = ArchiveBinding.members(None, ACTUAL)
+        self.assertEqual(len(members), 4)
+        problems = []
+        # No TOC, Release, notices or UI file: the subset still agrees, and says it is only that.
+        result = G.check_archive(ArchiveBinding.archive(None, members), ACTUAL, problems)
+        self.assertEqual((result['status'], problems), ('FOUR_MEMBER_SUBSET_MATCHED', []))
+        self.assertIn('not the whole archive', result['scope'])
+        line = next(line for line in G.summary_lines({
+            'inputs': [], 'problems': [], 'verdict': 'PASS', 'notEvidenceOf': '', 'compositionReceipt':
+            {'status': 'NOT_SUPPLIED'}, 'archive': result}) if line.startswith('receipt:'))
+        self.assertIn('four localization runtime-input members only', line)
+
+
+class RealReceivers(unittest.TestCase):
+    """The listed real display receivers, including one multiline (lines = true) template."""
+
+    def test_help_reference_page_is_a_real_lines_template_receiver_in_every_condition(self):
+        probe = next(p for p in G.RECEIVER_PROBES if p['id'] == HELP_PROBE)
+        self.assertEqual(probe['key'], HELP_KEY)
+        self.assertEqual(probe['match'], 'segment')
+        self.assertIs(MODEL['declarations'][HELP_KEY].get('lines'), True)
+        self.assertEqual(MODEL['declarations'][HELP_KEY]['slots'], ('text',))
+        self.assertIn('\n', MODEL['active'][HELP_KEY])
+        report = synthetic_full_gate()
+        self.assertEqual(report['problems'], [])
+        rows = [r for r in report['runtime']['probes'] if r['probe'] == HELP_PROBE]
+        self.assertEqual(sorted(r['run'] for r in rows),
+                         sorted('%s:%s' % (c, p) for c in ('complete', 'missing', 'invalid')
+                                for p in MODEL['optionalIds']))
+        for row in rows:
+            self.assertEqual(row['result'], 'PASS', row)
+            self.assertEqual(row['source'], 'candidate' if row['run'].startswith('complete:') else 'base', row)
+        self.assertEqual(len(G.RECEIVER_PROBES), 8)
+        self.assertTrue(all(p.get('receiver') for p in G.RECEIVER_PROBES))
+
+    def test_report_separates_catalog_seam_and_display_receiver_coverage(self):
+        coverage = synthetic_full_gate()['coverage']
+        self.assertEqual(coverage['catalog']['activeKeys'], len(MODEL['active']))
+        self.assertEqual(coverage['seam']['keysPerRun'], len(MODEL['active']))
+        receivers = coverage['displayReceivers']
+        self.assertEqual([r['id'] for r in receivers['probes']], [p['id'] for p in G.RECEIVER_PROBES])
+        self.assertIn('not', receivers['scope'])
+        for row in receivers['probes']:
+            self.assertEqual(sorted(row['outcomes']), ['complete', 'invalid', 'missing'])
+
+    def test_discarded_localization_result_fails_the_same_required_gate(self):
+        # Valid complete composition; each control calls the real seam or the real producer, discards
+        # the localized value and shows the old English (or another page). The real receivers pass.
+        report = controls_gate()
+        self.assertEqual(report['verdict'], 'FAIL')
+        # Only display receivers fail: no static coverage, seam, load or setup problem.
+        self.assertEqual(codes(report), ['receiver-error', 'receiver-mismatch', 'receiver-not-localized',
+                                         'receiver-wrong-key'])
+        for product in report['products']:
+            self.assertTrue(product['complete'])
+        results = {}
+        for row in report['runtime']['probes']:
+            results.setdefault(row['probe'], {})[row['run']] = row['result']
+        for probe in G.RECEIVER_PROBES:
+            self.assertEqual(set(results[probe['id']].values()), {'PASS'}, probe['id'])
+        own = {results[i][run] for i in DISCARD_IDS for run in results[i]} - {'PASS'}
+        self.assertEqual(sorted(own), ['receiver-mismatch', 'receiver-not-localized'])
+        for product in MODEL['optionalIds']:
+            self.assertEqual(results['control.discarded_panel']['complete:' + product], 'receiver-not-localized')
+            self.assertEqual(results['control.discarded_help']['complete:' + product], 'receiver-not-localized')
+            self.assertEqual(results['control.wrong_help_page']['complete:' + product], 'receiver-mismatch')
+            # With English expected (missing or invalid entry) the discarded value cannot be told apart.
+            for condition in ('missing', 'invalid'):
+                self.assertEqual(results['control.discarded_panel']['%s:%s' % (condition, product)], 'PASS')
+                self.assertEqual(results['control.discarded_help']['%s:%s' % (condition, product)], 'PASS')
 
 
 if __name__ == '__main__':
