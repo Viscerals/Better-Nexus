@@ -4481,7 +4481,33 @@ class _Linker:
         it was reached under. A binding or field write passes a value on
         only when all its definitions are in allowed, or, with allowed None,
         in the reached set itself (a fixpoint). Returns (reached keys, valid
-        output keys with their flow)."""
+        output keys with their flow).
+
+        With allowed None, a field write can wait on a definition that only
+        that write itself would let the search reach, such as a carrier
+        copying the same field name (review fix 7, SPEC-147-S8-RF6-1). The
+        field writes still waiting are then assumed to pass and the search
+        repeated; an assumption holds only when every definition its write
+        needs was reached by that search, and the others wait again, until
+        every assumed write that passed has all its definitions reached (a
+        greatest fixpoint of the same every-definition rule)."""
+        reached, sinks, waiting = self.walk(roots, allowed, stop, {})
+        assumed = {} if allowed is not None else {
+            key: states[0][0] for key, states in waiting.items()
+            if type(key) is tuple and key[0] == 'fwrite'}
+        while assumed:
+            trial, trial_sinks, _ = self.walk(roots, None, stop, assumed)
+            refuted = [key for key, flow in assumed.items() if key in trial and any(
+                value is _OPAQUE or value not in trial for value in self.gate(key, flow))]
+            if not refuted:
+                return trial, trial_sinks
+            for key in refuted:
+                del assumed[key]
+        return reached, sinks
+
+    def walk(self, roots, allowed, stop, assumed):
+        """One search pass (see search): a key of assumed passes its gate
+        without its definitions. Returns (reached, sinks, still waiting)."""
         reached, visited, waiting, sinks = set(), set(), {}, {}
         queue = [(key, flow, ()) for key, flow in roots]
         while queue:
@@ -4489,7 +4515,7 @@ class _Linker:
             if (key, stack) in visited:
                 continue
             needs = self.gate(key, flow)
-            if needs is not None:
+            if needs is not None and key not in assumed:
                 pool = reached if allowed is None else allowed
                 if any(value is _OPAQUE or value not in pool for value in needs):
                     waiting.setdefault(key, []).append((flow, stack))
@@ -4511,7 +4537,7 @@ class _Linker:
             if key == stop:
                 continue
             queue.extend(self.successors(key, flow, stack))
-        return reached, sinks
+        return reached, sinks, waiting
 
     # -- output receivers --------------------------------------------------
 

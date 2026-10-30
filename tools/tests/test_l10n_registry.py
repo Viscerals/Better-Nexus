@@ -2711,6 +2711,58 @@ class ConsumerBindingTests(unittest.TestCase):
                                   in self.binding(receipt, key)["unprovenSites"]],
                                  ["output-not-reached"])
 
+    def test_c24_a_field_copied_into_the_same_field_name_still_binds(self):
+        # SPEC-147-S8-RF6-1: every write of a field name must carry the proof,
+        # and a carrier copy of the same field name is itself such a write, fed
+        # only by the field it copies; that dependency cycle must not refuse a
+        # genuine same-call display, while a copy from a table that never holds
+        # the value, or a discarded call, still proves nothing.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        direct = b'local function SpecRead(target) return target.SpecShared end; '
+        alias = b'local function SpecRead(target) local same=target; return same.SpecShared end; '
+        built = (b'local function SpecWrap(target) local box={SpecShared=target.SpecShared}; '
+                 b'return SpecRead(box) end; ')
+        assigned = (b'local function SpecWrap(target) local box={}; '
+                    b'box.SpecShared=target.SpecShared; return SpecRead(box) end; ')
+        left = b'local specLeft={SpecShared=' + text + b'}; local specRight={}; '
+        shown = b'specLabel:SetText(SpecWrap(specLeft))'
+        wrong = b'local specDiscard=SpecWrap(specLeft); specLabel:SetText(SpecWrap(specRight))'
+        forms = (("constructor carrier", direct + built), ("constructor carrier, reader alias",
+                                                          alias + built),
+                 ("assigned carrier", direct + assigned), ("assigned carrier, reader alias",
+                                                           alias + assigned))
+        cases = [(name + ", same call", True, code + left + shown) for name, code in forms]
+        cases += [(name + ", wrong call", False, code + left + wrong) for name, code in forms]
+        cases += [
+            ("aliased reader without a carrier", True, alias + left
+             + b'specLabel:SetText(SpecRead(specLeft))'),
+            ("carrier with another field name", True, b'local function SpecRead(target) return '
+             b'target.SpecBridge end; local function SpecWrap(target) local box={SpecBridge='
+             b'target.SpecShared}; return SpecRead(box) end; ' + left + shown),
+            # The same field copied from a table that never holds the value
+            # replaces it; no other write makes that copy carry the proof.
+            ("field overwritten by the same field of an empty table", False, left
+             + b'specLeft.SpecShared=specRight.SpecShared; specLabel:SetText(specLeft.SpecShared)'),
+        ]
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+
 
 class ConsumerCommandLineTests(unittest.TestCase):
     """S8: --consumers reads both TOCs and every Lua file they load from the
