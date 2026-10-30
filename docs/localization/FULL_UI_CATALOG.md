@@ -18,7 +18,7 @@ unchanged.
   first and unchanged, then a generated `NEXUS-L10N-FULL-UI` section per family.
   `docs/localization/KEY_CONTEXT.json` has one row per key (`cohort: fullui:<family>`
   for the new rows) and a `fullUiCatalog` summary.
-- 4,076 keys (the cap is 4,096; 20 entries of headroom): 28 original, 3,320 keys of ten
+- 4,078 keys (the cap is 4,096; 18 entries of headroom): 28 original, 3,320 keys of ten
   families (panel, hud, usertext, chat, library, wishlist, orb, journal, records, guide),
   18 owner integration keys, 629 keys of the v3 supplemental cohort (`remainder_*`
   fragments: Library reasons, Orb runtime/adapter/Continue texts and guidance, Wishlist
@@ -28,8 +28,10 @@ unchanged.
   guide's target trigger line, the unknown-tome fallback) and 8 keys of the v6
   supplemental cohort (`v6_source16_supplemental`: two Journal tome member reasons, the
   identity-found note in its two display forms with and without the editor instruction,
-  and the second and third paragraphs of the Orb offer-open text). `KEY_CONTEXT.json`'s
-  `fullUiCatalog.totalKeys` and the English base hold the same 4,076.
+  and the second and third paragraphs of the Orb offer-open text) and 2 keys of the v8
+  cohort (`v8_source16_journal_names`: the generated Journal tome and member fallback
+  names). `KEY_CONTEXT.json`'s `fullUiCatalog.totalKeys` and the English base hold the
+  same 4,078.
 - Contracts for complete translations (v6, caps unchanged): fourteen one-line templates
   (two Orb block sentences and twelve Wishlist editor chat lines) are `lines = true`
   templates (raw at most 1,024 bytes, result at most 2,048) that stay one displayed line;
@@ -46,9 +48,12 @@ unchanged.
   presented from the producer's own typed values; so are the Orb saved-format marker
   refusal (the runtime's display facts for that exact text) and the adapter's
   identity-found note (UserText and /nexus wishlist say it without its lead; the Orb
-  window and the /nexus status advisor line say it whole, as each showed before). The Journal splits only the tome-state reason lists the producers join
-  with "; ": each known reason through its key, an unknown one as given. A missing or
-  invalid pack entry shows the exact English.
+  window and the /nexus status advisor line say it whole, as each showed before). The
+  Journal splits only the tome-state reason lists the producers join with "; ": each
+  known reason through its key, an unknown one as given. Its generated tome and member
+  fallback names are said from the adapter's facts for exactly that row; a name the game
+  client gives stays as given, however it reads. A missing or invalid pack entry shows
+  the exact English.
 - English output is byte-identical except these recorded, authorized changes:
   `panel.note.language_scope` (v4, current scope statement), `guide.body.why_target`
   and `orb.tooltip.mini_usage` (v5 copy corrections, raw leaf/fallback and catalog
@@ -84,14 +89,11 @@ are separate gates owned outside this source change.
 ## Not complete
 
 - The original 533 pending and 8 unknown-visibility rows are dispositioned row by row in
-  the task-local successor evidence (global v6). Still open at this source:
+  the task-local successor evidence (global v8). Still open at this source:
   - dependencies: record dates, fight durations and K/M number notation stay
     code-formatted (no temporal or number grammar; the surrounding words are keyed), and
     exact client-locale class and NPC names (keyed Nexus copy; equality with the client's
     own names is UNKNOWN);
-  - not done, outside this change's paths: the Journal tome row's generated fallback
-    names ("Tome name unavailable: ...", "Echo name unavailable (#...)",
-    core/GameAdapter.lua) are shown in English.
 - In-text legacy rewrites of UserText.Message whose source fragment has no producer at
   this source (ARMED/UNARMED, tight horizon, waiting for owned-echo sync, "non-conformant
   data") are kept for compatibility; this is not proof that no external text reaches
