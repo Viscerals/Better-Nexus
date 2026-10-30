@@ -676,6 +676,15 @@ realPrint('PASS native_wishlist_tome_sequence: each level-1 Journal selection (A
 -- changes the stored first-run assignment, and only an explicit Journal
 -- choice moves the target. Every boundary prints the raw synthetic host and
 -- stored facts (H20RAW) before any adapter or observer read (H20VIEW).
+-- Each read window is also checked for passivity (H20-READ-PASSIVE): an
+-- independent string snapshot of host actions, accepted requests, queued
+-- replies, the raw disabled flags, pending directions, the native slot and
+-- the durable assignment records, taken before the reads, must equal the
+-- one taken after them (H20AFTER). Each completed case must end settled
+-- after its final reads (H20-CASE-SETTLED): no undelivered reply, nothing
+-- pending, the expected tome set, and no request or host action after the
+-- last guarded read. The held boundary in HELD is checked for passivity
+-- only; its queue and pending entries stay distinct from delivery.
 --
 --   FIRST    reset to 1 and login at 1: Journal A, native 101, 102, 0, 102,
 --            Journal C with B natively active, native 0, idle.
@@ -733,12 +742,75 @@ local function H20FirstText(first)
     return tostring(first.slot) .. '/' .. tostring(first.name) .. '/' .. tostring(first.assignmentId)
 end
 
+-- Independent string snapshot of the consequential facts a read must leave
+-- alone. Internal caches and diagnostic counters are deliberately not in it.
+local H20_SNAP_PARTS = {'actions', 'requests', 'queue', 'disabled', 'pending', 'native', 'assignment'}
+local function H20Snap(W)
+    local H, out = W.H, {}
+    local actions = {}
+    for _, action in ipairs(H.actions) do
+        local parts = {}
+        for i = 1, #action do
+            parts[#parts + 1] = type(action[i]) == 'table' and 'table' or tostring(action[i])
+        end
+        actions[#actions + 1] = table.concat(parts, ':')
+    end
+    out.actions = #actions .. '{' .. table.concat(actions, ',') .. '}'
+    local requests = {}
+    for _, r in ipairs(W.requests) do
+        requests[#requests + 1] = tostring(r.id) .. ':' .. tostring(r.dir) .. ':' .. tostring(r.step)
+            .. ':' .. string.format('%.2f', r.at)
+    end
+    out.requests = #requests .. '{' .. table.concat(requests, ',') .. '}'
+    local queue = {}
+    for _, q in ipairs(W.queue) do queue[#queue + 1] = tostring(q.id) .. '@' .. string.format('%.2f', q.due) end
+    out.queue = #queue .. '{' .. table.concat(queue, ',') .. '}'
+    local disabled = {}
+    for id, flag in pairs(H.disabled) do disabled[#disabled + 1] = tostring(id) .. '=' .. tostring(flag) end
+    table.sort(disabled)
+    out.disabled = '{' .. table.concat(disabled, ',') .. '}'
+    out.pending = PendingText()
+    out.native = 'active=' .. tostring(H.perks.serverActiveSlot) .. ' discovery='
+        .. tostring(H.perks.discoveredEchoes ~= nil) .. '/' .. tostring(H.discovered ~= nil)
+    local state = Nexus.Store.State() or {}
+    local first, links = state.firstRunWishlist, {}
+    if type(state.loadoutWishlists) == 'table' then
+        for slot, link in pairs(state.loadoutWishlists) do
+            links[#links + 1] = tostring(slot) .. '=' .. (type(link) == 'table'
+                and (tostring(link.name) .. '/' .. tostring(link.assignmentId)) or tostring(link))
+        end
+    end
+    table.sort(links)
+    out.assignment = 'first=' .. H20FirstText(first) .. '/' .. tostring(type(first) == 'table' and first.key or nil)
+        .. ' links{' .. table.concat(links, ',') .. '} serial=' .. tostring(state.wishlistAssignmentSerial)
+    return out
+end
+
+-- Compares a snapshot taken before a read window with one taken now.
+-- `reads` names the reads of that window.
+local function H20Passive(W, label, before, reads)
+    local after, changed = H20Snap(W), {}
+    for _, part in ipairs(H20_SNAP_PARTS) do
+        if after[part] ~= before[part] then
+            changed[#changed + 1] = part .. ' ' .. before[part] .. ' -> ' .. after[part]
+        end
+    end
+    W.h20LastRequests, W.h20LastActions = #W.requests, #W.H.actions
+    realPrint(string.format('H20AFTER %s %s #%d %s: actions %s requests %s queue %s pending %s disabled %s %s %s',
+        W.group, W.case, W.step, label, after.actions, after.requests, after.queue, after.pending,
+        after.disabled, after.native, after.assignment))
+    record(W.group, W.case, W.step, label, 'H20-READ-PASSIVE', #changed == 0,
+        reads .. ' left host actions, requests, queue, mirror, pending, native and assignment facts '
+            .. (#changed == 0 and 'unchanged' or ('changed: ' .. table.concat(changed, '; '))))
+end
+
 -- One boundary. `key`: the Wishlist expected as the stored first-run
 -- assignment and the target (nil: none yet). `identity`: the assignmentId it
 -- must still carry (nil: not compared). Returns the stored assignmentId.
 local function H20Facts(W, label, active, key, identity)
     local H, n = W.H, W.step
-    -- Raw synthetic host and stored state first.
+    -- Raw synthetic host and stored state first, and the passivity snapshot.
+    local before = H20Snap(W)
     local rawActive = H.perks.serverActiveSlot
     local rawDisabled = {}
     for i = 1, #GATED do rawDisabled[#rawDisabled + 1] = TOME[i] .. '=' .. tostring(H.disabled[GATED[i]] == true) end
@@ -758,9 +830,11 @@ local function H20Facts(W, label, active, key, identity)
     local slots = W.A.Slots() or {}
     local selected, kept = W.A.SelectedSavedBuild()
     local a = W.A.AssignedWishlist() or {}
+    local assignedText = AssignedText(W)
     realPrint(string.format('H20VIEW %s %s #%d %s: Slots().activeSlot=%s SelectedSavedBuild=%s,%s assigned %s identity=%s note=%s',
         W.group, W.case, n, label, tostring(slots.activeSlot), tostring(selected), tostring(kept),
-        AssignedText(W), tostring(a.identity), tostring(a.note)))
+        assignedText, tostring(a.identity), tostring(a.note)))
+    H20Passive(W, label, before, 'Slots, SelectedSavedBuild, AssignedWishlist and AssignedText')
     record(W.group, W.case, n, label, 'H20-NATIVE-SLOT', rawActive == active and tonumber(slots.activeSlot) == active,
         'raw ' .. tostring(rawActive) .. ', adapter ' .. tostring(slots.activeSlot) .. ', want ' .. tostring(active))
     record(W.group, W.case, n, label, 'H20-SELECTED', selected == nil and kept == false,
@@ -781,17 +855,19 @@ local function H20Facts(W, label, active, key, identity)
     local id = type(first) == 'table' and first.assignmentId or nil
     record(W.group, W.case, n, label, 'H20-TARGET', a.state == 'ready' and a.name == w.name
             and id ~= nil and a.identity == id,
-        'assigned ' .. AssignedText(W) .. ' identity ' .. tostring(a.identity) .. '; want ready/' .. w.name
+        'assigned ' .. assignedText .. ' identity ' .. tostring(a.identity) .. '; want ready/' .. w.name
             .. ' identity ' .. tostring(id))
     return id
 end
 
 -- The tome-automation hold the observer states (read-only).
 local function H20HeldReason(W, label, wantUnknown)
+    local before = H20Snap(W)
     local raw = W.H.perks.discoveredEchoes == nil and W.H.discovered == nil
     local obs = W.A.TomeStateObservation() or {}
     local reasons = table.concat(obs.reasons or {}, '; ')
     local synced = W.A.DiscoverySynced()
+    H20Passive(W, label, before, 'TomeStateObservation and DiscoverySynced')
     local held = reasons:find('discovery mirror is unsynced', 1, true) ~= nil
     record(W.group, W.case, W.step, label, 'H20-HELD-REASON',
         (wantUnknown and raw and synced == false and held)
@@ -804,7 +880,7 @@ end
 -- tome toggles, each with a direction. No upload, Save, Activate, lock,
 -- unlock, Select (take), banish, freeze or reroll; the OrbService has no
 -- ConfirmSpend, so no Orb can be spent here.
-local function H20Guard(W)
+local function H20Guard(W, key)
     W.step = W.step + 1
     local other, toggles, undirected = {}, 0, 0
     for _, action in ipairs(W.H.actions) do
@@ -819,6 +895,17 @@ local function H20Guard(W)
         'other host actions {' .. table.concat(other, ',') .. '}; toggles ' .. toggles .. ' = accepted '
             .. #W.requests .. ' (' .. H20RequestText(W) .. '); undirected ' .. undirected
             .. '; Orb spend member ' .. tostring(spend) .. '; same runtime ' .. tostring(Nexus == W.h20Nexus))
+    -- Settled after the final reads: nothing undelivered or pending, the
+    -- case's final tome set, and nothing sent after the last guarded read.
+    local want = Vector(WISHLISTS[key].tomes)
+    local server = Server(W)
+    record(W.group, W.case, W.step, 'whole case', 'H20-CASE-SETTLED',
+        #W.queue == 0 and next(Pending()) == nil and Same(server, want)
+            and #W.requests == W.h20LastRequests and #W.H.actions == W.h20LastActions,
+        'undelivered replies ' .. #W.queue .. '; pending ' .. PendingText() .. '; server ' .. Show(server)
+            .. '; want ' .. Show(want) .. '; requests ' .. #W.requests .. ' (at the last guarded read '
+            .. tostring(W.h20LastRequests) .. '); host actions ' .. #W.H.actions .. ' (at the last guarded read '
+            .. tostring(W.h20LastActions) .. ')')
 end
 
 local function H20FirstRunNative(W)
@@ -843,7 +930,7 @@ local function H20FirstRunNative(W)
     H20Facts(W, 'native active 0 after C', 0, 'C', idC)
     Idle(W, 'idle after the native sequence', IDLE_SECONDS)
     H20Facts(W, 'idle after the native sequence', 0, 'C', idC)
-    H20Guard(W)
+    H20Guard(W, 'C')
 end
 
 local function H20Guarded(W)
@@ -857,10 +944,13 @@ local function H20Guarded(W)
     Step(W, 'native active B102', H20Publish(WISHLISTS.B.slot), nil)
     H20Facts(W, 'native active B102', WISHLISTS.B.slot, 'A', idA)
     Step(W, 'observer and assignment reads', function(W)
+        local before = H20Snap(W)
         Journal()
         local a = W.A.AssignedWishlist() or {}
         local obs = W.A.TomeStateObservation() or {}
         W.A.DisabledLevers(); W.A.SelectedSavedBuild(); Nexus.RecomputeStats()
+        H20Passive(W, 'observer and assignment reads', before,
+            'Journal refresh, AssignedWishlist, TomeStateObservation, DisabledLevers, SelectedSavedBuild and RecomputeStats')
         return a.state == 'ready', 'assigned ' .. tostring(a.state) .. '/' .. tostring(a.name)
             .. ', observer rows ' .. #(obs.rows or {})
     end, nil)
@@ -878,7 +968,7 @@ local function H20Guarded(W)
     end, nil, {observeOnly=true})
     Step(W, 'control: Journal selection B with the permission granted', 'B', WISHLISTS.B.tomes)
     H20Facts(W, 'control: Journal selection B', 0, 'B')
-    H20Guard(W)
+    H20Guard(W, 'B')
 end
 
 local function H20Discovery(W)
@@ -908,7 +998,7 @@ local function H20Discovery(W)
     end, WISHLISTS.C.tomes)
     H20Facts(W, 'discovery restored', 0, 'C', idC)
     H20HeldReason(W, 'discovery restored', false)
-    H20Guard(W)
+    H20Guard(W, 'C')
 end
 
 local function H20Held(W)
@@ -963,7 +1053,7 @@ local function H20Held(W)
     H20Facts(W, 'released and settled', 0, 'C', idC)
     Step(W, 'native active B102 after release', H20Publish(WISHLISTS.B.slot), nil)
     H20Facts(W, 'native active B102 after release', WISHLISTS.B.slot, 'C', idC)
-    H20Guard(W)
+    H20Guard(W, 'C')
 end
 
 local H20_PLAN = {}
@@ -1015,5 +1105,6 @@ realPrint('PASS native_wishlist_tome_sequence H20: first-run native Wishlist act
     .. 'keeps the stored first-run assignment and target, selects no Saved Build and sends no tome '
     .. 'request; only Journal choices move the target with one confirmed request per changed tome; '
     .. 'Auto OFF / tome permission OFF send none; unknown discovery holds and a restored answer settles; '
-    .. 'held replies stay pending without duplicates until released; checks=' .. h20Total
+    .. 'held replies stay pending without duplicates until released; every boundary read is passive '
+    .. 'and every case ends settled; checks=' .. h20Total
     .. ' (prior ' .. (h20First - 1) .. ')')
