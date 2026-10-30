@@ -155,6 +155,21 @@
     "explicitPackChoice": "An explicit optional UI pack choice does not require the game itself to be translated.",
     "followUp": {"issue": 141, "status": "OUTSTANDING", "codeChangeInThisTask": "none"}
   },
+  "currentAutomaticPreference": {
+    "nature": "current_fact",
+    "sourceBinding": {"commit": "dadfc29b960689957afaf4ec136abca3ade4e8f2", "tree": "8aea7f4cdc7e44231842dec221e52d0143470cd7"},
+    "unchangedSince": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+    "unchangedSourceBlobs": {"core/Localization.lua": "02f8d8d8dc4e6fe367501da4d868153236e1dd22", "data/DefaultProfile.lua": "a51a675022b5c6195253ed51bc33fd77e4a30b3c"},
+    "preferenceValue": "automatic",
+    "isLanguageId": false,
+    "resolvesTo": "enUS",
+    "evidencedMappings": [],
+    "evidencedAliases": [],
+    "aliasEvidence": "none",
+    "offlineEvidence": "tests/prototype/terminology.lua (Lua harness)",
+    "historicalRecord": "automaticMode describes the 5c77eec base and is unchanged",
+    "nativeAcceptance": "NOT_RUN"
+  },
   "sessionRefresh": {
     "preference": "saved for the next user-requested reload or login",
     "activeLanguage": "fixed for the Lua session",

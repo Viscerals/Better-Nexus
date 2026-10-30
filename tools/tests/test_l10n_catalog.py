@@ -203,13 +203,13 @@ CURRENT_HUD_ADOPTED_KEYS = (HISTORICAL_HUD_ADOPTED_KEYS + [row[0] for row in CUR
 # The last committed data reference is ac2cdf5: English and decoded pack
 # values are unchanged from 55d7350; leading pack comments changed the
 # canonical pack bytes. The current packs file is still that ac2cdf5 blob.
-# The current English file is not: issue #165 added panel.button.options in
-# an uncommitted working copy that no commit, tree or Git blob holds yet, so
-# none is claimed for it. Historical and reference (SHA-256, length) tables
-# below refer to named Git blobs with LF line ends, never to raw Windows CRLF
-# inputs; only WORKING_COPY_PHYSICAL_INPUTS holds physical bytes, and says
-# so. The real parser/schema/report APIs still receive and hash original
-# physical bytes.
+# The current English file is not: issue #165 added panel.button.options,
+# first committed in a50372ba485fd98043d68ec7d4f732ee947b0c28 as Git blob
+# CURRENT_ENGLISH_GIT_BLOB below, unchanged through 8393f5f and the current
+# source. Historical and reference (SHA-256, length) tables below refer to
+# named Git blobs with LF line ends, never to raw Windows CRLF inputs; only
+# CHECKOUT_PHYSICAL_INPUTS holds physical bytes, and says so. The real
+# parser/schema/report APIs still receive and hash original physical bytes.
 HISTORICAL_TECHNICAL_REFERENCE = {"head": "55d7350c0d5c60fc5bf39385f48027cd62498c71",
                                   "tree": "9a7c51f0683a53adae1aecd833b1f13a590e2595"}
 CURRENT_TECHNICAL_REFERENCE = {"head": "ac2cdf5f4924c74f1e744990b2e0bb0405cd1c88",
@@ -221,18 +221,24 @@ HISTORICAL_REFERENCE_INPUTS = {
         ("3680a57743479df42854027ad3ad35d0df2407c0e957d993a3a4c3a57159676e", 21041),
 }
 # The English blob at ac2cdf5 (the same as at 55d7350), superseded by the
-# working copy; the current English bytes must no longer be this blob.
+# issue #165 English blob; the current English bytes must no longer be this blob.
 REFERENCE_ENGLISH_INPUT = ("2325010efc6c052628d70402542dcb9805e89135b72756442841ece97fccb2fc",
                            3744)
+# Canonical Git (LF) identities of the current data files.
 CURRENT_REFERENCE_INPUTS = {
+    "data/LocalizationEnglish.lua":
+        ("69d3998950b651f5b666f7b6a65a718c97bfb3719bfb4523d5c60037ed7f20a5", 3916),
     "data/LocalizationPacks.lua":
         ("5c8d10bb711474a0374a0ad851e4f3608ede2389fb58fd01b34ad3c4cda3de95", 21168),
 }
-# Working-copy identity, not a Git blob: the physical (CRLF) bytes of the
-# uncommitted issue #165 English source as recorded in its frozen
-# MANIFEST_FINAL.json. Replace it with the canonical LF blob identity of the
-# commit that first holds this source.
-WORKING_COPY_PHYSICAL_INPUTS = {
+# The Git blob that holds those canonical English bytes and the commit that
+# first holds it.
+CURRENT_ENGLISH_GIT_BLOB = {"blob": "024557e8ffb9d6f587080e46b47b33daea25e492",
+                            "firstCommit": "a50372ba485fd98043d68ec7d4f732ee947b0c28"}
+# Checkout identity, not a Git blob: the physical (CRLF) bytes that a Git
+# checkout writes for CURRENT_ENGLISH_GIT_BLOB, since .gitattributes sets
+# eol=crlf for *.lua. Compared only with physical bytes.
+CHECKOUT_PHYSICAL_INPUTS = {
     "data/LocalizationEnglish.lua":
         ("755f2f5d434a23bbff28ad01f23711e14601e1a4c8df5ee99269038ee13b5cf8", 3970),
 }
@@ -267,20 +273,68 @@ def canonical_git_lf(data):
 
 def assert_current_reference_bytes(test, relative, physical):
     """Compare the physical bytes of relative with their current identity and
-    return the canonical bytes. A file the reference commit still holds is
-    compared, as canonical Git LF bytes, with its reference hash and length; a
-    physical CRLF hash is never claimed to equal it. A working-copy file is
-    compared as physical bytes with its recorded working-copy identity, and
-    its canonical bytes must not be the superseded reference English blob."""
+    return the canonical bytes. The canonical Git LF bytes are compared with
+    their current reference hash and length, and must not be the superseded
+    reference English blob; a physical CRLF hash is never claimed to equal
+    them. A file with a recorded checkout identity is also compared, as
+    physical bytes, with that identity."""
     canonical = canonical_git_lf(physical)
     digest = (hashlib.sha256(canonical).hexdigest(), len(canonical))
-    if relative in CURRENT_REFERENCE_INPUTS:
-        test.assertEqual(digest, CURRENT_REFERENCE_INPUTS[relative], relative)
-    else:
+    test.assertEqual(digest, CURRENT_REFERENCE_INPUTS[relative], relative)
+    test.assertNotEqual(digest, REFERENCE_ENGLISH_INPUT, relative)
+    if relative in CHECKOUT_PHYSICAL_INPUTS:
         test.assertEqual((hashlib.sha256(bytes(physical)).hexdigest(), len(physical)),
-                         WORKING_COPY_PHYSICAL_INPUTS[relative], relative)
-        test.assertNotEqual(digest, REFERENCE_ENGLISH_INPUT, relative)
+                         CHECKOUT_PHYSICAL_INPUTS[relative], relative)
     return canonical
+
+
+# The commit that first holds the Options label adoption and the current
+# fact anchor of KEY_CONTEXT.json, at which it is unchanged.
+OPTIONS_ADOPTION_COMMITS = (CURRENT_ENGLISH_GIT_BLOB["firstCommit"],
+                            "8393f5f4b61a0d62b5043b861539be868ebf80f6")
+
+
+def assert_current_adoption_scope(test, scope):
+    """The currentAdoption scope names the historical technical reference,
+    not the ac2cdf5 data reference, both full Options adoption commits, and
+    its pending review."""
+    test.assertIn(HISTORICAL_TECHNICAL_REFERENCE["head"], scope)
+    test.assertNotIn(CURRENT_TECHNICAL_REFERENCE["head"], scope)
+    for sha in OPTIONS_ADOPTION_COMMITS:
+        test.assertIn(sha, scope)
+    test.assertIn("pending", scope)
+
+
+# Issue #141, #147: the current Automatic preference, beside the historical
+# automaticMode record of the base pin. The blobs are those of the source
+# commit, unchanged since 8393f5f.
+CURRENT_AUTOMATIC_PREFERENCE = {
+    "nature": "current_fact",
+    "sourceBinding": {"commit": "dadfc29b960689957afaf4ec136abca3ade4e8f2",
+                      "tree": "8aea7f4cdc7e44231842dec221e52d0143470cd7"},
+    "unchangedSince": "8393f5f4b61a0d62b5043b861539be868ebf80f6",
+    "unchangedSourceBlobs": {"core/Localization.lua": "02f8d8d8dc4e6fe367501da4d868153236e1dd22",
+                             "data/DefaultProfile.lua": "a51a675022b5c6195253ed51bc33fd77e4a30b3c"},
+    "preferenceValue": "automatic",
+    "isLanguageId": False,
+    "resolvesTo": "enUS",
+    "evidencedMappings": [],
+    "evidencedAliases": [],
+    "aliasEvidence": "none",
+    "offlineEvidence": "tests/prototype/terminology.lua (Lua harness)",
+    "historicalRecord": "automaticMode describes the 5c77eec base and is unchanged",
+    "nativeAcceptance": "NOT_RUN",
+}
+
+
+def assert_current_automatic_preference(test, record):
+    """The current Automatic preference is the exact recorded value, resolves
+    to English, and names no mapping, alias or alias evidence."""
+    test.assertEqual(record.get("evidencedMappings"), [])
+    test.assertEqual(record.get("evidencedAliases"), [])
+    test.assertEqual(record.get("aliasEvidence"), "none")
+    test.assertEqual(record.get("resolvesTo"), "enUS")
+    test.assertEqual(record, CURRENT_AUTOMATIC_PREFERENCE)
 
 
 def historical_context():
@@ -442,6 +496,40 @@ class ReleaseLanguagesContract(unittest.TestCase):
         self.assertEqual(session["implicitReload"], "none")
         self.assertEqual(session["halfRefreshedWindows"], "none")
 
+    def test_current_automatic_preference_resolves_to_english_without_aliases(self):
+        record = self.doc["currentAutomaticPreference"]
+        assert_current_automatic_preference(self, record)
+        # The historical base record beside it is unchanged.
+        self.assertEqual(self.doc["automaticMode"]["chooserProductId"], "NONE_AT_BASE")
+        # The current source still declares and resolves the value as recorded.
+        profile = read_text("data/DefaultProfile.lua")
+        self.assertIn('automatic = "automatic",', profile)
+        localization = read_text("core/Localization.lua")
+        self.assertIn('local AUTOMATIC = "automatic"', localization)
+        self.assertIn("if id == nil or id == AUTOMATIC then return ResolveAutomatic() end",
+                      localization)
+        self.assertIn("production Automatic holds no evidence and resolves English",
+                      read_text("tests/prototype/terminology.lua"))
+        for relative, blob in record["unchangedSourceBlobs"].items():
+            canonical = canonical_git_lf((ROOT / relative).read_bytes())
+            self.assertEqual(hashlib.sha1(b"blob %d\0" % len(canonical) + canonical).hexdigest(),
+                             blob, relative)
+        # Controls: an invented mapping or alias, a non-English resolution or
+        # a missing source commit fails.
+        mutations = {
+            "mapping": ("evidencedMappings", [{"raw": "frFR", "productId": "frFR"}]),
+            "alias": ("evidencedAliases", ["enGB"]),
+            "alias-evidence": ("aliasEvidence", "client locale frFR"),
+            "resolution": ("resolvesTo", "frFR"),
+            "source": ("sourceBinding", {"tree": CURRENT_AUTOMATIC_PREFERENCE["sourceBinding"]["tree"]}),
+        }
+        for label, (field, value) in mutations.items():
+            with self.subTest(control=label):
+                changed = dict(record)
+                changed[field] = value
+                with self.assertRaises(AssertionError):
+                    assert_current_automatic_preference(self, changed)
+
     def test_lineage_names_and_pseudo_data(self):
         lineage = self.doc["sourceLineage"]
         self.assertEqual(lineage["kind"], "independently_drafted_nexus_presentation_text")
@@ -529,10 +617,17 @@ class KeyContextContract(unittest.TestCase):
         adoption = self.doc["currentAdoption"]
         self.assertEqual(adoption["keys"], [row[0] for row in CURRENT_KEYS])
         self.assertEqual(adoption["allWindowSemanticCoverage"], "PENDING")
-        self.assertIn(HISTORICAL_TECHNICAL_REFERENCE["head"], adoption["scope"])
-        self.assertNotIn(CURRENT_TECHNICAL_REFERENCE["head"], adoption["scope"])
-        self.assertIn("uncommitted working copy", adoption["scope"])
-        self.assertIn("pending", adoption["scope"])
+        assert_current_adoption_scope(self, adoption["scope"])
+
+    def test_current_adoption_scope_names_both_commits_and_no_stale_qualifier(self):
+        scope = self.doc["currentAdoption"]["scope"]
+        assert_current_adoption_scope(self, scope)
+        self.assertNotIn("uncommitted", scope)
+        # Controls: a scope lacking either full commit fails.
+        for sha in OPTIONS_ADOPTION_COMMITS:
+            with self.subTest(missing=sha):
+                with self.assertRaises(AssertionError):
+                    assert_current_adoption_scope(self, scope.replace(sha, sha[:7]))
 
     def test_placeholders_are_typed_and_exact(self):
         for name, kind, english, _ in EXPECTED_KEYS:
@@ -1010,6 +1105,18 @@ class CatalogParserGrammar(unittest.TestCase):
         self.assertEqual({key: table[key] for key in CATALOG_CURRENT_ENGLISH},
                          CATALOG_CURRENT_ENGLISH)
         assert_current_reference_bytes(self, "data/LocalizationEnglish.lua", data)
+
+    def test_current_english_is_the_committed_canonical_blob(self):
+        name = "data/LocalizationEnglish.lua"
+        physical = (ROOT / name).read_bytes()
+        canonical = assert_current_reference_bytes(self, name, physical)
+        # The Git blob ID of the canonical bytes, computed without Git.
+        blob = hashlib.sha1(b"blob %d\0" % len(canonical) + canonical).hexdigest()
+        self.assertEqual(blob, CURRENT_ENGLISH_GIT_BLOB["blob"])
+        self.assertNotEqual((hashlib.sha256(canonical).hexdigest(), len(canonical)),
+                            HISTORICAL_REFERENCE_INPUTS[name])
+        # The physical checkout bytes are CRLF, so they are not the canonical bytes.
+        self.assertNotEqual(canonical, physical)
 
     def test_current_packs_file_parses_to_its_literal_tables(self):
         data = (ROOT / "data/LocalizationPacks.lua").read_bytes()
@@ -3134,10 +3241,11 @@ class CatalogCurrentSource(unittest.TestCase):
                     canonical = assert_current_reference_bytes(self, name, data)
                     reference = CURRENT_REFERENCE_INPUTS[name][0]
                     self.assertEqual(row["sha256"] == reference, canonical == data)
-                elif name in WORKING_COPY_PHYSICAL_INPUTS:
-                    assert_current_reference_bytes(self, name, data)
+                    self.assertNotEqual((row["sha256"], row["byteLength"]),
+                                        REFERENCE_ENGLISH_INPUT)
+                if name in CHECKOUT_PHYSICAL_INPUTS:
                     self.assertEqual((row["sha256"], row["byteLength"]),
-                                     WORKING_COPY_PHYSICAL_INPUTS[name])
+                                     CHECKOUT_PHYSICAL_INPUTS[name])
         self.assertNotIn("complete", first)
         self.assertEqual({family["state"] for family in first["families"]}, {"INCOMPLETE"})
         self.assertEqual(first["completeness"]["state"], "INCOMPLETE")
