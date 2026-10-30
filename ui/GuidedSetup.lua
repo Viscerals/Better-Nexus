@@ -5,8 +5,9 @@
 -- Setup Alternative (design/current "Nexus Setup Alternative"): the coach is
 -- one step at a time in a fixed order: the step line and rail ("All steps"
 -- opens the list), the step's title, one WHY THIS MATTERS line, DO THIS with
--- its action, then an outcome slot that says OBSERVED only for a result the
--- guide read (otherwise WHAT YOU WILL SEE). The footer is the Wishlist step's
+-- its action, then an outcome slot that says WHAT HAPPENED (the design's
+-- OBSERVED, in plain words) only for a result the guide read or the player
+-- made (otherwise WHAT YOU WILL SEE). The footer is the Wishlist step's
 -- one Selected name, Continue across the row, the gate hint, then Back, Skip
 -- for now and Continue later (the same close as X: the place is kept). The
 -- header's Reference replaces the step with an optional topic list; a topic
@@ -492,6 +493,15 @@ local function Status(kind)
     return c[kind] or EXTRA.status[kind] or c['not'] or {glyph = '?', word = '?'}
 end
 
+-- A checklist row's marker (owner-approved usability item 13, 2026-10-30):
+-- the status kind's own glyph for every row, the summary row too (never a
+-- step number), beside the row's status word. One glyph language across the
+-- checklist, the outcome slot and the summary icons; never colour alone.
+local function Marker(c, kind)
+    local st = (c.status or {})[kind]
+    return (st and st.glyph) or Status(kind).glyph or '?'
+end
+
 -- A status icon: the state's own glyph in the 12 px font inside a 14 px mark
 -- drawn with the solid texture, filled for Done - confirmed and outlined for
 -- every other state. Each state has its own printable ASCII glyph (the
@@ -657,8 +667,9 @@ function VIEW.welcome(g, s, ctx, c, y)
         y = y - Row({label = p.title, desc = p.desc, radio = s.path == id,
             act = function() note = nil; g.SetPath(id) end}, PAD, y, CW) - 4
     end
-    y = y - 4
-    return y - Text(c.safety, PAD, y, CW, 'muted', MUTED) - GAP
+    -- The navigation safety words are the outcome slot's WHAT YOU WILL SEE
+    -- line below (expect.welcome), said once, not a second line here.
+    return y - 4
 end
 
 -- The last check's outcome: edge and fill colours, its head line and the
@@ -1383,8 +1394,9 @@ local function ReferenceView(c, b, labels, id, pos, y)
     return y - Actions({{label = b.fullReference or b.fullHelp, act = function() U.OpenHelp(page) end}}, PAD, y, CW) - GAP
 end
 
--- The outcome slot under the step's action (Setup Alternative): OBSERVED
--- with the status word only for a result the guide read (StepStatus);
+-- The outcome slot under the step's action (Setup Alternative): WHAT
+-- HAPPENED (the design's OBSERVED) with the status word only for a result
+-- the guide read (StepStatus);
 -- otherwise WHAT YOU WILL SEE with what the step is expected to show. A
 -- glyph and a word, never colour alone. Returns the y below.
 local function Outcome(c, id, kind, word, y)
@@ -1739,12 +1751,11 @@ function U.Render()
         end
         y = y - 5 - GAP
         if view.checklist then
-            for i, step in ipairs(path) do
+            for _, step in ipairs(path) do
                 local kind, word = StepStatus(g, s, ctx, step)
-                local st = (c.status or {})[kind] or {}
                 local target = step
-                y = y - Row({label = (step == 'summary' and tostring(i) or (st.glyph or '?')) .. '  ' .. (labels[step] or step),
-                    desc = word or st.word, selected = step == id,
+                y = y - Row({label = Marker(c, kind) .. '  ' .. (labels[step] or step),
+                    desc = word or Status(kind).word, selected = step == id,
                     act = function() note = nil; view.checklist = false; g.GoTo(target) end}, PAD, y, CW) - 2
             end
             y = y - GAP
@@ -1754,12 +1765,11 @@ function U.Render()
         -- row per step of the path with its glyph-and-word status.
         f.checklist:Hide()
         local ny = top - Text(c.checklistTitle or 'CHECKLIST', EDGE, top, nav - 2 * EDGE, 'small', MUTED) - 6
-        for i, step in ipairs(path) do
+        for _, step in ipairs(path) do
             local kind, word = StepStatus(g, s, ctx, step)
-            local st = (c.status or {})[kind] or {}
             local target = step
-            ny = ny - Row({label = (step == 'summary' and tostring(i) or (st.glyph or '?')) .. '  ' .. (labels[step] or step),
-                desc = word or st.word, selected = step == id,
+            ny = ny - Row({label = Marker(c, kind) .. '  ' .. (labels[step] or step),
+                desc = word or Status(kind).word, selected = step == id,
                 act = function() note = nil; g.GoTo(target) end}, 8, ny, nav - 16) - 2
         end
         navBottom = ny - GAP
