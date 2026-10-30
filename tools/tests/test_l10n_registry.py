@@ -2769,6 +2769,65 @@ class ConsumerBindingTests(unittest.TestCase):
                                   in self.binding(receipt, key)["unprovenSites"]],
                                  ["output-not-reached"] * code.count(text))
 
+    def test_c25_a_field_copied_through_two_fresh_carriers_still_binds(self):
+        # SPEC-147-S8-RF7-1: a field copied through two fresh carrier tables,
+        # each written once, binds for the call that displays it; a field
+        # written back from its own copy after an empty table overwrote it
+        # (the order of those writes is unknown) proves nothing, whether the
+        # copy keeps the field name or crosses to another one.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        direct = b'local function SpecRead(target) return target.SpecShared end; '
+        alias = b'local function SpecRead(target) local same=target; return same.SpecShared end; '
+        built = (b'local function SpecWrap(target) local first={SpecShared=target.SpecShared}; '
+                 b'local box={SpecShared=first.SpecShared}; return SpecRead(box) end; ')
+        assigned = (b'local function SpecWrap(target) local first={}; '
+                    b'first.SpecShared=target.SpecShared; local box={}; '
+                    b'box.SpecShared=first.SpecShared; return SpecRead(box) end; ')
+        left = b'local specLeft={SpecShared=' + text + b'}; local specRight={}; '
+        shown = b'specLabel:SetText(SpecWrap(specLeft))'
+        wrong = b'local specDiscard=SpecWrap(specLeft); specLabel:SetText(SpecWrap(specRight))'
+        forms = (("two constructor carriers", direct + built),
+                 ("two constructor carriers, reader alias", alias + built),
+                 ("two assigned carriers", direct + assigned))
+        cases = [(name + ", same call", True, code + left + shown) for name, code in forms]
+        cases += [(name + ", wrong call", False, code + left + wrong) for name, code in forms]
+        cases += [
+            ("two carriers in the chunk", True, left + b'local first={SpecShared=specLeft.SpecShared}; '
+             b'local box={SpecShared=first.SpecShared}; specLabel:SetText(box.SpecShared)'),
+            ("one carrier in the chunk", True, left + b'local box={SpecShared=specLeft.SpecShared}; '
+             b'specLabel:SetText(box.SpecShared)'),
+            ("two carriers, the first with another field name", True, direct
+             + b'local function SpecWrap(target) local first={SpecBridge=target.SpecShared}; '
+             b'local box={SpecShared=first.SpecBridge}; return SpecRead(box) end; ' + left + shown),
+            ("round trip after an empty overwrite", False, left + b'specLeft.SpecShared='
+             b'specRight.SpecShared; specRight.SpecShared=specLeft.SpecShared; '
+             b'specLabel:SetText(specLeft.SpecShared)'),
+            ("round trip after an empty overwrite, copy shown", False, left
+             + b'specLeft.SpecShared=specRight.SpecShared; specRight.SpecShared='
+             b'specLeft.SpecShared; specLabel:SetText(specRight.SpecShared)'),
+            ("cross-field round trip after an empty overwrite", False, b'local specLeft={SpecA='
+             + text + b'}; local specRight={}; specLeft.SpecA=specRight.SpecB; '
+             b'specRight.SpecB=specLeft.SpecA; specLabel:SetText(specRight.SpecB)'),
+        ]
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"] * code.count(text))
+
 
 class ConsumerCommandLineTests(unittest.TestCase):
     """S8: --consumers reads both TOCs and every Lua file they load from the

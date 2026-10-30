@@ -4487,23 +4487,60 @@ class _Linker:
         that write itself would let the search reach, such as a carrier
         copying the same field name (review fix 7, SPEC-147-S8-RF6-1). The
         field writes still waiting are then assumed to pass and the search
-        repeated; an assumption holds only when every definition its write
-        needs was reached by that search, and the others wait again, until
-        every assumed write that passed has all its definitions reached (a
+        repeated, adding each field write a repeat finds waiting in turn, so
+        a chain of carriers bootstraps (review fix 8, SPEC-147-S8-RF7-1). An
+        assumption holds only when every definition its write needs was
+        reached by that search and no other write of that field may write a
+        table it writes (assumption_holds); a refuted one waits again and is
+        never assumed again, until every assumed write that passed holds (a
         greatest fixpoint of the same every-definition rule)."""
         reached, sinks, waiting = self.walk(roots, allowed, stop, {})
-        assumed = {} if allowed is not None else {
-            key: states[0][0] for key, states in waiting.items()
-            if type(key) is tuple and key[0] == 'fwrite'}
+        assumed = {} if allowed is not None else self.waiting_writes(waiting, {}, ())
+        refused = set()
         while assumed:
-            trial, trial_sinks, _ = self.walk(roots, None, stop, assumed)
-            refuted = [key for key, flow in assumed.items() if key in trial and any(
-                value is _OPAQUE or value not in trial for value in self.gate(key, flow))]
+            trial, trial_sinks, still = self.walk(roots, None, stop, assumed)
+            grown = self.waiting_writes(still, assumed, refused)
+            if grown:
+                assumed.update(grown)
+                continue
+            refuted = [key for key, flow in assumed.items() if key in trial
+                       and not self.assumption_holds(key, flow, trial)]
             if not refuted:
                 return trial, trial_sinks
             for key in refuted:
                 del assumed[key]
+                refused.add(key)
         return reached, sinks
+
+    def waiting_writes(self, waiting, assumed, refused):
+        """{field write key: its flow} for the field writes still waiting
+        that are neither assumed nor refused."""
+        return {key: states[0][0] for key, states in waiting.items()
+                if type(key) is tuple and key[0] == 'fwrite'
+                and key not in assumed and key not in refused}
+
+    def assumption_holds(self, key, flow, trial):
+        """True when an assumed field write may pass (review fixes 7 and 8):
+        every definition its write needs was reached by the trial search,
+        and it is the only write of that field on the tables it may write.
+        Two writes of one field on a table have no known order, so a value
+        written back from the table's own copy (a round trip after another
+        table overwrote the field) would justify itself; such a write is
+        never assumed. A write on an untracked table may write any table."""
+        if any(value is _OPAQUE or value not in trial for value in self.gate(key, flow)):
+            return False
+        name, base = flow.field_bases[key[1]]
+        mine = flow.objects(base) if base is not None else None
+        if not mine:
+            return False
+        for value, other in self.field_defs(name):
+            if value is key[1]:
+                continue
+            other_base = other.field_bases[value][1] if value is not _OPAQUE else None
+            theirs = other.objects(other_base) if other_base is not None else None
+            if theirs is None or (other is flow and theirs & mine):
+                return False
+        return True
 
     def walk(self, roots, allowed, stop, assumed):
         """One search pass (see search): a key of assumed passes its gate
