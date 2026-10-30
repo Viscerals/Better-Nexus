@@ -99,7 +99,13 @@ local function SafeText(v) return v ~= nil and tostring(v) or "" end
 -- Colour codes, bullets, padding and separators stay in code. EnsureFrame
 -- is at the 60-upvalue limit: it calls Nexus.Localization directly.
 local function LT(key) return (Nexus.Localization.Text(key)) end
-local function LF(key, fields) return (Nexus.Localization.Format(key, fields)) end
+local function LF(key, fields)
+    -- A seam without the template formatter (a partial test seam) gives the
+    -- seam's documented safe status, never an error and never a guess.
+    local L = Nexus.Localization
+    if type(L.Format) ~= "function" then return L.UNAVAILABLE or "" end
+    return (L.Format(key, fields))
+end
 local function LC(value) return Nexus.Localization.Count(value) end
 
 ------------------------------------------------------------------------
@@ -1337,10 +1343,11 @@ end
 -- AUTO_LABEL.Fit (below) measures the widest label with the button's own font
 -- object and reduces only that object's size when it does not fit, never
 -- below minSize. The tooltip names the full control.
--- on/off/unknown are the labels' localization keys (English "Auto ON",
--- "Auto OFF", "Auto --"); the labels resolve when shown or measured.
-local AUTO_LABEL = { on = "panel.button.auto_on", off = "panel.button.auto_off",
-    unknown = "panel.button.auto_unknown",
+-- on/off/unknown are the labels' English base (the reviewed English of
+-- AUTO_LABEL.keys in data/LocalizationEnglish.lua); what is shown and
+-- measured is each key's text in the active language (AutoLabel, Fit).
+local AUTO_LABEL = { on = "Auto ON", off = "Auto OFF", unknown = "Auto --",
+    keys = { on = "panel.button.auto_on", off = "panel.button.auto_off", unknown = "panel.button.auto_unknown" },
     inset = 6, minSize = 9, font = "NexusAutoButtonFont" }
 
 -- Auto OFF releases a roll-block reservation at once. The runtime does not
@@ -1491,7 +1498,7 @@ function AUTO_LABEL.Fit(force)
         if ok then path, size, flags = p, tonumber(s), f end
     end
     local width = tonumber(autoBtn:GetWidth()) or 72
-    local labels = { LT(AUTO_LABEL.on), LT(AUTO_LABEL.off), LT(AUTO_LABEL.unknown) }
+    local labels = { LT(AUTO_LABEL.keys.on), LT(AUTO_LABEL.keys.off), LT(AUTO_LABEL.keys.unknown) }
     local key = tostring(path) .. "|" .. tostring(size) .. "|" .. tostring(width)
         .. "|" .. table.concat(labels, "|")
     if not force and autoBtn._nexusFit and autoBtn._nexusFitKey == key then
@@ -2756,7 +2763,7 @@ local function EnsureFrame()
         if st ~= nil and tostring(st) ~= "" then
             GameTooltip:AddLine(" ")
             local displayStatus = M.StatusTooltipText()
-            GameTooltip:AddLine(Nexus.Localization.Format("panel.tooltip.options_status", {status = tostring(displayStatus)}), 0.6, 0.85, 1, true)
+            GameTooltip:AddLine("Status: " .. displayStatus, 0.6, 0.85, 1, true)
         end
         local notice = M._lastModel and M._lastModel.updateNotice
         if notice then
@@ -3372,7 +3379,7 @@ function M.MoreMenuItems(anchor)
             M.PlacePauseBanner()
         end) })
     -- Hiding is not pausing: it says how the panel comes back.
-    Add({ text = LT("panel.menu.hide_panel"), notCheckable = true,
+    Add({ text = "Hide Nexus Panel", notCheckable = true,
         tooltipTitle = LT("panel.tooltip.hide_panel_title"), tooltipText = HideTooltip(),
         func = MenuAction(function() M.HideByPlayer() end) })
     return items
@@ -3670,9 +3677,11 @@ local function EnsureMinimapButton()
         if M._restoreCue then M.CueMinimapRestore(false) end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("|cff7fd5ffNexus|r  |cff888888" .. SafeText(Nexus.VERSION) .. "|r")
-        GameTooltip:AddLine("Echo build automation · Community Builds · DPS Leaderboard", 0.6,0.8,1,true)
+        GameTooltip:AddLine(LT("panel.tooltip.minimap_summary"), 0.6,0.8,1,true)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Left-click: show or hide the Nexus panel  |  Right-click: Wishlists  |  Drag to reposition",
+        -- The "  |  " separators are code-owned (a translation holds no "|").
+        GameTooltip:AddLine(LT("panel.tooltip.minimap_left_click") .. "  |  " .. LT("panel.tooltip.minimap_right_click")
+            .. "  |  " .. LT("panel.tooltip.minimap_drag"),
             0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
@@ -3771,21 +3780,21 @@ local function RenderPerformance(pr, completed)
     -- M4 (UX-14): the shared column is the best record this client knows for
     -- these exact Echoes, not a global ranking (UserText.BEST_KNOWN).
     local text = Nexus.UserText
-    local bestKnown = text and text.BEST_KNOWN or "Best known"
+    local bestKnown = text and text.BEST_KNOWN or LT("panel.label.best_known")
     if completed then
-        performanceLabel:SetText("TRAINING DUMMY")
+        performanceLabel:SetText(LT("panel.heading.training_dummy"))
         setLabelText:SetText("")
-        dummyLabel:SetText("Your Best")
+        dummyLabel:SetText(LT("panel.label.your_best"))
         dummyGlobal:SetText(bestKnown)
-        lkPersonalLabel:SetText("LICH KING")
-        lkLabel:SetText("Your Best")
+        lkPersonalLabel:SetText(LT("panel.heading.lich_king"))
+        lkLabel:SetText(LT("panel.label.your_best"))
         lkGlobal:SetText(bestKnown)
     else
-        performanceLabel:SetText("DPS RECORDS")
+        performanceLabel:SetText(LT("panel.heading.dps_records"))
         -- M4 (UX-13): the plan's rolled copies, not Echo rows or names.
-        setLabelText:SetText("Target build · " .. count .. " rolled copies")
-        dummyLabel:SetText("Your Dummy")
-        lkLabel:SetText("Your Lich King")
+        setLabelText:SetText(LF("panel.label.target_build_copies", {count = tostring(count)}))
+        dummyLabel:SetText(LT("panel.label.your_dummy"))
+        lkLabel:SetText(LT("panel.label.your_lich_king"))
     end
     dummyValue:SetText(myDummy and ("|cff4dff80" .. FmtDps(myDummy.dps) .. "|r") or "|cff777777—|r")
     lkValue:SetText(myLK and ("|cff4dff80" .. FmtDps(myLK.dps) .. "|r") or "|cff777777—|r")
@@ -3797,8 +3806,8 @@ local function RenderPerformance(pr, completed)
         lkGlobal:SetText(topLK and (bestKnown .. "  |cffffd200" .. FmtDps(topLK.dps) .. "|r") or (bestKnown .. "  —"))
     end
 
-    AddDpsTooltip(dummyHit, "Training Dummy", myDummy, topDummy)
-    AddDpsTooltip(lkHit, "Lich King", myLK, topLK)
+    AddDpsTooltip(dummyHit, LT("panel.value.target_training_dummy"), myDummy, topDummy)
+    AddDpsTooltip(lkHit, LT("panel.value.target_lich_king"), myLK, topLK)
 end
 
 ------------------------------------------------------------------------
@@ -3831,7 +3840,7 @@ function M.DetailNameLines(names, stripDetail)
         if stripDetail then name = (name:gsub("%s+%b()", "")) end
         lines[#lines + 1] = name
     end
-    if #names > shown then lines[#lines + 1] = "+" .. (#names - shown) .. " more" end
+    if #names > shown then lines[#lines + 1] = LF("panel.label.more_count", {count = LC(#names - shown)}) end
     return lines
 end
 
@@ -3923,12 +3932,12 @@ end
 -- measured lines.
 function M.RenderDetailNames(missing, shed)
     local need = M.SetDetailNames(needText, M.DetailNameLines(missing, true),
-        "|cff888888No remaining demand|r", 1, 0.5, 0.2)
+        "|cff888888" .. LT("panel.label.no_remaining_demand") .. "|r", 1, 0.5, 0.2)
     local lines = M.DetailNameLines(shed, false)
     -- A longer list than the face shows names its complete-list route on
-    -- the "+N more" row itself (M.SyncExtraListLink).
-    if lines[3] then lines[3] = lines[3] .. " - Show all" end
-    local extra = M.SetDetailNames(shedText, lines, "|cff888888None|r", 0.72, 0.52, 1)
+    -- the "+N more" row itself (M.SyncExtraListLink): one whole row.
+    if lines[3] then lines[3] = LF("panel.label.more_count_show_all", {count = LC(#shed - 2)}) end
+    local extra = M.SetDetailNames(shedText, lines, "|cff888888" .. LT("panel.label.no_extra_copies") .. "|r", 0.72, 0.52, 1)
     M.SyncExtraListLink()
     return math.max(need, extra)
 end
@@ -3980,8 +3989,8 @@ function M.SyncExtraListLink()
         link:SetScript("OnEnter", function(self)
             if not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine("Show all extra copies", 1, 1, 1)
-            GameTooltip:AddLine("Opens every extra rolled copy in a list you can scroll. Reading it changes nothing.",
+            GameTooltip:AddLine(LT("panel.tooltip.show_all_extra_title"), 1, 1, 1)
+            GameTooltip:AddLine(LT("panel.tooltip.show_all_extra_body"),
                 0.85, 0.85, 0.85, true)
             GameTooltip:Show()
         end)
@@ -4036,16 +4045,14 @@ function M.EnsureExtraList()
     list.child:SetSize(L.width - L.inset - L.scrollBarRoom, 1)
     list.scroll:SetScrollChild(list.child)
     list.note = Text(list.child, "GameFontHighlightSmall")
-    list.note:SetText("Rolled copies above your exact Wishlist targets, including unrequested or different-quality "
-        .. "copies. This is a comparison, not a delete action. Locked copies protected by this Saved Build are "
-        .. "never listed here.")
+    list.note:SetText(LT("panel.body.extra_list_note"))
     list.body = Text(list.child, "GameFontHighlightSmall")
     -- One line of the names' font, measured for the least viewport.
     list.probe = Text(list, "GameFontHighlightSmall")
     list.probe:SetText("Ag")
     list.probe:Hide()
     list.close = CreateFrame("Button", nil, list, "UIPanelButtonTemplate")
-    list.close:SetText("Close")
+    list.close:SetText(LT("panel.button.close_extra_list"))
     list.close:SetSize(90, 22)
     list.close:SetPoint("BOTTOM", list, "BOTTOM", 0, L.closeBottom)
     list.close:SetScript("OnClick", function() list:Hide() end)
@@ -4160,19 +4167,18 @@ end
 function M.FillExtraList(list)
     local facts = M.ExtraListFacts()
     local lines = {}
-    local mark = facts.stale and " (not current)" or ""
+    local mark = facts.stale and (" " .. LT("panel.label.extra_list_not_current")) or ""
     if facts.state == "unknown" then
-        list.title:SetText("Extra rolled copies: not known" .. mark)
-        lines[#lines + 1] = "|cffd9d9d9The extra copies of this run are not known yet.|r"
+        list.title:SetText(LT("panel.title.extra_list_not_known") .. mark)
+        lines[#lines + 1] = "|cffd9d9d9" .. LT("panel.body.extra_list_not_known") .. "|r"
     elseif facts.state == "empty" then
-        list.title:SetText("Extra rolled copies: none" .. mark)
-        lines[#lines + 1] = "|cffd9d9d9No extra rolled copies are listed.|r"
+        list.title:SetText(LT("panel.title.extra_list_none") .. mark)
+        lines[#lines + 1] = "|cffd9d9d9" .. LT("panel.body.extra_list_none") .. "|r"
     else
-        list.title:SetText("Extra rolled copies: " .. #facts.names .. mark)
+        list.title:SetText(LF("panel.title.extra_list_count", {count = LC(#facts.names)}) .. mark)
         for index, name in ipairs(facts.names) do lines[#lines + 1] = index .. ". " .. name end
     end
-    list.status:SetText(facts.stale and ("Not current: the last panel update did not complete. This is the list "
-        .. "from the last update that did; it may have changed since.") or "")
+    list.status:SetText(facts.stale and LT("panel.status.extra_list_stale") or "")
     if facts.stale then list.body:SetTextColor(0.62, 0.6, 0.66) else list.body:SetTextColor(0.78, 0.66, 1) end
     list.body:SetText(table.concat(lines, "\n"))
     M.LayoutExtraList(list)
@@ -4289,8 +4295,7 @@ function M.EnsureOfferCards()
             if self._nexusTag and self._nexusTag ~= "" then
                 GameTooltip:AddLine(self._nexusTag, OFFER.mark[1], OFFER.mark[2], OFFER.mark[3], true)
             end
-            GameTooltip:AddLine("Choose in the game's Echo window. This card only shows the offer; "
-                .. "pointing at or clicking it chooses nothing.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine(LT("panel.tooltip.offer_card_passive"), 0.8, 0.8, 0.8, true)
             GameTooltip:Show()
         end)
         card:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -4403,12 +4408,17 @@ function M.SetOfferHeading(text, model, activeSlot, layout)
     local width = box and (box.w - 4 - (SafeText(model._nexusChargeLine) ~= "" and 76 or 0)) or nil
     local chosen = ""
     for _, form in ipairs(forms) do
+        -- The " · " separators and colours are code-owned; each word group is
+        -- one reviewed meaning.
         if model.auto == false then
-            chosen = "|cff7fd5ff" .. form .. "|r · Auto OFF" .. (activeSlot > 0 and (" · Slot " .. activeSlot) or " · Preview")
+            chosen = "|cff7fd5ff" .. form .. "|r · " .. LT("panel.label.auto_state_off") .. " · "
+                .. (activeSlot > 0 and LF("panel.label.slot_number", {slot = tostring(activeSlot)})
+                    or LT("panel.label.preview_tag"))
         elseif activeSlot > 0 then
-            chosen = "|cff4dff80Active:|r " .. form .. " · Slot " .. activeSlot
+            chosen = "|cff4dff80" .. LT("panel.label.active_prefix") .. "|r " .. form .. " · "
+                .. LF("panel.label.slot_number", {slot = tostring(activeSlot)})
         else
-            chosen = "|cff888888" .. form .. "|r · Preview"
+            chosen = "|cff888888" .. form .. "|r · " .. LT("panel.label.preview_tag")
         end
         if not width or M.LineWidth(text, chosen) <= width then break end
     end
@@ -4550,10 +4560,8 @@ function M.EnsurePlayWidgets()
     p.details:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine(M._playDetails and "Hide details" or "Show details", 1, 1, 1)
-        GameTooltip:AddLine("Shows or hides the details under the bar: still needed, missing tomes, extra copies "
-            .. "and locked targets, with the Echo names behind them. It changes only what this panel shows; the "
-            .. "counts and your build stay the same.", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(LT(M._playDetails and "panel.button.details_hide" or "panel.button.details_show"), 1, 1, 1)
+        GameTooltip:AddLine(LT("panel.tooltip.details_body"), 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
     p.details:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -4598,11 +4606,14 @@ function M.EnsurePlayWidgets()
         local perf = type(pr.performance) == "table" and pr.performance or {}
         local text = Nexus.UserText
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine((text and text.BEST_KNOWN or "Best known") .. " - same Echoes", 1, 1, 1)
-        for _, category in ipairs({{"dummy", "Training Dummy"}, {"lk", "Lich King"}}) do
+        GameTooltip:AddLine(LF("panel.tooltip.best_known_same_echoes",
+            {best_known = tostring(text and text.BEST_KNOWN or LT("panel.label.best_known"))}), 1, 1, 1)
+        for _, category in ipairs({{"dummy", "panel.value.target_training_dummy"}, {"lk", "panel.value.target_lich_king"}}) do
             local row = type(perf[category[1]]) == "table" and perf[category[1]].global or nil
             local dps = PlayDps(row)
-            GameTooltip:AddLine(category[2] .. ": " .. (dps and (dps .. " DPS") or "no shared record known"),
+            local target = LT(category[2])
+            GameTooltip:AddLine(dps and LF("panel.tooltip.best_known_target_dps", {target = target, dps = dps})
+                or LF("panel.tooltip.best_known_target_none", {target = target}),
                 0.85, 0.85, 0.85, true)
         end
         if text and text.RECORD_SCOPE then GameTooltip:AddLine(text.RECORD_SCOPE, 0.45, 0.75, 1, true) end
@@ -4615,21 +4626,20 @@ function M.EnsurePlayWidgets()
         if not (GameTooltip and self._nexusFull) then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:AddLine(self._nexusFull, 1, 1, 1, true)
-        GameTooltip:AddLine("Open shows the Orb window, where the run is paused or stopped. Opening it starts "
-            .. "or spends nothing.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(LT("panel.tooltip.orb_line_open"), 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     M.PassiveDragSurface(p.orbHit)
     p.orbOpen = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    p.orbOpen:SetText("Open")
+    p.orbOpen:SetText(LT("panel.button.orb_open"))
     p.orbOpen:SetScript("OnClick", function()
         if Nexus.OrbPanel and Nexus.OrbPanel.Show then Nexus.OrbPanel.Show() end
     end)
     p.orbOpen:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Orbs / Lost Memories", 1, 0.82, 0)
-        GameTooltip:AddLine("Opens the Orb window to inspect it. It starts or spends nothing.", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(LT("panel.tooltip.orbs_heading"), 1, 0.82, 0)
+        GameTooltip:AddLine(LT("panel.tooltip.orbs_open_inspect"), 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
     p.orbOpen:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -4728,24 +4738,25 @@ function M.RenderPlayRecords(model, layout)
     end
     local text = Nexus.UserText
     local function Value(d, l)
-        if d and l then return "Dummy " .. d .. " - Lich King " .. l end
-        if d then return d .. " DPS" end
-        if l then return "Lich King " .. l end
+        if d and l then return LF("panel.value.records_dummy_and_lk", {dummy = d, lk = l}) end
+        if d then return LF("panel.value.records_dps", {dps = d}) end
+        if l then return LF("panel.value.records_lk", {dps = l}) end
         return nil
     end
     local best = type(model.bestDps) == "table" and model.bestDps or {}
     local mineD, mineL = PlayDps(best.dummy), PlayDps(best.lk)
     local mine = Value(mineD, mineL)
     bestDpsText:SetJustifyH("LEFT")
-    bestDpsText:SetText(PLAY.label .. ((mineD and not mineL) and "Yours · Training Dummy" or "Yours") .. "|r")
+    bestDpsText:SetText(PLAY.label .. LT((mineD and not mineL) and "panel.label.yours_training_dummy" or "panel.label.yours") .. "|r")
     p.yoursValue:SetText(mine and (PLAY.value .. mine .. "|r")
-        or (PLAY.muted .. "no record yet - fight a training dummy|r"))
+        or (PLAY.muted .. LT("panel.value.no_record_yet") .. "|r"))
     local pr = type(model.progress) == "table" and model.progress or {}
     local perf = type(pr.performance) == "table" and pr.performance or {}
     local knownD = PlayDps(type(perf.dummy) == "table" and perf.dummy.global or nil)
     local knownL = PlayDps(type(perf.lk) == "table" and perf.lk.global or nil)
     local known = Value(knownD, knownL)
-    p.bestLabel:SetText(PLAY.label .. (text and text.BEST_KNOWN or "Best known") .. " · same build|r")
+    p.bestLabel:SetText(PLAY.label .. LF("panel.label.best_known_same_build",
+        {best_known = tostring(text and text.BEST_KNOWN or LT("panel.label.best_known"))}) .. "|r")
     if known then
         p.bestValue:SetText(PLAY.value .. known .. "|r")
     else
@@ -4759,16 +4770,17 @@ function M.RenderPlayRecords(model, layout)
             return readout and readout.StatusText and readout.StatusText(kind, fallback) or fallback
         end
         if state == "ready" then
-            p.bestValue:SetText(PLAY.muted .. "none received yet|r")
+            p.bestValue:SetText(PLAY.muted .. LT("panel.value.none_received_yet") .. "|r")
         elseif state == "failed" then
-            p.bestValue:SetText(PLAY.wait .. Kind("unavailable", "shared data") .. "|r")
+            p.bestValue:SetText(PLAY.wait .. Kind("unavailable", LT("panel.status.shared_data_short")) .. "|r")
         else
+            local loading = LT("panel.value.shared_data_loading")
             p.bestValue:SetText(PLAY.wait .. ((readout and readout.StatusParts)
-                and (readout.StatusParts("loading").glyph .. " shared data loading") or "shared data loading") .. "|r")
+                and (readout.StatusParts("loading").glyph .. " " .. loading) or loading) .. "|r")
         end
     end
     -- The design's note in the shared record-scope words (UserText.RECORD_SCOPE).
-    p.note:SetText(PLAY.muted .. "Shared records this client holds, not a server-wide ranking.|r")
+    p.note:SetText(PLAY.muted .. LT("panel.note.shared_records_scope") .. "|r")
 end
 
 -- The Play summary's content and visibility for this render. `layout` is the
@@ -4806,25 +4818,30 @@ function M.RenderPlaySummary(model, layout)
         -- neither cut nor moved to a hover.
         progressValue:SetText(text and text.RunProgressText
             and text.RunProgressText(pr.owned, pr.total, #toLockNamesCache)
-            or ((owned and total) and (owned .. " / " .. total .. " rolled copies this run")
-                or "Rolled copies this run: unavailable"))
-        p.details:SetText(details and "Hide details" or "Show details")
+            or ((owned and total) and LF("panel.value.run_progress", {owned = LC(owned), total = LC(total)})
+                or LT("panel.value.run_progress_unavailable")))
+        p.details:SetText(LT(details and "panel.button.details_hide" or "panel.button.details_show"))
         -- The share of planned rolled copies this run has (none while
         -- either count is unknown).
         p.share = (owned and total and total > 0) and {math.min(owned, total), total} or nil
         SetVisible(p.fill, p.share ~= nil and p.share[1] > 0)
+        -- English picks "copy"/"copies" (and "Echo"/"Echoes") by count: the
+        -- same choice picks one of two reviewed keys (no plural grammar).
         local function Count(n, one, many)
             if n == nil then return "?" end
-            return n .. " " .. (n == 1 and one or many)
+            return LF(n == 1 and one or many, {count = LC(n)})
         end
         local needed = (owned and total) and math.max(0, total - owned) or nil
-        p.needed:SetText(PlayPair("Still needed", Count(needed, "copy", "copies")))
+        p.needed:SetText(PlayPair(LT("panel.label.play_still_needed"), Count(needed, "panel.value.count_copy", "panel.value.count_copies")))
         local tomes = #unknownTomesCache
-        p.tomes:SetText(PlayPair("Missing tomes", tomes > 0 and Count(tomes, "Echo", "Echoes") or "none"))
+        p.tomes:SetText(PlayPair(LT("panel.label.play_missing_tomes"), tomes > 0
+            and Count(tomes, "panel.value.count_echo", "panel.value.count_echoes") or LT("panel.value.count_none")))
         local extra = #shedNamesCache
-        p.extra:SetText(PlayPair("Extra copies", extra > 0 and (extra .. " listed") or "none"))
+        p.extra:SetText(PlayPair(LT("panel.label.play_extra_copies"), extra > 0
+            and LF("panel.value.count_listed", {count = LC(extra)}) or LT("panel.value.count_none")))
         local lock = #toLockNamesCache
-        p.locked:SetText(PlayPair("Locked targets", lock > 0 and (lock .. " to lock") or "none to lock"))
+        p.locked:SetText(PlayPair(LT("panel.label.play_locked_targets"), lock > 0
+            and LF("panel.value.count_to_lock", {count = LC(lock)}) or LT("panel.value.none_to_lock")))
     else
         p.share = nil
         SetVisible(p.fill, false)
@@ -4990,7 +5007,7 @@ end
 local function EnsureCallboardWidgets()
     if not frame or frame._callboardLabel then return end
     local label = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    label:SetText("CALLBOARD")
+    label:SetText(LT("panel.heading.callboard"))
     label:SetJustifyH("LEFT")
     frame._callboardLabel = label
     local icon = CreateFrame("Button", nil, frame)
@@ -5111,8 +5128,8 @@ local function FillCallboard(summary)
     if callboard and callboard.IconTexture and frame._callboardIcon and frame._callboardIcon.texture then
         frame._callboardIcon.texture:SetTexture(callboard.IconTexture())
     end
-    frame._callboardLabel:SetText("CALLBOARD")
-    frame._callboardTitle:SetText(summary.title or "Callboard objective")
+    frame._callboardLabel:SetText(LT("panel.heading.callboard"))
+    frame._callboardTitle:SetText(summary.title or LT("panel.label.callboard_objective"))
     local detail = ""
     -- Every complete detail line, in order, for the row's hover: a new table
     -- on each render, so an earlier objective's lines are never shown.
@@ -5126,10 +5143,10 @@ local function FillCallboard(summary)
     if type(summary.lines) == "table" and summary.lines[1] then
         detail = tostring(summary.lines[1])
         if #summary.lines > 1 then
-            detail = detail .. "  |cff888888+" .. (#summary.lines - 1) .. " more|r"
+            detail = detail .. "  |cff888888" .. LF("panel.label.more_count", {count = LC(#summary.lines - 1)}) .. "|r"
         end
     end
-    frame._callboardLine:SetText(detail ~= "" and detail or "|cff888888No objective details|r")
+    frame._callboardLine:SetText(detail ~= "" and detail or ("|cff888888" .. LT("panel.label.callboard_no_details") .. "|r"))
     SetVisible(frame._callboardLabel, true)
     SetVisible(frame._callboardIcon, true)
     SetVisible(frame._callboardTitle, true)
@@ -5410,7 +5427,11 @@ local function ApplyPanelLayout(layout, completed)
                 miniButton:ClearAllPoints()
                 miniButton:SetPoint("RIGHT", button, "LEFT", -layout.orbMiniButtonGap, 0)
                 miniButton:SetSize(layout.orbMiniButtonW, layout.orbButtonH)
-                miniButton:SetText(layout.orbMiniButtonLabel)
+                -- LayoutMetrics chooses the full or short label by room, in
+                -- its own English; that choice is shown here as reviewed text.
+                local miniLabel = layout.orbMiniButtonLabel
+                miniButton:SetText(miniLabel == "Mini" and LT("panel.button.orb_mini_short")
+                    or miniLabel == "Orb mini panel" and LT("panel.button.orb_mini") or miniLabel)
                 M.FitOrbMiniButton(miniButton)
             end
         end
@@ -5464,7 +5485,7 @@ local function ApplyPanelLayout(layout, completed)
     PlacePanelBox(progressValue, boxes.progressValue)
 
     if boxes.tomes then
-        tomesLabel:SetText("MISSING TOMES")
+        tomesLabel:SetText(LT("panel.heading.missing_tomes"))
         PlacePanelRect(tomesLabel,boxes.tomes.x,boxes.tomes.y,
             boxes.tomes.w-28,boxes.tomes.h)
         tomesLabel:SetJustifyH("LEFT")
@@ -5515,9 +5536,11 @@ local function RenderBestDps(model, complete, noBuild, activeRoll, statusVisible
         local dummyText = dummyBest and ("|cff4dff80" .. FmtDps(dummyBest.dps) .. "|r") or "|cff777777—|r"
         local lkText = lkBest and ("|cff4dff80" .. FmtDps(lkBest.dps) .. "|r") or "|cff777777—|r"
         -- M4 (UX-14): the character's own records, not a shared ranking.
-        bestDpsText:SetText("|cffb8b8b8Your best DPS:|r  Dummy " .. dummyText .. "  |cff666666•|r  Lich King " .. lkText)
+        bestDpsText:SetText("|cffb8b8b8" .. LT("panel.label.your_best_dps") .. "|r  "
+            .. LF("panel.label.best_dps_dummy", {dps = dummyText}) .. "  |cff666666•|r  "
+            .. LF("panel.label.best_dps_lk", {dps = lkText}))
     else
-        bestDpsText:SetText("|cff888888Your best DPS: hit a training dummy to record|r")
+        bestDpsText:SetText("|cff888888" .. LT("panel.label.best_dps_none") .. "|r")
     end
     if not noBuild then
         bestDpsText:Show()
@@ -5697,10 +5720,11 @@ local function ApplyModel(model, signatures, roll)
         local effective = type(model.effective) == "table" and model.effective.state
         if model._nexusSessionPaused then
             -- Issue #171: the whole session is paused (Options > Resume Nexus).
-            statusText:SetText("|cffffd100Nexus paused|r")
+            statusText:SetText("|cffffd100" .. LT("panel.status.roll_nexus_paused") .. "|r")
         elseif model.auto and model.paused
             and (effective == "waiting" or effective == "rechecking") then
-            statusText:SetText("|cffffd100Auto " .. effective .. "|r")
+            statusText:SetText("|cffffd100" .. LT(effective == "waiting" and "panel.status.roll_auto_waiting"
+                or "panel.status.roll_auto_rechecking") .. "|r")
         elseif model.auto and Nexus.Readout and Nexus.Readout.WaitingForOffer
             and Nexus.Readout.WaitingForOffer(model.paused) then
             -- The design's waiting state: named as a wait for the offer,
@@ -5709,16 +5733,20 @@ local function ApplyModel(model, signatures, roll)
         elseif model.auto and model.paused then
             statusText:SetText("|cffffd100Auto ON — paused|r")
         elseif #cards == 0 and recommendation == "" then
-            statusText:SetText("|cff7fd5ffRoll status|r")
+            statusText:SetText("|cff7fd5ff" .. LT("panel.status.roll_status") .. "|r")
         elseif guide and guide.openOrbs and guideText ~= "" then
             -- With the Orb guidance and its button: the short form, which
             -- stays one line at every font scale. With Auto OFF the player
             -- chooses (Readout.OfferHeadingForms' shortest form), never
             -- "Active".
             if model.auto == false then
-                statusText:SetText("|cff7fd5ffYou choose|r" .. (activeSlot > 0 and (" · Slot " .. activeSlot) or " · Preview"))
+                statusText:SetText("|cff7fd5ff" .. LT("panel.status.roll_you_choose") .. "|r · "
+                    .. (activeSlot > 0 and LF("panel.label.slot_number", {slot = tostring(activeSlot)})
+                        or LT("panel.label.preview_tag")))
             else
-                statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Slot " .. activeSlot) or "|cff888888Preview|r")
+                statusText:SetText(activeSlot > 0 and ("|cff4dff80" .. LT("panel.label.active_prefix") .. "|r "
+                    .. LF("panel.label.slot_number", {slot = tostring(activeSlot)}))
+                    or ("|cff888888" .. LT("panel.label.preview_tag") .. "|r"))
             end
         elseif #cards > 0 and Nexus.Readout and Nexus.Readout.OfferHeading then
             -- The design's offer heading (whose choice it is), with the
@@ -5731,10 +5759,13 @@ local function ApplyModel(model, signatures, roll)
         elseif model.auto == false then
             -- The Auto selection is OFF (not merely held): Nexus only
             -- recommends, and the player chooses in the game's window.
-            statusText:SetText("|cff7fd5ffAuto OFF — you choose|r"
-                .. (activeSlot > 0 and (" · Slot " .. activeSlot) or " · Preview"))
+            statusText:SetText("|cff7fd5ff" .. LT("panel.status.roll_auto_off_you_choose") .. "|r · "
+                .. (activeSlot > 0 and LF("panel.label.slot_number", {slot = tostring(activeSlot)})
+                    or LT("panel.label.preview_tag")))
         else
-            statusText:SetText(activeSlot > 0 and ("|cff4dff80Active:|r Roll recommendations active — Slot " .. activeSlot) or "|cff888888Preview: Roll recommendation preview|r")
+            statusText:SetText(activeSlot > 0 and ("|cff4dff80" .. LT("panel.label.active_prefix") .. "|r "
+                .. LF("panel.status.roll_recommendations_active", {slot = tostring(activeSlot)}))
+                or ("|cff888888" .. LT("panel.status.roll_recommendation_preview") .. "|r"))
         end
         -- With Auto OFF, the one card the runtime marked as its Take target
         -- (Readout.MarkedCard: exactly one, else none) carries a marker, and
@@ -5751,7 +5782,7 @@ local function ApplyModel(model, signatures, roll)
             local c = cards[i]
             local line = type(c) == "table" and SafeText(c.text) or ""
             if marked == i and line ~= "" then line = "|cff4dff80>>|r " .. line end
-            if frozen == i and line ~= "" then line = "|cff7fd5ff[Freeze]|r " .. line end
+            if frozen == i and line ~= "" then line = "|cff7fd5ff[" .. LT("panel.label.freeze_tag") .. "]|r " .. line end
             cardTexts[i]:SetText(line)
         end
         -- The design's offer cards over these rows (M.RenderOfferCards). The
@@ -5864,12 +5895,12 @@ local function ApplyModel(model, signatures, roll)
         SetPoint(setupText, "TOP", frame, "TOP", 0, contentTop - 18)
         local assignment=model.assignment or {}
         local restoring=assignment.state=="restoring" or assignment.state=="loading"
-        setupText:SetText(restoring and "Restoring assigned Wishlist..."
-            or (assignment.state=="unavailable" and "Assigned Wishlist is unavailable" or "Assign a wishlist to this loadout"))
+        setupText:SetText(LT(restoring and "panel.status.setup_restoring"
+            or (assignment.state=="unavailable" and "panel.status.setup_unavailable" or "panel.status.setup_assign")))
         SetPoint(setupHint, "TOP", frame, "TOP", 0, contentTop - 48)
-        setupHint:SetText((restoring or assignment.state=="unavailable") and (assignment.note or "Waiting for the saved assignment and current loadout data.")
+        setupHint:SetText((restoring or assignment.state=="unavailable") and (assignment.note or LT("panel.body.setup_waiting"))
             or (assignment.emptySlot and assignment.note)
-            or "Assign an existing wishlist to this loadout, or create a new one. No Saved Build is required.")
+            or LT("panel.body.setup_assign_or_create"))
         if restoring then setupGetStartedBtn:Hide();setupImportBtn:Hide()end
         setupGetStartedBtn:ClearAllPoints()
         setupGetStartedBtn:SetPoint("TOP", frame, "TOP", 0, contentTop - 96)
@@ -5891,13 +5922,13 @@ local function ApplyModel(model, signatures, roll)
             SetVisible(completeSubtext, false)
         else
             SetPoint(completeBadge, "TOP", frame, "TOP", 0, contentTop - 8)
-            completeBadge:SetText("Wishlist complete")
+            completeBadge:SetText(LT("panel.status.wishlist_complete"))
             SetPoint(completeSubtext, "TOP", frame, "TOP", 0, contentTop - 30)
             completeSubtext:SetSize(252, 32)
             completeSubtext:SetJustifyV("TOP")
             completeSubtext:SetText(name
-                and ("'" .. ShortName(name, 34) .. "' is fully covered -- add more Echoes to keep rolling.")
-                or "Add more Echoes to your wishlist to keep rolling.")
+                and LF("panel.body.complete_named", {name = ShortName(name, 34)})
+                or LT("panel.body.complete_unnamed"))
             SetVisible(completeBadge, true)
             SetVisible(completeSubtext, true)
         end
@@ -5929,7 +5960,7 @@ local function ApplyModel(model, signatures, roll)
         local text = Nexus.UserText
         progressValue:SetText(text and text.RunProgressText
             and text.RunProgressText(owned, total, #toLockNamesCache, #unknownTomesCache > 0)
-            or string.format("%d / %d rolled copies this run", owned, total))
+            or LF("panel.value.run_progress", {owned = string.format("%d", owned), total = string.format("%d", total)}))
 
         SetPoint(needLabel, "TOPLEFT", frame, "TOPLEFT", 12, progressTop - 42)
         needLabel:SetText((Nexus.Localization.Text("panel.heading.still_needed")))
@@ -5937,7 +5968,7 @@ local function ApplyModel(model, signatures, roll)
         if #unknownTomesCache > 0 then
             -- Tomes are metadata for the run, not a third content column.
             -- Keep them on the progress line and preserve two clean Echo columns.
-            tomesLabel:SetText("MISSING\nTOMES")
+            tomesLabel:SetText(LT("panel.heading.missing_tomes_stacked"))
             SetPoint(tomesLabel, "TOPRIGHT", frame, "TOPRIGHT", -26, progressTop - 18)
             tomesLabel:SetSize(58, 24)
             tomesLabel:SetJustifyH("RIGHT")
@@ -5978,7 +6009,7 @@ local function ApplyModel(model, signatures, roll)
             local toLockShown = math.min(#toLockNamesCache, 2)
             for i = 1, toLockShown do toLockLines[#toLockLines + 1] = toLockNamesCache[i] end
             if #toLockNamesCache > toLockShown then
-                toLockLines[#toLockLines + 1] = "+" .. (#toLockNamesCache - toLockShown) .. " more"
+                toLockLines[#toLockLines + 1] = LF("panel.label.more_count", {count = LC(#toLockNamesCache - toLockShown)})
             end
             frame.toLockText:SetText(table.concat(toLockLines, ", "))
             frame.toLockLabel:Show()
@@ -6001,7 +6032,7 @@ local function ApplyModel(model, signatures, roll)
     LayoutServerStatus(complete and not noBuild)
     worldStatusBox._summary = DefensiveCopy(ss)
     if ss and (ss.tier or ss.mode or ss.ash or ss.gain or ss.intensity ~= nil) then
-        local difficulty = ss.tier or ss.mode or "Difficulty"
+        local difficulty = ss.tier or ss.mode or LT("panel.label.difficulty_fallback")
         -- Parse and format the ash number for compact display
         local function FmtAsh(raw)
             if not raw then return "—" end
@@ -6026,7 +6057,8 @@ local function ApplyModel(model, signatures, roll)
         -- it; an unknown mode keeps the card's former red caption.
         worldStatusText:SetText(((ss.tier == nil and ss.mode == "Normal")
             and "|cffd9d9d9" or "|cffff6b5f") .. difficulty .. "|r")
-        worldStatusAsh:SetText((complete and "|cff8ec9d6Soul Ash  |r" or "|cffb8b8b8Ash |r") .. "|cffffffff" .. ashFmt .. "|r")
+        worldStatusAsh:SetText((complete and ("|cff8ec9d6" .. LT("panel.label.soul_ash") .. "  |r")
+            or ("|cffb8b8b8" .. LT("panel.label.ash_short") .. " |r")) .. "|cffffffff" .. ashFmt .. "|r")
         worldStatusGain:SetText(ss.gain and ("|cff35e635" .. ss.gain .. "|r") or "")
         -- The bar is scaled to the game's validated maximum. Without valid
         -- constants, or without a reading, it has no truthful scale and stays
@@ -6290,8 +6322,14 @@ end
 -- and calls Pause / Resume on the player's click; it keeps no paused flag of
 -- its own. Without a usable API the control says so and nothing is labelled
 -- paused. Status must answer {paused=boolean, epoch=whole number >= 0}.
-local PAUSE_EXPLAIN = "Pauses Auto, Orb actions, sharing and DPS recording. An action already sent may still finish."
-local RESUME_NOTE = "Auto can continue if it was already on. Orb runs stay paused."
+-- The pause and resume notes, each two reviewed sentences (the Session
+-- menu shows them as two rows), resolved when shown.
+local function PauseExplain()
+    return LT("panel.note.pause_scope") .. " " .. LT("panel.note.pause_sent_may_finish")
+end
+local function ResumeNote()
+    return LT("panel.note.resume_auto_continues") .. " " .. LT("panel.note.resume_orb_stays_paused")
+end
 local function PauseAPI()
     local api = Nexus.SessionPause
     if type(api) == "table" and type(api.Status) == "function" and type(api.Pause) == "function"
@@ -6312,7 +6350,7 @@ function M.PauseStatus()
     if not (ok and ValidPause(status)) then return {available = false, paused = false, unknown = true} end
     return {available = true, paused = status.paused}
 end
-local PAUSE_UNKNOWN = "The session pause cannot be read right now, so Nexus may or may not be paused."
+local function PauseUnknown() return LT("panel.status.pause_unknown") end
 
 -- After a transition the committed model is drawn again (Render only: no
 -- refresh step, no action is prepared).
@@ -6327,11 +6365,10 @@ local function Transition(method, want, verb)
     if api then ok, status = pcall(api[method]) end
     RepaintPause()
     if ok and ValidPause(status) and status.paused == want then return true end
-    print("|cffffd200Nexus:|r Nexus did not " .. verb .. ": "
-        .. (not api and "the session pause is not available in this build."
-            or not ok and "the session pause reported an error."
-            or "the session pause did not confirm it.")
-        .. " The panel shows the state the session pause reports.")
+    print("|cffffd200Nexus:|r " .. LF(verb == "pause" and "panel.chat.pause_failed" or "panel.chat.resume_failed",
+        {reason = LT(not api and "panel.chat.pause_reason_unavailable"
+            or not ok and "panel.chat.pause_reason_error"
+            or "panel.chat.pause_reason_unconfirmed")}))
     return false
 end
 function M.PauseNexus() return Transition("Pause", true, "pause") end
@@ -6389,27 +6426,27 @@ function M.EnsurePauseBanner()
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         if self._nexusState == "paused" then
-            GameTooltip:AddLine("Nexus is paused for this session", 1, 0.82, 0)
-            GameTooltip:AddLine(PAUSE_EXPLAIN, 0.9, 0.9, 0.9, true)
-            GameTooltip:AddLine("Resume (or Options > Resume Nexus): " .. RESUME_NOTE, 0.9, 0.9, 0.9, true)
-            GameTooltip:AddLine("A reload or logout also ends the pause.", 0.75, 0.75, 0.75, true)
+            GameTooltip:AddLine(LT("panel.tooltip.paused_title"), 1, 0.82, 0)
+            GameTooltip:AddLine(PauseExplain(), 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine(LF("panel.tooltip.paused_resume_how", {note = ResumeNote()}), 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine(LT("panel.tooltip.paused_reload_ends"), 0.75, 0.75, 0.75, true)
         else
-            GameTooltip:AddLine("Session pause", 1, 0.82, 0)
-            GameTooltip:AddLine(PAUSE_UNKNOWN, 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine(LT("panel.tooltip.session_pause_title"), 1, 0.82, 0)
+            GameTooltip:AddLine(PauseUnknown(), 0.9, 0.9, 0.9, true)
         end
         GameTooltip:Show()
     end)
     banner:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
     local resume = CreateFrame("Button", nil, banner, "UIPanelButtonTemplate")
-    resume:SetText("Resume")
+    resume:SetText(LT("panel.button.resume"))
     resume:SetSize(76, 22)
     resume:SetPoint("RIGHT", banner, "RIGHT", -6, 0)
     resume:SetScript("OnClick", function() M.ResumeFromBanner() end)
     resume:SetScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Resume Nexus", 1, 1, 1)
-        GameTooltip:AddLine(RESUME_NOTE, 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(LT("panel.tooltip.resume_nexus_title"), 1, 1, 1)
+        GameTooltip:AddLine(ResumeNote(), 0.85, 0.85, 0.85, true)
         GameTooltip:Show()
     end)
     resume:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -6458,12 +6495,12 @@ function M.UpdatePauseBanner()
     banner = M.EnsurePauseBanner()
     banner._nexusState = state
     if state == "paused" then
-        banner.title:SetText("Nexus is paused for this session.")
-        banner.note:SetText("Auto, Orb actions, sharing and DPS recording wait.")
+        banner.title:SetText(LT("panel.status.paused_banner"))
+        banner.note:SetText(LT("panel.status.paused_banner_note"))
         banner.resume:Enable(); banner.resume:Show()
     else
-        banner.title:SetText("Pause state cannot be read right now.")
-        banner.note:SetText("Nexus may or may not be paused.")
+        banner.title:SetText(LT("panel.status.pause_unreadable_banner"))
+        banner.note:SetText(LT("panel.status.pause_unreadable_note"))
         banner.resume:Disable(); banner.resume:Hide()
     end
     M.PlacePauseBanner()
@@ -6495,25 +6532,25 @@ end
 function M.SessionMenuItems()
     local status = M.PauseStatus()
     if status.unknown then
-        return {{ text = "Session pause: cannot be read right now", notCheckable = true, disabled = true,
-            tooltipTitle = "Session pause", tooltipText = PAUSE_UNKNOWN }}
+        return {{ text = LT("panel.menu.session_pause_unreadable"), notCheckable = true, disabled = true,
+            tooltipTitle = LT("panel.tooltip.session_pause_title"), tooltipText = PauseUnknown() }}
     end
     if not status.available then
-        return {{ text = "Pause Nexus for this session (not available)", notCheckable = true, disabled = true,
-            tooltipTitle = "Pause Nexus for this session",
-            tooltipText = "This build has no session pause control." }}
+        return {{ text = LT("panel.menu.pause_not_available"), notCheckable = true, disabled = true,
+            tooltipTitle = LT("panel.tooltip.pause_session_title"),
+            tooltipText = LT("panel.tooltip.pause_no_control") }}
     end
     if status.paused then
-        return {{ text = "Resume Nexus", notCheckable = true, tooltipTitle = "Resume Nexus",
-            tooltipText = RESUME_NOTE, func = MenuAction(function() M.ResumeNexus() end) },
-            MenuNote("Auto can continue if it was already on."), MenuNote("Orb runs stay paused.")}
+        return {{ text = LT("panel.menu.resume_nexus"), notCheckable = true, tooltipTitle = LT("panel.tooltip.resume_nexus_title"),
+            tooltipText = ResumeNote(), func = MenuAction(function() M.ResumeNexus() end) },
+            MenuNote(LT("panel.note.resume_auto_continues")), MenuNote(LT("panel.note.resume_orb_stays_paused"))}
     end
     -- The note is two short rows, so the menu stays narrow.
-    return {{ text = "Pause Nexus for this session", notCheckable = true,
-        tooltipTitle = "Pause Nexus for this session", tooltipText = PAUSE_EXPLAIN,
+    return {{ text = LT("panel.menu.pause_session"), notCheckable = true,
+        tooltipTitle = LT("panel.tooltip.pause_session_title"), tooltipText = PauseExplain(),
         func = MenuAction(function() M.PauseNexus() end) },
-        MenuNote("Pauses Auto, Orb actions, sharing and DPS recording."),
-        MenuNote("An action already sent may still finish.")}
+        MenuNote(LT("panel.note.pause_scope")),
+        MenuNote(LT("panel.note.pause_sent_may_finish"))}
 end
 
 -- Issue #169: the Auto facts of the last committed model (memory only; no
@@ -6530,13 +6567,23 @@ local function Bounded(text, limit)
 end
 -- The button is the selection; this is what it is doing now (waiting,
 -- rechecking, paused or ready, with the reason in the player's wording).
+local AUTO_NOW_STATES = {off = "panel.value.auto_now_off", paused = "panel.value.auto_now_paused",
+    ready = "panel.value.auto_now_ready", waiting = "panel.value.auto_now_waiting",
+    rechecking = "panel.value.auto_now_rechecking"}
 local function AutoNowLine(model, limit)
     local effective = type(model) == "table" and model.effective
     if not (type(effective) == "table" and type(effective.state) == "string") then return nil end
     local reason = type(effective.reason) == "string" and effective.reason or nil
     if reason and Nexus.UserText then reason = Nexus.UserText.Message(reason) end
     if reason then reason = Bounded(reason, limit) end
-    return "Now: " .. effective.state .. ((reason and reason ~= "") and (" -- " .. reason) or "")
+    -- The runtime's state code is said in words when it is a known one; any
+    -- other code is shown as it is (as before).
+    local words = AUTO_NOW_STATES[effective.state]
+    local state = words and LT(words) or effective.state
+    if reason and reason ~= "" then
+        return LF("panel.tooltip.auto_now_reason", {state = state, reason = reason})
+    end
+    return LF("panel.tooltip.auto_now", {state = state})
 end
 local function HoldWords(held)
     local readout = Nexus.Readout
@@ -6551,12 +6598,11 @@ end
 function M.AutoDetailLines()
     local model, held = AutoFacts()
     local lines = {
-        "Automation and enabled actions",
-        "When ON: permits your enabled automatic actions. These may consume charges or change saved-build state.",
-        "Locked-Echo slot management is a separate opt-in. Orb runs require separate approval.",
-        "OFF keeps recommendations visible; it does not turn off Sync.",
-        "An off-Wishlist pick may occur when no eligible target or search action is available. "
-            .. "Later improvement is not guaranteed.",
+        LT("panel.body.auto_detail_heading"),
+        LT("panel.body.auto_detail_when_on"),
+        LT("panel.body.auto_detail_separate"),
+        LT("panel.body.auto_detail_off"),
+        LT("panel.body.auto_detail_off_wishlist"),
     }
     local readout = Nexus.Readout
     if readout and type(readout.AutomationScopeLines) == "function" then
@@ -6578,15 +6624,15 @@ function M.AutoDetailLines()
     if pause.paused then
         -- The confirmed session pause is the current hold, over the
         -- committed model's own state words.
-        lines[#lines + 1] = "Paused because: Nexus is paused for this session (Options > Resume Nexus)."
-        lines[#lines + 1] = "Now: paused for this session"
+        lines[#lines + 1] = LT("panel.body.auto_detail_paused_because")
+        lines[#lines + 1] = LT("panel.tooltip.auto_now_session_paused")
         return lines
     end
     if pause.unknown then
         -- An established pause may still hold: the last committed model's
         -- state words are not the current state.
-        lines[#lines + 1] = PAUSE_UNKNOWN
-        lines[#lines + 1] = "Now: unknown (the session pause cannot be read)"
+        lines[#lines + 1] = PauseUnknown()
+        lines[#lines + 1] = LT("panel.tooltip.auto_now_pause_unknown")
         return lines
     end
     local now = AutoNowLine(model, 600)
@@ -6600,41 +6646,41 @@ function M.AutoSummaryLines()
     local model, held = AutoFacts()
     local lines = {}
     local pause = M.PauseStatus()
-    if pause.unknown then lines[1] = PAUSE_UNKNOWN end
+    if pause.unknown then lines[1] = PauseUnknown() end
     if pause.paused then
-        lines[1] = "Nexus is paused for this session: Auto, Orb actions, sharing and DPS recording wait."
-        lines[2] = "To continue: Resume on the paused banner, or Options > Resume Nexus. " .. RESUME_NOTE
+        lines[1] = LT("panel.tooltip.auto_paused_session")
+        lines[2] = LT("panel.tooltip.auto_paused_continue") .. " " .. ResumeNote()
     else
         local refusal = model.auto ~= true and type(M._autoRefusal) == "table" and M._autoRefusal.text or nil
         local state, action
         if refusal then
-            state = "Your last click left Auto OFF: " .. Bounded(refusal, 160)
-            action = "Fix that, then click Auto again; a warning asks first."
+            state = LF("panel.tooltip.auto_refused_last_click", {reason = Bounded(refusal, 160)})
+            action = LT("panel.tooltip.auto_refused_action")
         elseif model.auto == true and held then
-            state = "Auto is selected ON but held: " .. HoldWords(held)
-            action = "It continues when that clears. Click Auto to turn it OFF."
+            state = LF("panel.tooltip.auto_on_held", {reason = HoldWords(held)})
+            action = LT("panel.tooltip.auto_on_held_action")
         elseif model.auto == true then
-            state = "Auto is selected ON: your enabled actions may Take, Banish, Reroll and Freeze for you."
-            action = "Click Auto to turn it OFF."
+            state = LT("panel.tooltip.auto_on_state")
+            action = LT("panel.tooltip.auto_on_action")
         elseif model.auto == false then
-            state = "Auto is OFF: Nexus only recommends; you choose."
-            action = "Click Auto to turn it ON; a warning asks first."
+            state = LT("panel.tooltip.auto_off_state")
+            action = LT("panel.tooltip.auto_off_action")
         else
-            state = "Auto is not known yet."
-            action = "Wait for Nexus to finish loading."
+            state = LT("panel.tooltip.auto_unknown_state")
+            action = LT("panel.tooltip.auto_unknown_action")
         end
         lines[#lines + 1] = state
         lines[#lines + 1] = action
-        lines[#lines + 1] = "When ON it may spend charges and change your Saved Build. Orb runs need their own approval."
+        lines[#lines + 1] = LT("panel.tooltip.auto_consequence")
     end
-    lines[#lines + 1] = "Full details: Options > Auto explained."
+    lines[#lines + 1] = LT("panel.tooltip.auto_full_details")
     return lines
 end
 
 function M.ShowAutoTooltip(owner)
     if not GameTooltip then return end
     GameTooltip:SetOwner(owner, "ANCHOR_TOP")
-    GameTooltip:AddLine("Auto", 1, 1, 1)
+    GameTooltip:AddLine(LT("panel.tooltip.auto_title"), 1, 1, 1)
     local lines = M.AutoSummaryLines()
     for i = 1, #lines do
         if i == #lines then GameTooltip:AddLine(lines[i], 1, 0.82, 0, true)
@@ -6644,8 +6690,8 @@ function M.ShowAutoTooltip(owner)
     -- committed model's state words were.
     -- An unreadable status leaves the current state unknown as well.
     local pause = M.PauseStatus()
-    local now = pause.paused and "Now: paused for this session"
-        or pause.unknown and "Now: unknown (the session pause cannot be read)"
+    local now = pause.paused and LT("panel.tooltip.auto_now_session_paused")
+        or pause.unknown and LT("panel.tooltip.auto_now_pause_unknown")
         or AutoNowLine(M._lastModel, 120)
     if now then GameTooltip:AddLine(now, 1, 0.82, 0, true) end
     GameTooltip:Show()
@@ -6715,7 +6761,7 @@ end
 function M.AutomationMenuItems(action)
     local readout = Nexus.Readout
     if not (readout and type(readout.AutomationSettingsRows) == "function") then
-        return {{text = "Automation settings are not available yet", notCheckable = true, disabled = true}}
+        return {{text = LT("panel.menu.automation_unavailable"), notCheckable = true, disabled = true}}
     end
     local store = Nexus.Store
     local okSettings, settings = false, nil
@@ -6765,22 +6811,26 @@ end
 -- again at that moment and alone holds the Store writer: this file never
 -- writes a setting. The result is said once in chat. Nothing is reloaded or
 -- refreshed: a saved choice applies after the next reload or login.
+-- The refusal codes' words (localization keys); the codes stay codes.
 local LANGUAGE_REASONS = {
-    startup = "Nexus is still starting",
-    capacity = "saved data is kept unchanged after a shared-data capacity refusal",
-    ["read-only"] = "this saved data is kept read-only by this build",
-    authority = "the saved-data owner is not available",
-    drift = "the saved data changed since start-up; reload first",
-    invalid = "that language is not available",
-    failed = "the saved-data owner did not take it",
+    startup = "panel.status.language_reason_startup",
+    capacity = "panel.status.language_reason_capacity",
+    ["read-only"] = "panel.status.language_reason_read_only",
+    authority = "panel.status.language_reason_authority",
+    drift = "panel.status.language_reason_drift",
+    invalid = "panel.status.language_reason_invalid",
+    failed = "panel.status.language_reason_failed",
 }
-local LANGUAGE_SCOPE = "Only selected main-panel labels and tooltips, status messages and the compact charge-count row are translated; other Nexus text stays English. Translations are drafts pending fluent and native review."
-local LANGUAGE_RELOAD = "A new choice applies after you reload the interface or log in again."
+local function LanguageReason(code)
+    return LT(LANGUAGE_REASONS[code] or "panel.status.language_reason_refused")
+end
+local function LanguageScope() return LT("panel.note.language_scope") end
+local function LanguageReload() return LT("panel.note.language_reload") end
 -- Issue #141: Automatic is a preference shown beside the installed packs,
 -- never one of them. This build reads no game language and has no evidenced
 -- client code for any pack, so Automatic shows English; the menu says so and
 -- never claims that a client locale is known.
-local LANGUAGE_AUTOMATIC = "Automatic shows English in this build: Nexus does not read the game's language, and no game language is mapped to a Nexus language."
+local function LanguageAutomatic() return LT("panel.note.language_automatic") end
 
 local function LanguageName(status, id)
     for _, row in ipairs(type(status) == "table" and type(status.languages) == "table"
@@ -6794,7 +6844,7 @@ end
 
 -- Issue #141: "Automatic (<the language it shows>)". Never a client locale.
 local function AutomaticName(status, id)
-    return "Automatic (" .. LanguageName(status, id) .. ")"
+    return LF("panel.menu.language_automatic", {language = LanguageName(status, id)})
 end
 
 -- The chooser's facts (see above). Reads only.
@@ -6835,18 +6885,18 @@ end
 -- The Options menu row: the active language, and a pending choice when there is one.
 function M.LanguageMenuLabel()
     local ok, status = pcall(M.LanguageStatus)
-    if not ok or type(status) ~= "table" then return "Language" end
+    if not ok or type(status) ~= "table" then return LT("panel.menu.language") end
     local name = status.activeAutomatic and AutomaticName(status, status.active)
         or LanguageName(status, status.active)
-    return "Language: " .. name
-        .. ((status.pending or status.preferencePending) and " (new choice after reload)" or "")
+    return LF((status.pending or status.preferencePending) and "panel.menu.language_row_pending"
+        or "panel.menu.language_row", {language = name})
 end
 
 -- The submenu rows. `action` wraps a click (the menu's MenuAction).
 function M.LanguageMenuItems(action)
     local status = M.LanguageStatus()
     local refusal = status.refusal
-    local items = {{text = "Nexus language", isTitle = true, notCheckable = true}}
+    local items = {{text = LT("panel.menu.language_title"), isTitle = true, notCheckable = true}}
     -- Issue #141: Automatic first, as a preference beside the packs (never
     -- one of them). Checked marks the saved preference; "- active" the
     -- language this session shows; "- in use" an Automatic session start.
@@ -6856,9 +6906,9 @@ function M.LanguageMenuItems(action)
     local pending = status.preferencePending or status.pending
     if automatic then
         local label = AutomaticName(status, status.automaticLanguage)
-        if status.activeAutomatic then label = label .. " - in use" end
+        if status.activeAutomatic then label = LF("panel.menu.language_in_use", {language = label}) end
         if pending and status.automatic then
-            label = label .. " - saved, applies after reload"
+            label = LF("panel.menu.language_saved_after_reload", {language = label})
         end
         items[#items + 1] = {text = label, checked = status.automatic == true,
             disabled = refusal ~= nil,
@@ -6867,32 +6917,32 @@ function M.LanguageMenuItems(action)
     for _, row in ipairs(type(status.languages) == "table" and status.languages or {}) do
         if type(row) == "table" and type(row.id) == "string" and type(row.name) == "string" then
             local id, label = row.id, row.name
-            if id == status.active then label = label .. " - active" end
+            if id == status.active then label = LF("panel.menu.language_active", {language = label}) end
             if pending and status.automatic ~= true and not status.savedUnsupported
                 and id == status.saved then
-                label = label .. " - saved, applies after reload"
+                label = LF("panel.menu.language_saved_after_reload", {language = label})
             end
             items[#items + 1] = {text = label, checked = status.automatic ~= true and id == status.saved,
                 disabled = refusal ~= nil,
                 func = action(function() M.ChooseLanguage(id) end)}
         end
     end
-    items[#items + 1] = {text = LANGUAGE_RELOAD, notCheckable = true, disabled = true}
-    items[#items + 1] = {text = LANGUAGE_SCOPE, notCheckable = true, disabled = true}
+    items[#items + 1] = {text = LanguageReload(), notCheckable = true, disabled = true}
+    items[#items + 1] = {text = LanguageScope(), notCheckable = true, disabled = true}
     if automatic then
-        items[#items + 1] = {text = LANGUAGE_AUTOMATIC, notCheckable = true, disabled = true}
+        items[#items + 1] = {text = LanguageAutomatic(), notCheckable = true, disabled = true}
     end
     if status.savedUnsupported then
-        items[#items + 1] = {text = "The saved language is not offered by this build; English is shown.",
+        items[#items + 1] = {text = LT("panel.note.language_saved_unsupported"),
             notCheckable = true, disabled = true}
     end
     if status.sessionOnly then
-        items[#items + 1] = {text = "The last choice was not saved, so it will not apply after a reload.",
+        items[#items + 1] = {text = LT("panel.note.language_session_only"),
             notCheckable = true, disabled = true}
     end
     if refusal ~= nil then
-        items[#items + 1] = {text = "Changes unavailable: " .. (LANGUAGE_REASONS[refusal]
-            or "the change was refused") .. ".", notCheckable = true, disabled = true}
+        items[#items + 1] = {text = LF("panel.note.language_changes_unavailable", {reason = LanguageReason(refusal)}),
+            notCheckable = true, disabled = true}
     end
     return items
 end
@@ -6904,28 +6954,26 @@ function M.LanguageResultText(result, id)
     local automatic = type(result) == "table" and result.automatic == true
     local name = automatic and AutomaticName(status, result.resolved)
         or LanguageName(status, type(result) == "table" and result.id or id)
-    local note = automatic and (" " .. LANGUAGE_AUTOMATIC) or ""
+    local note = automatic and (" " .. LanguageAutomatic()) or ""
     if state == "saved" then
         if result.pending then
-            return "Nexus language saved: " .. name .. ". " .. LANGUAGE_RELOAD .. " " .. LANGUAGE_SCOPE .. note
+            return LF("panel.chat.language_saved", {language = name}) .. " " .. LanguageReload() .. " "
+                .. LanguageScope() .. note
         elseif result.preferencePending then
-            return "Nexus language saved: " .. name .. ". The language shown does not change; "
-                .. "the saved choice is used from your next interface reload or login." .. note
+            return LF("panel.chat.language_saved_next_reload", {language = name}) .. note
         end
-        return "Nexus language saved: " .. name .. ". "
-            .. (automatic and "It is already this session's choice." or "It is already the active language.") .. note
+        return LF("panel.chat.language_saved", {language = name}) .. " "
+            .. LT(automatic and "panel.chat.language_already_session" or "panel.chat.language_already_active") .. note
     elseif state == "unchanged" then
-        return "Nexus language is already set to " .. name .. "; nothing was changed."
-            .. (result.pending and (" " .. LANGUAGE_RELOAD) or "") .. note
+        return LF("panel.chat.language_unchanged", {language = name})
+            .. (result.pending and (" " .. LanguageReload()) or "") .. note
     elseif state == "session" then
-        return "The language choice was not saved: only this session's settings took it, and it "
-            .. "would not last through the reload it needs. Nothing changes now."
+        return LT("panel.chat.language_session_only")
     elseif state == "unconfirmed" then
-        return "The language choice could not be confirmed as saved. Check the menu again after a reload."
+        return LT("panel.chat.language_unconfirmed")
     end
     local reason = type(result) == "table" and result.reason or nil
-    return "The language cannot be changed right now: " .. (LANGUAGE_REASONS[reason]
-        or "the change was refused") .. ". Nothing was changed."
+    return LF("panel.chat.language_refused", {reason = LanguageReason(reason)})
 end
 
 -- A row click: submits the choice through the lifecycle and says the result.
@@ -6971,7 +7019,7 @@ function M.NoteAutoClick(before, ok, state)
     local kind = blocked and "orb"
         or ((not warning or type(warning.RequestAuto) ~= "function") and "warning") or nil
     local text = Nexus.Readout and Nexus.Readout.AutoRefusalText
-        and Nexus.Readout.AutoRefusalText(kind, status) or ("Auto stayed OFF. " .. status)
+        and Nexus.Readout.AutoRefusalText(kind, status) or LF("panel.status.auto_stayed_off", {status = status})
     M._autoRefusal = {text = text, at = tonumber(GetTime()) or 0}
     local pr = model and type(model.progress) == "table" and model.progress or {}
     if not model or (tonumber(pr.total) or 0) <= 0 or not pr.wishlistName then
