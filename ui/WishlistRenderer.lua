@@ -1342,16 +1342,18 @@ local function EnsureFrame()
     titleText:SetPoint("TOP", 0, -14)
     titleText:SetText("Plan / Wishlist Editor")
 
-    -- The existing 900x18 context row under the header is the destination
-    -- row: editContextText is its first visible cell (character), and the
-    -- row, not that cell, is centred under the shared workspace header (the
-    -- title is placed in the header row, FullUIWorkspaces.ApplyHeader).
-    -- M.Refresh fills it.
+    -- The 972x18 context row under the header is the destination row:
+    -- editContextText is its first visible cell (character), and the row,
+    -- not that cell, is centred under the shared workspace header (the title
+    -- is placed in the header row, FullUIWorkspaces.ApplyHeader). It spans
+    -- the content width (1040 less 34 on each side; it was 900), so the
+    -- shared formatter can show more of the destination before shortening
+    -- (displayed item 6, #173). M.Refresh fills it.
     editContextText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     editContextText:SetJustifyH("LEFT")
     frame._destinationRow = Nexus.Panel.CreateDestinationRow(frame, editContextText)
     frame._destinationRow:SetPoint("TOP", frame, "TOP", 0, -38)
-    frame._destinationRow:SetSize(900, 18)
+    frame._destinationRow:SetSize(972, 18)
 
     wishlistNameLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     wishlistNameLabel:SetPoint("TOPLEFT", 34, -96)
@@ -1516,6 +1518,13 @@ local function EnsureFrame()
         end
         GameTooltip:AddLine("Switch wishlist", 1, 0.8, 0.3)
         GameTooltip:AddLine("Open a different saved wishlist in this editor.", 0.8, 0.8, 0.8, true)
+        -- Displayed item 6 (#173): Editing names what this editor opened and
+        -- holds; it is not a statement about the current assignment, which
+        -- this hover does not read.
+        if Controller.EditingContext and Controller.EditingContext() then
+            GameTooltip:AddLine("Editing: the Wishlist opened in this editor. Its current assignment "
+                .. "is not checked here; the row at the top shows what is known.", 0.8, 0.8, 0.8, true)
+        end
         GameTooltip:Show()
     end)
     wishlistSwitchBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1700,7 +1709,9 @@ local function EnsureFrame()
 
     searchBox = CreateFrame("EditBox", "NexusEditorSearch", frame,
         "InputBoxTemplate")
-    searchBox:SetSize(330, 22)
+    -- 250 units (was 330) leave the locked-slot strip and its automation
+    -- caption room to the left of My Builds; see frame._fitAutoLock.
+    searchBox:SetSize(250, 22)
     searchBox:SetPoint("TOPLEFT", 34, -126)
     searchBox:SetAutoFocus(false)
     searchBox:SetText(Controller.FilterState().search)
@@ -1723,7 +1734,7 @@ local function EnsureFrame()
     SyncSearchHint(searchBox)
 
     classCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
-    classCheck:SetPoint("LEFT", searchBox, "RIGHT", 18, 0)
+    classCheck:SetPoint("LEFT", searchBox, "RIGHT", 12, 0)
     classCheck:SetChecked(Controller.FilterState().classOnly)
     classCheck.text = classCheck:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     classCheck.text:SetPoint("LEFT", classCheck, "RIGHT", -2, 1)
@@ -1756,15 +1767,24 @@ local function EnsureFrame()
     frame._workspaceMyBuildsBtn:SetScript("OnLeave", function()
         GameTooltip:Hide()
     end)
-    -- The Auto-manage label ends 8 units left of My Builds (game) in the
-    -- closed state, at every slot count and Locked (n/m) width: its room is
-    -- worked out from the same anchors (the Locked label at x 540, 18-unit
-    -- slots 4 apart, the checkbox 26 right of the last), then the whole label,
-    -- else "Auto-manage", one line; the complete name is on hover over the
-    -- label and the checkbox. Presentation only; the checkbox is unchanged.
+    -- Displayed item 3 (#173): the separate, default-OFF locked-slot
+    -- automation option says what it is for without a hover. Its caption
+    -- ends 8 units left of My Builds (game) in the closed state, at every
+    -- slot count and Locked (n/m) width; its room is worked out from the same
+    -- anchors (18-unit slots 4 apart, the checkbox 12 right of the last). The
+    -- strip starts 12 units after the "Current class only" caption (never
+    -- right of the former x 540), so the caption has the room the narrower
+    -- search box leaves. The whole caption is shown on one line, else on up
+    -- to three measured lines (as many 14-unit-high lines as fit 42 units
+    -- beside the strip), else "Auto-manage locked slots" the same way; each
+    -- shown form names locked slots. With no room for either beside the
+    -- strip (the largest text sizes), the box and caption take their own
+    -- line under it (see below). The complete name stays on hover
+    -- over the label and the checkbox. Presentation only; the checkbox, its
+    -- setting and its guards are unchanged.
     local autoLockHit = Nexus.LayoutMetrics and Nexus.LayoutMetrics.FullTextTooltip
         and Nexus.LayoutMetrics.FullTextTooltip(autoLockLabel, frame) or nil
-    -- The check box itself is placed here too: 26 units after the last slot
+    -- The check box itself is placed here too: 12 units after the last slot
     -- while that leaves it 8 units left of My Builds, otherwise closer (never
     -- nearer than 6), so a long Locked (n/m) text or larger font cannot push
     -- the box under My Builds while only its label is hidden. The Locked
@@ -1781,9 +1801,21 @@ local function EnsureFrame()
         local full = "Auto-manage locked Echo slots"
         local n = math.max(1, math.min(8, math.floor(tonumber(slots) or 6)))
         local right = (tonumber(frame:GetWidth()) or 1040) - 34 - 140 - 8
+        -- The strip's left edge: after the class filter's caption, as that
+        -- caption is anchored (search box, 12, check box, -2), never right of
+        -- the former fixed x 540.
+        local origin = 540
+        local okC, cw = pcall(classCheck.text.GetStringWidth, classCheck.text)
+        cw = okC and tonumber(cw) or nil
+        local sw, bw = tonumber(searchBox:GetWidth()), tonumber(classCheck:GetWidth())
+        if cw and sw and bw then
+            origin = math.min(540, math.ceil(34 + sw + 12 + bw - 2 + cw + 12))
+        end
+        lockedLabel:ClearAllPoints()
+        lockedLabel:SetPoint("TOPLEFT", origin, -130)
         local okL, lw = pcall(lockedLabel.GetStringWidth, lockedLabel)
         lw = okL and tonumber(lw) or 60
-        local cap = math.floor(right - 22 - 6 - (22 * n - 4) - 8 - 540)
+        local cap = math.floor(right - 22 - 6 - (22 * n - 4) - 8 - origin)
         local caption = lockedLabel:GetText() or ""
         lockedLabel._nexusFullText = caption ~= "" and caption or nil
         if lw > cap then
@@ -1797,23 +1829,69 @@ local function EnsureFrame()
         if type(lockedLabel.SetWordWrap) == "function" then pcall(lockedLabel.SetWordWrap, lockedLabel, false) end
         lockedLabel:SetJustifyH("LEFT")
         lockedLabel:SetWidth(lw)
-        local slotsRight = 540 + lw + 8 + (22 * n - 4)
-        local gap = math.max(6, math.min(26, right - 22 - slotsRight))
+        local slotsRight = origin + lw + 8 + (22 * n - 4)
+        local gap = math.max(6, math.min(12, right - 22 - slotsRight))
         autoLockCheck:ClearAllPoints()
         autoLockCheck:SetPoint("LEFT", frame._nexusLockedSlot(n), "RIGHT", gap, 0)
         autoLockCheck._nexusAnchorSlot = n
         frame._autoLockClear = slotsRight + gap + 22 <= right
         local left = slotsRight + gap + 22 + 2
         local room = math.floor(right - left)
-        autoLockLabel:SetText(full)
-        local okF, fw = pcall(autoLockLabel.GetStringWidth, autoLockLabel)
-        fw = okF and tonumber(fw) or (#full * 6)
-        if fw > room then autoLockLabel:SetText("Auto-manage") end
         if type(autoLockLabel.SetWordWrap) == "function" then pcall(autoLockLabel.SetWordWrap, autoLockLabel, false) end
-        autoLockLabel:SetSize(math.max(1, room), 14)
+        -- One line's height and each candidate line's width, measured on
+        -- one unwrapped line at a time.
+        autoLockLabel:SetSize(1000, 14)
+        local function Measure(text)
+            autoLockLabel:SetText(text)
+            local ok, w = pcall(autoLockLabel.GetStringWidth, autoLockLabel)
+            return ok and tonumber(w) or (#text * 6)
+        end
+        Measure("Auto-manage")
+        local okH, lineHeight = pcall(autoLockLabel.GetStringHeight, autoLockLabel)
+        lineHeight = math.max(1, okH and tonumber(lineHeight) or 14)
+        local maxLines = math.max(1, math.min(3, math.floor(42 / lineHeight)))
+        local function Wrap(text)
+            local lines, current = {}, nil
+            for word in text:gmatch("%S+") do
+                local joined = current and (current .. " " .. word) or word
+                if Measure(joined) <= room then
+                    current = joined
+                elseif current and Measure(word) <= room then
+                    lines[#lines + 1] = current
+                    current = word
+                else
+                    return nil
+                end
+            end
+            lines[#lines + 1] = current
+            if #lines > maxLines then return nil end
+            return lines
+        end
+        local lines = room >= 24 and (Wrap(full) or Wrap("Auto-manage locked slots")) or nil
+        local drop = 0
+        if not lines then
+            -- No room beside the strip (the largest text sizes): the box and
+            -- its caption take their own line under the strip, from the
+            -- strip's left edge, and the lists and their titles move down
+            -- by that line (frame._applyContentDrop). The caption still
+            -- follows its box and ends 8 units left of My Builds.
+            local top = 130 + math.max(22, lineHeight) + 4
+            room = math.floor(right - (origin + 22 + 2))
+            maxLines = 3
+            lines = room >= 24 and (Wrap(full) or Wrap("Auto-manage locked slots")) or nil
+            local lineBox = math.max(22, lineHeight * (lines and #lines or 1))
+            autoLockCheck:ClearAllPoints()
+            autoLockCheck:SetPoint("TOPLEFT", frame, "TOPLEFT", origin, -(top + math.floor((lineBox - 22) / 2)))
+            frame._autoLockClear = origin + 22 <= right
+            drop = math.max(0, top + lineBox + 4 - 154)
+        end
+        autoLockLabel:SetText(lines and table.concat(lines, "\n") or full)
+        autoLockLabel:SetSize(math.max(1, room), lineHeight * (lines and #lines or 1))
         autoLockLabel._nexusFullText = full
-        if room < 24 then autoLockLabel:Hide() else autoLockLabel:Show() end
-        if autoLockHit then if room < 24 then autoLockHit:Hide() else autoLockHit:Show() end end
+        if lines then autoLockLabel:Show() else autoLockLabel:Hide() end
+        if autoLockHit then if lines then autoLockHit:Show() else autoLockHit:Hide() end end
+        frame._contentDrop = drop
+        if frame._applyContentDrop then frame._applyContentDrop(drop) end
         return room
     end
     frame._fitAutoLock(6)
@@ -1826,6 +1904,7 @@ local function EnsureFrame()
     local leftArea = CreateFrame("Frame", nil, frame)
     leftArea:SetPoint("TOPLEFT", 34, -180)
     leftArea:SetSize(600, MAX_ROWS * ROW_HEIGHT)
+    frame._leftArea = leftArea
     leftArea:EnableMouseWheel(true)
     leftArea:SetScript("OnMouseWheel", function(_, delta)
         Controller.AdjustScroll(delta)
@@ -1862,9 +1941,9 @@ local function EnsureFrame()
         row:SetScript("OnEnter", function(self)
             if not self.data then return end
             ShowEchoTooltip(self, self.data.spellId, "ANCHOR_RIGHT")
-            -- The status column (quality, Owned, Selected, Locked) is cut at
-            -- its 110 units with longer or larger text; the row's tooltip
-            -- always repeats it whole.
+            -- The status column (quality, Owned, Selected, Locked) is as wide
+            -- as its text (M.FitCatalogStatus, up to 260 units); the row's
+            -- tooltip still repeats it whole.
             local status = self.status and self.status:GetText()
             if status and status ~= "" and GameTooltip:IsShown() then
                 GameTooltip:AddLine(status, 1, 1, 1, true)
@@ -1898,6 +1977,7 @@ local function EnsureFrame()
     local pickArea = CreateFrame("Frame", nil, frame)
     pickArea:SetPoint("TOPLEFT", 674, -180)
     pickArea:SetSize(332, PICK_ROWS * ROW_HEIGHT)
+    frame._pickArea = pickArea
     pickArea:EnableMouseWheel(true)
     pickArea:SetScript("OnMouseWheel", function(_, delta)
         Controller.AdjustPick(delta)
@@ -1925,6 +2005,13 @@ local function EnsureFrame()
         row.text:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
         row.text:SetSize(224, ROW_HEIGHT)
         row.text:SetJustifyH("LEFT")
+        -- The planned copies (x2) and locked-slot notes end the name's 224
+        -- units on their own, so a long name cannot hide them
+        -- (M.SetPickRowText, displayed item 4, #173).
+        row.count = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.count:SetPoint("RIGHT", row, "LEFT", 250, 0)
+        row.count:SetSize(1, ROW_HEIGHT)
+        row.count:SetJustifyH("RIGHT")
 
         row.minus = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         row.minus:SetSize(22, 20); row.minus:SetPoint("RIGHT", -48, 0); row.minus:SetText("-")
@@ -2054,7 +2141,36 @@ local function EnsureFrame()
         divider:SetTexture(0.35, 0.35, 0.35, 0.65)
         divider:SetSize(1, 456)
         divider:SetPoint("TOPLEFT", 652, -180)
+        frame._divider = divider
     end)
+
+    -- The lists, their titles, Plan alternatives and the divider move down
+    -- by `drop` units while the locked-slot caption has its own line
+    -- (frame._fitAutoLock; 0 otherwise, the original places). Both lists
+    -- are sized at refresh: the catalog to the whole rows above its former
+    -- bottom edge, the Selected Echoes list to those above its footer.
+    frame._applyContentDrop = function(drop)
+        drop = math.max(0, math.floor(tonumber(drop) or 0))
+        header:ClearAllPoints()
+        header:SetPoint("TOPLEFT", 34, -158 - drop)
+        pickTitle:ClearAllPoints()
+        pickTitle:SetPoint("TOPLEFT", 674, -158 - drop)
+        planBtn:ClearAllPoints()
+        planBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -154 - drop)
+        leftArea:ClearAllPoints()
+        leftArea:SetPoint("TOPLEFT", 34, -180 - drop)
+        local pitch = frame._rowPitch or ROW_HEIGHT
+        leftArea:SetHeight(math.max(1, math.min(MAX_ROWS, math.floor(
+            (MAX_ROWS * ROW_HEIGHT - drop) / pitch))) * pitch)
+        pickArea:ClearAllPoints()
+        pickArea:SetPoint("TOPLEFT", 674, -180 - drop)
+        if frame._divider then
+            frame._divider:ClearAllPoints()
+            frame._divider:SetPoint("TOPLEFT", 652, -180 - drop)
+            frame._divider:SetHeight(MAX_ROWS * ROW_HEIGHT - drop)
+        end
+    end
+    frame._applyContentDrop(frame._contentDrop or 0)
 
     -- Background -- this was simply never added (not a crash, just an
     -- oversight, 2026-07-24). Separate pcall from the divider above so
@@ -2516,9 +2632,19 @@ local function RefreshView(catalogRevision)
     RefreshDisplayControls()
 
     local available = BuildAvailableList(catalog, catalogRevision)
-    scrollOffset = Controller.ClampScroll(#available, MAX_ROWS)
+    -- Fewer whole rows while the lists sit lower (frame._applyContentDrop).
+    -- Row pitch: at least ROW_HEIGHT, else one measured text line and 2
+    -- units, so a larger text size never runs a row into its neighbour.
+    local rowPitch = M.RowPitch(rows, pickRows)
+    frame._rowPitch = rowPitch
+    M.ApplyRowPitch(rows, rowPitch)
+    M.ApplyRowPitch(pickRows, rowPitch)
+    local catalogVisible = math.max(1, math.min(MAX_ROWS, math.floor(
+        (MAX_ROWS * ROW_HEIGHT - (frame._contentDrop or 0)) / rowPitch)))
+    if frame._leftArea then frame._leftArea:SetHeight(catalogVisible * rowPitch) end
+    scrollOffset = Controller.ClampScroll(#available, catalogVisible)
     for i, row in ipairs(rows) do
-        local data = available[scrollOffset + i]
+        local data = i <= catalogVisible and available[scrollOffset + i] or nil
         row.data = data
         if data then
             row:Show()
@@ -2550,6 +2676,7 @@ local function RefreshView(catalogRevision)
             else
                 row.status:SetText("|cffb8b8b8" .. qualityName .. "|r")
             end
+            M.FitCatalogStatus(row)
         else
             row:Hide()
         end
@@ -2561,7 +2688,7 @@ local function RefreshView(catalogRevision)
     local uniqueAvailable = 0
     for _ in pairs(availableFamilies) do uniqueAvailable = uniqueAvailable + 1 end
     footerText:SetText(string.format("Showing %d-%d of %d Echo/quality entries  •  %d distinct Echo names",
-        math.min(scrollOffset + 1, #available), math.min(#available, scrollOffset + MAX_ROWS),
+        math.min(scrollOffset + 1, #available), math.min(#available, scrollOffset + catalogVisible),
         #available, uniqueAvailable))
 
     local list = {}
@@ -2634,9 +2761,31 @@ local function RefreshView(catalogRevision)
         end
         list = filtered
     end
-    pickOffset = Controller.ClampPick(#list, PICK_ROWS)
+    -- M4 (UX-13): the editor counts a plan, so its rolled copies are planned.
+    -- Displayed item 4 (#173): that total is what a player checks before
+    -- saving, so it leads the first line (M.PackFooterText).
+    local footerParts = { "Planned rolled copies: " .. PendingTotal() .. "/79" }
+    if lockedCount > 0 then
+        footerParts[#footerParts + 1] = "Currently locked: " .. lockedCount
+            .. (lockedMaximum and ("/" .. lockedMaximum) or "")
+    end
+    local totalDesigned = designedCount + toLockCount
+    local targetParts = { "Locked targets: " .. totalDesigned .. "/6" }
+    -- realEntryCount, not #list -- the spliced-in "replaces" ghost rows are
+    -- a display aid, not separate wishlist entries, and shouldn't inflate
+    -- this count.
+    targetParts[#targetParts + 1] = realEntryCount .. " Echo/quality entries"
+    -- The footer is packed first: when its counts need more lines than its
+    -- 28 units, it grows upward and the list above shows fewer whole rows
+    -- (at least 8 units above the footer; exactly 8 at 28), so no count is
+    -- under a row.
+    local footerHeight = M.PackFooterText(pickFooterText, footerParts, targetParts)
+    local pickVisible = math.max(1, math.min(PICK_ROWS, math.floor((
+        PICK_ROWS * ROW_HEIGHT + 28 - footerHeight - (frame._contentDrop or 0)) / rowPitch)))
+    if frame._pickArea then frame._pickArea:SetHeight(pickVisible * rowPitch) end
+    pickOffset = Controller.ClampPick(#list, pickVisible)
     for i, row in ipairs(pickRows) do
-        local data = list[pickOffset + i]
+        local data = i <= pickVisible and list[pickOffset + i] or nil
         row.data = data
         if data and data.ghost then
             -- Read-only pairing row for the real-locked Echo a design above
@@ -2647,8 +2796,8 @@ local function RefreshView(catalogRevision)
             row.icon:SetTexture(SpellIcon(data.spellId))
             row.icon:SetVertexColor(0.5, 0.5, 0.5)
             row.text:SetTextColor(0.6, 0.6, 0.6)
-            row.text:SetText("    |cff8a8a8a-> replaces|r " .. data.name
-                .. "  |cff8a8a8a(currently locked)|r")
+            M.SetPickRowText(row, "    |cff8a8a8a-> replaces|r " .. data.name,
+                "|cff8a8a8a(currently locked)|r", true)
             if row.minus then row.minus:Hide() end
             if row.plus then row.plus:Hide() end
             if row.remove then row.remove:Hide() end
@@ -2667,16 +2816,16 @@ local function RefreshView(catalogRevision)
             if data.toLock then
                 -- Separate locked-slot target: core/Main.lua injects it into
                 -- automation without consuming or uploading a normal slot.
-                row.text:SetText("|cffff9040" .. data.name .. "  (locked slot)|r")
+                M.SetPickRowText(row, "|cffff9040" .. data.name .. "|r", "|cffff9040(locked slot)|r")
             elseif data.lockIntent then
                 -- Same separate locked-slot intent, represented on a pending
                 -- row for compatibility with an in-progress editor session.
                 -- It is excluded from the 79-copy upload and automated by its
                 -- committed exact spellId.
-                row.text:SetText(data.name .. "  |cffffd200x" .. tostring(data.stacks or 1)
+                M.SetPickRowText(row, data.name, "|cffffd200x" .. tostring(data.stacks or 1)
                     .. "|r  |cff40c0ff(locked slot)|r")
             else
-                row.text:SetText(data.name .. "  |cffffd200x" .. tostring(data.stacks or 1) .. "|r")
+                M.SetPickRowText(row, data.name, "|cffffd200x" .. tostring(data.stacks or 1) .. "|r")
             end
             -- An Echo that can only ever hold 1 stack has nothing to adjust --
             -- hiding +/- entirely for it instead of leaving inert-looking
@@ -2708,21 +2857,6 @@ local function RefreshView(catalogRevision)
             row:Hide()
         end
     end
-    local footerParts = {}
-    if lockedCount > 0 then
-        footerParts[#footerParts + 1] = "Currently locked: " .. lockedCount
-            .. (lockedMaximum and ("/" .. lockedMaximum) or "")
-    end
-    -- M4 (UX-13): the editor counts a plan, so its rolled copies are planned.
-    footerParts[#footerParts + 1] = "Planned rolled copies: " .. PendingTotal() .. "/79"
-    local totalDesigned = designedCount + toLockCount
-    local targetParts = { "Locked targets: " .. totalDesigned .. "/6" }
-    -- realEntryCount, not #list -- the spliced-in "replaces" ghost rows are
-    -- a display aid, not separate wishlist entries, and shouldn't inflate
-    -- this count.
-    targetParts[#targetParts + 1] = realEntryCount .. " Echo/quality entries"
-    pickFooterText:SetText(table.concat(footerParts, "  •  ")
-        .. "\n" .. table.concat(targetParts, "  •  "))
 end
 
     local function RefreshKeyMatches(known,controllerRevision,slots,active,
@@ -2843,9 +2977,142 @@ end
                     destinationRow._nexusEditorSlots,
                     panel.CachedDestinationCharacter(),
                     destinationRow._nexusEditorSelected),
-                900, 18)
+                972, 18)
         end
         return result
+    end
+
+    -- A catalog row's status column (quality, Owned, Selected, Locked) is as
+    -- wide as its text, at least the former 110 units and at most 260, so
+    -- "Uncommon · Owned" is not cut at a larger text size (displayed item 4,
+    -- #173). The name keeps the rest of the row up to its former 420 units;
+    -- it is never under the status. The row's tooltip still repeats both.
+    function M.FitCatalogStatus(row)
+        local ok, w = pcall(row.status.GetStringWidth, row.status)
+        w = ok and tonumber(w) or 110
+        local statusWidth = math.max(110, math.min(260, math.ceil(w) + 2))
+        row.status:SetWidth(statusWidth)
+        -- 28 units of icon and gap before the name, 12 after the status, 8
+        -- between them.
+        local rowWidth = tonumber(row:GetWidth()) or 600
+        row.text:SetWidth(math.max(1, math.min(420, rowWidth - 28 - 8 - statusWidth - 12)))
+    end
+
+    -- One text line's measured height in the list fonts (the catalog status
+    -- and a Selected row's copies), and the row pitch that leaves 2 units
+    -- between lines: ROW_HEIGHT (24) at the default sizes, more only when a
+    -- larger text size needs it (displayed item 4, #173).
+    function M.RowPitch(catalogRows, selectedRows)
+        local tallest = 0
+        for _, fs in ipairs({ catalogRows[1] and catalogRows[1].status,
+            catalogRows[1] and catalogRows[1].text,
+            selectedRows[1] and selectedRows[1].count }) do
+            local text, width = fs:GetText(), fs:GetWidth()
+            fs:SetWidth(1000)
+            fs:SetText("Xg")
+            local ok, h = pcall(fs.GetStringHeight, fs)
+            fs:SetText(text)
+            fs:SetWidth(width)
+            tallest = math.max(tallest, ok and tonumber(h) or 0)
+        end
+        return math.max(ROW_HEIGHT, math.ceil(tallest) + 2)
+    end
+
+    -- Rows placed `pitch` apart, each `pitch` high, with its name (and the
+    -- catalog status) as high as the row; buttons keep their sizes, centred.
+    function M.ApplyRowPitch(list, pitch)
+        for i, row in ipairs(list) do
+            if row._nexusPitch ~= pitch then
+                row._nexusPitch = pitch
+                row:SetHeight(pitch)
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", 0, -((i - 1) * pitch))
+                row.text:SetHeight(pitch)
+                if row.status then row.status:SetHeight(pitch) end
+            end
+        end
+    end
+
+    -- A Selected Echoes row: the name, then its copies or locked-slot note
+    -- right-aligned on one line. On a normal row the note ends the name's
+    -- 224 units, left of the - / + / remove controls; on the read-only
+    -- pairing row (`controlsHidden`, which has none of them) it ends 4 units
+    -- inside the row, so "(currently locked)" fits whole at larger text. The
+    -- note is as wide as its text and at least one line high; the name keeps
+    -- the rest (the client shortens a long one, whose whole name is on the
+    -- row's Echo tooltip).
+    function M.SetPickRowText(row, name, note, controlsHidden)
+        local count = row.count
+        if not count then
+            row.text:SetText(name .. "  " .. note)
+            return
+        end
+        local textRight = controlsHidden and ((tonumber(row:GetWidth()) or 332) - 4) or 250
+        count:ClearAllPoints()
+        count:SetPoint("RIGHT", row, "LEFT", textRight, 0)
+        if type(count.SetWordWrap) == "function" then pcall(count.SetWordWrap, count, false) end
+        count:SetText(note)
+        local ok, w = pcall(count.GetStringWidth, count)
+        local room = textRight - 26 - 24 - 6
+        w = math.min(room, math.ceil(ok and tonumber(w) or 40))
+        count:SetWidth(math.max(1, w + 2))
+        local okH, h = pcall(count.GetStringHeight, count)
+        count:SetHeight(math.max(1, math.ceil(okH and tonumber(h) or 14)))
+        row.text:SetWidth(math.max(24, textRight - 26 - (w + 2) - 6))
+        row.text:SetText(name)
+    end
+
+    -- The Selected Echoes footer (displayed item 4, #173). The counts are
+    -- unchanged. The parts are packed into lines that fit the 332-unit
+    -- width, measured one line at a time: the first part of `first` (the
+    -- planned rolled copies total) always leads line 1, the rest of `first`
+    -- joins it while it fits, else starts the next lines with `rest`. The box
+    -- (bottom-anchored above Save) is at least its former 28 units and as
+    -- high as all its lines, so every count is shown; the caller gives the
+    -- list above the remaining room, and the existing hover still repeats
+    -- the text if the client measures it taller. Returns the box height.
+    function M.PackFooterText(fontString, first, rest)
+        local sep = "  •  "
+        local width = tonumber(fontString:GetWidth()) or 332
+        local function Fits(text)
+            fontString:SetText(text)
+            local ok, w = pcall(fontString.GetStringWidth, fontString)
+            w = ok and tonumber(w) or nil
+            return w ~= nil and w <= width
+        end
+        local lines, line, carry = {}, first[1], {}
+        for i = 2, #first do
+            if Fits(line .. sep .. first[i]) then
+                line = line .. sep .. first[i]
+            else
+                carry[#carry + 1] = first[i]
+            end
+        end
+        lines[1] = line
+        for _, part in ipairs(rest) do carry[#carry + 1] = part end
+        line = nil
+        for _, part in ipairs(carry) do
+            if line and Fits(line .. sep .. part) then
+                line = line .. sep .. part
+            else
+                if line then lines[#lines + 1] = line end
+                line = part
+            end
+        end
+        if line then lines[#lines + 1] = line end
+        fontString:SetText(lines[1])
+        local ok, lineHeight = pcall(fontString.GetStringHeight, fontString)
+        lineHeight = math.max(1, ok and tonumber(lineHeight) or 14)
+        fontString._nexusFullText = nil
+        fontString:SetText(table.concat(lines, "\n"))
+        -- The whole text's own measured height, or one measured line each,
+        -- whichever is more.
+        fontString:SetHeight(0)
+        local okAll, measured = pcall(fontString.GetStringHeight, fontString)
+        measured = okAll and tonumber(measured) or 0
+        local height = math.ceil(math.max(28, measured, lineHeight * #lines))
+        fontString:SetHeight(height)
+        return height
     end
 
     function M.SetApplySaved()
