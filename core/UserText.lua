@@ -1,10 +1,64 @@
 -- Player-facing terminology only. Stable policy/reason codes and protocol data
 -- remain unchanged; diagnostics may retain original codes for support.
 -- Issue #123/#142: five reasons resolve their English text through the
--- Nexus.Localization seam (localizedReasons below); every other text here is
--- unchanged.
+-- Nexus.Localization seam (localizedReasons below).
+-- Full visible-UI localization (issues #143-#148, family "usertext"): every
+-- other visible output of this file except T.Guide (reason texts, refusals,
+-- waits, the "Not saved:" comparisons, annotations, the "Details:" suffix,
+-- destination words, count units, record scope, setup and status lines and
+-- terms) is shown through the same seam by a stable semantic key (reason.*,
+-- term.*, count.*, usertext.*), looked up at call time. The English beside
+-- each key here is its exact English base: it is shown only when the seam is
+-- absent or cannot give the key, so no English byte changes. T.Message's
+-- INPUTS are raw producer strings matched by English patterns: the inputs,
+-- the patterns and the values captured from them are never translated; a
+-- captured value reaches the output only as a template slot, verbatim. The
+-- output is presented once (ui/Panel.lua Present) and is never passed through
+-- T.Message again. The in-text rewrite chain at the end of T.Message rewrites
+-- fragments of producer-composed English and stays English until those
+-- producers are converted together with it (docs/localization-dynamic-cohorts.md).
+-- T.Guide (guided setup copy, read by ui/GuidedSetup.lua) is not covered here.
 Nexus=Nexus or {}
 local T={};Nexus.UserText=T
+
+-- The seam at call time (a test may swap Nexus.Localization), never cached.
+local function Seam()
+    local localization=Nexus.Localization
+    if type(localization)=="table" and type(localization.Text)=="function" then return localization end
+    return nil
+end
+-- A static meaning: the seam's text for key, else its exact English.
+local function Say(key,english)
+    local localization=Seam()
+    if localization then
+        local text,source=localization.Text(key)
+        if type(text)=="string" and source~="unavailable" then return text end
+    end
+    return english
+end
+-- A template meaning. args: field name -> a string (a "text" slot, inserted
+-- verbatim and never parsed again) or a whole number (a "count" slot, through
+-- Localization.Count). english is the exact English output, shown when the
+-- seam is absent or refuses (for example a slot value above its byte limit).
+local function SayF(key,args,english)
+    local localization=Seam()
+    if localization and type(localization.Format)=="function" and type(localization.Count)=="function" then
+        local slots={}
+        for name,value in pairs(args) do
+            slots[name]=type(value)=="number" and localization.Count(value) or value
+        end
+        local text,source=localization.Format(key,slots)
+        if type(text)=="string" and source~="unavailable" then return text end
+    end
+    return english
+end
+-- A {key, english} entry through Say; any other value (a code-owned glyph
+-- such as "?") as it is.
+local function Pick(entry)
+    if type(entry)=="table" then return Say(entry[1],entry[2]) end
+    return entry
+end
+
 local reasons={
     ["unsynced"]="Waiting for current Echo data from the server - automatic choices paused",
     ["waiting for owned-echo sync"]="Waiting for current Echo data from the server - automatic choices paused",
@@ -46,6 +100,50 @@ local reasons={
     ["Tome levers"]="Echo availability controls",
     ["flag demotions cleared (they re-arm on fresh evidence)"]="Temporary safety-assumption disablements cleared; new evidence can disable them again",
 }
+-- The stable semantic key of each reason above (raw producer reason -> key).
+-- Raw reasons with the same meaning share one key; the raw reason stays the
+-- lookup and is never rewritten. A key is never made from the reason's text.
+local reasonKeys={
+    ["unsynced"]="reason.wait_echo_data",
+    ["waiting for owned-echo sync"]="reason.wait_echo_data",
+    ["waiting for owned-state sync"]="reason.wait_echo_data",
+    ["no wishlist set - advisor only"]="reason.no_wishlist_advisor",
+    ["no wishlist"]="reason.assign_wishlist_targets",
+    ["pending-pick count"]="reason.wait_remaining_choice_count",
+    ["Orb state active or unknown"]="reason.orb_active_or_unconfirmed",
+    ["orb state not yet known"]="reason.orb_state_not_confirmed",
+    ["orb state unknown"]="reason.orb_state_unreadable",
+    ["orb state unavailable"]="reason.orb_state_unexposed",
+    ["orb state capability missing"]="reason.orb_knownness_unreported",
+    ["Orb offer active -- manual action required"]="reason.orb_offer_active",
+    ["Take wanted Echo (EchoWeaver)"]="reason.take_needed",
+    ["Take available Echo (EchoWeaver)"]="reason.take_available",
+    ["Freeze wanted Echo before search (EchoWeaver)"]="reason.freeze_needed_before_search",
+    ["Banish to find Wishlist targets (EchoWeaver)"]="reason.banish_find_targets",
+    ["Reroll: no requested Echo on board (EchoWeaver)"]="reason.reroll_no_requested",
+    ["Reroll: no needed Echo on board (EchoWeaver)"]="reason.reroll_none_needed",
+    ["Take available filler (EchoWeaver)"]="reason.take_outside_wishlist",
+    ["Take filler; search unavailable (EchoWeaver)"]="reason.take_outside_no_search",
+    ["Wishlist complete; take filler (EchoWeaver)"]="reason.complete_take_outside",
+    ["Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)"]="reason.freeze_one_needed",
+    ["Banish an unwanted Echo before Reroll (EchoWeaver, experimental)"]="reason.banish_unneeded_before_reroll",
+    ["Take the held wanted Echo instead of searching (EchoWeaver, experimental)"]="reason.take_held_needed",
+    ["Take wanted Echo"]="reason.take_needed",
+    ["invalid wishlist"]="reason.wishlist_unusable",
+    ["invalid loadout"]="reason.saved_build_invalid",
+    ["ROOT_PENDING"]="reason.library_preparing",
+    ["SOURCE_KEY_WIDTH_EXCEEDED"]="reason.record_key_unsupported",
+    ["preparing"]="reason.shared_data_preparing",
+    ["cleaning"]="reason.removing_expired_requests",
+    ["throttled"]="reason.wait_send_rate",
+    ["armed (guaranteed queue live)"]="reason.guaranteed_offer_marked",
+    ["Activate did not guarantee -- treating as unarmed"]="reason.no_guarantee_after_activate",
+    ["bracket fishing: reroll filler guarantee"]="reason.reroll_unneeded_guaranteed",
+    ["tight horizon"]="reason.few_selections_remain",
+    ["drain guaranteed queue"]="reason.use_shown_offer",
+    ["Tome levers"]="term.echo_availability_controls",
+    ["flag demotions cleared (they re-arm on fresh evidence)"]="reason.safety_disablements_cleared",
+}
 -- Reasons whose English text comes from Nexus.Localization (issue #123). The
 -- raw reason stays the lookup key and is never rewritten; the value is the
 -- stable semantic key of its reviewed text (data/LocalizationEnglish.lua).
@@ -64,12 +162,18 @@ local legacyWaitText={
     ["waiting for three-card board"]="Waiting for the next three Echo choices",
     ["waiting for pending-pick count"]="waiting for pending-pick count",
 }
+-- A tome's control name. The tome name is game catalog data and the id is the
+-- raw number from the producer's text: both are inserted verbatim.
 local function availabilityName(id)
     local a=Nexus.GameAdapter
     local catalog=a and a.Catalog and a.Catalog()
     local lever=catalog and catalog.levers and catalog.levers[tonumber(id)]
     local name=lever and lever.tomeName
-    return name and (tostring(name).." (control #"..id..")") or ("Echo-availability control #"..id)
+    if name then
+        local shown=tostring(name)
+        return SayF("usertext.label.tome_control",{name=shown,id=id},shown.." (control #"..id..")")
+    end
+    return SayF("usertext.label.availability_control",{id=id},"Echo-availability control #"..id)
 end
 -- One of those reasons through the seam. When the seam has no reviewed text
 -- for the key it returns its documented safe status and the raw code is kept
@@ -90,9 +194,32 @@ local function LocalizedReason(key,code)
     if legacyWaitText[code] then return legacyWaitText[code] end -- issue #142, seam absent
     return "This action is not available yet. Check the status or diagnostics. Details: "..code
 end
+-- A reason of the reasons table through the seam, with the same provenance
+-- rule as LocalizedReason: only a validated base/candidate result carries it.
+-- These reasons keep their English in this file, so a seam that cannot give
+-- the key shows that exact English (without provenance) instead of the safe
+-- status; the raw reason is never shown in place of its text.
+local function SeamReason(key,english)
+    local localization=Seam()
+    if localization then
+        local text,source=localization.Text(key)
+        if type(text)=="string" and text~="" and source~="unavailable" then
+            return text, (source=="base" or source=="candidate")
+                and type(localization.IsText)=="function" and localization.IsText(text)==true
+        end
+    end
+    return english
+end
+-- A whole count captured as digits from a producer's text, or nil when the
+-- number would not show its exact digits again (the English is then shown).
+local function CapturedCount(digits)
+    local value=tonumber(digits)
+    if value and tostring(value)==digits then return value end
+    return nil
+end
 function T.Message(value)
     local s=tostring(value or "")
-    if reasons[s] then return reasons[s] end
+    if reasons[s] then return SeamReason(reasonKeys[s],reasons[s]) end
     if localizedReasons[s] then return LocalizedReason(localizedReasons[s],s) end
     local prefix,body=s:match("^(L%d+ %-%- )(.*)$")
     if prefix then
@@ -105,33 +232,51 @@ function T.Message(value)
     body=s:match("^waiting: (.*)$")
     if body then return T.Message(body) end
     local id=s:match("^disabling off%-wishlist tome lever (%d+)$")
-    if id then return "Disabling off-Wishlist "..availabilityName(id) end
+    if id then
+        local control=availabilityName(id)
+        return SayF("usertext.status.disabling_control",{control=control},"Disabling off-Wishlist "..control)
+    end
     id=s:match("^re%-enabling wishlist tome lever (%d+)$")
-    if id then return "Enabling Wishlist "..availabilityName(id) end
+    if id then
+        local control=availabilityName(id)
+        return SayF("usertext.status.enabling_control",{control=control},"Enabling Wishlist "..control)
+    end
     local detail
     id,detail=s:match("^lever (%d+): (.*)$")
-    if id then return availabilityName(id)..": "..detail:gsub("non%-conformant data","unsupported availability data") end
+    if id then
+        -- The detail is the producer's raw text (one legacy fragment rewrite).
+        local control=availabilityName(id)
+        local shown=detail:gsub("non%-conformant data","unsupported availability data")
+        return SayF("usertext.status.control_detail",{control=control,detail=shown},control..": "..shown)
+    end
     if s:find("locked roles remain unknown",1,true) or s:find("awaiting authoritative lock evidence",1,true)
         or s:find("waiting for authoritative locked%-Echo evidence") then
-        return "Choose this Wishlist's locked Echo targets in the editor. Your planned build does not have to match the equipped build. Details: "..s
+        return SayF("reason.choose_locked_targets",{details=s},"Choose this Wishlist's locked Echo targets in the editor. Your planned build does not have to match the equipped build. Details: "..s)
     end
     if s:find("waiting for synchronized permanent locked%-Echo evidence") then
-        return "Waiting for the server's current locked Echo list. Details: "..s
+        return SayF("reason.wait_locked_echo_list",{details=s},"Waiting for the server's current locked Echo list. Details: "..s)
     end
     if s:find("waiting for the server mirror",1,true) then
-        return "The saved Wishlist is not available from the server yet. Details: "..s
+        return SayF("reason.wait_server_wishlist",{details=s},"The saved Wishlist is not available from the server yet. Details: "..s)
     end
     if s:find("payload changed",1,true) or s:find("preview is stale",1,true) then
-        return "This draft changed. Reopen it and review the current targets before saving. Details: "..s
+        return SayF("reason.draft_changed",{details=s},"This draft changed. Reopen it and review the current targets before saving. Details: "..s)
     end
     local lost,gain,fewer=s:match("exact wishlist progress regressed (%d+) %(gained (%d+), shed (%d+) exact stacks%)")
-    if lost then return "Not saved: this run matches "..lost.." fewer Wishlist copies ("..gain.." gained, "..fewer.." fewer than the saved build)." end
-    if s:find("cleanup-only save added new excess/wrong-quality pollution",1,true) then
-        return "Not saved: this run adds excess or wrong-quality copies compared with the saved build."
+    if lost then
+        local english="Not saved: this run matches "..lost.." fewer Wishlist copies ("..gain.." gained, "..fewer.." fewer than the saved build)."
+        local lostCount,gainCount,fewerCount=CapturedCount(lost),CapturedCount(gain),CapturedCount(fewer)
+        if not (lostCount and gainCount and fewerCount) then return english end
+        return SayF("reason.not_saved_fewer_copies",{lost=lostCount,gained=gainCount,fewer=fewerCount},english)
     end
-    if s:find("no net gain",1,true) then return "Not saved: no additional matching Wishlist copies were confirmed." end
-    if s:find("coverage lost:",1,true) then return "Not saved: some previously matched Wishlist targets would be lost. See diagnostics for the exact targets." end
-    if s:match("^[A-Z][A-Z0-9_]+$") then return "This action is not available yet. Check the status or diagnostics. Details: "..s end
+    if s:find("cleanup-only save added new excess/wrong-quality pollution",1,true) then
+        return Say("reason.not_saved_adds_excess","Not saved: this run adds excess or wrong-quality copies compared with the saved build.")
+    end
+    if s:find("no net gain",1,true) then return Say("reason.not_saved_no_gain","Not saved: no additional matching Wishlist copies were confirmed.") end
+    if s:find("coverage lost:",1,true) then return Say("reason.not_saved_coverage_lost","Not saved: some previously matched Wishlist targets would be lost. See diagnostics for the exact targets.") end
+    if s:match("^[A-Z][A-Z0-9_]+$") then
+        return SayF("reason.unknown_code",{code=s},"This action is not available yet. Check the status or diagnostics. Details: "..s)
+    end
     s=s:gsub("Take wanted Echo %(EchoWeaver%)","Take a needed Echo")
         :gsub("Wishlist identity found; ","")
         :gsub("TARGET:","WISHLIST:")
@@ -148,14 +293,31 @@ function T.Message(value)
         :gsub("waiting for owned%-echo sync","waiting for current Echo data from the server")
     return s
 end
+-- A card annotation code -> its {key, English}; EchoWeaver's own words for the
+-- same states share the key of that state.
+local ANNOTATIONS={
+    wanted={"usertext.label.card_needed","Needed"},
+    ["returns later"]={"usertext.label.card_not_taken_now","Not taken now; a later offer is not guaranteed"},
+    banked={"usertext.label.card_held_offer","Held offer"},
+    filler={"usertext.label.card_not_on_wishlist","Not on Wishlist"},
+    ["low quality"]={"usertext.label.card_different_quality","Different quality from target"},
+    ["target met"]={"usertext.label.card_target_met","Target already met"},
+    ["wrong quality"]={"usertext.label.card_different_quality","Different quality from target"},
+    -- EchoWeaver's own words for the same states.
+    ["target satisfied"]={"usertext.label.card_target_met","Target already met"},
+    frozen={"usertext.label.card_frozen_offer","Frozen offer"},
+}
 function T.Annotation(value)
-    return ({wanted="Needed",["returns later"]="Not taken now; a later offer is not guaranteed",
-        banked="Held offer",filler="Not on Wishlist",["low quality"]="Different quality from target",
-        ["target met"]="Target already met",["wrong quality"]="Different quality from target",
-        -- EchoWeaver's own words for the same states.
-        ["target satisfied"]="Target already met",frozen="Frozen offer"})[value] or T.Message(value)
+    local entry=value~=nil and ANNOTATIONS[value] or nil
+    if entry then return Say(entry[1],entry[2]) end
+    return T.Message(value)
 end
-function T.Details(code) return "Details: "..tostring(code or "unknown") end
+-- The support detail. The raw code is inserted verbatim and never translated.
+function T.Details(code)
+    if not code then return Say("usertext.label.details_no_code","Details: unknown") end
+    local shown=tostring(code)
+    return SayF("usertext.label.details",{code=shown},"Details: "..shown)
+end
 
 ------------------------------------------------------------------------
 -- M4 (UX-04/13/14/15): shared player-facing presentation of destinations,
@@ -164,6 +326,8 @@ function T.Details(code) return "Details: "..tostring(code or "unknown") end
 -- writes nothing and schedules nothing. An unknown is said as unknown or
 -- unavailable, never as 0, and a planned or partial state is never called
 -- complete. Names pass through the existing display sanitizer (UTF-8 safe).
+-- Each worded value comes from the seam by key (see the header); names,
+-- slot numbers and codes are template slots, never translated.
 ------------------------------------------------------------------------
 
 -- A whole, finite, non-negative number, else nil (unknown).
@@ -209,30 +373,61 @@ function T.SavedBuildLabel(slot, name, maxChars)
     slot = Whole(slot)
     local shown = T.SafeName(name, maxChars)
     if slot and slot >= 1 then
-        return shown and ("Saved Build '" .. shown .. "' (slot " .. slot .. ")")
-            or ("Saved Build " .. slot)
+        if shown then
+            return SayF("term.saved_build_named_slot", {name = shown, slot = tostring(slot)},
+                "Saved Build '" .. shown .. "' (slot " .. slot .. ")")
+        end
+        return SayF("term.saved_build_slot", {slot = tostring(slot)}, "Saved Build " .. slot)
     end
-    return shown and ("Saved Build '" .. shown .. "'") or nil
+    return shown and SayF("term.saved_build_named", {name = shown}, "Saved Build '" .. shown .. "'") or nil
 end
 
 -- Shared wording of the destination descriptor documented below, used by
 -- both DestinationLines and DestinationFields so that they cannot disagree.
--- Pure: these only word the facts they are given.
+-- Pure: these only word the facts they are given. Each state has its
+-- in-sentence words (lower case, after "Destination: " or "Captured; ") and
+-- the same words as a whole cell value (raised first letter): two keys,
+-- because a translation may word the two places differently.
+--   {lowerKey, lower English, cellKey, cell English}
 local SAVED_BUILD_STATE_WORDS = {
-    unavailable = "not available right now",
-    empty = "empty: it holds no Echoes, so assigning to it is refused",
-    active = "active in the game",
-    inactive = "not active in the game",
-    unconfirmed = "not confirmed as the active Saved Build",
+    unavailable = {"usertext.value.build_unavailable", "not available right now",
+        "usertext.value.build_unavailable_cell", "Not available right now"},
+    empty = {"usertext.value.build_empty", "empty: it holds no Echoes, so assigning to it is refused",
+        "usertext.value.build_empty_cell", "Empty: it holds no Echoes, so assigning to it is refused"},
+    active = {"usertext.value.build_active", "active in the game",
+        "usertext.value.build_active_cell", "Active in the game"},
+    inactive = {"usertext.value.build_inactive", "not active in the game",
+        "usertext.value.build_inactive_cell", "Not active in the game"},
+    unconfirmed = {"usertext.value.build_unconfirmed", "not confirmed as the active Saved Build",
+        "usertext.value.build_unconfirmed_cell", "Not confirmed as the active Saved Build"},
 }
--- The other destinations: their Saved Build cell and destination words.
+-- A Saved Build whose active state is not stated (DestinationFields only).
+local BUILD_STATE_NOT_KNOWN = {"usertext.value.build_state_not_known", "active state not known",
+    "usertext.value.build_state_not_known_cell", "Active state not known"}
+-- The other destinations: their Saved Build cell ({key, English}, a cell
+-- value) and destination words (as above).
 local DESTINATION_WORDS = {
-    firstRun = {build = "none in use", state = "first-run target (no Saved Build in use)"},
-    restoring = {build = "not known yet", state = "not known yet (the saved assignment is being restored)"},
-    unknown = {build = "not loaded yet", state = "Saved Build data is not loaded yet"},
-    unconfirmed = {build = "not confirmed right now", state = "not confirmed right now"},
-    none = {build = "none captured", state = "none captured"},
+    firstRun = {build = {"usertext.value.build_cell_none_in_use", "None in use"},
+        state = {"usertext.value.dest_first_run", "first-run target (no Saved Build in use)",
+            "usertext.value.dest_first_run_cell", "First-run target (no Saved Build in use)"}},
+    restoring = {build = {"usertext.value.build_cell_not_known_yet", "Not known yet"},
+        state = {"usertext.value.dest_restoring", "not known yet (the saved assignment is being restored)",
+            "usertext.value.dest_restoring_cell", "Not known yet (the saved assignment is being restored)"}},
+    unknown = {build = {"usertext.value.build_cell_not_loaded_yet", "Not loaded yet"},
+        state = {"usertext.value.dest_not_loaded", "Saved Build data is not loaded yet",
+            "usertext.value.dest_not_loaded_cell", "Saved Build data is not loaded yet"}},
+    unconfirmed = {build = {"usertext.value.build_cell_not_confirmed", "Not confirmed right now"},
+        state = {"usertext.value.dest_unconfirmed", "not confirmed right now",
+            "usertext.value.dest_unconfirmed_cell", "Not confirmed right now"}},
+    none = {build = {"usertext.value.build_cell_none_captured", "None captured"},
+        state = {"usertext.value.dest_none", "none captured",
+            "usertext.value.dest_none_cell", "None captured"}},
 }
+-- In-sentence (cell false) or whole-cell (cell true) words of such an entry.
+local function StateWords(entry, cell)
+    if cell then return Say(entry[3], entry[4]) end
+    return Say(entry[1], entry[2])
+end
 local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true, restoring = true}
 
 -- Compact alternatives (DestinationFields only). Display metadata: the value
@@ -275,20 +470,31 @@ local WISHLIST_STATES = {assigned = true, unassigned = true, unavailable = true,
 -- minimum ("P_"). No mark is a pipe or a control character; each is
 -- chosen from the descriptor codes, never cut from or parsed out of the
 -- worded value.
+-- Worded markers are {key, English} (Pick); the one-glyph marks and "?" are
+-- code-owned glyphs, the same in every language. The "C:", "P" and "PC"
+-- prefixes are keyed templates around the mark.
 local SAVED_BUILD_STATE_COMPACT = {
-    unavailable = {compact = "Unavailable", minimum = "N/A", mark = "x"},
-    empty = {compact = "Empty", minimum = "Empty", mark = "0"},
-    active = {compact = "Active", minimum = "On", mark = "+"},
-    inactive = {compact = "Inactive", minimum = "Off", mark = "-"},
-    unconfirmed = {compact = "Unconfirmed", minimum = "?", mark = "?"},
-    notStated = {compact = "Not known", minimum = "?", mark = "?"},
+    unavailable = {compact = {"usertext.value.compact_build_unavailable", "Unavailable"},
+        minimum = {"usertext.value.minimum_build_unavailable", "N/A"}, mark = "x"},
+    empty = {compact = {"usertext.value.compact_build_empty", "Empty"},
+        minimum = {"usertext.value.minimum_build_empty", "Empty"}, mark = "0"},
+    active = {compact = {"usertext.value.compact_build_active", "Active"},
+        minimum = {"usertext.value.minimum_build_active", "On"}, mark = "+"},
+    inactive = {compact = {"usertext.value.compact_build_inactive", "Inactive"},
+        minimum = {"usertext.value.minimum_build_inactive", "Off"}, mark = "-"},
+    unconfirmed = {compact = {"usertext.value.compact_build_unconfirmed", "Unconfirmed"}, minimum = "?", mark = "?"},
+    notStated = {compact = {"usertext.value.compact_build_not_known", "Not known"}, minimum = "?", mark = "?"},
 }
 local DESTINATION_COMPACT = {
-    firstRun = {build = "None", compact = "First run", minimum = "1st", mark = "1"},
-    restoring = {build = "?", compact = "Restoring", minimum = "Wait", mark = "~"},
-    unknown = {build = "?", compact = "Not loaded", minimum = "?", mark = "?"},
-    unconfirmed = {build = "?", compact = "Unconfirmed", minimum = "?", mark = "?"},
-    none = {build = "?", compact = "None", minimum = "None"},
+    firstRun = {build = {"usertext.value.compact_dest_build_none", "None"},
+        compact = {"usertext.value.compact_dest_first_run", "First run"},
+        minimum = {"usertext.value.minimum_dest_first_run", "1st"}, mark = "1"},
+    restoring = {build = "?", compact = {"usertext.value.compact_dest_restoring", "Restoring"},
+        minimum = {"usertext.value.minimum_dest_restoring", "Wait"}, mark = "~"},
+    unknown = {build = "?", compact = {"usertext.value.compact_dest_not_loaded", "Not loaded"}, minimum = "?", mark = "?"},
+    unconfirmed = {build = "?", compact = {"usertext.value.compact_dest_unconfirmed", "Unconfirmed"}, minimum = "?", mark = "?"},
+    none = {build = "?", compact = {"usertext.value.compact_dest_none", "None"},
+        minimum = {"usertext.value.minimum_dest_none", "None"}},
 }
 -- The one-glyph minimum mark of a stated Wishlist assignment state; an
 -- assigned Wishlist with a name shows that name instead (see
@@ -299,21 +505,16 @@ local WISHLIST_MINIMUM = {
 -- A stated Wishlist assignment state in compact words.
 local function WishlistCompact(wishlist, state)
     if state == "assigned" then
-        return wishlist or "Assigned"
+        return wishlist or Say("usertext.value.compact_wishlist_assigned", "Assigned")
     elseif state == "unassigned" then
-        return "None"
+        return Say("usertext.value.compact_wishlist_none", "None")
     elseif state == "unavailable" then
-        return wishlist and ("N/A: " .. wishlist) or "N/A"
+        return wishlist and SayF("usertext.value.compact_wishlist_unavailable_named", {name = wishlist}, "N/A: " .. wishlist)
+            or Say("usertext.value.compact_wishlist_unavailable", "N/A")
     elseif state == "restoring" then
-        return "Restoring"
+        return Say("usertext.value.compact_wishlist_restoring", "Restoring")
     end
-    return wishlist and ("?: " .. wishlist) or "?"
-end
-
--- A fixed phrase with its first letter raised when asked (ASCII words only,
--- never a name).
-local function Lead(text, capital)
-    return capital and (text:sub(1, 1):upper() .. text:sub(2)) or text
+    return wishlist and SayF("usertext.value.compact_wishlist_unknown_named", {name = wishlist}, "?: " .. wishlist) or "?"
 end
 
 -- The descriptor's facts as codes and display-safe names. The Saved Build
@@ -347,17 +548,25 @@ local function DestinationParts(d)
 end
 
 -- The Wishlist words for one assignment state, or the name alone when no
--- known state is given (nil when there is neither).
-local function WishlistWords(wishlist, state, capital)
+-- known state is given (nil when there is neither). cell: the words stand
+-- alone as a cell value (raised first letter) rather than after "Wishlist: ".
+local function WishlistWords(wishlist, state, cell)
     if state == "assigned" then
-        return wishlist and (wishlist .. " (assigned)") or Lead("assigned", capital)
+        if wishlist then return SayF("usertext.value.wishlist_assigned_named", {name = wishlist}, wishlist .. " (assigned)") end
+        return cell and Say("usertext.value.wishlist_assigned_cell", "Assigned")
+            or Say("usertext.value.wishlist_assigned", "assigned")
     elseif state == "unassigned" then
-        return Lead("none assigned", capital)
+        return cell and Say("usertext.value.wishlist_none_assigned_cell", "None assigned")
+            or Say("usertext.value.wishlist_none_assigned", "none assigned")
     elseif state == "unavailable" then
-        return wishlist and (wishlist .. " - unavailable right now")
-            or Lead("unavailable right now", capital)
+        if wishlist then
+            return SayF("usertext.value.wishlist_unavailable_named", {name = wishlist}, wishlist .. " - unavailable right now")
+        end
+        return cell and Say("usertext.value.wishlist_unavailable_cell", "Unavailable right now")
+            or Say("usertext.value.wishlist_unavailable", "unavailable right now")
     elseif state == "restoring" then
-        return Lead("restoring the saved assignment", capital)
+        return cell and Say("usertext.value.wishlist_restoring_cell", "Restoring the saved assignment")
+            or Say("usertext.value.wishlist_restoring", "restoring the saved assignment")
     end
     return wishlist
 end
@@ -380,16 +589,27 @@ function T.DestinationLines(d)
     d = type(d) == "table" and d or {}
     local lines = {}
     local p = DestinationParts(d)
-    if p.character then lines[#lines + 1] = "Character: " .. p.character end
-    if p.kind == "savedBuild" then
-        local state = SAVED_BUILD_STATE_WORDS[p.state]
-        lines[#lines + 1] = "Destination: " .. (p.label or "the selected Saved Build")
-            .. (state and (" - " .. state) or "")
-    else
-        lines[#lines + 1] = "Destination: " .. DESTINATION_WORDS[p.kind].state
+    if p.character then
+        lines[#lines + 1] = SayF("usertext.label.character_line", {name = p.character}, "Character: " .. p.character)
     end
+    local destination
+    if p.kind == "savedBuild" then
+        local entry = SAVED_BUILD_STATE_WORDS[p.state]
+        local build = p.label or Say("usertext.value.selected_build", "the selected Saved Build")
+        if entry then
+            local state = StateWords(entry, false)
+            destination = SayF("usertext.value.build_with_state", {build = build, state = state}, build .. " - " .. state)
+        else
+            destination = build
+        end
+    else
+        destination = StateWords(DESTINATION_WORDS[p.kind].state, false)
+    end
+    lines[#lines + 1] = SayF("usertext.label.destination_line", {destination = destination}, "Destination: " .. destination)
     local wishlist = WishlistWords(p.wishlist, d.wishlistState)
-    if wishlist then lines[#lines + 1] = "Wishlist: " .. wishlist end
+    if wishlist then
+        lines[#lines + 1] = SayF("usertext.label.wishlist_line", {wishlist = wishlist}, "Wishlist: " .. wishlist)
+    end
     return lines
 end
 
@@ -427,21 +647,23 @@ function T.DestinationFields(d)
         local name, slot = T.SafeName(d.name), Whole(d.slot)
         if slot and slot < 1 then slot = nil end
         if name and slot then
-            build = name .. " (slot " .. slot .. ")"
-            buildCompact = "#" .. slot .. " " .. name
+            build = SayF("usertext.value.build_name_slot", {name = name, slot = tostring(slot)},
+                name .. " (slot " .. slot .. ")")
+            buildCompact = SayF("usertext.value.compact_build_name_slot", {name = name, slot = tostring(slot)},
+                "#" .. slot .. " " .. name)
         elseif slot then
-            build = "Slot " .. slot
-            buildCompact = "#" .. slot
+            build = SayF("usertext.value.build_slot", {slot = tostring(slot)}, "Slot " .. slot)
+            buildCompact = SayF("usertext.value.compact_build_slot", {slot = tostring(slot)}, "#" .. slot)
         else
-            build = name or Lead("the selected Saved Build", true)
-            buildCompact = name or "Selected"
+            build = name or Say("usertext.value.selected_build_cell", "The selected Saved Build")
+            buildCompact = name or Say("usertext.value.compact_build_selected", "Selected")
         end
-        stateWords = SAVED_BUILD_STATE_WORDS[p.state] or "active state not known"
+        stateWords = SAVED_BUILD_STATE_WORDS[p.state] or BUILD_STATE_NOT_KNOWN
         stateShort = SAVED_BUILD_STATE_COMPACT[p.state] or SAVED_BUILD_STATE_COMPACT.notStated
     else
-        build = Lead(DESTINATION_WORDS[p.kind].build, true)
+        build = Pick(DESTINATION_WORDS[p.kind].build)
         stateWords = DESTINATION_WORDS[p.kind].state
-        buildCompact = DESTINATION_COMPACT[p.kind].build
+        buildCompact = Pick(DESTINATION_COMPACT[p.kind].build)
         stateShort = DESTINATION_COMPACT[p.kind]
     end
     local noAssignment = p.kind == "savedBuild" and d.empty and true or false
@@ -451,9 +673,12 @@ function T.DestinationFields(d)
     -- display-safe name, which is never cut or sanitized again here.
     local wishlist, wishlistCompact, wishlistMinimum
     if noAssignment then
-        local words = "no valid assignment (the Saved Build holds no Echoes)"
-        wishlist = p.wishlist and (p.wishlist .. " - " .. words) or Lead(words, true)
-        wishlistCompact = p.wishlist and ("Refused: " .. p.wishlist) or "Refused"
+        wishlist = p.wishlist and SayF("usertext.value.wishlist_refused_named", {name = p.wishlist},
+                p.wishlist .. " - no valid assignment (the Saved Build holds no Echoes)")
+            or Say("usertext.value.wishlist_refused", "No valid assignment (the Saved Build holds no Echoes)")
+        wishlistCompact = p.wishlist and SayF("usertext.value.compact_wishlist_refused_named", {name = p.wishlist},
+                "Refused: " .. p.wishlist)
+            or Say("usertext.value.compact_wishlist_refused", "Refused")
         wishlistMinimum = "!"
     elseif stated then
         wishlist = WishlistWords(p.wishlist, d.wishlistState, true)
@@ -463,28 +688,39 @@ function T.DestinationFields(d)
     elseif p.wishlist then
         -- Captured is the Wishlist held when the edit or view opened, never a
         -- current link; it says so instead of calling it assigned or in use.
-        wishlist = p.wishlist .. (captured and " (captured; not checked as assigned now)" or " (assignment not known)")
-        wishlistCompact = "?: " .. p.wishlist
+        wishlist = captured and SayF("usertext.value.wishlist_captured_named", {name = p.wishlist},
+                p.wishlist .. " (captured; not checked as assigned now)")
+            or SayF("usertext.value.wishlist_unknown_named", {name = p.wishlist}, p.wishlist .. " (assignment not known)")
+        wishlistCompact = SayF("usertext.value.compact_wishlist_unknown_named", {name = p.wishlist}, "?: " .. p.wishlist)
         wishlistMinimum = "?"
     else
-        wishlist = "Not known"
+        wishlist = Say("usertext.value.wishlist_not_known", "Not known")
         wishlistCompact = "?"
         wishlistMinimum = "?"
     end
     local state, stateCompact, stateMinimum
     if captured then
-        state = "Captured; " .. stateWords
-            .. ((noAssignment or stated) and "" or "; not checked as assigned now")
+        local words = StateWords(stateWords, false)
+        if noAssignment or stated then
+            state = SayF("usertext.value.state_captured", {state = words}, "Captured; " .. words)
+        else
+            state = SayF("usertext.value.state_captured_unchecked", {state = words},
+                "Captured; " .. words .. "; not checked as assigned now")
+        end
         -- "C:" keeps the capture visible; the state record's one-glyph mark
         -- keeps each state distinct, 3 glyphs in all (see the markers above).
         -- A captured first-run plan keeps its whole "first-run target" label
         -- (T.Terms.firstRun) in compact; its minimum stays "C:1".
-        stateCompact = p.kind == "firstRun" and "Captured: first-run target"
-            or ("Captured: " .. stateShort.compact)
-        stateMinimum = "C:" .. stateShort.mark
+        if p.kind == "firstRun" then
+            stateCompact = Say("usertext.value.compact_state_captured_first_run", "Captured: first-run target")
+        else
+            local compact = Pick(stateShort.compact)
+            stateCompact = SayF("usertext.value.compact_state_captured", {state = compact}, "Captured: " .. compact)
+        end
+        stateMinimum = SayF("usertext.value.minimum_state_captured", {mark = stateShort.mark}, "C:" .. stateShort.mark)
     else
-        state = Lead(stateWords, true)
-        stateCompact, stateMinimum = stateShort.compact, stateShort.minimum
+        state = StateWords(stateWords, true)
+        stateCompact, stateMinimum = Pick(stateShort.compact), Pick(stateShort.minimum)
     end
     -- d.preview == true (explicit only): the view shows a Community Build
     -- preview, not this destination's plan. Presentation only: the full and
@@ -496,42 +732,53 @@ function T.DestinationFields(d)
     -- record's mark, or "_" for a "none" destination (never captured).
     local preview = d.preview == true
     if preview then
-        state = "Preview; " .. state
-        stateCompact = "Preview: " .. stateCompact
-        stateMinimum = (captured and "PC" or "P")
-            .. (p.kind == "none" and "_" or stateShort.mark)
+        state = SayF("usertext.value.state_preview", {state = state}, "Preview; " .. state)
+        stateCompact = SayF("usertext.value.compact_state_preview", {state = stateCompact}, "Preview: " .. stateCompact)
+        local mark = p.kind == "none" and "_" or stateShort.mark
+        stateMinimum = captured
+            and SayF("usertext.value.minimum_state_preview_captured", {mark = mark}, "PC" .. mark)
+            or SayF("usertext.value.minimum_state_preview", {mark = mark}, "P" .. mark)
     end
     local fields = {
-        {key = "character", label = "Character", value = p.character or "Not known",
+        {key = "character", label = Say("usertext.label.field_character", "Character"),
+            value = p.character or Say("usertext.value.character_not_known", "Not known"),
             compact = p.character or "?"},
-        {key = "savedBuild", label = "Saved Build", value = build, compact = buildCompact},
-        {key = "wishlist", label = "Wishlist", value = wishlist, compact = wishlistCompact,
-            minimum = wishlistMinimum},
-        {key = "state", label = "State", value = state, compact = stateCompact,
-            minimum = stateMinimum},
+        {key = "savedBuild", label = Say("usertext.label.field_saved_build", "Saved Build"), value = build,
+            compact = buildCompact},
+        {key = "wishlist", label = Say("usertext.label.field_wishlist", "Wishlist"), value = wishlist,
+            compact = wishlistCompact, minimum = wishlistMinimum},
+        {key = "state", label = Say("usertext.label.field_state", "State"), value = state,
+            compact = stateCompact, minimum = stateMinimum},
     }
     local tooltip = {}
     for index = 1, #fields do
-        tooltip[index] = fields[index].label .. ": " .. fields[index].value
+        local label, value = fields[index].label, fields[index].value
+        tooltip[index] = SayF("usertext.tooltip.field_line", {label = label, value = value}, label .. ": " .. value)
     end
     if captured then
         -- The assignment words follow the facts given with it (review
         -- SPEC-GH-1): an empty Saved Build's refusal and a stated
         -- d.wishlistState are kept as given; only an unstated one is called
-        -- not checked. Nothing is looked up here.
+        -- not checked. Nothing is looked up here. Two sentences, joined by
+        -- this code with one space.
         local assignment
         if noAssignment then
-            assignment = "Assigning to it is refused: the Saved Build holds no Echoes."
+            assignment = Say("usertext.tooltip.captured_refused",
+                "Assigning to it is refused: the Saved Build holds no Echoes.")
         elseif stated then
-            assignment = "Its Wishlist line gives the assignment as stated for it; assigned now means the current link, which the Nexus panel shows."
+            assignment = Say("usertext.tooltip.captured_stated",
+                "Its Wishlist line gives the assignment as stated for it; assigned now means the current link, which the Nexus panel shows.")
         else
-            assignment = "It is not checked as assigned now: assigned now means the current link, which the Nexus panel shows."
+            assignment = Say("usertext.tooltip.captured_unchecked",
+                "It is not checked as assigned now: assigned now means the current link, which the Nexus panel shows.")
         end
-        tooltip[#tooltip + 1] = "Captured: shown as captured earlier, the destination held when this edit or view opened. "
-            .. assignment
+        tooltip[#tooltip + 1] = Say("usertext.tooltip.captured_lead",
+            "Captured: shown as captured earlier, the destination held when this edit or view opened.")
+            .. " " .. assignment
     end
     if preview then
-        tooltip[#tooltip + 1] = "Preview: a Community Build preview is shown; it is not this destination's assignment."
+        tooltip[#tooltip + 1] = Say("usertext.tooltip.preview",
+            "Preview: a Community Build preview is shown; it is not this destination's assignment.")
     end
     return fields, tooltip
 end
@@ -541,70 +788,100 @@ end
 -- row is {key, label, status, text}; status is "done", "todo", "waiting" or
 -- "unknown". Loading, restoring, unavailable and not-known are never "done",
 -- and whether the Welcome was seen or closed is not a fact here. complete is
--- true only when all three steps are done now.
-T.CHECK_MARKS = {done = "[done]", todo = "[to do]", waiting = "[waiting]", unknown = "[not known]", info = "[info]"}
+-- true only when all three steps are done now. key and status are the codes
+-- callers act on; label and text are display words only.
+local CHECK_MARK_WORDS = {done = {"usertext.label.mark_done", "[done]"}, todo = {"usertext.label.mark_todo", "[to do]"},
+    waiting = {"usertext.label.mark_waiting", "[waiting]"}, unknown = {"usertext.label.mark_not_known", "[not known]"},
+    info = {"usertext.label.mark_info", "[info]"}}
+-- Read at display time: T.CHECK_MARKS[status] is that status's mark.
+T.CHECK_MARKS = setmetatable({}, {__index = function(_, status)
+    local entry = CHECK_MARK_WORDS[status]
+    return entry and Say(entry[1], entry[2]) or nil
+end})
 function T.SetupChecklist(f)
     f = type(f) == "table" and f or {}
     local rows = {}
     local function row(key, label, status, text)
         rows[#rows + 1] = {key = key, label = label, status = status, text = text}
     end
+    local startup = Say("usertext.label.setup_startup", "Start-up")
+    local destinationLabel = Say("usertext.label.setup_destination", "Destination")
+    local wishlistLabel = Say("usertext.label.setup_wishlist", "Wishlist")
     if f.startup == "ready" then
-        row("startup", "Start-up", "done", "Local saved data is restored.")
+        row("startup", startup, "done", Say("usertext.status.setup_startup_ready", "Local saved data is restored."))
     elseif f.startup == "loading" then
-        row("startup", "Start-up", "waiting", "Local saved data is still being restored (see the loading panel).")
+        row("startup", startup, "waiting", Say("usertext.status.setup_startup_loading",
+            "Local saved data is still being restored (see the loading panel)."))
     else
-        row("startup", "Start-up", "unknown", "Start-up status cannot be read.")
+        row("startup", startup, "unknown", Say("usertext.status.setup_startup_unknown", "Start-up status cannot be read."))
     end
     local d = type(f.destination) == "table" and f.destination or nil
     if f.startup ~= "ready" then
-        row("destination", "Destination", "unknown", "Not known until start-up finishes.")
-        row("wishlist", "Wishlist", "unknown", "Not known until start-up finishes.")
+        local text = Say("usertext.status.setup_after_startup", "Not known until start-up finishes.")
+        row("destination", destinationLabel, "unknown", text)
+        row("wishlist", wishlistLabel, "unknown", text)
         return {rows = rows, complete = false}
     end
     if not d then
-        row("destination", "Destination", "unknown", "The Nexus panel has not shown a run yet.")
-        row("wishlist", "Wishlist", "unknown", "The Nexus panel has not shown a run yet.")
+        local text = Say("usertext.status.setup_no_run_shown", "The Nexus panel has not shown a run yet.")
+        row("destination", destinationLabel, "unknown", text)
+        row("wishlist", wishlistLabel, "unknown", text)
         return {rows = rows, complete = false}
     end
     local label = T.SavedBuildLabel(d.slot, d.name)
     local destinationDone = false
     if d.kind == "savedBuild" and d.empty then
-        row("destination", "Destination", "todo", (label or "The selected Saved Build")
-            .. " holds no Echoes, so a Wishlist cannot be assigned to it. Load a Saved Build that holds Echoes in the game's build window.")
+        local tail = " holds no Echoes, so a Wishlist cannot be assigned to it. Load a Saved Build that holds Echoes in the game's build window."
+        row("destination", destinationLabel, "todo", label
+            and SayF("usertext.status.setup_dest_empty_named", {build = label}, label .. tail)
+            or Say("usertext.status.setup_dest_empty", "The selected Saved Build" .. tail))
     elseif d.kind == "savedBuild" and d.unavailable then
-        row("destination", "Destination", "unknown", (label or "The Saved Build") .. " is not available right now.")
+        row("destination", destinationLabel, "unknown", label
+            and SayF("usertext.status.setup_dest_unavailable_named", {build = label}, label .. " is not available right now.")
+            or Say("usertext.status.setup_dest_unavailable", "The Saved Build is not available right now."))
     elseif d.kind == "savedBuild" and d.active == true then
         destinationDone = true
-        row("destination", "Destination", "done", (label or "A Saved Build") .. " is active in the game.")
+        row("destination", destinationLabel, "done", label
+            and SayF("usertext.status.setup_dest_active_named", {build = label}, label .. " is active in the game.")
+            or Say("usertext.status.setup_dest_active", "A Saved Build is active in the game."))
     elseif d.kind == "savedBuild" then
-        row("destination", "Destination", "unknown", "A Saved Build's plan is in use, but which Saved Build is active is not confirmed.")
+        row("destination", destinationLabel, "unknown", Say("usertext.status.setup_dest_unconfirmed",
+            "A Saved Build's plan is in use, but which Saved Build is active is not confirmed."))
     elseif d.kind == "firstRun" then
         destinationDone = true
-        row("destination", "Destination", "done", "The first-run target (no Saved Build in use).")
+        row("destination", destinationLabel, "done", Say("usertext.status.setup_dest_first_run",
+            "The first-run target (no Saved Build in use)."))
     elseif d.kind == "unknown" then
-        row("destination", "Destination", "waiting", d.reason == "restoring"
-            and "Not known yet: the saved assignment is being restored."
-            or "Not known yet: Saved Build data is not loaded.")
+        row("destination", destinationLabel, "waiting", d.reason == "restoring"
+            and Say("usertext.status.setup_dest_restoring", "Not known yet: the saved assignment is being restored.")
+            or Say("usertext.status.setup_dest_not_loaded", "Not known yet: Saved Build data is not loaded."))
     else
-        row("destination", "Destination", "unknown", "Not confirmed right now.")
+        row("destination", destinationLabel, "unknown", Say("usertext.status.setup_dest_not_confirmed", "Not confirmed right now."))
     end
     local wishlist = T.SafeName(d.wishlist)
     local state = d.wishlistState
     local wishlistDone = false
     if d.empty then
-        row("wishlist", "Wishlist", "todo", "Needs a Saved Build that holds Echoes first.")
+        row("wishlist", wishlistLabel, "todo", Say("usertext.status.setup_wishlist_needs_build",
+            "Needs a Saved Build that holds Echoes first."))
     elseif state == "assigned" then
         wishlistDone = true
-        row("wishlist", "Wishlist", "done", (wishlist and ("'" .. wishlist .. "'") or "A Wishlist") .. " is assigned.")
+        row("wishlist", wishlistLabel, "done", wishlist
+            and SayF("usertext.status.setup_wishlist_assigned_named", {name = wishlist}, "'" .. wishlist .. "' is assigned.")
+            or Say("usertext.status.setup_wishlist_assigned", "A Wishlist is assigned."))
     elseif state == "unassigned" then
-        row("wishlist", "Wishlist", "todo", "None assigned. Assign Wishlist... opens the chooser; nothing is assigned until you choose. No Wishlist yet? Create one in the Wishlist Editor.")
+        row("wishlist", wishlistLabel, "todo", Say("usertext.status.setup_wishlist_none",
+            "None assigned. Assign Wishlist... opens the chooser; nothing is assigned until you choose. No Wishlist yet? Create one in the Wishlist Editor."))
     elseif state == "restoring" then
-        row("wishlist", "Wishlist", "waiting", "The saved assignment is being restored.")
+        row("wishlist", wishlistLabel, "waiting", Say("usertext.status.setup_wishlist_restoring",
+            "The saved assignment is being restored."))
     elseif state == "unavailable" then
-        row("wishlist", "Wishlist", "unknown", (wishlist and ("'" .. wishlist .. "' is ") or "The assignment is ") .. "unavailable right now.")
+        row("wishlist", wishlistLabel, "unknown", wishlist
+            and SayF("usertext.status.setup_wishlist_unavailable_named", {name = wishlist},
+                "'" .. wishlist .. "' is unavailable right now.")
+            or Say("usertext.status.setup_wishlist_unavailable", "The assignment is unavailable right now."))
     else
-        row("wishlist", "Wishlist", "unknown", "Not known right now.")
+        row("wishlist", wishlistLabel, "unknown", Say("usertext.status.setup_wishlist_not_known", "Not known right now."))
     end
     return {rows = rows, complete = f.startup == "ready" and destinationDone and wishlistDone}
 end
@@ -612,9 +889,9 @@ end
 -- M7: Auto, Sync and Orb status as information lines (not setup steps). OFF
 -- and no Orb run are complete answers; an unread fact says it is not known.
 local SYNC_MODE_LINES = {
-    automatic = "Sync: Automatic. Nexus may send shared builds and DPS records without a click; what is sent may reach no one.",
-    manual = "Sync: Manual. Nexus sends only what you start (Sync Now or Share).",
-    off = "Sync: Off. Nexus sends nothing; local records are kept.",
+    automatic = {"usertext.status.sync_automatic", "Sync: Automatic. Nexus may send shared builds and DPS records without a click; what is sent may reach no one."},
+    manual = {"usertext.status.sync_manual", "Sync: Manual. Nexus sends only what you start (Sync Now or Share)."},
+    off = {"usertext.status.sync_off", "Sync: Off. Nexus sends nothing; local records are kept."},
 }
 -- The Orb line. orb: false (an observed owner with no approved run), nil
 -- (unknown; observed false: the owner was not read this session, so an
@@ -622,56 +899,78 @@ local SYNC_MODE_LINES = {
 -- Panel.SetupFacts. The reason is the text the Orb owner last recorded for its
 -- run, said as that and never as a fresh check; the operation is the run's
 -- recorded name, never a Resume target. Open Orbs reviews the current state.
-local ORB_STATE_WORDS = {PAUSED = "run paused", STOPPED = "run stopped",
-    LIMIT = "run stopped at its approved maximum", FINISHED = "run finished",
-    COMPLETE = "run ended: its selected targets were met",
-    ROLLED_COMPLETE = "run ended: its rolled targets were met",
-    OUT_OF_ORBS = "run ended: no Orbs were left", NO_SOURCES = "run ended: no safe source copies were left"}
-local ORB_UNRESOLVED = "an earlier Orb action is unresolved"
+-- The recorded reason, operation and an unlisted state code are inserted
+-- verbatim; the sentences around them are keyed and joined with one space.
+local ORB_STATE_WORDS = {PAUSED = {"usertext.status.orb_state_paused", "run paused"},
+    STOPPED = {"usertext.status.orb_state_stopped", "run stopped"},
+    LIMIT = {"usertext.status.orb_state_limit", "run stopped at its approved maximum"},
+    FINISHED = {"usertext.status.orb_state_finished", "run finished"},
+    COMPLETE = {"usertext.status.orb_state_complete", "run ended: its selected targets were met"},
+    ROLLED_COMPLETE = {"usertext.status.orb_state_rolled_complete", "run ended: its rolled targets were met"},
+    OUT_OF_ORBS = {"usertext.status.orb_state_out_of_orbs", "run ended: no Orbs were left"},
+    NO_SOURCES = {"usertext.status.orb_state_no_sources", "run ended: no safe source copies were left"}}
 local ORB_REASON_CHARS, ORB_NAME_CHARS = 280, 60
 local function OrbLine(orb, observed)
-    if orb == false then return "Orbs (optional): no Orb run approved this session." end
+    if orb == false then
+        return Say("usertext.status.orb_none_approved", "Orbs (optional): no Orb run approved this session.")
+    end
     if type(orb) ~= "table" then
         if observed == false then
-            return "Orbs (optional): not known. Orb status has not been read this session, so an unresolved earlier Orb action is not ruled out. Open Orbs to check."
+            return Say("usertext.status.orb_not_read",
+                "Orbs (optional): not known. Orb status has not been read this session, so an unresolved earlier Orb action is not ruled out. Open Orbs to check.")
         end
-        return "Orbs (optional): status not known right now."
+        return Say("usertext.status.orb_status_not_known", "Orbs (optional): status not known right now.")
     end
     local state = type(orb.state) == "string" and orb.state:match("^[%u_]+$") or nil
-    local head
-    if orb.running == true then head = "run running"
-    elseif orb.restored == true or state == "RECOVERY" then head = ORB_UNRESOLVED
-    elseif state and ORB_STATE_WORDS[state] then head = ORB_STATE_WORDS[state]
-    elseif state then head = "run in state " .. state
-    else head = "run state not known" end
-    local line = "Orbs (optional): " .. head
-        .. ((orb.pending == true and head ~= ORB_UNRESOLVED) and "; a result is pending." or ".")
+    -- unresolved is decided from the facts, never by comparing worded text.
+    local head, unresolved
+    if orb.running == true then head = Say("usertext.status.orb_state_running", "run running")
+    elseif orb.restored == true or state == "RECOVERY" then
+        unresolved = true
+        head = Say("usertext.status.orb_state_unresolved", "an earlier Orb action is unresolved")
+    elseif state and ORB_STATE_WORDS[state] then head = Pick(ORB_STATE_WORDS[state])
+    elseif state then head = SayF("usertext.status.orb_state_code", {code = state}, "run in state " .. state)
+    else head = Say("usertext.status.orb_state_not_known", "run state not known") end
+    local line
+    if orb.pending == true and not unresolved then
+        line = SayF("usertext.status.orb_line_pending", {state = head}, "Orbs (optional): " .. head .. "; a result is pending.")
+    else
+        line = SayF("usertext.status.orb_line", {state = head}, "Orbs (optional): " .. head .. ".")
+    end
     local operation = orb.pending == true and type(orb.operation) == "string"
         and T.SafeName(orb.operation, ORB_NAME_CHARS) or nil
-    if operation then line = line .. " Original operation (as recorded): '" .. operation .. "'." end
+    if operation then
+        line = line .. " " .. SayF("usertext.status.orb_operation", {name = operation},
+            "Original operation (as recorded): '" .. operation .. "'.")
+    end
     local reason = type(orb.reason) == "string" and T.SafeName(Utf8Cut(orb.reason, ORB_REASON_CHARS)) or nil
     if reason then
         if not reason:find("[%.!?]$") then reason = reason .. "." end
-        line = line .. " Last reason Nexus recorded: " .. reason
+        line = line .. " " .. SayF("usertext.status.orb_last_reason", {reason = reason}, "Last reason Nexus recorded: " .. reason)
     end
-    return line .. " Open Orbs to review it now and see the actions available there."
+    return line .. " " .. Say("usertext.status.orb_review", "Open Orbs to review it now and see the actions available there.")
 end
 function T.StatusLines(f)
     f = type(f) == "table" and f or {}
     local lines = {}
     if f.auto == true then
         local held = T.SafeName(f.autoNote or f.paused, 200)
-        lines[#lines + 1] = "Auto: ON" .. (held and (" - not acting now: " .. held) or "")
+        lines[#lines + 1] = held and SayF("usertext.status.auto_on_held", {reason = held}, "Auto: ON - not acting now: " .. held)
+            or Say("usertext.status.auto_on", "Auto: ON")
     elseif f.auto == false then
-        lines[#lines + 1] = "Auto: OFF. Recommendations only; turning Auto ON is your choice (read its warning first)."
+        lines[#lines + 1] = Say("usertext.status.auto_off",
+            "Auto: OFF. Recommendations only; turning Auto ON is your choice (read its warning first).")
     else
-        lines[#lines + 1] = "Auto: not known right now."
+        lines[#lines + 1] = Say("usertext.status.auto_not_known", "Auto: not known right now.")
     end
-    local sync = SYNC_MODE_LINES[f.syncMode]
+    local sync = f.syncMode ~= nil and SYNC_MODE_LINES[f.syncMode] or nil
     if sync then
-        lines[#lines + 1] = sync .. (f.syncExplicit == false and " (Not a choice you saved.)" or "")
+        local line = Pick(sync)
+        lines[#lines + 1] = f.syncExplicit == false
+            and SayF("usertext.status.sync_not_saved_choice", {line = line}, line .. " (Not a choice you saved.)")
+            or line
     else
-        lines[#lines + 1] = "Sync: mode not known right now."
+        lines[#lines + 1] = Say("usertext.status.sync_not_known", "Sync: mode not known right now.")
     end
     lines[#lines + 1] = OrbLine(f.orb, f.orbObserved)
     return lines
@@ -680,25 +979,40 @@ end
 -- One count vocabulary. These are different units and are never merged:
 -- planned copies (the plan), rolled copies this run, the Wishlist's copies
 -- found in a Saved Build, locked targets, and Echo families represented (a
--- family counts once whatever its copies).
-local COUNT_UNITS = {
-    planned = "rolled copies planned",
-    run = "rolled copies this run",
-    savedBuild = "Wishlist copies in this Saved Build",
-    locked = "locked targets",
-    families = "Echo families represented",
+-- family counts once whatever its copies). Each unit has its own keys: the
+-- bare unit, its "have / want" line and its unavailable line (a whole
+-- sentence per unit, so a translation can agree the unit with its numbers).
+-- An unknown kind keeps the plain "copies" wording.
+local COUNT_KINDS = {
+    planned = {unit = "count.planned_copies", english = "rolled copies planned", progress = "count.planned_progress",
+        unavailable = "count.planned_unavailable", unavailableEnglish = "Rolled copies planned: unavailable"},
+    run = {unit = "count.run_copies", english = "rolled copies this run", progress = "count.run_progress",
+        unavailable = "count.run_unavailable", unavailableEnglish = "Rolled copies this run: unavailable"},
+    savedBuild = {unit = "count.saved_build_copies", english = "Wishlist copies in this Saved Build",
+        progress = "count.saved_build_progress", unavailable = "count.saved_build_unavailable",
+        unavailableEnglish = "Wishlist copies in this Saved Build: unavailable"},
+    locked = {unit = "count.locked_targets", english = "locked targets", progress = "count.locked_progress",
+        unavailable = "count.locked_unavailable", unavailableEnglish = "Locked targets: unavailable"},
+    families = {unit = "count.echo_families", english = "Echo families represented", progress = "count.families_progress",
+        unavailable = "count.families_unavailable", unavailableEnglish = "Echo families represented: unavailable"},
 }
-T.COUNT_UNITS = COUNT_UNITS
+local COUNT_COPIES = {english = "copies", progress = "count.copies_progress",
+    unavailable = "count.copies_unavailable", unavailableEnglish = "Copies: unavailable"}
+-- Read at display time: T.COUNT_UNITS[kind] is that unit's words.
+T.COUNT_UNITS = setmetatable({}, {__index = function(_, kind)
+    local entry = kind ~= nil and COUNT_KINDS[kind] or nil
+    return entry and Say(entry.unit, entry.english) or nil
+end})
 
 -- "12 / 79 rolled copies this run", or "Rolled copies this run: unavailable"
 -- when either side is unknown (never 0 / 0 or a guessed total).
 function T.CountText(kind, have, want)
-    local unit = COUNT_UNITS[kind] or "copies"
+    local entry = kind ~= nil and COUNT_KINDS[kind] or COUNT_COPIES
     local h, w = Whole(have), Whole(want)
     if h == nil or w == nil or w <= 0 then
-        return unit:sub(1, 1):upper() .. unit:sub(2) .. ": unavailable"
+        return Say(entry.unavailable, entry.unavailableEnglish)
     end
-    return h .. " / " .. w .. " " .. unit
+    return SayF(entry.progress, {have = h, want = w}, h .. " / " .. w .. " " .. entry.english)
 end
 
 -- The run's own progress line. Locked targets still to lock are said; the
@@ -707,12 +1021,18 @@ end
 function T.RunProgressText(have, want, lockedOutstanding, compact)
     local h, w, outstanding = Whole(have), Whole(want), Whole(lockedOutstanding)
     if h == nil or w == nil or w <= 0 then
-        return compact and "Rolled: unavailable" or "Rolled copies this run: unavailable"
+        if compact then return Say("count.rolled_unavailable_compact", "Rolled: unavailable") end
+        return Say("count.run_unavailable", "Rolled copies this run: unavailable")
     end
     if outstanding and outstanding > 0 then
-        return h .. " / " .. w .. " rolled, " .. outstanding .. (compact and " to lock" or " still to lock")
+        local args = {have = h, want = w, outstanding = outstanding}
+        if compact then
+            return SayF("count.run_to_lock_compact", args, h .. " / " .. w .. " rolled, " .. outstanding .. " to lock")
+        end
+        return SayF("count.run_to_lock", args, h .. " / " .. w .. " rolled, " .. outstanding .. " still to lock")
     end
-    return h .. " / " .. w .. (compact and " rolled" or " rolled copies this run")
+    if compact then return SayF("count.run_progress_compact", {have = h, want = w}, h .. " / " .. w .. " rolled") end
+    return SayF("count.run_progress", {have = h, want = w}, h .. " / " .. w .. " rolled copies this run")
 end
 
 -- Complete only when the rolled copies are met AND no locked target is
@@ -723,16 +1043,18 @@ function T.ProgressComplete(have, want, lockedOutstanding)
 end
 
 -- Record scope (DPS records and leaderboards): what this client holds, not a
--- complete or server-wide ranking.
-T.BEST_KNOWN = "Best known"
-T.RECORD_SCOPE = "Best known: the best shared record this client holds for these exact Echoes. "
-    .. "It is not a complete or server-wide ranking."
-T.LEADERBOARD_SCOPE = "Best known exact loadout per character"
+-- complete or server-wide ranking. T.BEST_KNOWN, T.RECORD_SCOPE,
+-- T.LEADERBOARD_SCOPE and T.GLOSSARY are read at display time (the metatable
+-- of T below), so they show the active language.
+local BEST_KNOWN = {"term.best_known", "Best known"}
+local RECORD_SCOPE = {"usertext.note.record_scope", "Best known: the best shared record this client holds for these exact Echoes. "
+    .. "It is not a complete or server-wide ranking."}
+local LEADERBOARD_SCOPE = {"usertext.label.leaderboard_scope", "Best known exact loadout per character"}
 
 function T.CategoryName(category)
-    if category == "lk" then return "Lich King" end
-    if category == "dummy" then return "Training Dummy" end
-    if category == "combined" then return "Both records" end
+    if category == "lk" then return Say("usertext.label.category_lich_king", "Lich King") end
+    if category == "dummy" then return Say("usertext.label.category_training_dummy", "Training Dummy") end
+    if category == "combined" then return Say("usertext.label.category_both", "Both records") end
     return nil
 end
 
@@ -746,16 +1068,19 @@ function T.RecordDetailParts(row)
     if category then parts[#parts + 1] = category end
     local duration = Whole(row.duration)
     if duration and duration > 0 then
-        parts[#parts + 1] = string.format("%d:%02d fight", math.floor(duration / 60), duration % 60)
+        local shown = string.format("%d:%02d", math.floor(duration / 60), duration % 60)
+        parts[#parts + 1] = SayF("usertext.value.fight_duration", {duration = shown}, shown .. " fight")
     end
     local level = Whole(row.level)
-    if level and level > 0 then parts[#parts + 1] = "Level " .. level end
+    if level and level > 0 then
+        parts[#parts + 1] = SayF("usertext.value.record_level", {level = tostring(level)}, "Level " .. level)
+    end
     local stamp = Whole(row.ts)
     local formatDate = (type(date) == "function" and date) or (type(os) == "table" and os.date) or nil
     if stamp and stamp > 0 and formatDate then
         local ok, text = pcall(formatDate, "!%Y-%m-%d", stamp)
         if ok and type(text) == "string" and text ~= "" then
-            parts[#parts + 1] = "Recorded " .. text .. " (UTC)"
+            parts[#parts + 1] = SayF("usertext.value.recorded_date", {date = text}, "Recorded " .. text .. " (UTC)")
         end
     end
     return parts
@@ -765,36 +1090,49 @@ end
 -- the record does not say (unknown is not presented as either).
 function T.OwnerLine(row)
     if type(row) ~= "table" then return nil end
-    if row.ownerVerified == true then return "Owner verified" end
-    if row.ownerVerified == false then return "Owner identity not established" end
+    if row.ownerVerified == true then return Say("usertext.label.owner_verified", "Owner verified") end
+    if row.ownerVerified == false then
+        return Say("usertext.label.owner_not_established", "Owner identity not established")
+    end
     return nil
 end
 
 -- One user meaning per label (UX-15). Internal identifiers, protocol fields
 -- and saved-data names keep their own spelling and are not listed here.
-T.Terms = {
+-- Read at display time: T.Terms[name] is that term's words.
+local TERMS = {
     -- Issue #165: the panel's menu button shows "Options" (ui/Panel.lua
     -- OptionsLabel, localized as panel.button.options); its hover carries the
     -- status. The old key name is kept for existing readers; it now holds the
     -- visible name, never the retired "Menu and status" or a bare ellipsis.
-    options = "Options",
-    menuAndStatus = "Options",
-    bestKnown = T.BEST_KNOWN,
-    showRecords = "Show DPS records",
+    options = {"term.options", "Options"},
+    menuAndStatus = {"term.options", "Options"},
+    bestKnown = BEST_KNOWN,
+    showRecords = {"term.show_records", "Show DPS records"},
     -- The game's own page that lists your Saved Builds.
-    myBuildsPage = "My Builds",
+    myBuildsPage = {"term.my_builds", "My Builds"},
     -- The Build Library scope that lists your Saved Builds and shared listings
     -- (internal scope key "mine").
-    mineScope = "Mine",
-    firstRun = "first-run target",
+    mineScope = {"term.mine_scope", "Mine"},
+    firstRun = {"term.first_run_target", "first-run target"},
 }
-T.GLOSSARY = "Counts: planned copies (the plan), rolled copies this run, the Wishlist's copies in a Saved Build "
+T.Terms = setmetatable({}, {__index = function(_, name)
+    local entry = name ~= nil and TERMS[name] or nil
+    return entry and Say(entry[1], entry[2]) or nil
+end})
+local GLOSSARY = {"usertext.body.glossary", "Counts: planned copies (the plan), rolled copies this run, the Wishlist's copies in a Saved Build "
     .. "and locked targets are different counts, and Echo families represented counts a family once. "
     .. "Unavailable is not 0, and a plan is not a finished build. Best known: the best shared DPS record this "
     .. "client holds for the exact same Echoes; it is not a complete or server-wide ranking. My Builds is the "
     .. "game's page of your Saved Builds; in Build Library, the Mine scope lists your Saved Builds and "
     .. "shared listings. Options: the Options button on the Nexus panel header opens its menu of direct "
-    .. "choices; point at it for the current status."
+    .. "choices; point at it for the current status."}
+local DISPLAY_FIELDS = {BEST_KNOWN = BEST_KNOWN, RECORD_SCOPE = RECORD_SCOPE,
+    LEADERBOARD_SCOPE = LEADERBOARD_SCOPE, GLOSSARY = GLOSSARY}
+setmetatable(T, {__index = function(_, name)
+    local entry = name ~= nil and DISPLAY_FIELDS[name] or nil
+    return entry and Say(entry[1], entry[2]) or nil
+end})
 
 ------------------------------------------------------------------------
 -- Guided setup coach copy (ui/GuidedSetup.lua, issue #131), from the Claude
