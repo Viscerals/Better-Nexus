@@ -24,10 +24,12 @@
 --     already-open list not current at once, in its title and above the
 --     names; the failed candidate never reaches it; the next good render
 --     makes it current again; nothing is queried, sent or saved.
--- X3  item 7: at the default, 16 px and double font models, in the listed,
---     stale, unknown and empty forms, the title, status, note, scrolling
---     names, scroll bar and Close keep apart inside the window, the names
---     keep a viewport of four rows, and every name stays in the body.
+-- X4  item 7: on the 640 x 480 floor and ordinary screens, at the default,
+--     16 px and double font models, in the listed, stale (after the actual
+--     header failure), unknown and empty forms, the window fits the screen;
+--     the title, the not-current warning, the X and Close stay pinned and
+--     apart; the explanation and every name scroll in one region whose child
+--     holds every wrapped line, and scrolling to its end reaches the last.
 -- H1  item 8: X and Hide Nexus Panel say once how to bring the panel back and
 --     light the minimap button; a repeat hide says nothing; showing clears it.
 -- U1  item 12: plain version and update words keep the exact installed build;
@@ -405,66 +407,91 @@ C.scenario('X2 a failed panel render marks an open extra list not current, witho
  P._playDetails=false
 end)
 
-C.scenario('X3 the list keeps title, note, names, scroll bar and Close apart at every supported font model',function()
+C.scenario('X4 the list fits the screen it is on, with every line and its controls reachable',function()
  local G=dofile('tests/prototype/layout_geometry_support.lua')
  local methods=G.RegionMethods()
  local saved={GetStringHeight=methods.GetStringHeight,GetStringWidth=methods.GetStringWidth,
   GetTextWidth=methods.GetTextWidth,GetFont=methods.GetFont}
+ local uiW,uiH=UIParent:GetWidth(),UIParent:GetHeight()
  P._playDetails=true
- C.setup(P.Render(Model(Extras(41)))==true,'X3: fixture: 41 extra copies')
- for _,key in ipairs({'default','px16','double'}) do
-  local model=G.MODELS[key]
+ -- Supported floor (LayoutMetrics.FitToScreen, the Community viewport: 640 x 480)
+ -- with the largest text model, and ordinary screens.
+ local cases={{640,480,'double'},{640,480,'px16'},{640,480,'default'},{1024,768,'px16'},{1366,768,'double'},{1920,1080,'default'}}
+ for _,case in ipairs(cases) do
+  local sw,sh,model=case[1],case[2],G.MODELS[case[3]]
+  UIParent:SetSize(sw,sh)
   G.UseFont(model)
   for _,form in ipairs({'listed','stale','unknown','empty'}) do
-   local committed=nil
+   local why='X4 '..sw..'x'..sh..' '..model.name..' '..form
    if form=='stale' then
-    P.Render(Model(Extras(41)))
-    P.ShowExtraList()
+    P.Render(Model(Extras(41)));P.ShowExtraList()
     local realHeader=P.UpdateContextHeader
     P.UpdateContextHeader=function() error('injected',0) end
-    pcall(P.Render,Model(Extras(2)))
+    pcall(P.Render,Model({'Failed Candidate Echo ×9 (Epic:×9)'}))
     P.UpdateContextHeader=realHeader
    else
-    P.Render(Model(form=='listed' and Extras(41) or form=='empty' and {} or nil))
-    P.ShowExtraList()
+    P.Render(Model(form=='listed' and Extras(41) or form=='empty' and {} or nil));P.ShowExtraList()
    end
    local list=_G.NexusExtraCopiesList
-   local why='X3 '..model.name..' '..form
    if not C.setup(list and list:IsShown(),why..': fixture: the list is open') then break end
    local function R(region) return G.Rect(region,list) end
-   -- A text's box reaches as far down as its wrapped rows under the model,
-   -- whatever height the region was given (the reviewer's measurement).
    local function T(text)
     local r=R(text)
-    local need=G.Rows(text:GetText(),text:GetWidth(),model.char)*model.line
-    r[4]=math.max(r[4],r[2]+need)
+    r[4]=math.max(r[4],r[2]+G.Rows(text:GetText(),text:GetWidth(),model.char)*model.line)
     return r
    end
-   local box=R(list)
-   local title,note,scroll,close,closeX=T(list.title),T(list.note),R(list.scroll),R(list.close),R(list.closeX)
-   local status=list.status and list.status:IsShown() and T(list.status) or nil
-   local above=status or title
-   C.expect(title[4]<=(status and status[2] or note[2]) and (not status or status[4]<=note[2]),
-    why..': title, status and note do not overlap',G.Text(title)..' '..(status and G.Text(status) or '-')..' '..G.Text(note))
-   C.expect(note[4]<=scroll[2],why..': the note ends above the scrolling names',G.Text(note)..' / '..G.Text(scroll))
-   C.expect(G.Apart(title,closeX),why..': the title stays clear of the X',G.Text(title)..' / '..G.Text(closeX))
-   C.expect(scroll[4]<=close[2],why..': Close sits below the names',G.Text(scroll)..' / '..G.Text(close))
-   C.expect(scroll[4]-scroll[2]>=4*model.line,why..': the names keep a viewport of four rows at least',scroll[4]-scroll[2])
-   C.expect(G.Inside(title,box) and G.Inside(note,box) and G.Inside(scroll,box) and G.Inside(close,box),
-    why..': every part is inside the window',G.Text(box))
+   local W,Hh=list:GetWidth(),list:GetHeight()
+   -- The window itself fits the screen: clamping cannot move a window that is larger than it.
+   C.expect(W<=sw and Hh<=sh,why..': the window fits the screen',W..'x'..Hh..' on '..sw..'x'..sh)
+   local box,scroll,close,closeX=R(list),R(list.scroll),R(list.close),R(list.closeX)
+   print('OBSERVED',why,'window '..W..'x'..Hh,'scroll view '..(scroll[4]-scroll[2]),'child '..list.child:GetHeight())
+   local title=T(list.title)
+   local status=list.status:IsShown() and T(list.status) or nil
+   -- Pinned parts and controls inside the window, apart from the scrolling region.
+   C.expect(G.Inside(title,box) and G.Inside(close,box) and G.Inside(closeX,box) and G.Inside(scroll,box),
+    why..': title, X, Close and the scrolling region are inside the window',G.Text(title)..' '..G.Text(scroll)..' '..G.Text(close))
+   C.expect(title[4]<=(status and status[2] or scroll[2]) and (not status or status[4]<=scroll[2]) and scroll[4]<=close[2]
+    and G.Apart(title,closeX),why..': title, status, scrolling region and Close do not overlap',
+    G.Text(title)..' '..(status and G.Text(status) or '-')..' '..G.Text(scroll)..' '..G.Text(close))
+   C.expect(scroll[4]-scroll[2]>=3*model.line,why..': the scrolling region shows three rows at least',scroll[4]-scroll[2])
+   -- The stale warning is never scrolled away: it is pinned and shown whole.
+   if form=='stale' then
+    C.expect(status~=nil and Plain(list.status:GetText()):find('Not current',1,true)==1 and G.Inside(status,box),
+     why..': the not-current warning is pinned in view')
+    C.guard(not (list.body:GetText() or ''):find('Failed Candidate',1,true),why..': the failed candidate never reaches the list')
+   else
+    C.expect(status==nil,why..': a current list shows no warning')
+   end
+   -- Everything else scrolls: the note and every name sit in the scroll child,
+   -- and the scroll child is as tall as their wrapped rows, so scrolling to the
+   -- end reaches the last line.
+   local child=list.child
+   local inChild=list.note:GetParent()==child and list.body:GetParent()==child
+   C.expect(inChild,why..': the note and the names scroll together')
+   local need=0
+   for _,text in ipairs({list.note,list.body}) do
+    if (text:GetText() or '')~='' then need=need+G.Rows(text:GetText(),text:GetWidth(),model.char)*model.line end
+   end
+   C.expect(child:GetHeight()>=need,why..': the scroll child holds every wrapped line',child:GetHeight()..' < '..need)
+   C.expect(list.body:GetWidth()<=scroll[3]-scroll[1] and list.note:GetWidth()<=scroll[3]-scroll[1],
+    why..': the scrolled text is no wider than its region',list.body:GetWidth()..'/'..(scroll[3]-scroll[1]))
+   local range=math.max(0,child:GetHeight()-(scroll[4]-scroll[2]))
+   list.scroll:SetVerticalScroll(range)
+   local bottom=R(child)
+   C.expect(bottom[4]<=scroll[4]+0.5,why..': scrolled to the end, the last line is in the region',G.Text(bottom)..' / '..G.Text(scroll))
+   list.scroll:SetVerticalScroll(0)
    if form=='listed' or form=='stale' then
     local body=list.body:GetText() or ''
     local missing=0
-    for i=1,41 do if not body:find(i..'. ',1,true) then missing=missing+1 end end
-    C.guard(missing==0 and body:find(LONG,1,true)~=nil,why..': every name is still in the scrolling body, whole',missing)
-    C.expect(list.child:GetHeight()>=G.Rows(body,list.body:GetWidth(),model.char)*model.line,
-     why..': the scroll child is as tall as the wrapped names',list.child:GetHeight())
+    for i,name in ipairs(Extras(41)) do if not body:find(i..'. '..name,1,true) then missing=missing+1 end end
+    C.guard(missing==0,why..': every name, count and quality is listed whole',missing)
    end
-   C.guard(above~=nil,why..': fixture')
-   list:Hide()
+   list.close:Click()
+   C.guard(not list:IsShown(),why..': Close closes it')
   end
  end
  for key,fn in pairs(saved) do methods[key]=fn end
+ UIParent:SetSize(uiW,uiH)
  P._playDetails=false
  P.Render(Model(Extras(41)))
 end)
