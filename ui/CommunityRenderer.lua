@@ -971,6 +971,17 @@ function Renderer.New(options)
     }
 
     local frame, scrollChild, scrollFrame, scrollBar
+    -- Issue #144 passivity (early review PD1-P2-1): the page the view shows.
+    -- A published projection may clamp a saved page beyond the results (a
+    -- saved 99 of 3 pages shows page 3). That clamp is view state only
+    -- (frame._nexusPageView, keyed by the saved request it was made for);
+    -- it is never saved. Explicit page actions start from this shown page.
+    local function ViewPage(filters)
+        local page = math.max(1, math.floor(tonumber(filters and filters.page) or 1))
+        local view = frame and frame._nexusPageView
+        if view and view.requested == page then return view.shown end
+        return page
+    end
     local detailPanel
     local searchBox, clearSearchBtn, classDropBtn, qualifiedBtn, dropPanel
     local sortToggle, sortPanel
@@ -3699,7 +3710,7 @@ local function EnsureFrame()
     if (FilterSettings().search or "") == "" then clearSearchBtn:Hide() end
     clearSearchBtn:SetScript("OnClick",function()
         local filters = FilterSettings()
-        local requestedPage = math.max(1,math.floor(tonumber(filters.page) or 1))
+        local requestedPage = ViewPage(filters)
         ControllerInstance().SetFilter("search", "")
         suppressSearchChange = true
         searchBox:SetText("")
@@ -3914,9 +3925,9 @@ local function EnsureFrame()
     prevPageBtn:SetText(T("library.button.page_prev"))
     frame._prevPageBtn = prevPageBtn
     prevPageBtn:SetScript("OnClick",function()
-        local filters = FilterSettings()
-        if (filters.page or 1) <= 1 then return end
-        ControllerInstance().SetFilter("page", (filters.page or 1) - 1)
+        local page = ViewPage(FilterSettings())
+        if page <= 1 then return end
+        ControllerInstance().SetFilter("page", page - 1)
         if scrollBar then scrollBar.value = 0 end
         pump.RefreshContext()
     end)
@@ -3933,8 +3944,7 @@ local function EnsureFrame()
     nextPageBtn:SetText(T("library.button.page_next"))
     frame._nextPageBtn = nextPageBtn
     nextPageBtn:SetScript("OnClick",function()
-        local filters = FilterSettings()
-        ControllerInstance().SetFilter("page", (filters.page or 1) + 1)
+        ControllerInstance().SetFilter("page", ViewPage(FilterSettings()) + 1)
         if scrollBar then scrollBar.value = 0 end
         pump.RefreshContext()
     end)
@@ -4340,7 +4350,7 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
     -- A page click is cheap state too. Show the requested page immediately
     -- while retaining both the last-good rows and their last published bound
     -- until the deferred projection can clamp and publish the new result.
-    local requestedPage = math.max(1, math.floor(tonumber(fs.page) or 1))
+    local requestedPage = ViewPage(fs)
     local visiblePageCount = math.max(requestedPage, lastPublishedPageCount)
     if pageText then
         pageText:SetText(string.format("%d / %d", requestedPage,
@@ -4418,8 +4428,11 @@ function M.RenderRefresh(respectHold, statusAlreadyRefreshed)
         viewDiagnostic.pump.Note()
         return false, projectionError
     end
-    if projectionSummary and fs.page ~= projectionSummary.page then
-        ControllerInstance().SetFilter("page", projectionSummary.page)
+    -- The clamp is view state only (ViewPage); nothing is saved here.
+    if projectionSummary then
+        local requested = math.max(1, math.floor(tonumber(fs.page) or 1))
+        frame._nexusPageView = requested ~= projectionSummary.page
+            and {requested = requested, shown = projectionSummary.page} or nil
         fs.page = projectionSummary.page
     end
     if projectionSummary then

@@ -125,4 +125,115 @@ do
  Passive(r,'leaderboard open')
 end
 
+-- Early review PD1-P2-1 (565b2d2): a saved page beyond the projected pages
+-- is clamped for the view only. A passive open, render, refresh, select and
+-- hide/reopen never call the saved-filter writer (Controller.SetFilter) or
+-- add page/pageSize/classFilter defaults; the explicit Prev/Next buttons
+-- save the page next to the DISPLAYED page (page 2 from a shown page 3, not
+-- 98 from a saved 99); a disabled boundary button writes nothing; a scope
+-- change resets the view without a stale clamp. A future-format (read-only)
+-- root keeps its saved bytes through both passive and explicit steps.
+-- Each phase is measured from a baseline taken after an intentional boot
+-- and the same idle settling as its control.
+local function ControllerOf()
+ for i=1,40 do
+  local n,v=debug.getupvalue(Nexus.CommunityBuilds.Select,i)
+  if not n then break end
+  if n=='ControllerInstance' then return v() end
+ end
+ error('SETUP controller upvalue missing')
+end
+local function Saved99()
+ return {page=99,currentClassOnly=false,qualifiedOnly=false,scope='all',search='',custom={keep=17,nested={deep=true}}}
+end
+local function PageBoot(readOnly)
+ local db=readOnly and F.Database({version=6}) or F.Database()
+ local profile=T.Profile(45,0)
+ db.communityBuilds,db.loadoutEvidence=profile.communityBuilds,profile.loadoutEvidence
+ db.buildFilters=Saved99()
+ local H=F.Boot(db)
+ check(Nexus.StartupStatus().state~='pending','SETUP page fixture startup completed')
+ return H
+end
+local function Settle(H) for _=1,60 do H.Advance(.05,.05) end end
+local function Writes()
+ local C=ControllerOf();local calls={};local old=C.SetFilter
+ C.SetFilter=function(k,v) calls[#calls+1]=tostring(k)..'='..tostring(v);return old(k,v) end
+ return calls,function() C.SetFilter=old end
+end
+local function Shown()
+ local f=NexusCommunityBuildsFrame
+ local a,b=tostring(f._pageText:GetText()):match('^(%d+) / (%d+)$')
+ return tonumber(a),tonumber(b),f._prevPageBtn:IsEnabled(),f._nextPageBtn:IsEnabled()
+end
+
+-- Matched control: the same boot and idle settling with no window makes no
+-- filter write, so later calls are the UI's own.
+do
+ local H=PageBoot(false)
+ local calls,restore=Writes()
+ Settle(H)
+ restore()
+ check(#calls==0 and NexusDB.buildFilters.page==99,'SETUP idle control: no filter write, saved page 99 kept')
+end
+
+do
+ local H=PageBoot(false)
+ local CB=Nexus.CommunityBuilds
+ local saved=NexusDB.buildFilters
+ local custom=saved.custom
+ local savedBytes=F.Serialize(saved)
+ local calls,restore=Writes()
+ local actions,sends=#H.actions,#H.sent
+ CB.Show();Settle(H)
+ local page,count,prev,nxt=Shown()
+ check(count and count>=3,'SETUP the fixture projects several pages: '..tostring(count))
+ check(page==count and prev and not nxt,'EXPECT the view shows the clamped last page with truthful controls: '..tostring(page)..' / '..tostring(count))
+ CB.Refresh();Settle(H)
+ CB.Select('synthetic-startup-1');CB.Refresh();CB.Hide();CB.Show();Settle(H)
+ page,count=Shown()
+ check(page==count,'EXPECT refresh, select and hide/reopen keep the clamped view')
+ check(#calls==0,'EXPECT passive open/refresh/select/reopen never call the saved-filter writer: '..table.concat(calls,','))
+ check(NexusDB.buildFilters==saved and saved.page==99 and saved.pageSize==nil and saved.classFilter==nil,
+  'EXPECT the saved request (page 99) stays, and no default is added')
+ check(F.Serialize(saved)==savedBytes and saved.custom==custom and custom.nested.deep==true,'EXPECT saved filter bytes, unknown and nested fields unchanged')
+ check(#H.actions==actions and #H.sent==sends,'GUARD no game action or send')
+ -- Explicit Prev from the displayed page.
+ NexusCommunityBuildsFrame._prevPageBtn:Click();Settle(H)
+ check(#calls==1 and calls[1]=='page='..(count-1),'EXPECT Prev saves the page before the DISPLAYED one: '..table.concat(calls,','))
+ check(saved.page==count-1 and saved.pageSize==20,'EXPECT the explicit page choice is saved with its defaults')
+ page=Shown()
+ check(page==count-1,'EXPECT the view follows the explicit page')
+ -- Explicit Next to the last page; the disabled Next then writes nothing.
+ NexusCommunityBuildsFrame._nextPageBtn:Click();Settle(H)
+ check(#calls==2 and calls[2]=='page='..count and saved.page==count,'EXPECT Next saves the page after the displayed one')
+ local _,_,_,nextEnabled=Shown()
+ check(not nextEnabled,'SETUP Next is disabled on the last page')
+ NexusCommunityBuildsFrame._nextPageBtn:Click()
+ check(#calls==2,'EXPECT a disabled boundary button writes nothing')
+ -- A scope change resets the view: no stale clamp.
+ NexusCommunityBuildsFrame._myBuildsBtn:Click();Settle(H)
+ page=Shown()
+ check(saved.scope=='mine' and saved.page==1 and page==1,'EXPECT an explicit scope change shows page 1, not a stale clamp')
+ restore()
+end
+
+-- Future-format (read-only) root: the same passive and explicit steps never
+-- touch the saved root; the explicit page stays session-only.
+do
+ local H=PageBoot(true)
+ local CB=Nexus.CommunityBuilds
+ local before=F.Serialize(NexusDB)
+ local calls,restore=Writes()
+ CB.Show();Settle(H)
+ local page,count=Shown()
+ check(count and page==count and #calls==0,'EXPECT read-only root: the clamped view, no writer call')
+ check(F.Serialize(NexusDB)==before,'EXPECT read-only root: saved bytes unchanged by the passive open')
+ NexusCommunityBuildsFrame._prevPageBtn:Click();Settle(H)
+ page=Shown()
+ check(#calls==1 and page==count-1,'EXPECT read-only root: Prev still moves the view to the displayed page before')
+ check(F.Serialize(NexusDB)==before,'EXPECT read-only root: the explicit page is session-only, saved bytes unchanged')
+ restore()
+end
+
 print('PASS l10n_passivity_library checks='..checks..' (synthetic; native NOT_RUN; incomplete Leaderboard row reachability UNKNOWN)')
