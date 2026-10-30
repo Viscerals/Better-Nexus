@@ -60,6 +60,16 @@ Registry-bound seam (R union of #147, at the end of this file):
     CatalogRegistryError
         .code (stable, one of REGISTRY_CODES), .path and .key
 
+Opt-in diagnostic seam (S6 of #147, after the registry-bound seam):
+
+    registry_catalog_diagnostics(the same five byte strings) -> dict
+        a read-only diagnostic receipt that never raises for catalog data:
+        the unchanged strict verdict, every independent invalid, obsolete
+        and orphan pack entry when the rest of the catalog is trustworthy,
+        else an explicit incomplete-collection boundary. It is not a gate.
+    CatalogDiagnosticError
+        .code (stable, one of DIAGNOSTIC_CODES), .path and .key
+
 Both functions take the exact bytes of a source (bytes or bytearray), never a
 filename. They read and write no file. They never evaluate, import or execute
 Lua, never call back into the data and never interpret its text. After Lua 5.1
@@ -125,6 +135,7 @@ Error codes (CODES):
 Run directly, this file is the read-only report command line:
 
     python tools/l10n_catalog.py [--root DIR] [--require-complete] [--registry]
+                                 [--diagnose]
 
 DIR defaults to the repository that contains this tool, never the current
 directory. Inside the resolved root it reads exactly
@@ -146,7 +157,11 @@ schema or evidence failure writes one ASCII JSON error record with a stable
 code on stderr and exits 2. Nothing is written, imported from the root,
 executed, fetched or read from Git. With --registry, core/Localization.lua is also read as bytes under the
 same root rules and the registry-bound report v2 replaces the report; the
-record then carries registryBinding "requested". Python 3.9+, standard
+record then carries registryBinding "requested". With --diagnose,
+core/Localization.lua is read the same way and one diagnostics record with
+the registry_catalog_diagnostics receipt is written on stdout instead; its
+exit status is 2 while the catalog is invalid or the collection is
+incomplete, else 0, or 1 with --require-complete. Python 3.9+, standard
 library only.
 """
 from __future__ import annotations
@@ -767,11 +782,9 @@ def _check_release(document):
     return found
 
 
-def _check_packs(packs, english, products, formats=_V1_FORMATS):
-    """The packs: within the runtime pack limit, no English pack, exactly the
-    selected optional products, each autonym and entry inside the contract
-    and each autonym equal to the release metadata. A missing entry is valid
-    partial data and is not replaced by English."""
+def _check_pack_set(packs, products):
+    """Within the runtime pack limit, no English pack and exactly the
+    selected optional products."""
     where = 'packs'
     _require(len(packs) <= _MAX_LANGUAGES, 'pack-count', where)
     _require(_ENGLISH_ID not in packs, 'pack-english', where, _ENGLISH_ID)
@@ -780,20 +793,42 @@ def _check_packs(packs, english, products, formats=_V1_FORMATS):
     for product_id in products:
         _require(product_id == _ENGLISH_ID or product_id in packs, 'pack-missing', where,
                  product_id)
+
+
+def _check_pack_shape(pack_id, pack):
+    """The autonym and entry count of one pack. Returns the entries path."""
+    path = 'packs[%r]' % (pack_id,)
+    _require(_valid_text(pack['name'], _MAX_NAME_BYTES), 'invalid-autonym', path + '.name',
+             pack_id)
+    _require(len(pack['entries']) <= _MAX_BASE_ENTRIES, 'pack-too-many-entries',
+             path + '.entries', pack_id)
+    return path + '.entries'
+
+
+def _check_entry(key, text, english, path, formats):
+    """One pack entry: a valid key of the English base with valid text."""
+    _require(_valid_key(key), 'invalid-key', path, key)
+    _require(key in english, 'orphan-entry', path, key)
+    _check_value(text, key, path, formats)
+
+
+def _check_pack_autonym(pack_id, pack, products):
+    product_path, product = products[pack_id]
+    _require(product['autonym'] == pack['name'], 'release-autonym', product_path + '.autonym',
+             pack_id)
+
+
+def _check_packs(packs, english, products, formats=_V1_FORMATS):
+    """The packs: within the runtime pack limit, no English pack, exactly the
+    selected optional products, each autonym and entry inside the contract
+    and each autonym equal to the release metadata. A missing entry is valid
+    partial data and is not replaced by English."""
+    _check_pack_set(packs, products)
     for pack_id, pack in packs.items():
-        path = '%s[%r]' % (where, pack_id)
-        _require(_valid_text(pack['name'], _MAX_NAME_BYTES), 'invalid-autonym', path + '.name',
-                 pack_id)
-        entries = pack['entries']
-        _require(len(entries) <= _MAX_BASE_ENTRIES, 'pack-too-many-entries', path + '.entries',
-                 pack_id)
-        for key, text in entries.items():
-            _require(_valid_key(key), 'invalid-key', path + '.entries', key)
-            _require(key in english, 'orphan-entry', path + '.entries', key)
-            _check_value(text, key, path + '.entries', formats)
-        product_path, product = products[pack_id]
-        _require(product['autonym'] == pack['name'], 'release-autonym', product_path + '.autonym',
-                 pack_id)
+        path = _check_pack_shape(pack_id, pack)
+        for key, text in pack['entries'].items():
+            _check_entry(key, text, english, path, formats)
+        _check_pack_autonym(pack_id, pack, products)
 
 
 def validate_catalog_data(english_source: bytes, packs_source: bytes,
@@ -847,7 +882,8 @@ REPORT_SCHEMA_VERSION = 1
 # The seven entry categories in report order. In a report the first six
 # partition the English keys of each optional pack, and obsolete lists pack
 # entries outside them. invalid and obsolete are always empty in a report,
-# because validate_catalog_data rejects such input before any report exists.
+# because validate_catalog_data rejects such input before any report exists;
+# only the opt-in diagnostic receipt (S6, end of this file) fills them.
 ENTRY_CATEGORIES = (
     'translated_and_reviewed', 'reviewed_legitimately_identical',
     'deliberate_english_placeholder', 'draft_unreviewed', 'missing', 'invalid', 'obsolete',
@@ -1072,12 +1108,17 @@ def _check_declarations(release, english, packs, optional_ids):
     return {pair: record['decision'] for pair, record in found.items()}, len(records)
 
 
-def _classify(ordered, english, entries, decisions, product_id):
-    """One category list per ENTRY_CATEGORIES name for one optional pack."""
+def _classify(ordered, english, entries, decisions, product_id, problems=None):
+    """One category list per ENTRY_CATEGORIES name for one optional pack.
+    problems, from the diagnostics only, is (invalid keys, obsolete keys):
+    an invalid entry is invalid before any declaration applies."""
+    invalid = problems[0] if problems else ()
     keys = {category: [] for category in ENTRY_CATEGORIES}
     for key in ordered:
         if key not in entries:
             category = 'missing'
+        elif key in invalid:
+            category = 'invalid'
         elif (product_id, key) in decisions:
             category = _DECISIONS[decisions[(product_id, key)]]
         elif entries[key] == english[key]:
@@ -1085,7 +1126,10 @@ def _classify(ordered, english, entries, decisions, product_id):
         else:
             category = 'draft_unreviewed'
         keys[category].append(key)
-    keys['obsolete'] = sorted(key for key in entries if key not in english)
+    if problems:
+        keys['obsolete'] = list(problems[1])
+    else:
+        keys['obsolete'] = sorted(key for key in entries if key not in english)
     return keys
 
 
@@ -1145,11 +1189,20 @@ def catalog_report(english_source: bytes, packs_source: bytes, key_context_json:
                             NOTICE['validationScope'])
 
 
-def _coverage_report(validated, sources, input_names, schema_version, scope):
+def _input_rows(input_names, sources):
+    """One row per (name, source) of input_names with the SHA-256 and length
+    of its exact bytes in sources."""
+    return [{'name': name, 'source': source, 'sha256': hashlib.sha256(bytes(data)).hexdigest(),
+             'byteLength': len(data)} for (name, source), data in zip(input_names, sources)]
+
+
+def _coverage_report(validated, sources, input_names, schema_version, scope, problems=None):
     """The report derivation shared by catalog_report and the registry-bound
     registry_catalog_report: the evidence and metadata checks, then the
     report of validated data, with one input row per (name, source) of
-    input_names and its exact bytes in sources."""
+    input_names and its exact bytes in sources. problems, passed only by the
+    diagnostics, maps an optional product ID to its (invalid keys, obsolete
+    keys)."""
     english, packs = validated['english'], validated['packs']
     context, release = validated['keyContext'], validated['release']
     products = release['products']
@@ -1163,13 +1216,13 @@ def _coverage_report(validated, sources, input_names, schema_version, scope):
     decisions, declaration_count = _check_declarations(release, english, packs,
                                                        frozenset(optional_ids))
     ordered = sorted(english)
-    inputs = [{'name': name, 'source': source, 'sha256': hashlib.sha256(bytes(data)).hexdigest(),
-               'byteLength': len(data)} for (name, source), data in zip(input_names, sources)]
+    inputs = _input_rows(input_names, sources)
     reasons, lists, rows = [], {}, []
     for item in optional:
         product_id = item['productId']
         entries = packs[product_id]['entries']
-        keys = _classify(ordered, english, entries, decisions, product_id)
+        keys = _classify(ordered, english, entries, decisions, product_id,
+                         problems[product_id] if problems else None)
         counts = _counts(keys)
         lists[product_id] = keys
         rows.append({
@@ -1363,14 +1416,14 @@ _CLI_FAILURES = (CatalogCliError, CatalogSyntaxError, CatalogValidationError,
 
 
 def _cli_arguments(arguments):
-    """Return (root or None, require_complete, registry). Only --root DIR,
-    --root=DIR, --require-complete and --registry are accepted, each at most
-    once."""
-    root, require_complete, registry, seen, index = None, False, False, set(), 0
+    """Return (root or None, require_complete, registry, diagnose). Only
+    --root DIR, --root=DIR, --require-complete, --registry and --diagnose are
+    accepted, each at most once."""
+    root, seen, index = None, set(), 0
     while index < len(arguments):
         argument, position = arguments[index], index
         index += 1
-        if argument in ('--require-complete', '--registry'):
+        if argument in ('--require-complete', '--registry', '--diagnose'):
             name, value = argument, None
         elif argument == '--root':
             if index >= len(arguments):
@@ -1384,15 +1437,11 @@ def _cli_arguments(arguments):
         if name in seen:
             raise CatalogCliError('argument-duplicate', name)
         seen.add(name)
-        if value is None and name == '--registry':
-            registry = True
-        elif value is None:
-            require_complete = True
-        elif value == '':
+        if value == '':
             raise CatalogCliError('argument-missing-value', name)
-        else:
+        if value is not None:
             root = value
-    return root, require_complete, registry
+    return root, '--require-complete' in seen, '--registry' in seen, '--diagnose' in seen
 
 
 def _cli_root(root):
@@ -1461,6 +1510,11 @@ def _cli_toc(data):
     return found
 
 
+def _cli_toc_row(data, entries):
+    return {'name': 'toc', 'source': _TOC_SOURCE, 'sha256': hashlib.sha256(data).hexdigest(),
+            'byteLength': len(data), 'requiredOrder': entries, 'scope': _TOC_SCOPE}
+
+
 def _cli_technical(report):
     """Technical dictionary validity and entry counts, kept apart from
     external readiness."""
@@ -1498,15 +1552,21 @@ def _cli_readiness(report):
     }
 
 
-def _cli_error(error):
-    """One error record with the stable class and code of error."""
-    record = {'schema': CLI_SCHEMA, 'schemaVersion': CLI_SCHEMA_VERSION, 'record': 'error',
-              'tool': _TOOL_PATH, 'status': STATUS, 'errorClass': type(error).__name__,
-              'code': error.code, 'exitCode': _EXIT_ERROR}
+def _error_fields(error):
+    """The stable class and code of error and its known location fields."""
+    fields = {'errorClass': type(error).__name__, 'code': error.code}
     for field in ('subject', 'path', 'key', 'line', 'column'):
         value = getattr(error, field, None)
         if value is not None:
-            record[field] = value if type(value) in (str, int) else repr(value)
+            fields[field] = value if type(value) in (str, int) else repr(value)
+    return fields
+
+
+def _cli_error(error):
+    """One error record with the stable class and code of error."""
+    record = {'schema': CLI_SCHEMA, 'schemaVersion': CLI_SCHEMA_VERSION, 'record': 'error',
+              'tool': _TOOL_PATH, 'status': STATUS, 'exitCode': _EXIT_ERROR}
+    record.update(_error_fields(error))
     return record
 
 
@@ -1520,6 +1580,7 @@ def main(argv=None) -> int:
     """The read-only report command line described in the module documentation:
 
         python tools/l10n_catalog.py [--root DIR] [--require-complete] [--registry]
+                                     [--diagnose]
 
     Exactly one ASCII JSON record is written: a report on stdout or an error
     on stderr. The return value is 0 for a valid report, also for partial
@@ -1528,15 +1589,19 @@ def main(argv=None) -> int:
     registry or evidence error. Without --registry the record is unchanged
     (report schemaVersion 1). With it, core/Localization.lua is read as a
     sixth fixed input and the report is registry_catalog_report
-    (schemaVersion 2), marked registryBinding "requested"."""
+    (schemaVersion 2), marked registryBinding "requested". With --diagnose a
+    diagnostics record is written on stdout instead (_cli_diagnostics)."""
     arguments = sys.argv[1:] if argv is None else list(argv)
     try:
-        root, require_complete, registry = _cli_arguments(arguments)
+        root, require_complete, registry, diagnose = _cli_arguments(arguments)
         resolved = _cli_root(_DEFAULT_ROOT if root is None else root)
         data = [_cli_read(resolved, source) for source in _CLI_INPUTS]
-        if registry:
+        if registry or diagnose:
             localization = _cli_read(resolved, _AUTHORITY)
         toc_entries = _cli_toc(data[-1])
+        if diagnose:
+            return _cli_diagnostics(registry_catalog_diagnostics(*data[:-1], localization),
+                                    _cli_toc_row(data[-1], toc_entries), require_complete)
         if registry:
             report = registry_catalog_report(*data[:-1], localization)
         else:
@@ -1558,9 +1623,7 @@ def main(argv=None) -> int:
         'requireComplete': 'requested' if require_complete else 'not_requested',
         'exitCode': exit_code,
         'inputBinding': _INPUT_BINDING,
-        'toc': {'name': 'toc', 'source': _TOC_SOURCE,
-                'sha256': hashlib.sha256(data[-1]).hexdigest(), 'byteLength': len(data[-1]),
-                'requiredOrder': toc_entries, 'scope': _TOC_SCOPE},
+        'toc': _cli_toc_row(data[-1], toc_entries),
         'technicalCatalog': _cli_technical(report),
         'externalReadiness': readiness,
         'report': report,
@@ -1881,6 +1944,12 @@ def registry_catalog_report(english_source: bytes, packs_source: bytes,
     validated = validate_registry_catalog_data(*sources)
     report = _coverage_report(validated, sources, _REGISTRY_INPUTS,
                               REGISTRY_REPORT_SCHEMA_VERSION, REGISTRY_SCOPE)
+    report['registry'] = _registry_section(validated)
+    return report
+
+
+def _registry_section(validated):
+    """The registry section of report schemaVersion 2."""
     rows = []
     for key, declaration in validated['declarations'].items():
         kind, placeholders, limit = _context_shape(declaration)
@@ -1888,7 +1957,7 @@ def registry_catalog_report(english_source: bytes, packs_source: bytes,
         if limit is not None:
             row.update({'placeholders': placeholders, 'resultLimitBytes': limit})
         rows.append(row)
-    report['registry'] = {
+    return {
         'source': _AUTHORITY,
         'markers': {'open': _REGISTRY_OPEN, 'close': _REGISTRY_CLOSE},
         'declarationCount': len(rows),
@@ -1900,7 +1969,242 @@ def registry_catalog_report(english_source: bytes, packs_source: bytes,
                  'from the declarations'),
         'nonexecution': _NONEXECUTION,
     }
-    return report
+
+
+# ---------------------------------------------------------------------------
+# S6 (Refs #147): opt-in, read-only static diagnostics over the registry-bound
+# catalog. The strict gate above stops at the first failure, so invalid and
+# obsolete entries never reach a report. registry_catalog_diagnostics takes
+# the same five byte strings and returns a receipt instead of raising:
+#
+# - strictVerdict is registry_catalog_report's own verdict on the same bytes,
+#   with its unchanged error class and code. The receipt never changes it.
+# - Everything except the pack entries must first be trustworthy, in the
+#   strict order: syntax, JSON, declarations, English, registry, key context,
+#   release, the retired-key list (keyContext.retiredKeys, below), the pack
+#   set, each pack's autonym and entry count. The first failure there is the
+#   collection boundary: collection INCOMPLETE, no entry problem and no
+#   coverage, because entries cannot be enumerated safely. Nothing is
+#   repaired, guessed or re-parsed with a looser grammar.
+# - Otherwise every pack entry gets the strict entry check. An invalid-text
+#   or invalid-template entry of an active key is invalid; any other
+#   unknown key (orphan-entry or invalid-key there) is obsolete when the
+#   retired-key list names it, else an orphan. An orphan is never obsolete
+#   and never counted. The coverage then is report schemaVersion 2 with
+#   invalid active keys in invalid, still once in the active denominator,
+#   and retired keys in obsolete, outside it. A failure in its evidence
+#   checks is a boundary too.
+#
+# valid is true only when the strict verdict is valid and the collection is
+# complete. The receipt is not a gate: completeness is never established,
+# and the strict API, required CI and release gates still decide. The
+# retired-key list is read only here; the strict APIs never read it, so
+# their outcomes are unchanged. The command line writes the receipt with
+# --diagnose (exit 2 while invalid or incomplete).
+
+DIAGNOSTIC_SCHEMA = 'nexus.l10n.diagnostic_receipt'
+DIAGNOSTIC_SCHEMA_VERSION = 1
+DIAGNOSTIC_CODES = (
+    'retired-structure', 'retired-key', 'retired-duplicate', 'retired-order', 'retired-active',
+)
+PROBLEM_CATEGORIES = ('invalid', 'obsolete', 'orphan')
+_INVALID_ENTRY_CODES = frozenset(('invalid-text', 'invalid-template'))
+_STRICT_FAILURES = (CatalogSyntaxError, CatalogValidationError, CatalogRegistryError,
+                    CatalogEvidenceError)
+_DIAGNOSTIC_MODE = ('opt-in read-only diagnostics over the exact supplied bytes; the strict '
+                    'verdict is reported unchanged')
+_COLLECTION_RULE = ('COMPLETE: every pack entry was checked. INCOMPLETE: the boundary failure '
+                    'made entry enumeration untrustworthy, so no entry problem or coverage is '
+                    'reported and other problems may exist')
+_COMPLETENESS_RULE = ('this receipt never establishes completeness or release readiness; '
+                      'fallback English, autonyms and copied English are never reviewed '
+                      'translations')
+_GATE_RULE = ('this receipt is not a gate: the strict API, required CI and release gates '
+              'decide, and an invalid catalog fails them however it is reported')
+
+
+class CatalogDiagnosticError(ValueError):
+    """Raised inside registry_catalog_diagnostics for a malformed retired-key
+    list and reported as its collection boundary. It carries a stable code
+    (one of DIAGNOSTIC_CODES) and, when known, the path and the key."""
+
+    def __init__(self, code: str, path: str = None, key=None):
+        detail = '' if path is None else ' at ' + path
+        if key is not None:
+            detail += ' (%r)' % (key,)
+        super().__init__(code + detail)
+        self.code, self.path, self.key = code, path, key
+
+
+def _diagnostic(condition, code, path, key=None):
+    if not condition:
+        raise CatalogDiagnosticError(code, path, key)
+
+
+def _check_retired(context, declarations):
+    """keyContext.retiredKeys.keys: valid semantic keys, each once, in
+    ascending order, none an active declaration. Returns the list."""
+    where = 'keyContext.retiredKeys'
+    record = context.get('retiredKeys')
+    _diagnostic(type(record) is dict and _is_str_list(record.get('keys')), 'retired-structure',
+                where)
+    keys, seen = record['keys'], set()
+    for key in keys:
+        _diagnostic(_valid_key(key), 'retired-key', where + '.keys', key)
+        _diagnostic(key not in seen, 'retired-duplicate', where + '.keys', key)
+        _diagnostic(key not in declarations, 'retired-active', where + '.keys', key)
+        seen.add(key)
+    _diagnostic(keys == sorted(keys), 'retired-order', where + '.keys')
+    return list(keys)
+
+
+def _trusted_catalog(sources):
+    """Every strict check except the pack entries, in the strict order, plus
+    the retired-key list. Returns (validated, retired keys, formats)."""
+    english_source, packs_source, key_context_json, release_json, localization_source = sources
+    english = parse_english(english_source)
+    packs = parse_packs(packs_source)
+    key_context = _strict_json(key_context_json, 'keyContext')
+    release = _strict_json(release_json, 'release')
+    declarations = parse_registry_declarations(localization_source)
+    formats = _declared_formats(declarations)
+    _check_english(english, formats)
+    _check_registry(declarations, english, key_context)
+    _check_context(key_context, english, formats)
+    products = _check_release(release)
+    retired = _check_retired(key_context, declarations)
+    _check_pack_set(packs, products)
+    for pack_id, pack in packs.items():
+        _check_pack_shape(pack_id, pack)
+        _check_pack_autonym(pack_id, pack, products)
+    validated = {'english': english, 'packs': packs, 'keyContext': key_context,
+                 'release': release, 'declarations': declarations}
+    return validated, retired, formats
+
+
+def _entry_code(key, text, english, path, formats):
+    """The strict code of one pack entry, or None when it is valid."""
+    try:
+        _check_entry(key, text, english, path, formats)
+    except CatalogValidationError as error:
+        return error.code
+    return None
+
+
+def _entry_problems(validated, retired, formats):
+    """Every entry problem of the optional packs in release order, keys
+    sorted, and {product ID: (invalid keys, obsolete keys)}."""
+    english, packs = validated['english'], validated['packs']
+    rows, problems = [], {}
+    for item in validated['release']['products']:
+        if item['kind'] != _OPTIONAL:
+            continue
+        product_id = item['productId']
+        entries = packs[product_id]['entries']
+        path = 'packs[%r].entries' % (product_id,)
+        invalid, obsolete = set(), []
+        for key in sorted(entries):
+            code = _entry_code(key, entries[key], english, path, formats)
+            if code is None:
+                continue
+            if code in _INVALID_ENTRY_CODES:
+                category = 'invalid'
+                invalid.add(key)
+            elif key in retired:
+                category = 'obsolete'
+                obsolete.append(key)
+            else:
+                category = 'orphan'
+            rows.append({'productId': product_id, 'key': key, 'category': category,
+                         'code': code})
+        problems[product_id] = (frozenset(invalid), obsolete)
+    return rows, problems
+
+
+def registry_catalog_diagnostics(english_source: bytes, packs_source: bytes,
+                                 key_context_json: bytes, release_json: bytes,
+                                 localization_source: bytes) -> dict:
+    """The opt-in diagnostic receipt (see above) for the exact bytes of the
+    five registry-bound inputs. Each argument must be bytes or bytearray,
+    else TypeError; no catalog failure is raised. Nothing is read, written,
+    executed or modified."""
+    sources = (english_source, packs_source, key_context_json, release_json,
+               localization_source)
+    for name, value in zip(('english_source', 'packs_source', 'key_context_json',
+                            'release_json', 'localization_source'), sources):
+        if not isinstance(value, (bytes, bytearray)):
+            raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
+    sources = tuple(bytes(value) for value in sources)
+    try:
+        registry_catalog_report(*sources)
+        strict = {'result': 'valid'}
+    except _STRICT_FAILURES as error:
+        strict = {'result': 'invalid', 'api': 'registry_catalog_report'}
+        strict.update(_error_fields(error))
+    retired, rows, coverage, boundary, stage = None, [], None, None, 'structure'
+    try:
+        validated, retired_keys, formats = _trusted_catalog(sources)
+        retired = retired_keys
+        rows, problems = _entry_problems(validated, frozenset(retired_keys), formats)
+        stage = 'evidence'
+        coverage = _coverage_report(validated, sources, _REGISTRY_INPUTS,
+                                    REGISTRY_REPORT_SCHEMA_VERSION, REGISTRY_SCOPE, problems)
+        coverage['registry'] = _registry_section(validated)
+    except _STRICT_FAILURES + (CatalogDiagnosticError,) as error:
+        boundary = {'stage': stage}
+        boundary.update(_error_fields(error))
+        rows, coverage = [], None
+    if boundary is None and strict['result'] == 'invalid' and not rows:
+        # Never report an invalid catalog as fully collected without a problem.
+        boundary = {key: value for key, value in strict.items() if key != 'result'}
+        boundary['stage'] = 'strict'
+        coverage = None
+    return {
+        'schema': DIAGNOSTIC_SCHEMA,
+        'schemaVersion': DIAGNOSTIC_SCHEMA_VERSION,
+        'tool': _TOOL_PATH,
+        'status': STATUS,
+        'validationScope': REGISTRY_SCOPE,
+        'mode': _DIAGNOSTIC_MODE,
+        'inputs': _input_rows(_REGISTRY_INPUTS, sources),
+        'valid': strict['result'] == 'valid' and boundary is None,
+        'strictVerdict': strict,
+        'collection': {'state': 'INCOMPLETE' if boundary else 'COMPLETE', 'boundary': boundary,
+                       'rule': _COLLECTION_RULE},
+        'retiredKeys': retired,
+        'entryProblems': rows,
+        'problemCounts': {category: sum(1 for row in rows if row['category'] == category)
+                          for category in PROBLEM_CATEGORIES},
+        'coverage': coverage,
+        'completeness': {'established': False, 'rule': _COMPLETENESS_RULE},
+        'gate': 'NOT_A_GATE',
+        'gateRule': _GATE_RULE,
+        'nonexecution': _NONEXECUTION,
+    }
+
+
+def _cli_diagnostics(receipt, toc, require_complete):
+    """Write one diagnostics record on stdout and return its exit status: 2
+    while the receipt is not valid, else 1 with --require-complete (never
+    established) or 0."""
+    if not receipt['valid']:
+        exit_code = _EXIT_ERROR
+    else:
+        exit_code = _EXIT_NOT_ESTABLISHED if require_complete else _EXIT_REPORT
+    _cli_emit(sys.stdout, {
+        'schema': CLI_SCHEMA,
+        'schemaVersion': CLI_SCHEMA_VERSION,
+        'record': 'diagnostics',
+        'tool': _TOOL_PATH,
+        'status': STATUS,
+        'requireComplete': 'requested' if require_complete else 'not_requested',
+        'registryBinding': 'requested',
+        'exitCode': exit_code,
+        'inputBinding': _INPUT_BINDING,
+        'toc': toc,
+        'diagnostics': receipt,
+    })
+    return exit_code
 
 
 if __name__ == '__main__':

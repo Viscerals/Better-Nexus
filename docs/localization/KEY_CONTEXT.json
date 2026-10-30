@@ -24,6 +24,12 @@
     "mismatchCode": "context-declaration-mismatch",
     "status": "IMPLEMENTED_DRAFT_REVIEW_PENDING"
   },
+  "retiredKeys": {
+    "keys": [],
+    "rule": "semantic keys deliberately removed from the declarations: each a valid key, listed once in ascending order, never an active declaration. No current key is retired. The opt-in diagnostics report a pack entry for a listed key as obsolete and any other unknown pack key as an orphan; the strict gate still refuses both as orphan-entry, and neither counts toward the active keys",
+    "checkedBy": "tools/l10n_catalog.py registry_catalog_diagnostics",
+    "status": "IMPLEMENTED_DRAFT_REVIEW_PENDING"
+  },
   "keySchema": {
     "minBytes": 3,
     "maxBytes": 64,

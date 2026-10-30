@@ -653,5 +653,366 @@ class RegistryCommandLineTests(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(str(root))), ["Nexus.toc", "core", "data", "docs"])
 
 
+# S6 (Refs #147): opt-in static diagnostics. Synthetic inputs are built in
+# memory from the real bytes; the synthetic retired and never-known keys
+# below exist only here, never in a shipped input.
+RETIRED = "reason.retired_example"
+NEVER_KNOWN = "reason.never_known"
+EXPECTED_DIAGNOSTIC_CODES = ("retired-structure", "retired-key", "retired-duplicate",
+                             "retired-order", "retired-active")
+FIRST_PACK_TEXT = b"[\"reason.save_in_progress\"] = \"L'enregistrement"
+FRENCH_CHARGE = b'"Ban:{banish} Rel:{reroll} Gel:{freeze}"'
+
+
+def add_entries(packs, pack_id, *lines):
+    """packs with lines inserted as the first entries of pack_id, in the line
+    break of the source."""
+    newline = b"\r\n" if b"\r\n" in packs else b"\n"
+    pattern = re.compile(rb"(\n    " + pack_id.encode() + rb" = \{\r?\n        name = "
+                         rb"\"[^\"\r\n]*\",\r?\n        entries = \{)")
+    if len(pattern.findall(packs)) != 1:
+        raise AssertionError("expected exactly one pack %s" % pack_id)
+    added = b"".join(newline + b"            " + line for line in lines)
+    return pattern.sub(lambda match: match.group(1) + added, packs, count=1)
+
+
+def with_retired(context, keys):
+    """KEY_CONTEXT bytes with retiredKeys.keys replaced (None removes the
+    whole member)."""
+    document = json.loads(context.decode("utf-8"))
+    if keys is None:
+        del document["retiredKeys"]
+    else:
+        document["retiredKeys"]["keys"] = keys
+    return json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def with_declaration(release, product_id, key, text, decision="translated"):
+    """RELEASE_LANGUAGES bytes with one synthetic, structurally qualified
+    entry-review declaration. It is not language or rights evidence."""
+    document = json.loads(release.decode("utf-8"))
+    document["entryReview"]["declarations"].append({
+        "productId": product_id, "key": key,
+        "translatedTextSha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "reviewer": "Synthetic Fixture Reviewer", "decision": decision,
+        "evidenceReference": "https://example.invalid/synthetic", "status": "declared"})
+    return json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def multi_error_inputs(inputs):
+    """D1: one structurally valid catalog whose frFR pack has two invalid
+    active entries, a known retired entry and a never-known orphan, and whose
+    deDE pack has a malformed key."""
+    english, packs, context, release, localization = inputs
+    packs = replace_once(packs, FIRST_PACK_TEXT, FIRST_PACK_TEXT + b"|")
+    packs = replace_once(packs, FRENCH_CHARGE, b'"Ban:{banish} Rel:{reroll}"')
+    packs = add_entries(packs, "frFR", b'["%s"] = "Retired text",' % RETIRED.encode(),
+                        b'["%s"] = "Unknown text",' % NEVER_KNOWN.encode())
+    packs = add_entries(packs, "deDE", b'["Bad Key"] = "Schlecht",')
+    return [english, packs, with_retired(context, [RETIRED]), release, localization]
+
+
+class DiagnosticTests(unittest.TestCase):
+    """S6: the opt-in, read-only diagnostic receipt beside the unchanged
+    strict gate."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = load_catalog()
+        cls.inputs = current_inputs()
+        cls.diagnose = staticmethod(cls.catalog.registry_catalog_diagnostics)
+        cls.strict_report = cls.catalog.registry_catalog_report(*cls.inputs)
+
+    def strict_error(self, data):
+        catalog = self.catalog
+        with self.assertRaises((catalog.CatalogSyntaxError, catalog.CatalogValidationError,
+                                catalog.CatalogRegistryError,
+                                catalog.CatalogEvidenceError)) as raised:
+            catalog.registry_catalog_report(*data)
+        error = raised.exception
+        return type(error).__name__, error.code, getattr(error, "key", None)
+
+    def assert_incomplete(self, receipt, error_class, code):
+        self.assertIs(receipt["valid"], False)
+        self.assertEqual(receipt["collection"]["state"], "INCOMPLETE")
+        boundary = receipt["collection"]["boundary"]
+        self.assertEqual((boundary["errorClass"], boundary["code"]), (error_class, code))
+        self.assertEqual(receipt["entryProblems"], [])
+        self.assertIsNone(receipt["coverage"])
+        self.assertIs(receipt["completeness"]["established"], False)
+
+    def test_d1_multi_error_classes_and_unchanged_strict_failure(self):
+        data = multi_error_inputs(self.inputs)
+        # The strict gate keeps its first-error contract: the retired key is
+        # still an orphan-entry there.
+        self.assertEqual(self.strict_error(data),
+                         ("CatalogValidationError", "orphan-entry", RETIRED))
+        receipt = self.diagnose(*data)
+        self.assertIs(receipt["valid"], False)
+        self.assertEqual(receipt["strictVerdict"]["result"], "invalid")
+        self.assertEqual((receipt["strictVerdict"]["code"], receipt["strictVerdict"]["key"]),
+                         ("orphan-entry", RETIRED))
+        self.assertEqual(receipt["collection"]["state"], "COMPLETE")
+        self.assertIsNone(receipt["collection"]["boundary"])
+        self.assertEqual(receipt["entryProblems"], [
+            {"productId": "frFR", "key": CHARGE, "category": "invalid", "code": "invalid-template"},
+            {"productId": "frFR", "key": NEVER_KNOWN, "category": "orphan", "code": "orphan-entry"},
+            {"productId": "frFR", "key": RETIRED, "category": "obsolete", "code": "orphan-entry"},
+            {"productId": "frFR", "key": "reason.save_in_progress", "category": "invalid",
+             "code": "invalid-text"},
+            {"productId": "deDE", "key": "Bad Key", "category": "orphan", "code": "invalid-key"},
+        ])
+        self.assertEqual(receipt["problemCounts"], {"invalid": 2, "obsolete": 1, "orphan": 2})
+        self.assertEqual(receipt["retiredKeys"], [RETIRED])
+        self.assertEqual(receipt, self.diagnose(*data))
+        json.dumps(receipt, sort_keys=True).encode("ascii")
+
+    def test_d1_input_bindings_are_the_exact_supplied_bytes(self):
+        data = multi_error_inputs(self.inputs)
+        receipt = self.diagnose(*data)
+        self.assertEqual([(row["name"], row["source"]) for row in receipt["inputs"]],
+                         [("english", INPUTS[0]), ("packs", INPUTS[1]), ("keyContext", INPUTS[2]),
+                          ("release", INPUTS[3]), ("localization", INPUTS[4])])
+        for row, value in zip(receipt["inputs"], data):
+            self.assertEqual((row["sha256"], row["byteLength"]),
+                             (hashlib.sha256(value).hexdigest(), len(value)))
+
+    def test_d2_real_retired_list_is_empty_and_checked(self):
+        context = json.loads((ROOT / INPUTS[2]).read_text(encoding="utf-8"))
+        self.assertEqual(context["retiredKeys"]["keys"], [])
+        receipt = self.diagnose(*self.inputs)
+        self.assertEqual(receipt["retiredKeys"], [])
+        self.assertEqual(self.catalog.DIAGNOSTIC_CODES, EXPECTED_DIAGNOSTIC_CODES)
+        for codes in (self.catalog.CODES, self.catalog.VALIDATION_CODES,
+                      self.catalog.EVIDENCE_CODES, self.catalog.REGISTRY_CODES,
+                      self.catalog.CLI_CODES):
+            self.assertFalse(set(codes) & set(EXPECTED_DIAGNOSTIC_CODES))
+
+    def test_d2_malformed_retired_lists_are_refused(self):
+        cases = (
+            (None, "retired-structure", None),
+            ("reason.retired_example", "retired-structure", None),
+            ([RETIRED, 7], "retired-structure", None),
+            (["Bad Key"], "retired-key", "Bad Key"),
+            (["reason"], "retired-key", "reason"),
+            ([RETIRED, RETIRED], "retired-duplicate", RETIRED),
+            (["reason.zeta", "reason.alpha"], "retired-order", None),
+            (["panel.button.options"], "retired-active", "panel.button.options"),
+            ([CHARGE], "retired-active", CHARGE),
+        )
+        for keys, code, key in cases:
+            with self.subTest(keys=keys):
+                data = self.with_input(2, with_retired(self.inputs[2], keys))
+                # The strict gate does not read retired metadata: unchanged valid.
+                self.catalog.registry_catalog_report(*data)
+                receipt = self.diagnose(*data)
+                self.assert_incomplete(receipt, "CatalogDiagnosticError", code)
+                self.assertEqual(receipt["collection"]["boundary"].get("key"), key)
+                self.assertEqual(receipt["strictVerdict"], {"result": "valid"})
+                self.assertIsNone(receipt["retiredKeys"])
+
+    def test_d2_retired_and_never_known_entries_stay_distinct(self):
+        packs = add_entries(self.inputs[1], "ruRU", b'["%s"] = "x",' % RETIRED.encode(),
+                            b'["%s"] = "y",' % NEVER_KNOWN.encode())
+        for retired, categories in (([], ("orphan", "orphan")),
+                                    ([RETIRED], ("obsolete", "orphan")),
+                                    ([NEVER_KNOWN, RETIRED], ("obsolete", "obsolete"))):
+            with self.subTest(retired=retired):
+                receipt = self.diagnose(self.inputs[0], packs,
+                                        with_retired(self.inputs[2], retired), *self.inputs[3:])
+                rows = {row["key"]: row["category"] for row in receipt["entryProblems"]}
+                self.assertEqual((rows[RETIRED], rows[NEVER_KNOWN]), categories)
+                obsolete = receipt["coverage"]["products"][-1]["keys"]["obsolete"]
+                self.assertEqual(obsolete, sorted(key for key in (RETIRED, NEVER_KNOWN)
+                                                  if key in retired))
+
+    def test_d3_active_keys_partition_once_and_bad_extras_do_not_count(self):
+        data = multi_error_inputs(self.inputs)
+        # A synthetic qualified declaration on an invalid entry must not make
+        # it reviewed.
+        text = "L'enregistrement|"
+        packs = self.catalog.parse_packs(data[1])
+        bad = packs["frFR"]["entries"]["reason.save_in_progress"]
+        self.assertTrue(bad.startswith(text))
+        data[3] = with_declaration(data[3], "frFR", "reason.save_in_progress", bad)
+        receipt = self.diagnose(*data)
+        self.assertEqual(receipt["collection"]["state"], "COMPLETE")
+        rows = {row["productId"]: row for row in receipt["coverage"]["products"]}
+        french = rows["frFR"]
+        self.assertEqual(french["denominator"], 28)
+        self.assertEqual(french["keys"]["invalid"], [CHARGE, "reason.save_in_progress"])
+        self.assertEqual(french["keys"]["missing"], ["panel.button.options"])
+        self.assertEqual(french["keys"]["obsolete"], [RETIRED])
+        self.assertEqual(french["counts"]["translated_and_reviewed"], 0)
+        self.assertEqual(french["counts"]["draft_unreviewed"], 25)
+        self.assertEqual(french["reconciliation"], {"denominator": 28, "inDenominatorTotal": 28})
+        for row in receipt["coverage"]["products"]:
+            seen = [key for category in self.catalog.ENTRY_CATEGORIES[:6]
+                    for key in row["keys"][category]]
+            self.assertEqual(sorted(seen), sorted(CURRENT_KEYS), row["productId"])
+            self.assertNotIn(NEVER_KNOWN, row["keys"]["obsolete"])
+            self.assertNotIn("Bad Key", sum(row["keys"].values(), []))
+        self.assertEqual(rows["deDE"]["counts"], self.strict_report["products"][1]["counts"])
+        self.assertEqual(receipt["coverage"]["denominator"]["englishKeys"], 28)
+        self.assertEqual(receipt["coverage"]["completeness"]["state"], "INCOMPLETE")
+        codes = {reason["code"] for reason in receipt["coverage"]["completeness"]["reasons"]}
+        self.assertTrue({"entries-invalid", "entries-obsolete"} <= codes)
+        self.assertIs(receipt["completeness"]["established"], False)
+        self.assertNotIn("100%", json.dumps(receipt))
+
+    def test_d4_valid_partial_input_keeps_the_strict_report(self):
+        receipt = self.diagnose(*self.inputs)
+        self.assertIs(receipt["valid"], True)
+        self.assertEqual(receipt["strictVerdict"], {"result": "valid"})
+        self.assertEqual(receipt["collection"], {"state": "COMPLETE", "boundary": None,
+                                                 "rule": receipt["collection"]["rule"]})
+        self.assertEqual(receipt["entryProblems"], [])
+        self.assertEqual(receipt["problemCounts"], {"invalid": 0, "obsolete": 0, "orphan": 0})
+        self.assertEqual(receipt["coverage"], self.strict_report)
+        self.assertIs(receipt["completeness"]["established"], False)
+        self.assertEqual(receipt["gate"], "NOT_A_GATE")
+        # A synthetic declaration and an English-identical entry keep their
+        # existing categories; fallback English is never an entry.
+        english = self.catalog.parse_english(self.inputs[0])
+        packs = replace_once(self.inputs[1], b'"Mes builds"',
+                             b'"%s"' % english["panel.button.my_builds"].encode("utf-8"))
+        release = with_declaration(self.inputs[3], "deDE", "panel.button.my_builds",
+                                   "Meine Builds")
+        data = [self.inputs[0], packs, self.inputs[2], release, self.inputs[4]]
+        receipt = self.diagnose(*data)
+        report = self.catalog.registry_catalog_report(*data)
+        self.assertEqual(receipt["coverage"], report)
+        rows = {row["productId"]: row["counts"] for row in report["products"]}
+        self.assertEqual(rows["frFR"]["deliberate_english_placeholder"], 1)
+        self.assertEqual(rows["deDE"]["translated_and_reviewed"], 1)
+        self.assertEqual(rows["frFR"]["missing"], 1)
+        self.assertEqual(report["completeness"]["state"], "INCOMPLETE")
+
+    def test_d5_strict_apis_codes_and_inputs_are_unchanged(self):
+        catalog = self.catalog
+        self.assertEqual(list(inspect.signature(catalog.registry_catalog_diagnostics).parameters),
+                         ["english_source", "packs_source", "key_context_json", "release_json",
+                          "localization_source"])
+        self.assertEqual(catalog.REGISTRY_CODES, EXPECTED_REGISTRY_CODES)
+        data = multi_error_inputs(self.inputs)
+        with self.assertRaises(catalog.CatalogValidationError) as raised:
+            catalog.validate_registry_catalog_data(*data)
+        self.assertEqual((raised.exception.code, raised.exception.key), ("orphan-entry", RETIRED))
+        with self.assertRaises(catalog.CatalogValidationError) as raised:
+            catalog.catalog_report(*data[:4])
+        self.assertEqual((raised.exception.code, raised.exception.key), ("orphan-entry", RETIRED))
+        mutable = [bytearray(value) for value in data]
+        before = [hashlib.sha256(value).hexdigest() for value in mutable]
+        self.assertEqual(self.diagnose(*mutable), self.diagnose(*data))
+        self.assertEqual([hashlib.sha256(value).hexdigest() for value in mutable], before)
+        names = ["english_source", "packs_source", "key_context_json", "release_json",
+                 "localization_source"]
+        for index, name in enumerate(names):
+            with self.subTest(argument=name):
+                changed = list(self.inputs)
+                changed[index] = changed[index].decode("utf-8")
+                with self.assertRaises(TypeError) as raised:
+                    self.diagnose(*changed)
+                self.assertIn(name, str(raised.exception))
+
+    def test_d6_untrustworthy_structure_is_an_explicit_incomplete_collection(self):
+        english, packs, context, release, localization = self.inputs
+        declaration = b'["panel.button.options"] = {kind = "text"},'
+        self.assertEqual(localization.count(declaration), 1)
+        cases = {
+            "pack syntax": (1, packs + b"x"),
+            "duplicate pack key": (1, add_entries(packs, "frFR",
+                                                  b'["panel.button.my_builds"] = "Doppel",')),
+            "duplicate declaration": (4, localization.replace(declaration,
+                                                              declaration + b" " + declaration)),
+            "json": (2, context[:-3]),
+            "unknown pack": (1, packs.replace(b"    frFR = {", b"    xxXX = {", 1)),
+            "invalid English": (0, replace_once(english, b'"Options"', b'"Opt|ions"')),
+            "invalid autonym": (1, replace_once(packs, b'name = "Fran\xc3\xa7ais"',
+                                                b'name = "Fr|an\xc3\xa7ais"')),
+        }
+        for name, (index, value) in cases.items():
+            with self.subTest(case=name):
+                data = self.with_input(index, value)
+                error_class, code, key = self.strict_error(data)
+                receipt = self.diagnose(*data)
+                self.assert_incomplete(receipt, error_class, code)
+                self.assertEqual(receipt["strictVerdict"]["code"], code)
+                self.assertEqual(receipt["collection"]["boundary"].get("key"), key)
+        # Entry errors next to an untrustworthy pack set are not collected,
+        # so no partial list is reported as complete.
+        mixed = multi_error_inputs(self.inputs)
+        mixed[1] = mixed[1].replace(b"    ruRU = {", b"    xxXX = {", 1)
+        receipt = self.diagnose(*mixed)
+        self.assert_incomplete(receipt, "CatalogValidationError", "pack-unknown")
+
+    def test_retired_keys_are_never_a_shipped_key(self):
+        english = self.catalog.parse_english(self.inputs[0])
+        packs = self.catalog.parse_packs(self.inputs[1])
+        for key in (RETIRED, NEVER_KNOWN):
+            self.assertNotIn(key, english)
+            self.assertFalse(any(key in pack["entries"] for pack in packs.values()))
+            for value in self.inputs:
+                self.assertNotIn(key.encode(), value)
+
+    def with_input(self, index, value):
+        data = list(self.inputs)
+        data[index] = value
+        return data
+
+
+class DiagnosticCommandLineTests(unittest.TestCase):
+    """S6: --diagnose prints one diagnostic record; invalid input still
+    exits 2, and the default and --registry outcomes are unchanged."""
+
+    def run_cli(self, *args):
+        return subprocess.run([sys.executable, "-B", str(CATALOG_TOOL), *[str(a) for a in args]],
+                              capture_output=True, cwd=str(ROOT))
+
+    def copy_root(self, root, data):
+        for relative, value in zip(INPUTS, data):
+            target = root.joinpath(*relative.split("/"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(value)
+        shutil.copyfile(str(ROOT / "Nexus.toc"), str(root / "Nexus.toc"))
+
+    def test_valid_repository_root(self):
+        run = self.run_cli("--diagnose")
+        self.assertEqual((run.returncode, run.stderr), (0, b""))
+        record = json.loads(run.stdout)
+        self.assertEqual((record["record"], record["exitCode"]), ("diagnostics", 0))
+        self.assertIs(record["diagnostics"]["valid"], True)
+        self.assertEqual(record["diagnostics"]["coverage"]["registry"]["declarationCount"], 28)
+        strict = self.run_cli("--diagnose", "--require-complete")
+        self.assertEqual(strict.returncode, 1)
+        self.assertEqual(json.loads(strict.stdout)["exitCode"], 1)
+        self.assertEqual(self.run_cli("--diagnose", "--diagnose").returncode, 2)
+
+    def test_invalid_root_fails_in_every_mode(self):
+        data = multi_error_inputs(current_inputs())
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.copy_root(root, data)
+            before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            for args in ((), ("--registry",), ("--require-complete",)):
+                with self.subTest(args=args):
+                    run = self.run_cli("--root", root, *args)
+                    self.assertEqual((run.returncode, run.stdout), (2, b""))
+                    error = json.loads(run.stderr)
+                    self.assertEqual((error["code"], error["key"]), ("orphan-entry", RETIRED))
+            for args in (("--diagnose",), ("--diagnose", "--require-complete"),
+                         ("--diagnose", "--registry")):
+                with self.subTest(args=args):
+                    run = self.run_cli("--root", root, *args)
+                    self.assertEqual((run.returncode, run.stderr), (2, b""))
+                    record = json.loads(run.stdout)
+                    self.assertEqual(record["exitCode"], 2)
+                    self.assertIs(record["diagnostics"]["valid"], False)
+                    self.assertEqual(record["diagnostics"]["problemCounts"],
+                                     {"invalid": 2, "obsolete": 1, "orphan": 2})
+            after = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            self.assertEqual(after, before)
+
+
 if __name__ == "__main__":
     unittest.main()
