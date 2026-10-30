@@ -428,6 +428,8 @@ NAMES += ['l10n_full_contract']
 NAMES += ['l10n_settings_identity']
 # Issue #144 passivity (family-144 PD1/PD3): passive Build Library/Leaderboard open, refresh, show and select write no saved filters (even same-value) and queue no loadout request; explicit filter choices and lock-in unchanged; incomplete Leaderboard row reachability UNKNOWN (native NOT_RUN).
 NAMES += ['l10n_passivity_library']
+# Full visible-UI localization: every declaration has admitted English, every Text/Format key literal in a TOC runtime source is a reviewed key of the matching kind, and no reviewed key lacks a consumer (static source + real seam; native NOT_RUN).
+NAMES += ['l10n_catalog_consumers']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
