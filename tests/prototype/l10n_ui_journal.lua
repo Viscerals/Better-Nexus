@@ -350,6 +350,22 @@ collected={}
 local before=Snapshot()
 DriveJournal('pseudo')
 DriveTargets('pseudo')
+-- v3: an adapter refusal of a picker assignment is said through its key
+-- (only the adapter's writer is stubbed; the picker row is the real one).
+do
+ local A=Nexus.GameAdapter
+ local real=A.SetLoadoutWishlist
+ A.SetLoadoutWishlist=function() return false,'that loadout slot is empty or unavailable' end
+ NexusActiveWishlistSelector:Click()
+ local row
+ for _,r in ipairs(NexusWishlistOnlyPicker.children) do if not row and r.nameButton and r:IsVisible() then row=r end end
+ local lines=row and S.CaptureChat(function() row.nameButton:Click() end) or {}
+ A.SetLoadoutWishlist=real
+ local said=false
+ for _,l in ipairs(lines) do if l:find(S.OPEN..'that loadout slot is empty or unavailable'..S.CLOSE,1,true) then said=true end end
+ check(row~=nil and said,'v3: the picker refusal is said through its key: '..table.concat(lines,' | '))
+ if NexusWishlistOnlyPicker:IsShown() then NexusActiveWishlistSelector:Click() end
+end
 local chooser=NewChooser(true)
 DriveChooser('pseudo',chooser)
 DriveChooser('pseudo no-store',NewChooser(false))

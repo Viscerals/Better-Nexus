@@ -1530,10 +1530,11 @@ local function ShowWishlistPicker(anchor, wishes, linked, active, loadoutName, A
                     end
                     if not ok then
                         -- The guide records the raw reason; chat shows it: the
-                        -- adapter's own text as supplied, or a reviewed key.
+                        -- adapter's reason through its key when known (as
+                        -- supplied otherwise), or a reviewed key.
                         GuideAssign(numbered, active, false, err, cSnapshot, origin)
                         local shownErr = err == FIRST_RUN_UNAVAILABLE and T("journal.chat.first_run_unavailable")
-                            or err and tostring(err) or T("journal.chat.select_failed")
+                            or err and tostring(Nexus.UserText.Recognized(tostring(err))) or T("journal.chat.select_failed")
                         print("|cffff6060Nexus:|r " .. shownErr)
                         return
                     end
