@@ -257,6 +257,35 @@ for _,row in ipairs(rows) do
  end
  check(pane.record:GetText():find('DPS',1,true) and S.IsPseudo(pane.record:GetText()),'the record line carries the DPS figure inside the translated template')
 end
+-- R5 P27: Copy from a record opens a NEW draft. A real catalog build title
+-- is data (verbatim); a record whose build is not known gets the generated
+-- name, said once in the active language when the copy opens. The editor
+-- shows that same name; a later language change does not rename it.
+do
+ local copyable
+ for _,row in ipairs(Rows()) do if row.data.player~='Carol' then copyable=copyable or row end end
+ copyable:Click();for _=1,4 do H.Advance(.05,.05) end
+ local real=pane.copyCandidate and pane.copyCandidate.title
+ check(type(real)=='string' and real==copyable.data.build.title and not S.IsPseudo(real),'R5 P27: a real build title stays data: '..tostring(real))
+ local build=copyable.data.build
+ copyable.data.build=nil
+ copyable:Click();for _=1,4 do H.Advance(.05,.05) end
+ local generated=S.OPEN..tostring(copyable.data.player).."'s Loadout"..S.CLOSE
+ check(pane.copyCandidate and pane.copyCandidate.title==generated,'R5 P27: the generated name is said in the active language: '..tostring(pane.copyCandidate and pane.copyCandidate.title))
+ local before=#H.sent..'/'..#H.actions
+ pane.copy:Click();for _=1,4 do H.Advance(.05,.05) end
+ check(NexusWishlistNameInput and NexusWishlistNameInput:GetText()==generated,'R5 P27: the new draft shows that same name in the editor: '..tostring(NexusWishlistNameInput and NexusWishlistNameInput:GetText()))
+ check(#H.sent..'/'..#H.actions==before,'R5 P27: opening the copy sends and acts on nothing')
+ -- A later language change re-renders the editor without renaming the draft.
+ local L0=Nexus.Localization
+ local _,restoreSeam=S.Activate(nil,{})
+ Nexus.WishlistEditor.Refresh()
+ check(NexusWishlistNameInput:GetText()==generated,'R5 P27: a language change does not rename the draft')
+ restoreSeam();check(Nexus.Localization==L0,'R5 P27: seam restored')
+ copyable.data.build=build
+ if NexusEditorFrame then NexusEditorFrame:Hide() end
+ LF.Open(H,'lk');frame=NexusLeaderboardFrame;pane=frame._leaderboardDetail
+end
 for _,cat in ipairs({'dummy','combined'}) do
  LF.Open(H,cat)
  Scan('leaderboard '..cat,S.VisibleTexts(frame))

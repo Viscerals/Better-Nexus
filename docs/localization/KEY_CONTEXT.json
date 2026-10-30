@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 3997,
+    "declaredKeys": 4000,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -46038,6 +46038,17 @@
       "cohort": "fullui:usertext"
     },
     {
+      "key": "editor.value.imported_wishlist_default",
+      "kind": "text",
+      "english": "Imported Wishlist",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Generated name prefilled in the naming prompt of a NEW Wishlist imported from a code that names none. Made once when the prompt opens; the player may edit it; the accepted name is then the Wishlist's name (data, never re-translated). Short and name-like.",
+      "consumer": "Name prompt after an import code without a name value",
+      "familySurface": "v5_source86_supplemental: Name prompt after an import code without a name (value); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
       "key": "guide.body.target_c_active",
       "kind": "text",
       "english": "The Echo Journal targets this slot now, so the next recommendation Nexus makes uses the new Wishlist.",
@@ -46046,6 +46057,35 @@
       "meaning": "Saved Build step: pick which Saved Build follows the Wishlist and see the consequence before anything changes. Guided setup coach (the \"Nexus setup\" window). Opening, moving between steps or closing it assigns, saves, sends, spends and changes Auto nothing: keep such statements complete. Game terms (Echo, Wishlist, Saved Build, Echo Journal, My Builds, Orb, Lost Memories, Auto ON/OFF) follow the client's and Nexus's own wording. A leading mark (+ x ! ? * > < = v ^ -) is a code status glyph: keep it first, followed by a space. \"Nexus\" stays. Shown when the Echo Journal already targets this Saved Build. Say only that the next recommendation uses the new Wishlist; promise no timing (no 'right away', 'immediately', 'within seconds').",
       "consumer": "Guided setup coach body",
       "familySurface": "v5_source86_supplemental: Guided setup coach (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "leaderboard.value.generated_build",
+      "kind": "text",
+      "english": "Leaderboard Build",
+      "placeholders": [],
+      "group": "leaderboard",
+      "meaning": "Generated name of a NEW Wishlist draft copied from a Leaderboard record with neither a build title nor a player name. Made once when the copy opens; editable; after saving it is the Wishlist's name (data). Short and name-like.",
+      "consumer": "Wishlist editor name field, after Copy from a Leaderboard record value",
+      "familySurface": "v5_source86_supplemental: Wishlist editor name field, after Copy from a Leaderboard record (value); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "leaderboard.value.generated_player_loadout",
+      "kind": "template",
+      "english": "{player}'s Loadout",
+      "placeholders": [
+        {
+          "name": "player",
+          "type": "text",
+          "meaning": "the player whose record is copied (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1100,
+      "group": "leaderboard",
+      "meaning": "Generated name of a NEW Wishlist draft copied from a Leaderboard record that has no build title. It is made once, when the copy opens, and the player may edit it; after saving it is the Wishlist's name (data, never re-translated). Keep it short and name-like.",
+      "consumer": "Wishlist editor name field, after Copy from a Leaderboard record value",
+      "familySurface": "v5_source86_supplemental: Wishlist editor name field, after Copy from a Leaderboard record (value); family coverage PENDING review",
       "cohort": "fullui:v5_source86_supplemental"
     },
     {
@@ -53438,7 +53478,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 3997,
+    "totalKeys": 4000,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -53462,7 +53502,7 @@
       "remainder_runtime_status": 35,
       "v4_long_paragraphs": 0,
       "v5_source86_amendments": 0,
-      "v5_source86_supplemental": 2
+      "v5_source86_supplemental": 5
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

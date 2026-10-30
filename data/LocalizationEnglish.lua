@@ -3656,8 +3656,11 @@ Nexus.LocalizationEnglish = {
     ["usertext.value.wishlist_unavailable_cell"] = "Unavailable right now",
     ["usertext.value.wishlist_unavailable_named"] = "{name} - unavailable right now",
     ["usertext.value.wishlist_unknown_named"] = "{name} (assignment not known)",
-    -- v5_source86_supplemental (2)
+    -- v5_source86_supplemental (5)
+    ["editor.value.imported_wishlist_default"] = "Imported Wishlist",
     ["guide.body.target_c_active"] = "The Echo Journal targets this slot now, so the next recommendation Nexus makes uses the new Wishlist.",
+    ["leaderboard.value.generated_build"] = "Leaderboard Build",
+    ["leaderboard.value.generated_player_loadout"] = "{player}'s Loadout",
     ["settings.title.window"] = "Nexus Options",
     -- wishlist (381)
     ["editor.body.role_help_plan_only"] = "This edits only the Wishlist plan; your character's Echoes are unchanged.",

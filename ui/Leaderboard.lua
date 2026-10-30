@@ -810,9 +810,13 @@ local function CopyEvidence(row)
         return nil,currentReason or "record evidence is unavailable"
     end
     if current ~= selected then return nil,"record evidence changed" end
+    -- A real build title is data. Only a generated default is said in the
+    -- active language, once, when this new copy is made: the editor then
+    -- holds that name like any other (the player may edit it).
     local title=build and build.title
-        or (row.player and (tostring(row.player).."'s Loadout"))
-        or "Leaderboard Build"
+        or (row.player and TF("leaderboard.value.generated_player_loadout", {player=tostring(row.player)},
+            tostring(row.player).."'s Loadout"))
+        or T("leaderboard.value.generated_build")
     return CandidateEvidence.Build({
         title=title,
         ordinaryEchoes=row.echoes,

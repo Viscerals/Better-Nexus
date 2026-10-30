@@ -612,4 +612,40 @@ check(Nexus.UserText.Message('save refused: no net gain over the saved build')
 check(Nexus.UserText.Message('coverage lost: 2 targets')
  =='Not saved: some previously matched Wishlist targets would be lost. See diagnostics for the exact targets.','R5: a genuine coverage-lost refusal keeps its meaning')
 
+------------------------------------------------------------------------------
+-- R5 P178: an import code without a name opens the naming prompt of a NEW
+-- draft prefilled with the generated name in the active language (made once,
+-- when the prompt opens); the accepted name is the draft's name and the save
+-- confirmation names exactly those bytes. A code with its own name keeps it
+-- verbatim. A later language change does not rename the draft.
+------------------------------------------------------------------------------
+do
+ local h=BootAssign('Qv Saved',S.PseudoEntries())
+ local generated=S.OPEN..'Imported Wishlist'..S.CLOSE
+ Nexus.WishlistEditor.ImportEBH1String('EBH1:200001.1.1,200002.2.1:MAGE:')
+ local _,p=PopupText(h)
+ check(p.which=='NEXUS_NAME_IMPORTED_WISHLIST' and p.editBox:GetText()==generated,
+  'R5 P178: a nameless import prefills the generated name in the active language: '..tostring(p.editBox:GetText()))
+ h.AcceptPopup();for _=1,4 do h.Advance(.05,.05) end
+ check(NexusWishlistNameInput:GetText()==generated,'R5 P178: the new draft holds that same name: '..tostring(NexusWishlistNameInput:GetText()))
+ local frame=NexusEditorFrame
+ local create=Find(frame.children,function(c) local t=tostring(c:GetText())
+  return c.kind=='Button' and c:IsShown() and c:IsEnabled() and t:find('Create',1,true) end)
+ create:Click()
+ local question=PopupText(h)
+ check(question:find("'"..generated.."'",1,true)~=nil,'R5 P178: the save confirmation names exactly the accepted bytes: '..question:sub(1,120))
+ StaticPopup_Hide(h.popup.which)
+ local L0=Nexus.Localization
+ local _,restoreSeam=S.Activate(nil,{})
+ Nexus.WishlistEditor.Refresh()
+ check(NexusWishlistNameInput:GetText()==generated,'R5 P178: a language change does not rename the draft')
+ restoreSeam();check(Nexus.Localization==L0,'R5 P178: seam restored')
+ if NexusEditorFrame then NexusEditorFrame:Hide() end
+ -- Existing name: the code's own name is data, prefilled verbatim.
+ Nexus.WishlistEditor.ImportEBH1String('EBH1:200003.1.1:MAGE:'..OTHER_NAME)
+ _,p=PopupText(h)
+ check(p.editBox:GetText()==OTHER_NAME,'R5 P178: a code that names its Wishlist keeps that name verbatim: '..tostring(p.editBox:GetText()))
+ StaticPopup_Hide(p.which)
+end
+
 print('l10n_ui_wishlist PASS '..checks)

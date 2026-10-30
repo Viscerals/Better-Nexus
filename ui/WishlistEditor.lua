@@ -26,6 +26,10 @@ local TrimWishlistName = DraftModel.TrimName
 -- session language is chosen after this file loads. Names, codes and game
 -- data are inserted through template text slots and are never translated.
 local function T(key) return (Nexus.Localization.Text(key)) end
+-- The generated name of an imported Wishlist whose code names none, said in
+-- the active language when the naming prompt opens for that new draft; the
+-- player may edit it, and the accepted name is then data like any other.
+local function ImportedDefault() return T("editor.value.imported_wishlist_default") end
 local function TF(key, args) return (Nexus.Localization.Format(key, args)) end
 local function N(value) return Nexus.Localization.Count(value) end
 
@@ -850,9 +854,9 @@ function M.ImportEBH1String(text, chosenName)
         return
     end
     local suggested = TrimWishlistName(parsed.name)
-    if suggested == "" then suggested = "Imported Wishlist" end
+    if suggested == "" then suggested = ImportedDefault() end
     local displaySuggested = DisplayUntrusted(suggested, 1024, false)
-        or "Imported Wishlist"
+        or ImportedDefault()
     StaticPopup_Show("NEXUS_NAME_IMPORTED_WISHLIST",
         displaySuggested, nil, parsed)
 end
@@ -932,7 +936,7 @@ StaticPopupDialogs["NEXUS_NAME_IMPORTED_WISHLIST"] = LocalizedDialog({
     editBoxWidth = 300,
     OnShow = function(self)
         local suggested = TrimWishlistName(self.data and self.data.name)
-        if suggested == "" then suggested = "Imported Wishlist" end
+        if suggested == "" then suggested = ImportedDefault() end
         ConfigureSafeNameEditBox(self.editBox)
         self.editBox:_NexusSetRawText(suggested)
         self.editBox:SetFocus()
