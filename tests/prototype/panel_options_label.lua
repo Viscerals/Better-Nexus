@@ -365,10 +365,12 @@ do
   [G.MODELS.small]={false,false},[G.MODELS.double]={true,true},[C125]={false,true}}
  local HELP='Help and setup, settings, notices, logs and panel actions. Plan, Explore and Orbs are on the footer.'
  local NOTICE='Update available: 1.20.0-beta.1 test.9029'
+ -- The control's own hover: its name heads it, complete and wrapped while
+ -- the button shows that name shortened (with or without the trusted "! "),
+ -- so the complete label is shown exactly once; then help and the notice.
  local function Want(label,notice,shortened)
   local out={}
-  if shortened then out[#out+1]={(notice and '! ' or '')..label,1,1,1,true} end
-  out[#out+1]={label,1,1,1}
+  out[#out+1]={label,1,1,1,shortened or nil}
   out[#out+1]={HELP,0.8,0.8,0.8,true}
   if notice then
    out[#out+1]={' '}
@@ -392,7 +394,22 @@ do
    charges=o.offer and {banish=0,freeze=7} or nil,
   }
  end
- local H,log,shipped
+ local H,log,shipped,baseline
+ local function Effects()
+  local id,initialized,automatic=Nexus.Localization.ActiveLanguage()
+  return {db=F.Serialize(NexusDB),settings=H.Clone(Nexus.Store.Settings()),language=id,initialized=initialized,
+   automatic=automatic,actions=#H.actions,sent=#H.sent,chat=#H.chat,popup=H.popup~=nil,
+   auto=Nexus.RecomputeStats().autoEnabled==true,
+   option=ProjectEbonholdOptionsService:GetSetting('autoAcceptLoadoutEchoes')==true,
+   readOnly=tostring(Nexus.MainInternals.SavedRootReadOnlyV1()),warning=Nexus.OverwriteWarning.IsOpen()==true,
+   assignment=H.Clone(Nexus.GameAdapter.AssignmentActionSnapshot())}
+ end
+ -- Passivity: everything above, compared with the snapshot each boot takes
+ -- right after start-up and its fixture configuration, before the first
+ -- tested render, hover, menu or sweep. Nothing is re-based later.
+ local function Passive(why)
+  check(same(Effects(),baseline),why..': since start-up no saved root, setting, language, Auto, assignment, action (save, spend), send, chat, popup or consent change')
+ end
  -- One fresh real-TOC boot; options nil boots the shipped data unchanged.
  local function Boot(language,options)
   local db=F.Database({version=2});db.settings.uiLanguage=language
@@ -448,6 +465,7 @@ do
    and Nexus.Localization.ActiveLanguage()==(language or 'enUS') and (options==nil)==(shipped==nil),
    'SETUP O1: real TOC boot ready with '..tostring(language or 'enUS')..' active; the scoped hook ran once and is gone')
   Nexus.Panel.Show()
+  baseline=Effects()
   return Nexus.Localization
  end
  local function Hover(owner)
@@ -463,20 +481,12 @@ do
   owner:GetScript('OnLeave')(owner)
   return lines,owners,shown==true and not GameTooltip:IsShown()
  end
- local function Effects()
-  local id,initialized,automatic=Nexus.Localization.ActiveLanguage()
-  return {db=F.Serialize(NexusDB),settings=H.Clone(Nexus.Store.Settings()),language=id,initialized=initialized,
-   automatic=automatic,actions=#H.actions,sent=#H.sent,chat=#H.chat,popup=H.popup~=nil,
-   auto=Nexus.RecomputeStats().autoEnabled==true,
-   option=ProjectEbonholdOptionsService:GetSetting('autoAcceptLoadoutEchoes')==true,
-   readOnly=tostring(Nexus.MainInternals.SavedRootReadOnlyV1()),warning=Nexus.OverwriteWarning.IsOpen()==true,
-   assignment=H.Clone(Nexus.GameAdapter.AssignmentActionSnapshot())}
- end
  local function Menu()
   local opened
   EasyMenu=function(list,frame,anchor)opened={list=list,frame=frame,anchor=anchor}end
   NexusPanel._menuBtn:Click()
   EasyMenu=nil
+  Passive('O1 menu opening')
   return opened
  end
  local function TopTexts(opened)
@@ -524,13 +534,15 @@ do
   check(Nexus.LayoutMetrics.Shortened(label)==expectShort,
    why..': the 80 px label is '..(expectShort and 'shortened' or 'whole')..' in this model ('..label:GetStringWidth()..' px)')
   local lines,owners,cycle=Hover(menu)
+  -- Every visible tooltip line counts, whatever its colour or wrap flag.
+  local full=0
+  for _,line in ipairs(lines)do if tostring(line[1]):find(want,1,true) then full=full+1 end end
+  check(full==1,why..': the complete label appears in exactly one visible hover line ('..full..')')
   check(same(lines,Want(want,notice,expectShort)) and #owners==1 and owners[1][1]==menu
    and owners[1][2]=='ANCHOR_TOPLEFT' and cycle,
-   why..': the registered hover takes the tooltip once and gives '..(expectShort and 'the complete label once, first, then ' or '')
-    ..'the control name, its help'..(notice and ' and the complete trusted notice' or '')..' ('..#lines..' lines)')
-  local full=0
-  for _,line in ipairs(lines)do if line[1]==shown and line[5]==true then full=full+1 end end
-  check(full==(expectShort and 1 or 0),why..': the complete shown label is recovered exactly '..(expectShort and 'once' or 'never (it fits)'))
+   why..': the registered hover takes the tooltip once and gives the '..(expectShort and 'complete ' or '')
+    ..'control name, its help'..(notice and ' and the complete trusted notice' or '')..' ('..#lines..' lines)')
+  Passive(why)
   if W~=420 then f:SetWidth(420) end
   return r
  end
@@ -584,6 +596,7 @@ do
  G.UseFont(G.MODELS.default)
  check(L.Text(KEY)=='Options' and select(2,L.Text(KEY))=='base','SETUP O1 English: the shipped data shows Options')
  check(Nexus.Panel.Render(Model()),'SETUP O1 English: render')
+ Passive('O1 English render')
  local englishWishlist=NexusPanel._contextWishlist:GetText()
  local englishMenu=TopTexts(Menu())
  check(englishWishlist=='Wishlist: Synthetic |||| Wishlist Caf\195\169 (assigned)' and #englishMenu>10,
@@ -617,7 +630,6 @@ do
  frames=#H.frames
  local warm={label=menu:GetFontString(),regions=#menu.regions,children=#menu.children,enter=menu:GetScript('OnEnter'),
   leave=menu:GetScript('OnLeave'),click=menu:GetScript('OnClick')}
- local effects=Effects()
  local saved=P.SavedLayoutRoot()
  check(P.Render(H.Clone(P._lastModel)) and P.Render(Model({notice=true})) and P.Render(Model()),'SETUP O1 expanded: copied and raw renders')
  check(P.Render(P._lastModel) and menu:GetText()==LONG and P.OptionsLabel()==LONG,'O1 expanded: rendering the committed model again keeps the admitted label once')
@@ -636,7 +648,7 @@ do
   and #menu.children==warm.children and menu:GetScript('OnEnter')==warm.enter and menu:GetScript('OnLeave')==warm.leave
   and menu:GetScript('OnClick')==warm.click and rawget(menu,'_nexusOneLine')==nil,
   'O1 expanded: the same warm control, FontString and registered handlers; no frame, label or hook added')
- check(same(Effects(),effects),'O1 expanded: renders, refreshes, hovers, hide / reopen and the menu change no saved root, setting, language, Auto, assignment, action, send, chat, popup or consent')
+ check(same(Effects(),baseline),'O1 expanded: since start-up, sweeps, renders, refreshes, hovers, hide / reopen and the menu change no saved root, setting, language, Auto, assignment, action, send, chat, popup or consent')
  check(rawget(NexusDB.settings,'uiLanguage')=='frFR' and Nexus.RecomputeStats().autoEnabled~=true,'O1 expanded: the synthetic frFR choice and Auto OFF stay')
  local sets=0
  for _,entry in ipairs(log)do
@@ -649,6 +661,7 @@ do
  -- Charges and names keep their own semantics beside the expanded label.
  check(P.Render(Model({offer=true})) and f._chargesText:IsShown() and f._chargesText:GetText()=='Ban:0 Rel:? Gel:7',
   'O1 expanded: the real charge row keeps the copied frFR template: known 0, unknown ?, known 7')
+ Passive('O1 expanded, offer with charges')
  check(Nexus.Readout.ChargesLine({banish=0,freeze=7,trustworthy=false})=='Ban:0 Rel:? Gel:7 ~'
   and L.Format('readout.charge_counts',{banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}},{})=='B:0 R:? F:7',
   'O1 expanded: the estimate mark follows the whole row; an explicit {} pack gives the English row')

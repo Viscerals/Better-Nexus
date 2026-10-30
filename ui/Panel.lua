@@ -2700,16 +2700,20 @@ local function EnsureFrame()
     end)
     menuBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-        -- While a larger face shortens the Options label, its complete
-        -- label comes first (as My Builds). Through the Nexus global: no
-        -- new upvalue in EnsureFrame.
-        local metrics = Nexus.LayoutMetrics
-        if metrics and metrics.Shortened and metrics.Shortened(self:GetFontString()) then
-            GameTooltip:AddLine(tostring(self:GetText() or ""), 1, 1, 1, true)
-        end
         -- M4 (UX-15, M3 NB9): one name for this button everywhere: the
-        -- hover is headed by its own label, without the notice mark.
-        GameTooltip:AddLine(M.OptionsLabel(), 1, 1, 1)
+        -- hover is headed by its own label, without the notice mark. Issue
+        -- #146: while a larger face or a longer label shortens the button,
+        -- the complete label is shown once: the heading itself (wrapped)
+        -- when the button shows that label, with or without the trusted
+        -- "! "; any other button text first, then the heading. Through the
+        -- Nexus global and M: no new upvalue in EnsureFrame.
+        local metrics = Nexus.LayoutMetrics
+        local label, shown = M.OptionsLabel(), tostring(self:GetText() or "")
+        local short = metrics and metrics.Shortened and metrics.Shortened(self:GetFontString()) or false
+        if short and shown ~= M.OptionsText(false) and shown ~= M.OptionsText(true) then
+            GameTooltip:AddLine(shown, 1, 1, 1, true)
+        end
+        GameTooltip:AddLine(label, 1, 1, 1, short or nil)
         GameTooltip:AddLine("Help and setup, settings, notices, logs and panel actions. Plan, Explore and Orbs are on the footer.", 0.8, 0.8, 0.8, true)
         -- model.status (Main.lua's statusLine, including "error (see /nexus
         -- err)") was set on every render but never read anywhere in this file --
