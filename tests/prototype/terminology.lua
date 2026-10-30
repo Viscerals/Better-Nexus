@@ -315,7 +315,7 @@ end
 -- declares. Loader fixtures that use test-only keys reload the real file
 -- with only the lines between its two declaration marker lines replaced, in
 -- memory, by a test block (by default each valid key of the fixture as text,
--- the charge key with its real format declaration, at most 64 in byte
+-- the charge key with its real format declaration, at most CAP in byte
 -- order), so their text, key and entry limit rules still decide. Every other
 -- byte is the real file; reload() above keeps the real declarations.
 local REGISTRY_OPEN,REGISTRY_CLOSE='-- NEXUS-L10N-REGISTRY BEGIN','-- NEXUS-L10N-REGISTRY END'
@@ -338,6 +338,11 @@ end
 local CHARGE_DECLARATION=runtimeSource:match('%["readout%.charge_counts"%] = (%b{})')
 check(CHARGE_DECLARATION=='{fields = {"banish", "reroll", "freeze"},\r\n        kind = "format", slot = "count", resultLimit = 254}'
  or CHARGE_DECLARATION=='{fields = {"banish", "reroll", "freeze"},\n        kind = "format", slot = "count", resultLimit = 254}','R: the charge row declares its three count fields, in order, and the 254-byte result limit')
+-- Full-UI scope: the declaration/entry cap is the bounded 4096 (it was the
+-- 64-entry pilot cap); the boundary fixtures below run at exactly CAP and
+-- CAP + 1 entries.
+local CAP=4096
+check(L.MAX_BASE_ENTRIES==CAP,'the bounded full-UI declaration and entry cap is 4096')
 local function testKey(key)
  return type(key)=='string' and #key>=3 and #key<=64 and key:find('^[a-z][a-z0-9_]*%.[a-z0-9_.]*[a-z0-9_]$')~=nil and not key:find('%.[^a-z]')
 end
@@ -345,7 +350,7 @@ local function declaredBlock(base)
  local keys={}
  for key in pairs(base)do if testKey(key) then keys[#keys+1]=key end end
  table.sort(keys)
- while #keys>64 do keys[#keys]=nil end
+ while #keys>CAP do keys[#keys]=nil end
  local lines={'local DECLARATIONS = {'}
  for _,key in ipairs(keys)do
   lines[#lines+1]=('    ["%s"] = %s,'):format(key,key=='readout.charge_counts' and CHARGE_DECLARATION or '{kind = "text"}')
@@ -384,23 +389,23 @@ do
  check(bounded.Has(key64) and text=='At key limit' and source=='base' and why==nil,'GUARD exact key limit resolves')
  text,source,why=bounded.Resolve(key65,{[key65]='Candidate cannot add it'})
  check(not bounded.Has(key65) and text==U and source=='unavailable' and why=='invalid_key','GUARD candidate cannot resurrect over-limit key')
- local many={};for i=1,64 do many['reason.entry_'..i]='Entry '..i end
+ local many={};for i=1,CAP do many['reason.entry_'..i]='Entry '..i end
  local full=assert(reloadDeclared(many));facts=full.Diagnostics().base;listed=full.Keys()
- check(facts.present and facts.accepted==64 and facts.rejected==0 and not facts.oversized and #listed==64,'GUARD exactly 64 valid entries accepted')
- check(facts.undeclared==0 and facts.missingDeclared==0,'R: 64 declarations admit exactly 64 declared entries')
+ check(facts.present and facts.accepted==CAP and facts.rejected==0 and not facts.oversized and #listed==CAP,'GUARD exactly CAP valid entries accepted')
+ check(facts.undeclared==0 and facts.missingDeclared==0,'R: CAP declarations admit exactly CAP declared entries')
  for _,key in ipairs(listed)do
   text,source,why=full.Resolve(key)
   check(full.Has(key) and text==many[key] and source=='base' and why==nil,'GUARD admitted boundary entry resolves: '..key)
  end
- many['reason.entry_65']='Entry 65'
+ many['reason.entry_'..(CAP+1)]='Entry '..(CAP+1)
  local big=assert(reloadDeclared(many));facts=big.Diagnostics().base
- check(facts.present and facts.accepted==0 and facts.rejected==65 and facts.oversized and #big.Keys()==0,'GUARD 65-entry base fails closed and counts all entries')
- check(facts.undeclared==0 and facts.missingDeclared==64,'R: an oversized base is refused whole before any entry is judged; every declaration is then without English')
+ check(facts.present and facts.accepted==0 and facts.rejected==CAP+1 and facts.oversized and #big.Keys()==0,'GUARD CAP+1-entry base fails closed and counts all entries')
+ check(facts.undeclared==0 and facts.missingDeclared==CAP,'R: an oversized base is refused whole before any entry is judged; every declaration is then without English')
  local realBig={};for key,text in pairs(realData)do realBig[key]=text end
- for i=1,64-count(realData)+1 do realBig['reason.extra_'..i]='Extra '..i end
- check(count(realBig)==65,'SETUP the real English plus test entries is 65 entries')
+ for i=1,CAP-count(realData)+1 do realBig['reason.extra_'..i]='Extra '..i end
+ check(count(realBig)==CAP+1,'SETUP the real English plus test entries is CAP+1 entries')
  facts=assert(reload(realBig)).Diagnostics().base
- check(facts.present and facts.oversized and facts.accepted==0 and facts.rejected==65 and facts.undeclared==0 and facts.missingDeclared==28,'R: the real declarations keep the whole-base 65 refusal; all 28 declared meanings are then unavailable')
+ check(facts.present and facts.oversized and facts.accepted==0 and facts.rejected==CAP+1 and facts.undeclared==0 and facts.missingDeclared==28,'R: the real declarations keep the whole-base CAP+1 refusal; all 28 declared meanings are then unavailable')
  for key in pairs(many)do
   text,source,why=big.Resolve(key,{[key]='Candidate cannot add it'})
   check(not big.Has(key) and text==U and source=='unavailable' and why=='unknown_key','GUARD oversized base cannot be resurrected: '..key)
@@ -582,13 +587,13 @@ do
   local xb=assert(reloadWith(extra,block('{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 254}',case[2]))).Diagnostics().base
   check(xb.accepted==28 and xb.rejected==2 and xb.undeclared==2 and xb.missingDeclared==0,'R: a malformed declaration is left out ('..case[1]..')')
  end
- -- More than 64 declarations, or no declaration table: nothing is declared.
+ -- More than CAP declarations, or no declaration table: nothing is declared.
  local tooMany={'local DECLARATIONS = {'}
  for key in pairs(realData)do tooMany[#tooMany+1]=('    ["%s"] = {kind = "text"},'):format(key)end
- for i=1,64-count(realData)+1 do tooMany[#tooMany+1]=('    ["parity.extra_%d"] = {kind = "text"},'):format(i)end
+ for i=1,CAP-count(realData)+1 do tooMany[#tooMany+1]=('    ["parity.extra_%d"] = {kind = "text"},'):format(i)end
  tooMany[#tooMany+1]='}'
- check(#tooMany-2==65,'SETUP 65 declarations')
- for _,case in ipairs({{'65 declarations',table.concat(tooMany,'\n')},{'not a table','local DECLARATIONS = 7'},
+ check(#tooMany-2==CAP+1,'SETUP CAP+1 declarations')
+ for _,case in ipairs({{'CAP+1 declarations',table.concat(tooMany,'\n')},{'not a table','local DECLARATIONS = 7'},
    {'with a metatable','local DECLARATIONS = setmetatable({["reason.list_preparing"] = {kind = "text"}}, {})'}})do
   local none=assert(reloadWith(realData,case[2]),'loader with '..case[1]);checks=checks+1
   local nb=none.Diagnostics().base

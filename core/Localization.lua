@@ -5,9 +5,8 @@
 -- This file reads no game API, client locale, saved data or setting, and it
 -- prints, sends, schedules or saves nothing. Its state is the English base
 -- and the optional packs copied at load (draft text, pending fluent and
--- native review, for reviewed English keys only: a bounded subset of Panel
--- labels and tooltips, status messages and the readout charge-row template;
--- all other Nexus text stays English), the
+-- native review, for reviewed English keys only; a key without a valid pack
+-- entry shows its English), the
 -- session's active language (set once from the ID its caller supplies, see
 -- below) and the fixed-size diagnostic record below.
 --
@@ -45,10 +44,12 @@
 -- bytes without running them. At load each declaration is admitted only
 -- when its key passes the key contract and it is exactly {kind = "text"} or
 -- exactly {kind = "format", fields = {...}, slot = "count", resultLimit =
--- CHARGE_RESULT_LIMIT} with one or more distinct field names; any other
--- declaration is left out. More than MAX_BASE_ENTRIES declarations, or a
--- value that is not a plain table, declares nothing (fail closed). SCHEMAS
--- is derived from the admitted format declarations.
+-- CHARGE_RESULT_LIMIT} with one or more distinct field names, or exactly
+-- {kind = "block"} or a template declaration (see "Full-UI kinds" below);
+-- any other declaration is left out. More than MAX_BASE_ENTRIES
+-- declarations, or a value that is not a plain table, declares nothing
+-- (fail closed). SCHEMAS is derived from the admitted format and template
+-- declarations.
 --
 -- English base: data/LocalizationEnglish.lua, loaded just before this file
 -- by Nexus.toc, sets Nexus.LocalizationEnglish. Its valid entries are copied
@@ -77,7 +78,8 @@
 --     table with a metatable)      -> English text, "base", "unsupported_pack"
 --  5. no entry for the key         -> English text, "base", "missing_candidate"
 --  6. entry outside the text contract (not a string, empty, only ASCII whitespace,
---     control byte, "|", too long, malformed or non-scalar UTF-8)
+--     control byte, "|", too long, malformed or non-scalar UTF-8; a block key
+--     uses the block contract of "Full-UI kinds")
 --                                  -> English text, "base", "invalid_candidate"
 --  7. otherwise                    -> the entry, "candidate", nil
 -- A candidate can only replace a reviewed English key, never add one.
@@ -158,6 +160,37 @@
 -- ordinary consumer such as ui/Readout.lua shows the active language. An
 -- explicit pack (including {} or an invalid candidate) still decides alone,
 -- and Resolve and FormatResolve stay pure supplied-pack owners.
+--
+-- Full-UI kinds (issues #143-#148, full visible-UI scope). The "text" and
+-- "format" rules above are unchanged. Two more declared kinds exist, and the
+-- cap MAX_BASE_ENTRIES (declarations, English base and each pack) is the
+-- bounded 4096 instead of the 64-entry pilot cap; above it the same
+-- fail-closed rules apply.
+--  * {kind = "block"}: one static meaning that needs several lines (a Help
+--    or FAQ paragraph). The text contract with two differences: at most
+--    MAX_BLOCK_BYTES bytes, and the line feed (byte 10) is allowed. Carriage
+--    return, every other control byte and "|" stay refused. Resolve and Text
+--    answer it exactly as static text; an English or candidate block that
+--    fails this contract is refused or falls back exactly as text does.
+--  * {kind = "template", fields = {...}, slots = {...}, resultLimit = N}
+--    (optionally lines = true): a named template under the grammar above.
+--    slots is a plain list as long as fields giving each field's code-owned
+--    slot type: "count" (the typed count record above) or "text" (a Lua
+--    string of at most MAX_SLOT_TEXT_BYTES bytes that the calling code
+--    supplies: a name, a formatted number, a code-owned marker). A text slot
+--    value is inserted verbatim in the one substitution pass and is never
+--    parsed again, so a value may hold bytes a template may not (a player
+--    name's escaped "||", a code-owned colour); a translation can never add
+--    them. N is a whole number from 1 to MAX_TEMPLATE_RESULT_BYTES. Without
+--    lines the template is single-line text (MAX_TEXT_BYTES); with
+--    lines = true it follows the block contract. L.Format resolves it in the
+--    order given for formats above, with its own result limit.
+--  * L.Count(value) builds a count slot record from an observation:
+--    {known = true, value = N} for a finite whole number N >= 0, otherwise
+--    {known = false}. Unknown is never zero.
+-- No plural, gender, date or number grammar exists: where English chooses
+-- between two wordings (one copy, several copies) the calling code chooses
+-- between two reviewed keys exactly as the English did.
 
 Nexus = Nexus or {}
 local L = {}
@@ -165,15 +198,25 @@ Nexus.Localization = L
 
 local MAX_KEY_BYTES = 64
 local MAX_TEXT_BYTES = 256
-local MAX_BASE_ENTRIES = 64
+-- Full visible-UI scope (issues #143-#148): the cap bounds the declarations,
+-- the English base and each pack. It was 64 for the pilot cohort; 4096 holds
+-- the complete measured UI catalog with headroom and still fails closed
+-- above it (see "Full-UI kinds" below).
+local MAX_BASE_ENTRIES = 4096
 local MAX_DIAGNOSTIC_KEYS = 8
 local MAX_NAME_BYTES = 64
 local MAX_LANGUAGES = 16
+local MAX_BLOCK_BYTES = 1024
+local MAX_TEMPLATE_RESULT_BYTES = 2048
+local MAX_SLOT_TEXT_BYTES = 1024
 L.MAX_KEY_BYTES = MAX_KEY_BYTES
 L.MAX_TEXT_BYTES = MAX_TEXT_BYTES
 L.MAX_BASE_ENTRIES = MAX_BASE_ENTRIES
 L.MAX_DIAGNOSTIC_KEYS = MAX_DIAGNOSTIC_KEYS
 L.MAX_NAME_BYTES = MAX_NAME_BYTES
+L.MAX_BLOCK_BYTES = MAX_BLOCK_BYTES
+L.MAX_TEMPLATE_RESULT_BYTES = MAX_TEMPLATE_RESULT_BYTES
+L.MAX_SLOT_TEXT_BYTES = MAX_SLOT_TEXT_BYTES
 
 -- The documented safe status for a key without reviewed text: nonempty and
 -- inside the text contract. Resolve returns this local, not the field.
@@ -242,6 +285,18 @@ end
 -- The same scalar-text check for the owned UserText presentation boundary.
 -- This is not an identifier validator; it does not normalize Unicode.
 function L.IsText(value) return ValidText(value) end
+
+-- A block (see "Full-UI kinds"): the text contract with MAX_BLOCK_BYTES and
+-- one exception, the line feed (byte 10). Every other control byte, carriage
+-- return included, and "|" stay refused.
+local function ValidBlock(text)
+    if type(text) ~= "string" then return false end
+    local length = #text
+    if length < 1 or length > MAX_BLOCK_BYTES then return false end
+    if not text:find("[^\9-\13\32]") then return false end
+    if text:find("[%z\1-\9\11-\31\127|]") then return false end
+    return WellFormedUtf8(text)
+end
 
 -- Code-owned schemas of the formatted meanings (issue #142), derived from
 -- the declarations below (issue #147). A schema, not a translation, names
@@ -316,25 +371,60 @@ local function FormatSchema(declaration)
     if not Plain(fields) then return nil end
     local count = FieldCount(fields)
     if count < 1 then return nil end
-    local schema = {fields = {}, index = {}, resultLimit = CHARGE_RESULT_LIMIT}
+    local schema = {fields = {}, index = {}, slots = {}, resultLimit = CHARGE_RESULT_LIMIT}
     for index = 1, count do
         local name = rawget(fields, index)
         if type(name) ~= "string" or #name > MAX_KEY_BYTES or not name:find("^[a-z][a-z0-9_]*$")
             or schema.index[name] then return nil end
-        schema.fields[index], schema.index[name] = name, true
+        schema.fields[index], schema.index[name], schema.slots[name] = name, true, SLOT_TYPE
     end
     return schema
 end
 
--- The admitted declarations: declared[key] is "text" or "format", and
--- SCHEMAS[key] is the schema of each admitted format declaration.
+-- The slot types a template field may declare (see "Full-UI kinds").
+local TEMPLATE_SLOTS = {count = true, text = true}
+
+-- The schema of an admitted template declaration, or nil: exactly kind,
+-- fields, slots and resultLimit, and optionally lines = true; one or more
+-- distinct field names as for a format; slots a plain list of the same
+-- length naming each field's slot type; resultLimit a whole number from 1 to
+-- MAX_TEMPLATE_RESULT_BYTES.
+local function TemplateSchema(declaration)
+    local lines = rawget(declaration, "lines")
+    if lines ~= nil and lines ~= true then return nil end
+    if FieldCount(declaration) ~= (lines and 5 or 4) then return nil end
+    local limit, fields, slots = rawget(declaration, "resultLimit"), rawget(declaration, "fields"),
+        rawget(declaration, "slots")
+    if type(limit) ~= "number" or limit ~= math.floor(limit) or limit < 1
+        or limit > MAX_TEMPLATE_RESULT_BYTES then return nil end
+    if not Plain(fields) or not Plain(slots) then return nil end
+    local count = FieldCount(fields)
+    if count < 1 or FieldCount(slots) ~= count then return nil end
+    local schema = {fields = {}, index = {}, slots = {}, resultLimit = limit, lines = lines == true}
+    for index = 1, count do
+        local name, slot = rawget(fields, index), rawget(slots, index)
+        if type(name) ~= "string" or #name > MAX_KEY_BYTES or not name:find("^[a-z][a-z0-9_]*$")
+            or schema.index[name] or type(slot) ~= "string" or not TEMPLATE_SLOTS[slot] then return nil end
+        schema.fields[index], schema.index[name], schema.slots[name] = name, true, slot
+    end
+    return schema
+end
+
+-- The admitted declarations: declared[key] is "text", "block", "format" or
+-- "template", and SCHEMAS[key] is the schema of each admitted format or
+-- template declaration.
 local declared, SCHEMAS, declaredCount = {}, {}, 0
 if Plain(DECLARATIONS) and FieldCount(DECLARATIONS) <= MAX_BASE_ENTRIES then
     for key, declaration in next, DECLARATIONS do
         if ValidKey(key) and Plain(declaration) then
             local kind = rawget(declaration, "kind")
-            if kind == "text" and FieldCount(declaration) == 1 then
+            if (kind == "text" or kind == "block") and FieldCount(declaration) == 1 then
                 declared[key], declaredCount = kind, declaredCount + 1
+            elseif kind == "template" then
+                local schema = TemplateSchema(declaration)
+                if schema then
+                    declared[key], SCHEMAS[key], declaredCount = kind, schema, declaredCount + 1
+                end
             elseif kind == "format" then
                 local schema = FormatSchema(declaration)
                 if schema then
@@ -350,7 +440,11 @@ end
 -- MAX_TEXT_BYTES bytes; braces are ASCII, so UTF-8 is split only between
 -- characters.
 local function CompileTemplate(text, schema)
-    if not ValidText(text) then return nil end
+    if schema.lines then
+        if not ValidBlock(text) then return nil end
+    elseif not ValidText(text) then
+        return nil
+    end
     local parts, literal, seen, used = {}, {}, {}, 0
     local index, length = 1, #text
     while index <= length do
@@ -387,11 +481,17 @@ local function CompileTemplate(text, schema)
     return parts
 end
 
--- The shown text of one argument slot, or nil. Only a plain record that is
--- exactly {known = true, value = N} (N a finite whole number >= 0, shown
--- with tostring) or exactly {known = false} (shown as "?") is admitted, and
--- at most three of its fields are looked at.
-local function SlotText(slot)
+-- The shown text of one argument slot, or nil. A "text" slot admits a Lua
+-- string of at most MAX_SLOT_TEXT_BYTES bytes, shown verbatim. A "count"
+-- slot admits only a plain record that is exactly {known = true, value = N}
+-- (N a finite whole number >= 0, shown with tostring) or exactly
+-- {known = false} (shown as "?"), and at most three of its fields are
+-- looked at.
+local function SlotText(slot, slotType)
+    if slotType == "text" then
+        if type(slot) == "string" and #slot <= MAX_SLOT_TEXT_BYTES then return slot end
+        return nil
+    end
     if type(slot) ~= "table" or getmetatable(slot) ~= nil then return nil end
     local fields, key = 0, next(slot)
     while key ~= nil do
@@ -424,7 +524,7 @@ local function ArgumentValues(arguments, schema)
     if fields ~= limit then return nil end
     local values = {}
     for _, name in ipairs(schema.fields) do
-        local shown = SlotText(rawget(arguments, name))
+        local shown = SlotText(rawget(arguments, name), schema.slots[name])
         if not shown then return nil end
         values[name] = shown
     end
@@ -460,13 +560,13 @@ do
         else
             for key, text in next, source do
                 local kind = declared[key]
-                local parts = kind == "format" and CompileTemplate(text, SCHEMAS[key]) or nil
+                local parts = SCHEMAS[key] and CompileTemplate(text, SCHEMAS[key]) or nil
                 if parts then
                     templates[key] = parts
                     baseKeys[#baseKeys + 1] = key
                     baseLoad.accepted = baseLoad.accepted + 1
                     baseLoad.formatted = baseLoad.formatted + 1
-                elseif kind == "text" and ValidText(text) then
+                elseif (kind == "text" and ValidText(text)) or (kind == "block" and ValidBlock(text)) then
                     base[key] = text
                     baseKeys[#baseKeys + 1] = key
                     baseLoad.accepted = baseLoad.accepted + 1
@@ -493,7 +593,9 @@ local function Resolve(key, pack)
     end
     local candidate = rawget(pack, key)
     if candidate == nil then return english, "base", "missing_candidate" end
-    if not ValidText(candidate) then return english, "base", "invalid_candidate" end
+    if not (declared[key] == "block" and ValidBlock(candidate) or ValidText(candidate)) then
+        return english, "base", "invalid_candidate"
+    end
     return candidate, "candidate", nil
 end
 L.Resolve = Resolve
@@ -565,7 +667,8 @@ do
                         copy[key] = text
                         accepted = accepted + 1
                     end
-                elseif ValidKey(key) and base[key] ~= nil and ValidText(text) then
+                elseif ValidKey(key) and base[key] ~= nil
+                    and (declared[key] == "block" and ValidBlock(text) or ValidText(text)) then
                     copy[key] = text
                     accepted = accepted + 1
                 end
@@ -670,16 +773,27 @@ function L.Format(key, arguments, pack)
     return text, source, reason
 end
 
+-- The typed record of a "count" slot: {known = true, value = N} for a
+-- finite whole number N >= 0, otherwise {known = false}. An absent or
+-- invalid observation is unknown, never filled with 0. Pure.
+function L.Count(value)
+    if type(value) == "number" and value == value and value >= 0 and value < math.huge
+        and value == math.floor(value) then
+        return {known = true, value = value}
+    end
+    return {known = false}
+end
+
 -- Whether the English base holds a reviewed text or template for the key.
 function L.Has(key)
     return ValidKey(key) and (base[key] ~= nil or templates[key] ~= nil)
 end
 
--- "text" for a reviewed static text, "format" for a template, else nil.
+-- The declared kind of a reviewed key: "text" or "block" for static text,
+-- "format" or "template" for a template, else nil.
 function L.Kind(key)
     if not ValidKey(key) then return nil end
-    if base[key] ~= nil then return "text" end
-    if templates[key] ~= nil then return "format" end
+    if base[key] ~= nil or templates[key] ~= nil then return declared[key] end
     return nil
 end
 

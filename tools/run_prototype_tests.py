@@ -422,6 +422,10 @@ NAMES += ['owner14_editor_usability']
 NAMES += ['owner14_guide_help_usability']
 # Issue #147 S1: shared runtime/offline localization parity corpus (tests/prototype/fixtures/l10n_parity) through the unchanged core/Localization.lua under the harness Lua; P19/P20 native behaviour UNKNOWN (synthetic offline evidence; native NOT_RUN).
 NAMES += ['localization_parity']
+# Full visible-UI localization (#143-#148): the bounded 4096 cap, the block kind and the typed template kind of core/Localization.lua; text/format rules unchanged (synthetic offline; native NOT_RUN).
+NAMES += ['l10n_full_contract']
+# Full visible-UI localization: Settings selects Options rows by stable semantic identities, never English titles, so translated menus keep every setting; stale-click refusal kept (native NOT_RUN).
+NAMES += ['l10n_settings_identity']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

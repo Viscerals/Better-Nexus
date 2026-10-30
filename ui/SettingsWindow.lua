@@ -31,19 +31,22 @@ local function AddMenuRows(out, items)
     for _, item in ipairs(items or {}) do
         if type(item) == "table" and not item.isTitle and type(item.text) == "string"
             and (type(item.func) == "function" or item.disabled) then
-            out[#out+1] = {text=Plain(item.text), action=not item.disabled and item.func or nil,
+            out[#out+1] = {id=item.nexusId, text=Plain(item.text), action=not item.disabled and item.func or nil,
                 checked=item.checked == true, disabled=item.disabled == true,
                 detail=Plain(item.tooltipText or "")}
         end
     end
 end
 
+-- The rows under one Options menu section, chosen by the section's stable
+-- identity (Panel's nexusSection), never by its shown, possibly translated,
+-- title.
 local function MoreSection(section)
     local panel = Nexus.Panel
     if not (panel and type(panel.MoreMenuItems) == "function") then return {} end
     local out, current = {}, nil
     for _, item in ipairs(panel.MoreMenuItems()) do
-        if item.isTitle then current = item.text
+        if item.isTitle then current = item.nexusSection
         elseif current == section then AddMenuRows(out, {item}) end
     end
     return out
@@ -86,14 +89,14 @@ function M.Rows(category)
             AddMenuRows(out, panel.LanguageMenuItems(identity))
         end
     elseif category == "display" then
-        for _, item in ipairs(MoreSection("Settings")) do
-            if item.text:find("DPS records", 1, true)
-                or item.text:find("Difficulty / Soul Ash HUD", 1, true) then
+        -- The two local HUD choices, by their stable row identities.
+        for _, item in ipairs(MoreSection("settings")) do
+            if item.id == "dps_records" or item.id == "hud_mode" then
                 out[#out+1] = item
             end
         end
     elseif category == "notices" then
-        out = MoreSection("Notices")
+        out = MoreSection("notices")
     elseif category == "support" then
         out[#out+1] = Route("Guided setup", function()
             if Nexus.Help and Nexus.Help.OpenGuide then Nexus.Help.OpenGuide() end

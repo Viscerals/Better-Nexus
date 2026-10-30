@@ -2951,7 +2951,12 @@ local function MenuAction(fn)
     end
 end
 
-local function MenuTitle(text) return {text = text, isTitle = true, notCheckable = true} end
+-- A section title may carry a stable semantic identity (nexusSection), and
+-- a row its own (nexusId), so another window (ui/SettingsWindow.lua) selects
+-- them without reading their shown, possibly translated, text.
+local function MenuTitle(text, section)
+    return {text = text, isTitle = true, notCheckable = true, nexusSection = section}
+end
 local function MenuNote(text) return {text = text, notCheckable = true, disabled = true} end
 
 -- Options > Main panel size (issue #170): the chosen size, one 5% step either
@@ -3232,7 +3237,7 @@ end
 function M.MoreMenuItems(anchor)
     local items = {}
     local function Add(item) items[#items + 1] = item end
-    Add(MenuTitle("Help and setup"))
+    Add(MenuTitle("Help and setup", "help"))
     -- Short answers (also the panel's "?" button, M.ShowFaq).
     Add({ text = "Questions (FAQ)", notCheckable = true,
         tooltipTitle = "Questions (FAQ)",
@@ -3273,7 +3278,7 @@ function M.MoreMenuItems(anchor)
             .. "viewer, and the Orb and Wishlist windows. Opening a window changes nothing.",
         menuList = M.MoreWindowsItems() })
 
-    Add(MenuTitle("Settings"))
+    Add(MenuTitle("Settings", "settings"))
     -- design/current "Nexus Main Panel - Compact Redesign": Options opens
     -- Appearance directly. Its list is the shared Theme choice
     -- (Theme.MenuItems: the same saved style and colour the Orb windows use),
@@ -3308,7 +3313,7 @@ function M.MoreMenuItems(anchor)
     Add({ text = M.LanguageMenuLabel(), notCheckable = true, hasArrow = true,
         menuList = M.LanguageMenuItems(MenuAction) })
     Add({ text = showPerformance and "Hide DPS records (now shown)" or "Show DPS records (now hidden)",
-        notCheckable = true,
+        notCheckable = true, nexusId = "dps_records",
         tooltipTitle = "DPS records",
         tooltipText = "Shows or hides the DPS record rows on this panel. Recording and Sync are not changed.",
         func = MenuAction(function()
@@ -3318,7 +3323,7 @@ function M.MoreMenuItems(anchor)
         end) })
     Add(M.HudModeMenuItem())
 
-    Add(MenuTitle("Notices"))
+    Add(MenuTitle("Notices", "notices"))
     -- Never disabled: the Releases page and the installed build are
     -- available with no report, no peer and no Community catalog.
     Add({ text = (Nexus.Updates and Nexus.Updates.Status)
@@ -3327,10 +3332,10 @@ function M.MoreMenuItems(anchor)
         func = MenuAction(function() M.ShowUpdateStatus() end) })
     Add(M.UpdateNoticesMenuItem())
 
-    Add(MenuTitle("Session"))
+    Add(MenuTitle("Session", "session"))
     for _, item in ipairs(M.SessionMenuItems()) do Add(item) end
 
-    Add(MenuTitle("Panel"))
+    Add(MenuTitle("Panel", "panel"))
     Add(M.PanelSizeMenuItem())
     Add({ text = "Reset Panel Position", notCheckable = true,
         func = MenuAction(function()
@@ -3412,15 +3417,17 @@ end
 function M.HudModeMenuItem()
     local status = Nexus.ServerStatus
     if not (status and type(status.IsDetected) == "function" and type(status.IsUsingNexusHud) == "function") then
-        return { text = "Difficulty / Soul Ash HUD (not known)", notCheckable = true, disabled = true }
+        return { text = "Difficulty / Soul Ash HUD (not known)", notCheckable = true, disabled = true,
+            nexusId = "hud_mode" }
     end
     local nexus = status.IsUsingNexusHud() and true or false
     local text = nexus and "Use Server Difficulty / Soul Ash HUD" or "Use Nexus Difficulty / Soul Ash HUD"
     if not status.IsDetected() then
-        return { text = text .. " (game HUD not detected)", notCheckable = true, disabled = true }
+        return { text = text .. " (game HUD not detected)", notCheckable = true, disabled = true,
+            nexusId = "hud_mode" }
     end
     return { text = text .. (nexus and " (now: Nexus)" or " (now: Server)"),
-        notCheckable = true,
+        notCheckable = true, nexusId = "hud_mode",
         func = MenuAction(function()
             if Nexus.ServerStatus then
                 Nexus.ServerStatus.SetMode(Nexus.ServerStatus.IsUsingNexusHud() and "server" or "nexus")
