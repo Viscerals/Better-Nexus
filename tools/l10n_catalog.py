@@ -2622,6 +2622,13 @@ def _cli_provenance(receipt, toc, require_complete):
 # one identity with its local aliases (review fix 2): a field written through
 # an alias is another definition, and a module table that escapes its file,
 # is reassigned or is written through a computed key resolves no function.
+# Review fix 2 adds identity: a field value reaches only a read of a table
+# with the same object origin (a constructor, an unassigned local alias or a
+# parameter it was passed to), a parameter value returns only to the call
+# that passed it, and an output counts only on a client receiver (a client
+# global never assigned by the loaded source, or a CreateFrame or
+# CreateFontString widget the source never redefines), never on method
+# spelling alone.
 #
 # Comments, strings that merely contain call text, data and declaration
 # tables, Has and Kind queries and Text methods of other objects never bind.
@@ -2673,9 +2680,10 @@ _BINDING_RULE = ('DIRECT_LITERAL_CONSUMER: a direct-call or wrapper-call site wh
                  'no such site; a literal lead, comment, declaration, unrelated Text method or '
                  'a discarded or overwritten result never binds')
 _OUTPUT_RULE = ('a site counts only when its localization result may flow, by the syntactic '
-                'rules of _UnitFlow, into argument 1 of SetText, AddLine or AddMessage or an '
-                'argument of print; a site that does not is listed in unprovenSites and not '
-                'counted. This is a static path, not proof that it runs or is displayed')
+                'rules of _UnitFlow, into argument 1 of SetText, AddLine or AddMessage on a client '
+                'receiver or an argument of a never-assigned print, keeping table identity and '
+                'call-site correspondence; a site that does not is listed in unprovenSites and '
+                'not counted. This is a static path, not proof that it runs or is displayed')
 _FAMILY_RULE = ('binding and family classification are independent: DECLARED names the window '
                 'families whose adoptedKeys hold the key, UNCLASSIFIED none; neither adopts a '
                 'key or establishes family coverage')
@@ -2686,9 +2694,11 @@ _CONSUMER_LIMITS = (
     'a localization table passed to another function, stored in a global or a table field, or '
     'reached through a computed name is not followed',
     'map dispatch is accepted only in the exact guarded shape described for this seam',
-    'result flow is may-flow and flow-insensitive: a field name is one channel across every '
-    'table, values in globals, computed-key writes and method calls are not followed, and an '
-    'output outside the loaded source (such as the stock dropdown menu) is not an output',
+    'result flow is may-flow and flow-insensitive: field values follow table identity only '
+    'through constructors, unassigned local aliases and local-function or pcall arguments in '
+    'one file; values in globals, computed-key writes, method calls and calls deeper than '
+    '8 frames are not followed; and an output outside the loaded source (such as the stock '
+    'dropdown menu) or on a receiver not proved to be a client object is not an output',
     'Lua 5.1 lexical and grammar rules; LuaJIT and Lua 5.2 additions are refused',
 )
 _CONSUMER_INPUT_BINDING = ('exact bytes read once from the resolved root for the registry inputs, '
@@ -3811,31 +3821,57 @@ def _module_root(binding):
     return binding
 
 
+def _local_function(callee):
+    """The function node a callee names when it is an unassigned local
+    function (local function f or local f = function), else None."""
+    binding = callee.binding if callee.kind == 'name' else None
+    if binding is not None and not binding.assigned and binding.value is not None \
+            and binding.value.kind == 'function' and binding.kind in ('local', 'localfunction'):
+        return binding.value
+    return None
+
+
+_STACK_LIMIT = 8
+# Output receivers are client objects: never-assigned client globals, or
+# widgets made by CreateFrame or a CreateFontString method that the loaded
+# source does not redefine.
+_WIDGET_FUNCTIONS = frozenset(('CreateFrame',))
+_WIDGET_METHODS = frozenset(('CreateFontString',))
+
+
 class _UnitFlow:
     """The may-flow graph of one parsed file, built once with its parse.
 
     A value flows from an expression into a paren, into an operation for the
     operands _flowing_operands names, into the binding a local statement or
-    assignment gives it, into a table field by name (constructor or literal
-    field assignment), into the return of its function (first value only),
-    into the parameter of a local function it is passed to, and into
-    argument 1 of a _SINK_METHODS call or any argument of a _SINK_FUNCTIONS
-    call, the outputs. A binding passes a value on to its reads only when
-    every definition (its declared value and every assignment, closures
-    included) carries a value of the same proof; a value-less definition
-    such as a for variable or a later multiple-value position never does.
-    A field name is one channel across every table and file, under the
-    same every-definition rule. Function results reach the calls the
+    assignment gives it, into a literal table field (constructor or field
+    assignment), into the return of its function (first value only), into
+    the parameter of a local function it is passed to (directly or through
+    pcall), and into argument 1 of a _SINK_METHODS call or any argument of a
+    _SINK_FUNCTIONS call, the candidate outputs. A binding passes a value on
+    to its reads only when every definition (its declared value and every
+    assignment, closures included) carries a value of the same proof; a
+    value-less definition such as a for variable or a later multiple-value
+    position never does. Review fix 2 (SPEC-147-S8-RF1-1..3): a field value
+    reaches only a read whose table shares an object origin with the
+    written table (objects); a parameter value returns only to the call
+    that passed it (call_args, direct_calls, kept by the linker's call
+    stack); and a candidate output counts only on a client output receiver
+    (the linker's receiver_ok). Function results reach the calls the
     receipt can resolve: local functions here, module functions and their
     Nexus exports when the units are linked."""
 
     def __init__(self, body):
         self.edges, self.defs, self.def_of = {}, {}, {}
         self.field_writes, self.field_reads, self.field_def_of = {}, {}, {}
+        self.field_bases = {}
+        self.call_args, self.param_args, self.direct_calls = {}, {}, {}
+        self.global_writes, self.sinks = set(), {}
         self.path_calls, self.module_calls = {}, []
         self.module_defs, self.dynamic_modules = {}, set()
         self.alias_of, self.export_values, self.exports = {}, set(), []
         self.chunk_returns = set()
+        self.object_memo = {}
         self.block(body, None)
         self.module_funcs = {}
         for module, fields in self.module_defs.items():
@@ -3854,11 +3890,45 @@ class _UnitFlow:
             self.edge(value, binding)
             self.def_of.setdefault(value, []).append(binding)
 
-    def write_field(self, name, value):
+    def write_field(self, name, value, base):
+        """value written to field name of base (a local binding, a table
+        constructor node, or None for any other table expression)."""
         self.field_writes.setdefault(name, []).append(value)
         if value is not _OPAQUE:
-            self.edge(value, ('field', name))
+            self.edge(value, ('fwrite', value))
             self.field_def_of.setdefault(value, []).append(name)
+            self.field_bases[value] = (name, base)
+
+    def objects(self, base, depth=0):
+        """The object origins a table reference may hold, or None when its
+        identity is not tracked: a table constructor is its own origin; a
+        local declared once (never assigned again) holds itself plus the
+        origins of a local alias or constructor it is declared with; a
+        parameter never assigned holds itself plus the origins of every
+        local alias or constructor a resolved call passes to it."""
+        if base is None or depth > 16:
+            return None
+        if type(base) is not _Binding:
+            return frozenset((base,))
+        if base in self.object_memo:
+            return self.object_memo[base]
+        self.object_memo[base] = frozenset((base,))
+        defs = self.defs.get(base, ())
+        if base.kind == 'local' and len(defs) == 1 and defs[0] is not _OPAQUE:
+            sources = [defs[0]]
+        elif base.kind == 'param' and not defs:
+            sources = self.param_args.get(base, ())
+        else:
+            self.object_memo[base] = None
+            return None
+        origins = {base}
+        for source in sources:
+            if source.kind == 'table':
+                origins.add(source)
+            elif source.kind == 'name' and source.binding is not None:
+                origins |= self.objects(source.binding, depth + 1) or frozenset()
+        self.object_memo[base] = frozenset(origins)
+        return self.object_memo[base]
 
     def module_ok(self, binding, depth=0):
         """A local module table (or alias of one) whose identity stays here:
@@ -3898,6 +3968,15 @@ class _UnitFlow:
                     self.define(name.binding, _OPAQUE)
         elif kind == 'localfunction':
             self.function(stmt.func)
+        elif kind == 'funcstat' and stmt.method is not None:
+            # function base:name() writes the field name of base.
+            self.function(stmt.func)
+            self.expr(stmt.target, func)
+            base = stmt.target.binding if stmt.target.kind == 'name' else None
+            self.write_field(stmt.method, stmt.func, base)
+            if base is not None:
+                fields = self.module_defs.setdefault(_module_root(base), {})
+                fields.setdefault(stmt.method, []).append(stmt.func)
         elif kind in ('funcstat', 'assign'):
             if kind == 'funcstat':
                 targets, values = [stmt.target], [stmt.func]
@@ -3937,8 +4016,10 @@ class _UnitFlow:
         if target.kind == 'name':
             if target.binding is not None:
                 self.define(target.binding, value)
-            elif _path(target) is not None and value is not _OPAQUE and value.kind == 'name':
-                self.export_values.add(value)
+            else:
+                self.global_writes.add(target.value)
+                if _path(target) is not None and value is not _OPAQUE and value.kind == 'name':
+                    self.export_values.add(value)
             return
         if target.obj.kind != 'name':
             self.expr(target.obj, func)
@@ -3948,7 +4029,7 @@ class _UnitFlow:
             if base is not None:
                 self.dynamic_modules.add(_module_root(base))
             return
-        self.write_field(target.key.value, value)
+        self.write_field(target.key.value, value, base)
         if base is not None:
             fields = self.module_defs.setdefault(_module_root(base), {})
             fields.setdefault(target.key.value, []).append(value)
@@ -3972,7 +4053,8 @@ class _UnitFlow:
             self.expr(node.obj, func)
             self.expr(node.key, func)
             if node.key.kind == 'string' and node.key.value is not None:
-                self.field_reads.setdefault(node.key.value, []).append(node)
+                base = node.obj.binding if node.obj.kind == 'name' else None
+                self.field_reads.setdefault(node.key.value, []).append((node, base))
         elif kind == 'paren':
             self.expr(node.expr, func)
             self.edge(node.expr, node)
@@ -3989,6 +4071,7 @@ class _UnitFlow:
                 self.expr(arg, func)
             if node.name in _SINK_METHODS and node.args:
                 self.edge(node.args[0], ('sink', node))
+                self.sinks[node] = node.obj
         elif kind == 'function':
             self.function(node)
         elif kind == 'table':
@@ -3998,7 +4081,14 @@ class _UnitFlow:
                 self.expr(field.value, func)
                 if field.key is not None and field.key.kind == 'string' \
                         and field.key.value is not None:
-                    self.write_field(field.key.value, field.value)
+                    self.write_field(field.key.value, field.value, node)
+
+    def pass_args(self, target, args, call):
+        """Arguments of one call of a local function, by parameter position;
+        the linker returns a value that entered here only to this call."""
+        for param, arg in zip(target.params, args):
+            self.call_args.setdefault(arg, []).append((param.binding, call))
+            self.param_args.setdefault(param.binding, []).append(arg)
 
     def call(self, node, func):
         callee, args = node.func, node.args
@@ -4008,14 +4098,17 @@ class _UnitFlow:
         if callee.kind == 'name' and callee.binding is None and callee.value in _SINK_FUNCTIONS:
             for arg in args:
                 self.edge(arg, ('sink', node))
-        binding = callee.binding if callee.kind == 'name' else None
-        if binding is not None and not binding.assigned and binding.value is not None \
-                and binding.value.kind == 'function' and binding.kind in ('local',
-                                                                          'localfunction'):
-            target = binding.value
+            self.sinks[node] = None
+        target = _local_function(callee)
+        if target is not None:
             self.edge(('ret', target), node)
-            for param, arg in zip(target.params, args):
-                self.edge(arg, param.binding)
+            self.direct_calls.setdefault(target, set()).add(node)
+            self.pass_args(target, args, node)
+        elif callee.kind == 'name' and callee.binding is None and callee.value == 'pcall' \
+                and args and _local_function(args[0]) is not None:
+            # pcall(f, ...) passes its remaining arguments to f; its own
+            # first result is a status, so f's result does not come back here.
+            self.pass_args(_local_function(args[0]), args[1:], node)
         if callee.kind == 'index' and callee.obj.kind == 'name' and callee.obj.binding \
                 is not None and callee.key.kind == 'string':
             self.module_calls.append((_module_root(callee.obj.binding), callee.key.value,
@@ -4035,7 +4128,8 @@ class _Unit:
 
 # Parsed files memoized by the SHA-256 of their exact bytes, oldest dropped
 # first. A parse, its scan and its flow graph depend only on those bytes,
-# and linking never changes them, so a memoized parse is the same parse;
+# and linking changes none of them (it only fills the flow's object-origin
+# memo, itself a function of the same bytes), so a memoized parse is the same parse;
 # nothing is read or written. Two equal files of one call get separate
 # parses (fresh), so their local names stay distinct.
 _PARSE_MEMO = {}
@@ -4087,7 +4181,10 @@ class _Linker:
         for unit in self.units:
             for path, rows in unit.scan.path_assignments.items():
                 self.assignments.setdefault(path, []).extend(rows)
-        self.field_cache, self.ret_links = {}, {}
+        self.field_cache, self.ret_links, self.receiver_memo = {}, {}, {}
+        self.global_writes = set()
+        for unit in self.units:
+            self.global_writes |= unit.flow.global_writes
         for unit in self.units:
             flow = unit.flow
             exports = {}
@@ -4130,69 +4227,153 @@ class _Linker:
     # -- the may-flow search -----------------------------------------------
 
     def field_defs(self, name):
+        """Every value written to a field of this name in any unit, with its
+        unit flow."""
         if name not in self.field_cache:
-            self.field_cache[name] = [value for unit in self.units
+            self.field_cache[name] = [(value, unit.flow) for unit in self.units
                                       for value in unit.flow.field_writes.get(name, ())]
         return self.field_cache[name]
 
     def gate(self, key, flow):
-        """The definitions a binding or field node needs, else None."""
+        """The definitions a binding or field write needs, else None. Every
+        write of a field name anywhere must carry the proof, a conservative
+        rule on top of object identity."""
         if type(key) is tuple:
-            return self.field_defs(key[1]) if key[0] == 'field' else None
+            if key[0] == 'fwrite':
+                return [value for value, _ in self.field_defs(flow.field_bases[key[1]][0])]
+            return None
         if type(key) is _Binding:
             return flow.defs.get(key, ())
         return None
 
-    def successors(self, key, flow):
+    def field_reads(self, value, flow):
+        """The reads of the field a write sets whose table shares an object
+        origin with the written table, in the same unit (review fix 2)."""
+        name, base = flow.field_bases[value]
+        written = flow.objects(base)
+        if not written:
+            return []
+        return [read for read, read_base in flow.field_reads.get(name, ())
+                if (flow.objects(read_base) or frozenset()) & written]
+
+    def successors(self, key, flow, stack):
+        """(key, flow, call stack) successors. A value enters a local
+        function's parameter with its call pushed and leaves that function's
+        return only to that call; without a pushed call it reaches every
+        resolved call. Field and module paths start an empty stack."""
         if type(key) is tuple:
             tag = key[0]
-            if tag == 'field':
-                return [(read, unit.flow) for unit in self.units
-                        for read in unit.flow.field_reads.get(key[1], ())]
+            if tag == 'fwrite':
+                return [(read, flow, ()) for read in self.field_reads(key[1], flow)]
             if tag == 'pret':
-                return [(call, unit.flow) for unit in self.units
+                return [(call, unit.flow, ()) for unit in self.units
                         for call in unit.flow.path_calls.get(key[1], ())]
             if tag == 'ret':
-                out = [(nxt, flow) for nxt in flow.edges.get(key, ())]
+                if stack:
+                    call = stack[-1]
+                    if call in flow.direct_calls.get(key[1], ()):
+                        return [(call, flow, stack[:-1])]
+                    return []
+                out = [(nxt, flow, ()) for nxt in flow.edges.get(key, ())]
                 for nxt, owner in self.ret_links.get(key[1], ()):
-                    out.append((nxt, owner))
+                    out.append((nxt, owner, ()))
                 return out
             if tag == 'sink':
                 return []
-        return [(nxt, flow) for nxt in flow.edges.get(key, ())]
+        out = [(nxt, flow, stack) for nxt in flow.edges.get(key, ())]
+        if len(stack) < _STACK_LIMIT:
+            out.extend((param, flow, stack + (call,))
+                       for param, call in flow.call_args.get(key, ()))
+        return out
 
     def search(self, roots, allowed=None, stop=None):
-        """Every key reached from roots [(key, flow)]. A binding or field
-        passes a value on only when all its definitions are in allowed, or,
-        with allowed None, in the reached set itself (a fixpoint). Returns
-        (reached keys, sink keys with their flow)."""
-        reached, waiting, sinks = set(), {}, {}
-        queue = list(roots)
+        """Every key reached from roots [(key, flow)], with the call stack
+        it was reached under. A binding or field write passes a value on
+        only when all its definitions are in allowed, or, with allowed None,
+        in the reached set itself (a fixpoint). Returns (reached keys, valid
+        output keys with their flow)."""
+        reached, visited, waiting, sinks = set(), set(), {}, {}
+        queue = [(key, flow, ()) for key, flow in roots]
         while queue:
-            key, flow = queue.pop()
-            if key in reached:
+            key, flow, stack = queue.pop()
+            if (key, stack) in visited:
                 continue
             needs = self.gate(key, flow)
             if needs is not None:
                 pool = reached if allowed is None else allowed
                 if any(value is _OPAQUE or value not in pool for value in needs):
-                    waiting[key] = flow
+                    waiting.setdefault(key, []).append((flow, stack))
                     continue
+            visited.add((key, stack))
             reached.add(key)
             if type(key) is tuple and key[0] == 'sink':
-                sinks[key] = flow
+                if self.output_ok(key[1], flow):
+                    sinks[key] = flow
                 continue
             if allowed is None and flow is not None:
-                for binding in flow.def_of.get(key, ()):
-                    if binding in waiting:
-                        queue.append((binding, waiting.pop(binding)))
-                for name in flow.field_def_of.get(key, ()):
-                    if ('field', name) in waiting:
-                        queue.append((('field', name), waiting.pop(('field', name))))
+                gated = list(flow.def_of.get(key, ()))
+                if key in flow.field_bases:
+                    name = flow.field_bases[key][0]
+                    gated += [('fwrite', value) for value, _ in self.field_defs(name)]
+                for item in gated:
+                    for state in waiting.pop(item, ()):
+                        queue.append((item,) + state)
             if key == stop:
                 continue
-            queue.extend(self.successors(key, flow))
+            queue.extend(self.successors(key, flow, stack))
         return reached, sinks
+
+    # -- output receivers --------------------------------------------------
+
+    def output_ok(self, node, flow):
+        """A candidate output is a real one only on a client receiver: the
+        never-assigned global print, or a SetText/AddLine/AddMessage method
+        whose receiver receiver_ok accepts (review fix 2). A local table
+        with its own SetText is never an output."""
+        receiver = flow.sinks[node]
+        if receiver is None:
+            return node.func.value not in self.global_writes
+        return self.receiver_ok(receiver, flow)
+
+    def receiver_ok(self, expr, flow, depth=0):
+        """True when expr can only hold a client object: a client global the
+        loaded source never assigns, a local whose every definition is one,
+        a field whose every write anywhere is one, or a widget made by
+        CreateFrame or a CreateFontString method the source never defines."""
+        if depth > 16:
+            return False
+        while expr.kind == 'paren':
+            expr = expr.expr
+        memo = id(expr)
+        if memo in self.receiver_memo:
+            return self.receiver_memo[memo]
+        self.receiver_memo[memo] = False    # a receiver cycle proves nothing
+        result = False
+        if expr.kind == 'name' and expr.binding is None:
+            result = expr.value not in self.global_writes
+        elif expr.kind == 'name' and expr.binding.kind == 'local':
+            defs = flow.defs.get(expr.binding, ())
+            result = bool(defs) and all(value is not _OPAQUE and self.widget(value, flow, depth)
+                                        for value in defs)
+        elif expr.kind == 'index' and expr.key.kind == 'string' and expr.key.value is not None:
+            writes = self.field_defs(expr.key.value)
+            result = bool(writes) and all(value is not _OPAQUE and self.widget(value, owner, depth)
+                                          for value, owner in writes)
+        elif expr.kind in ('call', 'method'):
+            result = self.widget(expr, flow, depth)
+        self.receiver_memo[memo] = result
+        return result
+
+    def widget(self, value, flow, depth):
+        if value.kind == 'call':
+            return (value.func.kind == 'name' and value.func.binding is None
+                    and value.func.value in _WIDGET_FUNCTIONS
+                    and value.func.value not in self.global_writes)
+        if value.kind == 'method':
+            return value.name in _WIDGET_METHODS and not self.field_defs(value.name)
+        if value.kind in ('name', 'index', 'paren'):
+            return self.receiver_ok(value, flow, depth + 1)
+        return False
 
     def outputs(self, sinks):
         rows = []

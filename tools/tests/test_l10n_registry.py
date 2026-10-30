@@ -1981,7 +1981,11 @@ class ConsumerBindingTests(unittest.TestCase):
         receipts = {}
         for name, (path, data) in variants.items():
             with self.subTest(variant=name):
-                receipt = receipts[name] = self.gate_fails(with_file(self.files, path, data))
+                # The receipt is kept before the gate assertion, so a later
+                # check of this variant never fails on a missing receipt.
+                receipt = receipts[name] = self.receipt(with_file(self.files, path, data))
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
                 for key in MAPPED_KEYS:
                     self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
                 self.assertEqual(receipt["counts"]["DIRECT_LITERAL_CONSUMER"], 23)
@@ -2394,6 +2398,87 @@ class ConsumerBindingTests(unittest.TestCase):
         self.assertEqual((row["sha256"], row["byteLength"]),
                          (hashlib.sha256(panel).hexdigest(), len(panel)))
         self.assertNotEqual(row["sha256"], hashlib.sha256(self.files[PANEL]).hexdigest())
+
+    def test_c19_value_origin_and_output_receiver_are_proved(self):
+        # Review fix 2 (SPEC-147-S8-RF1-1..3): a field value reaches only a
+        # read of the same table, a parameter value returns only to the call
+        # that passed it, and an output needs a client receiver.
+        key, panel = "panel.heading.progress", self.files[PANEL]
+        # The three review reproductions, each replacing the real progress call.
+        cases = [
+            ("unrelated table field", False, PANEL, (
+                b'local specLeft={SpecUniqueField=Nexus.Localization.Text("panel.heading.progress")}; '
+                b'local specRight={}; progressLabel:SetText(specRight.SpecUniqueField)')),
+            ("distinct call result", False, PANEL, (
+                b'local function SpecCarry(value) return value end; local specDiscard=SpecCarry('
+                b'Nexus.Localization.Text("panel.heading.progress")); '
+                b'progressLabel:SetText(SpecCarry("fixed"))')),
+            ("fake local output", False, PANEL, (
+                b'local specFake={SetText=function(self,value) return nil end}; '
+                b'specFake:SetText(Nexus.Localization.Text("panel.heading.progress"))')),
+        ]
+        # Further identity and receiver controls in a small loaded file, with
+        # the real progress call replaced by fixed text in Panel.
+        host, bare = "core/SessionPause.lua", edit(panel, PROGRESS_CALL,
+                                                  b'progressLabel:SetText("Progress")')
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        cases += [(name, binds, host, label + code) for name, binds, code in (
+            ("same table field", True,
+             b'local specLeft={Field=' + text + b'}; specLabel:SetText(specLeft.Field)\n'),
+            ("same table through an alias", True,
+             b'local specLeft={}; specLeft.Field=' + text + b'; local specAlias=specLeft; '
+             b'specLabel:SetText(specAlias.Field)\n'),
+            ("reassigned table", False,
+             b'local specLeft={}; specLeft.Field=' + text + b'; specLeft={}; '
+             b'specLabel:SetText(specLeft.Field)\n'),
+            ("same call result", True,
+             b'local function SpecCarry(value) return value end; '
+             b'specLabel:SetText(SpecCarry(' + text + b'))\n'),
+            ("nested calls keep their own return", False,
+             b'local function SpecInner(value) return value end; local function SpecOuter(value) '
+             b'local ignored=SpecInner(value); return SpecInner("fixed") end; '
+             b'specLabel:SetText(SpecOuter(' + text + b'))\n'),
+            ("fake field output", False,
+             b'local specHolder={}; specHolder._specOut={SetText=function(self,value) end}; '
+             b'specHolder._specOut:SetText(' + text + b')\n'),
+            ("real widget field output", True,
+             b'local specHolder={}; specHolder._specOut=UIParent:CreateFontString(); '
+             b'specHolder._specOut:SetText(' + text + b')\n'))]
+        for name, binds, path, code in cases:
+            with self.subTest(case=name):
+                if path == PANEL:
+                    files = with_file(self.files, PANEL, edit(panel, PROGRESS_CALL, code))
+                else:
+                    files = with_file(with_file(self.files, PANEL, bare), host,
+                                      self.files[host] + code)
+                receipt = self.receipt(files)
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem["key"])
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+        # A client global assigned by the loaded source is no receiver: with
+        # both chat outputs of the mapped reasons replaced they are unbound,
+        # and either one alone still binds them.
+        main, editor = "core/Main.lua", "ui/WishlistEditor.lua"
+        chat = self.files[main] + b"\nDEFAULT_CHAT_FRAME = {AddMessage = function() end}\n"
+        printer = self.files[editor] + b"\nprint = function() end\n"
+        for files, binds in ((with_file(self.files, main, chat), True),
+                             (with_file(self.files, editor, printer), True),
+                             (with_file(with_file(self.files, main, chat), editor, printer), False)):
+            receipt = self.receipt(files)
+            self.assertEqual({row["binding"] for row in receipt["keys"] if row["key"]
+                              in MAPPED_KEYS}, {"MAPPED_TO_CONSUMER" if binds else "UNBOUND"})
+        # A CreateFontString redefined by the loaded source makes no widget.
+        made = self.files[host] + b"\nlocal specMaker = {}\nfunction specMaker:CreateFontString() end\n"
+        receipt = self.gate_fails(with_file(self.files, host, made))
+        self.assertIn(key, [row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"])
 
 
 class ConsumerCommandLineTests(unittest.TestCase):
