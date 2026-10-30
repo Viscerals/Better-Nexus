@@ -444,6 +444,12 @@ NAMES += ['l10n_ui_hud']
 NAMES += ['l10n_ui_usertext']
 # Full-UI family journal (helper ad1d915f09b0c1c32): Echo Journal Nexus Progress tab and Plan alternatives chooser through the seam under a pseudo pack; dialogs, slots, missing-entry, English and UTF-8 boundary runs (synthetic; native NOT_RUN).
 NAMES += ['l10n_ui_journal']
+# Full-UI family panel (helper a47a23a0761650bb8): main panel header, footer, workspaces, cards, details, hovers and every Options menu level at the real receivers under a pseudo pack; English, long and missing-entry runs; passivity (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_panel']
+# Full-UI family wishlist (helper a3e168aca82c2c089): Wishlist editor, display popup, chooser, menus, popups and on-screen Wishlist under a pseudo pack; slots, fallback, English, passivity (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_wishlist']
+# Full-UI family orb (helper a2e9c1797a97d607b): Orb window states, history, Continue chrome, strip, mini panel and hovers under a pseudo pack; runtime texts mapped at display; no spend/action/send/write (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_orb']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
