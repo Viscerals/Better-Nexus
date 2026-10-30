@@ -2661,6 +2661,50 @@ class ConsumerBindingTests(unittest.TestCase):
                                   in self.binding(receipt, key)["unprovenSites"]],
                                  ["output-not-reached"])
 
+    def test_c23_a_carrier_made_in_a_call_belongs_to_that_call(self):
+        # SPEC-147-S8-RF5-1: a table made inside a function is a fresh object
+        # in each of its invocations, so a field written and read on it, read
+        # directly or passed on, stays with the invocation that wrote it.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        read = b'local function SpecRead(target) return target.SpecBridge end; '
+        left = b'local specLeft={SpecSource=' + text + b'}; local specRight={}; '
+        shown = b'specLabel:SetText(SpecWrap(specLeft))'
+        wrong = b'local specDiscard=SpecWrap(specLeft); specLabel:SetText(SpecWrap(specRight))'
+        wraps = (
+            ("constructor carrier", read + b'local function SpecWrap(target) local box='
+             b'{SpecBridge=target.SpecSource}; return SpecRead(box) end; '),
+            ("assigned carrier", read + b'local function SpecWrap(target) local box={}; '
+             b'box.SpecBridge=target.SpecSource; return SpecRead(box) end; '),
+            ("carrier read in place", b'local function SpecWrap(target) local box='
+             b'{SpecBridge=target.SpecSource}; return box.SpecBridge end; '),
+            ("carrier passed as a constructor", read + b'local function SpecWrap(target) '
+             b'return SpecRead({SpecBridge=target.SpecSource}) end; '),
+        )
+        cases = [(name + ", same call", True, wrap + left + shown) for name, wrap in wraps]
+        cases += [(name + ", wrong call", False, wrap + left + wrong) for name, wrap in wraps]
+        # A value made inside the function reaches the carrier of every call.
+        cases.append(("own value through a carrier", True, read + b'local function SpecMake() '
+                      b'local box={SpecBridge=' + text + b'}; return SpecRead(box) end; '
+                      b'specLabel:SetText(SpecMake())'))
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+
 
 class ConsumerCommandLineTests(unittest.TestCase):
     """S8: --consumers reads both TOCs and every Lua file they load from the

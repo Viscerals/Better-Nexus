@@ -3889,6 +3889,7 @@ class _UnitFlow:
         self.chunk_returns = set()
         self.declared = set()   # values given by local declarations (not later assignments)
         self.object_memo = {}
+        self.made_in = {}       # table constructors and locals: the function made in (None: chunk)
         self.block(body, None)
         self.module_funcs = {}
         for module, fields in self.module_defs.items():
@@ -3989,6 +3990,7 @@ class _UnitFlow:
             for expr in stmt.exprs:
                 self.expr(expr, func)
             for index, name in enumerate(stmt.names):
+                self.made_in[name.binding] = func
                 if index < len(stmt.exprs):
                     value = stmt.exprs[index]
                     self.define(name.binding, value)
@@ -4106,6 +4108,7 @@ class _UnitFlow:
         elif kind == 'function':
             self.function(node)
         elif kind == 'table':
+            self.made_in[node] = func
             for field in node.fields:
                 if field.key is not None:
                     self.expr(field.key, func)
@@ -4349,7 +4352,10 @@ class _Linker:
         that call. When that argument is itself a parameter of the calling
         function, the call continues under every enclosing call whose own
         argument holds the table (argument_contexts, review fix 5), so each
-        enclosing function returns the value only to its own call."""
+        enclosing function returns the value only to its own call. A table
+        made inside a function is a fresh object per invocation, so a read
+        on it continues under the invocation that wrote it (carrier_contexts,
+        review fix 6)."""
         name, base = flow.field_bases[value]
         written = self.objects_at(base, flow, stack)
         if not written:
@@ -4362,35 +4368,63 @@ class _Linker:
                 if root in written:
                     # Written through the same parameter: the same invocation.
                     out.append((read, stack))
-                for context in self.param_contexts(root, flow, written):
+                for context in self.param_contexts(root, flow, written, stack):
                     out.append((read, context))
-            elif (flow.objects(read_base) or frozenset()) & written:
-                out.append((read, ()))
+            else:
+                held = (flow.objects(read_base) or frozenset()) & written
+                for context in self.carrier_contexts(held, flow, stack):
+                    out.append((read, context))
         return out
 
-    def param_contexts(self, param, flow, written, depth=1):
+    def carrier_contexts(self, objects, flow, stack):
+        """The call stacks under which a read of one of these written
+        objects meets the very object written under stack (review fix 6,
+        SPEC-147-S8-RF5-1). A table constructor or local of the file chunk
+        is one object: (). One made inside a function is fresh in each of
+        its invocations: the write's stack up to that function's innermost
+        call on it, or () when the stack holds no call at all (the value is
+        made in every invocation). A stack that holds other calls but none
+        of that function leaves its invocation unknown, so that object
+        proves nothing (unproven)."""
+        out = []
+        for obj in objects:
+            func = flow.made_in.get(obj)
+            context = () if func is None or not stack else None
+            if func is not None:
+                for position in range(len(stack) - 1, -1, -1):
+                    if flow.call_arguments(func, stack[position]) is not None:
+                        context = stack[:position + 1]
+                        break
+            if context is not None and context not in out:
+                out.append(context)
+        return sorted(out, key=len)
+
+    def param_contexts(self, param, flow, written, stack, depth=1):
         """The call stacks (outermost call first, ending with a resolved call
-        of param's function) under which an unassigned parameter holds an
-        object of written, each at most _STACK_LIMIT calls deep."""
+        of param's function) under which an unassigned parameter holds the
+        object written under stack, each at most _STACK_LIMIT calls deep."""
         func = param.owner
         out = []
         for call in list(flow.direct_calls.get(func, ())) + list(flow.pcall_calls.get(func, ())):
             args = flow.call_arguments(func, call)
             if param.index < len(args):
                 out.extend(context + (call,) for context
-                           in self.argument_contexts(args[param.index], flow, written, depth))
+                           in self.argument_contexts(args[param.index], flow, written, stack,
+                                                     depth)
+                           if len(context) < _STACK_LIMIT)
         return out
 
-    def argument_contexts(self, arg, flow, written, depth):
+    def argument_contexts(self, arg, flow, written, stack, depth):
         """The enclosing call stacks under which an argument expression holds
-        an object of written (review fix 5, SPEC-147-S8-RF4-1): () when it
-        does under every call (a table constructor or a tracked local); one
-        stack per enclosing call whose own argument holds it when it names
+        the object written under stack (review fixes 5 and 6,
+        SPEC-147-S8-RF4-1 and RF5-1): for a table constructor or a tracked
+        local, carrier_contexts of the written objects it holds; one stack
+        per enclosing call whose own argument holds it when it names
         (directly or through local aliases) a parameter of the calling
         function, so a wrapper never merges its separate calls. Beyond
         _STACK_LIMIT enclosing calls the path stays unproven."""
         if arg.kind == 'table':
-            return [()] if arg in written else []
+            return self.carrier_contexts(frozenset((arg,)) & written, flow, stack)
         if arg.kind != 'name' or arg.binding is None:
             return []
         root = flow.alias_root(arg.binding)
@@ -4400,8 +4434,8 @@ class _Linker:
                 return [()]
             if depth >= _STACK_LIMIT:
                 return []
-            return self.param_contexts(root, flow, written, depth + 1)
-        return [()] if self.argument_objects(arg, flow) & written else []
+            return self.param_contexts(root, flow, written, stack, depth + 1)
+        return self.carrier_contexts(self.argument_objects(arg, flow) & written, flow, stack)
 
     def argument_objects(self, arg, flow):
         """The object origins an argument expression passes."""
