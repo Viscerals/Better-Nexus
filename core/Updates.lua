@@ -89,6 +89,33 @@ local function Release()
     return type(Nexus.Release) == "table" and Nexus.Release or {}
 end
 
+-- Full-UI localization, chat family. The notices, the menu row and the
+-- status lines are reviewed text from the Nexus.Localization seam, looked up
+-- at call time; versions, build labels, channel IDs and the URL are data and
+-- enter only through text slots. Without the seam (this module also runs
+-- alone) and for a value a template cannot carry, each keeps its exact
+-- English. The second result is the seam's source: "candidate" means a
+-- translation, which callers show without the English-only chat rewrite.
+local function UiText(key, english)
+    local localization = Nexus.Localization
+    if type(localization) ~= "table" or type(localization.Text) ~= "function" then
+        return english, "base"
+    end
+    local text, source = localization.Text(key)
+    if source == "unavailable" then return english, "base" end
+    return text, source
+end
+
+local function UiFormat(key, arguments, english)
+    local localization = Nexus.Localization
+    if type(localization) ~= "table" or type(localization.Format) ~= "function" then
+        return english, "base"
+    end
+    local text, source = localization.Format(key, arguments)
+    if source == "unavailable" then return english, "base" end
+    return text, source
+end
+
 local function Settings()
     if Nexus.Store and Nexus.Store.Settings then
         return Nexus.Store.Settings()
@@ -159,6 +186,11 @@ end
 local CHANNEL_LABEL = {
     stable="stable release", ["public-test"]="public test build",
     internal="internal test package", development="development source",
+}
+-- The reviewed key of each channel label (the channel IDs stay data).
+local CHANNEL_KEY = {
+    stable="update.value.channel_stable", ["public-test"]="update.value.channel_public_test",
+    internal="update.value.channel_internal", development="update.value.channel_development",
 }
 
 function Updates.Preference()
@@ -312,12 +344,16 @@ local function Current()
     return bundled
 end
 
+-- The notice text and its seam source.
 local function Message(candidate)
     local installed = Installed()
-    return (candidate.kind == "stable" and "New Nexus release available: "
+    local english = (candidate.kind == "stable" and "New Nexus release available: "
         or "New Nexus test build available: ") .. candidate.display .. "."
         .. " You have " .. installed.display .. "."
         .. " Installation is manual: /nexus update shows the Releases page."
+    return UiFormat(candidate.kind == "stable" and "update.chat.release_available"
+        or "update.chat.test_build_available",
+        {build=candidate.display, installed=installed.display}, english)
 end
 
 -- Seen targets, newest last, bounded. A target that was dismissed stays
@@ -342,7 +378,9 @@ local function MaybeNotify(candidate)
     if notifiedTargets[candidate.key] or Dismissed(candidate.key) then return false end
     if sessionNotices >= MAX_SESSION_NOTICES then return false end
     if type(callbacks.notify) == "function" then
-        local ok = pcall(callbacks.notify, candidate.display, Updates.ReleaseUrl(), Message(candidate))
+        local url = Updates.ReleaseUrl()
+        local message, source = Message(candidate)
+        local ok = pcall(callbacks.notify, candidate.display, url, message, source)
         if not ok then return false end
     end
     notifiedTargets[candidate.key] = true
@@ -392,12 +430,14 @@ local function HintCandidate(parsed, test)
         key=TargetKey(series, test), authority=HINT_AUTHORITY, verified=false}
 end
 
+-- The hint notice text and its seam source.
 local function HintMessage(hint)
-    return "Another player's client reports a newer public test build: "
+    return UiFormat("update.chat.hint_reported", {build=hint.display},
+        "Another player's client reports a newer public test build: "
         .. hint.display .. "."
         .. " UNVERIFIED: Nexus did not check GitHub and cannot confirm that this"
         .. " build exists or is safe."
-        .. " Check the Releases page yourself: /nexus update."
+        .. " Check the Releases page yourself: /nexus update.")
 end
 
 -- One bounded map of keys, each stamped with when it was remembered.
@@ -426,8 +466,9 @@ local function MaybeHintNotice()
         or hintDismissed[hintTarget.key] ~= nil then return false end
     if hintNotices >= MAX_HINT_NOTICES then return false end
     if type(callbacks.notify) == "function" then
-        local ok = pcall(callbacks.notify, hintTarget.display, Updates.ReleaseUrl(),
-            HintMessage(hintTarget))
+        local url = Updates.ReleaseUrl()
+        local message, source = HintMessage(hintTarget)
+        local ok = pcall(callbacks.notify, hintTarget.display, url, message, source)
         if not ok then return false end
     end
     Remember(hintNotified, hintTarget.key)
@@ -576,60 +617,103 @@ function Updates.Status()
     local enabled = Updates.IsEnabled()
     local candidate = Updates.GetCandidate()
     local hint = Updates.PublicTestHint()
+    -- Each shown line is reviewed text (see UiText above); translated is
+    -- set when any of them is a translation (detailSource below).
+    local translated = false
+    local function Shown(text, source)
+        if source == "candidate" then translated = true end
+        return text
+    end
+    local channelKey = CHANNEL_KEY[installed.channel]
     local status = {
         installed=installed.display, installedLabel=installed.label,
         channel=installed.channel,
-        channelLabel=CHANNEL_LABEL[installed.channel] or installed.channel,
+        channelLabel=channelKey and Shown(UiText(channelKey, CHANNEL_LABEL[installed.channel]))
+            or installed.channel,
         preference=Updates.Preference(), enabled=enabled,
         url=Updates.ReleaseUrl(), candidate=enabled and candidate or nil,
         hint=enabled and hint or nil,
     }
-    local have = "Installed: " .. installed.display .. " (" .. status.channelLabel
-        .. (installed.label ~= "source" and (", " .. installed.label) or "") .. ")."
+    local have
+    if installed.label ~= "source" then
+        have = Shown(UiFormat("update.body.installed_label",
+            {build=installed.display, channel=status.channelLabel, label=installed.label},
+            "Installed: " .. installed.display .. " (" .. status.channelLabel
+                .. ", " .. installed.label .. ")."))
+    else
+        have = Shown(UiFormat("update.body.installed",
+            {build=installed.display, channel=status.channelLabel},
+            "Installed: " .. installed.display .. " (" .. status.channelLabel .. ")."))
+    end
     -- Only an installation that can be placed in a public test series can
     -- receive a hint at all, so only it is told that none arrived.
     local listens = enabled and Updates.Preference() ~= "stable"
         and installed.channel == "public-test" and type(installed.test) == "number"
     if not enabled then
-        status.state, status.menu = "disabled", "Version and updates: notices off"
+        status.state = "disabled"
+        status.menu = Shown(UiText("update.menu.notices_off", "Version and updates: notices off"))
         status.detail = have
-            .. LINE .. "Update notices are off, so Nexus names no newer build. To check yourself, open the Releases page."
+            .. LINE .. Shown(UiText("update.body.notices_off",
+                "Update notices are off, so Nexus names no newer build. To check yourself, open the Releases page."))
     elseif not candidate and hint then
         -- A hint is never trusted release information, so it never becomes the
         -- candidate, never hides bundled evidence and says what it is.
         status.state = "hint"
-        status.menu = "Newer public test reported: " .. hint.display .. " (unverified)"
+        status.menu = Shown(UiFormat("update.menu.hint_reported", {build=hint.display},
+            "Newer public test reported: " .. hint.display .. " (unverified)"))
         status.detail = have
-            .. LINE .. "Newer public test reported: " .. hint.display .. "."
-            .. LINE .. "Reported by another client; not checked against GitHub."
-            .. LINE .. "Check the Better Nexus Releases page before updating."
+            .. LINE .. Shown(UiFormat("update.body.hint_reported", {build=hint.display},
+                "Newer public test reported: " .. hint.display .. "."))
+            .. LINE .. Shown(UiText("update.body.hint_unverified",
+                "Reported by another client; not checked against GitHub."))
+            .. LINE .. Shown(UiText("update.body.hint_check_releases",
+                "Check the Better Nexus Releases page before updating."))
     elseif not candidate then
-        status.state, status.menu = "unknown", "Version and updates: no verified update info"
+        status.state = "unknown"
+        status.menu = Shown(UiText("update.menu.no_verified_info",
+            "Version and updates: no verified update info"))
         -- Bundled evidence that only the stable-only preference hides is named.
         local hidden = Updates.Preference() == "stable" and BundledCandidate(true) or nil
         status.detail = have
             .. LINE .. (hidden
-                and ("A newer test build (" .. hidden.display .. ") is not announced because notices are set to stable releases only.")
-                or "No verified update information. Nexus cannot check for updates by itself.")
-            .. (listens and (LINE .. "No newer public-test announcement was received.") or "")
-            .. LINE .. "Versions stated by other players' clients are not release information."
-            .. LINE .. "That is not proof that this build is the latest: to check, open the Releases page."
+                and Shown(UiFormat("update.body.test_hidden_stable_only", {build=hidden.display},
+                    "A newer test build (" .. hidden.display .. ") is not announced because notices are set to stable releases only."))
+                or Shown(UiText("update.body.no_verified_info",
+                    "No verified update information. Nexus cannot check for updates by itself.")))
+            .. (listens and (LINE .. Shown(UiText("update.body.no_hint_received",
+                "No newer public-test announcement was received."))) or "")
+            .. LINE .. Shown(UiText("update.body.peer_versions_not_release",
+                "Versions stated by other players' clients are not release information."))
+            .. LINE .. Shown(UiText("update.body.not_proof_latest",
+                "That is not proof that this build is the latest: to check, open the Releases page."))
     else
         status.state = "available"
-        status.menu = "Update available: " .. candidate.display
-        status.detail = have .. " " .. (candidate.kind == "stable" and "New Nexus release available: "
-            or "New Nexus test build available: ") .. candidate.display .. "."
+        status.menu = Shown(UiFormat("update.menu.available", {build=candidate.display},
+            "Update available: " .. candidate.display))
+        local stable = candidate.kind == "stable"
+        status.detail = have .. " " .. Shown(UiFormat(stable and "update.body.release_available"
+            or "update.body.test_build_available", {build=candidate.display},
+            (stable and "New Nexus release available: "
+                or "New Nexus test build available: ") .. candidate.display .. "."))
         -- Trusted information is never replaced or hidden by a hint; a hint
         -- that names something else is added after it, still unverified.
         if hint and hint.key ~= candidate.key then
             status.detail = status.detail
-                .. LINE .. "Another client also reports " .. hint.display
-                .. " (unverified, not checked against GitHub)."
+                .. LINE .. Shown(UiFormat("update.body.hint_also_reported", {build=hint.display},
+                    "Another client also reports " .. hint.display
+                    .. " (unverified, not checked against GitHub)."))
         end
     end
-    local announce = status.preference == "stable" and "stable releases only" or "stable releases and public test builds"
-    status.detail = status.detail .. LINE .. "Update notices: "
-        .. (enabled and ("on, " .. announce .. ".") or ("off (when on: " .. announce .. ")."))
+    local stableOnly = status.preference == "stable"
+    local announce = stableOnly and "stable releases only" or "stable releases and public test builds"
+    local noticesKey = enabled
+        and (stableOnly and "update.body.notices_on_stable_only" or "update.body.notices_on_all")
+        or (stableOnly and "update.body.notices_off_stable_only" or "update.body.notices_off_all")
+    status.detail = status.detail .. LINE .. Shown(UiText(noticesKey, "Update notices: "
+        .. (enabled and ("on, " .. announce .. ".") or ("off (when on: " .. announce .. ")."))))
+    -- "candidate" when a translated line is in the detail: chat shows it
+    -- without the English-only rewrite; "base" keeps the former path.
+    status.detailSource = translated and "candidate" or "base"
     return status
 end
 

@@ -31,6 +31,25 @@ function Lifecycle.New(options)
     local EnsureAutomation = assert(options.ensureAutomation,
         "MainLifecycle requires automation binding")
     local Print = assert(options.print, "MainLifecycle requires print")
+    -- Full-UI localization, chat family: options.printText(text, source)
+    -- shows a translated (candidate) line without the English-only
+    -- UserText rewrite and English exactly as Print does; without it, Print.
+    local PrintText = type(options.printText) == "function" and options.printText
+        or function(text) return Print(text) end
+    -- The seam's text and source for a reviewed key, looked up at call time
+    -- (the key itself if the seam is absent; the TOC loads it first).
+    local function NoticeText(key, arguments)
+        local localization = Nexus.Localization
+        if type(localization) ~= "table" then return key, "base" end
+        if arguments == nil then return localization.Text(key) end
+        return localization.Format(key, arguments)
+    end
+    -- One reviewed notice (a text, or a template when arguments are given).
+    -- Versions and build labels are data slots.
+    local function Notice(key, arguments)
+        local text, source = NoticeText(key, arguments)
+        return PrintText(text, source)
+    end
     local RecordError = assert(options.recordError,
         "MainLifecycle requires error recording")
     local RecordStoreError = assert(options.recordStoreError,
@@ -755,9 +774,14 @@ function Lifecycle.New(options)
                     -- found it, so the update module reads its stored notice
                     -- without rewriting, quarantining or removing it.
                     persist=not CAPACITY_REFUSALS[startupTiming.coreFailure],
-                    notify=function(version, _, message)
-                        Print(type(message) == "string" and message
-                            or ("Nexus build " .. tostring(version) .. ": see /nexus update. Installation is manual."))
+                    -- Updates words the notice through the seam and passes
+                    -- its source, so a translation skips the English rewrite.
+                    notify=function(version, _, message, source)
+                        if type(message) == "string" then
+                            PrintText(message, source)
+                        else
+                            Notice("main.chat.update_notice_fallback", {version=tostring(version)})
+                        end
                     end,
                     refresh=function()
                         if Nexus.Panel and Nexus.Panel.Refresh then Nexus.Panel.Refresh() end
@@ -808,7 +832,7 @@ function Lifecycle.New(options)
         Panel.Init({
             ToggleAuto=function()
                 local enabled = automation.ToggleAuto()
-                Print("auto " .. (enabled and "ON" or "OFF"))
+                Notice(enabled and "main.chat.auto_on" or "main.chat.auto_off")
                 return enabled
             end,
             RefreshDisplay=function() return RefreshHud() end,
@@ -825,10 +849,10 @@ function Lifecycle.New(options)
         local release = type(Nexus.ReleaseIdentity) == "function"
             and Nexus.ReleaseIdentity() or nil
         local privateMark = release and release.channel == "internal" and " internal" or ""
-        Print("v" .. Nexus.VERSION .. " build=" .. buildLabel .. privateMark
-            .. " -- type /nexus for commands.")
+        Notice("main.chat.loaded", {version="" .. Nexus.VERSION, build=buildLabel .. privateMark})
         if Adapter.RivalDetected() then
-            Print("|cffff6060EchoOptimizer detected -- it conflicts with Nexus's board hook. Disable EchoOptimizer; Nexus replaces its functionality.|r")
+            local text, source = NoticeText("main.chat.echo_optimizer_conflict")
+            PrintText("|cffff6060" .. text .. "|r", source)
         end
         return true
     end
@@ -1596,15 +1620,18 @@ function Lifecycle.New(options)
                 local noticed = startupTiming.saturationNoticed or {}
                 startupTiming.saturationNoticed = noticed
                 for _, line in ipairs({
-                    {"refusedBuilds", "Community catalog full: new shared builds are refused."},
-                    {"refusedTombstones", "Community removal markers full: new build removals are refused."},
-                    {"refusedBarriers", "Community retention markers full: older shared builds are kept instead of removed."},
-                    {"refusedCatalog", "Community catalog full: new shared data is refused."},
+                    {"refusedBuilds", "main.chat.saturation_builds"},
+                    {"refusedTombstones", "main.chat.saturation_tombstones"},
+                    {"refusedBarriers", "main.chat.saturation_barriers"},
+                    {"refusedCatalog", "main.chat.saturation_catalog"},
                 }) do
                     if not noticed[line[1]] and (tonumber(record[line[1]]) or 0) > 0 then
                         noticed[line[1]] = true
-                        Print(line[2] .. " Your existing Community builds and Leaderboard stay available. "
-                            .. "See /nexus status.")
+                        -- Two reviewed sentences on one line, joined here.
+                        local first, firstSource = NoticeText(line[2])
+                        local rest, restSource = NoticeText("main.chat.saturation_still_available")
+                        PrintText(first .. " " .. rest, (firstSource == "candidate"
+                            or restSource == "candidate") and "candidate" or "base")
                     end
                 end
             end
