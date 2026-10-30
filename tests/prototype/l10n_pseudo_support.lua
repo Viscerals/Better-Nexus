@@ -102,13 +102,19 @@ function S.IsPseudo(text)
  return type(text)=='string' and text:find(OPEN,1,true)~=nil
 end
 
--- Text left after removing every marked span, colour escapes and textures.
+-- Text left after removing every balanced marked span, colour escapes and
+-- textures, and whether the markers were balanced. Only a span whose
+-- opener has its matching closer is removed: after an unmatched opener the
+-- rest of the text stays (without the opener) so the scan still sees it,
+-- and a stray closer is kept as text. `balanced` is false for either case.
 function S.Unmarked(text)
  text=tostring(text or '')
  text=text:gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r',''):gsub('|T.-|t',''):gsub('||','|')
- local out,i={},1
+ local out,i,balanced={},1,true
  while true do
   local s=text:find(OPEN,i,true)
+  local stray=text:find(CLOSE,i,true)
+  if stray and (not s or stray<s) then balanced=false end
   if not s then out[#out+1]=text:sub(i);break end
   out[#out+1]=text:sub(i,s-1)
   local depth,j=1,s+#OPEN
@@ -117,20 +123,28 @@ function S.Unmarked(text)
    elseif text:sub(j,j+#CLOSE-1)==CLOSE then depth=depth-1;j=j+#CLOSE
    else j=j+1 end
   end
-  i=j
+  if depth>0 then
+   -- No matching closer: keep everything after this opener visible.
+   balanced=false
+   i=s+#OPEN
+  else
+   i=j
+  end
  end
- return table.concat(out)
+ return table.concat(out),balanced
 end
 
--- True when the unmarked remainder still holds an English-looking word (two
--- or more ASCII letters) that `allow` does not accept. `allow(word, text)`
--- may accept data that is never translated (player, build and Echo names,
--- game identifiers, numbers with units owned by data).
+-- The first English-looking word (two or more ASCII letters) left in the
+-- unmarked remainder that `allow` does not accept, or "<unbalanced pseudo
+-- marker>" when the markers do not pair up (a cut or malformed pseudo text
+-- is never counted as covered). `allow(word, text)` may accept data that is
+-- never translated (player, build and Echo names, game identifiers).
 function S.LooksUntranslated(text,allow)
- local rest=S.Unmarked(text)
+ local rest,balanced=S.Unmarked(text)
  for word in rest:gmatch('[A-Za-z][A-Za-z\']+') do
   if not (allow and allow(word,text)) then return word end
  end
+ if not balanced then return '<unbalanced pseudo marker>' end
  return nil
 end
 
@@ -154,16 +168,20 @@ function S.VisibleTexts(root,out)
 end
 
 -- Runs fn with GameTooltip's line methods recorded; returns the lines.
+-- Every replaced name is restored to its exact raw original afterwards,
+-- also when that original was nil (an inherited method) and also when fn
+-- fails; fn's error is then raised again.
+local TOOLTIP_METHODS={'AddLine','SetText','AddDoubleLine'}
 function S.CaptureTooltip(fn,...)
  local lines={}
  local saved={}
- for _,name in ipairs({'AddLine','SetText','AddDoubleLine'}) do saved[name]=rawget(GameTooltip,name) end
- GameTooltip.AddLine=function(_,t) lines[#lines+1]=t end
- GameTooltip.SetText=function(_,t) lines[#lines+1]=t end
- GameTooltip.AddDoubleLine=function(_,a,b) lines[#lines+1]=a;lines[#lines+1]=b end
+ for index,name in ipairs(TOOLTIP_METHODS) do saved[index]=rawget(GameTooltip,name) end
+ rawset(GameTooltip,'AddLine',function(_,t) lines[#lines+1]=t end)
+ rawset(GameTooltip,'SetText',function(_,t) lines[#lines+1]=t end)
+ rawset(GameTooltip,'AddDoubleLine',function(_,a,b) lines[#lines+1]=a;lines[#lines+1]=b end)
  local ok,err=pcall(fn,...)
- for name,v in pairs(saved) do GameTooltip[name]=v end
- assert(ok,err)
+ for index,name in ipairs(TOOLTIP_METHODS) do rawset(GameTooltip,name,saved[index]) end
+ if not ok then error(err,0) end
  return lines
 end
 

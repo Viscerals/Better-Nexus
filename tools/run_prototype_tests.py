@@ -430,6 +430,8 @@ NAMES += ['l10n_settings_identity']
 NAMES += ['l10n_passivity_library']
 # Full visible-UI localization: every declaration has admitted English, every Text/Format key literal in a TOC runtime source is a reviewed key of the matching kind, and no reviewed key lacks a consumer (static source + real seam; native NOT_RUN).
 NAMES += ['l10n_catalog_consumers']
+# Full-UI pseudo-locale support guards (early review FULLUI-FOUNDATION-1/2): tooltip capture restores every method incl. inherited nil originals on success and failure; an unmatched pseudo opener never hides English (synthetic; native NOT_RUN).
+NAMES += ['l10n_pseudo_support_guards']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
