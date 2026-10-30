@@ -168,11 +168,14 @@ do
   ['orb.status.counted']='{kind = "template", fields = {"have", "limit"}, slots = {"count", "count"}, resultLimit = 300}',
   ['orb.status.named']='{kind = "template", fields = {"name", "count"}, slots = {"text", "count"}, resultLimit = 300}',
   ['orb.status.kept']=TEXT,['orb.status.done']=TEXT,
+  ['orb.status.pair']='{kind = "template", fields = {"name", "destination"}, slots = {"text", "text"}, resultLimit = 300}',
  }
  local eng={['orb.status.plain']='Session interrupted.',['orb.status.kept']=' Kept.',['orb.status.done']='Done.',
+  ['orb.status.pair']="assigned '{name}' to {destination}.",
   ['orb.status.counted']='It lists {have} occupied records, more than the {limit} allowed.',
   ['orb.status.named']='{name} needs {count} more copies.'}
  local packs={frFR={name='Fran\195\167ais',entries={['orb.status.plain']='Session interrompue.',['orb.status.kept']=' Gard\195\169.',['orb.status.done']='Fini.',
+  ['orb.status.pair']='DEST={destination};NAME={name}',
   ['orb.status.counted']='{limit} max, {have} vus.',['orb.status.named']='{name} : encore {count}.'}}}
  local m=load(decl,eng,packs)
  local book=m.PhraseBook({
@@ -222,6 +225,17 @@ do
  check(m.Phrase('Session interrupted. Done.',sb)=='Session interrompue. Fini.','EXPECT a single space between units is kept')
  check(m.Phrase('Session interrupted. Unknown tail.',sb)=='Session interrupted. Unknown tail.','GUARD partial coverage shows the raw text unchanged')
  check(m.Phrase('Session interrupted.  Done.',sb)=='Session interrupted.  Done.','GUARD only one separating space is allowed')
+ -- R5 (Source86): two text slots are recaptured only when the English has
+ -- exactly one split; a value holding the format's own delimiter makes it
+ -- ambiguous, and the raw text is kept rather than a guessed split.
+ local pb=m.PhraseBook({formats={{format="assigned '%s' to %s.",key='orb.status.pair',fields={'name','destination'}}}})
+ check(m.Phrase("assigned 'Alpha' to My Build.",pb)=='DEST=My Build;NAME=Alpha','EXPECT a unique split is recaptured and reordered')
+ check(m.Phrase("assigned 'O'Brien' to My Build.",pb)=="DEST=My Build;NAME=O'Brien",'EXPECT an apostrophe alone keeps a unique split')
+ local amb="assigned 'A' to B' to My Build."
+ local shown,known=m.Phrase(amb,pb)
+ check(shown==amb and known==false,'GUARD a delimiter inside a value: ambiguous split, raw text kept')
+ shown,known=m.Phrase("assigned 'Alpha' to Build' to C.",pb)
+ check(shown=="assigned 'Alpha' to Build' to C." and known==false,'GUARD a delimiter inside the other value: raw text kept')
 end
 
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData and Nexus.LocalizationPacks==realPacks,'GUARD real seam restored')

@@ -4804,29 +4804,85 @@ L.MAX_PHRASE_ENTRIES = MAX_PHRASE_ENTRIES
 
 local function CompileFormat(format, fieldCount)
     if type(format) ~= "string" or #format == 0 then return nil end
-    local parts, slots, index, length = {"^"}, {}, 1, #format
+    -- segments: the format as literal strings and slots, for ParseCount.
+    local parts, slots, segments, literal, index, length = {"^"}, {}, {}, {}, 1, #format
+    local function Flush()
+        if #literal > 0 then segments[#segments + 1] = {literal = table.concat(literal)}; literal = {} end
+    end
     while index <= length do
         local c = format:sub(index, index)
         if c == "%" then
             local n = format:sub(index + 1, index + 1)
             if n == "%" then
-                parts[#parts + 1] = "%%"
+                parts[#parts + 1] = "%%"; literal[#literal + 1] = "%"
             elseif n == "d" then
                 parts[#parts + 1] = "(%d+)"; slots[#slots + 1] = "count"
+                Flush(); segments[#segments + 1] = {slot = "count"}
             elseif n == "s" then
                 parts[#parts + 1] = "(.-)"; slots[#slots + 1] = "text"
+                Flush(); segments[#segments + 1] = {slot = "text"}
             else
                 return nil
             end
             index = index + 2
         else
             parts[#parts + 1] = c:find("^[%^%$%(%)%%%.%[%]%*%+%-%?]$") and ("%" .. c) or c
+            literal[#literal + 1] = c
             index = index + 1
         end
     end
+    Flush()
     if #slots == 0 or #slots ~= fieldCount then return nil end
     parts[#parts + 1] = "$"
-    return table.concat(parts), slots
+    return table.concat(parts), slots, segments
+end
+
+-- How many ways raw splits into a format's literals and slots: 0, 1, or 2
+-- for "more than one" (a count slot is one or more digits, a text slot any
+-- bytes, as the compiled pattern allows). A text value that holds the
+-- format's own delimiters makes the split ambiguous: which bytes belong to
+-- which field is then unknown, and the text is not recaptured.
+local function ParseCount(raw, segments)
+    local length, memo = #raw, {}
+    local function From(position, index)
+        if index > #segments then return position == length + 1 and 1 or 0 end
+        local id = position * 256 + index
+        if memo[id] then return memo[id] end
+        local segment, total = segments[index], 0
+        if segment.literal then
+            if raw:sub(position, position + #segment.literal - 1) == segment.literal then
+                total = From(position + #segment.literal, index + 1)
+            end
+        elseif segment.slot == "count" then
+            local stop = position
+            while stop <= length and raw:byte(stop) >= 48 and raw:byte(stop) <= 57 do
+                stop = stop + 1
+                total = total + From(stop, index + 1)
+                if total > 1 then break end
+            end
+        else
+            local nextSegment = segments[index + 1]
+            if nextSegment and nextSegment.literal then
+                local from = position
+                while true do
+                    local at = raw:find(nextSegment.literal, from, true)
+                    if not at then break end
+                    total = total + From(at, index + 1)
+                    if total > 1 then break end
+                    from = at + 1
+                end
+            else
+                for stop = position, length + 1 do
+                    total = total + From(stop, index + 1)
+                    if total > 1 then break end
+                end
+            end
+        end
+        if total > 1 then total = 2 end
+        memo[id] = total
+        return total
+    end
+    return From(1, 1)
 end
 
 function L.PhraseBook(spec)
@@ -4845,10 +4901,10 @@ function L.PhraseBook(spec)
         for _, entry in ipairs(spec.formats) do
             local fields = type(entry) == "table" and entry.fields
             if book.size < MAX_PHRASE_ENTRIES and type(fields) == "table" and ValidKey(entry.key) then
-                local pattern, slots = CompileFormat(entry.format, #fields)
+                local pattern, slots, segments = CompileFormat(entry.format, #fields)
                 if pattern then
                     book.formats[#book.formats + 1] = {pattern = pattern, key = entry.key,
-                        fields = fields, slots = slots, format = entry.format,
+                        fields = fields, slots = slots, format = entry.format, segments = segments,
                         nested = type(entry.nested) == "table" and entry.nested or nil}
                     book.size = book.size + 1
                 end
@@ -4869,8 +4925,9 @@ function L.Phrase(raw, book)
     for _, entry in ipairs(type(book.formats) == "table" and book.formats or {}) do
         local captures = {raw:match(entry.pattern)}
         if captures[1] ~= nil then
-            local args, usable = {}, true
-            for i, name in ipairs(entry.fields) do
+            -- Two or more slots: recaptured only when the split is unique.
+            local args, usable = {}, #entry.slots < 2 or ParseCount(raw, entry.segments) == 1
+            for i, name in ipairs(usable and entry.fields or {}) do
                 local value = captures[i]
                 if entry.slots[i] == "count" then
                     local n = tonumber(value)

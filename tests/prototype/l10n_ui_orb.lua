@@ -134,8 +134,27 @@ end
 -- producer format, rebuilt as the producer writes it, shows exactly the
 -- producer's bytes in English; texts made of several of its sentences too.
 local BOOK=assert(UI.PhraseBook(),'the Orb book is built')
+-- R5 (Source86): the saved-format marker line puts two producer slots side
+-- by side ("(%s%s)"), so which bytes are the type and which the text cannot
+-- be told from the English. Localization.Phrase keeps such a line raw
+-- (unique-parse rule) instead of guessing; every other format is checked.
+local MARKER='orb.runtime.format_marker_invalid'
+local function WithoutMarker(book)
+ local copy={}
+ for k,v in pairs(book) do copy[k]=v end
+ copy.formats={}
+ for _,entry in ipairs(book.formats) do if entry.key~=MARKER then copy.formats[#copy.formats+1]=entry end end
+ return copy
+end
 do
- local failures=S.BookFidelity(BOOK,'english')
+ local marker
+ for _,entry in ipairs(BOOK.formats) do if entry.key==MARKER then marker=entry end end
+ local line=string.format(marker.format,'string',' 7x','7')
+ local shown,known=L.Phrase(line,BOOK)
+ check(known==false and shown==line,'R5: the adjacent-slot marker line stays raw (ambiguous split): '..tostring(shown))
+end
+do
+ local failures=S.BookFidelity(WithoutMarker(BOOK),'english')
  check(#failures==0,'English: every Orb book entry shows the producer bytes:\n'..table.concat(failures,'\n'))
  local exactN=0
  for _ in pairs(BOOK.exact) do exactN=exactN+1 end
@@ -269,7 +288,7 @@ end
 Boot('wrap')
 check(Nexus.Localization.ActiveLanguage()=='frFR','pseudo pack active from session start')
 do
- local failures=S.BookFidelity(UI.PhraseBook(),'pseudo')
+ local failures=S.BookFidelity(WithoutMarker(UI.PhraseBook()),'pseudo')
  check(#failures==0,'pseudo: every Orb book entry is said through the seam:\n'..table.concat(failures,'\n'))
  for _,raw in ipairs(COMPOSED) do
   local shown,known=Nexus.Localization.Phrase(raw,UI.PhraseBook())

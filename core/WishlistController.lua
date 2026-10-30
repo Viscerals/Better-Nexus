@@ -316,6 +316,31 @@ local function NotifyPhrase(text)
     return text, false
 end
 Controller.NotifyPhrase = NotifyPhrase
+-- A chat line whose code-filled values (an accepted Wishlist name, a
+-- destination, an Echo name) this file already holds: said through its key
+-- with those values as their own slots, never recaptured from the English
+-- (a name may contain the line's own words, quotes or delimiters, or a
+-- phrase a legacy UserText rule would read as a refusal). typed = {key =,
+-- args =}; an arg {key = k} is the seam's text of that code-owned value.
+-- The English line is shown when the seam is absent or refuses the values.
+local function SayTyped(message, typed)
+    local L = Nexus.Localization
+    local tag, body = tostring(message):match("^(|c%x%x%x%x%x%x%x%xNexus:|r )(.*)$")
+    if not tag or type(L) ~= "table" or type(L.Format) ~= "function" then return message end
+    local args = {}
+    for name, value in pairs(typed.args) do
+        if type(value) == "table" then
+            local text, source = L.Text(value.key)
+            if source == "unavailable" then return message end
+            value = text
+        end
+        args[name] = value
+    end
+    local shown, source = L.Format(typed.key, args)
+    if type(shown) ~= "string" or source == "unavailable" then return message end
+    return tag .. shown
+end
+Controller.SayTyped = SayTyped
 -- The reasons the Wishlist editor, Manage, the role chooser, assignment and
 -- the Plan workspace insert verbatim (this file, GameAdapter, WishlistModel,
 -- WishlistEditor, FullUIWorkspaces): exact texts only, with the Library's
@@ -408,8 +433,11 @@ function Controller.New(options)
     boundStore = Store
     -- The one presentation of a chat line (UserText.Message); the callback
     -- prints what it is given.
-    local notify = function(message)
+    -- typed: the line's own key and code-filled values (SayTyped), so a
+    -- player's name is never parsed back out of the English.
+    local notify = function(message, typed)
         local callback=type(options.notify)=="function" and options.notify or print
+        if typed then return callback(SayTyped(message, typed)) end
         callback(Nexus.UserText and Nexus.UserText.Message(message) or message)
     end
     local Adapter
@@ -1301,7 +1329,8 @@ function Controller.New(options)
         local lockedBySpell = LockedBySpell()
         if (tonumber(lockedBySpell[tonumber(row.spellId)]) or 0) > 0 then
             notify("|cffff6060Nexus:|r " .. tostring(row.name or "that Echo")
-                .. " is already locked -- it doesn't need a wishlist slot.")
+                .. " is already locked -- it doesn't need a wishlist slot.", {key = "editor.notify.already_locked",
+                args = {echo = row.name and tostring(row.name) or {key = "editor.notify.value_that_echo"}}})
             return "already_locked"
         end
         local nextPending, outcome = DraftModel.AddPending(state.pending, row, {
@@ -1409,15 +1438,18 @@ function Controller.New(options)
         TouchPresentation()
         if outcome == "tagged" then
             notify("|cff4dff80Nexus:|r " .. tostring(data.name)
-                .. " is now designed for a locked slot and no longer consumes the 79-copy wishlist budget.")
+                .. " is now designed for a locked slot and no longer consumes the 79-copy wishlist budget.",
+                {key = "editor.notify.designed_locked", args = {echo = tostring(data.name)}})
         elseif outcome == "already" then
             notify("|cff4dff80Nexus:|r " .. tostring(data.name)
-                .. " is already designed for a locked slot.")
+                .. " is already designed for a locked slot.",
+                {key = "editor.notify.already_designed_locked", args = {echo = tostring(data.name)}})
         elseif outcome == "lock_full" or outcome == "slots_full" then
             NotifyLockBudget(outcome, locked)
         elseif outcome == "queued" then
             notify("|cff4dff80Nexus:|r added " .. tostring(data.name)
-                .. " as a locked-slot target. It is pursued separately from the 79-copy wishlist.")
+                .. " as a locked-slot target. It is pursued separately from the 79-copy wishlist.",
+                {key = "editor.notify.added_locked_target", args = {echo = tostring(data.name)}})
         end
         return outcome
     end
@@ -2254,14 +2286,18 @@ function Controller.New(options)
 
     local function NotSavedChanged(destination)
         local context = state.editingContext or state.createTargetContext
-        local label = context and context.loadoutName ~= nil and tostring(context.loadoutName) ~= ""
-            and ("Saved Build '" .. tostring(context.loadoutName) .. "'")
+        local named = context and context.loadoutName ~= nil and tostring(context.loadoutName) ~= ""
+        local label = named and ("Saved Build '" .. tostring(context.loadoutName) .. "'")
             or (destination == "first" and "the first-run Wishlist")
             or ("Saved Build " .. tostring(destination))
+        local L = Nexus.Localization
+        local typedLabel = named and L.Format("editor.notify.label_saved_build_named", {name = tostring(context.loadoutName)})
+            or (destination == "first" and L.Text("editor.notify.label_first_run"))
+            or L.Format("editor.notify.label_saved_build_number", {slot = tostring(destination)})
         notify("|cffffd200Nexus:|r Not saved: " .. label .. " was assigned, unassigned or restored "
             .. "while the editor was open, and that choice is kept. Nothing was uploaded or "
             .. "assigned; your edits are still shown. Close and reopen the editor to edit the "
-            .. "current Wishlist.")
+            .. "current Wishlist.", {key = "editor.notify.assignment_changed_open", args = {destination = typedLabel}})
     end
 
     -- The numbered Saved Build this save would assign, when it holds no Echoes
@@ -2402,11 +2438,11 @@ function Controller.New(options)
             notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' may already have been sent from this draft "
                 .. "(the game reported an error during that upload), so nothing was uploaded again. Check the "
                 .. "Wishlist list in the Echo Journal. To create another Wishlist anyway, change the plan or its "
-                .. "name, or use New Wishlist.")
+                .. "name, or use New Wishlist.", {key = "editor.notify.maybe_sent", args = {name = tostring(name)}})
         else
             notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' was sent from this draft and the game accepted "
                 .. "the upload, so it counts as already created and nothing was uploaded again. To create "
-                .. "another Wishlist, change the plan or its name, or use New Wishlist.")
+                .. "another Wishlist, change the plan or its name, or use New Wishlist.", {key = "editor.notify.already_created", args = {name = tostring(name)}})
         end
         return reason
     end
@@ -2548,7 +2584,7 @@ function Controller.New(options)
             state.applyRetry = nil
             notify("|cffff6060Nexus:|r Not saved: a Wishlist named '" .. tostring(name) .. "' now exists. "
                 .. "Nothing was uploaded; your edits are kept. Press Create again to see the name "
-                .. "it will get.")
+                .. "it will get.", {key = "editor.notify.name_taken", args = {name = tostring(name)}})
             return false, "name_taken"
         end
         -- The draft that authorized this upload: its editor and Create
@@ -2595,7 +2631,7 @@ function Controller.New(options)
                     .. "during the upload (another draft was opened or this one was edited). This save "
                     .. "changed no assignment and updated no locked targets, so any assignment it already "
                     .. "had is kept; nothing is uploaded again. To edit the uploaded Wishlist, open it from "
-                    .. "the Echo Journal.")
+                    .. "the Echo Journal.", {key = "editor.notify.uploaded_draft_changed", args = {name = tostring(name)}})
                 return false, "uploaded_draft_changed"
             end
             -- The draft is the one uploaded: whatever the commit below rewrites
@@ -2627,7 +2663,7 @@ function Controller.New(options)
                 associated = true
                 trace.outcome = "kept"
                 notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' was uploaded, but its assignment "
-                    .. "was changed while the editor was open; that choice is kept.")
+                    .. "was changed while the editor was open; that choice is kept.", {key = "editor.notify.uploaded_assignment_kept", args = {name = tostring(name)}})
             end
             if not state.editingContext and intent == INTENT.SAVE_CHANGES and AssignTarget() then
                 -- Save changes of a new plan that could have been assigned:
@@ -2635,7 +2671,7 @@ function Controller.New(options)
                 trace.outcome = "saveOnly"
                 notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' saved without an assignment, as you chose. "
                     .. "No Saved Build or first-run target changed. To assign it, use Assign now... or the "
-                    .. "Wishlist selector in the Echo Journal.")
+                    .. "Wishlist selector in the Echo Journal.", {key = "editor.notify.saved_unassigned_new", args = {name = tostring(name)}})
             elseif keepsAssignment then
                 -- Save changes of a Wishlist opened for a Saved Build that
                 -- does not hold it: its edits are saved, and that Saved Build
@@ -2643,7 +2679,7 @@ function Controller.New(options)
                 trace.outcome = "saveOnly"
                 notify("|cffffd200Nexus:|r '" .. tostring(name) .. "' saved without an assignment, as you chose. "
                     .. "The Saved Build this editor opened it for keeps its current Wishlist, and no first-run "
-                    .. "target changed. To assign it, use Save & assign or the Wishlist selector in the Echo Journal.")
+                    .. "target changed. To assign it, use Save & assign or the Wishlist selector in the Echo Journal.", {key = "editor.notify.saved_unassigned_opened", args = {name = tostring(name)}})
             elseif state.editingContext and state.editingContext.loadoutSlot
                 and Adapter.UpdateWishlistAssociationAfterSave then
                 -- The open editor's binding goes with the save (see the writer).
@@ -2670,9 +2706,12 @@ function Controller.New(options)
                 if associated then
                     AdoptActions(state.draftActions, installed)
                     trace.outcome, trace.installed = "assigned", installed
+                    local loadoutName = state.createTargetContext.loadoutName
                     notify("|cff4dff80Nexus:|r assigned '" .. tostring(name)
-                    .. "' to " .. tostring(state.createTargetContext.loadoutName
-                        or "the active Saved Build") .. ".")
+                    .. "' to " .. tostring(loadoutName
+                        or "the active Saved Build") .. ".", {key = "editor.notify.assigned_to",
+                        args = {name = tostring(name), destination = loadoutName ~= nil and tostring(loadoutName)
+                            or {key = "editor.notify.value_active_saved_build"}}})
                 elseif associationReason == "assignment_changed" then
                     KeptNotice()
                 end
@@ -2722,7 +2761,7 @@ function Controller.New(options)
                         else AdoptActions(state.draftActions, installed) end
                         trace.outcome, trace.installed = "firstRun", installed
                         notify("|cff4dff80Nexus:|r '" .. tostring(name)
-                            .. "' is the first-run Wishlist target (used until a Saved Build with Echoes is active).")
+                            .. "' is the first-run Wishlist target (used until a Saved Build with Echoes is active).", {key = "editor.notify.first_run_target", args = {name = tostring(name)}})
                     elseif associationReason == "assignment_changed" then
                         KeptNotice()
                     end
@@ -2736,7 +2775,9 @@ function Controller.New(options)
                         .. (unloaded and "Saved Build data is not loaded yet, so it is not assigned."
                             or context and "This editor has no Saved Build destination for it, so it is not assigned."
                             or "The editor did not capture a Saved Build for this draft, so it is not assigned.")
-                        .. " To assign it, use the Wishlist selector in My Builds.")
+                        .. " To assign it, use the Wishlist selector in My Builds.", {key = unloaded and "editor.notify.saved_not_loaded"
+                            or context and "editor.notify.saved_no_destination" or "editor.notify.saved_not_captured",
+                            args = {name = tostring(name)}})
                 end
             end
             if associated ~= true then
@@ -2782,7 +2823,7 @@ function Controller.New(options)
             end
             notify("|cffff6060Nexus:|r The game reported an error while sending '" .. tostring(name)
                 .. "'. It may or may not have reached the server, so it is not sent again from this draft and "
-                .. "nothing was assigned. Check the Wishlist list in the Echo Journal before saving again.")
+                .. "nothing was assigned. Check the Wishlist list in the Echo Journal before saving again.", {key = "editor.notify.host_error", args = {name = tostring(name)}})
             return false, "host_error"
         end
         if tostring(err) == "stale_slot" then
@@ -3154,7 +3195,8 @@ function Controller.New(options)
             -- prepares the confirmation, it does not save anything yet.
             if name ~= typed:gsub("^%s+", ""):gsub("%s+$", "") then
                 notify("|cffff6060Nexus:|r the | character is not kept in a "
-                    .. "wishlist name; this plan will be named \"" .. name .. "\".")
+                    .. "wishlist name; this plan will be named \"" .. name .. "\".",
+                    {key = "editor.notify.name_character_dropped", args = {character = "|", name = name}})
             end
             -- A new Wishlist never takes a name a Wishlist the player can see
             -- already has (DraftModel.NameKey): it is offered the first free
@@ -3164,7 +3206,7 @@ function Controller.New(options)
             local unique = DraftModel.UniqueName(name, taken)
             if not unique then
                 notify("|cffff6060Nexus:|r Not saved: no free name was found for \"" .. name
-                    .. "\". Choose another name.")
+                    .. "\". Choose another name.", {key = "editor.notify.no_free_name", args = {name = name}})
                 return nil, "name_unavailable"
             end
             if unique ~= name then
@@ -3172,7 +3214,7 @@ function Controller.New(options)
                 -- list, a saved plan, or a Create of this session).
                 notify("|cffffd200Nexus:|r A Wishlist named \"" .. name .. "\" is already listed (on the server "
                     .. "list, in your saved plans or created this session), so this new one will be named \""
-                    .. unique .. "\".")
+                    .. unique .. "\".", {key = "editor.notify.name_listed_renamed", args = {name = name, unique = unique}})
             end
             requestedName, name, namesUnknown = name, unique, not known or nil
         end

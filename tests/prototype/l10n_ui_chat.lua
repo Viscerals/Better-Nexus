@@ -243,6 +243,22 @@ for line in (upd[1]:sub(#PREFIX+1)..'\n'):gmatch('(.-)\n') do
  check(S.IsPseudo(line) and S.LooksUntranslated(line)==nil,'every update detail line translated: '..line)
 end
 check(Nexus.Updates.Status().detailSource=='candidate','Status says a translation is in its detail')
+-- R5 retro: the whole translated /nexus update reply, built independently of
+-- Updates.Status().detail from the pack entries in their order (installed,
+-- no verified info, peer versions, not proof, notices), joined by LF after
+-- the one chat prefix; the Releases line keeps the URL verbatim. A dropped
+-- clause or separator fails here even when every remaining line is marked.
+do
+ local P=S.activeEntries
+ local function E(key,args) return (P[key]:gsub('{(%l[%w_]*)}',function(n) return args and args[n] end)) end
+ local installed=Nexus.Updates.Status().installed
+ local want=PREFIX..E('update.body.installed',{build=installed,channel=E('update.value.channel_development')})
+  ..'\n'..E('update.body.no_verified_info')..'\n'..E('update.body.peer_versions_not_release')
+  ..'\n'..E('update.body.not_proof_latest')..'\n'..E('update.body.notices_on_all')
+ check(upd[1]==want,'R5 retro: the whole translated update detail, in order: '..upd[1])
+ check(upd[2]==PREFIX..E('command.chat.update_releases_page',{url='https://github.com/Viscerals/Better-Nexus/releases'}),
+  'R5 retro: the translated Releases line with the verbatim URL')
+end
 local menuRow
 for _,item in ipairs(Nexus.Panel.MoreMenuItems()) do
  if item.text==Nexus.Updates.Status().menu then menuRow=item end

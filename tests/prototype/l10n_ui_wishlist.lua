@@ -535,4 +535,81 @@ end
 Nexus.WishlistOverlay.Show();H.Advance(1.1,.05)
 check(Find(S.VisibleTexts(NexusOverlayControls),function(t) return t.text=='Unlock position' end)~=nil,'D: overlay control in exact English')
 
+------------------------------------------------------------------------------
+-- R5 (FULLUI-647-SPEC-P2-01 and the inherited named-refusal group): the real
+-- Create & assign producer keeps the accepted name and its destination as
+-- their own slots. Each case boots the real TOC with a Saved Build named
+-- DEST, types NAME into the real editor and saves through the real
+-- confirmation (an explicit consented save of the synthetic fixture), then
+-- reads the one assignment notice the controller printed.
+------------------------------------------------------------------------------
+local ASSIGN_TAG='|cff4dff80Nexus:|r '
+local function BootAssign(dest,entries)
+ if entries then S.InstallBootHook(nil,entries) end
+ local h=F.Boot(F.Database(),function(x)
+  x.perks.serverBuildSlots={{name=dest,verified=true,echoes={{spellId=200001,quality=1,stacks=1}}}}
+  x.perks.serverActiveSlot=1
+ end)
+ for _=1,40 do h.Advance(.05,.05) end
+ return h
+end
+-- The accepted name (the editor's own trim/pipe rule) and the printed notice.
+local function AssignNotice(h,name)
+ Nexus.WishlistEditor.NewWishlist()
+ local frame=NexusEditorFrame
+ Find(frame._leftArea.children,function(r) return r:IsShown() and r.data end):Click()
+ NexusWishlistNameInput:SetText(name)
+ local create=Find(frame.children,function(c) local t=tostring(c:GetText())
+  return c.kind=='Button' and c:IsShown() and c:IsEnabled() and t:find('Create',1,true) and t:find('assign',1,true)
+   and not t:find('unassigned',1,true) end)
+ assert(create,'the Create & assign control')
+ create:Click()
+ local accepted=Nexus.WishlistModel.New().TrimName(name)
+ local chat=S.CaptureChat(function() h.AcceptPopup();h.now=h.now+3.1;h.Advance(.6,.05) end)
+ local notice
+ for _,line in ipairs(chat) do
+  if line:sub(1,#ASSIGN_TAG)==ASSIGN_TAG and (line:find('assigned',1,true) or line:find('NAME=',1,true)) then notice=notice or line end
+ end
+ local all=table.concat(chat,' | ')
+ return notice,accepted,all
+end
+local NAMES={"A' to B","A' to B {destination} %s","O'Brien",'Plain','no net gain','coverage lost:','net gain','coverage lost'}
+local DESTS={'Qv Saved',"Build' to C {name} %s"}
+-- Reordered valid candidate: both identities whole, in the candidate's order.
+local REORDER=S.PseudoEntries()
+REORDER['editor.notify.assigned_to']='DEST={destination};NAME={name}'
+REORDER['editor.notify.value_active_saved_build']='ACTIVEDEST'
+for _,dest in ipairs(DESTS) do
+ local h=BootAssign(dest,REORDER)
+ for _,name in ipairs(NAMES) do
+  local notice,accepted,all=AssignNotice(h,name)
+  check(accepted==name,'R5: the editor accepts the name as typed: '..name)
+  check(notice==ASSIGN_TAG..'DEST='..dest..';NAME='..accepted,
+   'R5 reordered: the whole notice keeps both identities ('..name..' -> '..dest..'): '..tostring(notice)..' || '..all)
+ end
+end
+-- Invalid candidates (missing, duplicated or unknown field): the complete
+-- exact English notice with both identities, nothing code-owned unresolved.
+for label,candidate in pairs({missing='NAME={name}',duplicate='{name} {name} {destination}',unknown='{name} {destination} {owner}'}) do
+ local bad=S.PseudoEntries()
+ bad['editor.notify.assigned_to']=candidate
+ local h=BootAssign('Qv Saved',bad)
+ local notice=AssignNotice(h,"A' to B {destination} %s")
+ check(notice==ASSIGN_TAG.."assigned 'A' to B {destination} %s' to Qv Saved.",
+  'R5 '..label..' field candidate: the exact English notice with both identities: '..tostring(notice))
+end
+-- English: the producer's exact English bytes for every name; the two
+-- refusal-like names are assignment notices (authorized correction of the
+-- inherited false refusal), not "Not saved" lines.
+local h=BootAssign('Qv Saved')
+for _,name in ipairs(NAMES) do
+ local notice=AssignNotice(h,name)
+ check(notice==ASSIGN_TAG.."assigned '"..name.."' to Qv Saved.",'R5 English: the exact assignment notice for '..name..': '..tostring(notice))
+end
+-- A genuine refusal reason keeps its proper meaning (the legacy rule).
+check(Nexus.UserText.Message('save refused: no net gain over the saved build')
+ =='Not saved: no additional matching Wishlist copies were confirmed.','R5: a genuine no-net-gain refusal keeps its meaning')
+check(Nexus.UserText.Message('coverage lost: 2 targets')
+ =='Not saved: some previously matched Wishlist targets would be lost. See diagnostics for the exact targets.','R5: a genuine coverage-lost refusal keeps its meaning')
+
 print('l10n_ui_wishlist PASS '..checks)
