@@ -23,7 +23,11 @@ PY = 'tools/tests/test_l10n_inventory.py'
 CATALOG_PY = 'tools/tests/test_l10n_catalog.py'
 PARITY_PY = 'tools/tests/test_l10n_parity.py'
 REGISTRY_PY = 'tools/tests/test_l10n_registry.py'
-PYTHON_REGISTRY = [PY, CATALOG_PY, PARITY_PY, REGISTRY_PY]
+GATE_PY = 'tools/tests/test_l10n_full_ui_gate.py'
+# The intended registry, written out here and never read from the runner: the expected counts
+# and lines below derive from this list.
+PYTHON_REGISTRY = [PY, CATALOG_PY, PARITY_PY, REGISTRY_PY, GATE_PY]
+REGISTERED = len(PYTHON_REGISTRY)
 PY_SCOPE = '(separate processes; not counted with the listed Lua tests)'
 
 
@@ -132,7 +136,8 @@ def ci_check_call(report: dict, *args: str, python=None, prepare=None):
     The runner process writes `report`. Any other process is a registered Python test: python
     maps its path to an exit code, 'timeout' (TimeoutExpired with partial bytes output, after
     45.25 s) or 'launch' (FileNotFoundError); the default is exit 0 after 0.5 s. The clock is
-    fake and starts at 2000.0. prepare(ci) may change the module before main() runs.
+    fake and starts at 2000.0. prepare(ci) may change the module before main() runs. A report
+    of None makes the runner process write no report.
     Returns code (an exception is returned as the exit status), out (stdout lines), calls
     ((command, keywords) of every process started, in order) and report (the --output file
     afterwards, or None)."""
@@ -144,6 +149,8 @@ def ci_check_call(report: dict, *args: str, python=None, prepare=None):
     def fake_run(command, **kwargs):
         calls.append((list(command), kwargs))
         if any(str(part).endswith('run_prototype_tests.py') for part in command):
+            if report is None:
+                return subprocess.CompletedProcess(command, 1, stdout='runner out', stderr='runner err')
             pathlib.Path(command[command.index('--output') + 1]).write_text(json.dumps(report), encoding='utf-8')
             return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
         name = python_test_name(command[-1], ci.ROOT)
@@ -321,7 +328,7 @@ def main() -> int:
         'startup_budget': {'seconds': 40.75, 'timeout_seconds': None}, 'boot': {'seconds': 30.5},
         'orbs': {'seconds': 20.25}, 'transport': {'seconds': 3.0}}))
     unchanged = [f'inventory: {len(names)} listed tests',
-                 f'python inventory: 4 registered Python test files {PY_SCOPE}',
+                 f'python inventory: {REGISTERED} registered Python test files {PY_SCOPE}',
                  'runtime: LuaJIT',
                  f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}',
                  'RESULT: no listed test failed; every listed test ran']
@@ -330,11 +337,8 @@ def main() -> int:
               'timing: startup_budget PASS 40.75 s (limit unknown s)',
               'timing: boot PASS 30.5 s (limit 45 s)',
               'timing: orbs PASS 20.25 s (limit 45 s)']
-    python = [f'python: {PY} PASS 0.5 s (limit 45 s)',
-              f'python: {CATALOG_PY} PASS 0.5 s (limit 45 s)',
-              f'python: {PARITY_PY} PASS 0.5 s (limit 45 s)',
-              f'python: {REGISTRY_PY} PASS 0.5 s (limit 45 s)',
-              f'python: passed 4, failed 0, registered 4 {PY_SCOPE}']
+    python = [f'python: {path} PASS 0.5 s (limit 45 s)' for path in PYTHON_REGISTRY] + [
+              f'python: passed {REGISTERED}, failed 0, registered {REGISTERED} {PY_SCOPE}']
     expect('ci_check prints the raised limits, then the five slowest, each test once, then the lines of all'
            ' registered Python tests in registry order, just before RESULT',
            out == unchanged[:-1] + timing + python + unchanged[-1:], ' | '.join(out[-13:]))
@@ -351,7 +355,7 @@ def main() -> int:
         'catalog_root_capacity': {'status': 'TIMEOUT', 'exit': None, 'seconds': 120.5, 'stdout': 'partial'},
         'sync_admission_traffic_acceptance': {'seconds': None}}), '--only', ','.join(shard))
     unchanged = [f'inventory: {len(names)} listed tests',
-                 f'python inventory: 4 registered Python test files {PY_SCOPE}',
+                 f'python inventory: {REGISTERED} registered Python test files {PY_SCOPE}',
                  '--- parse: FAIL', 'parse out', 'parse err',
                  '--- catalog_root_capacity: TIMEOUT', 'partial', '',
                  'runtime: LuaJIT',
@@ -363,10 +367,7 @@ def main() -> int:
               'timing: sync_admission_traffic_acceptance PASS unknown s (limit 120 s)',
               'timing: parse FAIL 2.5 s (limit 45 s)',
               'timing: boot PASS 0.25 s (limit 45 s)']
-    python = [f'python: NOT SELECTED in a shard (not run, not a pass): {PY}',
-              f'python: NOT SELECTED in a shard (not run, not a pass): {CATALOG_PY}',
-              f'python: NOT SELECTED in a shard (not run, not a pass): {PARITY_PY}',
-              f'python: NOT SELECTED in a shard (not run, not a pass): {REGISTRY_PY}']
+    python = [f'python: NOT SELECTED in a shard (not run, not a pass): {path}' for path in PYTHON_REGISTRY]
     expect('ci_check timing lines show TIMEOUT and FAIL rows and print a missing seconds as unknown;'
            ' a shard prints every registered Python test as NOT SELECTED',
            out == unchanged[:-1] + timing + python + unchanged[-1:], ' | '.join(out[-13:]))
@@ -375,19 +376,20 @@ def main() -> int:
            [line for line in out if not line.startswith(('timing: ', 'python: '))] == unchanged and code == 1,
            f'exit {code}')
 
-    # 9. A NOT_RUN row in a complete inventory is never a pass: RESULT FAILED, exit 1. All four registered
-    # Python tests still run as separate processes and are counted apart from the Lua tests.
+    # 9. A NOT_RUN row in a complete inventory is never a pass: RESULT FAILED, exit 1. Every registered
+    # Python test still runs as a separate process and is counted apart from the Lua tests.
     code, out = run_ci_check(controlled_report(names, {'parse': {'status': 'NOT_RUN', 'reason': 'stand-in skip'}}))
-    expect('a NOT_RUN row is printed as NOT RUN and fails the check, exit 1; the four Python tests stay separate',
+    expect(f'a NOT_RUN row is printed as NOT RUN and fails the check, exit 1; the {REGISTERED} Python tests stay'
+           ' separate',
            'NOT RUN (not a pass): parse: stand-in skip' in out and out[-1] == 'RESULT: FAILED' and code == 1
-           and f'python: passed 4, failed 0, registered 4 {PY_SCOPE}' in out,
+           and f'python: passed {REGISTERED}, failed 0, registered {REGISTERED} {PY_SCOPE}' in out,
            f'exit {code}, last {out[-2:]}')
 
     # 10. The Python test registry: apart from NAMES, never passed to the Lua runtime, never counted there.
     runner = load_runner()
     registered = getattr(runner, 'PYTHON_TESTS', None)
-    expect(f'PYTHON_TESTS registers exactly {PY}, {CATALOG_PY}, {PARITY_PY} then {REGISTRY_PY}, apart from the'
-           ' Lua NAMES',
+    expect(f'PYTHON_TESTS registers exactly {", ".join(PYTHON_REGISTRY[:-1])} then {PYTHON_REGISTRY[-1]}, apart'
+           ' from the Lua NAMES',
            registered == PYTHON_REGISTRY and not set(registered) & set(runner.NAMES), f'PYTHON_TESTS={registered!r}')
     expect('a Python test process gets 45 s',
            getattr(runner, 'PYTHON_TEST_TIMEOUT_SECONDS', None) == 45,
@@ -405,7 +407,7 @@ def main() -> int:
            f'registered_python_tests={(report or {}).get("registered_python_tests")!r}')
 
     # 11. ci_check's Python inventory: this checkout, then a missing, a duplicate, a malformed and an
-    # unregistered entry. Each is refused before any process starts. Each case keeps all four default entries
+    # unregistered entry. Each is refused before any process starts. Each case keeps every default entry
     # registered and present, so that only its intended problem arises.
     check = getattr(load_ci_check(), 'check_python_inventory', None)
     found = check(list(registered or [])) if callable(check) else 'tools/ci_check.py has no check_python_inventory'
@@ -414,12 +416,12 @@ def main() -> int:
     complete = controlled_report(names, {})
     for case, tests, problem in (
             ('a registered Python test without a file',
-             [PY, CATALOG_PY, PARITY_PY, REGISTRY_PY, 'tools/tests/test_stand_in_missing.py'],
+             PYTHON_REGISTRY + ['tools/tests/test_stand_in_missing.py'],
              'Python test listed but no file: tools/tests/test_stand_in_missing.py'),
-            ('a Python test registered twice', [PY, CATALOG_PY, PARITY_PY, REGISTRY_PY, PY],
+            ('a Python test registered twice', PYTHON_REGISTRY + [PY],
              f'Python test listed more than once: {PY}'),
             ('a registered entry outside tools/tests',
-             [PY, CATALOG_PY, PARITY_PY, REGISTRY_PY, '../outside/test_stand_in.py'],
+             PYTHON_REGISTRY + ['../outside/test_stand_in.py'],
              'Python test entry is not a tools/tests/test_*.py path: ../outside/test_stand_in.py')):
         result = ci_check_call(complete, prepare=with_runner(python_tests=tests))
         expect(f'{case} fails the inventory check: exit 1, nothing started',
@@ -427,8 +429,8 @@ def main() -> int:
                f'exit {result.code}, {len(result.calls)} processes, {result.out[:4]}')
     with tempfile.TemporaryDirectory() as tmp:
         base = pathlib.Path(tmp)
-        for rel in (PY, CATALOG_PY, PARITY_PY, REGISTRY_PY, 'tools/tests/test_stand_in_unregistered.py',
-                    'tools/tests/nested/test_stand_in_nested.py', 'tools/tests/stand_in_helper.py'):
+        for rel in PYTHON_REGISTRY + ['tools/tests/test_stand_in_unregistered.py',
+                                      'tools/tests/nested/test_stand_in_nested.py', 'tools/tests/stand_in_helper.py']:
             (base / rel).parent.mkdir(parents=True, exist_ok=True)
             (base / rel).write_text('', encoding='utf-8')
         result = ci_check_call(complete, prepare=with_runner(root=base))
@@ -445,7 +447,8 @@ def main() -> int:
     result = ci_check_call(complete, '--inventory-only')
     expect('--inventory-only reports both inventories, starts no process and exits 0',
            result.code == 0 and result.calls == [] and result.out == [
-               f'inventory: {len(names)} listed tests', f'python inventory: 4 registered Python test files {PY_SCOPE}',
+               f'inventory: {len(names)} listed tests',
+               f'python inventory: {REGISTERED} registered Python test files {PY_SCOPE}',
                'inventory check passed; no test was executed'],
            f'exit {result.code}, {len(result.calls)} processes, {result.out}')
 
@@ -456,8 +459,7 @@ def main() -> int:
     lua_ok = (len(lua_command) > 1 and str(lua_command[1]).endswith('run_prototype_tests.py')
               and '--only' not in lua_command
               and not any(marker in str(part) for part in lua_command
-                          for marker in ('test_l10n_inventory', 'test_l10n_catalog', 'test_l10n_parity',
-                                         'test_l10n_registry')))
+                          for marker in (pathlib.PurePosixPath(path).stem for path in PYTHON_REGISTRY)))
     py_calls = result.calls[1:] if len(result.calls) == 1 + len(PYTHON_REGISTRY) else []
     expect('a complete run starts the Lua runner once, without --only or a Python test, then each registered'
            ' Python test',
@@ -476,52 +478,71 @@ def main() -> int:
                and all(r.get('status') == 'PASS' and r.get('exit') == 0 and r.get('seconds') == 0.5
                        and r.get('timeout_seconds') == 45 for r in py_rows))
     expect('all passing Python tests are PASS (exit 0, 0.5 s, limit 45 s) in the report and the output, counted'
-           ' 4/0 of 4 registered; the Lua counts stay Lua-only, exit 0',
+           f' {REGISTERED}/0 of {REGISTERED} registered; the Lua counts stay Lua-only, exit 0',
            result.code == 0 and rows_ok and pyrep.get('selected') is True
            and pyrep.get('registered') == PYTHON_REGISTRY
-           and (pyrep.get('passed'), pyrep.get('failed')) == (4, 0)
+           and (pyrep.get('passed'), pyrep.get('failed')) == (REGISTERED, 0)
            and all(f'python: {path} PASS 0.5 s (limit 45 s)' in result.out for path in PYTHON_REGISTRY)
-           and f'python: passed 4, failed 0, registered 4 {PY_SCOPE}' in result.out
+           and f'python: passed {REGISTERED}, failed 0, registered {REGISTERED} {PY_SCOPE}' in result.out
            and f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}' in result.out
            and result.out[-1:] == ['RESULT: no listed test failed; every listed test ran'],
            f'exit {result.code}, rows {py_rows}, last {result.out[-4:]}')
 
-    # 14. A nonzero exit, a timeout and a launch failure of the first Python test each fail the check; the
-    # other registered Python tests still run as their own processes and pass in the same run.
+    # 14. A nonzero exit, a timeout and a launch failure of one Python test each fail the check, attributed
+    # to that named test; every other registered Python test still runs as its own process and passes in the
+    # same run. The first test fails in each way; then the registry test, which is no longer the last one,
+    # and the full visible-UI gate test, which is now last.
+    def failed_worker(case, path, outcome, status, seconds, exit_code, stdout, stderr, label):
+        result = ci_check_call(complete, python={path: outcome})
+        pyrep = (result.report or {}).get('python_tests') or {}
+        py_rows = [r for r in (pyrep.get('results') or []) if isinstance(r, dict)]
+        others = [p for p in PYTHON_REGISTRY if p != path]
+        rows_ok = [r.get('test') for r in py_rows] == PYTHON_REGISTRY and all(
+            (r.get('status'), r.get('exit'), r.get('seconds'), r.get('timeout_seconds'))
+            == ((status, exit_code, seconds, 45) if r.get('test') == path else ('PASS', 0, 0.5, 45))
+            for r in py_rows)
+        tail = [f'--- python {path}: {status}', stdout, stderr] + [
+            f'python: {p} {status} {seconds} s (limit 45 s)' if p == path else f'python: {p} PASS 0.5 s (limit 45 s)'
+            for p in PYTHON_REGISTRY] + [
+            f'python: passed {REGISTERED - 1}, failed 1, registered {REGISTERED} {PY_SCOPE}', 'RESULT: FAILED']
+        expect(f'{case} of {label} is {status}, printed and counted apart from the Lua tests while'
+               f' {", ".join(others[:-1])} and {others[-1]} still run and pass, exit 1',
+               result.code == 1 and len(result.calls) == 1 + len(PYTHON_REGISTRY)
+               and result.out[-len(tail):] == tail
+               and f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}' in result.out
+               and rows_ok and (pyrep.get('passed'), pyrep.get('failed')) == (REGISTERED - 1, 1),
+               f'exit {result.code}, last {result.out[-len(tail):]}, rows {py_rows}')
+
     for case, outcome, status, seconds, exit_code, stdout, stderr in (
             ('a nonzero exit', 1, 'FAIL', 0.5, 1, f'{PY} out', f'{PY} err'),
             ('a timeout', 'timeout', 'TIMEOUT', 45.25, None, 'py partial out', 'py partial err'),
             ('a launch failure', 'launch', 'LAUNCH_FAILED', 0.5, None, '',
              'FileNotFoundError: [Errno 2] stand-in launch failure')):
-        result = ci_check_call(complete, python={PY: outcome})
-        row = python_row(result.report)
-        pyrep = (result.report or {}).get('python_tests') or {}
-        py_rows = pyrep.get('results') or []
-        other = py_rows[1] if len(py_rows) == 4 and isinstance(py_rows[1], dict) else {}
-        third = py_rows[2] if len(py_rows) == 4 and isinstance(py_rows[2], dict) else {}
-        fourth = py_rows[3] if len(py_rows) == 4 and isinstance(py_rows[3], dict) else {}
-        tail = [f'--- python {PY}: {status}', stdout, stderr, f'python: {PY} {status} {seconds} s (limit 45 s)',
-                f'python: {CATALOG_PY} PASS 0.5 s (limit 45 s)',
-                f'python: {PARITY_PY} PASS 0.5 s (limit 45 s)',
-                f'python: {REGISTRY_PY} PASS 0.5 s (limit 45 s)',
-                f'python: passed 3, failed 1, registered 4 {PY_SCOPE}', 'RESULT: FAILED']
-        expect(f'{case} of the first Python test is {status}, printed and counted apart from the Lua tests while'
-               f' {CATALOG_PY}, {PARITY_PY} and {REGISTRY_PY} still run and pass, exit 1',
-               result.code == 1 and len(result.calls) == 1 + len(PYTHON_REGISTRY)
-               and result.out[-len(tail):] == tail
-               and f'passed {len(names)}, failed 0, NOT RUN 0, no result row 0, listed {len(names)}' in result.out
-               and row.get('test') == PY
-               and row.get('status') == status and row.get('exit') == exit_code and row.get('seconds') == seconds
-               and row.get('timeout_seconds') == 45
-               and other.get('test') == CATALOG_PY and other.get('status') == 'PASS' and other.get('exit') == 0
-               and other.get('seconds') == 0.5 and other.get('timeout_seconds') == 45
-               and third.get('test') == PARITY_PY and third.get('status') == 'PASS' and third.get('exit') == 0
-               and third.get('seconds') == 0.5 and third.get('timeout_seconds') == 45
-               and fourth.get('test') == REGISTRY_PY and fourth.get('status') == 'PASS' and fourth.get('exit') == 0
-               and fourth.get('seconds') == 0.5 and fourth.get('timeout_seconds') == 45
-               and (pyrep.get('passed'), pyrep.get('failed')) == (3, 1),
-               f'exit {result.code}, last {result.out[-9:]}, row {row}, second row {other}, third row {third},'
-               f' fourth row {fourth}')
+        failed_worker(case, PY, outcome, status, seconds, exit_code, stdout, stderr, 'the first Python test')
+    failed_worker('a nonzero exit', REGISTRY_PY, 1, 'FAIL', 0.5, 1, f'{REGISTRY_PY} out', f'{REGISTRY_PY} err',
+                  f'{REGISTRY_PY}, not the last Python test,')
+    failed_worker('a nonzero exit', GATE_PY, 1, 'FAIL', 0.5, 1, f'{GATE_PY} out', f'{GATE_PY} err',
+                  f'the last Python test {GATE_PY}')
+    failed_worker('a timeout', GATE_PY, 'timeout', 'TIMEOUT', 45.25, None, 'py partial out', 'py partial err',
+                  f'the last Python test {GATE_PY}')
+
+    # 14b. A complete run whose Lua report lacks one listed test is not complete, even with every registered
+    # Python test passing; with no runner report at all, no Python test is started.
+    result = ci_check_call(controlled_report([n for n in names if n != 'boot'], {}))
+    pyrep = (result.report or {}).get('python_tests') or {}
+    expect(f'a listed Lua test without a result row fails a complete run although all {REGISTERED} Python tests'
+           ' run and pass, exit 1',
+           result.code == 1 and len(result.calls) == 1 + len(PYTHON_REGISTRY)
+           and f'passed {len(names) - 1}, failed 0, NOT RUN 0, no result row 1, listed {len(names)}' in result.out
+           and f'python: passed {REGISTERED}, failed 0, registered {REGISTERED} {PY_SCOPE}' in result.out
+           and (pyrep.get('passed'), pyrep.get('failed')) == (REGISTERED, 0) and result.out[-1:] == ['RESULT: FAILED'],
+           f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
+    result = ci_check_call(None)
+    expect('without a runner report no Python test starts and nothing is counted as passed, exit 1',
+           result.code == 1 and len(result.calls) == 1
+           and result.out[-1:] == ['RESULT: the runner wrote no report; nothing is counted as passed']
+           and not any(line.startswith('python: ') for line in result.out),
+           f'exit {result.code}, {len(result.calls)} processes, last {result.out[-3:]}')
 
     # 15. A --only shard runs the selected Lua tests only; each Python test is NOT SELECTED, never a pass.
     result = ci_check_call(controlled_report(['parse', 'boot'], {}), '--only', 'parse,boot')
