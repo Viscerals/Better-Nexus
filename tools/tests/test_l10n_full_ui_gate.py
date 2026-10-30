@@ -600,7 +600,10 @@ class CompositionReceipt(unittest.TestCase):
         self.assertEqual(codes(G.evaluate(sources, b'{"schema": 1}')), ['receipt-structure'])
 
     def test_contract_override_must_match_the_actual_declarations(self):
-        key = 'panel.tooltip.size_explained'
+        # A reduced-catalog key the actual source still declares as text
+        # (panel.tooltip.size_explained, the earlier example, became a block in the reviewed v4
+        # contract, so a text -> block override of it is no longer stale).
+        key = 'leaderboard.column.rank'
         override = {'key': key, 'kind': 'block', 'previousKind': 'text'}
         sources = composed()
         # The actual declaration is still text: an anticipated v3 receipt is stale composition.
