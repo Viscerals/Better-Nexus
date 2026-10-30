@@ -6838,7 +6838,17 @@ local LANGUAGE_REASONS = {
 local function LanguageReason(code)
     return LT(LANGUAGE_REASONS[code] or "panel.status.language_reason_refused")
 end
-local function LanguageScope() return LT("panel.note.language_scope") end
+-- The scope statement is a block of short lines (one sentence each): the
+-- Language menu shows each line as its own row (a menu row does not wrap);
+-- a chat line joins them with spaces.
+local function LanguageScopeLines()
+    local lines = {}
+    for line in (LT("panel.note.language_scope") .. "\n"):gmatch("([^\n]*)\n") do
+        if line ~= "" then lines[#lines + 1] = line end
+    end
+    return lines
+end
+local function LanguageScope() return table.concat(LanguageScopeLines(), " ") end
 local function LanguageReload() return LT("panel.note.language_reload") end
 -- Issue #141: Automatic is a preference shown beside the installed packs,
 -- never one of them. This build reads no game language and has no evidenced
@@ -6942,7 +6952,9 @@ function M.LanguageMenuItems(action)
         end
     end
     items[#items + 1] = {text = LanguageReload(), notCheckable = true, disabled = true}
-    items[#items + 1] = {text = LanguageScope(), notCheckable = true, disabled = true}
+    for _, line in ipairs(LanguageScopeLines()) do
+        items[#items + 1] = {text = line, notCheckable = true, disabled = true}
+    end
     if automatic then
         items[#items + 1] = {text = LanguageAutomatic(), notCheckable = true, disabled = true}
     end

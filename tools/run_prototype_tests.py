@@ -454,6 +454,8 @@ NAMES += ['l10n_ui_orb']
 NAMES += ['l10n_ui_guide']
 # Full-UI v3 remainder: an Auto hold reason is presented once (AutomationRuntime keeps the English wording for its support report line; Readout.AutoHoldText -> UserText.Message says it in the active language), and the Orb block sentence through the Orb book; real boot, real Auto and Orb gate, exact English and pseudo (synthetic; native NOT_RUN).
 NAMES += ['l10n_hold_presentation']
+# Global v4 amendment: nine long paragraphs (block / lines=true template) are complete above 256 bytes at their real receivers (extra list, Language menu/Settings/chat, Details, size, Orb mini, Auto confirmation line, context popup, import chat); invalid/missing fall back to exact English; English bytes; passive (synthetic; native NOT_RUN).
+NAMES += ['l10n_long_paragraphs']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

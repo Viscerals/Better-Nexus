@@ -52,7 +52,9 @@ function S.PseudoEntries(mode,english)
  local out={}
  for key,text in pairs(english) do
   local body=mode=='long' and expand(text) or text
-  out[key]=OPEN..body..CLOSE
+  -- A multi-line block is marked line by line, so a receiver that shows
+  -- each line on its own (a menu row per line) still shows marked text.
+  out[key]=OPEN..body:gsub('\n',CLOSE..'\n'..OPEN)..CLOSE
  end
  return out
 end

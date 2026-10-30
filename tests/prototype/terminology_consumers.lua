@@ -662,7 +662,11 @@ do
  local menu,rows=LanguageMenu()
  check(menu and rows==1 and menu.hasArrow and type(menu.menuList)=='table','the ... menu has exactly one Language row with a submenu')
  local text=MenuText(menu)
- check(Row(menu,'enUS') and text:find('other Nexus text stays English',1,true) and not text:find('three status messages',1,true),'English and the bounded coverage note are listed (#143: its exact wording is checked after the Panel consumer cohort below)')
+ -- v4 (Root amendment): the scope note states draft coverage with English
+-- fallback ("text without one stays in English") instead of the obsolete
+-- selected-labels-only list; the stale claims stay refused.
+check(Row(menu,'enUS') and text:find('text without one stays in English',1,true) and not text:find('three status messages',1,true)
+ and not text:find('Only selected main-panel labels',1,true),'English and the bounded coverage note are listed (#143: its exact wording is checked after the Panel consumer cohort below)')
  for _,id in ipairs(IDS)do
   check(Row(menu,id) and not Row(menu,id).disabled,'the chooser lists '..id..' by its own name, enabled')
   check(not text:find(id,1,true) and not menu.text:find(id,1,true),'no internal language ID is shown: '..id)
@@ -1711,7 +1715,10 @@ do
  end
  -- The explicit coverage-literal exception, checked last so a pre-binding
  -- Panel first fails on its mapped consumers above.
- local SCOPE='Only selected main-panel labels and tooltips, status messages and the compact charge-count row are translated; other Nexus text stays English. Translations are drafts pending fluent and native review.'
+ -- v4: the scope note is a block of three lines; each is its own disabled row,
+ -- in order (a menu row does not wrap).
+ local SCOPE={'Nexus shows its own text in the selected language where a draft translation exists; text without one stays in English.',
+  'Game names, player names and diagnostic data are not translated.','Translations are drafts pending fluent and native review.'}
  local easy,items=EasyMenu,nil
  local before=Effects()
  EasyMenu=function(list)items=list end
@@ -1722,10 +1729,11 @@ do
   if type(item.text)=='string' and item.text:find('^Language')then language=item end
  end
  for _,row in ipairs(language and language.menuList or {})do
-  if row.text==SCOPE and row.disabled==true and row.notCheckable==true then found=true end
+  if row.text==SCOPE[1] and row.disabled==true and row.notCheckable==true then found=1
+  elseif found and found<#SCOPE and row.text==SCOPE[found+1] and row.disabled==true and row.notCheckable==true then found=found+1 end
   if tostring(row.text):find('six messages',1,true)then stale=true end
  end
- check(found and not stale and same(Effects(),before),'#143: the actual Language menu states the bounded coverage exactly, without the six-message claim, and opening it writes nothing')
+ check(found==#SCOPE and not stale and same(Effects(),before),'#143: the actual Language menu states the bounded coverage exactly, without the six-message claim, and opening it writes nothing')
 end
 
 -- UX-02: a fresh real boot with the shipped defaults (Freeze allowed, trusted
