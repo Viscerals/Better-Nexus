@@ -61,7 +61,9 @@ end
 -- Nexus.Localization. Returns the module and a restore function.
 function S.Activate(mode,entries)
  local real,realPacks=Nexus.Localization,Nexus.LocalizationPacks
- Nexus.LocalizationPacks={frFR={name='Pseudo',entries=entries or S.PseudoEntries(mode)}}
+ entries=entries or S.PseudoEntries(mode)
+ S.activeEntries=entries
+ Nexus.LocalizationPacks={frFR={name='Pseudo',entries=entries}}
  local ok,err=pcall(dofile,'core/Localization.lua')
  local module=Nexus.Localization
  Nexus.LocalizationPacks=realPacks
@@ -79,6 +81,7 @@ end
 -- also removes itself after its one use.
 function S.InstallBootHook(mode,entries)
  entries=entries or S.PseudoEntries(mode)
+ S.activeEntries=entries
  local realLoadfile=loadfile
  local function uninstall() loadfile=realLoadfile end
  loadfile=function(path,...)
@@ -134,12 +137,50 @@ function S.Unmarked(text)
  return table.concat(out),balanced
 end
 
+-- Well-formed UTF-8 (shortest-form scalar sequences), byte by byte.
+local function WellFormedUtf8(t)
+ local i,n=1,#t
+ while i<=n do
+  local c=t:byte(i);local w
+  if c<0x80 then w=1 elseif c>=0xC2 and c<=0xDF then w=2 elseif c>=0xE0 and c<=0xEF then w=3
+  elseif c>=0xF0 and c<=0xF4 then w=4 else return false end
+  if i+w-1>n then return false end
+  for k=i+1,i+w-1 do local d=t:byte(k);if d<0x80 or d>0xBF then return false end end
+  i=i+w
+ end
+ return true
+end
+S.WellFormedUtf8=WellFormedUtf8
+
+-- A seam text that the code shortened with "..." (its closing marker is cut
+-- off). True only when the whole shown text (colour codes aside) is the
+-- opener plus a well-formed UTF-8 prefix of one installed pseudo entry, then
+-- "..." and optional trailing ":" or spaces. For a template entry the prefix
+-- is compared up to its first placeholder, since slot values follow it.
+-- `entries` defaults to the entries the last activation installed.
+function S.IsShortenedSeamText(text,entries)
+ entries=entries or S.activeEntries
+ if type(entries)~='table' then return false end
+ local plain=tostring(text or ''):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')
+ local body=plain:match('^('..OPEN..'.-)%.%.%.[:%s]*$')
+ if not body or body:find(CLOSE,1,true) or not WellFormedUtf8(body) or #body<=#OPEN then return false end
+ for _,value in pairs(entries) do
+  if type(value)=='string' then
+   if value:sub(1,#body)==body then return true end
+   local brace=value:find('{',1,true)
+   if brace and #body>=brace-1 and body:sub(1,brace-1)==value:sub(1,brace-1) then return true end
+  end
+ end
+ return false
+end
+
 -- The first English-looking word (two or more ASCII letters) left in the
 -- unmarked remainder that `allow` does not accept, or "<unbalanced pseudo
 -- marker>" when the markers do not pair up (a cut or malformed pseudo text
 -- is never counted as covered). `allow(word, text)` may accept data that is
 -- never translated (player, build and Echo names, game identifiers).
 function S.LooksUntranslated(text,allow)
+ if S.IsShortenedSeamText(text) then return nil end
  local rest,balanced=S.Unmarked(text)
  for word in rest:gmatch('[A-Za-z][A-Za-z\']+') do
   if not (allow and allow(word,text)) then return word end

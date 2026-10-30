@@ -62,4 +62,18 @@ check(S.LooksUntranslated(O..'a'..C..O..'12')~=nil,'an unbalanced marker is repo
 check(S.LooksUntranslated('Untranslated '..C)=='Untranslated','a stray closer does not hide English before it')
 check(S.LooksUntranslated('Ashbringer',function(word) return word=='Ashbringer' end)==nil,'explicit data allowance still works')
 check(S.LooksUntranslated(O..'Owned by '..C..'Ashbringer',function(word) return word=='Ashbringer' end)==nil,'marked text next to allowed data is covered')
+-- 3. Code-shortened seam text: accepted only as a real entry's prefix.
+local entries={['x.label.long']=O..'Waiting for the actual game result'..C,
+ ['x.status.slot']=O..'Reserved for {name} until it ends'..C}
+check(S.IsShortenedSeamText(O..'Waiting for the act...',entries),'a prefix of a real entry plus ... is shortened seam text')
+check(S.IsShortenedSeamText('|cffffffff'..O..'Waiting for the actual...:|r',entries),'colour codes and a trailing colon are code-owned')
+check(S.IsShortenedSeamText(O..'Reserved for Ashbringer unt...',entries),'a template prefix is compared up to its first placeholder')
+check(not S.IsShortenedSeamText(O..'Totally different text...',entries),'a non-entry prefix is not shortened seam text')
+check(not S.IsShortenedSeamText(O..'Waiting for the actual game result Untranslated...',entries),'text beyond the entry is not shortened seam text')
+check(not S.IsShortenedSeamText(O..'Waiting for the act'..string.char(208)..'...',{['x.y']=O..'Waiting for the act'..string.char(208,159)..C}),'a cut inside a UTF-8 character is not accepted')
+check(not S.IsShortenedSeamText(O..'Waiting for the act...'..' tail English',entries),'English after the ellipsis is not accepted')
+S.activeEntries=entries
+check(S.LooksUntranslated(O..'Waiting for the act...')==nil,'the scan accepts real shortened seam text')
+check(S.LooksUntranslated(O..'Totally different text...')~=nil,'the scan still reports a non-entry cut text')
+S.activeEntries=nil
 print('PASS l10n_pseudo_support_guards checks='..checks..' (synthetic; native NOT_RUN)')
