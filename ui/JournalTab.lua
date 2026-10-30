@@ -576,6 +576,35 @@ local function JournalShown(raw)
 end
 M.JournalShown = JournalShown
 
+-- A tome row's names as shown: the tome name and its Echo names. Only names
+-- the adapter generated (core/GameAdapter.lua A.TomeNameFacts, bound to
+-- exactly this row's name and Echo names) are said through their keys; a
+-- supplied name stays as given, however it reads. A generated name keeps its
+-- exact English when the active language has no valid candidate for it.
+local function TomeNames(t)
+    local adapter, L = Nexus.GameAdapter, Nexus.Localization
+    local echoes = type(t) == "table" and type(t.echoNames) == "table" and t.echoNames or {}
+    local name = type(t) == "table" and t.name or nil
+    local facts = type(adapter) == "table" and type(adapter.TomeNameFacts) == "function"
+        and adapter.TomeNameFacts(t.leverId, name, echoes) or nil
+    local canFormat = type(L) == "table" and type(L.Format) == "function"
+    local shown = {}
+    for i = 1, #echoes do
+        local echo, id = echoes[i], facts and facts.memberIds[i]
+        if id ~= nil and canFormat then
+            local text, source = L.Format("journal.provider.generated_echo_name", {id = tostring(id)})
+            if source == "candidate" then echo = text end
+        end
+        shown[i] = echo
+    end
+    if facts and facts.nameGenerated and canFormat then
+        local text, source = L.Format("journal.provider.generated_tome_name", {echoes = table.concat(shown, ", ")})
+        if source == "candidate" then name = text end
+    end
+    return name, shown
+end
+M.TomeNames = TomeNames
+
 local function Filled(value)
     return type(value) == "string" and value ~= "" and value or nil
 end
@@ -594,7 +623,8 @@ local function TomeRowEnter(self)
     local t = self.tome
     if not (GameTooltip and type(t) == "table") then return end
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:AddLine(t.name, 1, 1, 1, true)
+    local tomeName, echoNames = TomeNames(t)
+    GameTooltip:AddLine(tomeName, 1, 1, 1, true)
     -- The observation (t.status), reason, plan and names are the provider's
     -- text, shown as supplied; only the words around them are reviewed keys.
     local observed = (Filled(t.status) and (JournalShown(t.status))) or T("journal.value.tome_unknown")
@@ -610,9 +640,7 @@ local function TomeRowEnter(self)
     if Filled(t.reason) then GameTooltip:AddLine((ReasonShown(t.reason)), 0.82, 0.82, 0.82, true) end
     if Filled(t.plan) then GameTooltip:AddLine((JournalShown(t.plan)), 0.82, 0.82, 0.82, true) end
     local names = {}
-    if type(t.echoNames) == "table" then
-        for i = 1, #t.echoNames do names[#names + 1] = Filled(t.echoNames[i]) end
-    end
+    for i = 1, #echoNames do names[#names + 1] = Filled(echoNames[i]) end
     if #names > 0 then
         -- English chooses Echo or Echoes; so does this code (two keys).
         local list = table.concat(names, ", ")
@@ -928,7 +956,7 @@ local function DoRefresh()
         row.icon:SetAlpha(icon and 1 or 0.5)
         row.background:SetVertexColor(0.55, 0.60, 0.68, index % 2 == 1 and 0.08 or 0.03)
         local request = requests and t.pending ~= nil
-        row.label:SetText(t.name)
+        row.label:SetText((TomeNames(t)))
         -- A request shows its reviewed badge; an observation shows the
         -- provider's status text as supplied, or Unknown without one.
         row.status:SetText(request and T(PENDING_BADGE[t.pending] or "journal.status.tome_request_pending")

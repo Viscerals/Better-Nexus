@@ -3739,6 +3739,9 @@ Nexus.LocalizationEnglish = {
     ["orb.assignment.identity_found_reason_open_editor"] = "{reason}. Open the Wishlist Editor to choose and confirm its locked targets.",
     ["orb.recovery.offer_open_proposed_exits"] = "For the original no-choice class, Continue is available only after a reload for a client-observed spend with no usable recorded choice and no open offer, after a read-only check. Separately, a stopped attribution-ambiguous action needs its fresh distinct chosen gain actually owned. Both exits require a quiet read-only check and your confirmation.",
     ["orb.recovery.offer_open_proposed_route"] = "Open /nexus orbs for this record's eligibility and explanation. Nexus never continues by itself. Nexus will not choose or spend.",
+    -- v8_source16_journal_names (2)
+    ["journal.provider.generated_echo_name"] = "Echo name unavailable (#{id})",
+    ["journal.provider.generated_tome_name"] = "Tome name unavailable: {echoes}",
     -- wishlist (381)
     ["editor.body.role_help_plan_only"] = "This edits only the Wishlist plan; your character's Echoes are unchanged.",
     ["editor.body.role_help_targets"] = "Choose which copies this plan targets for locked Echo slots (at most six).",

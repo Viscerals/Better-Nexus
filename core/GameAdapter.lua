@@ -4143,15 +4143,19 @@ function A.TomeStateObservation(unavailableReason)
     local pending = state and state.tomeTogglePending or {}
     local out = { rows={}, stale=#reasons > 0, reasons=reasons,
         catalogAvailable=cat ~= nil, serverFreshness="unverified" }
+    local nameFacts = {}
     for lever, lv in pairs(cat and cat.levers or {}) do
-        local names, seenNames = {}, {}
+        local names, seenNames, generatedIds = {}, {}, {}
         local yes, no, unreadable, known, invalidDiscovery = 0, 0, 0, false, false
         local members = lv.members or {}
         for i = 1, #members do
             local id = members[i]
             local member = cat.rows[id]
             local name = member and member.name or ("Echo name unavailable (#" .. tostring(id) .. ")")
-            if not seenNames[name] then names[#names + 1] = name; seenNames[name] = true end
+            if not seenNames[name] then
+                names[#names + 1] = name; seenNames[name] = true
+                if not (member and member.name) then generatedIds[name] = id end
+            end
             if type(discovered) == "table" then
                 local marker = discovered[id]
                 if marker == true or (type(marker) == "number" and marker == marker
@@ -4185,8 +4189,13 @@ function A.TomeStateObservation(unavailableReason)
             if known then discoveredKnown = true
             elseif not invalidDiscovery then discoveredKnown = false end
         end
-        local name = type(lv.tomeName) == "string" and lv.tomeName ~= ""
-            and lv.tomeName or ("Tome name unavailable: " .. table.concat(names, ", "))
+        local supplied = type(lv.tomeName) == "string" and lv.tomeName ~= ""
+        local name = supplied and lv.tomeName or ("Tome name unavailable: " .. table.concat(names, ", "))
+        -- Display facts (A.TomeNameFacts): which of these names this function
+        -- generated; supplied names, however they read, have none.
+        local memberIds, echoCopy = {}, {}
+        for i = 1, #names do echoCopy[i] = names[i]; memberIds[i] = generatedIds[names[i]] end
+        nameFacts[lever] = {name = name, echoNames = echoCopy, nameGenerated = not supplied, memberIds = memberIds}
         -- The tome's own icon, else the first member Echo that has one; the
         -- source is stated, and with neither the Journal shows a neutral tile.
         local icon, iconSource = SpellIcon(lever), "tome spell"
@@ -4208,7 +4217,25 @@ function A.TomeStateObservation(unavailableReason)
         if a.name ~= b.name then return a.name < b.name end
         return a.lever < b.lever
     end)
+    A._tomeNameFacts = nameFacts
     return out
+end
+
+-- Display only: the facts of a tome row's names when `name` and `echoNames`
+-- are exactly those of the latest observation of `lever`: whether the tome
+-- name is the generated fallback, and at each Echo position the member ID of
+-- a generated member name (nil for a supplied name). nil for anything else.
+-- The observation, its names and rows are unchanged.
+function A.TomeNameFacts(lever, name, echoNames)
+    local facts = type(A._tomeNameFacts) == "table" and A._tomeNameFacts[lever] or nil
+    if type(facts) ~= "table" or facts.name ~= name or type(echoNames) ~= "table"
+        or #echoNames ~= #facts.echoNames then return nil end
+    local ids = {}
+    for i = 1, #echoNames do
+        if echoNames[i] ~= facts.echoNames[i] then return nil end
+        ids[i] = facts.memberIds[i]
+    end
+    return {nameGenerated = facts.nameGenerated == true, memberIds = ids}
 end
 
 -- values: "confirmed" (server mirror says disabled) or "pending" (our

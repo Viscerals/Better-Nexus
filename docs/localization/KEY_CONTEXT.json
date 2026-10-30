@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 4076,
+    "declaredKeys": 4078,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -47183,6 +47183,42 @@
       "cohort": "fullui:v6_source16_supplemental"
     },
     {
+      "key": "journal.provider.generated_echo_name",
+      "kind": "template",
+      "english": "Echo name unavailable (#{id})",
+      "placeholders": [
+        {
+          "name": "id",
+          "type": "text",
+          "meaning": "the Echo's spell ID (a number, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1100,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress: a tome row label, its hover heading and its Echo list. Nexus generates this name only when the game client gives none (core/GameAdapter.lua); a name the client gives is shown as given and never uses this key. Stands in for one member Echo the game client does not name; keep '#' and the ID exactly.",
+      "consumer": "Echo Journal > Nexus Progress (tome rows) value",
+      "familySurface": "v8_source16_journal_names: Echo Journal > Nexus Progress (tome rows) (value); family coverage PENDING review",
+      "cohort": "fullui:v8_source16_journal_names"
+    },
+    {
+      "key": "journal.provider.generated_tome_name",
+      "kind": "template",
+      "english": "Tome name unavailable: {echoes}",
+      "placeholders": [
+        {
+          "name": "echoes",
+          "type": "text",
+          "meaning": "the tome's Echo names, joined by ', ' (code-owned): names the game gives verbatim; a generated member name already in the shown language"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress: a tome row label, its hover heading and its Echo list. Nexus generates this name only when the game client gives none (core/GameAdapter.lua); a name the client gives is shown as given and never uses this key. Stands in for a tome the game client does not name: say that its name is unavailable, then list its Echoes.",
+      "consumer": "Echo Journal > Nexus Progress (tome rows) value",
+      "familySurface": "v8_source16_journal_names: Echo Journal > Nexus Progress (tome rows) (value); family coverage PENDING review",
+      "cohort": "fullui:v8_source16_journal_names"
+    },
+    {
       "key": "editor.body.role_help_plan_only",
       "kind": "text",
       "english": "This edits only the Wishlist plan; your character's Echoes are unchanged.",
@@ -54561,7 +54597,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 4076,
+    "totalKeys": 4078,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -54587,7 +54623,8 @@
       "v5_source86_amendments": 0,
       "v5_source86_supplemental": 73,
       "v6_source16_amendments": 0,
-      "v6_source16_supplemental": 8
+      "v6_source16_supplemental": 8,
+      "v8_source16_journal_names": 2
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

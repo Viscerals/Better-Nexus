@@ -4031,6 +4031,9 @@ local DECLARATIONS = {
     ["orb.assignment.identity_found_reason_open_editor"] = {kind = "template", fields = {"reason"}, slots = {"text"}, resultLimit = 1400},
     ["orb.recovery.offer_open_proposed_exits"] = {kind = "block"},
     ["orb.recovery.offer_open_proposed_route"] = {kind = "block"},
+    -- v8_source16_journal_names (2)
+    ["journal.provider.generated_echo_name"] = {kind = "template", fields = {"id"}, slots = {"text"}, resultLimit = 1100},
+    ["journal.provider.generated_tome_name"] = {kind = "template", fields = {"echoes"}, slots = {"text"}, resultLimit = 2048},
     -- wishlist (381)
     ["editor.body.role_help_plan_only"] = {kind = "text"},
     ["editor.body.role_help_targets"] = {kind = "text"},

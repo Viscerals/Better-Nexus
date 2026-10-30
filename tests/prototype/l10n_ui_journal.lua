@@ -953,6 +953,138 @@ do
  check(r.passive,'S16 P60 English: passive')
 end
 
+------------------------------------------------------------------------------
+-- Source16 Journal generated names: the adapter's generated fallback names
+-- ("Tome name unavailable: <Echo names>" and "Echo name unavailable (#<id>)")
+-- from the REAL adapter through the bound runtime provider to the visible
+-- tome row label, its hover heading and its Echo/Echoes hover line. Only the
+-- names the adapter generated are said through their keys (provenance, not
+-- text); supplied names, including ones that read like a fallback, stay as
+-- given. Expected texts are written out here.
+------------------------------------------------------------------------------
+local LA,LB,LC,LD=777101,777102,777103,777104
+local function NamesFixture(entries)
+ Nexus=nil;WishlistRealizerDB=nil;SlashCmdList=nil;NexusDB=nil
+ if entries~=false then S.InstallBootHook(nil,entries) end
+ local h=dofile('tests/prototype/harness.lua')
+ H=h
+ -- A: no tome name; real member names.
+ h.AddEcho(400101,'Evidence Echo 1',1,1,0);h.AddEcho(400102,'Evidence Echo 2',1,1,0)
+ -- B: supplied names that read like the fallbacks.
+ h.names[LB]='Tome name unavailable: Fake'
+ h.AddEcho(400201,'Echo name unavailable (#999)',1,1,0)
+ -- C: no tome name; one member whose name the catalog will not give, one supplied.
+ h.AddEcho(400301,'Nameless Echo',1,1,0);h.AddEcho(400302,'Supplied Echo',1,1,0)
+ -- D: a supplied tome name; two members without names.
+ h.names[LD]='Tome of Things'
+ h.AddEcho(400401,'Nameless One',1,1,0);h.AddEcho(400402,'Nameless Two',1,1,0)
+ for id,lever in pairs({[400101]=LA,[400102]=LA,[400201]=LB,[400301]=LC,[400302]=LC,[400401]=LD,[400402]=LD}) do
+  h.db[id].requiredSpell=lever;h.discovered[id]=true
+ end
+ h.perks.discoveredEchoes=h.discovered
+ h.Boot()
+ -- The client catalog gives no name for these members (absent member data).
+ local cat=Nexus.GameAdapter.Catalog()
+ for _,id in ipairs({400301,400401,400402}) do cat.rows[id].name=nil end
+ local provider
+ for i=1,80 do local n,v=debug.getupvalue(Nexus.JournalTab.TryInstall,i);if not n then break end;if n=='provider' then provider=v end end
+ assert(type(provider)=='function','SETUP names: the real runtime provider is bound')
+ local journal=CreateFrame('Frame','ProjectEbonholdEchoJournal',UIParent);journal:SetSize(570,450)
+ CreateFrame('ScrollFrame','ProjectEbonholdEchoJournalScroll',journal)
+ CreateFrame('Button','ProjectEbonholdEchoJournalTab1',journal)
+ assert(Nexus.JournalTab.TryInstall(provider),'SETUP names: the real Journal is installed')
+ NexusJournalScroll:SetSize(520,360);journal:Show();OpenPage()
+ local toggle=ButtonOn(Page(),function(f) return f:GetText()==Nexus.Localization.Text('journal.button.show_details') end)
+ assert(toggle,'SETUP names: the Show details control');toggle:Click();Nexus.JournalTab.Refresh()
+ return h,provider
+end
+-- For each lever: the provider's raw row, the visible row label, its hover
+-- heading and its Echo/Echoes hover line; reads counted for passivity.
+local function NamesRead(h,provider)
+ local owner=Nexus.MainInternals.StoreAuthorityOwner;local old,writes=owner.UpdateStateV1,0
+ owner.UpdateStateV1=function(...) writes=writes+1;return old(...) end
+ local before=TomeSnap(h)
+ local data=provider()
+ local raw,lines={},{}
+ for _,sec in ipairs(data.sections) do
+  for _,t in ipairs(sec.tomeRows or {}) do raw[t.leverId]=t end
+  for _,l in ipairs(sec.lines or {}) do lines[#lines+1]=l end
+ end
+ Nexus.JournalTab.Refresh()
+ local shown={}
+ for _,r in ipairs(h.frames) do
+  if r.parent==Page() and r.tome and raw[r.tome.leverId] and r:IsVisible() and not shown[r.tome.leverId] then
+   local tip=S.CaptureTooltip(r:GetScript('OnEnter'),r)
+   if r:GetScript('OnLeave') then r:GetScript('OnLeave')(r) end
+   local echoes
+   for _,l in ipairs(tip) do if l:find('Echo',1,true) and (l:find(': ',1,true)) and l~=tip[1] then echoes=echoes or l end end
+   shown[r.tome.leverId]={label=r.label:GetText(),heading=tip[1],tip=tip,echoes=echoes}
+  end
+ end
+ owner.UpdateStateV1=old
+ return raw,shown,lines,TomeSnap(h)==before and writes==0
+end
+local GEN_C='Tome name unavailable: Echo name unavailable (#400301), Supplied Echo'
+local GEN_A='Tome name unavailable: Evidence Echo 1, Evidence Echo 2'
+local function EchoesLine(shown,lever) return shown[lever] and shown[lever].echoes end
+-- PSEUDO: every generated name through its key; supplied names as given.
+do
+ local h,provider=NamesFixture(nil)
+ local raw,shown,lines,passive=NamesRead(h,provider)
+ check(raw[LA] and raw[LA].name==GEN_A,'S17 names: the adapter keeps its raw generated tome name',raw[LA] and raw[LA].name)
+ check(raw[LC] and raw[LC].name==GEN_C and raw[LC].echoNames[1]=='Echo name unavailable (#400301)' and raw[LC].echoNames[2]=='Supplied Echo',
+  'S17 names: the adapter keeps its raw generated member name, order and the supplied name',raw[LC] and raw[LC].name)
+ check(raw[LD] and raw[LD].echoNames[1]=='Echo name unavailable (#400401)' and raw[LD].echoNames[2]=='Echo name unavailable (#400402)',
+  'S17 names: two generated member names keep their IDs and order')
+ local hasLine=false;for _,l in ipairs(lines) do if l:find('^'..GEN_C:gsub('%p','%%%0')..': ') then hasLine=true end end
+ check(hasLine,'S17 names: the provider text line keeps the raw generated name')
+ local wantA=O..GEN_A..C
+ check(shown[LA] and shown[LA].label==wantA,'S17 names: the row label says the generated tome name through its key, member names exact',shown[LA] and shown[LA].label)
+ check(shown[LA] and shown[LA].heading==wantA,'S17 names: the hover heading says the generated tome name through its key',shown[LA] and shown[LA].heading)
+ local wantC=O..'Tome name unavailable: '..O..'Echo name unavailable (#400301)'..C..', Supplied Echo'..C
+ check(shown[LC] and shown[LC].label==wantC,'S17 names: a generated member inside a generated tome name, both through their keys, the supplied name exact',shown[LC] and shown[LC].label)
+ check(shown[LC] and shown[LC].heading==wantC,'S17 names: the hover heading says the nested generated names',shown[LC] and shown[LC].heading)
+ check(EchoesLine(shown,LC)==O..'Echoes: '..O..'Echo name unavailable (#400301)'..C..', Supplied Echo'..C,'S17 names: the Echoes hover line says the generated member through its key, the supplied one exact',EchoesLine(shown,LC))
+ check(shown[LD] and shown[LD].label=='Tome of Things','S17 names: a supplied tome name stays exactly as given',shown[LD] and shown[LD].label)
+ check(EchoesLine(shown,LD)==O..'Echoes: '..O..'Echo name unavailable (#400401)'..C..', '..O..'Echo name unavailable (#400402)'..C..C,'S17 names: two generated members each through the key with their full IDs',EchoesLine(shown,LD))
+ check(shown[LB] and shown[LB].label=='Tome name unavailable: Fake' and shown[LB].heading=='Tome name unavailable: Fake','S17 names: a supplied tome name that reads like the fallback stays exactly as given',shown[LB] and shown[LB].label)
+ check(EchoesLine(shown,LB)==O..'Echo: Echo name unavailable (#999)'..C,'S17 names: a supplied Echo name that reads like the fallback stays exactly as given',EchoesLine(shown,LB))
+ check(passive,'S17 names: reading, refreshing and hovering write nothing, send nothing, act on nothing')
+end
+-- REORDERED, MISSING and INVALID candidates at the same real receivers.
+do
+ local entries=S.PseudoEntries()
+ entries['journal.provider.generated_tome_name']='{echoes} :TOME?'
+ entries['journal.provider.generated_echo_name']='#{id}?ECHO'
+ local h,provider=NamesFixture(entries)
+ local _,shown=NamesRead(h,provider)
+ check(shown[LC] and shown[LC].label=='#400301?ECHO, Supplied Echo :TOME?','S17 names reordered: a valid reordered candidate places the names, the full ID and the supplied name',shown[LC] and shown[LC].label)
+ check(shown[LA] and shown[LA].heading=='Evidence Echo 1, Evidence Echo 2 :TOME?','S17 names reordered: the hover heading too',shown[LA] and shown[LA].heading)
+ entries=S.PseudoEntries();entries['journal.provider.generated_tome_name']=nil
+ h,provider=NamesFixture(entries)
+ _,shown=NamesRead(h,provider)
+ check(shown[LC] and shown[LC].label==GEN_C and shown[LC].heading==GEN_C,'S17 names missing: a missing tome candidate shows the whole exact English name, nested member and supplied name included',shown[LC] and shown[LC].label)
+ check(EchoesLine(shown,LC)==O..'Echoes: '..O..'Echo name unavailable (#400301)'..C..', Supplied Echo'..C,'S17 names missing: the member line keeps its own key')
+ entries=S.PseudoEntries();entries['journal.provider.generated_tome_name']=string.rep('x',1100)..'{echoes}'
+ entries['journal.provider.generated_echo_name']=nil
+ h,provider=NamesFixture(entries)
+ _,shown=NamesRead(h,provider)
+ check(shown[LC] and shown[LC].label==GEN_C and shown[LA].label==GEN_A,'S17 names invalid: an over-bound tome candidate shows the whole exact English names',shown[LC] and shown[LC].label)
+ check(EchoesLine(shown,LC)==O..'Echoes: Echo name unavailable (#400301), Supplied Echo'..C,'S17 names missing: a missing member candidate shows its exact English with the full ID',EchoesLine(shown,LC))
+ entries=S.PseudoEntries();entries['journal.provider.generated_echo_name']=nil
+ h,provider=NamesFixture(entries)
+ _,shown=NamesRead(h,provider)
+ check(shown[LC] and shown[LC].label==O..GEN_C..C,'S17 names missing: a missing member candidate inside a translated tome name keeps its exact English',shown[LC] and shown[LC].label)
+end
+-- ENGLISH: no pack; the exact names at every receiver.
+do
+ local h,provider=NamesFixture(false)
+ local raw,shown,_,passive=NamesRead(h,provider)
+ check(shown[LC] and shown[LC].label==GEN_C and shown[LC].heading==GEN_C and EchoesLine(shown,LC)=='Echoes: Echo name unavailable (#400301), Supplied Echo','S17 names English: the exact generated names at the row, heading and Echoes line',shown[LC] and shown[LC].label)
+ check(shown[LA] and shown[LA].label==GEN_A and shown[LB].label=='Tome name unavailable: Fake' and shown[LD].label=='Tome of Things','S17 names English: every row label is the exact name')
+ check(raw[LC].name==GEN_C and passive,'S17 names English: raw names unchanged and passive')
+end
+
 if #failures>0 then
  for _,f in ipairs(failures) do print('FAIL '..f) end
  error('l10n_ui_journal: '..#failures..' of '..checks..' checks failed')
