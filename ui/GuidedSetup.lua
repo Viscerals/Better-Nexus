@@ -117,7 +117,112 @@ local view = {help = false, checklist = false, autoMore = false, lesson = nil, r
 local function ResetImport() view.import = {open = false, text = '', result = nil, checked = nil} end
 
 local function Core() return Nexus.GuidedSetup end
-local function Copy() local t = Nexus.UserText; return t and t.Guide or {} end
+------------------------------------------------------------------------
+-- Full visible-UI localization (guide family, guide.* keys). The coach's
+-- words stay core/UserText.lua Guide (and EXTRA below); this window shows them
+-- through Nexus.Localization at display time. Copy() is a view of that table
+-- in which every static word leaf is replaced by its catalog meaning, but only
+-- while the leaf is still exactly that meaning's English (Localization.Resolve,
+-- pure); otherwise the leaf is shown as UserText has it. The key of a leaf is
+-- named by its path of code identifiers in the table (CopyKey), never by its
+-- English. A printf leaf ("%s", "%d") stays in the view as its English and is
+-- matched in Fmt by that exact English (GUIDE_FORMATS) to a named template; a
+-- leaf whose one argument chooses between whole sentences (ON/OFF, one step or
+-- several) selects a key exactly as the English chose its word. Ids, routes
+-- and status glyphs are never translated. The view is rebuilt when the seam
+-- or the copy table changes (the seam itself is never kept). Display only:
+-- nothing here reads saved data, assigns, saves, sends or spends.
+------------------------------------------------------------------------
+local COPY_SURFACE = {title = 'title', charLine = 'label', charUnknown = 'label', kicker = 'label',
+    kickerOptional = 'label', labels = 'label', status = 'status', words = 'label', checklistTitle = 'heading',
+    buttons = 'button', safety = 'body', whyLabel = 'heading', doLabel = 'heading', gate = 'status',
+    chat = 'chat', notice = 'status', notes = 'status'}
+local COPY_PREFIX = {buttons = '', status = '', labels = 'step', words = 'word', title = 'window'}
+local COPY_SKIP = {id = true, page = true, glyph = true}
+local function Snake(s) return (tostring(s):gsub('(%l)(%u)', '%1_%2'):lower()) end
+-- The catalog key of a copy leaf: guide.<surface>.<path in snake case>.
+local function CopyKey(path)
+    local group = path[1]
+    local surface = COPY_SURFACE[group] or 'body'
+    if tostring(path[#path]):sub(1, 5) == 'title' then surface = 'title' end
+    local prefix = COPY_PREFIX[group]
+    if prefix == nil then prefix = Snake(group) end
+    local parts = {}
+    if prefix ~= '' then parts[1] = prefix end
+    for i = 2, #path do parts[#parts + 1] = Snake(path[i]) end
+    if #parts == 0 then parts[1] = Snake(group) end
+    return 'guide.' .. surface .. '.' .. table.concat(parts, '_')
+end
+-- Translated static words handed out by the view (bounded by the catalog):
+-- Fmt never formats them.
+local LOCALIZED = {}
+-- The view is built from the live copy table on every call (a caller or a
+-- test may change a word in place), with two memos: a leaf's key by its
+-- table and field, and a key's shown text by the exact English it was
+-- shown for (both dropped when the seam changes).
+local memo = {seam = nil, keys = setmetatable({}, {__mode = 'k'}), shown = {}}
+local function LeafKey(node, k, path, seg)
+    local byField = memo.keys[node]
+    if not byField then byField = {}; memo.keys[node] = byField end
+    local key = byField[k]
+    if key == nil then
+        path[#path + 1] = seg
+        key = CopyKey(path)
+        path[#path] = nil
+        byField[k] = key
+    end
+    return key
+end
+local function Shown(seam, key, raw)
+    local hit = memo.shown[key]
+    if hit and hit.raw == raw then return hit.text end
+    local text = raw
+    if seam.Resolve(key) == raw then
+        local value, source = seam.Text(key)
+        if source ~= 'unavailable' and type(value) == 'string' then text = value; LOCALIZED[value] = true end
+    end
+    memo.shown[key] = {raw = raw, text = text}
+    return text
+end
+local function LocalizeCopy(node, path, seam)
+    local copy = {}
+    for k, v in pairs(node) do
+        local seg = k
+        if type(k) == 'number' then
+            seg = type(v) == 'table' and (type(v.id) == 'string' and v.id or type(v.page) == 'string' and v.page)
+                or tostring(k)
+        end
+        if type(v) == 'table' then
+            path[#path + 1] = seg
+            copy[k] = LocalizeCopy(v, path, seam)
+            path[#path] = nil
+        elseif type(v) == 'string' and not COPY_SKIP[k] and not v:find('%', 1, true) and v:find('%a%a') then
+            copy[k] = Shown(seam, LeafKey(node, k, path, seg), v)
+        else
+            copy[k] = v
+        end
+    end
+    return copy
+end
+local function LocalCopy(source)
+    local seam = Nexus.Localization
+    if type(source) ~= 'table' or type(seam) ~= 'table' or type(seam.Resolve) ~= 'function'
+        or type(seam.Text) ~= 'function' then return source end
+    if memo.seam ~= seam then
+        memo.seam, memo.keys, memo.shown = seam, setmetatable({}, {__mode = 'k'}), {}
+    end
+    return LocalizeCopy(source, {}, seam)
+end
+-- During one U.Render pass the view is built once (copyPass); outside a pass
+-- every call reads the live table again.
+local copyPass = nil
+local function Copy()
+    if copyPass then return copyPass end
+    local t = Nexus.UserText
+    local view = LocalCopy(t and t.Guide or {})
+    if copyPass == false then copyPass = view end
+    return view
+end
 -- Words this file adds until core/UserText.lua Guide carries them; a key of
 -- the same name there wins (Words). What Nexus follows now on the Wishlist
 -- step (core CurrentAssignment), and the summary's Already linked status: a
@@ -129,15 +234,103 @@ local EXTRA = {
         assignedNowUnknown = '! What is assigned now could not be read, so no Wishlist is marked as assigned.'},
     status = {observed = {glyph = '=', word = 'Already linked'}},
 }
+local function Extra() return LocalCopy(EXTRA) end
 local function Words(group, key)
     local c = Copy()[group]
     local v = type(c) == 'table' and c[key] or nil
-    if v == nil and EXTRA[group] then v = EXTRA[group][key] end
+    local extra = Extra()
+    if v == nil and extra[group] then v = extra[group][key] end
     return v
 end
+-- The printf leaves of the copy by their exact English: a template key and
+-- its fields in argument order, or (select) the argument whose value chooses
+-- the key, the other arguments filling fields in order.
+-- NEXUS-GUIDE-FORMATS BEGIN (generated from the guide fragment; see above)
+local GUIDE_FORMATS = {
+    ["#%d - this session"] = {key = "guide.body.assign_ev_request_value", fields = {"request"}, slots = {"count"}},
+    ["%s - Saved Builds read from Nexus"] = {key = "guide.label.char_line", fields = {"character"}, slots = {"text"}},
+    ["%s - not reviewed"] = {select = 1, keys = {["OFF"] = "guide.body.finish_auto_not_reviewed_off", ["ON"] = "guide.body.finish_auto_not_reviewed_on"}, fields = {}, slots = {}},
+    ["%s already follows %s."] = {key = "guide.body.target_c_already", fields = {"build", "wishlist"}, slots = {"text", "text"}},
+    ["%s already follows %s. Nexus read it back just now; this guide did not change it."] = {key = "guide.body.assign_observed_body", fields = {"build", "wishlist"}, slots = {"text", "text"}},
+    ["%s already follows %s. Read back; not changed by this guide."] = {key = "guide.body.finish_assign_true", fields = {"build", "wishlist"}, slots = {"text", "text"}},
+    ["%s follows %s now. Assigning switches it to %s."] = {key = "guide.body.target_c_replace", fields = {"build", "current", "wishlist"}, slots = {"text", "text", "text"}},
+    ["%s follows %s. Confirmed by read back."] = {key = "guide.body.finish_assign_done", fields = {"build", "wishlist"}, slots = {"text", "text"}},
+    ["%s follows another Wishlist (%s). Open the chooser and choose your Wishlist."] = {key = "guide.body.assign_stale_body_mismatch", fields = {"build", "other"}, slots = {"text", "text"}},
+    ["%s follows your Wishlist, but its locked targets are still unconfirmed."] = {key = "guide.body.assign_stale_body_partial", fields = {"build"}, slots = {"text"}},
+    ["%s is empty: it holds no Echoes, so it cannot follow a Wishlist yet."] = {key = "guide.body.target_c_empty", fields = {"build"}, slots = {"text"}},
+    ["%s stays in your Wishlists. Nothing is deleted."] = {key = "guide.body.target_c_kept", fields = {"wishlist"}, slots = {"text"}},
+    ["%s, unchanged by this guide"] = {select = 1, keys = {["OFF"] = "guide.body.finish_auto_mode_off", ["ON"] = "guide.body.finish_auto_mode_on"}, fields = {}, slots = {}},
+    ["* Waiting for you to choose %s in the Wishlist chooser. Nothing is assigned yet."] = {key = "guide.body.assign_waiting", fields = {"wishlist"}, slots = {"text"}},
+    ["+ Code read: %s - %d Echo entries (%d rolled copies, %d locked targets)."] = {key = "guide.body.wishlist_import_ok", fields = {"name", "entries", "rolled", "locked"}, slots = {"text", "count", "count", "count"}},
+    ["< Back to step %d - %s"] = {key = "guide.button.ref_back", fields = {"step", "label"}, slots = {"count", "text"}},
+    ["About: %s"] = {key = "guide.title.help_title", fields = {"topic"}, slots = {"text"}},
+    ["Another Wishlist (%s) was assigned instead. Open the chooser and choose your Wishlist."] = {key = "guide.body.assign_stale_body_other", fields = {"other"}, slots = {"text"}},
+    ["Assigned now to %s"] = {key = "guide.body.wishlist_assigned_now", fields = {"build"}, slots = {"text"}},
+    ["Assigned now to %s: %s."] = {key = "guide.body.wishlist_assigned_now_line", fields = {"build", "wishlist"}, slots = {"text", "text"}},
+    ["Assigned now to %s: %s. More than one listed Wishlist holds the same Echoes under that name, so none is marked."] = {key = "guide.body.wishlist_assigned_now_ambiguous", fields = {"build", "wishlist"}, slots = {"text", "text"}},
+    ["Chosen: %s."] = {key = "guide.body.wishlist_chosen", fields = {"wishlist"}, slots = {"text"}},
+    ["Esc: back to step %d"] = {key = "guide.body.reference_esc_step", fields = {"step"}, slots = {"count"}},
+    ["Follows %s"] = {key = "guide.body.target_follows", fields = {"wishlist"}, slots = {"text"}},
+    ["If you assign %s here"] = {key = "guide.body.target_if_assign", fields = {"wishlist"}, slots = {"text"}},
+    ["In the game now (read just now, not set or confirmed by this guide): %s follows %s."] = {key = "guide.body.finish_current_note", fields = {"build", "wishlist"}, slots = {"text", "text"}},
+    ["It filled this field's %d-letter limit, so it may be cut off. Copy the whole code again from where you got it. Nothing was imported."] = {key = "guide.body.wishlist_import_long", fields = {"limit"}, slots = {"count"}},
+    ["Keep Auto %s"] = {select = 1, keys = {["OFF"] = "guide.button.keep_auto_off", ["ON"] = "guide.button.keep_auto_on"}, fields = {}, slots = {}},
+    ["Not finished: %d step%s still open"] = {select = 2, keys = {[""] = "guide.title.finish_title_open_one", ["s"] = "guide.title.finish_title_open_many"}, fields = {"count"}, slots = {"count"}},
+    ["Opens the Echo Journal Wishlist chooser. Nothing changes until you choose %s there."] = {key = "guide.body.assign_open_note", fields = {"wishlist"}, slots = {"text"}},
+    ["Preview only: you picked %s. Nothing was chosen in game."] = {key = "guide.body.sim_picked", fields = {"card"}, slots = {"text"}},
+    ["Replaces the %s link on this slot. Nothing is deleted."] = {key = "guide.body.target_short_replace", fields = {"wishlist"}, slots = {"text"}},
+    ["Saved in the Wishlist Editor: %s."] = {key = "guide.body.wishlist_saved", fields = {"wishlist"}, slots = {"text"}},
+    ["Selected: %s"] = {key = "guide.body.wishlist_selected", fields = {"wishlist"}, slots = {"text"}},
+    ["Slot %d"] = {key = "guide.body.target_slot_unnamed", fields = {"slot"}, slots = {"count"}},
+    ["Slot %d - %s"] = {key = "guide.body.target_slot", fields = {"slot", "name"}, slots = {"count", "text"}},
+    ["Step %d of %d"] = {key = "guide.label.kicker", fields = {"step", "total"}, slots = {"count", "count"}},
+    ["The Echo Journal assigns to %s, not to your target %s. Select your target in the game build window, or go Back and choose the Saved Build the Journal targets. Nothing was opened or assigned."] = {key = "guide.status.notes_route", fields = {"journal_target", "your_target"}, slots = {"text", "text"}},
+    ["The Echo Journal chooser assigns only to the Saved Build that is active in the game, and %s is not active now."] = {key = "guide.body.target_c_select", fields = {"build"}, slots = {"text"}},
+    ["The assignment of %s changed after your choice. Check again so the result belongs to what is set now."] = {key = "guide.body.assign_stale_body_stale", fields = {"build"}, slots = {"text"}},
+    ["The assignment of %s changed through another route, not through this guide. Check again."] = {key = "guide.body.assign_stale_body_changed", fields = {"build"}, slots = {"text"}},
+    ["The assignment was refused (%s). Nothing was assigned."] = {key = "guide.body.assign_rejected_body", fields = {"reason"}, slots = {"text"}},
+    ["[Nexus] Auto is %s (this guide did not change it)."] = {select = 1, keys = {["OFF"] = "guide.chat.chat_auto_off", ["ON"] = "guide.chat.chat_auto_on", ["unknown"] = "guide.chat.chat_auto_unknown"}, fields = {}, slots = {}},
+    ["[Nexus] Setup confirmed: %s follows %s."] = {key = "guide.chat.chat_complete", fields = {"build", "wishlist"}, slots = {"text", "text"}},
+    ["[Nexus] Setup guide closed at \"%s\". Closing changed nothing."] = {key = "guide.chat.chat_paused", fields = {"step"}, slots = {"text"}},
+    ["[Nexus] Setup guide closed with %d step%s open. Not marked complete."] = {select = 2, keys = {[""] = "guide.chat.chat_incomplete_one", ["s"] = "guide.chat.chat_incomplete_many"}, fields = {"count"}, slots = {"count"}},
+}
+-- NEXUS-GUIDE-FORMATS END
+local function FormatCopy(spec, ...)
+    local seam = Nexus.Localization
+    if type(seam) ~= 'table' or type(seam.Format) ~= 'function' or type(seam.Text) ~= 'function'
+        or type(seam.Count) ~= 'function' then return nil end
+    local key, args, f = spec.key, {}, 0
+    for i = 1, select('#', ...) do
+        local v = (select(i, ...))
+        if i == spec.select then
+            key = spec.keys[tostring(v)]
+        else
+            f = f + 1
+            local name, slot = spec.fields[f], spec.slots[f]
+            if not name then return nil end
+            if slot == 'count' then args[name] = seam.Count(tonumber(v)) else args[name] = tostring(v) end
+        end
+    end
+    if not key or f ~= #spec.fields then return nil end
+    local text, source
+    if f == 0 then text, source = seam.Text(key) else text, source = seam.Format(key, args) end
+    if source == 'unavailable' or type(text) ~= 'string' then return nil end
+    return text
+end
+-- The legacy printf result, unless the text is a printf leaf of the copy
+-- (its template in the active language) or a translated word (never
+-- formatted). A failing format still shows the text as it was.
 local function Fmt(text, ...)
-    local ok, s = pcall(string.format, tostring(text or ''), ...)
-    return ok and s or tostring(text or '')
+    local raw = tostring(text or '')
+    if LOCALIZED[raw] then return raw end
+    local ok, s = pcall(string.format, raw, ...)
+    if not ok then return raw end
+    local spec = GUIDE_FORMATS[raw]
+    if spec then
+        local shown = FormatCopy(spec, ...)
+        if shown then return shown end
+    end
+    return s
 end
 local function Safe(v)
     local t = Nexus.UserText
@@ -490,7 +683,7 @@ end
 -- A status kind's glyph and word: the copy's, else this file's (EXTRA).
 local function Status(kind)
     local c = Copy().status or {}
-    return c[kind] or EXTRA.status[kind] or c['not'] or {glyph = '?', word = '?'}
+    return c[kind] or Extra().status[kind] or c['not'] or {glyph = '?', word = '?'}
 end
 
 -- A checklist row's marker (owner-approved usability item 13, 2026-10-30):
@@ -1199,7 +1392,14 @@ local function Character()
     local okL, level = pcall(function() return UnitLevel and UnitLevel('player') end)
     local parts = {Name(name)}
     if realm and realm ~= '' then parts[#parts + 1] = Name(realm) end
-    if okL and tonumber(level) and tonumber(level) > 0 then parts[#parts + 1] = 'Level ' .. tostring(level) end
+    if okL and tonumber(level) and tonumber(level) > 0 then
+        local english, seam = 'Level ' .. tostring(level), Nexus.Localization
+        local shown, source
+        if type(seam) == 'table' and type(seam.Format) == 'function' and type(seam.Count) == 'function' then
+            shown, source = seam.Format('guide.label.character_level', {level = seam.Count(tonumber(level))})
+        end
+        parts[#parts + 1] = (source and source ~= 'unavailable' and shown) or english
+    end
     return table.concat(parts, ' - ')
 end
 
@@ -1670,7 +1870,7 @@ local function Bound(top, contentEnd, footY, endY, used, key)
     if metrics and type(metrics.FitToScreen) == 'function' then metrics.FitToScreen(f) end
 end
 
-function U.Render()
+local function RenderPass()
     local f, g = Ensure(), Core()
     if not g then return end
     -- The kept place is bound (and on first use this session applied) before
@@ -1890,6 +2090,15 @@ function U.Render()
     end
     y = y - 22 - EDGE
     Bound(top, contentEnd, footY, y, bodyUsed, scrollKey)
+end
+-- One render pass shares one copy view (see Copy); the pass ends after an
+-- error too, which is raised again unchanged.
+function U.Render()
+    if copyPass ~= nil then return RenderPass() end
+    copyPass = false
+    local ok, err = pcall(RenderPass)
+    copyPass = nil
+    if not ok then error(err, 0) end
 end
 
 -- The coach's text in render order (the header first), for readers and

@@ -12,8 +12,31 @@ local frame,index= nil,1
 local returnTo=nil
 -- Keep the complete Help window above the Orb dialog's 30-33 layer band.
 local HELP_LEVEL=40
+-- Full visible-UI localization (guide family, help.* keys). Every visible
+-- English text of this window is a reviewed catalog meaning looked up through
+-- Nexus.Localization when it is shown (never cached here). Without the seam,
+-- or for a key it cannot show, the exact English kept beside it is shown:
+-- the page's own text (H.Pages[i].text stays the complete English reference)
+-- or the English argument. Page ids, topic ids and routes are identities.
+local function T(key, english)
+    local seam = Nexus.Localization
+    if type(seam) ~= "table" or type(seam.Text) ~= "function" then return english end
+    local text, source = seam.Text(key)
+    if source == "unavailable" then return english end
+    return text
+end
+-- args(seam) builds the template's arguments (seam.Count for counts).
+local function TF(key, args, english)
+    local seam = Nexus.Localization
+    if type(seam) ~= "table" or type(seam.Format) ~= "function" or type(seam.Count) ~= "function" then
+        return english
+    end
+    local text, source = seam.Format(key, args(seam))
+    if source == "unavailable" then return english end
+    return text
+end
 local pages={
- {id="start",title="Getting started",text=[[Start here: Setup / Welcome opens Guided setup at the step you left. Click it above to begin; that is the first task, and opening it never turns Auto ON. It is also in the Options menu on the Nexus panel (Options > Setup / Welcome), and Help in each Nexus window, /nexus guide, /nexus help and /nexus tutorial open it too. You do not need the rest of this page to start.
+ {id="start",title="Getting started",titleKey="help.title.page_start",text=[[Start here: Setup / Welcome opens Guided setup at the step you left. Click it above to begin; that is the first task, and opening it never turns Auto ON. It is also in the Options menu on the Nexus panel (Options > Setup / Welcome), and Help in each Nexus window, /nexus guide, /nexus help and /nexus tutorial open it too. You do not need the rest of this page to start.
 
 Guided setup goes one step at a time: choose or create a Wishlist, choose the Saved Build that should follow it, assign it in the Echo Journal chooser, try a SIMULATED recommendation and decide about Auto. A step is done only after Nexus reads the result back; a skipped, pending or unknown step is not done. Opening, navigating or closing the guide assigns, shares, spends and turns on nothing. It saves only its own place for this character and, when you first close the first-launch guide (Close or Escape), that it was seen, and only when saved data can be written; its steps stay as they are.
 
@@ -43,7 +66,7 @@ Saving and loading Saved Builds: in the game's own build window, loading a Saved
 Words: A Wishlist is a desired plan, not proof that you own its Echoes. Saved Builds are server slots. Active Loadout is the selected server loadout. Nexus treats no future random Echo roll as guaranteed.
 
 Counts: planned copies (the plan), rolled copies this run, the Wishlist's copies in a Saved Build and locked targets are different counts, and Echo families represented counts a family once. Unavailable is not 0, and a plan is not a finished build. Best known: the best shared DPS record this client holds for the exact same Echoes; it is not a complete or server-wide ranking. My Builds is the game's page of your Saved Builds; in Build Library, the Mine scope lists your Saved Builds and shared listings. Options: the Options button on the Nexus panel header opens a short menu: Questions (FAQ), Setup / Welcome, Auto explained, Appearance, settings, notices, the session pause and panel actions. Its More help and windows list opens Reference (the full manual), the setup information and checklist, the support report, the log viewer, Orbs and the Wishlist Editor. Point at Options for the current status.]]},
- {id="wishlists",title="Wishlists and locked targets",text=[[Before you edit: a plan holds up to 79 rolled copies and 6 locked Echo copies (85 total). Counts are copies, not names or rows. Each quality is a different target; a lower-quality copy does not count for a higher-quality target.
+ {id="wishlists",title="Wishlists and locked targets",titleKey="help.title.page_wishlists",text=[[Before you edit: a plan holds up to 79 rolled copies and 6 locked Echo copies (85 total). Counts are copies, not names or rows. Each quality is a different target; a lower-quality copy does not count for a higher-quality target.
 
 1. Open the Wishlist Editor (/nexus editor). Import opens a draft; nothing is kept until you click Create & assign or Create unassigned (new plan) or Save changes (existing Wishlist).
 2. If the editor asks for locked targets, choose them, then click Confirm locked targets & edit (or & assign). You do not need to own the plan already.
@@ -55,7 +78,7 @@ Imports without locked markers use your matching currently locked Echoes by defa
 /nexus currentlocks off: choose future untagged plans manually.
 /nexus currentlocks on: use matching locked targets by default.
 Nexus-only locked-role markers should be imported in Nexus, not assumed compatible with every native importer.]]},
- {id="rolling",title="Auto, rolling and saving",text=[[Before you turn Auto ON, read this. Automatic save is separate from Take, Banish, Reroll and Freeze. After a completed run, Auto may replace your active Saved Build with that run and give it the Wishlist's name. Nexus compares the run with the Wishlist assigned to that loadout. It replaces an existing Saved Build only when overall Wishlist progress is higher than the Saved Build's, or equal with cleanup (some extra copies removed, or an even swap of requested copies). Not every run is saved. Assigning by itself changes nothing, but at level 80 after a finished run, turning Auto ON or changing the assigned Wishlist makes Nexus check a finished run it has not saved yet against that Wishlist, so a replacement can follow without a new run; how soon is not promised. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. There is no separate automatic-save switch: Auto OFF stops it.
+ {id="rolling",title="Auto, rolling and saving",titleKey="help.title.page_rolling",text=[[Before you turn Auto ON, read this. Automatic save is separate from Take, Banish, Reroll and Freeze. After a completed run, Auto may replace your active Saved Build with that run and give it the Wishlist's name. Nexus compares the run with the Wishlist assigned to that loadout. It replaces an existing Saved Build only when overall Wishlist progress is higher than the Saved Build's, or equal with cleanup (some extra copies removed, or an even swap of requested copies). Not every run is saved. Assigning by itself changes nothing, but at level 80 after a finished run, turning Auto ON or changing the assigned Wishlist makes Nexus check a finished run it has not saved yet against that Wishlist, so a replacement can follow without a new run; how soon is not promised. Saving edits to the assigned Wishlist can also lead to a replacement without a new run. There is no separate automatic-save switch: Auto OFF stops it.
 
 Better means Wishlist progress, not Orb investment or keeping every individual Echo. Example: a run that loses 1 requested copy but gains 3 other requested copies is +2 overall. It can replace the Saved Build even when the lost Echo is one you value or obtained with Orbs. The save itself spends no Orbs, and it does not mean that Echo was judged worthless. Nexus cannot undo a completed save or bring back that Echo or the Orbs spent on it; Unassign does not restore a Saved Build. Keep Auto OFF if you want the current Saved Build left untouched. Auto starts OFF each session.
 
@@ -85,7 +108,7 @@ Nexus does not keep rerolls back for later in a run. These rules are not a guara
 Reading the panel: Needed, Target already met, Not on Wishlist and Different quality from target describe the current choice. Frozen offer is a card kept by Freeze. Priority numbers in advanced diagnostics are not DPS or percentages. EXTRA COPIES are rolled copies above exact Wishlist targets. Target 2/current 5 means 3 extras. This display deletes nothing. [Guaranteed offer] means the server marks this offer guaranteed. Overlay: [X] meets the requested copy count; [~] some; [ ] none. These symbols are not network or loading states.
 
 When it is blocked: "Waiting for the game to confirm the last Echo action." means an action was sent and has no confirmed result yet. Do not choose again or reload; wait. "Auto waiting" means Auto stays ON and holds its actions for such a result, or for an action the game still shows pending. "Auto rechecking" means it also asks the game again for your granted Echoes, at a slow pace and only while that could settle the wait; a request is not an answer and nothing is resent. The game gives Nexus no receipt for an Echo selection. If the matching grant never appears, or another selection of the same Echo makes it impossible to tell which one was granted, Nexus keeps waiting until a new run. Turning Auto off and on does not end that wait. A reload ends Nexus's tracking of it without learning or cancelling the result. Point at the Auto button to see what Auto is doing now and why. "No Echo choice is showing." means only that no choice is on screen now. It does not mean the run is finished, and it is not a reason to retry. "Auto ON — paused" means Auto stays ON but is not acting; the line below it says why and what helps (the Status line of the Options button's hover has it too). When an Auto click leaves Auto OFF, the same place says why. Waiting for current Echo data means automatic choices wait for ownership confirmation; it is not Sync status. Ordinary rolling stays paused during active or unknown Orb offers.]]},
- {id="sharing",title="Shared builds and DPS",text=[[1. Click Explore on the Nexus panel, then Build Library. Use the scope buttons to switch between All Shared and Mine (your Saved Builds and shared listings; not the game's My Builds page). If the Build Library is taller than your screen (for example with large text), its content scrolls: use the bar at its right edge, or the mouse wheel over the window outside the build list and the build details, which scroll on their own.
+ {id="sharing",title="Shared builds and DPS",titleKey="help.title.page_sharing",text=[[1. Click Explore on the Nexus panel, then Build Library. Use the scope buttons to switch between All Shared and Mine (your Saved Builds and shared listings; not the game's My Builds page). If the Build Library is taller than your screen (for example with large text), its content scrolls: use the bar at its right edge, or the mouse wheel over the window outside the build list and the build details, which scroll on their own.
 2. Require both DPS records: when checked, only builds with both a Training Dummy and a Lich King record that this client holds are listed. When unchecked, that requirement is off; other filters still apply. A record shows what this client holds. It is not build quality, outside verification, or finished Sync. While a filter change is applied, the list says Updating results...
 3. Copy into Editor creates a draft; it does not activate, spend or share. Your own Share actions need your click: on your own Saved Build, Share Build... at the right asks you to confirm first, and the Share Build form shares when you press its Share Build button. With Sync set to Automatic, an eligible new character best for Training Dummy or Lich King may send without a click: a DPS record with your ordinary and any locked Echoes and player info, plus a separate automatic "Record Loadout" summary without the Echo list. That DPS record carries its Echo list. The DPS record does not need a request or that summary: receivers may create a viewable, copyable page from the record alone. An oversized summary is refused separately; it does not stop an otherwise admitted DPS record. Manual and Off refuse both automatic sends. Sending is not delivery: Nexus cannot confirm that anyone receives or keeps what it sent. A shared build cannot be recalled: players who receive it keep their copy. Sharing is separate from saving a Wishlist or a server Saved Build.
 
@@ -107,7 +130,7 @@ In every mode Nexus joins its hidden Sync chat channel and can receive what othe
 When a newer best replaces an automatic Record Loadout page, Nexus removes the old page on this client only. It sends no removal, so players who already received the page keep it.
 
 Sync words: queued means waiting to send. Sent means it left this client; receipt is not confirmed. Received means it arrived here. Stored means this client kept it after its checks. A listed build or record is one this client stored; it does not show which other players have it.]]},
- {id="orbs",title="Orbs / Lost Memories",text=[[Before you start: Orb mode refines existing rolled Echoes toward the assigned Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace locked Echo slots, and it stops when rolled targets are complete. Opening the window, Open Orbs..., Help and Max spend nothing.
+ {id="orbs",title="Orbs / Lost Memories",titleKey="help.title.page_orbs",text=[[Before you start: Orb mode refines existing rolled Echoes toward the assigned Wishlist. It uses one Orb per replacement, then waits for the actual offer and the confirmed result. It cannot create, reorder, or replace locked Echo slots, and it stops when rolled targets are complete. Opening the window, Open Orbs..., Help and Max spend nothing.
 
 1. Open /nexus orbs, Orbs on the Nexus panel, Orbs / Lost Memories in the Options menu under More help and windows, or Open Orbs... (shown with Orb guidance). Check the assigned Wishlist, missing rolled copies and the confirmed Orb balance. Loading or unavailable data is not a zero balance.
 2. Set the maximum. Until you type an amount, it follows your confirmed Orb balance, up to 1000. Typing an amount stops that; Max returns to following the balance. A typed amount must be a whole number from 1 to 10,000. A maximum saved by an earlier version is kept.
@@ -129,7 +152,7 @@ Only one manual case can confirm it: after a reload, if that action's offer is s
 Reloading: a reload never clears the record, refunds or repeats an Orb, or settles the action by itself. For Orbs, Nexus suggests a reload only in these cases, and its message says which: the game still holds an earlier Orb choice (the Orb window names the Echo to choose after the reload); a submitted action that cannot be confirmed, which Continue may then handle; a game packet Nexus could not accept; or local saved data that could not be read. Otherwise do not reload; follow the Orb window. To report a problem, type /nexus report before any reload. Run history clears on reload or logout; after a reload the Continue window says the earlier steps are not listed, and the saved record is kept. The history of the current run shows its usage as it is now; when the run has changed since its last recorded step (Pause records none), the header says the current state and the last recorded one.
 
 Continue: a restored observed spend with no recorded choice and no open offer can use this explicit exit. Stop first if an attribution-ambiguous run is still running. A stopped attribution-ambiguous choice can also use it when fresh ownership shows its distinct chosen gain; unrelated changes and the ambiguity flag alone are insufficient. This remains available after actual completion, exhausted live checks and reload, when its current checks pass. Nexus asks twice, read-only, for the Orb count and Echoes, checks quiet unchanged state, then waits for your confirmation. It archives the original receipt UNCONFIRMED with no confidence, ends the old run and releases ordinary rolling only after saving. Observed spend stays counted once; unknown charge exposure stays unknown without a refund. No spend, choice or automatic Resume is sent. The finite archive holds at most eight entries and can fill. Every new spend reserves room for its possible exit before Auto is disabled or authority acquired. A full restored pending record stays preserved and blocked; Continue cannot make room by deleting history. A new Orb run needs new approval of its maximum and any disclosed history baseline. Two uncorrelated answers do not prove that the server is finished or that no older answer is still on its way. Nexus never continues by itself. Older readers may retain a versioned record with an unsupported-owner message; that message does not establish another character acted. Return to this build to review eligibility; this does not restart spending.]]},
- {id="troubleshooting",title="Problems and bug reports",text=[[If something goes wrong: do not reload, relog, spend Orbs, reroll or change builds to recreate it. Do not clear logs or reset saved data.
+ {id="troubleshooting",title="Problems and bug reports",titleKey="help.title.page_troubleshooting",text=[[If something goes wrong: do not reload, relog, spend Orbs, reroll or change builds to recreate it. Do not clear logs or reset saved data.
 
 Report a problem. No report/logs or requested details = your support request will be ignored until provided.
 1. Type /nexus report when the problem happens, before any reload. Its incidents are kept for this session only.
@@ -167,7 +190,7 @@ Local roll record: Nexus records its rolling decisions automatically, on this co
 More diagnostics: /nexus log opens the log viewer. Prepare full diagnostic report builds a paged report. Select this page and copy pages in order; it does not put every page on the clipboard.
 
 Updates: update notices come from release information shipped inside this package; the Options button then reads ! Options. Another player's client can report a newer test build; Nexus shows that only as an UNVERIFIED hint. No notice does not mean your build is the latest. Nexus never downloads or installs.]]},
- {id="about",title="About and advanced details",text=[[Ordinary rolling and Orb decisions come from EchoWeaver, the rolling engine that Nexus maintains itself. Orb decisions use EchoWeaver's source, target and fallback rules with Nexus's exact-quality, locked-role, approval, budget and confirmation safeguards.
+ {id="about",title="About and advanced details",titleKey="help.title.page_about",text=[[Ordinary rolling and Orb decisions come from EchoWeaver, the rolling engine that Nexus maintains itself. Orb decisions use EchoWeaver's source, target and fallback rules with Nexus's exact-quality, locked-role, approval, budget and confirmation safeguards.
 
 EchoWeaver has no runtime dependency on another addon. Source and reuse notices are in THIRD_PARTY.md. Neither algorithm is claimed mathematically optimal or universally safe without matching client evidence.
 
@@ -178,7 +201,7 @@ Advanced commands are troubleshooting tools, not generic fixes. Do not experimen
 /nexus prototype prints build/reference details. The installed README contains the current player guide.
 
 Known legacy compatibility and incomplete native validation remain disclosed. Offline tests are not native verification. Back up saved data and test voluntarily.]]},
- {id="faq",title="Questions (FAQ)",text=[[What do I do next?
+ {id="faq",title="Questions (FAQ)",titleKey="help.title.page_faq",text=[[What do I do next?
 Follow the step the panel shows, or Setup / Welcome (button above): it opens the guide at the step you left. Opening it changes nothing.
 
 Which Wishlist is Nexus using?
@@ -200,6 +223,183 @@ How do I get back to what I was doing?
 Close this window (Close or Escape). Reading these pages changed no setting, assignment or Auto.]]},
 }
 H.Pages=pages
+-- Each page's text as catalog blocks, in order: {key, separator after it
+-- (code-owned line breaks or the space between two parts of one long
+-- paragraph), text-slot arguments}. Joined with the English base these
+-- blocks give exactly the page's text above (tests/prototype/l10n_ui_guide.lua
+-- checks every page). A block holding a "|" command is a template whose
+-- slot inserts that command unchanged. Questions (FAQ) keeps its question
+-- and answer apart, so the code-owned gold colour stays on the question.
+local PAGE_BLOCKS = {
+ start = {
+  {"help.body.start_first_task", "\n\n"},
+  {"help.body.start_guided_steps_1", " "},
+  {"help.body.start_guided_steps_2", "\n\n"},
+  {"help.body.start_other_routes_1", "\n"},
+  {"help.body.start_other_routes_2", "\n\n"},
+  {"help.body.start_reference_later", "\n\n"},
+  {"help.body.start_experimental_backup", "\n\n"},
+  {"help.body.start_before_auto_on", "\n\n"},
+  {"help.body.start_setup_steps_1", "\n"},
+  {"help.body.start_setup_steps_2", "\n"},
+  {"help.body.start_setup_steps_3", "\n\n"},
+  {"help.body.start_purpose", "\n\n"},
+  {"help.body.start_more_detail", "\n\n"},
+  {"help.body.start_saved_builds_1", " "},
+  {"help.body.start_saved_builds_2", "\n\n"},
+  {"help.body.start_words", "\n\n"},
+  {"help.body.start_counts_1", " "},
+  {"help.body.start_counts_2", " "},
+  {"help.body.start_counts_3", nil},
+ },
+ wishlists = {
+  {"help.body.wishlists_limits", "\n\n"},
+  {"help.body.wishlists_editor_steps_1", "\n"},
+  {"help.body.wishlists_editor_steps_2", " "},
+  {"help.body.wishlists_editor_steps_3", "\n\n"},
+  {"help.body.wishlists_locked_targets", "\n\n"},
+  {"help.body.wishlists_import_locked", nil},
+ },
+ rolling = {
+  {"help.body.rolling_auto_save_1", " "},
+  {"help.body.rolling_auto_save_2", " "},
+  {"help.body.rolling_auto_save_3", "\n\n"},
+  {"help.body.rolling_better_means_1", " "},
+  {"help.body.rolling_better_means_2", "\n\n"},
+  {"help.body.rolling_permissions_1", " "},
+  {"help.body.rolling_permissions_2", "\n\n"},
+  {"help.body.rolling_tomes_1", " "},
+  {"help.body.rolling_tomes_2", "\n\n"},
+  {"help.body.rolling_turn_on_steps_1", "\n"},
+  {"help.body.rolling_turn_on_steps_2", "\n\n", {reroll_command = "/nexus reroll on|off", freeze_command = "/nexus freeze on|off"}},
+  {"help.body.rolling_experimental_strategy_1", "\n"},
+  {"help.body.rolling_experimental_strategy_2", "\n"},
+  {"help.body.rolling_experimental_strategy_3", "\n"},
+  {"help.body.rolling_experimental_strategy_4", " "},
+  {"help.body.rolling_experimental_strategy_5", "\n"},
+  {"help.body.rolling_experimental_strategy_6", "\n\n"},
+  {"help.body.rolling_released_strategy_1", " "},
+  {"help.body.rolling_released_strategy_2", "\n"},
+  {"help.body.rolling_released_strategy_3", "\n"},
+  {"help.body.rolling_released_strategy_4", "\n\n"},
+  {"help.body.rolling_reading_panel_1", " "},
+  {"help.body.rolling_reading_panel_2", "\n\n"},
+  {"help.body.rolling_blocked_1", " "},
+  {"help.body.rolling_blocked_2", " "},
+  {"help.body.rolling_blocked_3", " "},
+  {"help.body.rolling_blocked_4", nil},
+ },
+ sharing = {
+  {"help.body.sharing_library_steps_1", "\n"},
+  {"help.body.sharing_library_steps_2", "\n"},
+  {"help.body.sharing_library_steps_3", " "},
+  {"help.body.sharing_library_steps_4", " "},
+  {"help.body.sharing_library_steps_5", "\n\n"},
+  {"help.body.sharing_removing", "\n\n"},
+  {"help.body.sharing_names", "\n\n"},
+  {"help.body.sharing_locked_targets", "\n\n"},
+  {"help.body.sharing_leaderboard", "\n\n"},
+  {"help.body.sharing_sync_now", "\n\n"},
+  {"help.body.sharing_sync_sends_1", " "},
+  {"help.body.sharing_sync_sends_2", "\n"},
+  {"help.body.sharing_sync_sends_3", " "},
+  {"help.body.sharing_sync_sends_4", " "},
+  {"help.body.sharing_sync_sends_5", "\n"},
+  {"help.body.sharing_sync_sends_6", "\n\n"},
+  {"help.body.sharing_sync_words", nil},
+ },
+ orbs = {
+  {"help.body.orbs_before_start", "\n\n"},
+  {"help.body.orbs_run_steps_1", "\n"},
+  {"help.body.orbs_run_steps_2", "\n"},
+  {"help.body.orbs_run_steps_3", " "},
+  {"help.body.orbs_run_steps_4", "\n"},
+  {"help.body.orbs_run_steps_5", " "},
+  {"help.body.orbs_run_steps_6", "\n\n"},
+  {"help.body.orbs_requirements", "\n\n"},
+  {"help.body.orbs_closing", "\n\n"},
+  {"help.body.orbs_after_run", "\n\n"},
+  {"help.body.orbs_blocked_1", " "},
+  {"help.body.orbs_blocked_2", " "},
+  {"help.body.orbs_blocked_3", " "},
+  {"help.body.orbs_blocked_4", " "},
+  {"help.body.orbs_blocked_5", " "},
+  {"help.body.orbs_blocked_6", "\n\n"},
+  {"help.body.orbs_unresolved_1", " "},
+  {"help.body.orbs_unresolved_2", "\n\n"},
+  {"help.body.orbs_manual_confirm", "\n\n"},
+  {"help.body.orbs_reloading_1", " "},
+  {"help.body.orbs_reloading_2", "\n\n"},
+  {"help.body.orbs_continue_exit_1", " "},
+  {"help.body.orbs_continue_exit_2", " "},
+  {"help.body.orbs_continue_exit_3", " "},
+  {"help.body.orbs_continue_exit_4", nil},
+ },
+ troubleshooting = {
+  {"help.body.troubleshooting_first", "\n\n"},
+  {"help.body.troubleshooting_report_steps_1", "\n"},
+  {"help.body.troubleshooting_report_steps_2", "\n\n"},
+  {"help.body.troubleshooting_report_file", "\n\n"},
+  {"help.body.troubleshooting_reporting_fails", "\n\n"},
+  {"help.body.troubleshooting_loading", "\n\n"},
+  {"help.body.troubleshooting_turning_off_1", " "},
+  {"help.body.troubleshooting_turning_off_2", "\n\n"},
+  {"help.body.troubleshooting_commands_1", "\n"},
+  {"help.body.troubleshooting_commands_2", "\n\n", {policy_command = "/nexus policy adaptive|released"}},
+  {"help.body.troubleshooting_roll_record_1", " "},
+  {"help.body.troubleshooting_roll_record_2", " "},
+  {"help.body.troubleshooting_roll_record_3", "\n\n"},
+  {"help.body.troubleshooting_diagnostics", "\n\n"},
+  {"help.body.troubleshooting_updates", nil},
+ },
+ about = {
+  {"help.body.about_engine", "\n\n"},
+  {"help.body.about_dependency", "\n\n"},
+  {"help.body.about_throttle", "\n\n"},
+  {"help.body.about_advanced_commands_1", " "},
+  {"help.body.about_advanced_commands_2", "\n\n"},
+  {"help.body.about_prototype_command", "\n\n"},
+  {"help.body.about_compatibility", nil},
+ },
+ faq = {
+  {"help.label.faq_next_question", "\n"},
+  {"help.body.faq_next_answer", "\n\n"},
+  {"help.label.faq_which_wishlist_question", "\n"},
+  {"help.body.faq_which_wishlist_answer", "\n\n"},
+  {"help.label.faq_auto_question", "\n"},
+  {"help.body.faq_auto_answer", "\n\n"},
+  {"help.label.faq_auto_off_sync_question", "\n"},
+  {"help.body.faq_auto_off_sync_answer", "\n\n"},
+  {"help.label.faq_pause_hide_question", "\n"},
+  {"help.body.faq_pause_hide_answer_1", " "},
+  {"help.body.faq_pause_hide_answer_2", "\n\n"},
+  {"help.label.faq_panel_size_question", "\n"},
+  {"help.body.faq_panel_size_answer", "\n\n"},
+  {"help.label.faq_get_back_question", "\n"},
+  {"help.body.faq_get_back_answer", nil},
+ },
+}
+H.PageBlocks=PAGE_BLOCKS
+-- The shown text of a page: its blocks in the active language, or its whole
+-- English text when the seam is absent or a block cannot be shown.
+local function PageText(p)
+    local blocks=PAGE_BLOCKS[p.id]
+    local seam=Nexus.Localization
+    if not blocks or type(seam)~="table" or type(seam.Text)~="function" or type(seam.Format)~="function" then
+        return p.text
+    end
+    local out={}
+    for _,b in ipairs(blocks) do
+        local text,source
+        if b[3] then text,source=seam.Format(b[1],b[3]) else text,source=seam.Text(b[1]) end
+        if source=="unavailable" then return p.text end
+        out[#out+1]=text
+        if b[2] then out[#out+1]=b[2] end
+    end
+    return table.concat(out)
+end
+H.PageText=PageText
+local function PageTitle(p) return T(p.titleKey,p.title) end
 -- A question/answer page's text (groups apart by a blank line, the first
 -- line of each the question) with every question in the heading gold
 -- (|cffffd100, the panel's heading colour) and one more blank line between
@@ -221,36 +421,48 @@ end
 -- its topic as the complete reference, with every warning, permission and
 -- recovery step. Opening a screen assigns, spends, sends and turns on nothing.
 local topics={
- start={title="Getting started",open="Open Setup guide",route=function() return H.OpenGuide() end,lines={
+ start={title="Getting started",titleKey="help.heading.topic_start",open="Open Setup guide",openKey="help.button.topic_start",
+  lineKeys={"help.body.topic_start_1","help.body.topic_start_2"},route=function() return H.OpenGuide() end,lines={
   "Setup guide takes you one step at a time: choose a Wishlist, pick the Saved Build that follows it, assign it, then read a recommendation.",
   "Opening, moving through or closing the guide assigns, spends, sends and turns on nothing. Skipped, unknown and unconfirmed steps are never counted as done."}},
- wishlists={title="Wishlists vs Saved Builds",open="Open Wishlist Editor",route=function() return H.OpenEditor() end,lines={
+ wishlists={title="Wishlists vs Saved Builds",titleKey="help.heading.topic_wishlists",open="Open Wishlist Editor",openKey="help.button.topic_wishlists",
+  lineKeys={"help.body.topic_wishlists_1","help.body.topic_wishlists_2"},route=function() return H.OpenEditor() end,lines={
   "A Wishlist is the plan: the Echoes you want. A Saved Build is a server slot the game loads; each one follows one Wishlist.",
   "Create or import a Wishlist in the editor. A draft is kept only when you save it there, and assigning by itself changes no Saved Build."}},
- rolling={title="Auto",open="Open Automation settings",route=function() return H.OpenSettings("automation") end,lines={
+ rolling={title="Auto",titleKey="help.heading.topic_rolling",open="Open Automation settings",openKey="help.button.topic_rolling",
+  lineKeys={"help.body.topic_rolling_1","help.body.topic_rolling_2"},route=function() return H.OpenSettings("automation") end,lines={
   "Auto OFF: Nexus only recommends. Auto ON: it may Take, Banish, Reroll and Freeze for you, and may replace your active Saved Build with a better finished run.",
   "Auto starts OFF each session. Turn it ON only with the Auto button on the Nexus panel, after its warning. Automation settings shows each permission."}},
- sharing={title="Sync",open="Open Sync settings",route=function() return H.OpenSettings("sync") end,lines={
+ sharing={title="Sync",titleKey="help.heading.topic_sharing",open="Open Sync settings",openKey="help.button.topic_sharing",
+  lineKeys={"help.body.topic_sharing_1","help.body.topic_sharing_2"},route=function() return H.OpenSettings("sync") end,lines={
   "Your Sync mode decides what Nexus may send: Automatic may send without a click, Manual sends only what you start, Off sends nothing.",
   "Sharing a build is always its own confirmed action. Sent is not delivered, and a shared build cannot be recalled."}},
- orbs={title="Orbs",open="Open Orbs / Lost Memories",route=function() return H.OpenOrbs() end,lines={
+ orbs={title="Orbs",titleKey="help.heading.topic_orbs",open="Open Orbs / Lost Memories",openKey="help.button.topic_orbs",
+  lineKeys={"help.body.topic_orbs_1","help.body.topic_orbs_2"},route=function() return H.OpenOrbs() end,lines={
   "Orb mode refines rolled Echoes toward the assigned Wishlist, one Orb per replacement, within the maximum you approve with Start.",
   "Opening the window, Help and Max spend nothing. Closing the window does not stop a run: use Pause or Stop."}},
- troubleshooting={title="Support",open="Open Support report",route=function() return H.OpenSupport() end,lines={
+ troubleshooting={title="Support",titleKey="help.heading.topic_troubleshooting",open="Open Support report",openKey="help.button.topic_troubleshooting",
+  lineKeys={"help.body.topic_troubleshooting_1","help.body.topic_troubleshooting_2"},route=function() return H.OpenSupport() end,lines={
   "Something wrong? Type /nexus report before any reload, then Copy summary. Do not reload, reset or clear data to recreate it.",
   "Prepare report file keeps the report on this computer; send that file privately, never in public. Nothing is uploaded."}},
- faq={title="Questions",open="Open Setup guide",route=function() return H.OpenGuide() end,lines={
+ faq={title="Questions",titleKey="help.heading.topic_faq",open="Open Setup guide",openKey="help.button.topic_faq",
+  lineKeys={"help.body.topic_faq_1","help.body.topic_faq_2"},route=function() return H.OpenGuide() end,lines={
   "Short answers to common questions: what to do next, which Wishlist is used, Auto, Sync, pausing or hiding.",
   "Reading this page changes nothing. Close or Escape takes you back."}},
- about={title="About Nexus",open="Open Log viewer",route=function() return H.OpenLogs() end,lines={
+ about={title="About Nexus",titleKey="help.heading.topic_about",open="Open Log viewer",openKey="help.button.topic_about",
+  lineKeys={"help.body.topic_about_1","help.body.topic_about_2"},route=function() return H.OpenLogs() end,lines={
   "Where the rolling engine comes from, compatibility notes and the advanced commands.",
   "Advanced commands are troubleshooting tools, not generic fixes. Opening the Log viewer shows what Nexus recorded and changes nothing by itself."}},
 }
 H.Topics=topics
 local REFERENCE="Reference: every detail, warning and recovery step for this topic (scroll)."
+local REFERENCE_KEY="help.label.reference_note"
 -- Short labels of the direct page buttons, by page id.
 local TAB_LABELS={start="Start",wishlists="Wishlists",rolling="Auto",sharing="Sharing",orbs="Orbs",
  troubleshooting="Problems",about="About",faq="FAQ"}
+local TAB_KEYS={start="help.tab.start",wishlists="help.tab.wishlists",rolling="help.tab.rolling",
+ sharing="help.tab.sharing",orbs="help.tab.orbs",troubleshooting="help.tab.troubleshooting",
+ about="help.tab.about",faq="help.tab.faq"}
 -- The topic card above the reference: its title and Open action on one row,
 -- its lines under them (wrapped to the text they need at the current font),
 -- then the Reference label and the scrolling page text below the card.
@@ -283,17 +495,19 @@ end
 local function layoutTopic(p)
     local t=topics[p.id] or {}
     local metrics=Nexus.LayoutMetrics
-    frame.topicOpen:SetText(t.open or "")
+    frame.topicOpen:SetText(t.open and T(t.openKey,t.open) or "")
     local bw=200
     if metrics and metrics.FitButtonWidth then bw=metrics.FitButtonWidth(frame.topicOpen,150,300) or bw
     else frame.topicOpen:SetWidth(bw) end
     -- One action for every topic, always shown (no hidden Help control).
     if t.route then frame.topicOpen:Enable() else frame.topicOpen:Disable() end
     frame.topicOpen:ClearAllPoints();frame.topicOpen:SetPoint("TOPRIGHT",frame,"TOPRIGHT",-25,TOPIC_TOP-4)
-    frame.topicTitle:SetText(t.title or p.title)
+    frame.topicTitle:SetText(t.title and T(t.titleKey,t.title) or PageTitle(p))
     frame.topicTitle:ClearAllPoints();frame.topicTitle:SetPoint("TOPLEFT",frame,"TOPLEFT",28,TOPIC_TOP-8)
     frame.topicTitle:SetSize(math.max(120,600-bw-12),16)
-    local lines=table.concat(t.lines or {},"\n")
+    local shown={}
+    for i,line in ipairs(t.lines or {}) do shown[i]=T(t.lineKeys and t.lineKeys[i],line) end
+    local lines=table.concat(shown,"\n")
     frame.topicText:SetText(lines)
     frame.topicText:ClearAllPoints();frame.topicText:SetPoint("TOPLEFT",frame,"TOPLEFT",28,TOPIC_TOP-32)
     local th=topicHeight(frame.topicText,lines,600)
@@ -308,16 +522,18 @@ local function layoutTopic(p)
 end
 local function refresh()
     -- The manual is named Reference everywhere (Help is the guided coach).
-    local p=pages[index];frame.title:SetText("Nexus Reference - "..p.title)
+    local p=pages[index]
+    frame.title:SetText(TF("help.title.window",function() return {page=PageTitle(p)} end,"Nexus Reference - "..p.title))
     -- Issue #169: the Auto page adds what Auto may do now (Panel
     -- .AutoDetailLines, from the last committed model and saved settings),
     -- below the complete reference. Reading it changes nothing.
-    local text=p.text
+    local text=PageText(p)
     local panel=Nexus.Panel
     if p.id=="rolling" and panel and type(panel.AutoDetailLines)=="function" then
         local ok,lines=pcall(panel.AutoDetailLines)
         if ok and type(lines)=="table" and #lines>0 then
-            text=text.."\n\nAuto right now (read when this page opened):\n"..table.concat(lines,"\n")
+            text=text.."\n\n"..T("help.heading.auto_now","Auto right now (read when this page opened):").."\n"
+                ..table.concat(lines,"\n")
         end
     end
     -- Questions (FAQ), owner-approved readability (issue #169): each group's
@@ -326,7 +542,8 @@ local function refresh()
     -- apart. The wording is unchanged and the height is measured below.
     if p.id=="faq" then text=H.FormatQuestions(text) end
     frame.body:SetText(text)
-    frame.page:SetText("Page "..index.." / "..#pages)
+    frame.page:SetText(TF("help.label.page_position",function(seam)
+        return {page=seam.Count(index),total=seam.Count(#pages)} end,"Page "..index.." / "..#pages))
     layoutTopic(p)
     -- The current page's button is the disabled one and carries the selected
     -- mark (item 11; Theme repaints it with the palette); a page change
@@ -370,10 +587,10 @@ local function ensure()
         f:SetFrameLevel(HELP_LEVEL+2)
         f:SetScript("OnClick",function()fn();scroll:SetVerticalScroll(0)end);return f
     end
-    b(20,90,"Previous",function()index=math.max(1,index-1);refresh()end)
-    b(118,90,"Next",function()index=math.min(#pages,index+1);refresh()end)
-    b(430,95,"Start page",function()index=1;refresh()end)
-    b(533,100,"Close",function()frame:Hide()end)
+    b(20,90,T("help.button.previous","Previous"),function()index=math.max(1,index-1);refresh()end)
+    b(118,90,T("help.button.next","Next"),function()index=math.min(#pages,index+1);refresh()end)
+    b(430,95,T("help.button.start_page","Start page"),function()index=1;refresh()end)
+    b(533,100,T("help.button.close","Close"),function()frame:Hide()end)
     frame.page=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall");frame.page:SetPoint("BOTTOM",0,26)
     -- Direct page buttons: any page in one click (deep links use H.Show(id)).
     frame.tabs={}
@@ -382,7 +599,7 @@ local function ensure()
     if 20+(#pages-1)*step+79>640 then step=math.floor(620/#pages) end
     for i,p in ipairs(pages) do
         local t=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
-        t:SetPoint("TOPLEFT",20+(i-1)*step,TABS_TOP);t:SetSize(step-4,20);t:SetText(TAB_LABELS[p.id] or p.title)
+        t:SetPoint("TOPLEFT",20+(i-1)*step,TABS_TOP);t:SetSize(step-4,20);t:SetText(TAB_LABELS[p.id] and T(TAB_KEYS[p.id],TAB_LABELS[p.id]) or PageTitle(p))
         t:SetFrameLevel(HELP_LEVEL+2)
         t:SetScript("OnClick",function()index=i;refresh();scroll:SetVerticalScroll(0)end)
         frame.tabs[i]=t
@@ -395,7 +612,7 @@ local function ensure()
     -- open another window, unlike the page tabs above.
     frame.windowsLabel=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     frame.windowsLabel:SetPoint("TOPLEFT",frame,"TOPLEFT",20,WINDOWS_LABEL);frame.windowsLabel:SetSize(615,16)
-    frame.windowsLabel:SetJustifyH("LEFT");frame.windowsLabel:SetText("Open another window:")
+    frame.windowsLabel:SetJustifyH("LEFT");frame.windowsLabel:SetText(T("help.heading.open_window","Open another window:"))
     -- The primary setup path. Each button only navigates (H.OpenGuide: Setup /
     -- Welcome opens or resumes Guided setup; H.OpenAssignment, H.OpenEditor,
     -- H.OpenChecklist); none assigns, spends, sends or turns Auto ON, and a
@@ -404,10 +621,10 @@ local function ensure()
         local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("TOPLEFT",x,WINDOWS_TOP);f:SetSize(w,22)
         f:SetText(label);f:SetFrameLevel(HELP_LEVEL+2);f:SetScript("OnClick",fn);return f
     end
-    action(20,150,"Setup / Welcome",function()H.OpenGuide()end)
-    action(176,160,"Assign Wishlist...",function()H.OpenAssignment()end)
-    action(342,140,"Wishlist Editor",function()H.OpenEditor()end)
-    frame.checklist=action(488,140,"Setup checklist",function()H.OpenChecklist()end)
+    action(20,150,T("help.button.setup_welcome","Setup / Welcome"),function()H.OpenGuide()end)
+    action(176,160,T("help.button.assign_wishlist","Assign Wishlist..."),function()H.OpenAssignment()end)
+    action(342,140,T("help.button.wishlist_editor","Wishlist Editor"),function()H.OpenEditor()end)
+    frame.checklist=action(488,140,T("help.button.setup_checklist","Setup checklist"),function()H.OpenChecklist()end)
     frame.note=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall");frame.note:SetPoint("TOPLEFT",20,NOTE_TOP)
     frame.note:SetSize(615,13);frame.note:SetJustifyH("LEFT");frame.note:SetText("")
     -- The page's topic card (topics above): its title, lines and one Open
@@ -426,7 +643,7 @@ local function ensure()
     frame.topicOpen:SetFrameLevel(HELP_LEVEL+2)
     frame.topicOpen:SetScript("OnClick",function() H.OpenTopic(pages[index].id) end)
     frame.reference=frame:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
-    frame.reference:SetJustifyH("LEFT");frame.reference:SetText(REFERENCE)
+    frame.reference:SetJustifyH("LEFT");frame.reference:SetText(T(REFERENCE_KEY,REFERENCE))
     -- Register the completed window once, including its owned navigation
     -- controls. Palette changes then repaint the same frame through Theme.
     if Nexus.Theme and Nexus.Theme.StyleWindow then Nexus.Theme.StyleWindow(frame,0.94) end
@@ -470,13 +687,13 @@ end
 function H.OpenSetup()
     local quick=Nexus.QuickStart
     if not (quick and type(quick.ShowSetup)=="function") then
-        return Refuse("Setup / Welcome is not available yet.")
+        return Refuse(T("help.error.setup_unavailable_yet","Setup / Welcome is not available yet."))
     end
     local shown,why=quick.ShowSetup()
     if not shown then
         return Refuse(why=="warning-open"
-            and "Setup / Welcome did not open. Answer the open warning (Yes or No), then open it again."
-            or "Setup / Welcome is not available right now.")
+            and T("help.error.setup_warning_open","Setup / Welcome did not open. Answer the open warning (Yes or No), then open it again.")
+            or T("help.error.setup_unavailable_now","Setup / Welcome is not available right now."))
     end
     Leave()
     return true
@@ -486,21 +703,21 @@ end
 -- since the Journal is kept hidden while it is shown.
 function H.OpenAssignment()
     if not LocalToolsReady() then
-        return Refuse("Assign Wishlist opens after start-up finishes (see the loading panel). Nothing was opened or assigned.")
+        return Refuse(T("help.error.assign_after_startup","Assign Wishlist opens after start-up finishes (see the loading panel). Nothing was opened or assigned."))
     end
     local journal=Nexus.JournalTab
     if not (journal and type(journal.OpenBuilds)=="function") then
-        return Refuse("The Echo Journal route is not available. Nothing was assigned.")
+        return Refuse(T("help.error.journal_route_unavailable","The Echo Journal route is not available. Nothing was assigned."))
     end
     if type(journal.CanOpenBuilds)=="function" and not journal.CanOpenBuilds() then
-        return Refuse("The game's Character Progression button was not found. Nothing was opened or assigned.")
+        return Refuse(T("help.error.progression_button_missing","The game's Character Progression button was not found. Nothing was opened or assigned."))
     end
     -- Use the same guarded route as the panel. A visible Plan may hold an
     -- unsaved draft or an open Save confirmation; Help must not hide it and
     -- bypass the workspace suspension check before opening the game page.
     local panel=Nexus.Panel
     if not (panel and type(panel.OpenAssignment)=="function") then
-        return Refuse("The guarded assignment route is not available. Nothing was opened or assigned.")
+        return Refuse(T("help.error.assignment_route_unavailable","The guarded assignment route is not available. Nothing was opened or assigned."))
     end
     if panel.OpenAssignment()==false then return false end
     Leave()
@@ -512,7 +729,7 @@ end
 function H.OpenChecklist()
     local quick=Nexus.QuickStart
     if not (quick and type(quick.ShowChecklist)=="function") then
-        return Refuse("The setup checklist is not available.")
+        return Refuse(T("help.error.checklist_unavailable","The setup checklist is not available."))
     end
     Leave()
     quick.ShowChecklist()
@@ -525,13 +742,13 @@ end
 function H.OpenGuide()
     local ui=Nexus.GuidedSetupUI
     if not (ui and type(ui.Show)=="function") then
-        return Refuse("Guided setup is not available.")
+        return Refuse(T("help.error.guide_unavailable","Guided setup is not available."))
     end
     local shown,why=ui.Show()
     if not shown then
         return Refuse(why=="warning-open"
-            and "Guided setup did not open. Answer the open warning (Yes or No), then open Guided setup again."
-            or "Guided setup is not available right now.")
+            and T("help.error.guide_warning_open","Guided setup did not open. Answer the open warning (Yes or No), then open Guided setup again.")
+            or T("help.error.guide_unavailable_now","Guided setup is not available right now."))
     end
     Leave()
     return true
@@ -563,11 +780,11 @@ end
 -- Wishlist Editor: the editor as /nexus editor opens it.
 function H.OpenEditor()
     if not LocalToolsReady() then
-        return Refuse("The Wishlist Editor opens after start-up finishes (see the loading panel). Nothing was opened.")
+        return Refuse(T("help.error.editor_after_startup","The Wishlist Editor opens after start-up finishes (see the loading panel). Nothing was opened."))
     end
     local editor=Nexus.WishlistEditor
     if not (editor and type(editor.Show)=="function") then
-        return Refuse("The Wishlist Editor is not available.")
+        return Refuse(T("help.error.editor_unavailable","The Wishlist Editor is not available."))
     end
     -- Help can sit on top of an already-open Plan. Re-running Show() there
     -- starts a fresh editor session and discards unsaved Echo edits; simply
@@ -580,7 +797,7 @@ function H.OpenEditor()
     local opened=editor.Show()
     local editorFrame=_G.NexusEditorFrame
     if opened==false or not (editorFrame and editorFrame.IsShown and editorFrame:IsShown()) then
-        return Refuse("The Wishlist Editor did not open. Help remains here; try again after start-up finishes.")
+        return Refuse(T("help.error.editor_did_not_open","The Wishlist Editor did not open. Help remains here; try again after start-up finishes."))
     end
     Leave()
     return true
@@ -590,22 +807,30 @@ end
 function H.OpenTopic(id)
     local t=topics[id]
     if not (t and type(t.route)=="function") then
-        return Refuse("This topic has no screen to open. Nothing was opened.")
+        return Refuse(T("help.error.topic_no_screen","This topic has no screen to open. Nothing was opened."))
     end
     return t.route()
 end
 -- Automation or Sync settings (ui/SettingsWindow.lua): opening it changes no
 -- preference; each change there is its own existing, guarded control.
 function H.OpenSettings(section)
-    local label=section=="sync" and "Sync settings" or "Automation settings"
+    -- One whole sentence per section and outcome (the section name is part
+    -- of each translated sentence, never joined to it here).
+    local sync=section=="sync"
+    local label=sync and "Sync settings" or "Automation settings"
     if not LocalToolsReady() then
-        return Refuse(label.." open after start-up finishes (see the loading panel). Nothing was opened or changed.")
+        return Refuse(T(sync and "help.error.sync_settings_after_startup" or "help.error.automation_settings_after_startup",
+            label.." open after start-up finishes (see the loading panel). Nothing was opened or changed."))
     end
     local settings=Nexus.SettingsWindow
     if not (settings and type(settings.Show)=="function") then
-        return Refuse(label.." are not available. Nothing was opened or changed.")
+        return Refuse(T(sync and "help.error.sync_settings_unavailable" or "help.error.automation_settings_unavailable",
+            label.." are not available. Nothing was opened or changed."))
     end
-    if settings.Show(section)==false then return Refuse(label.." did not open. Nothing was changed.") end
+    if settings.Show(section)==false then
+        return Refuse(T(sync and "help.error.sync_settings_did_not_open" or "help.error.automation_settings_did_not_open",
+            label.." did not open. Nothing was changed."))
+    end
     Leave()
     return true
 end
@@ -614,9 +839,9 @@ end
 function H.OpenOrbs()
     local orb=Nexus.OrbPanel
     if not (orb and type(orb.Show)=="function") then
-        return Refuse("The Orb window is not available. Nothing was spent.")
+        return Refuse(T("help.error.orbs_unavailable","The Orb window is not available. Nothing was spent."))
     end
-    if orb.Show()==false then return Refuse("The Orb window did not open. Nothing was spent.") end
+    if orb.Show()==false then return Refuse(T("help.error.orbs_did_not_open","The Orb window did not open. Nothing was spent.")) end
     Leave()
     return true
 end
@@ -625,20 +850,20 @@ end
 function H.OpenSupport()
     local ui=Nexus.SupportReportUI
     if not (ui and type(ui.Show)=="function") then
-        return Refuse("The support report is not available. Type /nexus report.")
+        return Refuse(T("help.error.support_unavailable","The support report is not available. Type /nexus report."))
     end
-    if ui.Show()==false then return Refuse("The support report did not open. Type /nexus report.") end
+    if ui.Show()==false then return Refuse(T("help.error.support_did_not_open","The support report did not open. Type /nexus report.")) end
     Leave()
     return true
 end
 -- The Log viewer, as /nexus log opens it after start-up.
 function H.OpenLogs()
     if not LocalToolsReady() then
-        return Refuse("The Log viewer opens after start-up finishes (see the loading panel). Nothing was opened.")
+        return Refuse(T("help.error.logs_after_startup","The Log viewer opens after start-up finishes (see the loading panel). Nothing was opened."))
     end
     local logs=Nexus.LogViewer
-    if not (logs and type(logs.Show)=="function") then return Refuse("The Log viewer is not available.") end
-    if logs.Show()==false then return Refuse("The Log viewer did not open.") end
+    if not (logs and type(logs.Show)=="function") then return Refuse(T("help.error.logs_unavailable","The Log viewer is not available.")) end
+    if logs.Show()==false then return Refuse(T("help.error.logs_did_not_open","The Log viewer did not open.")) end
     Leave()
     return true
 end

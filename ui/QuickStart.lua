@@ -7,6 +7,28 @@ local M = {}
 Nexus.QuickStart = M
 
 local frame
+-- Full visible-UI localization (guide family, setup.* keys; the start-up
+-- refusals shared with Help use Help's help.error.* keys). Each visible
+-- English sentence is a reviewed catalog meaning, looked up through
+-- Nexus.Localization when it is shown (never cached here); without the seam
+-- or for a key it cannot show, the exact English beside the key is shown.
+-- Colour codes, the chat prefix and the joins between sentences stay here.
+local function T(key, english)
+    local seam = Nexus.Localization
+    if type(seam) ~= "table" or type(seam.Text) ~= "function" then return english end
+    local text, source = seam.Text(key)
+    if source == "unavailable" then return english end
+    return text
+end
+local function TF(key, args, english)
+    local seam = Nexus.Localization
+    if type(seam) ~= "table" or type(seam.Format) ~= "function" or type(seam.Count) ~= "function" then
+        return english
+    end
+    local text, source = seam.Format(key, args(seam))
+    if source == "unavailable" then return english end
+    return text
+end
 -- The saved acknowledgement follows the policy of the release note in
 -- ui/Changelog.lua: hasSeenQuickStart is saved data, so it is written only
 -- when the saved-data owner reports a durable write for this character and
@@ -22,22 +44,32 @@ local MAX_RECORD_ATTEMPTS = 10
 local unsavedNoticeShown = false
 -- The informational replay (M.ShowSetup) states what it is in place of the
 -- first-time title and hint; normal opens restore these exact texts.
-local NORMAL_TITLE = "Welcome to Nexus"
-local NORMAL_HINT = "Reopen Help any time with /nexus help. Automation and Orb spending require separate explicit controls."
-local SETUP_TITLE = "Nexus setup (information only)"
-local SETUP_HINT = "Information only: this guide saves nothing and never turns Auto ON."
+local function NormalTitle() return T("setup.title.welcome", "Welcome to Nexus") end
+local function NormalHint()
+    return T("setup.note.reopen_help", "Reopen Help any time with /nexus help. Automation and Orb spending require separate explicit controls.")
+end
+local function SetupTitle() return T("setup.title.information_only", "Nexus setup (information only)") end
+local function SetupHint()
+    return T("setup.note.information_only", "Information only: this guide saves nothing and never turns Auto ON.")
+end
 -- The current Sync mode in the Build Library's and Leaderboard's words. Off
 -- and Manual are core/SyncModePolicy.lua's text. Reading the mode writes
 -- nothing; this window neither offers nor changes a mode.
-local SYNC_AUTOMATIC_TEXT = "Sync is Automatic: may send without a click (login requests, answers to other users, eligible character-best DPS with Echoes and player info)."
+local function SyncAutomaticText()
+    return T("setup.body.sync_automatic", "Sync is Automatic: may send without a click (login requests, answers to other users, eligible character-best DPS with Echoes and player info).")
+end
 
 local function SyncNote(f)
     if not (f and f.sync) then return f end
     local policy = Nexus.SyncModePolicy
     local mode = policy and type(policy.Mode) == "function" and policy.Mode() or nil
-    local text = mode == "automatic" and SYNC_AUTOMATIC_TEXT
-        or mode and type(policy.Text) == "function" and policy.Text(mode) or nil
-    f.sync:SetText(text and (text .. " Reference: Sharing lists what is sent.") or "")
+    -- The mode's display sentence (SyncModePolicy.DisplayText where its owner
+    -- provides it; Text stays raw English for code that compares it).
+    local display = policy and (type(policy.DisplayText) == "function" and policy.DisplayText or policy.Text)
+    local text = mode == "automatic" and SyncAutomaticText()
+        or mode and type(display) == "function" and display(mode) or nil
+    f.sync:SetText(text and TF("setup.body.sync_reference", function() return {sync = tostring(text)} end,
+        text .. " Reference: Sharing lists what is sent.") or "")
     return f
 end
 
@@ -127,13 +159,13 @@ local function ReplayRouteReady(kind)
     end
     if not ready then
         print("|cffffd200Nexus:|r " .. (kind == "assign"
-            and "Assign Wishlist opens after start-up finishes (see the loading panel). Nothing was opened or assigned."
-            or "The Wishlist Editor opens after start-up finishes (see the loading panel). Nothing was opened."))
+            and T("help.error.assign_after_startup", "Assign Wishlist opens after start-up finishes (see the loading panel). Nothing was opened or assigned.")
+            or T("help.error.editor_after_startup", "The Wishlist Editor opens after start-up finishes (see the loading panel). Nothing was opened.")))
         return false
     end
     local journal = Nexus.JournalTab
     if kind == "assign" and journal and type(journal.CanOpenBuilds) == "function" and not journal.CanOpenBuilds() then
-        print("|cffffd200Nexus:|r The game's Character Progression button was not found. Nothing was opened or assigned.")
+        print("|cffffd200Nexus:|r " .. T("help.error.progression_button_missing", "The game's Character Progression button was not found. Nothing was opened or assigned."))
         return false
     end
     return true
@@ -171,12 +203,12 @@ end
 -- about a dismissal that is not saved (yet): nothing is claimed complete, and
 -- the first-use window may be offered again later.
 local UNSAVED_NOTICE = {
-    welcome = "The Welcome is closed, but this cannot be saved right now "
+    welcome = {key = "setup.chat.welcome_not_saved", english = "The Welcome is closed, but this cannot be saved right now "
         .. "(saved data is still loading or is read-only). If it cannot be saved this session, "
-        .. "the Welcome is offered again next time. Setup information (read only) in the Options menu shows it again.",
-    coach = "Guided setup is closed, but this cannot be saved right now "
+        .. "the Welcome is offered again next time. Setup information (read only) in the Options menu shows it again."},
+    coach = {key = "setup.chat.coach_not_saved", english = "Guided setup is closed, but this cannot be saved right now "
         .. "(saved data is still loading or is read-only). If it cannot be saved this session, "
-        .. "Guided setup is offered again next time. /nexus help or Setup / Welcome in the Options menu reopens it.",
+        .. "Guided setup is offered again next time. /nexus help or Setup / Welcome in the Options menu reopens it."},
 }
 local function Dismiss(kind)
     dismissedThisSession = true
@@ -184,7 +216,8 @@ local function Dismiss(kind)
         StartRecordRetry()
         if not unsavedNoticeShown then
             unsavedNoticeShown = true
-            print("|cffffd200Nexus:|r " .. (UNSAVED_NOTICE[kind] or UNSAVED_NOTICE.welcome))
+            local notice = UNSAVED_NOTICE[kind] or UNSAVED_NOTICE.welcome
+            print("|cffffd200Nexus:|r " .. T(notice.key, notice.english))
         end
     end
 end
@@ -253,8 +286,8 @@ end
 -- Normal (first-time or deliberate) presentation: the exact first-time texts.
 local function NormalTexts(f)
     f._informational = nil
-    if f.title then f.title:SetText(NORMAL_TITLE) end
-    if f.hint then f.hint:SetText(NORMAL_HINT) end
+    if f.title then f.title:SetText(NormalTitle()) end
+    if f.hint then f.hint:SetText(NormalHint()) end
     FitClose(f)
     return SyncNote(f)
 end
@@ -293,12 +326,12 @@ local function EnsureFrame()
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     frame.title = title
     title:SetPoint("TOP", 0, -16)
-    title:SetText("Welcome to Nexus")
+    title:SetText(NormalTitle())
 
     local subtitle = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     frame.subtitle = subtitle
     subtitle:SetPoint("TOP", 0, -37)
-    subtitle:SetText("Plan your Echoes, then choose what to automate.")
+    subtitle:SetText(T("setup.label.welcome_subtitle", "Plan your Echoes, then choose what to automate."))
 
     local body = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     frame.body = body
@@ -306,17 +339,18 @@ local function EnsureFrame()
     body:SetSize(372, 112)
     body:SetJustifyH("LEFT")
     body:SetJustifyV("TOP")
+    -- Three sentences joined here; the Auto consequence keeps its gold colour.
     body:SetText(
-        "Already have a Saved Build? Assign the Wishlist you want it to follow. " ..
-        "|cffffd100With Auto ON, Nexus may replace the active Saved Build with a better finished run. " ..
-        "Keep Auto OFF to leave that slot unchanged.|r\n" ..
-        "Starting fresh? Import a Wishlist code or copy a Community build into an editable draft."
+        T("setup.body.welcome_existing_build", "Already have a Saved Build? Assign the Wishlist you want it to follow.") .. " " ..
+        "|cffffd100" .. T("setup.body.welcome_auto_replace", "With Auto ON, Nexus may replace the active Saved Build with a better finished run. " ..
+        "Keep Auto OFF to leave that slot unchanged.") .. "|r\n" ..
+        T("setup.body.welcome_starting_fresh", "Starting fresh? Import a Wishlist code or copy a Community build into an editable draft.")
     )
 
     local current = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     current:SetSize(174, 26)
     current:SetPoint("TOPLEFT", 24, -176)
-    current:SetText("Set up current build")
+    current:SetText(T("setup.button.set_up_current_build", "Set up current build"))
     current:SetScript("OnClick", function()
         if frame and frame._informational and not ReplayRouteReady("assign") then return end
         Finish()
@@ -329,7 +363,7 @@ local function EnsureFrame()
     local import = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     import:SetSize(174, 26)
     import:SetPoint("TOPRIGHT", -24, -176)
-    import:SetText("Import / Create Wishlist")
+    import:SetText(T("setup.button.import_create_wishlist", "Import / Create Wishlist"))
     import:SetScript("OnClick", function()
         if frame and frame._informational and not ReplayRouteReady("editor") then return end
         Finish()
@@ -340,7 +374,7 @@ local function EnsureFrame()
     local builds = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     builds:SetSize(174, 26)
     builds:SetPoint("TOPLEFT", current, "BOTTOMLEFT", 0, -10)
-    builds:SetText("Browse Community builds")
+    builds:SetText(T("setup.button.browse_community_builds", "Browse Community builds"))
     builds:SetScript("OnClick", function()
         Finish()
         CloseOtherSetupWindows()
@@ -350,7 +384,7 @@ local function EnsureFrame()
     local leaderboard = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     leaderboard:SetSize(174, 26)
     leaderboard:SetPoint("TOPRIGHT", import, "BOTTOMRIGHT", 0, -10)
-    leaderboard:SetText("Open Leaderboard")
+    leaderboard:SetText(T("setup.button.open_leaderboard", "Open Leaderboard"))
     leaderboard:SetScript("OnClick", function()
         Finish()
         CloseOtherSetupWindows()
@@ -360,11 +394,11 @@ local function EnsureFrame()
     -- The optional long manual under its own name, Reference (the design's
     -- separately named view); Help itself is the coach row below.
     local reference = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    reference:SetSize(174,26);reference:SetPoint("TOPLEFT",24,-250);reference:SetText("Reference")
+    reference:SetSize(174,26);reference:SetPoint("TOPLEFT",24,-250);reference:SetText(T("setup.button.reference", "Reference"))
     reference:SetScript("OnClick",function() Finish();OpenReference() end)
     frame.reference = reference
     local orbs = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    orbs:SetSize(174,26);orbs:SetPoint("TOPRIGHT",-24,-250);orbs:SetText("Orbs / Lost Memories")
+    orbs:SetSize(174,26);orbs:SetPoint("TOPRIGHT",-24,-250);orbs:SetText(T("setup.button.orbs_lost_memories", "Orbs / Lost Memories"))
     orbs:SetScript("OnClick",function() Finish();if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end)
     -- Help: the step-by-step coach (ui/GuidedSetup.lua), the prominent full
     -- row, through the guarded route above (OpenHelpCoach). Like the other
@@ -377,7 +411,7 @@ local function EnsureFrame()
     local guide = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     guide:SetSize(372, 26)
     guide:SetPoint("TOPLEFT", 24, -284)
-    guide:SetText("Help: Guided setup")
+    guide:SetText(T("setup.button.help_guided_setup", "Help: Guided setup"))
     guide:SetScript("OnClick", function()
         if not OpenHelpCoach() then return end
         Finish()
@@ -395,12 +429,12 @@ local function EnsureFrame()
     hint:SetPoint("BOTTOMLEFT", 24, 22)
     hint:SetSize(290, 54)
     hint:SetJustifyH("LEFT")
-    hint:SetText("Reopen Help any time with /nexus help. Automation and Orb spending require separate explicit controls.")
+    hint:SetText(NormalHint())
 
     local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     close:SetSize(74, 24)
     close:SetPoint("BOTTOMRIGHT", -24, 20)
-    close:SetText("Close")
+    close:SetText(T("setup.button.close", "Close"))
     close:SetScript("OnClick", Finish)
     frame.close = close
 
@@ -471,8 +505,8 @@ function M.ShowSetup()
     end
     local f = EnsureFrame()
     f._informational = true
-    if f.title then f.title:SetText(SETUP_TITLE) end
-    if f.hint then f.hint:SetText(SETUP_HINT) end
+    if f.title then f.title:SetText(SetupTitle()) end
+    if f.hint then f.hint:SetText(SetupHint()) end
     FitClose(f)
     SyncNote(f):Show()
     return true
@@ -553,12 +587,17 @@ local function RefreshChecklist()
     for i, line in ipairs(checklist.rows) do
         local row = steps.rows[i]
         if row and row.status == "done" then done = done + 1 end
-        line:SetText(row and ((marks[row.status] or "") .. " " .. row.label .. ": " .. row.text) or "")
+        -- The mark, label and status words are UserText's; this file owns the join.
+        line:SetText(row and TF("setup.value.checklist_row", function()
+            return {mark = tostring(marks[row.status] or ""), label = tostring(row.label), status = tostring(row.text)}
+        end, (marks[row.status] or "") .. " " .. row.label .. ": " .. row.text) or "")
     end
     checklist.steps = steps
+    local function counts(seam) return {done = seam.Count(done), total = seam.Count(#steps.rows)} end
     checklist.summary:SetText(steps.complete
-        and "Setup steps done now: " .. done .. " of " .. #steps.rows .. "."
-        or "Setup steps done now: " .. done .. " of " .. #steps.rows .. ". Nothing here completes a step for you.")
+        and TF("setup.status.steps_done", counts, "Setup steps done now: " .. done .. " of " .. #steps.rows .. ".")
+        or TF("setup.status.steps_done_open", counts,
+            "Setup steps done now: " .. done .. " of " .. #steps.rows .. ". Nothing here completes a step for you."))
     local status = text and text.StatusLines and text.StatusLines(facts) or {}
     for i, line in ipairs(checklist.status) do line:SetText(status[i] or "") end
     LayoutChecklist(checklist)
@@ -589,14 +628,14 @@ local function EnsureChecklist()
     end)
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     f.title:SetPoint("TOP", 0, -16)
-    f.title:SetText("Setup checklist and status")
+    f.title:SetText(T("setup.title.checklist", "Setup checklist and status"))
     f.subtitle = ChecklistText(f, -38, 28)
-    f.subtitle:SetText("Read-only: what Nexus can read now. A step is done only when it is true now.")
+    f.subtitle:SetText(T("setup.label.checklist_subtitle", "Read-only: what Nexus can read now. A step is done only when it is true now."))
     f.rows = {}
     for i, y in ipairs(CHECK_ROW_Y) do f.rows[i] = ChecklistText(f, y, 40) end
     f.summary = ChecklistText(f, -202, 16)
     f.statusTitle = ChecklistText(f, -224, 16, "GameFontNormalSmall")
-    f.statusTitle:SetText("Status")
+    f.statusTitle:SetText(T("setup.heading.checklist_status", "Status"))
     f.status = {}
     for i, y in ipairs(CHECK_STATUS_Y) do f.status[i] = ChecklistText(f, y, 32) end
     -- Why the last button did not open its window, in this window (not only
@@ -633,27 +672,27 @@ local function EnsureChecklist()
         LayoutChecklist(f)
         return false
     end
-    f.assign = button(24, 130, "Assign Wishlist...", function()
-        route("OpenAssignment", "Assign Wishlist is not available. Nothing was opened or assigned.")
+    f.assign = button(24, 130, T("setup.button.assign_wishlist", "Assign Wishlist..."), function()
+        route("OpenAssignment", T("setup.error.assign_unavailable", "Assign Wishlist is not available. Nothing was opened or assigned."))
     end)
-    f.editor = button(160, 120, "Wishlist Editor", function()
-        route("OpenEditor", "The Wishlist Editor is not available. Nothing was opened.")
+    f.editor = button(160, 120, T("setup.button.wishlist_editor", "Wishlist Editor"), function()
+        route("OpenEditor", T("setup.error.editor_unavailable", "The Wishlist Editor is not available. Nothing was opened."))
     end)
     -- Help is the guided setup coach at its current step (Help.OpenGuide, as
     -- OpenHelpCoach above), which takes this window's place. When it cannot
     -- open (an Auto warning waits for its answer) the reason is shown here,
     -- this window stays for a retry and nothing else opens: Reference, below,
     -- is the player's own separate choice.
-    f.help = button(286, 70, "Help", function()
-        route("OpenGuide", "Guided setup is not available. Nothing was opened.")
+    f.help = button(286, 70, T("setup.button.help", "Help"), function()
+        route("OpenGuide", T("setup.error.guide_unavailable", "Guided setup is not available. Nothing was opened."))
     end)
-    f.close = button(362, 74, "Close", function() f:Hide() end)
+    f.close = button(362, 74, T("setup.button.close", "Close"), function() f:Hide() end)
     -- Reference, the optional long manual, on its own row above Help and
     -- Close. It opens above this window (Help's own layer); this window stays.
     f.reference = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     f.reference:SetSize(CHECK_REFERENCE_W, 24)
     f.reference:SetPoint("BOTTOMRIGHT", -24, CHECK_REFERENCE_Y)
-    f.reference:SetText("Reference")
+    f.reference:SetText(T("setup.button.reference", "Reference"))
     f.reference:SetScript("OnClick", OpenReference)
     local elapsed = 0
     f:SetScript("OnShow", function() elapsed = 0; f.notice:SetText(""); RefreshChecklist() end)

@@ -5,11 +5,50 @@ local Nexus = Nexus
 local M = {}
 Nexus.FullUIWorkspaces = M
 
+-- Full visible-UI localization (guide family, workspace.* keys). Each visible
+-- English label and detail is a reviewed catalog meaning, looked up through
+-- Nexus.Localization when it is shown (never cached here); without the seam
+-- or for a key it cannot show, the exact English beside the key is shown.
+-- Workspace kinds and the reasons this module returns stay raw identities;
+-- only their chat display is translated (M.ReasonText).
+local function T(key, english)
+    local seam = Nexus.Localization
+    if type(seam) ~= "table" or type(seam.Text) ~= "function" then return english end
+    local text, source = seam.Text(key)
+    if source == "unavailable" then return english end
+    return text
+end
+
 local descriptions = {
-    plan = { label = "Plan", detail = "Wishlist Editor: choose Echoes and edit a plan. Nothing is saved or assigned by opening this tab." },
-    builds = { label = "Explore", detail = "Build Library: browse builds. Sharing, importing and Sync require their own controls." },
-    records = { label = "Records", detail = "Explore DPS records in the Leaderboard. Sync requires its own button." },
+    plan = { label = "Plan", detail = "Wishlist Editor: choose Echoes and edit a plan. Nothing is saved or assigned by opening this tab.",
+        labelKey = "workspace.tab.plan", detailKey = "workspace.tooltip.plan" },
+    builds = { label = "Explore", detail = "Build Library: browse builds. Sharing, importing and Sync require their own controls.",
+        labelKey = "workspace.tab.explore", detailKey = "workspace.tooltip.explore" },
+    records = { label = "Records", detail = "Explore DPS records in the Leaderboard. Sync requires its own button.",
+        labelKey = "workspace.tab.records", detailKey = "workspace.tooltip.records" },
 }
+
+-- The display words of this module's own refusal reasons (returned raw to
+-- callers, which may compare them). A reason from another owner (an editor
+-- or a window's Show) is shown as that owner worded it.
+local REASON_KEYS = {
+    ["wishlist editor unavailable"] = "workspace.error.plan_unavailable",
+    ["leaderboard unavailable"] = "workspace.error.records_unavailable",
+    ["build library unavailable"] = "workspace.error.library_unavailable",
+    ["unknown Explore view"] = "workspace.error.unknown_explore_view",
+    ["unknown workspace"] = "workspace.error.unknown_workspace",
+    ["workspace did not open"] = "workspace.error.did_not_open",
+    ["workspace unavailable"] = "workspace.error.unavailable",
+    ["Plan draft protection is unavailable"] = "workspace.error.draft_protection_unavailable",
+    ["Plan action unavailable"] = "workspace.error.plan_action_unavailable",
+    ["Plan action refused"] = "workspace.error.plan_action_refused",
+}
+function M.ReasonText(reason)
+    local raw = tostring(reason)
+    local key = REASON_KEYS[raw]
+    if key then return T(key, raw) end
+    return raw
+end
 
 -- Keep the existing buttons and their handlers. This preserves the local
 -- close/dropdown cleanup and LoadingStatus hooks installed by each window.
@@ -20,7 +59,8 @@ function M.BindTabs(frame, active, buttons, beforeLeave)
         local button = buttons[key]
         if not button then return false end
         local item = descriptions[key]
-        button:SetText(key == active and "|cffffd200" .. item.label .. "|r" or item.label)
+        local label = T(item.labelKey, item.label)
+        button:SetText(key == active and "|cffffd200" .. label .. "|r" or label)
         if key ~= active then
             button:SetScript("OnClick", function()
                 M.NavigateFrom(frame, key, beforeLeave)
@@ -32,8 +72,8 @@ function M.BindTabs(frame, active, buttons, beforeLeave)
                 -- LoadingStatus owns the pending-data explanation here.
                 if not GameTooltip or self._nexusDataLoading then return end
                 GameTooltip:SetOwner(self, "ANCHOR_TOP")
-                GameTooltip:AddLine(item.label, 1, .82, .2)
-                GameTooltip:AddLine(item.detail, .8, .8, .8, true)
+                GameTooltip:AddLine(T(item.labelKey, item.label), 1, .82, .2)
+                GameTooltip:AddLine(T(item.detailKey, item.detail), .8, .8, .8, true)
                 GameTooltip:Show()
             end)
             button:HookScript("OnLeave", function()
@@ -244,7 +284,7 @@ function M.NavigateFrom(source, kind, beforeLeave)
     local ok, reason = M.Show(kind)
     if ok == false then
         if type(print) == "function" then
-            print("|cffffd200Nexus:|r " .. tostring(reason or "workspace unavailable"))
+            print("|cffffd200Nexus:|r " .. M.ReasonText(reason or "workspace unavailable"))
         end
         return false, reason
     end
