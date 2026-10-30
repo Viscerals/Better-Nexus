@@ -15,6 +15,44 @@ Nexus = Nexus or {}
 local M = {}
 Nexus.CallboardStatus = M
 
+-- Full-UI localization (issues #143-#148): Nexus's own words in the reward
+-- tooltip and the two quest-log state lines resolve through
+-- Nexus.Localization when shown (never cached at load); while the seam is
+-- absent or a key answers "unavailable" the exact English is shown. The
+-- reward rows keep their canonical English difficulty label (row.label is
+-- compared, signed and matched against the game's tooltip); only the shown
+-- name is translated. Objective titles and progress text are game data.
+local function Say(key, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Text) == "function" then
+        local text, source = localization.Text(key)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
+local function SayF(key, args, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Format) == "function" then
+        local text, source = localization.Format(key, args)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
+
+-- The shown name of a canonical difficulty label (display only).
+local DIFFICULTY_SHOWN = {
+    ["Normal"] = "callboard.label.difficulty_normal",
+    ["Hardcore I"] = "callboard.label.difficulty_hc1",
+    ["Hardcore II"] = "callboard.label.difficulty_hc2",
+    ["Hardcore III"] = "callboard.label.difficulty_hc3",
+    ["Hardcore IV"] = "callboard.label.difficulty_hc4",
+    ["Hardcore V"] = "callboard.label.difficulty_hc5",
+}
+local function DifficultyShown(label)
+    local key = type(label) == "string" and DIFFICULTY_SHOWN[label] or nil
+    return key and Say(key, label) or label
+end
+
 local scanner
 local elapsed = 0
 local cachedSummary = { observed = false }
@@ -271,9 +309,9 @@ local function QuestLogLinesForIndex(index, isComplete)
     local ok, lines = pcall(function()
         if not index then return nil end
         if isComplete and isComplete > 0 then
-            return { "|cff66d966Ready for turn-in|r" }
+            return { "|cff66d966" .. Say("callboard.status.ready_turn_in", "Ready for turn-in") .. "|r" }
         elseif isComplete and isComplete < 0 then
-            return { "|cffff4d4dFailed|r" }
+            return { "|cffff4d4d" .. Say("callboard.status.failed", "Failed") .. "|r" }
         end
         if type(GetNumQuestLeaderBoards) ~= "function"
             or type(GetQuestLogLeaderBoard) ~= "function" then
@@ -1273,9 +1311,9 @@ local function ShowRewardsRows(owner, rows)
     GameTooltip:SetOwner(owner, "ANCHOR_NONE")
     AnchorRewardsTooltipLeft(owner)
     GameTooltip:ClearLines()
-    GameTooltip:AddLine("Rewards by Difficulty", 1, 0.82, 0)
-    GameTooltip:AddLine("Completing the objective on higher difficulties grants better rewards.",
-        0.85, 0.85, 0.85, true)
+    GameTooltip:AddLine(Say("callboard.heading.rewards_by_difficulty", "Rewards by Difficulty"), 1, 0.82, 0)
+    GameTooltip:AddLine(Say("callboard.tooltip.higher_difficulty_rewards",
+        "Completing the objective on higher difficulties grants better rewards."), 0.85, 0.85, 0.85, true)
     GameTooltip:AddLine(" ")
     for i = 1, #rows do
         local row = rows[i]
@@ -1284,13 +1322,16 @@ local function ShowRewardsRows(owner, rows)
         if money then
             right[#right + 1] = money
         elseif row.xp and row.xp > 0 then
-            right[#right + 1] = tostring(math.floor(row.xp)) .. " XP"
+            local xp = tostring(math.floor(row.xp))
+            right[#right + 1] = SayF("callboard.value.reward_xp", {xp = xp}, xp .. " XP")
         end
         local ash = FormatAsh(row.ash)
-        if ash then right[#right + 1] = "|cffa380ff" .. ash .. " Ash|r" end
+        if ash then
+            right[#right + 1] = "|cffa380ff" .. SayF("callboard.value.reward_ash", {ash = ash}, ash .. " Ash") .. "|r"
+        end
         local labelColor = row.color or (row.label == "Normal" and { 1, 1, 1 } or { 1, 0.35, 0.35 })
         GameTooltip:AddDoubleLine(
-            row.label,
+            DifficultyShown(row.label),
             #right > 0 and table.concat(right, "  ") or "—",
             labelColor[1], labelColor[2], labelColor[3],
             1, 1, 1)
@@ -1312,10 +1353,10 @@ function M.ShowRewardsTooltip(owner)
     GameTooltip:SetOwner(owner, "ANCHOR_NONE")
     AnchorRewardsTooltipLeft(owner)
     GameTooltip:ClearLines()
-    GameTooltip:AddLine("Rewards by Difficulty", 1, 0.82, 0)
+    GameTooltip:AddLine(Say("callboard.heading.rewards_by_difficulty", "Rewards by Difficulty"), 1, 0.82, 0)
     GameTooltip:AddLine(" ")
-    GameTooltip:AddLine("Reward details are not available for this objective yet.",
-        0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(Say("callboard.tooltip.rewards_unavailable",
+        "Reward details are not available for this objective yet."), 0.7, 0.7, 0.7, true)
     GameTooltip:Show()
     AnchorRewardsTooltipLeft(owner)
 end

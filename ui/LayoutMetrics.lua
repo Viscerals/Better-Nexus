@@ -8,6 +8,20 @@ Nexus = Nexus or {}
 
 local M = {}
 local panelCache, communityCache = {}, {}
+
+-- Full-UI localization (issues #143-#148): the one code-owned label this
+-- file chooses (the Orb mini-panel button) resolves through
+-- Nexus.Localization when a layout is computed; while the seam is absent or
+-- the key answers "unavailable" the exact English is used. A cached layout
+-- keeps the label of its session, whose language does not change.
+local function ShownLabel(key, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Text) == "function" then
+        local text, source = localization.Text(key)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
 local panelOrder, communityOrder = {}, {}
 local MAX_CACHE_ENTRIES = 64
 local stats = {
@@ -484,7 +498,11 @@ function M.Panel(spec)
             local available = width - 24 - layout.orbButtonW - layout.orbMiniButtonGap
             local fullWidth = math.ceil(14 * char) + 20
             layout.orbMiniButtonW = math.max(1, math.min(fullWidth, available))
-            layout.orbMiniButtonLabel = fullWidth <= available and "Orb mini panel" or "Mini"
+            -- The width rule above is unchanged; only the chosen label is
+            -- shown in the session's language (ShownLabel).
+            layout.orbMiniButtonLabel = fullWidth <= available
+                and ShownLabel("layout.button.orb_mini_panel", "Orb mini panel")
+                or ShownLabel("layout.button.orb_mini_short", "Mini")
             height = height + layout.orbButtonH + math.ceil(gap/2)
         end
         local rows = tonumber(spec.guidanceRows) or 0

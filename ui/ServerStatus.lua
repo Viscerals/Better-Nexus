@@ -9,6 +9,20 @@ Nexus = Nexus or {}
 local M = {}
 Nexus.ServerStatus = M
 
+-- Full-UI localization (issues #143-#148): the one chat notice below
+-- resolves through Nexus.Localization when printed; while the seam is absent
+-- or its key answers "unavailable" the exact English is shown. The summary's
+-- mode and tier values ("Normal", "HC1".."HC5") are compared by the panel and
+-- are never translated here; the panel owns their display.
+local function Say(key, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Text) == "function" then
+        local text, source = localization.Text(key)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
+
 local rootFrame
 local scanner
 local elapsed = 0
@@ -678,9 +692,9 @@ function M.OpenHardcoreMenu()
     end
     if not hardcoreUnavailableNoted and type(print) == "function" then
         hardcoreUnavailableNoted = true
-        pcall(print, "|cff7fd5ffNexus:|r The Hardcore menu is not available yet. "
-            .. "Choose 'Use Server Difficulty / Soul Ash HUD' in the Nexus menu "
-            .. "and open it from the server HUD.")
+        pcall(print, "|cff7fd5ffNexus:|r " .. Say("server.chat.hardcore_menu_unavailable",
+            "The Hardcore menu is not available yet. Choose 'Use Server Difficulty / Soul Ash HUD' "
+            .. "in the Nexus menu and open it from the server HUD."))
     end
     return false
 end
