@@ -2763,7 +2763,12 @@ local function EnsureFrame()
         if st ~= nil and tostring(st) ~= "" then
             GameTooltip:AddLine(" ")
             local displayStatus = M.StatusTooltipText()
-            GameTooltip:AddLine("Status: " .. displayStatus, 0.6, 0.85, 1, true)
+            -- Global seam call (EnsureFrame is at the 60-upvalue ceiling); a
+            -- status the template cannot hold keeps the exact English line.
+            local statusLine, statusSource = Nexus.Localization.Format("panel.tooltip.menu_status",
+                {status = displayStatus})
+            if statusSource == "unavailable" then statusLine = "Status: " .. displayStatus end
+            GameTooltip:AddLine(statusLine, 0.6, 0.85, 1, true)
         end
         local notice = M._lastModel and M._lastModel.updateNotice
         if notice then
@@ -3379,7 +3384,7 @@ function M.MoreMenuItems(anchor)
             M.PlacePauseBanner()
         end) })
     -- Hiding is not pausing: it says how the panel comes back.
-    Add({ text = "Hide Nexus Panel", notCheckable = true,
+    Add({ text = LT("panel.menu.hide_panel"), notCheckable = true,
         tooltipTitle = LT("panel.tooltip.hide_panel_title"), tooltipText = HideTooltip(),
         func = MenuAction(function() M.HideByPlayer() end) })
     return items
@@ -5731,7 +5736,7 @@ local function ApplyModel(model, signatures, roll)
             -- never as "0 offers" or as an acting Auto.
             statusText:SetText("|cffffd100" .. Nexus.Readout.WAITING_OFFER_HEADING .. "|r")
         elseif model.auto and model.paused then
-            statusText:SetText("|cffffd100Auto ON — paused|r")
+            statusText:SetText("|cffffd100" .. Nexus.Localization.Text("panel.status.auto_on_paused") .. "|r")
         elseif #cards == 0 and recommendation == "" then
             statusText:SetText("|cff7fd5ff" .. LT("panel.status.roll_status") .. "|r")
         elseif guide and guide.openOrbs and guideText ~= "" then
@@ -5803,7 +5808,8 @@ local function ApplyModel(model, signatures, roll)
         -- reserved block has no current choice: it says so, and no more.
         -- An unstepped recommendation names its one Take or Freeze card; the
         -- Freeze reason's own words say the action.
-        local body = activeRoll and bodyText or "|cff888888No Echo choice is showing.|r"
+        local body = activeRoll and bodyText
+            or ("|cff888888" .. Nexus.Localization.Text("panel.body.no_echo_choice") .. "|r")
         local named = marked or (recommendation ~= "" and frozen)
         if named and activeRoll and bodyText == recommendation
             and not (guide and guide.openOrbs) and type(cards[named]) == "table" then

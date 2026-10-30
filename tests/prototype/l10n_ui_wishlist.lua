@@ -55,13 +55,9 @@ end
 
 -- Texts that are visible here but are not this family's adopted copy: each is
 -- listed as pending in fragments/wishlist.json or owned by another family.
+-- (The six Help-quoted editor action labels are reviewed keys now: owner
+-- follow-up v2.)
 local PENDING_TEXT={
- ['Create & assign']='help_action_first source-literal check (pending)',
- ['Create unassigned']='help_action_first source-literal check (pending)',
- ['Save changes']='help_action_first source-literal check (pending)',
- ['Save & assign']='help_action_first source-literal check (pending)',
- ['Confirm locked targets & edit']='help_action_first source-literal check (pending)',
- ['Confirm locked targets & assign']='help_action_first source-literal check (pending)',
  ['Plan']='FullUIWorkspaces tab label (workspace family)',
  ['Explore']='FullUIWorkspaces tab label (workspace family)',
  ['Records']='FullUIWorkspaces tab label (workspace family)',
@@ -297,8 +293,8 @@ local catalogRow=Find(f._leftArea.children,function(r) return r:IsShown() and r.
 catalogRow:Click()
 NexusWishlistNameInput:SetText(OTHER_NAME..' 2')
 local create=Find(f.children,function(c) return c.kind=='Button' and c:IsShown() and c:IsEnabled()
- and (c:GetText()=='Create unassigned' or c:GetText()=='Create & assign') end)
-check(create~=nil,'A10: the Create button (its label is pending, see the fragment)')
+ and (c:GetText()==S.OPEN..'Create unassigned'..S.CLOSE or c:GetText()==S.OPEN..'Create & assign'..S.CLOSE) end)
+check(create~=nil,'A10: the Create button shows its reviewed label')
 create:Click()
 popup,p=PopupText(H)
 check(p.which=='WISHLISTREALIZER_CREATE_WISHLIST','A10: the Create confirmation is shown')

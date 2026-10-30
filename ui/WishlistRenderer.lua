@@ -3268,7 +3268,7 @@ end
         local button = CreateFrame("Button", "NexusWishlistSaveOnlyButton", frame, "UIPanelButtonTemplate")
         button:SetSize(140, 26)
         button:SetPoint("BOTTOMLEFT", 866, 24)
-        button:SetText("Create unassigned")
+        button:SetText(T("editor.button.create_unassigned"))
         button:SetScript("OnClick", function()
             applyIntent(Controller.INTENT and Controller.INTENT.SAVE_CHANGES or "saveChanges")
         end)
@@ -3323,30 +3323,32 @@ end
     function M.ApplyAction()
         local intent = Controller.INTENT or {}
         local choice = frame and frame._saveChoice == true
-        -- Localization pending: these four action labels stay source
-        -- literals (help_action_first checks that Help's quoted labels are UI
-        -- source literals); the click carries the intent, not the label.
+        -- Help quotes these four action labels; they are reviewed keys bound
+        -- here with their exact English. The click carries the intent, not
+        -- the label.
         if Controller.IsEditing() then
-            if choice then return "Save & assign", intent.SAVE_AND_ASSIGN or "saveAndAssign" end
-            return "Save changes", intent.SAVE_CHANGES or "saveChanges"
+            if choice then return T("editor.button.save_and_assign"), intent.SAVE_AND_ASSIGN or "saveAndAssign" end
+            return T("editor.button.save_changes"), intent.SAVE_CHANGES or "saveChanges"
         end
         if choice then
-            return "Create & assign", intent.SAVE_AND_ASSIGN or "saveAndAssign"
+            return T("editor.button.create_and_assign"), intent.SAVE_AND_ASSIGN or "saveAndAssign"
         end
-        return "Create unassigned", intent.SAVE_CHANGES or "saveChanges"
+        return T("editor.button.create_unassigned"), intent.SAVE_CHANGES or "saveChanges"
     end
 
     -- The Save changes alternative shown beside an assigning action.
     function M.SecondaryAction()
-        return Controller.IsEditing() and "Save changes" or "Create unassigned"
+        return Controller.IsEditing() and T("editor.button.save_changes") or T("editor.button.create_unassigned")
     end
 
     -- The accept button of a confirmation names the same action as the
     -- control that opened it.
     function M.ConfirmLabel(data, mode)
         local assigns = type(data) == "table" and data.intent == "saveAndAssign"
-        if mode == "update" then return assigns and "Save & assign" or "Save changes" end
-        return assigns and "Create & assign" or "Create unassigned"
+        if mode == "update" then
+            return assigns and T("editor.button.save_and_assign") or T("editor.button.save_changes")
+        end
+        return assigns and T("editor.button.create_and_assign") or T("editor.button.create_unassigned")
     end
 
     function M.RenderIntentControls(apply, saving, blocked)

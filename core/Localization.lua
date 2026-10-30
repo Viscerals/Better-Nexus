@@ -1382,6 +1382,17 @@ local DECLARATIONS = {
     ["log.button.select_page"] = {kind = "text"},
     ["support.button.copy_summary"] = {kind = "text"},
     ["support.button.prepare_report_file"] = {kind = "text"},
+    -- integration2 (10)
+    ["editor.button.confirm_locked_assign"] = {kind = "text"},
+    ["editor.button.confirm_locked_edit"] = {kind = "text"},
+    ["editor.button.create_and_assign"] = {kind = "text"},
+    ["editor.button.create_unassigned"] = {kind = "text"},
+    ["editor.button.save_and_assign"] = {kind = "text"},
+    ["editor.button.save_changes"] = {kind = "text"},
+    ["panel.body.no_echo_choice"] = {kind = "text"},
+    ["panel.menu.hide_panel"] = {kind = "text"},
+    ["panel.status.auto_on_paused"] = {kind = "text"},
+    ["panel.tooltip.menu_status"] = {kind = "template", fields = {"status"}, slots = {"text"}, resultLimit = 1100},
     -- journal (202)
     ["journal.body.assign_note"] = {kind = "text"},
     ["journal.body.change_in_my_builds"] = {kind = "text"},

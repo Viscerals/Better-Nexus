@@ -140,9 +140,15 @@ local function keyedShows(line)
  for _,key in ipairs(Nexus.Localization.Keys()) do
   local kind=Nexus.Localization.Kind(key)
   local english,base,reason
-  if kind=='text' or kind=='block' then english,base,reason=Nexus.Localization.Resolve(key) end
+  if kind=='text' or kind=='block' then english,base,reason=Nexus.Localization.Resolve(key)
+  elseif kind=='template' then
+   -- A template's literal English (its placeholders are code-filled), bound
+   -- where a UI source names the key.
+   english,base=Nexus.LocalizationEnglish[key],'base'
+  end
   if english and base=='base' and reason==nil and has(english,line)
-   and (all:find('Text("'..key..'")',1,true) or all:find('T("'..key..'")',1,true)) then return key end
+   and (all:find('Text("'..key..'")',1,true) or all:find('T("'..key..'")',1,true)
+    or (kind=='template' and all:find('Format("'..key..'"',1,true))) then return key end
  end
 end
 for _,line in ipairs({'Waiting for the game to confirm the last Echo action.','No Echo choice is showing.','Auto ON — paused',

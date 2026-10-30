@@ -267,16 +267,13 @@ do
  for _,t in ipairs(texts) do if S.IsPseudo(t.text) then pseudo=pseudo+1 end end
  check(pseudo>150,'PSEUDO: pseudo text reached the display receivers ('..pseudo..')')
  local left=Leftovers(texts,foreign)
- -- The four literals help_action_first requires (pending in the fragment).
- local KEPT={['Hide Nexus Panel']=true,['No Echo choice is showing.']=true,['Auto ON — paused']=true,['Status: ']=true}
- local real,keptSeen={},0
- for _,l in ipairs(left) do
-  local kept=false
-  for k in pairs(KEPT) do if l:find(k,1,true) then kept=true end end
-  if kept then keptSeen=keptSeen+1 else real[#real+1]=l end
- end
+ -- The four labels help_action_first quotes ("Hide Nexus Panel", "No Echo
+ -- choice is showing.", "Auto ON — paused", "Status: ") are reviewed keys now
+ -- (owner follow-up v2), so nothing is kept back here.
+ local real=left
  -- Negative control: the scan does report plain English it is shown.
- check(keptSeen>0,'PSEUDO: the scan reports the kept English literals it meets ('..keptSeen..')')
+ local control=Leftovers({{text='Plain English control line',tag='control'}},foreign)
+ check(#control==1,'PSEUDO: the scan reports plain English it is shown (negative control: '..#control..')')
  if #real>0 then for i=1,math.min(#real,40) do print('UNTRANSLATED',real[i]) end end
  check(#real==0,'PSEUDO: every visible code-owned word passed the seam ('..#real..' left)')
  -- Chat lines and the Releases popup.

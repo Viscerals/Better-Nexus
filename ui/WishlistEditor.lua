@@ -457,9 +457,9 @@ function RolePicker.Render()
     if total-locked<=79 and total-locked>0 and locked<=6 then
         f.confirm:Enable()
     else f.confirm:Disable() end
-    -- Localization pending (help_action_first: Help quotes this label as a
-    -- UI source literal); the pair stays together in one language.
-    f.confirm:SetText(state.assign and "Confirm locked targets & assign" or "Confirm locked targets & edit")
+    -- Help quotes this pair; both are reviewed keys, so they stay in one
+    -- language together.
+    f.confirm:SetText(state.assign and T("editor.button.confirm_locked_assign") or T("editor.button.confirm_locked_edit"))
     local qualityNames=QualityNames()
     for n,view in ipairs(f.rows) do
         local index=(state.page-1)*RolePicker.visibleRows+n
@@ -686,7 +686,7 @@ function RolePicker.Ensure()
     -- Two lines of a 16 px face (the longest message wraps to two at 570 px).
     f.message=label("GameFontHighlightSmall",20,-430,570)
     f.message:SetHeight(44);f.message:SetJustifyV("TOP")
-    f.confirm=button("NexusWishlistRoleConfirm","Confirm locked targets & edit",210,-476,278,RolePicker.Accept)
+    f.confirm=button("NexusWishlistRoleConfirm",T("editor.button.confirm_locked_edit"),210,-476,278,RolePicker.Accept)
     f.cancel=button("NexusWishlistRoleCancel",T("editor.button.cancel"),498,-476,90,function()
         local pending=RolePicker.state
         if pending and pending.assign then

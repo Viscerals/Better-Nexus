@@ -1090,6 +1090,17 @@ Nexus.LocalizationEnglish = {
     ["log.button.select_page"] = "Select this page",
     ["support.button.copy_summary"] = "Copy summary",
     ["support.button.prepare_report_file"] = "Prepare report file",
+    -- integration2 (10)
+    ["editor.button.confirm_locked_assign"] = "Confirm locked targets & assign",
+    ["editor.button.confirm_locked_edit"] = "Confirm locked targets & edit",
+    ["editor.button.create_and_assign"] = "Create & assign",
+    ["editor.button.create_unassigned"] = "Create unassigned",
+    ["editor.button.save_and_assign"] = "Save & assign",
+    ["editor.button.save_changes"] = "Save changes",
+    ["panel.body.no_echo_choice"] = "No Echo choice is showing.",
+    ["panel.menu.hide_panel"] = "Hide Nexus Panel",
+    ["panel.status.auto_on_paused"] = "Auto ON \226\128\148 paused",
+    ["panel.tooltip.menu_status"] = "Status: {status}",
     -- journal (202)
     ["journal.body.assign_note"] = "Assigning by itself does not change any Saved Build.",
     ["journal.body.change_in_my_builds"] = "Change the assigned Wishlist in My Builds.",

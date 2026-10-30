@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 3356,
+    "declaredKeys": 3366,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -13279,6 +13279,123 @@
       "consumer": "button(frame, 156, -318, 160, ...)",
       "familySurface": "integration: Support report window (/nexus report) (button); family coverage PENDING review",
       "cohort": "fullui:integration"
+    },
+    {
+      "key": "editor.button.confirm_locked_assign",
+      "kind": "text",
+      "english": "Confirm locked targets & assign",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Imperative button: confirm which planned copies are for locked Echo slots, then assign. 'Locked targets' = copies planned for locked Echo slots (not card Freeze). Pair with confirm_locked_edit; Help quotes both.",
+      "consumer": "WishlistEditor RolePicker f.confirm",
+      "familySurface": "integration2: Wishlist editor, locked-target role picker (button); family coverage PENDING review",
+      "cohort": "fullui:integration2"
+    },
+    {
+      "key": "editor.button.confirm_locked_edit",
+      "kind": "text",
+      "english": "Confirm locked targets & edit",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Imperative button: confirm which planned copies are for locked Echo slots, then keep editing. Pair with confirm_locked_assign; Help quotes both.",
+      "consumer": "WishlistEditor RolePicker f.confirm",
+      "familySurface": "integration2: Wishlist editor, locked-target role picker (button); family coverage PENDING review",
+      "cohort": "fullui:integration2"
+    },
+    {
+      "key": "editor.button.create_and_assign",
+      "kind": "text",
+      "english": "Create & assign",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Imperative button for a new or imported plan: create it and assign it. It is not a blank-plan button. Help quotes it by name.",
+      "consumer": "WishlistRenderer M.ApplyAction / M.ConfirmLabel",
+      "familySurface": "integration2: Wishlist editor, apply row for a new or imported plan; and the create confirmation's accept button (button); family coverage PENDING review",
+      "cohort": "fullui:integration2"
+    },
+    {
+      "key": "editor.button.create_unassigned",
+      "kind": "text",
+      "english": "Create unassigned",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Imperative button: create the Wishlist but do not assign it to anything. Help quotes it by name.",
+      "consumer": "WishlistRenderer EnsureIntentControls / M.ApplyAction / M.SecondaryAction / M.ConfirmLabel",
+      "familySurface": "integration2: Wishlist editor, apply row (secondary button beside an assigning action) (button); family coverage PENDING review",
+      "cohort": "fullui:integration2"
+    },
+    {
+      "key": "editor.button.save_and_assign",
+      "kind": "text",
+      "english": "Save & assign",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Imperative button: save and assign. '&' joins two actions done together. Help quotes it by name.",
+      "consumer": "WishlistRenderer M.ApplyAction / M.ConfirmLabel",
+      "familySurface": "integration2: Wishlist editor, apply row; and its update confirmation's accept button (button); family coverage PENDING review",
+      "cohort": "fullui:integration2"
+    },
+    {
+      "key": "editor.button.save_changes",
+      "kind": "text",
+      "english": "Save changes",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Imperative button: save changes to the existing Wishlist. Paired with 'Save & assign' (saves and makes it the target). Also the accept button of the confirmation it opens. Help quotes it by name.",
+      "consumer": "WishlistRenderer M.ApplyAction / M.SecondaryAction / M.ConfirmLabel",
+      "familySurface": "integration2: Wishlist editor, apply row; and its update confirmation's accept button (button); family coverage PENDING review",
+      "cohort": "fullui:integration2"
+    },
+    {
+      "key": "panel.body.no_echo_choice",
+      "kind": "text",
+      "english": "No Echo choice is showing.",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "Plain statement: there is no Echo choice (offer board) on screen now. Not an error and not 'zero offers'. Help quotes it by name.",
+      "consumer": "roll body text in ApplyModel",
+      "familySurface": "integration2: Main panel, roll body (body); family coverage PENDING review",
+      "cohort": "fullui:integration2"
+    },
+    {
+      "key": "panel.menu.hide_panel",
+      "kind": "text",
+      "english": "Hide Nexus Panel",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "Imperative menu row: hide the Nexus main panel. It does not turn Nexus off or pause it. Help quotes it by name. Same words as its hover title (panel.tooltip.hide_panel_title), different role.",
+      "consumer": "M.MoreMenuItems Add({ text = ... })",
+      "familySurface": "integration2: Main panel, Options menu, Panel section (menu); family coverage PENDING review",
+      "cohort": "fullui:integration2"
+    },
+    {
+      "key": "panel.status.auto_on_paused",
+      "kind": "text",
+      "english": "Auto ON — paused",
+      "placeholders": [],
+      "group": "panel",
+      "meaning": "Status line: Auto is switched ON but is not acting right now. Keep 'Auto ON' as the same switch label used elsewhere (no restyling to 'Auto: On'); the dash separates the switch state from the hold. Help quotes it by name.",
+      "consumer": "statusText:SetText in ApplyModel",
+      "familySurface": "integration2: Main panel, roll heading status (status); family coverage PENDING review",
+      "cohort": "fullui:integration2"
+    },
+    {
+      "key": "panel.tooltip.menu_status",
+      "kind": "template",
+      "english": "Status: {status}",
+      "placeholders": [
+        {
+          "name": "status",
+          "type": "text",
+          "meaning": "the current status sentence, already presented by UserText in the active language (or raw when it has no presentation); inserted verbatim"
+        }
+      ],
+      "resultLimitBytes": 1100,
+      "group": "panel",
+      "meaning": "Label and value: 'Status:' followed by the current status sentence. Keep the label short; the value is inserted by code. Help quotes 'Status: ' by name.",
+      "consumer": "Options menu button OnEnter (EnsureFrame)",
+      "familySurface": "integration2: Main panel, Options button hover (tooltip); family coverage PENDING review",
+      "cohort": "fullui:integration2"
     },
     {
       "key": "journal.body.assign_note",
@@ -45121,7 +45238,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 3356,
+    "totalKeys": 3366,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -45134,7 +45251,8 @@
       "panel": 380,
       "wishlist": 381,
       "orb": 436,
-      "guide": 700
+      "guide": 700,
+      "integration2": 10
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }
