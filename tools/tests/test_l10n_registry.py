@@ -23,9 +23,12 @@ variants of the real bytes are refused.
 S8 adds the required-CI static consumer binding of the current repository
 through consumer_binding_report: the real registry inputs, both TOCs and every
 Lua file they load bind all 28 declared keys (23 direct, 5 mapped) with no
-problem, and in-memory mutants of the real bytes (a removed last consumer
-with fakes retained, a broken map chain, a wrong method kind, a TOC or
-source omission, hash drift and path collisions) fail the same gate.
+problem, each counted site with a proven output, and in-memory mutants of
+the real bytes (a removed last consumer with fakes retained, a broken map
+chain, a wrong method kind, a TOC or source omission, hash drift and path
+collisions) fail the same gate. Review fix 1 adds discarded, overwritten,
+compared and unused-helper results, review fix 2 a dispatcher overwritten
+through a module alias, and review fix 3 the closed two-TOC contract.
 
 Synthetic offline evidence only: no Lua runs, and this is not fluent, human
 or native evidence. Python 3.9+, standard library only. Registered in
@@ -1638,7 +1641,7 @@ DISPATCHER = "Nexus.UserText.Message"
 EXPECTED_CONSUMER_CODES = (
     "consumer-input-structure", "consumer-path", "consumer-duplicate-path",
     "consumer-hash-mismatch", "consumer-length-mismatch", "consumer-toc-required",
-    "consumer-toc-not-utf8", "consumer-toc-entry", "consumer-toc-duplicate",
+    "consumer-toc-unknown", "consumer-toc-not-utf8", "consumer-toc-entry", "consumer-toc-duplicate",
     "consumer-source-missing", "consumer-source-unlisted", "consumer-registry-unloaded",
     "consumer-registry-order", "consumer-registry-conflict",
 )
@@ -1751,13 +1754,36 @@ def assert_binding_receipt(test, receipt):
             "state": "UNCLASSIFIED", "families": [],
             "familySurface": ("PENDING: shared reason text; the families and surfaces "
                               "that show it are not classified")})
+    # Review fix 1 (SPEC-147-S8-1): a counted site is one whose localization
+    # result reaches an output, never merely a call location.
+    for row in receipt["keys"]:
+        for site in row["sites"]:
+            test.assertTrue(site["outputs"], (row["key"], site))
     test.assertEqual(len(receipt["mapChains"]), 1)
     chain = receipt["mapChains"][0]
     test.assertEqual((chain["wrapper"]["name"], chain["wrapper"]["method"],
                       chain["dispatcher"]), ("LocalizedReason", "Text", DISPATCHER))
-    test.assertTrue(chain["externalCallers"])
+    test.assertEqual((chain["established"], chain["wrapperReturnsResult"]), (True, True))
+    test.assertTrue(chain["outputs"])
     test.assertEqual(sorted(chain["boundKeys"]), sorted(MAPPED_KEYS))
     return receipt
+
+
+_S8_CATALOG, _S8_FILES = [], []
+
+
+def s8_catalog():
+    """One loaded tool for every S8 class, so its parse memo is shared."""
+    if not _S8_CATALOG:
+        _S8_CATALOG.append(load_catalog())
+    return _S8_CATALOG[0]
+
+
+def s8_files():
+    """The current input files, read once for every S8 class (callers copy)."""
+    if not _S8_FILES:
+        _S8_FILES.append(current_files())
+    return dict(_S8_FILES[0])
 
 
 class ConsumerBindingTests(unittest.TestCase):
@@ -1766,8 +1792,8 @@ class ConsumerBindingTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.catalog = load_catalog()
-        cls.files = current_files()
+        cls.catalog = s8_catalog()
+        cls.files = s8_files()
         cls.report = staticmethod(cls.catalog.consumer_binding_report)
 
     def receipt(self, files, **options):
@@ -1848,9 +1874,25 @@ class ConsumerBindingTests(unittest.TestCase):
         self.assertEqual({site["path"] for site in rows[CHARGE]["sites"]}, {READOUT})
         for key in MAPPED_KEYS:
             self.assertEqual({site["path"] for site in rows[key]["sites"]}, {USER_TEXT})
-        # The secondary Hub menu wrapper is bound separately from the direct calls.
-        draft = rows["panel.tooltip.create_wishlist_draft"]["sites"]
-        self.assertEqual(sorted(site["site"] for site in draft), ["direct-call", "wrapper-call"])
+        # Review fix 1 oracle correction: the Hub menu wrapper returns its
+        # localization result, but that result only fills tooltipText of an item
+        # for the stock dropdown, which is outside the loaded source. Its site is
+        # therefore listed as unproven, never counted; the direct tooltip call binds.
+        row = rows["panel.tooltip.create_wishlist_draft"]
+        self.assertEqual([site["site"] for site in row["sites"]], ["direct-call"])
+        self.assertEqual([(site["site"], site["reason"]) for site in row["unprovenSites"]],
+                         [("wrapper-call", "output-not-reached")])
+        self.assertEqual(sum(len(row["unprovenSites"]) for row in receipt["keys"]), 5)
+        # The proven outputs of the evidenced chains.
+        outputs = {(output["path"], output["output"])
+                   for site in rows[CHARGE]["sites"] for output in site["outputs"]}
+        self.assertEqual(outputs, {(PANEL, "SetText")})
+        options = {(output["path"], output["output"]) for site
+                   in rows["panel.button.options"]["sites"] for output in site["outputs"]}
+        self.assertEqual(options, {(PANEL, "SetText"), (PANEL, "AddLine")})
+        chain = receipt["mapChains"][0]
+        self.assertIn(("core/Main.lua", "AddMessage"),
+                      {(output["path"], output["output"]) for output in chain["outputs"]})
         self.assertEqual(receipt["counts"]["keys"], 28)
         self.assertEqual(receipt["completeness"]["established"], False)
         for family in self.catalog.validate_registry_catalog_data(
@@ -1885,21 +1927,33 @@ class ConsumerBindingTests(unittest.TestCase):
         both = edit(one, second, b'\n        needLabel:SetText("Still needed")\n')
         receipt = self.gate_fails(with_file(self.files, PANEL, both))
         self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
-        # A key whose direct call goes keeps its Hub menu wrapper consumer ...
+        # Review fix 1 oracle correction: without its direct tooltip call, the
+        # draft key is no longer kept by the Hub menu wrapper, whose result only
+        # reaches the stock dropdown outside the loaded source.
         key = "panel.tooltip.create_wishlist_draft"
         direct = (b'GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.create_wishlist_draft"),'
                   b' 0.75, 0.75, 0.75, true)')
         no_direct = edit(panel, direct, b'GameTooltip:AddLine("draft", 0.75, 0.75, 0.75, true)')
+        receipt = self.gate_fails(with_file(self.files, PANEL, no_direct))
+        self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+        self.assertEqual([site["site"] for site in self.binding(receipt, key)["unprovenSites"]],
+                         ["wrapper-call"])
+        # A secondary wrapper consumer whose result reaches the tooltip keeps it ...
+        shown = edit(panel, direct, b'local function DraftLine(key) return Nexus.Localization.Text'
+                     b'(key) end; GameTooltip:AddLine(DraftLine("panel.tooltip.create_wishlist_draft"),'
+                     b' 0.75, 0.75, 0.75, true)')
         receipt = assert_current_bindings(self, self.catalog,
-                                          binding_args(with_file(self.files, PANEL, no_direct)))
+                                          binding_args(with_file(self.files, PANEL, shown)))
         self.assertEqual([site["site"] for site in self.binding(receipt, key)["sites"]],
                          ["wrapper-call"])
-        # ... until the wrapper no longer calls the localization seam.
-        wrapper = (b'local function Text(key) return L and type(L.Text) == "function"'
-                   b' and (L.Text(key)) or nil end')
-        broken = edit(no_direct, wrapper, wrapper.replace(b"(L.Text(key))", b"(M.Text(key))"))
-        receipt = self.gate_fails(with_file(self.files, PANEL, broken))
+        # ... until the wrapper discards that result.
+        discarded = edit(shown, b"return Nexus.Localization.Text(key) end",
+                         b'Nexus.Localization.Text(key); return "draft" end')
+        receipt = self.gate_fails(with_file(self.files, PANEL, discarded))
         self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+        self.assertEqual([site["reason"] for site in self.binding(receipt, key)["unprovenSites"]
+                          if site["site"] == "wrapper-call" and site["wrapper"]["name"]
+                          == "DraftLine"], ["wrapper-result-not-returned"])
 
     def test_c4_mapped_chain_breaks_fail_the_gate(self):
         user = self.files[USER_TEXT]
@@ -1969,8 +2023,10 @@ class ConsumerBindingTests(unittest.TestCase):
         error = self.refuse(unlisted, "consumer-source-unlisted")
         self.assertEqual(error.path, PANEL)
         # Neither loaded nor supplied: the inventory shrinks and the gate fails.
+        # The 22 Panel keys lose their calls and, since review fix 1, the charge
+        # template its only output, the Panel charge widget: 23 unbound.
         receipt = self.gate_fails(with_file(self.files, "Nexus.toc", no_panel))
-        self.assertEqual(receipt["counts"]["UNBOUND"], 22)
+        self.assertEqual(receipt["counts"]["UNBOUND"], 23)
         # Loaded but not supplied: refused, never shrunk.
         error = self.refuse(binding_args(self.files, omit=(READOUT,)), "consumer-source-missing")
         self.assertEqual((error.path, error.subject), (READOUT, "Nexus.toc"))
@@ -2080,7 +2136,10 @@ class ConsumerBindingTests(unittest.TestCase):
                 self.assertEqual([problem["construct"] for problem in
                                   self.problems(receipt, "binding-unresolved")], [construct])
         # A supported alias of the real seam does bind.
-        alias = b' do local L2 = Nexus.Localization; L2.Text("panel.heading.progress") end'
+        # Review fix 1 oracle correction: the alias call must also show its
+        # result; a discarded alias call is no consumer.
+        alias = (b' do local L2 = Nexus.Localization; progressLabel:SetText('
+                 b'L2.Text("panel.heading.progress")) end')
         changed = edit(panel, PROGRESS_FAKES, PROGRESS_FAKE_CODE + alias + PROGRESS_FAKE_COMMENT)
         receipt = assert_current_bindings(self, self.catalog,
                                           binding_args(with_file(self.files, PANEL, changed)))
@@ -2119,9 +2178,16 @@ class ConsumerBindingTests(unittest.TestCase):
         self.assertEqual(self.binding(receipt, CHARGE)["binding"], "UNBOUND")
 
     def test_c11_lf_and_crlf_bind_alike_with_exact_hashes(self):
+        # Every file on a binding or output chain, both TOCs and the registry
+        # Lua sources change representation; the others keep their bytes.
+        chained = set(INPUTS + CONSUMER_TOCS) | {PANEL, READOUT, USER_TEXT, "core/Main.lua",
+                                                 "core/WishlistController.lua",
+                                                 "ui/JournalTab.lua", "ui/WishlistEditor.lua",
+                                                 "companion/NexusSupport/Storage.lua"}
         receipts = {}
         for name in ("lf", "crlf"):
-            files = {path: representations(data)[name] if path.endswith((".lua", ".toc")) else data
+            files = {path: representations(data)[name]
+                     if path in chained and path.endswith((".lua", ".toc")) else data
                      for path, data in self.files.items()}
             receipts[name] = assert_current_bindings(self, self.catalog, binding_args(files))
             for row in receipts[name]["sources"]:
@@ -2153,6 +2219,20 @@ class ConsumerBindingTests(unittest.TestCase):
             self.assertEqual(self.report(*args), expected)
         finally:
             blocked()
+        # A caller that rewrites every nested value of a returned receipt
+        # cannot change the next receipt through the parse memo.
+        snapshot = json.dumps(expected, sort_keys=True)
+        stack = [self.report(*args)]
+        while stack:
+            value = stack.pop()
+            items = value.items() if type(value) is dict else enumerate(value) \
+                if type(value) is list else ()
+            for index, item in list(items):
+                if type(item) in (dict, list):
+                    stack.append(item)
+                else:
+                    value[index] = "poisoned"
+        self.assertEqual(json.dumps(self.report(*args), sort_keys=True), snapshot)
         # The earlier seams give the same results with the binding seam present.
         registry = args[:5]
         self.assertEqual(self.catalog.registry_catalog_report(*registry)["registry"]
@@ -2183,15 +2263,163 @@ class ConsumerBindingTests(unittest.TestCase):
             self.receipt(changed)
         self.assertEqual((raised.exception.code, raised.exception.key), ("registry-limit", CHARGE))
 
+    def test_c15_a_localization_result_must_reach_an_output(self):
+        # Review fix 1 (SPEC-147-S8-1): a call whose result is overwritten,
+        # discarded or only reaches an unused helper never binds.
+        user, key = self.files[USER_TEXT], "panel.heading.progress"
+        call = b"local text,source=localization.Text(key)"
+        receipt = self.gate_fails(with_file(self.files, USER_TEXT, edit(
+            user, call, call + b"\n        text=code")))
+        self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
+                         list(MAPPED_KEYS))
+        self.assertEqual(receipt["mapChains"][0]["wrapperReturnsResult"], False)
+        self.assertEqual({site["reason"] for key in MAPPED_KEYS
+                          for site in self.binding(receipt, key)["unprovenSites"]},
+                         {"wrapper-result-not-returned"})
+        discard = (b'local function SpecProgress(key) Nexus.Localization.Text(key); return '
+                   b'"Progress" end; progressLabel:SetText(SpecProgress("panel.heading.progress"))')
+        receipt = self.gate_fails(with_file(self.files, PANEL, edit(
+            self.files[PANEL], PROGRESS_CALL, discard)))
+        self.assertEqual([(problem["code"], problem["key"]) for problem in receipt["problems"]],
+                         [("binding-unbound", key)])
+        self.assertEqual([site["reason"] for site in self.binding(receipt, key)["unprovenSites"]],
+                         ["wrapper-result-not-returned"])
+        # A result only compared, never shown, is no output either; shown
+        # through 'and'/'or' and '..' it is.
+        compared = (b'progressLabel:SetText(Nexus.Localization.Text("panel.heading.progress") '
+                    b'== "x" and "Yes" or "No")')
+        receipt = self.gate_fails(with_file(self.files, PANEL, edit(
+            self.files[PANEL], PROGRESS_CALL, compared)))
+        self.assertEqual([site["reason"] for site in self.binding(receipt, key)["unprovenSites"]],
+                         ["output-not-reached"])
+        joined = (b'progressLabel:SetText(ready and ("> " .. Nexus.Localization.Text('
+                  b'"panel.heading.progress")) or "")')
+        assert_current_bindings(self, self.catalog, binding_args(with_file(
+            self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL, joined))))
+        # All seven real dispatcher callers disconnected: the mapped keys go,
+        # and an unused helper that discards a Message result does not restore them.
+        callers = {"core/WishlistController.lua": (b"Nexus.UserText.Message(message)",),
+                   READOUT: (b"Nexus.UserText.Message(model.text)",),
+                   PANEL: (b"userText.Message(raw)", b"Nexus.UserText.Message(reason)"),
+                   "ui/JournalTab.lua": (b"Nexus.UserText.Message(text)",),
+                   "ui/WishlistEditor.lua": (b"Nexus.UserText.Message(message)",),
+                   "core/Main.lua": (b"Nexus.UserText.Message(msg)",)}
+        changed = dict(self.files)
+        for path, needles in callers.items():
+            for needle in needles:
+                changed[path] = edit(changed[path], needle,
+                                     needle.replace(b".Message(", b".MessageDisconnected("))
+        receipt = self.gate_fails(changed)
+        self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
+                         list(MAPPED_KEYS))
+        changed["core/WishlistController.lua"] += (
+            b'\nlocal function SpecUnusedReasonCall() local ignored=Nexus.UserText.Message('
+            b'"STORE_PENDING"); return "constant" end\n')
+        receipt = self.gate_fails(changed)
+        self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
+                         list(MAPPED_KEYS))
+        self.assertEqual(receipt["mapChains"][0]["established"], False)
+        # One real caller restored with its chat output binds them again.
+        restored = with_file(changed, "core/Main.lua", self.files["core/Main.lua"])
+        receipt = assert_current_bindings(self, self.catalog, binding_args(restored))
+        self.assertEqual({(output["path"], output["output"])
+                          for output in receipt["mapChains"][0]["outputs"]},
+                         {("core/Main.lua", "AddMessage")})
+
+    def test_c16_a_module_alias_overwriting_the_dispatcher_is_unresolved(self):
+        # Review fix 2 (SPEC-147-S8-2): a field written through a local alias
+        # of the exported module is a definition of that module's field.
+        user = self.files[USER_TEXT]
+        overwrite = (b'\nlocal userTextAlias=T\nuserTextAlias.Message=function(value) return '
+                     b'tostring(value or "") end\n')
+        receipt = self.gate_fails(with_file(self.files, USER_TEXT, user + overwrite))
+        self.assertEqual([(problem["construct"], problem["detail"]) for problem
+                          in self.problems(receipt, "binding-unresolved")],
+                         [("dispatcher", "T.Message has 2 definitions, directly or through a "
+                                         "local alias")])
+        self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
+                         list(MAPPED_KEYS))
+        for name, tail, detail in (
+                ("escaping module", b'\nlocal function Keep(t) return t end Keep(T)\n',
+                 "the module table T is assigned again, written through a computed key or "
+                 "escapes its file"),
+                ("computed field", b'\nlocal fieldName="Message" T[fieldName]=tostring\n',
+                 "the module table T is assigned again, written through a computed key or "
+                 "escapes its file"),
+                ("exported path assigned", b'\nNexus.UserText.Message=tostring\n',
+                 "Nexus.UserText or Nexus.UserText.Message is assigned elsewhere")):
+            with self.subTest(form=name):
+                receipt = self.gate_fails(with_file(self.files, USER_TEXT, user + tail))
+                self.assertEqual([problem["detail"] for problem
+                                  in self.problems(receipt, "binding-unresolved")], [detail])
+        # A same-named alias in another function is a different local.
+        benign = (b'\nlocal function SpecOtherScope() local localization=Nexus.Other; '
+                  b'localization={}; return localization.Text("not.a.binding") end\n')
+        assert_current_bindings(self, self.catalog,
+                                binding_args(with_file(self.files, USER_TEXT, user + benign)))
+
+    def test_c17_both_product_tocs_are_required(self):
+        # Review fix 3 (SPEC-147-S8-3): the companion TOC and its source cannot
+        # disappear together; a TOC outside the product contract is refused.
+        support, storage = CONSUMER_TOCS[1], "companion/NexusSupport/Storage.lua"
+        paired = dict(self.files)
+        del paired[support], paired[storage]
+        args = binding_args(paired)
+        self.assertEqual((len(args[5]), len(args[6])), (1, 99))
+        self.assertEqual(self.refuse(args, "consumer-toc-required").path, support)
+        alone = dict(self.files)
+        del alone[support]
+        self.assertEqual(self.refuse(binding_args(alone, extra=((storage, self.files[storage]),)),
+                                     "consumer-toc-required").path, support)
+        self.assertEqual(self.refuse(binding_args(self.files, omit=(storage,)),
+                                     "consumer-source-missing").path, storage)
+        args = binding_args(self.files)
+        args[5] = args[5] + [record("tools/Other.toc", b"Other.lua\n")]
+        self.assertEqual(self.refuse(args, "consumer-toc-unknown").path, "tools/Other.toc")
+        # A genuine addition to a product TOC is derived from its bytes.
+        added = "companion/NexusSupport/Extra.lua"
+        grown = with_file(self.files, support, self.files[support] + b"Extra.lua\n")
+        grown[added] = b"local x = 1\n"
+        receipt = assert_current_bindings(self, self.catalog, binding_args(grown))
+        self.assertEqual(len(receipt["sources"]), 101)
+        self.assertEqual(receipt["tocs"][1]["loaded"], [storage, added])
+        self.refuse(binding_args(with_file(self.files, support, grown[support])),
+                    "consumer-source-missing")
+
+    def test_c18_accurately_rehashed_benign_source_changes_stay_admissible(self):
+        panel = self.files[PANEL] + b"\r\n-- A benign comment; the Panel semantics are unchanged.\r\n"
+        receipt = assert_current_bindings(self, self.catalog,
+                                          binding_args(with_file(self.files, PANEL, panel)))
+        row = next(row for row in receipt["sources"] if row["path"] == PANEL)
+        self.assertEqual((row["sha256"], row["byteLength"]),
+                         (hashlib.sha256(panel).hexdigest(), len(panel)))
+        self.assertNotEqual(row["sha256"], hashlib.sha256(self.files[PANEL]).hexdigest())
+
 
 class ConsumerCommandLineTests(unittest.TestCase):
     """S8: --consumers reads both TOCs and every Lua file they load from the
     confined root and prints one consumers record; the earlier modes are
     unchanged."""
 
-    def run_cli(self, *args):
+    def run_process(self, *args):
         return subprocess.run([sys.executable, "-B", str(CATALOG_TOOL), *[str(a) for a in args]],
                               capture_output=True, cwd=str(ROOT))
+
+    def run_cli(self, *args):
+        """main() of the shared loaded tool in this process, with the exact
+        stdout and stderr bytes it writes; one real process run is kept in
+        test_repository_root, and the parse memo keeps the rest within the
+        registered time budget."""
+        import io
+        out, err = io.TextIOWrapper(io.BytesIO()), io.TextIOWrapper(io.BytesIO())
+        saved = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = out, err
+        try:
+            code = s8_catalog().main([str(arg) for arg in args])
+        finally:
+            sys.stdout, sys.stderr = saved
+        return subprocess.CompletedProcess(args, code, out.buffer.getvalue(),
+                                           err.buffer.getvalue())
 
     def copy_root(self, root, files):
         for relative, value in files.items():
@@ -2200,12 +2428,29 @@ class ConsumerCommandLineTests(unittest.TestCase):
             target.write_bytes(value)
 
     def test_repository_root(self):
+        # main() on the actual repository root reads both TOCs and all 100
+        # loaded files itself and writes exactly the API receipt.
         run = self.run_cli("--consumers")
         self.assertEqual((run.returncode, run.stderr), (0, b""))
         record = json.loads(run.stdout)
         self.assertEqual((record["record"], record["exitCode"]), ("consumers", 0))
-        expected = load_catalog().consumer_binding_report(*binding_args(current_files()))
+        expected = s8_catalog().consumer_binding_report(*binding_args(s8_files()))
         self.assertEqual(record["consumers"], json.loads(json.dumps(expected)))
+        self.assertEqual(len(record["consumers"]["sources"]), 100)
+        # A real process on a small confined root: the same entry point, exit
+        # status and one record, with unbound keys there (exit 2).
+        files = s8_files()
+        small = {path: files[path] for path in INPUTS + CONSUMER_TOCS[1:]
+                 + ("companion/NexusSupport/Storage.lua",)}
+        small["Nexus.toc"] = b"".join(line for line in files["Nexus.toc"].splitlines(True)
+                                      if b"Localization" in line or line.startswith(b"#"))
+        with tempfile.TemporaryDirectory() as temp:
+            self.copy_root(Path(temp), small)
+            process = self.run_process("--root", temp, "--consumers")
+            self.assertEqual((process.returncode, process.stderr), (2, b""))
+            self.assertEqual(process.stdout, self.run_cli("--root", temp, "--consumers").stdout)
+            receipt = json.loads(process.stdout)["consumers"]
+            self.assertEqual((len(receipt["sources"]), receipt["counts"]["UNBOUND"]), (4, 28))
         held = self.run_cli("--consumers", "--require-complete")
         self.assertEqual((held.returncode, json.loads(held.stdout)["exitCode"]), (1, 1))
         for args, code in ((("--consumers", "--consumers"), "argument-duplicate"),
@@ -2217,7 +2462,7 @@ class ConsumerCommandLineTests(unittest.TestCase):
                 self.assertEqual(json.loads(run.stderr)["code"], code)
 
     def test_mutated_root_fails_only_in_consumers_mode(self):
-        files = current_files()
+        files = s8_files()
         files[PANEL] = edit(files[PANEL], PROGRESS_CALL, PROGRESS_FAKES)
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -2236,7 +2481,7 @@ class ConsumerCommandLineTests(unittest.TestCase):
             self.assertEqual(after, before)
 
     def test_unsafe_or_missing_listed_source_fails(self):
-        files = current_files()
+        files = s8_files()
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "repo"
             self.copy_root(root, files)

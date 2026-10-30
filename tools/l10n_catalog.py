@@ -86,12 +86,14 @@ Static consumer binding seam (S8 of #147, after the provenance seam):
 
     consumer_binding_report(the same five byte strings, toc_records,
                             source_records) -> dict
-        a read-only binding receipt over the TOC-loaded Lua source: each
-        declared key is DIRECT_LITERAL_CONSUMER, MAPPED_TO_CONSUMER or
-        UNBOUND by a bounded syntactic check that never executes Lua, with
-        unresolved, orphan, kind and mutation problems kept explicit; valid
-        only without any problem. Each record is {"path", "sha256",
-        "byteLength", "data"}, and the claims are checked against the data.
+        a read-only binding receipt over the Lua source the two product
+        TOCs load: each declared key is DIRECT_LITERAL_CONSUMER,
+        MAPPED_TO_CONSUMER or UNBOUND by a bounded syntactic check that never
+        executes Lua and counts a site only when its result reaches an
+        output, with unresolved, orphan, kind and mutation problems kept
+        explicit; valid only without any problem. Each record is {"path",
+        "sha256", "byteLength", "data"}, and the claims are checked against
+        the data.
     CatalogConsumerError
         .code (stable, one of CONSUMER_CODES), .path, .line and .subject
 
@@ -2582,8 +2584,10 @@ def _cli_provenance(receipt, toc, require_complete):
 # also has a genuine static consumer. It takes the five registry-bound byte
 # strings, a record per TOC and a record per Lua file those TOCs load. Each
 # record is {"path", "sha256", "byteLength", "data"}: the claimed digest and
-# length are checked against the exact data, never normalized. The TOC entries
-# and the source records must be the same set of safe relative paths, the
+# length are checked against the exact data, never normalized. The TOC
+# records must be exactly the two product TOCs, Nexus.toc and
+# companion/NexusSupport/NexusSupport.toc; the TOC entries and the source
+# records must be the same set of safe relative paths, the
 # registry Lua sources must be loaded by Nexus.toc in their runtime order and
 # be the same bytes as the registry inputs, and a failure there raises
 # CatalogConsumerError (CONSUMER_CODES) instead of shrinking the inventory.
@@ -2602,9 +2606,22 @@ def _cli_provenance(receipt, toc, require_complete):
 # - map-value: a value of a read-only local table of literal string pairs,
 #   dispatched as wrapper(MAP[v], ...) by the sole return of
 #   "if MAP[v] then ... end" in the body of an exported module function
-#   (function T.Name, with Nexus.<Module> = T) that a call elsewhere reaches
-#   by its Nexus path. Only an earlier "if OTHER[v] then" guard over another
-#   such table may precede it; the codes it holds shadow the map's entries.
+#   (function T.Name, with Nexus.<Module> = T, defined once). Only an earlier
+#   "if OTHER[v] then" guard over another such table may precede it; the
+#   codes it holds shadow the map's entries.
+#
+# A site counts only when its localization result reaches an output (review
+# fix 1): a may-flow path in _UnitFlow, from the call through parens, the
+# text-carrying operands of and/or/.., bindings every definition of which
+# carries the same proof, function returns into their resolved calls, field
+# channels and parameters, ends at argument 1 of SetText, AddLine or
+# AddMessage or an argument of print. A wrapper must return its own
+# consumer-method result. A discarded, overwritten or merely compared result,
+# or one reaching only an unused helper or a stock widget outside the loaded
+# source, is listed in unprovenSites and never counted. A module table is
+# one identity with its local aliases (review fix 2): a field written through
+# an alias is another definition, and a module table that escapes its file,
+# is reassigned or is written through a computed key resolves no function.
 #
 # Comments, strings that merely contain call text, data and declaration
 # tables, Has and Kind queries and Text methods of other objects never bind.
@@ -2624,7 +2641,7 @@ CONSUMER_SCHEMA_VERSION = 1
 CONSUMER_CODES = (
     'consumer-input-structure', 'consumer-path', 'consumer-duplicate-path',
     'consumer-hash-mismatch', 'consumer-length-mismatch', 'consumer-toc-required',
-    'consumer-toc-not-utf8', 'consumer-toc-entry', 'consumer-toc-duplicate',
+    'consumer-toc-unknown', 'consumer-toc-not-utf8', 'consumer-toc-entry', 'consumer-toc-duplicate',
     'consumer-source-missing', 'consumer-source-unlisted', 'consumer-registry-unloaded',
     'consumer-registry-order', 'consumer-registry-conflict',
 )
@@ -2651,9 +2668,14 @@ _CONSUMER_MODE = ('opt-in read-only static binding receipt over the exact suppli
                   'strict catalog verdict must be valid first')
 _HASH_BASIS = ('each sha256 and byteLength is of the exact supplied bytes, LF or CRLF as given; '
                'nothing is normalized and no Git object is read')
-_BINDING_RULE = ('DIRECT_LITERAL_CONSUMER: a direct-call or wrapper-call site. '
-                 'MAPPED_TO_CONSUMER: only map-value sites. UNBOUND: no site; a literal lead, '
-                 'comment, declaration or unrelated Text method never binds')
+_BINDING_RULE = ('DIRECT_LITERAL_CONSUMER: a direct-call or wrapper-call site whose result '
+                 'reaches an output. MAPPED_TO_CONSUMER: only map-value sites that do. UNBOUND: '
+                 'no such site; a literal lead, comment, declaration, unrelated Text method or '
+                 'a discarded or overwritten result never binds')
+_OUTPUT_RULE = ('a site counts only when its localization result may flow, by the syntactic '
+                'rules of _UnitFlow, into argument 1 of SetText, AddLine or AddMessage or an '
+                'argument of print; a site that does not is listed in unprovenSites and not '
+                'counted. This is a static path, not proof that it runs or is displayed')
 _FAMILY_RULE = ('binding and family classification are independent: DECLARED names the window '
                 'families whose adoptedKeys hold the key, UNCLASSIFIED none; neither adopts a '
                 'key or establishes family coverage')
@@ -2664,6 +2686,9 @@ _CONSUMER_LIMITS = (
     'a localization table passed to another function, stored in a global or a table field, or '
     'reached through a computed name is not followed',
     'map dispatch is accepted only in the exact guarded shape described for this seam',
+    'result flow is may-flow and flow-insensitive: a field name is one channel across every '
+    'table, values in globals, computed-key writes and method calls are not followed, and an '
+    'output outside the loaded source (such as the stock dropdown menu) is not an output',
     'Lua 5.1 lexical and grammar rules; LuaJIT and Lua 5.2 additions are refused',
 )
 _CONSUMER_INPUT_BINDING = ('exact bytes read once from the resolved root for the registry inputs, '
@@ -2750,7 +2775,12 @@ def _consumer_inputs(registry, toc_records, source_records):
     for path, _ in tocs + sources:
         _consumer(path.casefold() not in seen, 'consumer-duplicate-path', path)
         seen.add(path.casefold())
-    _consumer(any(path == _MAIN_TOC for path, _ in tocs), 'consumer-toc-required', _MAIN_TOC)
+    # The closed product contract: exactly the two product TOCs, each present.
+    present = [path for path, _ in tocs]
+    for toc in _CONSUMER_TOCS:
+        _consumer(toc in present, 'consumer-toc-required', toc)
+    for toc in present:
+        _consumer(toc in _CONSUMER_TOCS, 'consumer-toc-unknown', toc)
     listed, folded = {}, set()
     for toc, data in tocs:
         for path, number in _toc_entries(toc, data):
@@ -2851,11 +2881,17 @@ def _lua_tokens(text):
 
 class _Node:
     """One syntax-tree node: its kind, the position of its first token and
-    the fields of that kind."""
+    the fields of that kind (slots keep large trees light)."""
+
+    __slots__ = ('kind', 'line', 'column', 'args', 'binding', 'body', 'call', 'clauses', 'cond',
+                 'expr', 'exprs', 'fields', 'func', 'key', 'method', 'name', 'names', 'obj',
+                 'operands', 'ops', 'orelse', 'params', 'start', 'step', 'stop', 'target',
+                 'targets', 'value', 'var', 'vararg')
 
     def __init__(self, kind, at, **fields):
         self.kind, self.line, self.column = kind, at.line, at.column
-        self.__dict__.update(fields)
+        for name, value in fields.items():
+            setattr(self, name, value)
 
 
 class _LuaParser:
@@ -3201,13 +3237,15 @@ def _descendants(nodes, functions=False):
 
 class _Binding:
     """One local name: how it was declared, the expression it was declared
-    with, whether it is assigned again, how it is used and which fields are
-    defined through it."""
+    with, the name nodes that assign it again and every use as (kind,
+    name node)."""
+
+    __slots__ = ('node', 'kind', 'value', 'owner', 'index', 'assigned', 'uses')
 
     def __init__(self, node, kind, value=None, owner=None, index=None):
         self.node, self.kind, self.value = node, kind, value
         self.owner, self.index = owner, index
-        self.assigned, self.uses, self.fields = [], [], {}
+        self.assigned, self.uses = [], []
 
 
 class _Resolver:
@@ -3233,7 +3271,7 @@ class _Resolver:
         binding = self.lookup(scopes, node.value)
         node.binding = binding
         if binding is not None:
-            binding.uses.append(use)
+            binding.uses.append((use, node))
             if use == 'target':
                 binding.assigned.append(node)
 
@@ -3257,9 +3295,6 @@ class _Resolver:
             return
         if node.obj.kind == 'name':
             self.reference(scopes, node.obj, 'field-target')
-            binding = node.obj.binding
-            if binding is not None and node.key.kind == 'string':
-                binding.fields[node.key.value] = binding.fields.get(node.key.value, 0) + 1
         else:
             self.expr(node.obj, scopes)
         self.expr(node.key, scopes)
@@ -3385,7 +3420,8 @@ def _literal_map(binding, string_values):
     if binding is None or binding.kind != 'local' or binding.value is None:
         return None
     table = binding.value
-    if table.kind != 'table' or binding.assigned or any(use != 'index' for use in binding.uses):
+    if table.kind != 'table' or binding.assigned or any(use != 'index'
+                                                        for use, _ in binding.uses):
         return None
     entries, seen = [], set()
     for field in table.fields:
@@ -3410,142 +3446,107 @@ def _frames(ctx):
     return frames
 
 
-class _Unit:
-    """One loaded Lua source and its parse."""
+class _UnitScan:
+    """The binding facts of one parsed file that need neither its path nor
+    the declarations: problems, dynamic constructs, literal sites, wrappers,
+    map dispatches and Nexus path assignments. Memoized with the parse;
+    receipts copy its rows and never change them."""
 
-    def __init__(self, path, data, order, fresh):
-        self.path, self.data, self.order = path, data, order
-        self.body, self.error, self.leads, self.localfunctions = _parsed(data, fresh)
-
-
-class _BindingAnalysis:
-    """The binding walk over every parsed unit (see the S8 notes above)."""
-
-    def __init__(self, units, declarations):
-        self.units, self.declarations = units, declarations
-        self.sites = {key: [] for key in declarations}
-        self.problems, self.dynamic, self.shadowed = [], [], []
+    def __init__(self, body, localfunctions):
+        self.problems, self.dynamic, self.literals = [], [], []
         self.wrappers, self.internal = {}, set()
-        self.path_calls, self.path_assignments = {}, {}
-        self.candidates, self.chains = [], []
+        self.candidates, self.seam_assignments, self.path_assignments = [], [], {}
+        self.find_wrappers(localfunctions)
+        self.block(body, (None, ('function', None, None)))
 
     # -- recording ---------------------------------------------------------
 
-    def problem(self, unit, node, code, **fields):
-        row = {'code': code, 'path': unit.path, 'line': node.line, 'column': node.column}
+    def problem(self, node, code, **fields):
+        row = {'code': code, 'line': node.line, 'column': node.column}
         row.update(fields)
-        self.problems.append(((unit.order, node.line, node.column), row))
+        self.problems.append(row)
 
-    def unknown(self, unit, node, construct, **fields):
-        row = {'path': unit.path, 'line': node.line, 'column': node.column,
-               'construct': construct}
+    def unknown(self, node, construct, **fields):
+        row = {'line': node.line, 'column': node.column, 'construct': construct}
         row.update(fields)
-        self.dynamic.append(((unit.order, node.line, node.column), row))
-
-    def literal(self, unit, arg, method, kind, site):
-        """A literal key reaching a seam method: a site, an orphan or a
-        kind mismatch."""
-        key = arg.value
-        declaration = self.declarations.get(key)
-        if declaration is None:
-            self.problem(unit, arg, 'binding-orphan', key=key, method=method)
-        elif kind is None:
-            return
-        elif declaration['kind'] != kind:
-            self.problem(unit, arg, 'binding-kind', key=key, method=method,
-                         declaredKind=declaration['kind'])
-        else:
-            row = {'path': unit.path, 'line': arg.line, 'column': arg.column}
-            row.update(site)
-            self.sites[key].append(((unit.order, arg.line, arg.column), row))
+        self.dynamic.append(row)
 
     # -- wrappers ----------------------------------------------------------
 
-    def find_wrappers(self):
+    def find_wrappers(self, localfunctions):
         """A local function is a wrapper when a consumer-method call on a
         receiver in its own body takes one of its parameters, never
         assigned, as the key. Through a reassigned alias it is no wrapper;
-        the walk reports that call as unresolved."""
-        for unit in self.units:
-            for binding in unit.localfunctions:
-                func = binding.value
-                found = []
-                for node in _descendants(func.body):
-                    if node.kind != 'call' or not node.args or node.args[0].kind != 'name':
-                        continue
-                    param = node.args[0].binding
-                    if param is None or param.kind != 'param' or param.owner is not func:
-                        continue
-                    method = _seam_method(_path(node.func))
-                    if method in _KEY_METHODS and not param.assigned:
-                        found.append((node, param.index, method))
-                kinds = {(index, _KEY_METHODS[method]) for _, index, method in found}
-                if len(kinds) > 1:
-                    self.problem(unit, binding.node, 'binding-unresolved', construct='wrapper',
-                                 detail='the wrapper passes different parameters or kinds')
+        the walk reports that call as unresolved. Whether the wrapper
+        returns that result is proved when a receipt links the units."""
+        for binding in localfunctions:
+            func = binding.value
+            found = []
+            for node in _descendants(func.body):
+                if node.kind != 'call' or not node.args or node.args[0].kind != 'name':
                     continue
-                if found:
-                    index, kind = kinds.pop()
-                    self.wrappers[binding] = {
-                        'name': binding.node.value, 'path': unit.path,
-                        'line': binding.node.line, 'parameter': index, 'kind': kind,
-                        'method': found[0][2]}
-                    self.internal.update(id(node) for node, _, _ in found)
+                param = node.args[0].binding
+                if param is None or param.kind != 'param' or param.owner is not func:
+                    continue
+                method = _seam_method(_path(node.func))
+                if method in _KEY_METHODS and not param.assigned:
+                    found.append((node, param.index, method))
+            kinds = {(index, _KEY_METHODS[method]) for _, index, method in found}
+            if len(kinds) > 1:
+                self.problem(binding.node, 'binding-unresolved', construct='wrapper',
+                             detail='the wrapper passes different parameters or kinds')
+                continue
+            if found:
+                index, kind = kinds.pop()
+                self.wrappers[binding] = {
+                    'name': binding.node.value, 'line': binding.node.line, 'parameter': index,
+                    'kind': kind, 'method': found[0][2], 'internal': [node for node, _, _ in found]}
+                self.internal.update(id(node) for node, _, _ in found)
 
     # -- the walk ----------------------------------------------------------
 
-    def walk(self):
-        for unit in self.units:
-            if unit.body is not None:
-                self.block(unit, unit.body, (None, ('function', None, None)))
-
-    def block(self, unit, body, ctx):
+    def block(self, body, ctx):
         for index, stmt in enumerate(body):
-            self.statement(unit, stmt, (ctx, ('statement', body, index)))
+            self.statement(stmt, (ctx, ('statement', body, index)))
 
-    def statement(self, unit, stmt, ctx):
+    def statement(self, stmt, ctx):
         kind = stmt.kind
         if kind == 'localfunction':
-            self.function(unit, stmt.func, ctx, None)
+            self.function(stmt.func, ctx, None)
         elif kind == 'funcstat':
-            self.target(unit, stmt.target, stmt.func, ctx)
-            self.function(unit, stmt.func, ctx, stmt)
+            self.target(stmt.target, stmt.func, ctx)
+            self.function(stmt.func, ctx, stmt)
         elif kind == 'assign':
             for expr in stmt.exprs:
-                self.expr(unit, expr, ctx, None)
+                self.expr(expr, ctx)
             for index, target in enumerate(stmt.targets):
-                value = stmt.exprs[index] if index < len(stmt.exprs) else None
-                self.target(unit, target, value, ctx)
+                self.target(target, stmt.exprs[index] if index < len(stmt.exprs) else None, ctx)
         elif kind in ('do', 'while', 'repeat', 'if', 'fornum', 'forin'):
             for child in _children(stmt):
-                if child.kind in _STATEMENTS:
-                    continue
-                self.expr(unit, child, ctx, None)
+                if child.kind not in _STATEMENTS:
+                    self.expr(child, ctx)
             for body in _bodies(stmt):
-                self.block(unit, body, ctx)
-        elif kind == 'local':
+                self.block(body, ctx)
+        elif kind in ('local', 'return'):
             for expr in stmt.exprs:
-                self.expr(unit, expr, ctx, 'local')
-        elif kind == 'return':
-            for expr in stmt.exprs:
-                self.expr(unit, expr, ctx, 'return')
+                self.expr(expr, ctx)
         elif kind == 'callstat':
-            self.expr(unit, stmt.call, ctx, 'statement')
+            self.expr(stmt.call, ctx)
 
-    def function(self, unit, func, ctx, funcstat):
-        self.block(unit, func.body, (ctx, ('function', func, funcstat)))
+    def function(self, func, ctx, funcstat):
+        self.block(func.body, (ctx, ('function', func, funcstat)))
 
-    def target(self, unit, target, value, ctx):
+    def target(self, target, value, ctx):
         """An assignment or function definition target: seam mutation and
         Nexus path assignments are recorded."""
         if target.kind == 'index':
             if target.obj.kind != 'name':
-                self.expr(unit, target.obj, ctx, None)
-            self.expr(unit, target.key, ctx, None)
+                self.expr(target.obj, ctx)
+            self.expr(target.key, ctx)
         path = _path(target)
         if path is None:
             return
-        self.path_assignments.setdefault(path, []).append((unit, target, value))
+        self.path_assignments.setdefault(path, []).append((target, value))
         if path == 'Nexus':
             bootstrap = (value is not None and value.kind == 'operation' and value.ops == ['or']
                          and value.operands[0].kind == 'name'
@@ -3554,89 +3555,83 @@ class _BindingAnalysis:
                          and value.operands[1].kind == 'table'
                          and not value.operands[1].fields)
             if not bootstrap:
-                self.problem(unit, target, 'binding-mutation', construct='nexus-reassigned',
+                self.problem(target, 'binding-mutation', construct='nexus-reassigned',
                              detail='the global Nexus is assigned something other than '
                                     'Nexus or {}')
-        elif (path == _LOCALIZATION or path.startswith(_LOCALIZATION + '.')) \
-                and unit.path != _AUTHORITY:
-            self.problem(unit, target, 'binding-mutation', construct='seam-assignment',
-                         detail='%s is assigned outside %s' % (path, _AUTHORITY))
+        elif path == _LOCALIZATION or path.startswith(_LOCALIZATION + '.'):
+            self.seam_assignments.append((target, path))
 
-    def expr(self, unit, node, ctx, sink):
+    def expr(self, node, ctx):
         kind = node.kind
         if kind == 'call':
-            self.call(unit, node, ctx, sink)
+            self.call(node, ctx)
         elif kind == 'method':
             if _path(node.obj, True) == _LOCALIZATION and node.name in _SEAM_METHODS:
-                self.problem(unit, node, 'binding-unresolved', construct='method-call',
+                self.problem(node, 'binding-unresolved', construct='method-call',
                              detail='%s:%s passes the seam table as its key'
                                     % (_LOCALIZATION, node.name))
-            self.expr(unit, node.obj, ctx, None)
+            self.expr(node.obj, ctx)
             for arg in node.args:
-                self.expr(unit, arg, ctx, 'argument:' + node.name)
+                self.expr(arg, ctx)
         elif kind == 'index':
-            self.member(unit, node, ctx)
+            self.member(node, ctx)
         elif kind == 'paren':
-            self.expr(unit, node.expr, ctx, sink)
+            self.expr(node.expr, ctx)
         elif kind == 'function':
-            self.function(unit, node, ctx, None)
+            self.function(node, ctx, None)
         else:
             for child in _children(node):
-                self.expr(unit, child, ctx, None)
+                self.expr(child, ctx)
 
-    def member(self, unit, node, ctx, checked=False):
+    def member(self, node, ctx, checked=False):
         """A field read. A consumer method read without being called (other
         than inside type()) is an indirect reference; a computed field of
         the seam is a dynamic member."""
         path = _path(node)
         if not checked and _seam_method(path) in _KEY_METHODS:
-            self.problem(unit, node, 'binding-unresolved', construct='indirect-key-method',
+            self.problem(node, 'binding-unresolved', construct='indirect-key-method',
                          detail='%s is read without being called' % path)
         elif node.key.kind != 'string' and _path(node.obj) == _LOCALIZATION:
-            self.unknown(unit, node, 'dynamic-member')
+            self.unknown(node, 'dynamic-member')
         if node.obj.kind != 'name':
-            self.expr(unit, node.obj, ctx, None)
-        self.expr(unit, node.key, ctx, None)
+            self.expr(node.obj, ctx)
+        self.expr(node.key, ctx)
 
-    def call(self, unit, node, ctx, sink):
+    def call(self, node, ctx):
         func, args = node.func, node.args
         path = _path(func)
         method = _seam_method(path)
         if method in _SEAM_METHODS:
-            self.seam_call(unit, node, method, sink)
+            self.seam_call(node, method)
         elif path is None and _seam_method(_path(func, True)) in _SEAM_METHODS:
-            self.problem(unit, node, 'binding-unresolved', construct='alias',
+            self.problem(node, 'binding-unresolved', construct='alias',
                          detail='a local alias of %s on the way is assigned again'
                                 % _LOCALIZATION)
         elif path is None and func.kind == 'index' and func.key.kind == 'string' \
                 and func.key.value in _KEY_METHODS and func.obj.kind == 'index' \
                 and func.obj.key.kind == 'string' and func.obj.key.value == 'Localization' \
                 and args and args[0].kind == 'string':
-            self.unknown(unit, node, 'unresolved-receiver', literal=args[0].value)
+            self.unknown(node, 'unresolved-receiver', literal=args[0].value)
         elif func.kind == 'name' and func.binding in self.wrappers:
-            self.wrapper_call(unit, node, func.binding, ctx)
-        if path is not None:
-            self.path_calls.setdefault(path, []).append((unit, node, ctx))
+            self.wrapper_call(node, func.binding, ctx)
         if func.kind == 'index':
-            self.member(unit, func, ctx, checked=True)
+            self.member(func, ctx, checked=True)
         elif func.kind != 'name':
-            self.expr(unit, func, ctx, None)
+            self.expr(func, ctx)
         global_name = func.value if func.kind == 'name' and func.binding is None else None
         if global_name == 'rawget' and len(args) >= 2 and _path(args[0]) == _LOCALIZATION:
             if args[1].kind != 'string':
-                self.unknown(unit, node, 'dynamic-member')
+                self.unknown(node, 'dynamic-member')
             elif args[1].value in _KEY_METHODS:
-                self.problem(unit, node, 'binding-unresolved', construct='indirect-key-method',
+                self.problem(node, 'binding-unresolved', construct='indirect-key-method',
                              detail='rawget reads %s.%s' % (_LOCALIZATION, args[1].value))
-        name = (func.key.value if func.kind == 'index' and func.key.kind == 'string'
-                else func.value if func.kind == 'name' else None)
         for arg in args:
             if global_name == 'type' and len(args) == 1 and arg.kind == 'index':
-                self.member(unit, arg, ctx, checked=True)
+                self.member(arg, ctx, checked=True)
             else:
-                self.expr(unit, arg, ctx, None if name is None else 'argument:' + name)
+                self.expr(arg, ctx)
 
-    def seam_call(self, unit, node, method, sink):
+    def seam_call(self, node, method):
         func = node.func
         while func.kind == 'paren':
             func = func.expr
@@ -3653,44 +3648,43 @@ class _BindingAnalysis:
                 receiver = {'form': 'alias', 'name': obj.value, 'line': obj.binding.node.line}
             else:
                 receiver = {'form': 'path', 'name': _LOCALIZATION}
-            self.literal(unit, arg, method, _KEY_METHODS.get(method), {
-                'site': 'direct-call', 'method': method, 'receiver': receiver, 'context': sink})
+            self.literals.append((arg, method, _KEY_METHODS.get(method), node, {
+                'site': 'direct-call', 'method': method, 'receiver': receiver}, None))
         elif method in _KEY_METHODS and id(node) not in self.internal:
-            self.unknown(unit, node, 'dynamic-key', method=method)
+            self.unknown(node, 'dynamic-key', method=method)
 
-    def wrapper_call(self, unit, node, binding, ctx):
+    def wrapper_call(self, node, binding, ctx):
         wrapper = self.wrappers[binding]
         if binding.assigned:
-            self.problem(unit, node, 'binding-unresolved', construct='wrapper',
+            self.problem(node, 'binding-unresolved', construct='wrapper',
                          detail='the wrapper %s is assigned again' % wrapper['name'])
             return
         index = wrapper['parameter']
         arg = node.args[index] if index < len(node.args) else None
         if arg is not None and arg.kind == 'string' and arg.value is not None:
-            self.literal(unit, arg, wrapper['method'], wrapper['kind'], {
+            self.literals.append((arg, wrapper['method'], wrapper['kind'], node, {
                 'site': 'wrapper-call', 'method': wrapper['method'],
-                'wrapper': {'name': wrapper['name'], 'path': wrapper['path'],
-                            'line': wrapper['line']}})
+                'wrapper': {'name': wrapper['name'], 'line': wrapper['line']}}, binding))
         elif arg is not None and arg.kind == 'index' and arg.obj.kind == 'name' \
                 and arg.key.kind == 'name' and arg.obj.binding is not None \
                 and arg.obj.binding.kind == 'local' and arg.obj.binding.value is not None \
                 and arg.obj.binding.value.kind == 'table':
             # A local table constructor indexed by a name: a map dispatch,
             # bound or explicitly unresolved, never silently dynamic.
-            self.dispatch(unit, node, wrapper, arg, ctx)
+            self.dispatch(node, binding, arg, ctx)
         else:
-            self.unknown(unit, node, 'dynamic-wrapper-argument', wrapper=wrapper['name'])
+            self.unknown(node, 'dynamic-wrapper-argument', wrapper=wrapper['name'])
 
     # -- map dispatch ------------------------------------------------------
 
-    def dispatch(self, unit, node, wrapper, arg, ctx):
+    def dispatch(self, node, wrapper, arg, ctx):
         """A wrapper(MAP[v], ...) call: checked here for its local shape and
-        preceding guards, and later (resolve_dispatches) for its exported
-        dispatcher and callers."""
+        preceding guards; its dispatcher and output chain are proved when a
+        receipt links the units."""
         mapping, variable = arg.obj.binding, arg.key.binding
         entries = _literal_map(mapping, True)
         if entries is None:
-            self.problem(unit, node, 'binding-unresolved', construct='map',
+            self.problem(node, 'binding-unresolved', construct='map',
                          detail='%s is not a read-only local table of literal string pairs'
                                 % arg.obj.value)
             return
@@ -3730,79 +3724,21 @@ class _BindingAnalysis:
                     reason = 'an earlier statement at line %d can return first' % earlier.line
                     break
         if reason is not None:
-            self.problem(unit, node, 'binding-unresolved', construct='dispatch', detail=reason)
+            self.problem(node, 'binding-unresolved', construct='dispatch', detail=reason)
             return
-        self.candidates.append({'unit': unit, 'node': node, 'wrapper': wrapper, 'map': mapping,
+        self.candidates.append({'node': node, 'wrapper': wrapper, 'map': mapping,
                                 'entries': entries, 'shadow': shadow, 'func': func,
                                 'funcstat': funcstat})
-
-    def resolve_dispatches(self):
-        for candidate in self.candidates:
-            unit, node, funcstat = candidate['unit'], candidate['node'], candidate['funcstat']
-            module, field = funcstat.target.obj.binding, funcstat.target.key.value
-            exports = sorted({path for path, rows in self.path_assignments.items()
-                              for _, _, value in rows
-                              if value is not None and value.kind == 'name'
-                              and value.binding is module and module is not None})
-            reason, callers = None, []
-            if module is None or module.kind != 'local' or module.value is None \
-                    or module.value.kind != 'table' or module.assigned:
-                reason = 'the function is not defined on a local module table'
-            elif module.fields.get(field) != 1:
-                reason = '%s.%s is defined more than once' % (module.node.value, field)
-            elif not exports:
-                reason = 'the module table is not exported as a Nexus path'
-            else:
-                for export in exports:
-                    others = [row for row in self.path_assignments.get(export, ())
-                              if not (row[2] is not None and row[2].kind == 'name'
-                                      and row[2].binding is module)]
-                    if others or self.path_assignments.get(export + '.' + field):
-                        reason = '%s or %s.%s is assigned elsewhere' % (export, export, field)
-                        break
-                    for caller_unit, call, ctx in self.path_calls.get(export + '.' + field, ()):
-                        if not any(entry[0] == 'function' and entry[1] is candidate['func']
-                                   for entry in _frames(ctx)):
-                            callers.append(((caller_unit.order, call.line, call.column),
-                                            {'path': caller_unit.path, 'line': call.line,
-                                             'column': call.column}))
-                if reason is None and not callers:
-                    reason = 'no call outside the dispatcher reaches %s' % ' or '.join(
-                        export + '.' + field for export in exports)
-            if reason is not None:
-                self.problem(unit, node, 'binding-unresolved', construct='dispatcher',
-                             detail=reason)
-                continue
-            wrapper, bound, shadowed = candidate['wrapper'], [], []
-            dispatcher = exports[0] + '.' + field
-            for code, value in candidate['entries']:
-                if code in candidate['shadow']:
-                    row = {'code': code, 'key': value.value, 'path': unit.path,
-                           'line': value.line, 'column': value.column,
-                           'shadowedBy': candidate['shadow'][code]}
-                    shadowed.append(row)
-                    self.shadowed.append(((unit.order, value.line, value.column), row))
-                    continue
-                before = len(self.sites.get(value.value, ()))
-                self.literal(unit, value, wrapper['method'], wrapper['kind'], {
-                    'site': 'map-value', 'code': code, 'map': candidate['map'].node.value,
-                    'dispatcher': dispatcher})
-                if len(self.sites.get(value.value, ())) > before:
-                    bound.append(value.value)
-            callers.sort(key=lambda item: item[0])
-            self.chains.append({
-                'map': {'name': candidate['map'].node.value, 'path': unit.path,
-                        'line': candidate['map'].node.line},
-                'wrapper': {'name': wrapper['name'], 'path': wrapper['path'],
-                            'line': wrapper['line'], 'method': wrapper['method']},
-                'dispatch': {'path': unit.path, 'line': node.line, 'column': node.column},
-                'dispatcher': dispatcher, 'externalCallers': [row for _, row in callers],
-                'entries': len(candidate['entries']), 'boundKeys': bound,
-                'shadowedEntries': shadowed})
 
 
 _STATEMENTS = frozenset(('local', 'localfunction', 'funcstat', 'assign', 'callstat', 'do',
                          'while', 'repeat', 'if', 'fornum', 'forin', 'return', 'break'))
+# Evidenced output sinks: argument 1 of these widget, tooltip and chat-frame
+# methods, and every argument of the global print.
+_SINK_METHODS = frozenset(('SetText', 'AddLine', 'AddMessage'))
+_SINK_FUNCTIONS = frozenset(('print',))
+_COMPARISON = frozenset(('==', '~=', '<', '<=', '>', '>='))
+_OPAQUE = None
 
 
 def _bodies(stmt):
@@ -3838,43 +3774,455 @@ def _guard(stmt, variable):
     return None
 
 
+def _flowing_operands(node):
+    """The operands of an operation whose text can be part of its value, by
+    Lua 5.1 precedence: in each 'or' alternative only the last element of
+    its 'and' chain, and in that element each single operand joined by '..'.
+    A comparison, arithmetic or unary result carries no text."""
+    operands, ops = node.operands, node.ops
+    if len(operands) == 1:
+        return []
+
+    def split(start, end, op):
+        pieces, begin = [], start
+        for index in range(start, end - 1):
+            if ops[index] == op:
+                pieces.append((begin, index + 1))
+                begin = index + 1
+        return pieces + [(begin, end)]
+    flowing = []
+    for low, high in split(0, len(operands), 'or'):
+        start, end = split(low, high, 'and')[-1]
+        if any(ops[index] in _COMPARISON for index in range(start, end - 1)):
+            continue
+        flowing.extend(operands[begin] for begin, stop in split(start, end, '..')
+                       if stop - begin == 1)
+    return flowing
+
+
+def _module_root(binding):
+    """The binding a chain of unassigned local aliases (local a = b) names."""
+    for _ in range(16):
+        value = binding.value
+        if binding.kind != 'local' or binding.assigned or value is None \
+                or value.kind != 'name' or value.binding is None:
+            return binding
+        binding = value.binding
+    return binding
+
+
+class _UnitFlow:
+    """The may-flow graph of one parsed file, built once with its parse.
+
+    A value flows from an expression into a paren, into an operation for the
+    operands _flowing_operands names, into the binding a local statement or
+    assignment gives it, into a table field by name (constructor or literal
+    field assignment), into the return of its function (first value only),
+    into the parameter of a local function it is passed to, and into
+    argument 1 of a _SINK_METHODS call or any argument of a _SINK_FUNCTIONS
+    call, the outputs. A binding passes a value on to its reads only when
+    every definition (its declared value and every assignment, closures
+    included) carries a value of the same proof; a value-less definition
+    such as a for variable or a later multiple-value position never does.
+    A field name is one channel across every table and file, under the
+    same every-definition rule. Function results reach the calls the
+    receipt can resolve: local functions here, module functions and their
+    Nexus exports when the units are linked."""
+
+    def __init__(self, body):
+        self.edges, self.defs, self.def_of = {}, {}, {}
+        self.field_writes, self.field_reads, self.field_def_of = {}, {}, {}
+        self.path_calls, self.module_calls = {}, []
+        self.module_defs, self.dynamic_modules = {}, set()
+        self.alias_of, self.export_values, self.exports = {}, set(), []
+        self.chunk_returns = set()
+        self.block(body, None)
+        self.module_funcs = {}
+        for module, fields in self.module_defs.items():
+            for name, values in fields.items():
+                value = values[0] if len(values) == 1 else None
+                self.module_funcs[(module, name)] = (
+                    value if value is not None and value.kind == 'function' else None,
+                    len(values))
+
+    def edge(self, source, target):
+        self.edges.setdefault(source, []).append(target)
+
+    def define(self, binding, value):
+        self.defs.setdefault(binding, []).append(value)
+        if value is not _OPAQUE:
+            self.edge(value, binding)
+            self.def_of.setdefault(value, []).append(binding)
+
+    def write_field(self, name, value):
+        self.field_writes.setdefault(name, []).append(value)
+        if value is not _OPAQUE:
+            self.edge(value, ('field', name))
+            self.field_def_of.setdefault(value, []).append(name)
+
+    def module_ok(self, binding, depth=0):
+        """A local module table (or alias of one) whose identity stays here:
+        never assigned again, never written through a computed key, and used
+        only through literal fields, by its Nexus export, as a value the
+        file chunk returns (discarded by the TOC loader) or by a local alias
+        with the same properties."""
+        if depth > 16 or binding.kind != 'local' or binding.assigned \
+                or binding in self.dynamic_modules:
+            return False
+        for use, node in binding.uses:
+            if use in ('index', 'field-target'):
+                continue
+            alias = self.alias_of.get(node) if use == 'value' else None
+            if use == 'value' and (node in self.export_values or node in self.chunk_returns or (
+                    alias is not None and self.module_ok(alias, depth + 1))):
+                continue
+            return False
+        return True
+
+    def block(self, body, func):
+        for stmt in body:
+            self.statement(stmt, func)
+
+    def statement(self, stmt, func):
+        kind = stmt.kind
+        if kind == 'local':
+            for expr in stmt.exprs:
+                self.expr(expr, func)
+            for index, name in enumerate(stmt.names):
+                if index < len(stmt.exprs):
+                    value = stmt.exprs[index]
+                    self.define(name.binding, value)
+                    if value.kind == 'name' and value.binding is not None:
+                        self.alias_of[value] = name.binding
+                elif stmt.exprs:
+                    self.define(name.binding, _OPAQUE)
+        elif kind == 'localfunction':
+            self.function(stmt.func)
+        elif kind in ('funcstat', 'assign'):
+            if kind == 'funcstat':
+                targets, values = [stmt.target], [stmt.func]
+                self.function(stmt.func)
+            else:
+                targets, values = stmt.targets, stmt.exprs
+                for expr in values:
+                    self.expr(expr, func)
+            for index, target in enumerate(targets):
+                value = values[index] if index < len(values) else _OPAQUE
+                self.target(target, value, func)
+        elif kind == 'callstat':
+            self.expr(stmt.call, func)
+        elif kind == 'return':
+            for expr in stmt.exprs:
+                self.expr(expr, func)
+            if func is not None and stmt.exprs:
+                self.edge(stmt.exprs[0], ('ret', func))
+            elif func is None:
+                # The WoW TOC loader discards a file chunk's return values.
+                self.chunk_returns.update(expr for expr in stmt.exprs if expr.kind == 'name')
+        elif kind in ('fornum', 'forin'):
+            for expr in (stmt.start, stmt.stop, stmt.step) if kind == 'fornum' else stmt.exprs:
+                if expr is not None:
+                    self.expr(expr, func)
+            for name in [stmt.var] if kind == 'fornum' else stmt.names:
+                self.define(name.binding, _OPAQUE)
+            self.block(stmt.body, func)
+        elif kind in ('do', 'while', 'repeat', 'if'):
+            for child in _children(stmt):
+                if child.kind not in _STATEMENTS:
+                    self.expr(child, func)
+            for body in _bodies(stmt):
+                self.block(body, func)
+
+    def target(self, target, value, func):
+        if target.kind == 'name':
+            if target.binding is not None:
+                self.define(target.binding, value)
+            elif _path(target) is not None and value is not _OPAQUE and value.kind == 'name':
+                self.export_values.add(value)
+            return
+        if target.obj.kind != 'name':
+            self.expr(target.obj, func)
+        self.expr(target.key, func)
+        base = target.obj.binding if target.obj.kind == 'name' else None
+        if target.key.kind != 'string' or target.key.value is None:
+            if base is not None:
+                self.dynamic_modules.add(_module_root(base))
+            return
+        self.write_field(target.key.value, value)
+        if base is not None:
+            fields = self.module_defs.setdefault(_module_root(base), {})
+            fields.setdefault(target.key.value, []).append(value)
+        path = _path(target)
+        if path is not None and path.count('.') == 1 and value is not _OPAQUE \
+                and value.kind == 'name' and value.binding is not None:
+            self.export_values.add(value)
+            self.exports.append((path, value.binding))
+
+    def function(self, func):
+        for param in func.params:
+            self.defs.setdefault(param.binding, [])
+        self.block(func.body, func)
+
+    def expr(self, node, func):
+        kind = node.kind
+        if kind == 'name':
+            if node.binding is not None:
+                self.edge(node.binding, node)
+        elif kind == 'index':
+            self.expr(node.obj, func)
+            self.expr(node.key, func)
+            if node.key.kind == 'string' and node.key.value is not None:
+                self.field_reads.setdefault(node.key.value, []).append(node)
+        elif kind == 'paren':
+            self.expr(node.expr, func)
+            self.edge(node.expr, node)
+        elif kind == 'operation':
+            for operand in node.operands:
+                self.expr(operand, func)
+            for operand in _flowing_operands(node):
+                self.edge(operand, node)
+        elif kind == 'call':
+            self.call(node, func)
+        elif kind == 'method':
+            self.expr(node.obj, func)
+            for arg in node.args:
+                self.expr(arg, func)
+            if node.name in _SINK_METHODS and node.args:
+                self.edge(node.args[0], ('sink', node))
+        elif kind == 'function':
+            self.function(node)
+        elif kind == 'table':
+            for field in node.fields:
+                if field.key is not None:
+                    self.expr(field.key, func)
+                self.expr(field.value, func)
+                if field.key is not None and field.key.kind == 'string' \
+                        and field.key.value is not None:
+                    self.write_field(field.key.value, field.value)
+
+    def call(self, node, func):
+        callee, args = node.func, node.args
+        self.expr(callee, func)
+        for arg in args:
+            self.expr(arg, func)
+        if callee.kind == 'name' and callee.binding is None and callee.value in _SINK_FUNCTIONS:
+            for arg in args:
+                self.edge(arg, ('sink', node))
+        binding = callee.binding if callee.kind == 'name' else None
+        if binding is not None and not binding.assigned and binding.value is not None \
+                and binding.value.kind == 'function' and binding.kind in ('local',
+                                                                          'localfunction'):
+            target = binding.value
+            self.edge(('ret', target), node)
+            for param, arg in zip(target.params, args):
+                self.edge(arg, param.binding)
+        if callee.kind == 'index' and callee.obj.kind == 'name' and callee.obj.binding \
+                is not None and callee.key.kind == 'string':
+            self.module_calls.append((_module_root(callee.obj.binding), callee.key.value,
+                                      node))
+        path = _path(callee)
+        if path is not None:
+            self.path_calls.setdefault(path, []).append(node)
+
+
+class _Unit:
+    """One loaded Lua source and its memoized parse, scan and flow graph."""
+
+    def __init__(self, path, data, order, fresh):
+        self.path, self.data, self.order = path, data, order
+        self.body, self.error, self.leads, self.scan, self.flow = _parsed(data, fresh)
+
+
 # Parsed files memoized by the SHA-256 of their exact bytes, oldest dropped
-# first. A parse depends only on those bytes and the analysis never changes
-# a parsed tree, so a memoized parse is the same parse; nothing is read or
-# written. Two equal files of one call get separate parses (fresh), so their
-# local names stay distinct.
+# first. A parse, its scan and its flow graph depend only on those bytes,
+# and linking never changes them, so a memoized parse is the same parse;
+# nothing is read or written. Two equal files of one call get separate
+# parses (fresh), so their local names stay distinct.
 _PARSE_MEMO = {}
 _PARSE_MEMO_LIMIT = 256
 
 
 def _parsed(data, fresh=False):
     """(syntax tree or None, error or None, string literals as (value, line,
-    column), local functions) of the exact bytes of one Lua file."""
+    column), scan, flow) of the exact bytes of one Lua file."""
     digest = hashlib.sha256(data).digest()
     if digest in _PARSE_MEMO and not fresh:
         return _PARSE_MEMO[digest]
     try:
         text = data.decode('utf-8')
     except UnicodeDecodeError:
-        result = None, {'code': 'not-utf8'}, [], []
+        result = None, {'code': 'not-utf8'}, [], None, None
     else:
         try:
             tokens = _lua_tokens(text)
             body = _LuaParser(tokens).chunk()
             resolver = _Resolver()
             resolver.block(body, [])
+            scan, flow = _UnitScan(body, resolver.localfunctions), _UnitFlow(body)
         except CatalogSyntaxError as error:
-            result = None, {'code': error.code, 'line': error.line, 'column': error.column}, [], []
+            result = None, {'code': error.code, 'line': error.line,
+                            'column': error.column}, [], None, None
         except RecursionError:
-            result = None, {'code': 'nesting-too-deep'}, [], []
+            result = None, {'code': 'nesting-too-deep'}, [], None, None
         else:
             leads = [(token.value, token.line, token.column) for token in tokens
                      if token.kind == 'string']
-            result = body, None, leads, resolver.localfunctions
+            result = body, None, leads, scan, flow
     while len(_PARSE_MEMO) >= _PARSE_MEMO_LIMIT:
         del _PARSE_MEMO[next(iter(_PARSE_MEMO))]
     _PARSE_MEMO[digest] = result
     return result
+
+
+class _Linker:
+    """Joins the parsed units of one receipt: module exports, function
+    results across files, field channels, wrappers, map dispatches and the
+    output proof of every literal site (see the S8 notes above)."""
+
+    def __init__(self, units, declarations):
+        self.units = [unit for unit in units if unit.scan is not None]
+        self.declarations = declarations
+        self.owner = {id(unit.flow): unit for unit in self.units}
+        self.assignments = {}
+        for unit in self.units:
+            for path, rows in unit.scan.path_assignments.items():
+                self.assignments.setdefault(path, []).extend(rows)
+        self.field_cache, self.ret_links = {}, {}
+        for unit in self.units:
+            flow = unit.flow
+            exports = {}
+            for path, module in flow.exports:
+                exports.setdefault(module, []).append(path)
+            for module, name, call in flow.module_calls:
+                func = self.module_function(flow, module, name, exports.get(module, ()))[0]
+                if func is not None:
+                    self.ret_links.setdefault(func, []).append((call, flow))
+            for module, paths in exports.items():
+                for (owner, name), _ in flow.module_funcs.items():
+                    if owner is not module:
+                        continue
+                    func = self.module_function(flow, module, name, paths)[0]
+                    if func is not None:
+                        self.ret_links.setdefault(func, []).extend(
+                            (('pret', path + '.' + name), None) for path in paths)
+
+    def export_ok(self, path, module, name):
+        rows = self.assignments.get(path, ())
+        return (len(rows) == 1 and rows[0][1] is not None and rows[0][1].kind == 'name'
+                and rows[0][1].binding is module and not self.assignments.get(path + '.' + name))
+
+    def module_function(self, flow, module, name, exports):
+        """(function node or None, reason) for module.name: one definition,
+        on a module table whose identity stays in its file, with every Nexus
+        export of it assigned once and its field never assigned by path."""
+        if module.value is None or module.value.kind != 'table' or not flow.module_ok(module):
+            return None, ('the module table %s is assigned again, written through a computed '
+                          'key or escapes its file' % module.node.value)
+        func, count = flow.module_funcs.get((module, name), (None, 0))
+        if count != 1 or func is None:
+            return None, ('%s.%s has %d definitions, directly or through a local alias'
+                          % (module.node.value, name, count))
+        for path in exports:
+            if not self.export_ok(path, module, name):
+                return None, '%s or %s.%s is assigned elsewhere' % (path, path, name)
+        return func, None
+
+    # -- the may-flow search -----------------------------------------------
+
+    def field_defs(self, name):
+        if name not in self.field_cache:
+            self.field_cache[name] = [value for unit in self.units
+                                      for value in unit.flow.field_writes.get(name, ())]
+        return self.field_cache[name]
+
+    def gate(self, key, flow):
+        """The definitions a binding or field node needs, else None."""
+        if type(key) is tuple:
+            return self.field_defs(key[1]) if key[0] == 'field' else None
+        if type(key) is _Binding:
+            return flow.defs.get(key, ())
+        return None
+
+    def successors(self, key, flow):
+        if type(key) is tuple:
+            tag = key[0]
+            if tag == 'field':
+                return [(read, unit.flow) for unit in self.units
+                        for read in unit.flow.field_reads.get(key[1], ())]
+            if tag == 'pret':
+                return [(call, unit.flow) for unit in self.units
+                        for call in unit.flow.path_calls.get(key[1], ())]
+            if tag == 'ret':
+                out = [(nxt, flow) for nxt in flow.edges.get(key, ())]
+                for nxt, owner in self.ret_links.get(key[1], ()):
+                    out.append((nxt, owner))
+                return out
+            if tag == 'sink':
+                return []
+        return [(nxt, flow) for nxt in flow.edges.get(key, ())]
+
+    def search(self, roots, allowed=None, stop=None):
+        """Every key reached from roots [(key, flow)]. A binding or field
+        passes a value on only when all its definitions are in allowed, or,
+        with allowed None, in the reached set itself (a fixpoint). Returns
+        (reached keys, sink keys with their flow)."""
+        reached, waiting, sinks = set(), {}, {}
+        queue = list(roots)
+        while queue:
+            key, flow = queue.pop()
+            if key in reached:
+                continue
+            needs = self.gate(key, flow)
+            if needs is not None:
+                pool = reached if allowed is None else allowed
+                if any(value is _OPAQUE or value not in pool for value in needs):
+                    waiting[key] = flow
+                    continue
+            reached.add(key)
+            if type(key) is tuple and key[0] == 'sink':
+                sinks[key] = flow
+                continue
+            if allowed is None and flow is not None:
+                for binding in flow.def_of.get(key, ()):
+                    if binding in waiting:
+                        queue.append((binding, waiting.pop(binding)))
+                for name in flow.field_def_of.get(key, ()):
+                    if ('field', name) in waiting:
+                        queue.append((('field', name), waiting.pop(('field', name))))
+            if key == stop:
+                continue
+            queue.extend(self.successors(key, flow))
+        return reached, sinks
+
+    def outputs(self, sinks):
+        rows = []
+        for (_, node), flow in sinks.items():
+            unit = self.owner[id(flow)]
+            name = node.name if node.kind == 'method' else node.func.value
+            rows.append(((unit.order, node.line, node.column),
+                         {'path': unit.path, 'line': node.line, 'column': node.column,
+                          'output': name}))
+        return [row for _, row in sorted(rows, key=lambda item: item[0])]
+
+    def wrapper_returns(self, binding, unit):
+        """True when a wrapper's own consumer-method result reaches its return."""
+        info = unit.scan.wrappers[binding]
+        stop = ('ret', binding.value)
+        reached, _ = self.search([(node, unit.flow) for node in info['internal']], stop=stop)
+        return stop in reached
+
+    def prove(self, roots_by_key):
+        """{key: {id(root): outputs}} for the roots of each key whose value
+        reaches an output, under the every-definition rule of that key."""
+        proofs = {}
+        for key, roots in roots_by_key.items():
+            allowed, _ = self.search(roots)
+            proofs[key] = {}
+            for root in roots:
+                _, sinks = self.search([root], allowed)
+                if sinks:
+                    proofs[key][id(root[0])] = self.outputs(sinks)
+        return proofs
 
 
 def consumer_binding_report(english_source: bytes, packs_source: bytes, key_context_json: bytes,
@@ -3904,16 +4252,120 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
         data = supplied[path]
         units.append(_Unit(path, data, listed[path][2], data in contents))
         contents.add(data)
-    analysis = _BindingAnalysis([unit for unit in units if unit.body is not None], declarations)
-    analysis.find_wrappers()
-    analysis.walk()
-    analysis.resolve_dispatches()
+    linker = _Linker(units, declarations)
+    problems, dynamic, shadowed, chains = [], [], [], []
+
+    def located(unit, row):
+        """A copy of a memoized row with the unit's current path; nested
+        dicts are copied too, so no receipt shares an object with the memo."""
+        out = {'code': row['code'], 'path': unit.path} if 'code' in row else {'path': unit.path}
+        out.update((field, dict(value) if type(value) is dict else value)
+                   for field, value in row.items() if field != 'code')
+        return (unit.order, row['line'], row['column']), out
+
+    candidates = {key: [] for key in declarations}   # key -> [(root, flow, unit, row, wrapper)]
+    for unit in linker.units:
+        scan = unit.scan
+        problems.extend(located(unit, row) for row in scan.problems)
+        dynamic.extend(located(unit, row) for row in scan.dynamic)
+        for target, path in scan.seam_assignments:
+            if unit.path != _AUTHORITY:
+                problems.append(located(unit, {
+                    'code': 'binding-mutation', 'line': target.line, 'column': target.column,
+                    'construct': 'seam-assignment',
+                    'detail': '%s is assigned outside %s' % (path, _AUTHORITY)}))
+        for arg, method, kind, root, site, wrapper in scan.literals:
+            declaration = declarations.get(arg.value)
+            where = {'line': arg.line, 'column': arg.column}
+            if declaration is None:
+                problems.append(located(unit, dict(where, code='binding-orphan', key=arg.value,
+                                                   method=method)))
+            elif kind is None:
+                continue
+            elif declaration['kind'] != kind:
+                problems.append(located(unit, dict(where, code='binding-kind', key=arg.value,
+                                                   method=method,
+                                                   declaredKind=declaration['kind'])))
+            else:
+                row = located(unit, dict(where, **site))
+                if wrapper is not None:
+                    row[1]['wrapper'] = dict(row[1]['wrapper'], path=unit.path)
+                candidates[arg.value].append((root, unit.flow, unit, row, wrapper))
+    wrappers = {}
+
+    def wrapper_proved(binding, unit):
+        if binding not in wrappers:
+            wrappers[binding] = linker.wrapper_returns(binding, unit)
+        return wrappers[binding]
+
+    for unit in linker.units:
+        for candidate in unit.scan.candidates:
+            node, funcstat, wrapper = candidate['node'], candidate['funcstat'], candidate['wrapper']
+            info = unit.scan.wrappers[wrapper]
+            module = _module_root(funcstat.target.obj.binding) \
+                if funcstat.target.obj.binding is not None else None
+            name = funcstat.target.key.value
+            exports = sorted(path for path, binding in unit.flow.exports if binding is module)
+            func, reason = (None, 'the dispatcher is not defined on a local module table') \
+                if module is None else linker.module_function(unit.flow, module, name, exports)
+            if reason is None and func is not candidate['func']:
+                reason = '%s.%s is not this function' % (module.node.value, name)
+            if reason is None and not exports:
+                reason = 'the module table %s is not exported as a Nexus path' % module.node.value
+            if reason is not None:
+                problems.append(located(unit, {
+                    'code': 'binding-unresolved', 'line': node.line, 'column': node.column,
+                    'construct': 'dispatcher', 'detail': reason}))
+                continue
+            chain = {'map': {'name': candidate['map'].node.value, 'path': unit.path,
+                             'line': candidate['map'].node.line},
+                     'wrapper': {'name': info['name'], 'path': unit.path, 'line': info['line'],
+                                 'method': info['method']},
+                     'dispatch': {'path': unit.path, 'line': node.line, 'column': node.column},
+                     'dispatcher': exports[0] + '.' + name,
+                     'entries': len(candidate['entries']), 'boundKeys': [],
+                     'shadowedEntries': [], 'wrapperReturnsResult': wrapper_proved(wrapper, unit),
+                     'outputs': []}
+            chains.append((unit, node, chain))
+            for code, value in candidate['entries']:
+                if code in candidate['shadow']:
+                    row = {'code': code, 'key': value.value, 'path': unit.path,
+                           'line': value.line, 'column': value.column,
+                           'shadowedBy': candidate['shadow'][code]}
+                    chain['shadowedEntries'].append(row)
+                    shadowed.append(((unit.order, value.line, value.column), row))
+                    continue
+                declaration = declarations.get(value.value)
+                where = {'line': value.line, 'column': value.column}
+                if declaration is None:
+                    problems.append(located(unit, dict(where, code='binding-orphan',
+                                                       key=value.value, method=info['method'])))
+                elif declaration['kind'] != info['kind']:
+                    problems.append(located(unit, dict(where, code='binding-kind',
+                                                       key=value.value, method=info['method'],
+                                                       declaredKind=declaration['kind'])))
+                else:
+                    candidates[value.value].append((node, unit.flow, unit, located(unit, dict(
+                        where, site='map-value', code=code, map=candidate['map'].node.value,
+                        dispatcher=chain['dispatcher'])), wrapper))
+    roots = {key: [(root, flow) for root, flow, unit, row, wrapper in rows
+                   if wrapper is None or wrapper_proved(wrapper, unit)]
+             for key, rows in candidates.items()}
+    proofs = linker.prove(roots)
+    for unit, node, chain in chains:
+        for key in declarations:
+            outputs = proofs[key].get(id(node))
+            if outputs and any(root is node and row[1]['site'] == 'map-value'
+                               for root, _, _, row, _ in candidates[key]):
+                chain['boundKeys'].append(key)
+                chain['outputs'] = outputs
+        chain['established'] = bool(chain['boundKeys'])
     for unit in units:
         if unit.error is not None:
             row = {'code': 'binding-unparsed', 'path': unit.path}
             row.update({('detail' if field == 'code' else field): value
                         for field, value in unit.error.items()})
-            analysis.problems.append(((unit.order, 0, 0), row))
+            problems.append(((unit.order, 0, 0), row))
     families = {}
     for family in context['windowFamilies']:
         for key in family['adoptedKeys']:
@@ -3922,30 +4374,41 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
                 'coverageStatus': family['coverageStatus']})
     surfaces = {row['key']: row.get('familySurface') for row in context['keys']
                 if type(row) is dict}
-    positions = {(row['path'], row['line'], row['column'])
-                 for sites in analysis.sites.values() for _, row in sites}
+    rows, unbound, positions, proven_rows = [], [], set(), {}
+    for key in declarations:
+        proven, unproven = [], []
+        for root, flow, unit, (order, row), wrapper in candidates[key]:
+            outputs = proofs[key].get(id(root))
+            if outputs:
+                proven.append((order, dict(row, outputs=outputs)))
+            else:
+                reason = ('wrapper-result-not-returned' if wrapper is not None
+                          and not wrapper_proved(wrapper, unit) else 'output-not-reached')
+                unproven.append((order, dict(row, reason=reason)))
+            positions.add((row['path'], row['line'], row['column']))
+        proven_rows[key] = ([row for _, row in sorted(proven, key=lambda item: item[0])],
+                            [row for _, row in sorted(unproven, key=lambda item: item[0])])
     leads = {key: {} for key in declarations}
     for unit in units:
         for value, line, column in unit.leads:
             if value in leads and (unit.path, line, column) not in positions:
                 leads[value][unit.path] = leads[value].get(unit.path, 0) + 1
-    rows, unbound = [], []
     for key, declaration in declarations.items():
-        sites = [row for _, row in sorted(analysis.sites[key], key=lambda item: item[0])]
+        sites, unproven = proven_rows[key]
         kinds = {row['site'] for row in sites}
         binding = (_DIRECT if kinds & {'direct-call', 'wrapper-call'}
                    else _MAPPED if kinds else _UNBOUND)
         if binding == _UNBOUND:
             unbound.append({'code': 'binding-unbound', 'path': None, 'key': key,
-                            'detail': 'no genuine static consumer of this declared key'})
+                            'detail': 'no static consumer of this declared key reaches an output'})
         declared = families.get(key, [])
         rows.append({'key': key, 'kind': declaration['kind'], 'binding': binding,
-                     'sites': sites,
+                     'sites': sites, 'unprovenSites': unproven,
                      'excludedLiteralLeads': {'count': sum(leads[key].values()),
                                               'byPath': leads[key]},
                      'family': {'state': 'DECLARED' if declared else 'UNCLASSIFIED',
                                 'families': declared, 'familySurface': surfaces.get(key)}})
-    problems = [row for _, row in sorted(analysis.problems, key=lambda item: item[0])] + unbound
+    problems = [row for _, row in sorted(problems, key=lambda item: item[0])] + unbound
     return {
         'schema': CONSUMER_SCHEMA,
         'schemaVersion': CONSUMER_SCHEMA_VERSION,
@@ -3973,16 +4436,17 @@ def consumer_binding_report(english_source: bytes, packs_source: bytes, key_cont
             _MAPPED: sum(1 for row in rows if row['binding'] == _MAPPED),
             _UNBOUND: len(unbound),
             'sites': sum(len(row['sites']) for row in rows),
+            'unprovenSites': sum(len(row['unprovenSites']) for row in rows),
             'problems': len(problems),
-            'dynamicUnknown': len(analysis.dynamic),
-            'shadowedMapEntries': len(analysis.shadowed)},
+            'dynamicUnknown': len(dynamic),
+            'shadowedMapEntries': len(shadowed)},
         'keys': rows,
-        'mapChains': analysis.chains,
-        'shadowedMapEntries': [row for _, row in sorted(analysis.shadowed,
-                                                        key=lambda item: item[0])],
-        'dynamicUnknown': [row for _, row in sorted(analysis.dynamic, key=lambda item: item[0])],
+        'mapChains': [chain for _, _, chain in chains],
+        'shadowedMapEntries': [row for _, row in sorted(shadowed, key=lambda item: item[0])],
+        'dynamicUnknown': [row for _, row in sorted(dynamic, key=lambda item: item[0])],
         'problems': problems,
         'bindingRule': _BINDING_RULE,
+        'outputRule': _OUTPUT_RULE,
         'familyRule': _FAMILY_RULE,
         'limits': list(_CONSUMER_LIMITS),
         'completeness': {'established': False, 'rule': _CONSUMER_COMPLETENESS},
