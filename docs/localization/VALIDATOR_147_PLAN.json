@@ -1,0 +1,312 @@
+{
+  "schema": "nexus.l10n.validator_147_plan",
+  "schemaVersion": 1,
+  "refs": [147, 123, 140, 141, 142, 143, 144, 145, 146, 148, 149],
+  "status": "PLAN_ONLY_ROOT_REVIEW_PENDING",
+  "nature": "Documentation and evidence only. This plan proposes future work. It authorizes no source, test, tool, runtime-data, metadata or family-inventory edit, no dispatch, merge, push, package, install, tracker, contact, native or model action, and no cap expansion.",
+  "companion": "docs/localization/VALIDATOR_147_PLAN.md",
+  "authoring": {
+    "providerInstanceId": "claudeAgent_claude2",
+    "providerDisplayName": "Claude Second",
+    "model": "claude-opus-5-5",
+    "providerEvidence": "orchestrator_capabilities reported inheritedProviderInstanceId claudeAgent_claude2 and inheritedModel claude-opus-5-5 for this session",
+    "branch": "docs/nexus-147-contract-plan-second-20261029",
+    "worktree": "own isolated T3 worktree docs-nexus-147-contract-plan-second-20261029",
+    "initialHead": "75178765a90c772c0521829708d365cc7dc3eb35",
+    "initialTree": "84b230e035a6d2853f48dc26666bf6c7510856e0",
+    "initialStateVerified": "HEAD and tree equal the required values; working tree clean",
+    "historicalWorkersRevived": false,
+    "instructionReads": ["AGENTS.md", "CONTRIBUTING.md", "AI_POLICY.md", "docs/agents/domain.md", "docs/agents/reporting.md", "installed implement, tdd and code-review skills"],
+    "absentDomainDocs": ["CONTEXT.md", "docs/adr/"]
+  },
+  "sourceBinding": {
+    "documentationUnion": {"commit": "75178765a90c772c0521829708d365cc7dc3eb35", "tree": "84b230e035a6d2853f48dc26666bf6c7510856e0"},
+    "runtimeEvidence": {"commit": "8393f5f4b61a0d62b5043b861539be868ebf80f6", "tree": "8c1397ba8856d6d6973d5dd28e7fa0aecebb4ada"},
+    "unionDeltaFromRuntimeEvidence": ["docs/localization/CURRENT_COHORT_EVIDENCE.json", "docs/localization/CURRENT_COHORT_EVIDENCE.md", "docs/localization/FULL_COVERAGE.md", "docs/localization/KEY_CONTEXT.json", "docs/tutorial/ALL41_ACCEPTANCE.json", "docs/tutorial/ALL41_ACCEPTANCE.md"],
+    "identicalBlobsAtBothPins": {
+      "core/Localization.lua": "02f8d8d8dc4e6fe367501da4d868153236e1dd22",
+      "data/LocalizationEnglish.lua": "024557e8ffb9d6f587080e46b47b33daea25e492",
+      "data/LocalizationPacks.lua": "1898a5ff36caea52d747d47447fdf034d96b5ce9",
+      "data/DefaultProfile.lua": "a51a675022b5c6195253ed51bc33fd77e4a30b3c",
+      "core/UserText.lua": "935076c017e779f1d0d832667fbd22a17c16859f",
+      "ui/Readout.lua": "f4ef71c253fe1506ebf25b0d5b084487ffa03cb0",
+      "ui/Panel.lua": "c8021912322f33aff406e6bfd75ac0e503107f75",
+      "Nexus.toc": "38a4b95907a20e97d0d06cfb0df70d6e99b2d01f",
+      "tools/l10n_catalog.py": "d4e4b6f64f1cb1f01bde9609dbb87d421827520e",
+      "tools/tests/test_l10n_catalog.py": "2faab202d391977591885709fe45dc2dae12790e",
+      "tools/run_prototype_tests.py": "06101ea378287e1817fb1b659e46f9f2498409a9",
+      "tools/ci_check.py": "a2645a77bc207737f50b9b2451a1bd0084e27b2c"
+    },
+    "establishes": "no new runtime, native, review or language acceptance; the union preserves the 8393f5f runtime, test and package blobs"
+  },
+  "inputsRead": {
+    "originalScope": {"file": "task-4/TRACKER_147_CURRENT_SCOPE_READ_20261029.json (root-held local coordination input, not committed)", "sha256": "bf194273a5a0d6a49170fd6aa4b0d7c2cb41c8694867c6b01f1c1d02864091e1", "sha256Verified": true, "bytes": 9215},
+    "publicIssue": {"url": "https://github.com/Viscerals/Better-Nexus/issues/147", "readOn": "2026-10-29", "readMode": "read-only gh issue view; nothing written", "state": "OPEN", "updatedAt": "2026-10-26T05:45:56Z", "bodyEqualsScopeRead": "equal except one trailing newline added by the read tool", "comments": 1},
+    "acceptedEvidence": ["docs/localization/CURRENT_COHORT_EVIDENCE.json", "docs/localization/CURRENT_COHORT_EVIDENCE.md", "docs/localization/KEY_CONTEXT.json", "docs/localization/FULL_COVERAGE.md", "docs/localization/RELEASE_LANGUAGES.json", "docs/localization/VALIDATION.md", "docs/localization-dynamic-cohorts.md"],
+    "sourceRead": ["core/Localization.lua", "data/LocalizationEnglish.lua", "data/LocalizationPacks.lua (header)", "data/DefaultProfile.lua:89-93", "Nexus.toc:13-15", "core/UserText.lua (seam references)", "ui/Readout.lua:320-336", "ui/Panel.lua:750-762", "tools/l10n_catalog.py", "tools/tests/test_l10n_catalog.py (F1-F4 regions and CatalogCurrentSource)", "tests/prototype/terminology.lua (boundary and Automatic anchors)", "tools/run_prototype_tests.py:11,423", "tools/build_package.py:41-175", ".gitattributes"],
+    "excluded": "credentials, private SavedVariables, player data, logs, chats, screenshots and unrelated projects were not read or recorded"
+  },
+  "historicalVersusCurrent": {
+    "rule": "A historical claim is not integrated code. Nothing below is ported, rerun or revived.",
+    "items": [
+      {"part": "U1 corrected runtime registry", "reportedPin": "38662fa6265e22c2bd7e9637ba54c5b8156375e6", "reportedResult": "541 contract assertions, 7 fixtures, catalog 76, inventory 8, runner 49", "objectInInspectedStore": false, "state": "historical reported, unproven; not integrated; not accepted"},
+      {"part": "U1 earlier draft", "reportedPin": "4bce313bf43f666d59b8bc157361ec038b6a1819", "reportedResult": "499 assertions; reviews requested fixes; full 557/558", "objectInInspectedStore": false, "state": "superseded, unproven"},
+      {"part": "U2 complete-English/plain-content admission", "reportedPin": null, "reportedResult": "packet prepared, implementation not started", "state": "prepared only"},
+      {"part": "U3a syntax-only parser", "reportedPin": "5f5b4628c91236d65d60f99207a3d2a8741fcb65", "reportedResult": "catalog 95/96", "objectInInspectedStore": false, "state": "historical reported, unproven; not integrated"},
+      {"part": "U3b semantic/schema binding", "reportedPin": null, "state": "PENDING"}
+    ],
+    "storeCheck": "git cat-file -t on 38662fa, 5f5b462 and 4bce313 in this worktree's object store failed (bounded check, not a global absence claim; CURRENT_COHORT_EVIDENCE records the wider bounded search)",
+    "currentSourceFacts": [
+      "core/Localization.lua has no registry or declaration symbol; SCHEMAS (line 232) is the only code-owned schema",
+      "tools/l10n_catalog.py is the scoped static-catalog draft: parse_english/parse_packs, validate_catalog_data, catalog_report and the confined-root CLI main; STATUS IMPLEMENTED_DRAFT_REVIEW_PENDING",
+      "tools/tests/test_l10n_catalog.py has 76 test methods, not 96"
+    ],
+    "holdsAndLabels": "Old transfer/provider holds and the historical owner label /root/restart_metadata_cli are not current approval or worker evidence. No current #147 worker is assigned by this plan."
+  },
+  "focusedBaselineAtUnion": {
+    "command": "python -B tools/tests/test_l10n_catalog.py",
+    "interpreter": "Python 3.14.7",
+    "source": "75178765a90c772c0521829708d365cc7dc3eb35",
+    "result": "Ran 76 tests, OK",
+    "workingTreeAfter": "clean",
+    "scope": "focused read-only check of the existing catalog suite against the union documents; not the full suite, not registration or CI evidence"
+  },
+  "fixedFacts": {
+    "englishKeys": 28,
+    "englishStatic": 27,
+    "englishTemplates": 1,
+    "template": {"key": "readout.charge_counts", "fields": ["banish", "reroll", "freeze"], "slotType": "count", "resultLimitBytes": 254},
+    "optionalPacks": ["frFR", "deDE", "esES", "plPL", "ptBR", "ruRU"],
+    "draftEntriesPerPack": 27,
+    "draftEntriesTotal": 162,
+    "missingInEveryPack": "panel.button.options",
+    "missingBehaviour": "exact English Options, source base, reason missing_candidate, counted",
+    "caps": {"MAX_KEY_BYTES": 64, "MAX_TEXT_BYTES": 256, "MAX_BASE_ENTRIES": 64, "MAX_NAME_BYTES": 64, "MAX_LANGUAGES": 16, "MAX_DIAGNOSTIC_KEYS": 8},
+    "englishHeadroom": 36,
+    "addsEnglishEntries": 0,
+    "capExpansionProposed": false,
+    "automatic": "English-only; L.AUTOMATIC_PREFERENCE is automatic; no evidenced client alias"
+  },
+  "requirements": [
+    {"id": "W1", "source": "What to build", "text": "distinguish real reviewed translations from placeholders", "anchors": ["tools/l10n_catalog.py:816 ENTRY_CATEGORIES", "tools/l10n_catalog.py:1040 _classify"], "status": "IMPLEMENTED_DRAFT", "gap": "none beyond review; depends on entryReview declarations, of which there are 0", "slice": ["S6"]},
+    {"id": "W2", "source": "What to build", "text": "per-pack/per-surface coverage report", "anchors": ["tools/l10n_catalog.py:1073 catalog_report", "tools/l10n_catalog.py:1473 main"], "status": "IMPLEMENTED_DRAFT", "gap": "surfaces are declared window families; consumer binding is declared, not verified", "slice": ["S8"]},
+    {"id": "W3", "source": "What to build", "text": "a malformed or unreviewed pack cannot be advertised as next-release complete merely because files exist", "anchors": ["tools/l10n_catalog.py main --require-complete (always exit 1 at this stage)", "core/Localization.lua:446 pack availability"], "status": "IMPLEMENTED_DRAFT", "gap": "availability (chooser offer) and completion are separate concepts; this plan keeps availability rules unchanged and makes completion a receipt-only fact", "slice": ["S3", "S6"]},
+    {"id": "R1.1", "source": "AC1", "text": "authoritative English key schema", "anchors": ["core/Localization.lua:162 ValidKey", "tools/l10n_catalog.py:538 _valid_key", "KEY_CONTEXT.json keySchema"], "status": "IMPLEMENTED_DRAFT_DUPLICATED", "gap": "keys exist by English-data presence; no per-key declaration; rule held in two places", "slice": ["S2", "S3", "S5"]},
+    {"id": "R1.2", "source": "AC1", "text": "context schema", "anchors": ["KEY_CONTEXT.json keys[].meaning/consumer/familySurface", "tools/l10n_catalog.py:623 _check_context"], "status": "PARTIAL", "gap": "context is document-only and bound to English keys, not to a code declaration", "slice": ["S5"]},
+    {"id": "R1.3", "source": "AC1", "text": "placeholder schema", "anchors": ["core/Localization.lua:232 SCHEMAS", "tools/l10n_catalog.py:439 _FORMAT_FIELDS and :440 _FORMAT_LIMITS", "KEY_CONTEXT.json keys[5].placeholders"], "status": "IMPLEMENTED_DRAFT_TRIPLICATED", "gap": "three hand-maintained copies; parity only by tests that repeat the same constants", "slice": ["S2", "S3", "S5"]},
+    {"id": "R1.4", "source": "AC1", "text": "markup schema", "anchors": ["core/Localization.lua:211 ValidText (no |, no control byte)", "tools/l10n_catalog.py:549 _valid_text"], "status": "IMPLEMENTED_DRAFT", "gap": "plain content is implicit, not a declared content class; code-owned markup (Options '! ') is outside data and must stay so", "slice": ["S3", "S4"]},
+    {"id": "R1.5", "source": "AC1", "text": "pack language identity", "anchors": ["RELEASE_LANGUAGES.json products[].productId/autonym", "tools/l10n_catalog.py:735 _check_packs autonym equality"], "status": "IMPLEMENTED_DRAFT", "gap": "tool hardcodes _PRODUCT_ROLES (line 449) and does not read data/DefaultProfile.lua uiLanguages.ids, which the runtime uses", "slice": ["S1", "S5"]},
+    {"id": "R1.6", "source": "AC1", "text": "optional-UI versus client mapping", "anchors": ["RELEASE_LANGUAGES.json productIdIsClientLocale false, clientLocaleCode UNKNOWN", "tools/l10n_catalog.py _check_release"], "status": "IMPLEMENTED_DRAFT", "gap": "no evidenced client alias exists; #141/#146 own any alias", "slice": []},
+    {"id": "R1.7", "source": "AC1", "text": "source/base revision per pack", "anchors": ["RELEASE_LANGUAGES.json sourcePin (document-level, historical 5c77eec)"], "status": "GAP", "gap": "no per-pack base revision (the English blob a pack was drafted against)", "slice": ["S7"]},
+    {"id": "R1.8", "source": "AC1", "text": "translator provenance/rights", "anchors": ["data/LocalizationPacks.lua header (drafted; technical review only)", "RELEASE_LANGUAGES.json packReviewStatementAtBase"], "status": "GAP", "gap": "no translator, authorship, attribution or rights field; values are UNKNOWN and must not be invented", "slice": ["S7"]},
+    {"id": "R1.9", "source": "AC1", "text": "human reviewer status", "anchors": ["RELEASE_LANGUAGES.json products[].review gates", "RELEASE_LANGUAGES.json entryReview (0 declarations)", "tools/l10n_catalog.py:991 _check_declarations"], "status": "IMPLEMENTED_DRAFT", "gap": "no reviewer assigned (#148)", "slice": []},
+    {"id": "R2.1", "source": "AC2", "text": "key parity", "anchors": ["tools/l10n_catalog.py context-key-mismatch"], "status": "PARTIAL", "gap": "English/context parity only; no runtime/offline key-admission parity", "slice": ["S1", "S5"]},
+    {"id": "R2.2", "source": "AC2", "text": "TOC parity", "anchors": ["tools/l10n_catalog.py:1387 _cli_toc", "Nexus.toc:13-15"], "status": "IMPLEMENTED_DRAFT", "gap": "order check in the CLI only; package TOC equality belongs to tools/build_package.py --check", "slice": []},
+    {"id": "R2.3", "source": "AC2", "text": "load parity", "anchors": ["tools/l10n_catalog.py NOTICE.validationScope (runtime load/fallback parity not implemented)"], "status": "GAP", "gap": "no shared corpus proves the offline verdict maps to the runtime load outcome", "slice": ["S1"]},
+    {"id": "R2.4", "source": "AC2", "text": "missing keys", "anchors": ["catalog_report category missing"], "status": "IMPLEMENTED_DRAFT", "gap": "none for packs; a declared English key without English text has no representation until S4", "slice": ["S4"]},
+    {"id": "R2.5", "source": "AC2", "text": "duplicate keys", "anchors": ["tools/l10n_catalog.py duplicate-key/duplicate-pack/duplicate-field", "context-duplicate-key"], "status": "IMPLEMENTED_DRAFT", "gap": "runtime cannot see a source duplicate (Lua constructor keeps the last); offline-only control", "slice": ["S1"]},
+    {"id": "R2.6", "source": "AC2", "text": "obsolete keys", "anchors": ["ENTRY_CATEGORIES obsolete (always empty in a report)"], "status": "PARTIAL", "gap": "no retired-key record, so obsolete cannot be told from orphan; validate_catalog_data raises before a report exists", "slice": ["S6"]},
+    {"id": "R2.7", "source": "AC2", "text": "orphan keys", "anchors": ["tools/l10n_catalog.py orphan-entry"], "status": "PARTIAL", "gap": "pack-entry orphans are rejected; English keys without a consumer reference are not checked (UNKNOWN whether #147 intended both meanings)", "slice": ["S6", "S8"]},
+    {"id": "R2.8", "source": "AC2", "text": "valid UTF-8", "anchors": ["core/Localization.lua:182 WellFormedUtf8", "tools/l10n_catalog.py not-utf8/value-not-utf8"], "status": "IMPLEMENTED_DRAFT", "gap": "Lua 5.1 versus LuaJIT escape meanings (\\x, \\z, \\u) are not refused as ambiguous; to verify", "slice": ["S1"]},
+    {"id": "R2.9", "source": "AC2", "text": "required plural variants", "anchors": ["docs/localization-dynamic-cohorts.md:69", "core/Localization.lua named count grammar"], "status": "BLOCKED_ON_142", "gap": "the named-count grammar has no plural grammar; this plan invents none", "slice": ["S9"]},
+    {"id": "R2.10", "source": "AC2", "text": "placeholder names", "anchors": ["CompileTemplate core/Localization.lua:245", "_valid_template tools/l10n_catalog.py:566"], "status": "IMPLEMENTED_DRAFT", "gap": "one template only", "slice": ["S3", "S5"]},
+    {"id": "R2.11", "source": "AC2", "text": "placeholder types", "anchors": ["SlotText core/Localization.lua:287", "_SLOT_TYPE count"], "status": "IMPLEMENTED_DRAFT", "gap": "one type (count) only; further types depend on #142", "slice": ["S9"]},
+    {"id": "R2.12", "source": "AC2", "text": "markup integrity", "anchors": ["ValidText | refusal"], "status": "IMPLEMENTED_DRAFT", "gap": "none for data", "slice": []},
+    {"id": "R2.13", "source": "AC2", "text": "newline integrity", "anchors": ["ValidText control-byte refusal (10, 13)"], "status": "IMPLEMENTED_DRAFT", "gap": "CRLF/LF source representations need an explicit parity control", "slice": ["S1"]},
+    {"id": "R2.14", "source": "AC2", "text": "deterministic fallback", "anchors": ["tests/prototype/terminology.lua:165,294-295", "core/Localization.lua Resolve/FormatResolve"], "status": "IMPLEMENTED_RUNTIME_ONLY", "gap": "offline report does not model fallback outcomes; a pack entry dropped at load later answers missing_candidate, not invalid_candidate", "slice": ["S1", "S6"]},
+    {"id": "R2.15", "source": "AC2", "text": "meaningful invalid fixture fails through the required-CI gate", "anchors": ["tools/tests/test_l10n_catalog.py CatalogSchemaApi", "PYTHON_TESTS tools/run_prototype_tests.py:423"], "status": "IMPLEMENTED_DRAFT_SCOPED", "gap": "scoped to the static catalog; registry and parity controls absent", "slice": ["S1", "S5"]},
+    {"id": "R2.16", "source": "AC2", "text": "valid fixture passes through the same gate", "anchors": ["CatalogCurrentSource"], "status": "IMPLEMENTED_DRAFT_SCOPED", "gap": "as R2.15", "slice": ["S1", "S5"]},
+    {"id": "R3.1", "source": "AC3", "text": "report translated-and-reviewed, reviewed-legitimately-identical, deliberate English placeholder, missing, invalid and obsolete separately", "anchors": ["ENTRY_CATEGORIES (also draft_unreviewed)"], "status": "PARTIAL", "gap": "invalid and obsolete are always empty because validation raises first", "slice": ["S6"]},
+    {"id": "R3.2", "source": "AC3", "text": "an unchanged product/game name can be reviewed as identical", "anchors": ["_DECISIONS legitimately_identical", "evidence-decision-mismatch"], "status": "IMPLEMENTED_DRAFT", "gap": "no declaration exists", "slice": []},
+    {"id": "R3.3", "source": "AC3", "text": "copied English without language review remains a placeholder", "anchors": ["_classify deliberate_english_placeholder"], "status": "IMPLEMENTED_DRAFT", "gap": "0 identical entries exist today", "slice": []},
+    {"id": "R4.1", "source": "AC4", "text": "static keys per adopted family", "anchors": ["KEY_CONTEXT.json windowFamilies (HUD 23 adopted; 14 families 0)", "catalog_report families"], "status": "PARTIAL", "gap": "five reason.* keys belong to no family; families are declared, not consumer-verified", "slice": ["S8"]},
+    {"id": "R4.2", "source": "AC4", "text": "dynamic keys per adopted family", "anchors": ["docs/localization-dynamic-cohorts.md"], "status": "BLOCKED_ON_142", "gap": "dynamic producers beyond the first cohort are unclassified", "slice": ["S9"]},
+    {"id": "R4.3", "source": "AC4", "text": "test-only fixtures and pseudo data excluded from shipped counts", "anchors": ["RELEASE_LANGUAGES.json pseudoAndTestData", "evidence-pseudo-product"], "status": "IMPLEMENTED_DRAFT", "gap": "new parity fixtures (S1) must live under tests/ and never under data/", "slice": ["S1"]},
+    {"id": "R4.4", "source": "AC4", "text": "required CI registration follows the accepted final runner contract", "anchors": ["tools/run_prototype_tests.py:423 PYTHON_TESTS", "tools/ci_check.py"], "status": "IMPLEMENTED_DRAFT", "gap": "new tests need registration in NAMES and PYTHON_TESTS", "slice": ["S1", "S5"]},
+    {"id": "R4.5", "source": "AC4", "text": "do not overwrite PR138's frozen runner/source", "anchors": ["#147 comment 2026-10-25"], "status": "UNKNOWN_CURRENT_STATE", "gap": "PR138's present state was not read; registration must be append-only and checked against it before any runner edit", "slice": ["S1"]},
+    {"id": "R5.1", "source": "AC5", "text": "preserve contributor rights", "anchors": [], "status": "GAP", "gap": "no rights field", "slice": ["S7"]},
+    {"id": "R5.2", "source": "AC5", "text": "required attribution", "anchors": ["THIRD_PARTY.md", "UPSTREAM.md"], "status": "GAP", "gap": "no per-pack attribution field", "slice": ["S7"]},
+    {"id": "R5.3", "source": "AC5", "text": "independent authorship", "anchors": [], "status": "GAP", "gap": "no authorship attestation", "slice": ["S7"]},
+    {"id": "R5.4", "source": "AC5", "text": "do not import another addon's translation corpus", "anchors": ["AI_POLICY.md"], "status": "POLICY_ONLY", "gap": "not machine-checkable; S7 records an explicit attestation field, and review remains human", "slice": ["S7"]},
+    {"id": "R5.5", "source": "AC5", "text": "no private client/player content", "anchors": ["AI_POLICY.md", "RELEASE_LANGUAGES.json clientEvidence.rule"], "status": "POLICY_ONLY", "gap": "as R5.4", "slice": ["S7"]},
+    {"id": "R5.6", "source": "AC5", "text": "record approved terminology/context for consequential prompts", "anchors": ["RELEASE_LANGUAGES.json terminology.status pending", "docs/localization/KEYS_AND_GLOSSARY.md (historical)"], "status": "GAP_BLOCKED_ON_ROOT_AND_148", "gap": "no approved terminology; consent/refusal prompts (#145) need it before adoption", "slice": ["S10"]},
+    {"id": "R6.1", "source": "AC6", "text": "machine-readable pack coverage receipt", "anchors": ["catalog_report", "CLI record nexus.l10n.catalog_cli_record"], "status": "IMPLEMENTED_DRAFT", "gap": "four-input; not registry-bound", "slice": ["S5"]},
+    {"id": "R6.2", "source": "AC6", "text": "machine-readable family coverage receipt", "anchors": ["catalog_report families"], "status": "IMPLEMENTED_DRAFT", "gap": "as R4.1", "slice": ["S8"]},
+    {"id": "R6.3", "source": "AC6", "text": "human-review status", "anchors": ["report gates"], "status": "IMPLEMENTED_DRAFT", "gap": "none technical", "slice": []},
+    {"id": "R6.4", "source": "AC6", "text": "native status", "anchors": ["report nativeFacts establishedByThisReport NOT_RUN"], "status": "IMPLEMENTED_DRAFT", "gap": "native evidence belongs to #146", "slice": []},
+    {"id": "R6.5", "source": "AC6 and #147 comment", "text": "no 100% claim; fallback English never counts as translation", "anchors": ["tools/tests/test_l10n_catalog.py test_actual_report_binds_the_exact_physical_input_bytes (100% refusal)"], "status": "IMPLEMENTED_DRAFT", "gap": "keep the refusal in every new receipt", "slice": ["S5", "S6"]},
+    {"id": "B1", "source": "Blocked by", "text": "#140 base format exists", "status": "SATISFIED", "anchors": ["data/LocalizationEnglish.lua", "core/Localization.lua"], "gap": "none", "slice": []},
+    {"id": "B2", "source": "Blocked by", "text": "#142 must define dynamic/plural schema before those gates complete", "status": "OPEN_DEPENDENCY", "anchors": ["docs/localization-dynamic-cohorts.md"], "gap": "recorded, not invented", "slice": ["S9"]},
+    {"id": "B3", "source": "Blocked by", "text": "static fixtures can proceed independently", "status": "USED", "anchors": [], "gap": "S0-S8 are static", "slice": ["S1"]},
+    {"id": "B4", "source": "Blocked by", "text": "coordinate runner integration with PR138", "status": "OPEN", "anchors": [], "gap": "see R4.5", "slice": ["S1"]},
+    {"id": "V1", "source": "Validation and ownership", "text": "preserve Lua 5.1/30300, Nexus identity, SavedVariables unknown/read-only/rollback compatibility", "status": "CONSTRAINT", "anchors": ["CONTRIBUTING.md Compatibility"], "gap": "no slice touches saved data", "slice": ["ALL"]},
+    {"id": "V2", "source": "Validation and ownership", "text": "unchanged gameplay, consent, matching, identity and network/resource semantics", "status": "CONSTRAINT", "anchors": ["core/UserText.lua raw-code lookup", "ui/Panel.lua:752 OptionsLabel"], "gap": "none", "slice": ["ALL"]},
+    {"id": "V3", "source": "Validation and ownership", "text": "meaningful focused controls, full exact-source CI and applicable package/TOC checks", "status": "PER_SLICE_GATE", "anchors": ["tools/ci_check.py", "tools/build_package.py --check"], "gap": "none run for this plan beyond the focused catalog baseline", "slice": ["ALL"]},
+    {"id": "V4", "source": "Validation and ownership", "text": "independent Spec and Standards review, fixes and re-review", "status": "PER_SLICE_GATE", "anchors": ["AGENTS.md Engineering workflow"], "gap": "this plan itself awaits root review", "slice": ["ALL"]},
+    {"id": "V5", "source": "Validation and ownership", "text": "fluent-speaker and native validation need their own evidence", "status": "SEPARATE_GATE", "anchors": ["#146", "#148"], "gap": "none claimed", "slice": []},
+    {"id": "V6", "source": "Validation and ownership", "text": "merge/release/native authority unchanged", "status": "CONSTRAINT", "anchors": ["RELEASE_SECURITY.md"], "gap": "none", "slice": ["ALL"]},
+    {"id": "E1", "source": "Execution tracking", "text": "keep three-key technical checks distinct from full-surface coverage, linguistic acceptance and #146", "status": "CONSTRAINT", "anchors": [], "gap": "none", "slice": ["ALL"]},
+    {"id": "E2", "source": "Execution tracking", "text": "track source pin, full checks, verdicts/fixes/re-review, composition, native, package and delivery separately", "status": "CONSTRAINT", "anchors": [], "gap": "none", "slice": ["ALL"]},
+    {"id": "G1", "source": "Isolation gate (2026-10-26)", "text": "U1 cannot integrate or ship alone; U2 and U3 are required", "status": "ADOPTED_AS_INTERLOCK", "anchors": [], "gap": "enforced by the S1 sentinel and the R union", "slice": ["S1", "R"]},
+    {"id": "G2", "source": "Isolation gate (2026-10-26)", "text": "do not relabel the historical four-input catalog as current registry validation", "status": "CONSTRAINT", "anchors": ["tools/l10n_catalog.py validate_catalog_data (four inputs)"], "gap": "the registry-bound API is new and versioned; the four-input API keeps its scoped label", "slice": ["S5"]}
+  ],
+  "contract": {
+    "principle": "One contract; each fact has exactly one owner. Every other copy is checked against its owner and is never a second authority.",
+    "fieldOwners": [
+      {"fact": "key existence, kind (text or format), placeholder names in order, slot type, result limit, content class", "owner": "a literal declaration table in core/Localization.lua (proposed, U1)", "checkedBy": ["runtime admission (U1/U2)", "tools/l10n_catalog.py nonexecuting declaration parser (U3)"]},
+      {"fact": "exact English text", "owner": "data/LocalizationEnglish.lua", "checkedBy": ["runtime admission", "parse_english"]},
+      {"fact": "meaning, consumer, family surface, group, translator notes", "owner": "docs/localization/KEY_CONTEXT.json keys[]", "checkedBy": ["U3b: kind, placeholders and resultLimitBytes rows must equal the declaration"]},
+      {"fact": "window-family membership", "owner": "docs/localization/KEY_CONTEXT.json windowFamilies[].adoptedKeys", "checkedBy": ["_check_families"]},
+      {"fact": "pack text and autonym", "owner": "data/LocalizationPacks.lua", "checkedBy": ["runtime pack copy", "parse_packs"]},
+      {"fact": "pack product identity, client-mapping status, review gates, base revision, provenance and rights", "owner": "docs/localization/RELEASE_LANGUAGES.json products[] (base revision and provenance proposed in S7)", "checkedBy": ["_check_release", "S7 checks"]},
+      {"fact": "language enum", "owner": "data/DefaultProfile.lua uiLanguages.ids", "checkedBy": ["runtime", "proposed offline cross-check (S5)"]},
+      {"fact": "per-entry review decisions", "owner": "RELEASE_LANGUAGES.json entryReview", "checkedBy": ["_check_declarations"]}
+    ],
+    "declarationShape": {
+      "text": "[\"key\"] = { kind = \"text\" }",
+      "format": "[\"readout.charge_counts\"] = { kind = \"format\", fields = { \"banish\", \"reroll\", \"freeze\" }, slot = \"count\", resultLimit = 254 }",
+      "grammar": "literal strings, non-negative decimal integers and nested plain tables only, inside one delimited block; no expression, so a nonexecuting parser reads exactly what the runtime reads",
+      "runtimeCheck": "the runtime asserts that a format resultLimit equals MAX_TEXT_BYTES - 2 for the charge row and fails closed otherwise",
+      "contentClass": "plain is the only class: the existing text contract. Markup is code-owned and never data.",
+      "cap": "at most MAX_BASE_ENTRIES (64) declarations; the declared set equals the 28 current keys; no key is added"
+    },
+    "admission": {
+      "U1": "English base and packs are admitted only against declarations; SCHEMAS is derived from the format declarations",
+      "U2": "complete-English admission: every declared key needs one valid English entry. An undeclared English entry is rejected and counted (proposed base.undeclared). A declared key without valid English is counted (proposed base.missingDeclared) and resolves as today (unavailable, unknown_key). The whole-base 64-entry fail-closed rule is unchanged.",
+      "packs": "pack availability is unchanged: a plain pack with a valid autonym of at most 64 bytes and a plain entries table of at most 64 entries is adopted and offered. Completion never gates availability, and availability never implies completion.",
+      "diagnostics": "only additive Diagnostics() fields; every existing field keeps its meaning so current fixtures stay valid unchanged"
+    },
+    "invariants": [
+      "Lua 5.1, interface 30300, addon and folder name Nexus",
+      "NexusDB and WishlistRealizerDB untouched; the uiLanguage preference and Automatic value unchanged",
+      "keys name meanings and are never made from English, player or game text; raw producer codes stay the lookup (core/UserText.lua)",
+      "Identity.ValidDisplayText stays a separate policy; names retained exact, no normalization or transliteration",
+      "no localized text decides a consent, action, matching or network/resource outcome; trusted markers such as the Options '! ' stay code-owned",
+      "deterministic English fallback with the existing reason codes and counts; results are never cut",
+      "active language set once per Lua session; Automatic resolves to English without an evidenced alias"
+    ],
+    "nonexecution": "The offline tool never evaluates, imports or executes Lua, including to inspect declarations. Lua prototype tests may execute Lua in the synthetic harness; that is test evidence, not native evidence."
+  },
+  "parityMapping": {
+    "rule": "Offline is a strict whole-catalog gate; the runtime degrades per entry or per pack. Each offline verdict must map to exactly one runtime outcome, shown below. A shared case corpus proves the mapping (S1).",
+    "rows": [
+      {"id": "P1", "case": "valid catalog", "offline": "valid", "runtime": "base accepted == English count, rejected 0; each pack adopted with rejected 0; absent pack keys answer base/missing_candidate"},
+      {"id": "P2", "case": "invalid English text or key", "offline": "invalid-text / invalid-key", "runtime": "that entry rejected and counted; key answers unavailable/unknown_key or invalid_key"},
+      {"id": "P3", "case": "English 65 entries", "offline": "english-too-many", "runtime": "oversized, accepted 0, rejected 65"},
+      {"id": "P4", "case": "invalid pack entry", "offline": "invalid-text or invalid-template (pack path)", "runtime": "entry not copied, row rejected +1; through the active pack the key answers missing_candidate, not invalid_candidate"},
+      {"id": "P5", "case": "pack entry for an unknown key", "offline": "orphan-entry", "runtime": "not copied, row rejected +1"},
+      {"id": "P6", "case": "pack with 65 entries", "offline": "pack-too-many-entries", "runtime": "pack refused, not offered, refused +1"},
+      {"id": "P7", "case": "invalid or 65-byte autonym", "offline": "invalid-autonym", "runtime": "pack refused"},
+      {"id": "P8", "case": "duplicate key in one table", "offline": "duplicate-key", "runtime": "undetectable (Lua constructor keeps the last value); offline-only control"},
+      {"id": "P9", "case": "pack ID outside the enum", "offline": "pack-unknown", "runtime": "never read and not counted as refused"},
+      {"id": "P10", "case": "enum ID without a pack", "offline": "pack-missing", "runtime": "refused +1, not offered"},
+      {"id": "P11", "case": "template reorder / missing / repeated / unknown name / {1} / {name:d} / lone brace", "offline": "valid / invalid-template", "runtime": "copied / not copied"},
+      {"id": "P12", "case": "same data as CRLF and as LF bytes", "offline": "identical decoded values and verdict", "runtime": "identical admission"},
+      {"id": "P13", "case": "decimal escape versus literal UTF-8 for the same scalar", "offline": "equal values (and equal duplicates)", "runtime": "equal values"},
+      {"id": "P14", "case": "overlong or surrogate bytes via decimal escape", "offline": "value-not-utf8", "runtime": "rejected by WellFormedUtf8"},
+      {"id": "P15", "case": "newline, CR or | in text", "offline": "invalid-text", "runtime": "rejected"},
+      {"id": "P16", "case": "ASCII-whitespace-only text versus U+00A0-only text", "offline": "invalid / valid", "runtime": "rejected / admitted"},
+      {"id": "P17", "case": "64-byte versus 65-byte key; 64 versus 65 entries", "offline": "valid / invalid", "runtime": "admitted / rejected or oversized"},
+      {"id": "P18", "case": "static text containing literal braces", "offline": "valid", "runtime": "admitted and shown literally"},
+      {"id": "P19", "case": "escape whose meaning differs between Lua 5.1 and LuaJIT (\\x41, \\z, \\u{...})", "offline": "UNKNOWN today; proposed new code ambiguous-escape", "runtime": "WoW Lua 5.1 and the LuaJIT harness may decode different bytes; to verify before S1 fixes the expectation"},
+      {"id": "P20", "case": "UTF-8 byte order mark at file start", "offline": "unexpected-token", "runtime": "UNKNOWN native loader behaviour; Lua 5.1 loadfile does not skip a BOM"},
+      {"id": "R-P1", "case": "undeclared but otherwise valid English entry", "offline": "registry: undeclared-entry (proposed)", "runtime": "registry: rejected and counted; current source admits it (expected red before the R union)"},
+      {"id": "R-P2", "case": "declaration and KEY_CONTEXT disagree on kind, placeholders or limit", "offline": "registry: context-declaration-mismatch (proposed)", "runtime": "not applicable (documents are not loaded)"},
+      {"id": "R-P3", "case": "declared key without English", "offline": "registry: english-incomplete (proposed)", "runtime": "registry: base.missingDeclared +1; key unavailable"}
+    ]
+  },
+  "findings": [
+    {"id": "F1", "where": "tools/tests/test_l10n_catalog.py:202-212, 231-238; used at :270-283 and :3133-3140", "classification": "STALE_COMMENTARY_WITH_VALID_ASSERTION", "fact": "Comments say panel.button.options exists only in an uncommitted working copy. It was committed in a50372b (English blob 024557e8). WORKING_COPY_PHYSICAL_INPUTS (755f2f5d..., 3970 bytes) is the CRLF checkout of that blob; .gitattributes forces eol=crlf for *.lua, so the physical hash is stable for git checkouts.", "purpose": "binds the report's input hash to the exact current English bytes and refuses the superseded reference blob", "currentGap": "the comment is false; English is compared by physical bytes while packs use the canonical LF blob, an inconsistent representation", "repair": "OPTIONAL_REBINDING (S0): correct the comments and move English to CURRENT_REFERENCE_INPUTS as the canonical LF blob (69d39989..., 3916 bytes), keeping the REFERENCE_ENGLISH_INPUT inequality and the physical-hash equality inside the report-binding test", "mustNot": "remove a check or loosen equality to obtain green"},
+    {"id": "F2", "where": "tools/tests/test_l10n_catalog.py:534", "classification": "HISTORICAL_PHRASE_ASSERTION", "fact": "assertIn('uncommitted working copy', currentAdoption.scope) passes only because the scope keeps that phrase inside a sentence labelled HISTORICAL STATEMENT, SUPERSEDED AND NO LONGER TRUE", "purpose": "originally distinguished an uncommitted Options adoption from a committed one", "currentGap": "the test pins a superseded statement and forces documents to retain it", "repair": "TEST_TRUTH_REPAIR (S0): replace with assertIn of a50372ba485fd98043d68ec7d4f732ee947b0c28 and of 8393f5f4b61a0d62b5043b861539be868ebf80f6 in the scope; then the historical sentence may be dropped from KEY_CONTEXT.json", "mustNot": "delete the assertion or replace it with a weaker substring"},
+    {"id": "F3", "where": "tools/tests/test_l10n_catalog.py:376, 481, 668 (BASE 5c77eec, TREE 692c669 at :30-31)", "classification": "INTENTIONAL_HISTORICAL_CONTRACT_PIN", "fact": "sourcePin of RELEASE_LANGUAGES.json, KEY_CONTEXT.json and the FULL_COVERAGE.md text are pinned to the historical declarative contract pin; current facts are bound additively (KEY_CONTEXT.currentSourceBinding, FULL_COVERAGE 'Current source at 8393f5f')", "purpose": "prevents a silent move of the declarative contract pin", "currentGap": "none; no Python assertion binds currentSourceBinding yet", "repair": "NO_CHANGE; OPTIONAL additive assertion that KEY_CONTEXT.currentSourceBinding.commit/tree equal 8393f5f/8c1397b", "mustNot": "rewrite the historical pins"},
+    {"id": "F4", "where": "tools/tests/test_l10n_catalog.py:431-438; RELEASE_LANGUAGES.json automaticMode", "classification": "HISTORICAL_METADATA_WITH_CURRENT_GAP", "fact": "automaticMode (chooserProductId NONE_AT_BASE) describes the 5c77eec base. Current source has an Automatic preference (data/DefaultProfile.lua:91, core/Localization.lua:396-426, 632-690) that resolves to English with no evidenced alias, tested in Lua (tests/prototype/terminology.lua:581, 888-889) but absent from the release metadata", "purpose": "pins the base-era Automatic contract", "currentGap": "the release metadata is silent about the current Automatic preference", "repair": "METADATA_ADDITION (S0): additive currentAutomaticPreference record (value automatic, resolvesTo enUS, evidencedMappings [], aliasEvidence none, source pin 8393f5f) with an additive test; 431-438 unchanged", "mustNot": "invent an alias or edit the historical block"},
+    {"id": "F5", "where": "ui/Panel.lua:3352-3365", "classification": "OUT_OF_SCOPE_143", "fact": "recorded in CURRENT_COHORT_EVIDENCE as a mixed-language Plan hub item", "currentGap": "a #143 coverage item, not a validator gap", "repair": "none here"},
+    {"id": "F6", "where": "core/Localization.lua:446-462 with :514-518", "classification": "CURRENT_DIAGNOSTIC_GAP", "fact": "an invalid pack entry is dropped at load and later answers missing_candidate through the active pack; only the row's rejected count remembers it", "currentGap": "runtime cannot report which entries were invalid; relevant to R3.1 and R2.14", "repair": "S6 proposal: additive per-pack bounded rejected-key list or reason counts in Diagnostics(); behaviour unchanged"},
+    {"id": "F7", "where": "tools/l10n_catalog.py:449 _PRODUCT_ROLES versus data/DefaultProfile.lua:92", "classification": "CURRENT_PARITY_GAP", "fact": "the tool hardcodes the product list; the runtime reads the enum", "repair": "S5: nonexecuting cross-check of uiLanguages.ids, or an explicit equality test"}
+  ],
+  "controls": {
+    "note": "Proposed controls. None was run as red for this plan. Expected results are predictions against current source.",
+    "items": [
+      {"id": "C1", "topic": "duplicate key / pack / field", "valid": "distinct keys", "invalid": "same key twice, once escaped", "expectedNow": "offline rejects (duplicate-key); runtime cannot see it (P8)"},
+      {"id": "C2", "topic": "missing", "valid": "pack without panel.button.options", "invalid": "none: missing is valid partial data", "expectedNow": "report missing; runtime base/missing_candidate counted"},
+      {"id": "C3", "topic": "orphan / obsolete", "valid": "-", "invalid": "pack entry reason.retired_example", "expectedNow": "offline orphan-entry; runtime drop. Obsolete cannot be distinguished until S6 adds retired keys (expected red for an obsolete-category test)"},
+      {"id": "C4", "topic": "UTF-8", "valid": "Русский literal and the same bytes as decimal escapes", "invalid": "\\192\\169 overlong, \\237\\160\\128 surrogate, \\244\\144\\128\\128 above U+10FFFF, truncated sequence", "expectedNow": "both refuse; parity case new"},
+      {"id": "C5", "topic": "control / markup / newline", "valid": "text with %, braces in static text", "invalid": "\\n, \\r, \\0, \\127, |cff, |T, |H", "expectedNow": "both refuse"},
+      {"id": "C6", "topic": "placeholders", "valid": "{freeze} R:{reroll} B:{banish}; {{ and }}", "invalid": "{1}, {banish:d}, {banish} twice, {unknown}, missing {freeze}, lone { or }", "expectedNow": "both agree"},
+      {"id": "C7", "topic": "types and required variants", "valid": "{known = true, value = 0}, {known = false}", "invalid": "value -1, 1.5, NaN, inf, extra field, metatable", "expectedNow": "runtime refuses (invalid_arguments); plural variants BLOCKED_ON_142"},
+      {"id": "C8", "topic": "identity / text / provenance classification", "valid": "identical product name with a legitimately_identical declaration", "invalid": "identical sentence without declaration; declaration with stale SHA-256; reviewer 'pending'", "expectedNow": "deliberate_english_placeholder; evidence-stale; evidence-reviewer"},
+      {"id": "C9", "topic": "boundaries", "valid": "key 64 bytes; 64 English entries; 64 pack entries; autonym 64 bytes", "invalid": "65 of each", "expectedNow": "agree (P3, P6, P7, P17)"},
+      {"id": "C10", "topic": "refused pack and diagnostics", "valid": "adopted pack row", "invalid": "metatable pack, non-table entries, invalid autonym, 65 entries", "expectedNow": "runtime refused +1 and not in Languages(); offline rejects with a stable code"},
+      {"id": "C11", "topic": "source-byte representations", "valid": "CRLF checkout and in-memory LF copy", "invalid": "lone CR; BOM", "expectedNow": "values equal; lone CR rejected by the test helper; BOM offline unexpected-token, runtime UNKNOWN"},
+      {"id": "C12", "topic": "runtime/offline disagreement", "valid": "the corpus with its mapping", "invalid": "mutant tool copy that accepts | (in a temporary directory) or a corpus row with a deliberately wrong expectation", "expectedNow": "parity test fails on the mutant; not run"},
+      {"id": "C13", "topic": "registry interlock", "valid": "no declaration block anywhere, or declaration block plus registry parser plus complete English", "invalid": "declaration block in core/Localization.lua without the U3 parser binding", "expectedNow": "S1 sentinel passes today (no block) and must fail on a U1-only candidate"},
+      {"id": "C14", "topic": "registry admission (R union)", "valid": "28 declarations equal to the 28 English keys", "invalid": "undeclared English entry; declared key without English; KEY_CONTEXT kind mismatch", "expectedNow": "EXPECTED RED against current source for R-P1 and R-P3 (no declarations exist)"}
+    ]
+  },
+  "slices": [
+    {"id": "S0", "name": "test-truth and metadata repair (prerequisite, not broad-validator completion)", "requirements": ["F1", "F2", "F4", "F3 optional"], "proposedWrites": ["tools/tests/test_l10n_catalog.py", "docs/localization/KEY_CONTEXT.json (drop the superseded sentence only after F2)", "docs/localization/RELEASE_LANGUAGES.json (additive currentAutomaticPreference)"], "acceptance": ["76 existing tests still pass and none is deleted or weakened", "line 534 replaced by the two SHA assertions; a scope without either SHA fails", "English identity is canonical LF 69d39989.../3916 in CURRENT_REFERENCE_INPUTS and the superseded blob still fails", "a currentAutomaticPreference that names an alias fails a new assertion"], "runtimeChange": false, "dependsOn": [], "verifyAtStart": "whether any test asserts the exact member set of RELEASE_LANGUAGES.json"},
+    {"id": "S1", "name": "first executable vertical slice: shared parity corpus and registry interlock sentinel against current runtime", "requirements": ["R2.3", "R2.1", "R2.5", "R2.8", "R2.13", "R2.14", "R2.15", "R2.16", "R4.3", "R4.4", "R4.5", "G1"], "seam": "the same case bytes give the mapped runtime outcome (Lua harness) and offline verdict (Python, nonexecuting)", "proposedWrites": ["tests/prototype/fixtures/l10n_parity/<case>/english.lua and packs.lua (existing real grammars)", "tests/prototype/fixtures/l10n_parity/cases.lua (case IDs and expected runtime/offline outcomes; restricted literal-table grammar)", "tests/prototype/localization_parity.lua (new Lua prototype test)", "tools/tests/test_l10n_parity.py (new Python test)", "tools/l10n_catalog.py (private restricted literal-table parser for cases.lua, later reused by U3)", "tools/run_prototype_tests.py (append localization_parity to NAMES and the Python test to PYTHON_TESTS only)"], "acceptance": ["every P1-P18 row passes on both sides against unchanged core/Localization.lua", "P19 and P20 are recorded UNKNOWN or resolved by verified evidence, never guessed", "LF variants are made in memory from the CRLF checkout; both sides agree", "a temporary mutant tool accepting | makes the Python parity test fail (red receipt kept)", "the sentinel fails when a declaration marker appears in core/Localization.lua without a registry-bound parser and complete-English cases", "fixtures live only under tests/; shippedProductIds stays []", "focused Lua and Python runs, then full python tools/ci_check.py at the final pin; ci inventory accepts the registrations"], "runtimeChange": false, "packageChange": false, "dependsOn": ["S0 recommended", "PR138 runner state read first"]},
+    {"id": "R", "name": "registry union: U1 + U2 + U3 composed as one reviewable and shippable candidate", "parts": [
+      {"id": "S2", "unit": "U3a", "what": "fresh nonexecuting parser for the delimited declaration block of core/Localization.lua", "proposedWrites": ["tools/l10n_catalog.py", "tools/tests/test_l10n_registry.py"]},
+      {"id": "S3", "unit": "U1", "what": "runtime declaration table for exactly the 28 keys; SCHEMAS derived from it; admission against it", "proposedWrites": ["core/Localization.lua", "tests/prototype/terminology.lua (additive registry checks)"]},
+      {"id": "S4", "unit": "U2", "what": "complete-English and plain-content admission; additive base.undeclared and base.missingDeclared", "proposedWrites": ["core/Localization.lua", "tests/prototype/localization_parity.lua cases R-P1, R-P3"]},
+      {"id": "S5", "unit": "U3b", "what": "registry-bound five-input API and report schemaVersion 2; replace _FORMAT_FIELDS/_FORMAT_LIMITS with parsed declarations; KEY_CONTEXT rows checked against declarations; enum cross-check (F7); CLI reads core/Localization.lua bytes it already lists", "proposedWrites": ["tools/l10n_catalog.py", "tools/tests/test_l10n_registry.py", "tools/run_prototype_tests.py (append)", "docs/localization/KEY_CONTEXT.json and RELEASE_LANGUAGES.json validator status only"]}
+    ], "interlock": "No part merges, packages or ships alone. Parts may be separate commits on one integration branch; review, full CI and acceptance apply to the composed head. The S1 sentinel enforces this mechanically.", "acceptance": ["C14 red before, green after", "declared set == English set == KEY_CONTEXT rows == 28", "every existing Lua fixture and the 76 catalog tests pass unchanged, or a change is justified per test without weakening", "the four-input API keeps its scoped label and is not called registry validation", "Diagnostics() changes are additive only", "pack availability unchanged for every current and corpus pack", "full ci_check at the final composed pin; build_package --check if core/Localization.lua changes the package"], "runtimeChange": true, "dependsOn": ["S1"]},
+    {"id": "S6", "name": "separate invalid and obsolete reporting", "requirements": ["R2.6", "R2.7", "R3.1", "W1", "F6"], "proposal": "a retired-keys list in KEY_CONTEXT.json; a diagnostic report mode that collects every invalid/obsolete entry with its code while the strict gate still fails; optional additive runtime rejected-key diagnostics", "proposedWrites": ["tools/l10n_catalog.py", "tools/tests/test_l10n_registry.py", "docs/localization/KEY_CONTEXT.json", "core/Localization.lua (optional, additive)"], "dependsOn": ["R"], "decision": "Root decides whether a diagnostic mode may emit categories for an invalid catalog"},
+    {"id": "S7", "name": "per-pack base revision, provenance, attribution and rights metadata", "requirements": ["R1.7", "R1.8", "R5.1", "R5.2", "R5.3", "R5.4", "R5.5"], "proposal": "additive products[] fields baseEnglishBlob, provenance {authorship, attribution, rightsStatement, importedCorpus}; unknown values are UNKNOWN, never invented; a declaration referencing a stale base revision is reported", "proposedWrites": ["docs/localization/RELEASE_LANGUAGES.json", "tools/l10n_catalog.py", "tools/tests/test_l10n_registry.py"], "dependsOn": ["S0", "Root wording for rights statements"]},
+    {"id": "S8", "name": "consumer and family binding by lexical scan", "requirements": ["W2", "R2.7", "R4.1", "R6.2"], "proposal": "use tools/l10n_inventory.py lexical records over TOC files to require a literal reference for each static key; map-produced keys (reason.*) are recorded as mapped, not unbound", "proposedWrites": ["tools/l10n_catalog.py", "tools/tests/test_l10n_registry.py"], "dependsOn": ["R"], "readOnlyInputs": ["docs/localization/FAMILY_144_INVENTORY.* when present (owned by the #144 lane)"]},
+    {"id": "S9", "name": "plural and dynamic variants", "requirements": ["R2.9", "R2.11", "R4.2", "B2"], "state": "BLOCKED_ON_142", "resumeTrigger": "#142 publishes an accepted dynamic/plural schema"},
+    {"id": "S10", "name": "approved terminology and consequential-prompt context", "requirements": ["R5.6"], "state": "BLOCKED_ON_ROOT_AND_148", "resumeTrigger": "Root approves terminology and a competent reviewer exists"}
+  ],
+  "ownership": {
+    "planOwner": "Root reviews this plan; no implementation is commissioned by it",
+    "reservations": [
+      {"path": "tools/tests/test_l10n_catalog.py", "slices": ["S0", "R (only if justified)", "S6"], "rule": "one owner at a time; serialize"},
+      {"path": "core/Localization.lua", "slices": ["R", "S6 optional"], "rule": "R union owner only"},
+      {"path": "tools/l10n_catalog.py", "slices": ["S1", "R", "S6", "S7", "S8"], "rule": "serialize"},
+      {"path": "tools/run_prototype_tests.py", "slices": ["S1", "R"], "rule": "append-only registration; shared with every lane; check PR138 and concurrent registrations first"},
+      {"path": "docs/localization/KEY_CONTEXT.json", "slices": ["S0", "R", "S6"], "rule": "serialize"},
+      {"path": "docs/localization/RELEASE_LANGUAGES.json", "slices": ["S0", "R", "S7"], "rule": "serialize"},
+      {"path": "data/LocalizationEnglish.lua and data/LocalizationPacks.lua", "slices": [], "rule": "no slice edits them; family lanes adding keys after R must add declarations in the same change"},
+      {"path": "docs/localization/FAMILY_144_INVENTORY.*", "slices": [], "rule": "owned by the parallel #144 lane; read-only here"}
+    ]
+  },
+  "migration": [
+    "M1 S0: test truth and metadata; no behaviour change",
+    "M2 S1: characterize current behaviour; no runtime or package change",
+    "M3 R: declarations for the existing 28 keys; derived schema equals the current SCHEMAS; additive diagnostics; four-input API retained with its scoped label; CLI moves to the registry-bound report v2",
+    "M4 S6-S8: additive reporting and metadata",
+    "Rollback: no saved data changes, so reverting a slice restores prior behaviour"
+  ],
+  "rejectedAlternatives": [
+    {"option": "execute Lua (luajit subprocess) from the offline tool to read declarations", "reason": "forbidden; the offline gate must stay nonexecuting"},
+    {"option": "KEY_CONTEXT.json as the type authority with generated Lua", "reason": "the runtime cannot read JSON; generation adds a drift step and makes a document runtime-critical"},
+    {"option": "a new data/LocalizationDeclarations.lua", "reason": "moves code-owned schema into data and changes TOC and package; possible later if Root prefers, with TOC/package gates"},
+    {"option": "port U1 38662fa or U3a 5f5b462", "reason": "objects unavailable; results unproven"},
+    {"option": "gate pack availability on completion", "reason": "silently changes which languages are offered"},
+    {"option": "invent plural grammar now", "reason": "owned by #142"},
+    {"option": "raise MAX_BASE_ENTRIES", "reason": "out of scope; separate reviewed engineering"},
+    {"option": "edit or delete F1-F4 assertions to obtain green", "reason": "weakens discriminating checks"}
+  ],
+  "gates": {
+    "perSlice": ["focused controls with kept red and green receipts", "full python tools/ci_check.py at the final pin with matched registration", "python tools/build_package.py --check when packaging or TOC changes", "independent Spec review against #147 requirement IDs", "independent Standards review against CONTRIBUTING.md, AI_POLICY.md and AGENTS.md"],
+    "separate": ["competent language review (#148)", "localized native evidence (#146)", "final composition (#149)", "merge, release and delivery authority"],
+    "notRunForThisPlan": ["full 599 Lua suite", "ci_check", "build_package --check (not triggered: no runtime, TOC or package path changes)", "any red control", "native"]
+  },
+  "resumeTriggers": [
+    {"item": "S0", "trigger": "Root accepts this plan and assigns an owner"},
+    {"item": "S1", "trigger": "S0 accepted or waived; PR138 runner state read"},
+    {"item": "R", "trigger": "S1 accepted; one owner assigned for the whole union"},
+    {"item": "S9", "trigger": "#142 accepted schema"},
+    {"item": "S10", "trigger": "Root terminology approval and a #148 reviewer"}
+  ],
+  "unknowns": [
+    "PR138's current state and frozen-runner contract",
+    "Lua 5.1 versus LuaJIT decoding of \\x, \\z and \\u escapes in the harness used by CI",
+    "native WoW 3.3.5a handling of a UTF-8 BOM in an addon Lua file",
+    "whether #147's 'orphan keys' also means English keys without a consumer",
+    "translator identity and rights for the current draft packs",
+    "whether any existing test asserts the exact member set of RELEASE_LANGUAGES.json (affects S0)"
+  ],
+  "notClaimed": ["implementation of any slice", "red or green execution of any proposed control", "U1, U2 or U3 integration or acceptance", "family coverage", "language review", "native acceptance", "package, install or delivery", "any new key, translation, alias or cap change", "the 15 new usability choices"]
+}
