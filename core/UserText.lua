@@ -405,6 +405,11 @@ end
 -- with d.wishlist the captured Wishlist name when it has one. That states
 -- only that it was captured, not that it is assigned now: unless
 -- d.wishlistState states the assignment, the state says it is not checked.
+-- Plain words (owner-approved usability item 6, 2026-10-30): "assigned now"
+-- is the current link a caller states (d.wishlistState "assigned");
+-- "captured" is the destination held when an edit or view opened. The
+-- captured words and hover say it is not checked as assigned now, and
+-- neither is ever called "in use".
 -- Value contract: each value is the complete display-safe text (whole
 -- SafeName output, in which a literal pipe is already the escaped pair
 -- "||"). A later fitting step shows it as it is, or shortens it only at a
@@ -456,7 +461,9 @@ function T.DestinationFields(d)
         wishlistMinimum = d.wishlistState == "assigned" and p.wishlist
             or WISHLIST_MINIMUM[d.wishlistState]
     elseif p.wishlist then
-        wishlist = p.wishlist .. (captured and " (captured)" or " (assignment not known)")
+        -- Captured is the Wishlist held when the edit or view opened, never a
+        -- current link; it says so instead of calling it assigned or in use.
+        wishlist = p.wishlist .. (captured and " (captured; not checked as assigned now)" or " (assignment not known)")
         wishlistCompact = "?: " .. p.wishlist
         wishlistMinimum = "?"
     else
@@ -467,7 +474,7 @@ function T.DestinationFields(d)
     local state, stateCompact, stateMinimum
     if captured then
         state = "Captured; " .. stateWords
-            .. ((noAssignment or stated) and "" or "; assignment not checked")
+            .. ((noAssignment or stated) and "" or "; not checked as assigned now")
         -- "C:" keeps the capture visible; the state record's one-glyph mark
         -- keeps each state distinct, 3 glyphs in all (see the markers above).
         -- A captured first-run plan keeps its whole "first-run target" label
@@ -508,7 +515,20 @@ function T.DestinationFields(d)
         tooltip[index] = fields[index].label .. ": " .. fields[index].value
     end
     if captured then
-        tooltip[#tooltip + 1] = "Captured: shown as captured earlier; being captured is not evidence of the current assignment."
+        -- The assignment words follow the facts given with it (review
+        -- SPEC-GH-1): an empty Saved Build's refusal and a stated
+        -- d.wishlistState are kept as given; only an unstated one is called
+        -- not checked. Nothing is looked up here.
+        local assignment
+        if noAssignment then
+            assignment = "Assigning to it is refused: the Saved Build holds no Echoes."
+        elseif stated then
+            assignment = "Its Wishlist line gives the assignment as stated for it; assigned now means the current link, which the Nexus panel shows."
+        else
+            assignment = "It is not checked as assigned now: assigned now means the current link, which the Nexus panel shows."
+        end
+        tooltip[#tooltip + 1] = "Captured: shown as captured earlier, the destination held when this edit or view opened. "
+            .. assignment
     end
     if preview then
         tooltip[#tooltip + 1] = "Preview: a Community Build preview is shown; it is not this destination's assignment."
@@ -824,24 +844,29 @@ T.Guide = {
         returnPlan = 'Return to Plan draft', planChanged = 'Keep or discard Plan draft',
         -- The bounded window's body controls (ui/GuidedSetup.lua ScreenCap).
         scrollUp = 'Scroll up (or use the mouse wheel)', scrollDown = 'Scroll down (or use the mouse wheel)'},
+    -- Owner-approved usability item 5 (2026-10-30): shorter plain words. Each
+    -- screen says a thing once: the navigation safety words are Welcome's
+    -- WHAT YOU WILL SEE line (expect.welcome), not a second line beside it.
     safety = 'Moving between steps never assigns, spends Orbs, sends data, or changes Auto.',
     -- Setup Alternative: one short reason per step, the action under DO
-    -- THIS, then the outcome slot. Only a result the guide read is OBSERVED;
+    -- THIS, then the outcome slot. Only a result the guide read is WHAT HAPPENED;
     -- before that the slot says what to expect, never that it happened.
     whyLabel = 'WHY THIS MATTERS', doLabel = 'DO THIS',
     why = {welcome = 'Nexus points at Echoes from a Wishlist you choose. Nothing changes in game until you confirm a step.',
         wishlist = 'A Wishlist is the Echoes you want. Recommendations and Orb runs work from it.',
         target = 'A Saved Build is the build slot the game loads. It is the build your Wishlist will follow.',
         assign = 'Once they are linked, recommendations follow your Wishlist for the build you play.',
-        manual = 'This is what Nexus points at while you roll. Nothing is chosen in game here.',
-        auto = 'Auto can act for you. It only changes when you change it yourself.',
-        summary = 'Only steps Nexus confirmed are marked done. Anything else stays open for later.'},
-    outcome = {expectLabel = 'WHAT YOU WILL SEE', observedLabel = 'OBSERVED', summaryLabel = 'SUMMARY',
-        expect = {welcome = 'Seven short steps. Back, Skip and Continue later never change anything.',
+        manual = 'This is what Nexus points at while you roll.',
+        auto = 'Auto can act for you. It is optional.',
+        summary = 'See what is done and what is still open.'},
+    -- A result the guide read or the player made is WHAT HAPPENED (plain
+    -- words for the design's OBSERVED); before it, WHAT YOU WILL SEE.
+    outcome = {expectLabel = 'WHAT YOU WILL SEE', observedLabel = 'WHAT HAPPENED', summaryLabel = 'SUMMARY',
+        expect = {welcome = 'Seven short steps. Moving between steps never assigns, spends Orbs, sends data, or changes Auto.',
             wishlist = 'One Wishlist lights up and the footer shows the same name.',
             target = 'One Saved Build lights up. Nexus does not edit it.',
             assign = 'After you confirm, Nexus reads the result back. Only a confirmed result counts as done.',
-            manual = 'A sample recommendation appears. Nothing is chosen in game.',
+            manual = 'A sample recommendation appears below. Try one pick.',
             auto = 'Auto stays as it is unless you change it yourself.',
             summary = 'Only steps Nexus confirmed are marked done. Skipped, unknown and declined steps stay open.'},
         extra = {skipped = 'Nothing was changed; this step stays open.',
@@ -876,14 +901,14 @@ T.Guide = {
                 'Something wrong? Type /nexus report before any reload, then Copy summary. Do not reload, reset or clear data to recreate it.',
                 'A prepared report file stays on this computer. Send it privately, never in public.'}}}},
     welcome = {title = 'Welcome to Nexus', titleReplay = 'Welcome back',
-        body = 'Nexus recommends Echoes from a Wishlist you choose. This guide links one Wishlist to one Saved Build and shows you what a recommendation looks like.',
-        bodyReplay = 'Replaying the guide resets nothing. It re-checks what is already set and lets you change anything safely.',
+        body = 'This guide links one Wishlist to one Saved Build, then shows you a sample recommendation.',
+        bodyReplay = 'Running the guide again resets nothing. It checks again what is set now, and you can change anything.',
         paths = {
             {id = 'new', title = 'New to Nexus', desc = 'Start a Wishlist and give it a build slot. About 3 minutes.'},
             {id = 'existing', title = 'I already have a Saved Build', desc = 'Point one of your Saved Builds at a Wishlist. You will see what gets replaced first.'},
             {id = 'explore', title = 'Just look around', desc = 'See how recommendations and Auto work. Nothing is set up or changed.'}}},
     wishlist = {title = 'Choose a Wishlist',
-        conceptWish = 'Wishlist - what you want', conceptWishBody = 'The Echoes you are aiming for. Nexus uses it to point at good picks.',
+        conceptWish = 'Wishlist - what you want', conceptWishBody = 'The Echoes you are aiming for.',
         conceptBuild = 'Saved Build - what you play', conceptBuildBody = 'A build slot the game loads. Each one follows one Wishlist.',
         yours = 'Yours on the server', needsRoles = 'Yours - needs locked targets; the chooser asks for them',
         importTitle = 'Paste a Wishlist code', importDesc = 'From a friend or a guide. Check it here first; checking imports and saves nothing.',
@@ -993,7 +1018,7 @@ T.Guide = {
     auto = {title = 'Auto is up to you',
         modeOn = 'Auto is ON right now', modeOff = 'Auto is OFF right now', modeUnknown = 'Auto mode unknown',
         subRead = 'Read from Nexus just now.', subUnknown = 'Nexus did not report it. The guide will leave it alone.',
-        lead = 'Most players start with Auto OFF and just follow the recommendations. This guide will not change it unless you do.',
+        lead = 'Most players start with Auto OFF and just follow the recommendations.',
         moreOn = 'With Auto ON, Nexus may choose offers and may replace your active Saved Build with a better finished run, without asking. It never loads a build or starts Orbs.',
         moreOff = 'With Auto OFF, Nexus only recommends. Slots change only when you change them.',
         reviewNote = 'Turning Auto ON or OFF is done with the Auto button on the Nexus panel, after its own warning.',
@@ -1073,7 +1098,9 @@ T.Guide = {
     notice = {owner = 'The character changed, so earlier guide results were cleared.',
         epoch = 'Saved data changed, so earlier guide results were cleared.',
         session = 'A new world session started, so earlier guide results were cleared and must be checked again.',
-        restored = 'Resumed where you left off. Earlier results are not kept: each one is read again now.',
+        -- The kept place is remembered; every result is read again (never
+        -- carried over as done).
+        restored = 'Picked up where you left off. Each earlier result is checked again now.',
         reselect = 'Resumed where you left off. More than one of your Wishlists holds the same Echoes as the one you chose, so the guide cannot tell which it was. Choose your Wishlist again; nothing was chosen for you.'},
     notes = {startup = 'Start-up is still running (see the loading panel). Nothing was opened.',
         unavailable = 'The game Character Progression button was not found. Nothing was opened or assigned.',

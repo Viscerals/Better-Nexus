@@ -237,7 +237,11 @@ C.scenario('S1 the kept place outlasts a reload for its own character; every res
   'S1: reopening after the reload resumes at the kept step on the kept path, the skipped step still skipped',Step())
  C.expect(s.wishlist~=nil and s.wishlist.key==key and s.target~=nil and s.target.destination==2,
   'S1: the kept Wishlist and Saved Build are taken again from what Nexus lists now')
- C.expect(s.notice=='restored' and Text():find('Resumed where you left off',1,true)~=nil,
+ -- Owner-approved item 5 (2026-10-30): the notice reads in plain words, with
+ -- no "not kept" beside "resumed"; it still names both the kept place and the
+ -- fresh check of every result.
+ C.expect(s.notice=='restored' and Text():find('Picked up where you left off',1,true)~=nil
+  and Text():find('checked again now',1,true)~=nil and Text():find('not kept',1,true)==nil,
   'S1: the coach says it resumed and that each result is read again',Text())
  C.expect(St()=='observed' and s.request==nil,'S1: the assignment confirmed before the reload is only observed by a fresh read back',St())
  local sm=G.Summary()

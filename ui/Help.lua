@@ -254,7 +254,13 @@ local TAB_LABELS={start="Start",wishlists="Wishlists",rolling="Auto",sharing="Sh
 -- The topic card above the reference: its title and Open action on one row,
 -- its lines under them (wrapped to the text they need at the current font),
 -- then the Reference label and the scrolling page text below the card.
-local TOPIC_TOP,REFERENCE_BOTTOM,REFERENCE_MIN=-110,-485,120
+-- Owner-approved usability item 11 (2026-10-30): the page tabs are a strip
+-- (a line under them; the current page's tab carries the Theme's selected
+-- mark and stays the disabled one), and the buttons that open another window
+-- stand apart below it under their own heading. Labels, routes and deep links
+-- are unchanged. The card starts 20 px lower to make that room.
+local TABS_TOP,TAB_RULE,WINDOWS_LABEL,WINDOWS_TOP,NOTE_TOP=-44,-67,-71,-89,-114
+local TOPIC_TOP,REFERENCE_BOTTOM,REFERENCE_MIN=-130,-485,120
 -- The lines may grow until the reference keeps its minimum scroll height
 -- above the bottom buttons; beyond that the card keeps its whole text on hover.
 local TOPIC_TEXT_MAX=(TOPIC_TOP-60)-REFERENCE_BOTTOM-REFERENCE_MIN
@@ -322,9 +328,14 @@ local function refresh()
     frame.body:SetText(text)
     frame.page:SetText("Page "..index.." / "..#pages)
     layoutTopic(p)
-    -- The current page's button is the disabled one; a page change clears an
-    -- earlier route note.
-    for i,t in ipairs(frame.tabs or {}) do if i==index then t:Disable() else t:Enable() end end
+    -- The current page's button is the disabled one and carries the selected
+    -- mark (item 11; Theme repaints it with the palette); a page change
+    -- clears an earlier route note.
+    local theme=Nexus.Theme
+    for i,t in ipairs(frame.tabs or {}) do
+        if i==index then t:Disable() else t:Enable() end
+        if theme and theme.SetSelected then theme.SetSelected(t,i==index) end
+    end
     if frame.note and frame.noteIndex~=index then frame.note:SetText("");frame.noteIndex=nil end
     if frame.content then
         frame.body:SetHeight(0)
@@ -348,7 +359,7 @@ local function ensure()
     local scroll=CreateFrame("ScrollFrame","NexusHelpScroll",frame,"UIPanelScrollFrameTemplate")
     -- Below the page buttons, the setup row, its one-line route note and the
     -- page's topic card (layoutTopic places it under the card).
-    scroll:SetPoint("TOPLEFT",20,-218);scroll:SetSize(595,267)
+    scroll:SetPoint("TOPLEFT",20,TOPIC_TOP-108);scroll:SetSize(595,267)
     scroll:SetFrameLevel(HELP_LEVEL+1);frame.scroll=scroll
     local child=CreateFrame("Frame",nil,scroll);child:SetSize(590,650);scroll:SetScrollChild(child);frame.content=child
     child:SetPoint("TOPLEFT",scroll,"TOPLEFT",0,0);child:SetFrameLevel(HELP_LEVEL+2)
@@ -371,24 +382,33 @@ local function ensure()
     if 20+(#pages-1)*step+79>640 then step=math.floor(620/#pages) end
     for i,p in ipairs(pages) do
         local t=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
-        t:SetPoint("TOPLEFT",20+(i-1)*step,-44);t:SetSize(step-4,20);t:SetText(TAB_LABELS[p.id] or p.title)
+        t:SetPoint("TOPLEFT",20+(i-1)*step,TABS_TOP);t:SetSize(step-4,20);t:SetText(TAB_LABELS[p.id] or p.title)
         t:SetFrameLevel(HELP_LEVEL+2)
         t:SetScript("OnClick",function()index=i;refresh();scroll:SetVerticalScroll(0)end)
         frame.tabs[i]=t
     end
+    -- The tab strip's line, just under the page tabs (item 11).
+    frame.tabRule=frame:CreateTexture(nil,"ARTWORK");frame.tabRule:SetTexture("Interface\\Buttons\\WHITE8X8")
+    frame.tabRule:SetVertexColor(.82,.62,.24,.7)
+    frame.tabRule:SetPoint("TOPLEFT",frame,"TOPLEFT",20,TAB_RULE);frame.tabRule:SetSize(615,1)
+    -- The window buttons' own heading, in the gold small heading font: these
+    -- open another window, unlike the page tabs above.
+    frame.windowsLabel=frame:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+    frame.windowsLabel:SetPoint("TOPLEFT",frame,"TOPLEFT",20,WINDOWS_LABEL);frame.windowsLabel:SetSize(615,16)
+    frame.windowsLabel:SetJustifyH("LEFT");frame.windowsLabel:SetText("Open another window:")
     -- The primary setup path. Each button only navigates (H.OpenGuide: Setup /
     -- Welcome opens or resumes Guided setup; H.OpenAssignment, H.OpenEditor,
     -- H.OpenChecklist); none assigns, spends, sends or turns Auto ON, and a
     -- route that cannot open says why in the note below.
     local function action(x,w,label,fn)
-        local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("TOPLEFT",x,-68);f:SetSize(w,22)
+        local f=CreateFrame("Button",nil,frame,"UIPanelButtonTemplate");f:SetPoint("TOPLEFT",x,WINDOWS_TOP);f:SetSize(w,22)
         f:SetText(label);f:SetFrameLevel(HELP_LEVEL+2);f:SetScript("OnClick",fn);return f
     end
     action(20,150,"Setup / Welcome",function()H.OpenGuide()end)
     action(176,160,"Assign Wishlist...",function()H.OpenAssignment()end)
     action(342,140,"Wishlist Editor",function()H.OpenEditor()end)
     frame.checklist=action(488,140,"Setup checklist",function()H.OpenChecklist()end)
-    frame.note=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall");frame.note:SetPoint("TOPLEFT",20,-93)
+    frame.note=frame:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall");frame.note:SetPoint("TOPLEFT",20,NOTE_TOP)
     frame.note:SetSize(615,13);frame.note:SetJustifyH("LEFT");frame.note:SetText("")
     -- The page's topic card (topics above): its title, lines and one Open
     -- action (H.OpenTopic), made once; layoutTopic fills and places it. The
