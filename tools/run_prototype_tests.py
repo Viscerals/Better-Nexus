@@ -420,6 +420,8 @@ NAMES += ['owner14_panel_usability']
 NAMES += ['owner14_editor_usability']
 # Owner-approved usability follow-up 2026-10-30, guide/Help/shared-copy lane (#131, #173, #169; displayed items 5, 6, 11, 13): shorter plain coach wording with consent, refusal and saved place kept; UserText.DestinationFields assigned now versus captured; Help page tabs apart from window buttons; one checklist marker language beside status words; every Auto OFF wording exact (EXPECT fails at f8cce3f4 by design; native NOT_RUN).
 NAMES += ['owner14_guide_help_usability']
+# Issue #147 S1: shared runtime/offline localization parity corpus (tests/prototype/fixtures/l10n_parity) through the unchanged core/Localization.lua under the harness Lua; P19/P20 native behaviour UNKNOWN (synthetic offline evidence; native NOT_RUN).
+NAMES += ['localization_parity']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
@@ -427,6 +429,8 @@ NAMES += ['owner14_guide_help_usability']
 # as its own process with the current Python interpreter. This runner never passes one to a Lua
 # runtime and never counts one with NAMES.
 PYTHON_TESTS=['tools/tests/test_l10n_inventory.py','tools/tests/test_l10n_catalog.py']
+# Issue #147 S1: offline side of the shared parity corpus and the G1 registry interlock sentinel.
+PYTHON_TESTS += ['tools/tests/test_l10n_parity.py']
 # Wall-clock limit for one Python test process, read by tools/ci_check.py.
 PYTHON_TEST_TIMEOUT_SECONDS=DEFAULT_TIMEOUT_SECONDS
 

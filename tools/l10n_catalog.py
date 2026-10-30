@@ -211,10 +211,13 @@ def _long_body(scanner, code, line, column):
     return body
 
 
-def _tokens(text):
+def _tokens(text, integers=False):
     """Return every token of text, ending with one 'eof' token. A lexical
     error raises CatalogSyntaxError. Any character outside the data grammar
-    becomes an 'other' token, which the parser always refuses."""
+    becomes an 'other' token, which the parser always refuses. Only the
+    private literal-table parser (S1, at the end of this file) passes
+    integers=True; parse_english and parse_packs never do, so a digit stays
+    an 'other' token for them."""
     scanner = _LEXER.Scanner(text)
     tokens = []
     try:
@@ -250,6 +253,17 @@ def _tokens(text):
                 while scanner.peek() in _NAME_PART:
                     scanner.index += 1
                 tokens.append(_Token('name', text[start:scanner.index], line, column))
+            elif integers and char in _DIGITS:
+                start = scanner.index
+                while scanner.peek() in _DIGITS:
+                    scanner.index += 1
+                digits = text[start:scanner.index]
+                if (scanner.peek() in _NAME_PART or scanner.peek() == '.'
+                        or len(digits) > _LITERAL_MAX_DIGITS
+                        or (len(digits) > 1 and digits[0] == '0')):
+                    tokens.append(_Token('other', digits, line, column))
+                else:
+                    tokens.append(_Token('integer', int(digits), line, column))
             else:
                 kind = 'punct' if char in _PUNCT else 'other'
                 tokens.append(_Token(kind, char, line, column))
@@ -1512,6 +1526,99 @@ def main(argv=None) -> int:
         'report': report,
     })
     return exit_code
+
+
+# ---------------------------------------------------------------------------
+# S1 (Refs #147): a PRIVATE restricted literal-table parser. It reads the
+# shared runtime/offline parity corpus tests/prototype/fixtures/l10n_parity/
+# cases.lua for tools/tests/test_l10n_parity.py, and a later registry-bound
+# parser may reuse it. It is not part of the public seam: CODES and every
+# public function, report and label above are unchanged. Like parse_english
+# and parse_packs it takes exact bytes, never a filename, reads and writes no
+# file, and never evaluates, imports or executes Lua. After Lua 5.1
+# whitespace and comments, the only accepted form is
+#
+#     return <table>
+#
+# followed by the end of the source. A table holds only positional values
+# (returned as a list) or only keyed fields (returned as a dict), never both;
+# {} is an empty list. A key is a bare Lua name that is not a reserved word,
+# or a bracketed literal string. Both spellings name the same key, so a
+# repeated key in either spelling is duplicate-key. A value is a literal
+# string, a decimal integer of 1 to _LITERAL_MAX_DIGITS digits without a
+# sign, leading zero, fraction or exponent, true, false or a nested table, at
+# most _LITERAL_MAX_DEPTH tables deep. Anything else raises CatalogSyntaxError
+# with an existing code: nil, a negative, hexadecimal or fractional number, a
+# variable, call, operator, concatenation, function, computed or numeric key,
+# a semicolon, a second statement or a table that is too deep is
+# unexpected-token (unexpected-end at the end of the source), and anything
+# after the table is trailing-content.
+
+_DIGITS = frozenset('0123456789')
+_LITERAL_MAX_DIGITS = 9
+_LITERAL_MAX_DEPTH = 8
+
+
+class _LiteralParser(_Parser):
+    """The restricted literal-table grammar over a token list."""
+
+    def value(self, depth):
+        token = self.tokens[self.index]
+        if token.kind in ('string', 'integer'):
+            self.index += 1
+            return token.value
+        if token.kind == 'name' and token.value in ('true', 'false'):
+            self.index += 1
+            return token.value == 'true'
+        if token.kind == 'punct' and token.value == '{' and depth < _LITERAL_MAX_DEPTH:
+            self.index += 1
+            return self.table(depth + 1)
+        self.fail(self.unexpected(token), token)
+
+    def table(self, depth):
+        """Read the items of the table whose { was just read."""
+        keyed, positional = {}, []
+
+        def item():
+            start = self.tokens[self.index]
+            if start.kind == 'name' and start.value not in _RESERVED:
+                self.index += 1
+                key = start.value
+            elif start.kind == 'punct' and start.value == '[':
+                key = self.bracketed_string()
+            else:
+                if keyed:
+                    self.fail('unexpected-token', start)
+                positional.append(self.value(depth))
+                return
+            if positional:
+                self.fail('unexpected-token', start)
+            if key in keyed:
+                self.fail('duplicate-key', start)
+            self.take('punct', '=')
+            keyed[key] = self.value(depth)
+
+        self.items(item)
+        return keyed if keyed else positional
+
+
+def _parse_literal_table(source):
+    """Parse the bytes of a 'return <table>' literal source (grammar above)
+    into nested lists, dicts, strings, integers and booleans. Syntax only."""
+    if not isinstance(source, (bytes, bytearray)):
+        raise TypeError('source must be bytes, not %s' % type(source).__name__)
+    try:
+        text = bytes(source).decode('utf-8')
+    except UnicodeDecodeError:
+        raise CatalogSyntaxError('not-utf8') from None
+    parser = _LiteralParser(_tokens(text, integers=True))
+    parser.take('name', 'return')
+    parser.take('punct', '{')
+    result = parser.table(1)
+    token = parser.tokens[parser.index]
+    if token.kind != 'eof':
+        parser.fail('trailing-content', token)
+    return result
 
 
 if __name__ == '__main__':
