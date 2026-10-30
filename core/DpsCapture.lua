@@ -4058,20 +4058,28 @@ local function CommitSession(category)
         if Nexus.DataRetention and Nexus.DataRetention.Request then
             Nexus.DataRetention.Request("personal DPS best committed")
         end
-        local catLabel = category == "lk" and "Lich King" or "Training Dummy"
-        local rawSetLabel = build and build.title or "current Echo set"
+        -- Issues #143-#148: the chat words come from Nexus.Localization at
+        -- this display boundary; the build title, the DPS figure (formatted
+        -- here) and the colour codes are inserted around them unchanged.
+        local L10n = Nexus.Localization
+        local catLabel = L10n.Text(category == "lk" and "leaderboard.value.category_lk"
+            or "leaderboard.value.category_dummy")
+        local fallbackSet = L10n.Text("leaderboard.value.current_echo_set")
+        local rawSetLabel = build and build.title or fallbackSet
         local setLabel = Identity and Identity.DisplaySafeText
             and Identity.DisplaySafeText(rawSetLabel, 1024, false)
-            or "current Echo set"
+            or fallbackSet
+        local dpsText = dpsFloor >= 1000000 and string.format("%.2fM", dpsFloor / 1000000)
+            or dpsFloor >= 1000 and string.format("%dk", math.floor(dpsFloor / 1000))
+            or tostring(dpsFloor)
         -- A read-only saved root keeps this record for the session only;
         -- the player is told so, here and in the DPS note below.
-        print(string.format(
-            "|cff7fd5ffNexus:|r |cff4dff80New best for '%s' (%s): %s DPS!|r%s",
-            tostring(setLabel), catLabel,
-            dpsFloor >= 1000000 and string.format("%.2fM", dpsFloor / 1000000)
-            or dpsFloor >= 1000 and string.format("%dk", math.floor(dpsFloor / 1000))
-            or tostring(dpsFloor),
-            StorageReadOnly() and " |cffffc040(session only: saved data is read-only, so this record is not kept after a reload)|r" or ""))
+        print("|cff7fd5ffNexus:|r |cff4dff80"
+            .. L10n.Format("leaderboard.chat.new_best", {
+                build = tostring(setLabel), category = catLabel, dps = dpsText})
+            .. "|r"
+            .. (StorageReadOnly() and (" |cffffc040"
+                .. L10n.Text("leaderboard.chat.new_best_session_only") .. "|r") or ""))
 
         -- Global comparison is only meaningful when the exact current Echo
         -- set is already a published community build.

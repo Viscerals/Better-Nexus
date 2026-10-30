@@ -16,6 +16,38 @@ local selectedIncident = nil
 local preparing = nil
 local lastPrepared = nil
 
+-- Full UI localization (issues #143-#148): this page's labels, buttons and
+-- status sentences come from Nexus.Localization, looked up when shown. The
+-- incident lines, the copyable summary and the prepared report are support
+-- payload: they are never translated and their bytes are unchanged. Values
+-- (IDs, sizes, checksums, reasons) are escaped and inserted verbatim.
+local function T(key) return (Nexus.Localization.Text(key)) end
+-- legacy: the exact English the page showed, used only when a value is too
+-- long for the template (so the English output never changes).
+local function TF(key, args, legacy)
+    local text, source = Nexus.Localization.Format(key, args)
+    if source == "unavailable" and legacy ~= nil then return legacy end
+    return text
+end
+-- The raw reasons this page and its builder produce stay the values that
+-- are returned and compared; only their display is looked up here. A
+-- reason not listed (a support component's own note) is shown as it is.
+local REASON_KEYS = {
+    ["this client cannot load the support component on demand"] = "support.reason.cannot_load_on_demand",
+    ["the NexusSupport component is not installed or is disabled"] = "support.reason.component_not_installed",
+    ["the support component did not register its storage"] = "support.reason.storage_not_registered",
+    ["the support component is not loaded"] = "support.reason.component_not_loaded",
+    ["the support component did not answer"] = "support.reason.component_no_answer",
+    ["the report was not completed, so the previous one was kept"] = "support.reason.report_not_completed",
+    ["the support component refused the report"] = "support.reason.component_refused",
+    ["preparation did not finish within its step budget"] = "support.reason.step_budget",
+}
+local function ReasonText(raw)
+    local key = type(raw) == "string" and REASON_KEYS[raw]
+    if key then return T(key) end
+    return raw
+end
+
 local function text(parent, x, y, w, h, value)
     local f = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     f:SetPoint("TOPLEFT", x, y); f:SetSize(w, h)
@@ -49,32 +81,31 @@ end
 
 local function storageLine()
     local builder = report()
-    if not builder then return "The report builder is unavailable." end
+    if not builder then return T("support.status.builder_unavailable") end
     local status = builder.StorageStatus()
     if not status.loaded then
-        return "Support storage: not loaded. Prepare report file loads it on demand."
+        return T("support.status.storage_not_loaded")
     end
     if status.incompatible then
-        return "Support storage: left untouched ("
-            .. builder.Escape(status.incompatible)
-            .. "). Use Copy summary instead."
+        local reason = builder.Escape(status.incompatible)
+        return TF("support.status.storage_left_untouched", {reason = reason},
+            "Support storage: left untouched (" .. reason .. "). Use Copy summary instead.")
     end
     -- Through the builder, which owns the shape: the page never reaches into
     -- the storage component itself, whatever that component turns out to be.
     local latest = type(builder.StoredSummary) == "function" and builder.StoredSummary() or nil
     if latest then
-        return "Support storage: report " .. builder.Escape(latest.id) .. ", "
-            .. builder.Escape(latest.bytes) .. " bytes in "
-            .. builder.Escape(latest.chunkCount)
-            .. " chunk(s), checksum " .. builder.Escape(latest.checksum)
-            .. ". Preparing another one replaces it."
+        return TF("support.status.storage_holds_report", {
+            id = builder.Escape(latest.id), bytes = builder.Escape(latest.bytes),
+            chunks = builder.Escape(latest.chunkCount),
+            checksum = builder.Escape(latest.checksum)})
     end
     if not status.ready then
-        return "Support storage: loaded, but it has not reported itself ready"
-            .. (status.reason and (" (" .. builder.Escape(status.reason) .. ")") or "")
-            .. "."
+        if not status.reason then return T("support.status.storage_not_ready") end
+        return TF("support.status.storage_not_ready_reason",
+            {reason = builder.Escape(ReasonText(status.reason))})
     end
-    return "Support storage: ready; no report has been prepared yet."
+    return T("support.status.storage_ready_none")
 end
 
 -- Load-on-demand, and only for an explicit request. A missing component is not
@@ -96,10 +127,14 @@ local function refresh()
     if not frame or not frame:IsShown() then return end
     local list = incidents()
     local incident = selected()
-    frame.status:SetText("Retained incidents this session: " .. #list
-        .. (incident and ("; showing #" .. tostring(incident.id)) or "; none to show"))
+    local shown = incident and tostring(incident.id) or nil
+    frame.status:SetText(incident
+        and TF("support.status.incidents_showing", {count = tostring(#list), id = shown},
+            "Retained incidents this session: " .. #list .. "; showing #" .. shown)
+        or TF("support.status.incidents_none", {count = tostring(#list)}))
     local builder = report()
-    local lines = builder and builder.IncidentLines(incident) or {"unavailable"}
+    -- The incident lines are the report's own payload, shown as they are.
+    local lines = builder and builder.IncidentLines(incident) or {T("support.value.unavailable")}
     -- A font string interprets pipe sequences, so a recorded label is escaped
     -- HERE. The copyable text is never escaped: see core/SupportReport.lua.
     frame.incident:SetText(builder and builder.Escape(table.concat(lines, "\n"))
@@ -146,22 +181,24 @@ local function ensure()
         insets={left=4, right=4, top=4, bottom=4}})
     frame:SetBackdropColor(.035, .04, .05, 1)
 
-    text(frame, 20, -14, 600, 22, "Nexus support report")
-    text(frame, 20, -36, 660, 30,
-        "Copy a summary for a ticket, or prepare a report file WoW writes at your next reload or logout.")
+    text(frame, 20, -14, 600, 22, T("support.title.support_report"))
+    text(frame, 20, -36, 660, 30, T("support.body.copy_or_prepare"))
     frame.status = text(frame, 20, -70, 660, 20)
-    frame.previous = button(frame, 20, -92, 90, "Previous", function() selectDelta(-1) end)
-    frame.next = button(frame, 116, -92, 90, "Next", function() selectDelta(1) end)
+    frame.previous = button(frame, 20, -92, 90, T("support.button.previous_incident"), function() selectDelta(-1) end)
+    frame.next = button(frame, 116, -92, 90, T("support.button.next_incident"), function() selectDelta(1) end)
     frame.incident = text(frame, 20, -124, 680, 150)
 
     frame.storage = text(frame, 20, -282, 680, 32)
+    -- "Copy summary" and "Prepare report file" stay literal: Help quotes them
+    -- by name (tests/prototype/help_action_first.lua checks the source).
     button(frame, 20, -318, 130, "Copy summary", function()
         local builder = report()
         if not builder then return end
         local body, meta = builder.Summary(selected())
-        showCopy(body, "Select this text and copy it (Ctrl+A, Ctrl+C). "
-            .. meta.bytes .. " of " .. builder.SUMMARY_MAX_BYTES
-            .. " bytes. Nothing was sent anywhere.")
+        local size, limit = meta.bytes .. "", builder.SUMMARY_MAX_BYTES .. ""
+        showCopy(body, TF("support.status.copy_summary_note", {bytes = size, max = limit},
+            "Select this text and copy it (Ctrl+A, Ctrl+C). " .. size .. " of " .. limit
+            .. " bytes. Nothing was sent anywhere."))
     end)
     button(frame, 156, -318, 160, "Prepare report file", function()
         UI.PrepareFile(false)
@@ -169,24 +206,25 @@ local function ensure()
     frame.advanced = CreateFrame("CheckButton", "NexusSupportExtended", frame,
         "UICheckButtonTemplate")
     frame.advanced:SetSize(22, 22); frame.advanced:SetPoint("TOPLEFT", 330, -316)
-    text(frame, 356, -320, 340, 20, "Advanced: full retained report (private)")
-    button(frame, 20, -348, 200, "Inspect prepared report", function()
+    text(frame, 356, -320, 340, 20, T("support.label.advanced_private"))
+    button(frame, 20, -348, 200, T("support.button.inspect_prepared"), function()
         -- Through the builder, like every other component read on this page.
         local builder = report()
         local latest = builder and type(builder.StoredReport) == "function"
             and builder.StoredReport() or nil
         if not latest then
-            frame.prepared:SetText("No prepared report is stored for this account.")
+            frame.prepared:SetText(T("support.status.no_prepared_report"))
             return
         end
-        frame.prepared:SetText("Stored report " .. builder.Escape(latest.id) .. ": "
-            .. builder.Escape(latest.bytes) .. " bytes, "
-            .. builder.Escape(latest.chunkCount)
-            .. " chunk(s), checksum " .. builder.Escape(latest.checksum)
-            .. (latest.matches ~= nil and (latest.matches
-                and "; matches its own checksum in memory"
-                or "; CHECKSUM MISMATCH in the stored copy") or "")
-            .. ". This reads the stored copy; it does not prove the session that made it still exists.")
+        -- One whole sentence for each checksum outcome (not compared, the
+        -- same, different).
+        local key = latest.matches == nil and "support.status.stored_report"
+            or latest.matches and "support.status.stored_report_matches"
+            or "support.status.stored_report_mismatch"
+        frame.prepared:SetText(TF(key, {id = builder.Escape(latest.id),
+            bytes = builder.Escape(latest.bytes),
+            chunks = builder.Escape(latest.chunkCount),
+            checksum = builder.Escape(latest.checksum)}))
     end)
     frame.prepared = text(frame, 20, -378, 680, 46)
 
@@ -210,8 +248,8 @@ local function ensure()
     frame.copyBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     frame.copyScroll:SetScrollChild(frame.copyBox)
 
-    button(frame, 500, -520, 100, "Clear focus", function() frame.copyBox:ClearFocus() end)
-    button(frame, 605, -520, 85, "Close", function() frame:Hide() end)
+    button(frame, 500, -520, 100, T("support.button.clear_focus"), function() frame.copyBox:ClearFocus() end)
+    button(frame, 605, -520, 85, T("support.button.close"), function() frame:Hide() end)
     frame:SetScript("OnShow", function() refresh() end)
     UISpecialFrames = UISpecialFrames or {}
     UISpecialFrames[#UISpecialFrames + 1] = "NexusSupportReport"
@@ -226,10 +264,12 @@ function UI.PrepareFile(extended)
     if frame and frame.advanced and frame.advanced:GetChecked() then
         extended = true
     end
+    -- The returned reasons stay raw; only the page's sentence is looked up.
     local ok, why = ensureStorage()
     if not ok then
-        lastPrepared = "Not prepared: " .. builder.Escape(why)
-            .. ". Use Copy summary instead; nothing was changed."
+        local reason = builder.Escape(ReasonText(why))
+        lastPrepared = TF("support.status.not_prepared_use_copy", {reason = reason},
+            "Not prepared: " .. reason .. ". Use Copy summary instead; nothing was changed.")
         refresh()
         return nil, why
     end
@@ -237,8 +277,10 @@ function UI.PrepareFile(extended)
     if status.incompatible then
         -- Known before any work is done: do not build a report that cannot be
         -- stored, and leave the existing data exactly as it is.
-        lastPrepared = "Not prepared: existing support data was left untouched ("
-            .. builder.Escape(status.incompatible) .. "). Use Copy summary instead."
+        local reason = builder.Escape(status.incompatible)
+        lastPrepared = TF("support.status.not_prepared_left_untouched", {reason = reason},
+            "Not prepared: existing support data was left untouched ("
+            .. reason .. "). Use Copy summary instead.")
         refresh()
         return nil, status.incompatible
     end
@@ -246,36 +288,42 @@ function UI.PrepareFile(extended)
         incident = selected(), extended = extended == true,
     })
     if not prepared then
-        lastPrepared = "Not prepared: the report could not be built ("
-            .. tostring(snapshot) .. "). The previously stored report was kept."
+        local raw = tostring(snapshot)
+        lastPrepared = TF("support.status.not_prepared_build_failed", {error = raw},
+            "Not prepared: the report could not be built ("
+            .. raw .. "). The previously stored report was kept.")
         refresh()
         return nil, snapshot
     end
     if not snapshot then
-        lastPrepared = "Not prepared: " .. builder.Escape(failure)
-            .. ". The previously stored report was kept."
+        local reason = builder.Escape(ReasonText(failure))
+        lastPrepared = TF("support.status.not_prepared_kept", {reason = reason},
+            "Not prepared: " .. reason .. ". The previously stored report was kept.")
         refresh()
         return nil, failure
     end
     local ok, stored, meta = pcall(builder.Store, snapshot)
     if not ok then
-        lastPrepared = "Not prepared: the support component refused the report ("
-            .. tostring(stored) .. "). The previously stored report was kept."
+        local raw = tostring(stored)
+        lastPrepared = TF("support.status.not_prepared_component_refused", {error = raw},
+            "Not prepared: the support component refused the report ("
+            .. raw .. "). The previously stored report was kept.")
         refresh()
         return nil, stored
     end
     if not stored then
-        lastPrepared = "Not prepared: " .. builder.Escape(meta)
-            .. ". The previously stored report was kept."
+        local reason = builder.Escape(ReasonText(meta))
+        lastPrepared = TF("support.status.not_prepared_kept", {reason = reason},
+            "Not prepared: " .. reason .. ". The previously stored report was kept.")
         refresh()
         return nil, meta
     end
-    lastPrepared = builder.Escape(builder.WrittenNotice(meta)) .. "\nAfter that, attach "
-        .. builder.FilePathHint()
-        .. " (the account folder is the one you played on)."
-        .. (type(meta) == "table" and meta.partial
-            and ("\nThis report is partial: "
-                .. builder.Escape(meta.omissions)) or "")
+    local partial = type(meta) == "table" and meta.partial
+        and builder.Escape(meta.omissions) or nil
+    lastPrepared = builder.Escape(builder.WrittenNotice(meta)) .. "\n"
+        .. TF("support.status.attach_file", {path = builder.FilePathHint()})
+        .. (partial and ("\n" .. TF("support.status.report_partial", {omissions = partial},
+            "This report is partial: " .. partial)) or "")
     refresh()
     return meta
 end

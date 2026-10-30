@@ -450,7 +450,16 @@ function Logs.SnapshotCooperative(name, yieldProgress)
         if copy == nil then error(why or "diagnostic record unavailable", 0) end
         output[i] = copy
         if type(yieldProgress)=="function" and i%2==0 then
-            yieldProgress("Collecting "..tostring(name).." "..i.."/"..#captured.refs)
+            -- A progress line for the data log window's status only (issues
+            -- #143-#148): it never enters the report. The history name is an
+            -- internal code shown as it is; numbers are formatted here.
+            local history,done,total=tostring(name),tostring(i),tostring(#captured.refs)
+            local localization=Nexus.Localization
+            local progress=localization and type(localization.Format)=="function"
+                and #history<=(tonumber(localization.MAX_SLOT_TEXT_BYTES) or 0)
+                and localization.Format("log.status.collecting_history",
+                    {history=history,done=done,total=total}) or nil
+            yieldProgress(progress or ("Collecting "..history.." "..done.."/"..total))
         end
     end
     return output
