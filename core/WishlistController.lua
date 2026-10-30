@@ -1716,8 +1716,11 @@ function Controller.New(options)
         local held = 0
         for _, copies in pairs(lockedBySpell) do held = held + (tonumber(copies) or 0) end
         if held > MAX_LOCK_SLOTS then
-            return planned, string.format("your current locked Echoes hold %d copies, more than the %d "
-                .. "locked target copies a plan carries, so they are not in this code", held, MAX_LOCK_SLOTS)
+            -- Display only (the export dialog's prompt and its chat line):
+            -- the reviewed seam's text, looked up now.
+            local L = Nexus.Localization
+            return planned, (L.Format("wishlist.status.export_locked_excess",
+                {held = L.Count(held), max = L.Count(MAX_LOCK_SLOTS)}))
         end
         return DraftModel.ExportEntries(state.pending, state.pendingLock,
             lockedBySpell, catalog, state.fulfilledDraftTargets)

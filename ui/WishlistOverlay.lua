@@ -15,6 +15,12 @@ Nexus = Nexus or {}
 local M = {}
 Nexus.WishlistOverlay = M
 
+-- Visible overlay copy comes from the reviewed seam (core/Localization.lua,
+-- keys "overlay.*" and the editor's shared Echo fallback), looked up when it
+-- is shown. Echo names from the catalog are data and are never translated.
+local function T(key) return (Nexus.Localization.Text(key)) end
+local function TF(key, args) return (Nexus.Localization.Format(key, args)) end
+
 local MAX_LINES = 90
 local COLUMNS = 3
 local ROWS_PER_COLUMN = math.ceil(MAX_LINES / COLUMNS)
@@ -73,11 +79,11 @@ local function ApplyLockState()
         -- strip interactive so the overlay can never become stuck.
         frame:EnableMouse(false)
         frame:RegisterForDrag()
-        if lockBtn then lockBtn:SetText("Unlock position") end
+        if lockBtn then lockBtn:SetText(T("overlay.button.unlock_position")) end
     else
         frame:EnableMouse(true)
         frame:RegisterForDrag("LeftButton")
-        if lockBtn then lockBtn:SetText("Lock position") end
+        if lockBtn then lockBtn:SetText(T("overlay.button.lock_position")) end
     end
     if controlsFrame then
         controlsFrame:EnableMouse(true)
@@ -193,8 +199,9 @@ local function EnsureFrame()
     hideBtn:SetScript("OnClick", function() M.Hide() end)
     hideBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Hide the wishlist overlay", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("/nexus overlay to show it again", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine(T("overlay.tooltip.hide"), 0.8, 0.8, 0.8)
+        -- The slash command is typed as is in every language.
+        GameTooltip:AddLine(TF("overlay.tooltip.show_again", {command = "/nexus overlay"}), 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     hideBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -370,7 +377,7 @@ function M.Refresh()
         cachedLocked, cachedCatalog
     local changed = false
     if not wl then
-        local text = "|cff888888No wishlist set|r"
+        local text = "|cff888888" .. T("overlay.status.no_wishlist") .. "|r"
         changed = ShowLine(1, LineKey(text, nil, nil, nil, false),
             text, nil, nil, nil, false) or changed
         for i = 2, MAX_LINES do changed = HideLine(i) or changed end
@@ -393,7 +400,8 @@ function M.Refresh()
             list[#list + 1] = { spellId = e.spellId, quality = e.quality,
                 stacks = e.stacks, family = e.family, locked = isLocked,
                 progress = entryProgress,
-                name = (row and row.name) or ("spell " .. tostring(e.spellId)) }
+                name = (row and row.name)
+                    or TF("editor.value.spell_id_fallback", {id = tostring(e.spellId)}) }
         end
     end
     table.sort(list, function(a, b)
@@ -409,8 +417,7 @@ function M.Refresh()
     for i = 1, MAX_LINES do
         local e = list[i]
         if not e and i == noteLine then
-            local text = "|cff888888Planned locked targets unavailable"
-                .. " - open the Wishlist Editor|r"
+            local text = "|cff888888" .. T("overlay.status.planned_unavailable") .. "|r"
             changed = ShowLine(i, LineKey(text, nil, nil, nil, false),
                 text, nil, nil, nil, false) or changed
         elseif e then
@@ -421,8 +428,8 @@ function M.Refresh()
                 or tonumber(fallbackOwner and fallbackOwner.bySpell
                     and (fallbackOwner.bySpell[e.spellId]
                         or fallbackOwner.bySpell[tostring(e.spellId)])) or 0
-            local nm = e.name or ("spell " .. tostring(e.spellId))
-            if e.locked then nm = nm .. " |cffb266ff(locked target)|r" end
+            local nm = e.name or TF("editor.value.spell_id_fallback", {id = tostring(e.spellId)})
+            if e.locked then nm = nm .. " |cffb266ff" .. T("overlay.value.locked_target") .. "|r" end
             local suffix = (want > 1 or e.locked)
                 and string.format(" (%d/%d)", math.min(have, want), want) or ""
             local text, red, green, blue

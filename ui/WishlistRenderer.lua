@@ -6,6 +6,25 @@ Nexus.WishlistInternals = Nexus.WishlistInternals or {}
 
 local Renderer = {}
 
+-- Visible editor copy comes from the reviewed seam (core/Localization.lua,
+-- keys "editor.*" and, for the display popup, "overlay.*"), looked up when it
+-- is shown, never cached at load. Names, codes and game data fill template
+-- text slots and are never translated. Raw English producer values that other
+-- code compares (reason codes, stored names) stay raw; only their display is
+-- localized here.
+local function T(key) return (Nexus.Localization.Text(key)) end
+local function TF(key, args) return (Nexus.Localization.Format(key, args)) end
+local function N(value) return Nexus.Localization.Count(value) end
+
+-- The code-owned names of the five Echo qualities (0..4); the editor's role
+-- chooser uses the same keys.
+local function QualityName(quality)
+    local key = ({[0] = "editor.value.quality_common", [1] = "editor.value.quality_uncommon",
+        [2] = "editor.value.quality_rare", [3] = "editor.value.quality_epic",
+        [4] = "editor.value.quality_legendary"})[quality]
+    return key and T(key) or nil
+end
+
 local function DisplayUntrusted(value, maxBytes, allowEmpty, allowLineBreaks)
     local identity = Nexus and Nexus.Identity
     if not (identity and type(identity.DisplaySafeText) == "function") then
@@ -225,7 +244,7 @@ local function ApplyPending(intent)
         M.RenderSaveResult()
         return
     end
-    local displayName = DisplayUntrusted(data.name, 1024, false) or "Wishlist"
+    local displayName = DisplayUntrusted(data.name, 1024, false) or T("editor.value.wishlist_fallback")
     local which = mode == "update" and "WISHLISTREALIZER_UPDATE_WISHLIST" or "WISHLISTREALIZER_CREATE_WISHLIST"
     -- Its accept button names the bound intent (M.ConfirmLabel).
     local dialog = type(StaticPopupDialogs) == "table" and StaticPopupDialogs[which] or nil
@@ -260,7 +279,7 @@ local function ShowEchoTooltip(owner, spellId, anchor)
         end
     end
 
-    GameTooltip:AddLine(name or ("Echo " .. tostring(id or "")), 1, 1, 1)
+    GameTooltip:AddLine(name or TF("editor.value.echo_id_fallback", {id = tostring(id or "")}), 1, 1, 1)
     if icon then
         GameTooltip:AddTexture(icon)
     end
@@ -357,12 +376,11 @@ function M.ShowManageWishlistsMenu(anchor, offset)
     local extra = #undone + (paged and 1 or 0)
     local visible = math.max(1, shown + extra)
 
-    menu.header:SetText(string.format(
-        "Saved wishlists on this character: %d  |cff777777%s|r", total,
-        support.supported
-            and "removals here are local; this addon never removes a server Wishlist"
-            or ("removals here are local; "
-                .. tostring(support.reason or "no deletion call"))))
+    menu.header:SetText(TF("editor.heading.manage_count", {count = N(total)})
+        .. "  |cff777777" .. (support.supported
+            and T("editor.note.manage_removals_local")
+            or TF("editor.note.manage_removals_reason",
+                {reason = tostring(support.reason or T("editor.note.manage_no_deletion_call"))})) .. "|r")
     -- The header wraps to its measured height; the rows start below it.
     local metrics = Nexus.LayoutMetrics
     local top = 8 + (metrics and metrics.WrapHeight(menu.header, 340, 12) or 14) + 4
@@ -394,22 +412,22 @@ function M.ShowManageWishlistsMenu(anchor, offset)
         local pagerRow = paged and i == visible
         if plan then
             local planName = DisplayUntrusted(plan.name, 1024, false)
-                or ("Wishlist " .. tostring(plan.associationIndex))
+                or TF("editor.value.wishlist_index_fallback", {index = tostring(plan.associationIndex)})
             -- Colour codes are not nested: the client's first |r closes the
             -- run it is in, so a nested one leaves the rest uncoloured and
             -- the trailing marker unmatched.
             local association
             if plan.usable then
-                association = string.format("|cff777777Saved Build %s, %d Echo rows|r",
-                    tostring(plan.associationIndex), tonumber(plan.rows) or 0)
+                association = "|cff777777" .. TF("editor.menu.manage_row_saved_build",
+                    {slot = tostring(plan.associationIndex), rows = N(tonumber(plan.rows) or 0)}) .. "|r"
             else
-                association = string.format(
-                    "|cffff9040not a Saved Build (%s)|r|cff777777, %d Echo rows|r",
-                    tostring(plan.associationIndex), tonumber(plan.rows) or 0)
+                association = "|cffff9040" .. TF("editor.menu.manage_row_not_saved_build",
+                    {index = tostring(plan.associationIndex)}) .. "|r|cff777777, "
+                    .. TF("editor.menu.manage_row_rows", {rows = N(tonumber(plan.rows) or 0)}) .. "|r"
             end
             row._label:SetTextColor(0.92, 0.92, 0.92)
             row._label:SetText(planName .. "  " .. association
-                .. "  |cffff6060[Remove]|r")
+                .. "  |cffff6060[" .. T("editor.menu.manage_remove") .. "]|r")
             row:Enable()
             -- The confirmation carries the identity, not the label: two
             -- plans may share a name, and only one is being removed.
@@ -435,22 +453,23 @@ function M.ShowManageWishlistsMenu(anchor, offset)
                 -- two is what let the dialog claim a copy that was not there.
                 local where
                 if confirmPlan.mirrorResolved then
-                    where = "A Wishlist on the server holds exactly this plan and is NOT removed: this client has no call that deletes one."
+                    where = T("editor.popup.forget_server_kept")
                 elseif confirmPlan.mirrorSlotLive then
-                    where = "The Wishlist slot this plan came from still exists but no longer holds these contents; nothing on the server is removed either way."
+                    where = T("editor.popup.forget_slot_changed")
                 else
-                    where = "No Wishlist on the server matches this plan, so this is the only copy."
+                    where = T("editor.popup.forget_only_copy")
                 end
-                StaticPopup_Show("NEXUS_FORGET_WISHLIST", string.format(
-                    "Remove \"%s\" from this character?\n%d Echo rows, %d ordinary and %d locked copies, %s.\n%s\nThe Manage list can undo this.",
-                    confirmPlan.name, tonumber(confirmPlan.rows) or 0,
-                    tonumber(confirmPlan.ordinaryCopies) or 0,
-                    tonumber(confirmPlan.lockedCopies) or 0,
-                    confirmPlan.usable
-                        and ("Saved Build " .. tostring(confirmPlan.associationIndex))
-                        or ("association " .. tostring(confirmPlan.associationIndex)
-                            .. " which is not a Saved Build"),
-                    where), nil, {
+                StaticPopup_Show("NEXUS_FORGET_WISHLIST",
+                    TF("editor.popup.forget_question", {name = confirmPlan.name}) .. "\n"
+                    .. TF("editor.popup.forget_facts", {rows = N(tonumber(confirmPlan.rows) or 0),
+                        ordinary = N(tonumber(confirmPlan.ordinaryCopies) or 0),
+                        locked = N(tonumber(confirmPlan.lockedCopies) or 0),
+                        association = confirmPlan.usable
+                            and TF("editor.value.saved_build_number",
+                                {slot = tostring(confirmPlan.associationIndex)})
+                            or TF("editor.value.association_not_saved_build",
+                                {index = tostring(confirmPlan.associationIndex)})})
+                    .. "\n" .. where .. "\n" .. T("editor.popup.forget_undo_hint"), nil, {
                     plan = confirmPlan,
                     forget = function(selector)
                         return Controller.ForgetRetainedPlan(selector)
@@ -461,10 +480,10 @@ function M.ShowManageWishlistsMenu(anchor, offset)
             row:Show()
         elseif undoRow then
             local undoName = DisplayUntrusted(undoRow.name, 1024, false)
-                or "a removed wishlist"
+                or T("editor.value.removed_wishlist_fallback")
             row._label:SetTextColor(0.45, 0.95, 0.6)
-            row._label:SetText(string.format("Undo: bring back \"%s\"  |cff777777removed from %s|r",
-                undoName, tostring(undoRow.associationIndex)))
+            row._label:SetText(TF("editor.menu.manage_undo", {name = undoName}) .. "  |cff777777"
+                .. TF("editor.menu.manage_undo_from", {index = tostring(undoRow.associationIndex)}) .. "|r")
             row:Enable()
             -- Each row takes back ITS removal, by the identity that row
             -- names, so an older one can be recovered without disturbing a
@@ -476,9 +495,8 @@ function M.ShowManageWishlistsMenu(anchor, offset)
                 if not ok then
                     print("|cffff9040Nexus:|r " .. tostring(reason))
                 elseif type(detail) == "table" and detail.movedFrom ~= nil then
-                    print(string.format(
-                        "|cff4dff80Nexus:|r \"%s\" came back as Saved Build %s, because %s now holds a different plan.",
-                        undoName, tostring(detail.loadoutSlot), tostring(detail.movedFrom)))
+                    print("|cff4dff80Nexus:|r " .. TF("editor.chat.manage_restored_moved",
+                        {name = undoName, slot = tostring(detail.loadoutSlot), from = tostring(detail.movedFrom)}))
                 end
                 requestRefresh()
                 M.ShowManageWishlistsMenu(anchor, 0)
@@ -488,10 +506,9 @@ function M.ShowManageWishlistsMenu(anchor, offset)
             local nextFirst = first + shown
             if nextFirst >= total then nextFirst = 0 end
             row._label:SetTextColor(0.85, 0.75, 0.45)
-            row._label:SetText(string.format(
-                "More saved wishlists (%d-%d of %d)  |cff777777click for the next %d|r",
-                first + 1, first + shown, total,
-                math.min(perPage, total - nextFirst)))
+            row._label:SetText(TF("editor.menu.manage_more",
+                {first = N(first + 1), last = N(first + shown), total = N(total)}) .. "  |cff777777"
+                .. TF("editor.menu.pager_next", {count = N(math.min(perPage, total - nextFirst))}) .. "|r")
             row:Enable()
             row:SetScript("OnClick", function()
                 M.ShowManageWishlistsMenu(anchor, nextFirst)
@@ -499,7 +516,7 @@ function M.ShowManageWishlistsMenu(anchor, offset)
             row:Show()
         else
             row._label:SetTextColor(0.55, 0.55, 0.55)
-            row._label:SetText("No saved wishlists are retained on this character")
+            row._label:SetText(T("editor.menu.manage_empty"))
             row:SetScript("OnClick", nil)
             row:Disable()
             row:Show()
@@ -518,7 +535,7 @@ local function CandidateEvidenceSuffix(candidate)
     if type(candidate) == "table"
         and candidate.lockEvidenceStatus == "unavailable" then
         local editor=Nexus.WishlistEditor
-        local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or "choose locked targets"
+        local hint=editor and editor.UnresolvedRoleHint and editor.UnresolvedRoleHint() or T("editor.status.hint_choose_locked_targets")
         return "  |cffff9040("..hint..")|r"
     end
     return ""
@@ -600,10 +617,9 @@ local function ShowWishlistSwitchMenu(anchor, offset)
             if nextFirst >= total then nextFirst = 0 end
             row._check:Hide()
             row._label:SetTextColor(0.85, 0.75, 0.45)
-            row._label:SetText(string.format(
-                "More wishlists (%d-%d of %d)  |cff777777click for the next %d|r",
-                first + 1, first + shown, total,
-                math.min(perPage, total - nextFirst)))
+            row._label:SetText(TF("editor.menu.switch_more",
+                {first = N(first + 1), last = N(first + shown), total = N(total)}) .. "  |cff777777"
+                .. TF("editor.menu.pager_next", {count = N(math.min(perPage, total - nextFirst))}) .. "|r")
             row:Enable()
             row:SetScript("OnClick", function()
                 ShowWishlistSwitchMenu(anchor, nextFirst)
@@ -616,19 +632,19 @@ local function ShowWishlistSwitchMenu(anchor, offset)
                 and not c.assignmentId and ((editingContext.key and c.key==editingContext.key)
                     or (c.slot and tonumber(editingContext.slot)==tonumber(c.slot)))))
             local wishlistLabel = DisplayUntrusted(c.name, 1024, false)
-                or ("Wishlist " .. tostring(c.slot))
+                or TF("editor.value.wishlist_index_fallback", {index = tostring(c.slot)})
             local displayAssignedName = assignedName
                 and DisplayUntrusted(assignedName, 1024, false) or nil
             local suffix = displayAssignedName
-                and ("  |cff777777Saved Build: " .. displayAssignedName .. "|r")
-                or "  |cff666666Saved Build: None|r"
+                and ("  |cff777777" .. TF("editor.menu.switch_saved_build", {name = displayAssignedName}) .. "|r")
+                or ("  |cff666666" .. T("editor.menu.switch_saved_build_none") .. "|r")
             -- A stored record whose map index names no Saved Build is
             -- shown and labelled here too, not only in the management
             -- list: it can be opened and saved, but it cannot be an
             -- assignment target.
             if c.associationUsable == false then
-                suffix = suffix .. "  |cffff9040(index "
-                    .. tostring(c.associationIndex) .. " is not a Saved Build)|r"
+                suffix = suffix .. "  |cffff9040" .. TF("editor.menu.switch_index_not_saved_build",
+                    {index = tostring(c.associationIndex)}) .. "|r"
             end
             row._label:SetText(wishlistLabel
                 .. CandidateEvidenceSuffix(c) .. suffix)
@@ -658,7 +674,7 @@ local function ShowWishlistSwitchMenu(anchor, offset)
             end)
             row:Show()
         else
-            row._label:SetText("No saved wishlists found")
+            row._label:SetText(T("editor.menu.switch_empty"))
             row._label:SetTextColor(0.55,0.55,0.55)
             row._check:Hide()
             row:SetScript("OnClick", nil)
@@ -729,7 +745,7 @@ local function ShowLoadoutSwitchMenu(anchor)
     for slot = 1, count do
         local data = slots and slots.bySlot and slots.bySlot[slot]
         local name = data and tostring(data.name or "") or ""
-        if name == "" then name = "Saved Build " .. tostring(slot) end
+        if name == "" then name = TF("editor.value.saved_build_number", {slot = tostring(slot)}) end
         local linked = View and View.GetLoadoutWishlist and View.GetLoadoutWishlist(slot)
         candidates[#candidates + 1] = {
             slot = slot,
@@ -782,11 +798,11 @@ local function ShowLoadoutSwitchMenu(anchor)
         local c = candidates[i]
         if c then
             local label = DisplayUntrusted(c.name, 1024, false) or ""
-            if label == "" then label = "Saved Build " .. tostring(c.slot) end
+            if label == "" then label = TF("editor.value.saved_build_number", {slot = tostring(c.slot)}) end
             local wishlistName = c.wishlist
                 and DisplayUntrusted(c.wishlist.name, 1024, false) or nil
             local suffix = wishlistName and ("  |cff777777" .. wishlistName .. "|r")
-                or "  |cff666666No wishlist|r"
+                or ("  |cff666666" .. T("editor.menu.loadout_no_wishlist") .. "|r")
             row._label:SetText((c.active and "|cffffd200" or "|cffffffff") .. label .. "|r" .. suffix)
             local targetSlot = tonumber(c.slot)
             local alreadyActive = c.active == true
@@ -809,11 +825,12 @@ local function ShowLoadoutSwitchMenu(anchor)
                 row:Disable()
                 row:SetScript("OnClick", nil)
                 row:SetScript("OnMouseDown", nil)
-                row._label:SetText("|cff666666Saved Build " .. tostring(targetSlot) .. "  Empty|r")
+                row._label:SetText("|cff666666" .. TF("editor.menu.loadout_empty",
+                    {slot = tostring(targetSlot)}) .. "|r")
             end
             row:Show()
         else
-            row._label:SetText("No saved loadouts found")
+            row._label:SetText(T("editor.menu.loadout_none"))
             row._label:SetTextColor(0.55,0.55,0.55)
             row:SetScript("OnClick", nil)
             row:Disable()
@@ -839,8 +856,8 @@ local function RefreshDisplayControls()
     if displayCheck and overlay then
         displayCheck:SetChecked(overlay.IsShown() == true)
         if displayLockBtn then
-            displayLockBtn:SetText(overlay.IsLocked()
-                and "Unlock to Move" or "Lock Position")
+            displayLockBtn:SetText(T(overlay.IsLocked()
+                and "overlay.button.unlock_to_move" or "overlay.button.lock_position_settings"))
         end
     end
 end
@@ -886,13 +903,13 @@ local function EnsureDisplayPopup()
 
     local title = p:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 18, -16)
-    title:SetText("On-Screen Wishlist")
+    title:SetText(T("overlay.title.settings"))
 
     local subtitle = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
     subtitle:SetSize(245, 28)
     subtitle:SetJustifyH("LEFT")
-    subtitle:SetText("Show, position, and resize the wishlist list used while playing.")
+    subtitle:SetText(T("overlay.body.settings_subtitle"))
 
     local close = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     close:SetSize(22, 22)
@@ -912,7 +929,7 @@ local function EnsureDisplayPopup()
         and initialOverlay.IsShown() == true or false)
     displayCheck.text = displayCheck:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     displayCheck.text:SetPoint("LEFT", displayCheck, "RIGHT", -2, 1)
-    displayCheck.text:SetText("Show on-screen wishlist")
+    displayCheck.text:SetText(T("overlay.label.show_overlay"))
     displayCheck:SetScript("OnClick", function(self)
         local overlay = Overlay()
         if overlay then
@@ -922,7 +939,7 @@ local function EnsureDisplayPopup()
 
     local moveLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     moveLabel:SetPoint("TOPLEFT", 18, -102)
-    moveLabel:SetText("Position")
+    moveLabel:SetText(T("overlay.label.position"))
 
     displayLockBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     displayLockBtn:SetSize(92, 22)
@@ -933,8 +950,8 @@ local function EnsureDisplayPopup()
         local overlay = Overlay()
         if overlay then
             overlay.ToggleLock()
-            displayLockBtn:SetText(overlay.IsLocked()
-                and "Unlock to Move" or "Lock Position")
+            displayLockBtn:SetText(T(overlay.IsLocked()
+                and "overlay.button.unlock_to_move" or "overlay.button.lock_position_settings"))
         end
     end)
 
@@ -943,7 +960,7 @@ local function EnsureDisplayPopup()
     resetBtn:SetPoint("LEFT", displayLockBtn, "RIGHT", 10, 0)
     resetBtn:SetFrameLevel(p:GetFrameLevel() + 5)
     resetBtn:EnableMouse(true)
-    resetBtn:SetText("Reset Position")
+    resetBtn:SetText(T("overlay.button.reset_position"))
     resetBtn:SetScript("OnClick", function()
         local overlay = Overlay()
         if overlay and overlay.ResetPosition then
@@ -956,11 +973,11 @@ local function EnsureDisplayPopup()
     hint:SetPoint("TOPLEFT", 18, -128)
     hint:SetSize(260, 24)
     hint:SetJustifyH("LEFT")
-    hint:SetText("Unlock to drag the list. Lock it when placed so the list does not block gameplay clicks.")
+    hint:SetText(T("overlay.body.lock_hint"))
 
     local sizeLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     sizeLabel:SetPoint("TOPLEFT", 18, -164)
-    sizeLabel:SetText("Size")
+    sizeLabel:SetText(T("overlay.label.size"))
 
     local scaleMinus = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     scaleMinus:SetSize(22, 22)
@@ -1172,22 +1189,22 @@ function M.EnsureLockedIcon(i)
     btn:SetScript("OnEnter", function(self)
         if self.slotState == "empty" then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine("Empty locked Echo slot", 1, 1, 1)
-            GameTooltip:AddLine("Click to choose an Echo to pursue for it.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine(T("editor.tooltip.locked_slot_empty"), 1, 1, 1)
+            GameTooltip:AddLine(T("editor.tooltip.locked_slot_empty_click"), 0.8, 0.8, 0.8, true)
             GameTooltip:Show()
         elseif self.spellId then
             ShowEchoTooltip(self, self.spellId, "ANCHOR_RIGHT")
             if self.slotState == "designed" then
-                GameTooltip:AddLine("Planned locked target, not currently in this slot. Click to remove this target.", 1, 0.85, 0.3, true)
+                GameTooltip:AddLine(T("editor.tooltip.locked_slot_planned"), 1, 0.85, 0.3, true)
                 GameTooltip:Show()
             elseif self.slotState == "locked" then
                 if self.beingReplaced then
-                    GameTooltip:AddLine("A replacement is planned for this slot (the gold icon). "
-                        .. "Automatic replacement needs both Automation and locked-Echo slot management ON; "
-                        .. "otherwise change it manually when available. Remove the gold target to cancel.", 1, 0.6, 0.4, true)
+                    GameTooltip:AddLine(T("editor.tooltip.locked_slot_replacing") .. " "
+                        .. T("editor.tooltip.locked_slot_automatic") .. " "
+                        .. T("editor.tooltip.locked_slot_cancel"), 1, 0.6, 0.4, true)
                 else
-                    GameTooltip:AddLine("Left-click: find in catalog", 0.8, 0.8, 0.8, true)
-                    GameTooltip:AddLine("Right-click: design a replacement for this slot", 0.8, 0.8, 0.8, true)
+                    GameTooltip:AddLine(T("editor.tooltip.locked_slot_find"), 0.8, 0.8, 0.8, true)
+                    GameTooltip:AddLine(T("editor.tooltip.locked_slot_replace"), 0.8, 0.8, 0.8, true)
                 end
                 GameTooltip:Show()
             end
@@ -1247,7 +1264,7 @@ function M.EnsureLockedNeedIcon(i)
     btn:SetScript("OnEnter", function(self)
         if not self.spellId then return end
         ShowEchoTooltip(self, self.spellId, "ANCHOR_TOP")
-        GameTooltip:AddLine("Designed to replace the Echo below -- click to un-assign.", 1, 0.85, 0.3, true)
+        GameTooltip:AddLine(T("editor.tooltip.locked_need_icon"), 1, 0.85, 0.3, true)
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1340,7 +1357,7 @@ local function EnsureFrame()
 
     titleText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     titleText:SetPoint("TOP", 0, -14)
-    titleText:SetText("Plan / Wishlist Editor")
+    titleText:SetText(Nexus.Localization.Text("editor.title.editor"))
 
     -- The 972x18 context row under the header is the destination row:
     -- editContextText is its first visible cell (character), and the row,
@@ -1357,7 +1374,7 @@ local function EnsureFrame()
 
     wishlistNameLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     wishlistNameLabel:SetPoint("TOPLEFT", 34, -96)
-    wishlistNameLabel:SetText("Wishlist name:")
+    wishlistNameLabel:SetText(Nexus.Localization.Text("editor.label.wishlist_name"))
 
     wishlistNameBox = CreateFrame("EditBox", "NexusWishlistNameInput", frame, "InputBoxTemplate")
     wishlistNameBox:SetSize(260, 22)
@@ -1414,8 +1431,8 @@ local function EnsureFrame()
     local buildsNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     buildsNav:SetSize(108, 22)
     buildsNav:SetPoint("TOPLEFT", 18, -12)
-    buildsNav:SetText("Build Library")
-    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(buildsNav,"Build Library") end
+    buildsNav:SetText(Nexus.Localization.Text("editor.button.build_library_nav"))
+    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(buildsNav,buildsNav:GetText()) end
     buildsNav:SetScript("OnClick", function()
         frame:Hide()
         if Nexus.CommunityBuilds then Nexus.CommunityBuilds.Show() end
@@ -1423,8 +1440,8 @@ local function EnsureFrame()
     local boardNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     boardNav:SetSize(102, 22)
     boardNav:SetPoint("LEFT", buildsNav, "RIGHT", 4, 0)
-    boardNav:SetText("Leaderboard")
-    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(boardNav,"Leaderboard") end
+    boardNav:SetText(Nexus.Localization.Text("editor.button.leaderboard_nav"))
+    if Nexus.LoadingStatus then Nexus.LoadingStatus.BindSharedButton(boardNav,boardNav:GetText()) end
     boardNav:SetScript("OnClick", function()
         frame:Hide()
         if Nexus.Leaderboard then Nexus.Leaderboard.Show() end
@@ -1432,7 +1449,7 @@ local function EnsureFrame()
     local wishNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     wishNav:SetSize(92, 22)
     wishNav:SetPoint("LEFT", boardNav, "RIGHT", 4, 0)
-    wishNav:SetText("|cffffd200Wishlists|r")
+    wishNav:SetText("|cffffd200" .. Nexus.Localization.Text("editor.button.wishlists_nav") .. "|r")
     wishNav:Disable()
     -- Help is the guided setup coach (Help.OpenHelp; native QA test.163008);
     -- Reference, at the top right clear of the centred title, is the manual's
@@ -1441,14 +1458,14 @@ local function EnsureFrame()
     frame._helpNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame._helpNav:SetSize(56, 22)
     frame._helpNav:SetPoint("LEFT", wishNav, "RIGHT", 4, 0)
-    frame._helpNav:SetText("Help")
+    frame._helpNav:SetText(Nexus.Localization.Text("editor.button.help"))
     frame._helpNav:SetScript("OnClick", function()
         if Nexus.Help and Nexus.Help.OpenHelp then Nexus.Help.OpenHelp("wishlists") end
     end)
     frame._referenceNav = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     frame._referenceNav:SetSize(84, 22)
     frame._referenceNav:SetPoint("TOPRIGHT", -40, -12)
-    frame._referenceNav:SetText("Reference")
+    frame._referenceNav:SetText(Nexus.Localization.Text("editor.button.reference"))
     frame._referenceNav:SetScript("OnClick", function()
         if Nexus.Help and Nexus.Help.OpenReference then Nexus.Help.OpenReference("wishlists") end
     end)
@@ -1457,10 +1474,14 @@ local function EnsureFrame()
             plan = wishNav, builds = buildsNav, records = boardNav,
         })
         -- LoadingStatus can repaint these labels after construction. Keep its
-        -- guarded buttons and pending-state tooltips, with the workspace names.
+        -- guarded buttons and pending-state tooltips, with the workspace names
+        -- BindTabs just painted (FullUIWorkspaces owns them and their wording).
         if Nexus.LoadingStatus then
-            Nexus.LoadingStatus.BindSharedButton(buildsNav, "Explore")
-            Nexus.LoadingStatus.BindSharedButton(boardNav, "Records")
+            local exploreLabel, recordsLabel = buildsNav:GetText(), boardNav:GetText()
+            Nexus.LoadingStatus.BindSharedButton(buildsNav,
+                (exploreLabel ~= nil and exploreLabel ~= "") and exploreLabel or "Explore")
+            Nexus.LoadingStatus.BindSharedButton(boardNav,
+                (recordsLabel ~= nil and recordsLabel ~= "") and recordsLabel or "Records")
         end
         -- The tabs, Help, Reference and the title at the shared header's
         -- anchors, as in Explore and Records.
@@ -1472,7 +1493,7 @@ local function EnsureFrame()
     loadoutSwitchBtn = CreateFrame("Button", nil, frame)
     loadoutSwitchBtn:SetSize(230, 22)
     loadoutSwitchBtn:SetPoint("TOPLEFT", 34, -66)
-    loadoutSwitchBtn:SetText("Saved Build: choose one")
+    loadoutSwitchBtn:SetText(Nexus.Localization.Text("editor.button.saved_build_choose"))
     StyleWishlistSelector(loadoutSwitchBtn)
     loadoutSwitchBtn:Enable()
     local loadoutFont = loadoutSwitchBtn:GetFontString()
@@ -1490,8 +1511,8 @@ local function EnsureFrame()
         if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Shortened(self:GetFontString()) then
             GameTooltip:AddLine(self:GetText(), 1, 1, 1, true)
         end
-        GameTooltip:AddLine("Saved Build to edit", 1, 0.8, 0.3)
-        GameTooltip:AddLine("Choose which Saved Build's assigned Wishlist this editor shows and edits. Choosing one does not activate it or change your active loadout; the list shows your active Saved Build in gold.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.saved_build_heading"), 1, 0.8, 0.3)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.saved_build_body"), 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     loadoutSwitchBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1501,7 +1522,7 @@ local function EnsureFrame()
     wishlistSwitchBtn = CreateFrame("Button", "NexusWishlistEditorSwitchButton", frame)
     wishlistSwitchBtn:SetSize(270, 22)
     wishlistSwitchBtn:SetPoint("LEFT", loadoutSwitchBtn, "RIGHT", 8, 0)
-    wishlistSwitchBtn:SetText("Choose wishlist to edit")
+    wishlistSwitchBtn:SetText(Nexus.Localization.Text("editor.button.wishlist_choose"))
     StyleWishlistSelector(wishlistSwitchBtn)
     wishlistSwitchBtn:SetScript("OnClick", function(self)
         HideLoadoutSwitchMenu()
@@ -1516,14 +1537,13 @@ local function EnsureFrame()
         if Nexus.LayoutMetrics and Nexus.LayoutMetrics.Shortened(self:GetFontString()) then
             GameTooltip:AddLine(self:GetText(), 1, 1, 1, true)
         end
-        GameTooltip:AddLine("Switch wishlist", 1, 0.8, 0.3)
-        GameTooltip:AddLine("Open a different saved wishlist in this editor.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.switch_heading"), 1, 0.8, 0.3)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.switch_body"), 0.8, 0.8, 0.8, true)
         -- Displayed item 6 (#173): Editing names what this editor opened and
         -- holds; it is not a statement about the current assignment, which
         -- this hover does not read.
         if Controller.EditingContext and Controller.EditingContext() then
-            GameTooltip:AddLine("Editing: the Wishlist opened in this editor. Its current assignment "
-                .. "is not checked here; the row at the top shows what is known.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.switch_editing"), 0.8, 0.8, 0.8, true)
         end
         GameTooltip:Show()
     end)
@@ -1532,7 +1552,7 @@ local function EnsureFrame()
     frame._manageBtn = CreateFrame("Button", "NexusWishlistEditorManageButton",
         frame, "UIPanelButtonTemplate")
     frame._manageBtn:SetSize(88, 22)
-    frame._manageBtn:SetText("Manage")
+    frame._manageBtn:SetText(Nexus.Localization.Text("editor.button.manage"))
     frame._manageBtn:SetScript("OnClick", function(self)
         HideWishlistSwitchMenu()
         if M._manageMenu and M._manageMenu:IsShown() then
@@ -1543,10 +1563,8 @@ local function EnsureFrame()
     end)
     frame._manageBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Manage saved wishlists", 1, 0.8, 0.3)
-        GameTooltip:AddLine(
-            "Remove a saved wishlist from this character, with an undo. "
-            .. "Server Wishlists are not touched.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.manage_heading"), 1, 0.8, 0.3)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.manage_body"), 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     frame._manageBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1555,7 +1573,7 @@ local function EnsureFrame()
     newWishlistBtn:SetSize(112, 22)
     newWishlistBtn:SetPoint("LEFT", wishlistSwitchBtn, "RIGHT", 8, 0)
     frame._manageBtn:SetPoint("LEFT", newWishlistBtn, "RIGHT", 6, 0)
-    newWishlistBtn:SetText("+ New Wishlist")
+    newWishlistBtn:SetText("+ " .. Nexus.Localization.Text("editor.button.new_wishlist"))
     newWishlistBtn:SetScript("OnClick", function()
         HideWishlistSwitchMenu()
         newWishlist()
@@ -1567,7 +1585,7 @@ local function EnsureFrame()
         "UIPanelButtonTemplate")
     frame._workspaceAssignBtn:SetSize(94, 22)
     frame._workspaceAssignBtn:SetPoint("LEFT", frame._manageBtn, "RIGHT", 4, 0)
-    frame._workspaceAssignBtn:SetText("Assign...")
+    frame._workspaceAssignBtn:SetText(Nexus.Localization.Text("editor.button.assign_menu"))
     frame._workspaceAssignBtn:SetScript("OnClick", function()
         if Nexus.FullUIWorkspaces then
             local ok, reason = Nexus.FullUIWorkspaces.OpenPlanAction("assignment")
@@ -1576,8 +1594,8 @@ local function EnsureFrame()
     end)
     frame._workspaceAssignBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Assign Wishlist", 1, .82, .2)
-        GameTooltip:AddLine("Open the game's Wishlist chooser for the Saved Build it shows. Nothing is assigned until you choose a Wishlist there.", .8, .8, .8, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.assign_heading"), 1, .82, .2)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.assign_body"), .8, .8, .8, true)
         GameTooltip:Show()
     end)
     frame._workspaceAssignBtn:SetScript("OnLeave", function()
@@ -1597,7 +1615,7 @@ local function EnsureFrame()
     -- a lock toggle scattered across every row of the pick list.
     lockedLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     lockedLabel:SetPoint("TOPLEFT", 540, -130)
-    lockedLabel:SetText("Locked:")
+    lockedLabel:SetText(Nexus.Localization.Text("editor.label.locked_initial"))
     lockedLabel:Hide()
 
     lockedIcons = {}
@@ -1624,11 +1642,9 @@ local function EnsureFrame()
     end)
     autoLockCheck:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Auto-manage locked Echo slots", 1, 0.8, 0.3)
-        GameTooltip:AddLine("With Automation ON and this option enabled, Nexus may lock acquired targets "
-            .. "and replace planned slots only when the game and safety checks allow it.", 0.8, 0.8, 0.8, true)
-        GameTooltip:AddLine("Selecting targets alone changes no owned Echoes. With this option OFF, place "
-            .. "them manually in the character progression UI.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.autolock_heading"), 1, 0.8, 0.3)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.autolock_body"), 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.autolock_manual"), 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     autoLockCheck:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1636,7 +1652,7 @@ local function EnsureFrame()
     local autoLockLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     autoLockLabel:SetPoint("LEFT", autoLockCheck, "RIGHT", 2, 0)
     autoLockLabel:SetJustifyH("LEFT")
-    autoLockLabel:SetText("Auto-manage locked Echo slots")
+    autoLockLabel:SetText(Nexus.Localization.Text("editor.label.autolock_full"))
     frame._autoLockLabel = autoLockLabel
 
     -- Nexus-native EBH1 import/export. Closures deliberately reference only
@@ -1646,13 +1662,13 @@ local function EnsureFrame()
     local exportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     exportBtn:SetSize(70, 22)
     exportBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -100)
-    exportBtn:SetText("Export")
+    exportBtn:SetText(Nexus.Localization.Text("editor.button.export"))
     exportBtn:SetScript("OnClick", function() StaticPopup_Show("NEXUS_EXPORT_WISHLIST") end)
 
     local importBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     importBtn:SetSize(70, 22)
     importBtn:SetPoint("RIGHT", exportBtn, "LEFT", -4, 0)
-    importBtn:SetText("Import")
+    importBtn:SetText(Nexus.Localization.Text("editor.button.import"))
     importBtn:SetScript("OnClick", function() StaticPopup_Show("NEXUS_IMPORT_WISHLIST") end)
 
     local planBtn = CreateFrame("Button", "NexusFlexiblePlanEntry", frame, "UIPanelButtonTemplate")
@@ -1661,7 +1677,7 @@ local function EnsureFrame()
     -- pane and Export: clear of the save-result line, its hover area, Assign
     -- now, Import and Export in the row above.
     planBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -154)
-    planBtn:SetText("Plan alternatives")
+    planBtn:SetText(Nexus.Localization.Text("editor.button.plan_alternatives"))
     planBtn:SetScript("OnClick", function() Nexus.WishlistEditor.OpenFlexiblePlanChooser() end)
 
     -- Tracking status: shows EXACTLY what the addon currently believes
@@ -1696,13 +1712,13 @@ local function EnsureFrame()
     local displayBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     displayBtn:SetSize(150, 22)
     displayBtn:SetPoint("TOPRIGHT", -34, -66)
-    displayBtn:SetText("Display Settings")
+    displayBtn:SetText(Nexus.Localization.Text("editor.button.display_settings"))
     displayBtn:SetScript("OnClick", function(self) ToggleDisplayPopup(self) end)
     displayBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("On-screen wishlist settings", 1, 1, 1)
-        GameTooltip:AddLine("Show/hide the always-on-screen list, and lock/unlock", 0.8, 0.8, 0.8, true)
-        GameTooltip:AddLine("it for moving.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.display_heading"), 1, 1, 1)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.display_body_start"), 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.display_body_end"), 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     displayBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1723,7 +1739,7 @@ local function EnsureFrame()
     -- and not being typed in; the filter itself is unchanged.
     searchBox._nexusHint = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     searchBox._nexusHint:SetPoint("LEFT", searchBox, "LEFT", 6, 0)
-    searchBox._nexusHint:SetText("Search Echoes")
+    searchBox._nexusHint:SetText(Nexus.Localization.Text("editor.placeholder.search"))
     local function SyncSearchHint(self)
         local empty = (self:GetText() or "") == ""
         if empty and not self._nexusFocused then self._nexusHint:Show() else self._nexusHint:Hide() end
@@ -1738,7 +1754,7 @@ local function EnsureFrame()
     classCheck:SetChecked(Controller.FilterState().classOnly)
     classCheck.text = classCheck:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     classCheck.text:SetPoint("LEFT", classCheck, "RIGHT", -2, 1)
-    classCheck.text:SetText("Current class only")
+    classCheck.text:SetText(Nexus.Localization.Text("editor.label.class_only"))
     classCheck:SetScript("OnClick", function(self)
         Controller.SetClassOnly(self:GetChecked() and true or false)
         requestRefresh()
@@ -1751,7 +1767,7 @@ local function EnsureFrame()
         "UIPanelButtonTemplate")
     frame._workspaceMyBuildsBtn:SetSize(140, 22)
     frame._workspaceMyBuildsBtn:SetPoint("TOPRIGHT", -34, -126)
-    frame._workspaceMyBuildsBtn:SetText("My Builds (game)")
+    frame._workspaceMyBuildsBtn:SetText(Nexus.Localization.Text("editor.button.my_builds_game"))
     frame._workspaceMyBuildsBtn:SetScript("OnClick", function()
         if Nexus.FullUIWorkspaces then
             local ok, reason = Nexus.FullUIWorkspaces.OpenPlanAction("mybuilds")
@@ -1760,8 +1776,8 @@ local function EnsureFrame()
     end)
     frame._workspaceMyBuildsBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("My Builds (game page)", 1, .82, .2)
-        GameTooltip:AddLine("Open Ebonhold's Character Progression page. This does not activate a Saved Build or assign a Wishlist.", .8, .8, .8, true)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.my_builds_heading"), 1, .82, .2)
+        GameTooltip:AddLine(Nexus.Localization.Text("editor.tooltip.my_builds_body"), .8, .8, .8, true)
         GameTooltip:Show()
     end)
     frame._workspaceMyBuildsBtn:SetScript("OnLeave", function()
@@ -1798,7 +1814,8 @@ local function EnsureFrame()
     frame._lockedLabelHit = Nexus.LayoutMetrics and Nexus.LayoutMetrics.FullTextTooltip
         and Nexus.LayoutMetrics.FullTextTooltip(lockedLabel, frame) or nil
     frame._fitAutoLock = function(slots)
-        local full = "Auto-manage locked Echo slots"
+        local full = Nexus.Localization.Text("editor.label.autolock_full")
+        local short = Nexus.Localization.Text("editor.label.autolock_short")
         local n = math.max(1, math.min(8, math.floor(tonumber(slots) or 6)))
         local right = (tonumber(frame:GetWidth()) or 1040) - 34 - 140 - 8
         -- The strip's left edge: after the class filter's caption, as that
@@ -1867,7 +1884,7 @@ local function EnsureFrame()
             if #lines > maxLines then return nil end
             return lines
         end
-        local lines = room >= 24 and (Wrap(full) or Wrap("Auto-manage locked slots")) or nil
+        local lines = room >= 24 and (Wrap(full) or Wrap(short)) or nil
         local drop = 0
         if not lines then
             -- No room beside the strip (the largest text sizes): the box and
@@ -1878,7 +1895,7 @@ local function EnsureFrame()
             local top = 130 + math.max(22, lineHeight) + 4
             room = math.floor(right - (origin + 22 + 2))
             maxLines = 3
-            lines = room >= 24 and (Wrap(full) or Wrap("Auto-manage locked slots")) or nil
+            lines = room >= 24 and (Wrap(full) or Wrap(short)) or nil
             local lineBox = math.max(22, lineHeight * (lines and #lines or 1))
             autoLockCheck:ClearAllPoints()
             autoLockCheck:SetPoint("TOPLEFT", frame, "TOPLEFT", origin, -(top + math.floor((lineBox - 22) / 2)))
@@ -1898,7 +1915,7 @@ local function EnsureFrame()
 
     local header = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     header:SetPoint("TOPLEFT", 34, -158)
-    header:SetText("Choose up to 79 rolled copies + 6 locked Echo copies (85 total). + / - changes the requested copies.")
+    header:SetText(Nexus.Localization.Text("editor.label.list_header"))
 
     -- Left: browsable catalog -----------------------------------------
     local leftArea = CreateFrame("Frame", nil, frame)
@@ -1972,7 +1989,7 @@ local function EnsureFrame()
     -- Right: pending picks ----------------------------------------------
     local pickTitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     pickTitle:SetPoint("TOPLEFT", 674, -158)
-    pickTitle:SetText("Selected Echoes")
+    pickTitle:SetText(Nexus.Localization.Text("editor.heading.selected"))
 
     local pickArea = CreateFrame("Frame", nil, frame)
     pickArea:SetPoint("TOPLEFT", 674, -180)
@@ -2042,14 +2059,15 @@ local function EnsureFrame()
         end
         row.remove._nexusArtSize = 28
         for _, hint in ipairs({
-            {row.minus, "One copy fewer", "Plans one copy fewer of this Echo."},
-            {row.plus, "One copy more", "Plans one more copy of this Echo, up to what it allows."},
-            {row.remove, "Remove from the plan", "Takes this Echo out of the plan."},
+            {row.minus, "editor.tooltip.step_minus_heading", "editor.tooltip.step_minus_body"},
+            {row.plus, "editor.tooltip.step_plus_heading", "editor.tooltip.step_plus_body"},
+            {row.remove, "editor.tooltip.step_remove_heading", "editor.tooltip.step_remove_body"},
         }) do
             hint[1]:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(hint[2], 1, 0.82, 0.2)
-                GameTooltip:AddLine(hint[3] .. " Nothing is saved until you save the Wishlist.", 0.8, 0.8, 0.8, true)
+                GameTooltip:AddLine(Nexus.Localization.Text(hint[2]), 1, 0.82, 0.2)
+                GameTooltip:AddLine(Nexus.Localization.Text(hint[3]) .. " "
+                    .. Nexus.Localization.Text("editor.tooltip.step_nothing_saved"), 0.8, 0.8, 0.8, true)
                 GameTooltip:Show()
             end)
             hint[1]:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2118,13 +2136,16 @@ local function EnsureFrame()
         local blocked = Controller.ApplyBlockReason()
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         -- M4 (UX-15): one word, Wishlist (it is kept on the server).
-        GameTooltip:AddLine(editingContext and "Save this assigned Wishlist" or "Create a Wishlist", 1, 0.8, 0.3)
-        GameTooltip:AddLine(blocked and ("Unavailable: "
-            .. (SafeDisplay(blocked, 1024, false) or "unknown reason")) or (editingContext and
-            ("Edits only: " .. (SafeDisplay(editingContext.name, 1024, false) or "Wishlist")) or
-            "Uploads the pending Echo list as a new Wishlist on the server."), 0.8, 0.8, 0.8, true)
+        local L = Nexus.Localization
+        GameTooltip:AddLine(L.Text(editingContext and "editor.tooltip.apply_heading_save"
+            or "editor.tooltip.apply_heading_create"), 1, 0.8, 0.3)
+        GameTooltip:AddLine(blocked and (L.Format("editor.tooltip.apply_unavailable",
+            {reason = SafeDisplay(blocked, 1024, false) or L.Text("editor.value.unknown_reason")}))
+            or (editingContext and (L.Format("editor.tooltip.apply_edits_only",
+                {name = SafeDisplay(editingContext.name, 1024, false) or L.Text("editor.value.wishlist_fallback")}))
+            or L.Text("editor.tooltip.apply_uploads_new")), 0.8, 0.8, 0.8, true)
         for _, line in ipairs(M.ApplyIntentLines()) do GameTooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
-        GameTooltip:AddLine("A confirmation is shown before anything is replaced.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(L.Text("editor.tooltip.apply_confirmation"), 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     applyBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2297,7 +2318,7 @@ local function RefreshView(catalogRevision)
                 designed[#designed + 1] = {
                     spellId=p.spellId,family=p.family,draftKey=rowKey,
                     name=(row and row.name) or p.name
-                        or ("spell " .. tostring(p.spellId)),
+                        or TF("editor.value.spell_id_fallback", {id = tostring(p.spellId)}),
                     replaces=copyIndex == 1 and p.replaces or nil,
                 }
             end
@@ -2333,8 +2354,8 @@ local function RefreshView(catalogRevision)
         local slotCount = math.min(8, math.max(MAX_LOCK_SLOTS, #realSlots,
             lockedCapacity or 0))
         lockedLabel:SetText(lockedMaximum
-            and string.format("Locked (%d/%d):", lockedCount, lockedMaximum)
-            or string.format("Locked (%d):", lockedCount))
+            and TF("editor.label.locked_count_max", {count = N(lockedCount), max = N(lockedMaximum)})
+            or TF("editor.label.locked_count", {count = N(lockedCount)}))
         lockedLabel:Show()
         for i = slotCount + 1, #lockedIcons do
             lockedIcons[i]:Hide()
@@ -2422,10 +2443,11 @@ local function RefreshView(catalogRevision)
     -- when it might really mean "you have several, pick one".
     local wl = View and View.Wishlist and View.Wishlist()
     if wl then
-        trackingText:SetText(string.format("|cff4dff80Tracking:|r '%s' (%s, %d echoes)",
-            DisplayUntrusted(wl.name, 1024, false) or "(unnamed)",
-            DisplayUntrusted(wl.source, 256, false) or "unknown",
-            EchoListTotal(wl.entries)))
+        trackingText:SetText("|cff4dff80" .. T("editor.status.tracking_label") .. "|r "
+            .. TF("editor.status.tracking_detail", {
+                name = DisplayUntrusted(wl.name, 1024, false) or T("editor.value.unnamed"),
+                source = DisplayUntrusted(wl.source, 256, false) or T("editor.value.unknown_source"),
+                count = N(EchoListTotal(wl.entries))}))
         for _, b in ipairs(candidateButtons) do b:Hide() end
     else
         local candidates = (View and View.GetWishlistCandidates
@@ -2437,17 +2459,16 @@ local function RefreshView(catalogRevision)
                     awaiting = awaiting + 1
                 end
             end
-            trackingText:SetText(awaiting > 0 and string.format(
-                "|cffff9040%d wishlists found|r -- %d need locked targets; click one to choose:",
-                #candidates, awaiting) or string.format(
-                "|cffff9040%d wishlists found|r -- click one to assign it to the active loadout:",
-                #candidates))
+            trackingText:SetText("|cffff9040" .. TF("editor.status.candidates_found", {count = N(#candidates)})
+                .. "|r -- " .. (awaiting > 0
+                    and TF("editor.status.candidates_need_targets", {count = N(awaiting)})
+                    or T("editor.status.candidates_click_assign")))
             for i, b in ipairs(candidateButtons) do
                 local c = candidates[i]
                 if c then
                     b:SetText(string.format("%s (%d)%s",
                         DisplayUntrusted(c.name, 1024, false)
-                            or ("Slot " .. tostring(c.slot)),
+                            or TF("editor.value.slot_fallback", {slot = tostring(c.slot)}),
                         c.count, CandidateEvidenceSuffix(c)))
                     b:SetScript("OnClick", function()
                         -- With Auto selected the Auto-ON confirmation comes
@@ -2462,19 +2483,11 @@ local function RefreshView(catalogRevision)
                         local ok, err, active, firstRun =
                             Controller.AssociateCandidate(c)
                         if ok then
-                            if firstRun then
-                                print("|cff4dff80Nexus:|r selected '"
-                                    .. (DisplayUntrusted(c.name, 1024, false) or "Wishlist")
-                                    .. "' as the first-run wishlist.")
-                            else
-                                print("|cff4dff80Nexus:|r assigned '"
-                                    .. (DisplayUntrusted(c.name, 1024, false) or "Wishlist")
-                                    .. "' with Loadout " .. tostring(active) .. ".")
-                            end
+                            M.PrintCandidateAssigned(c.name, firstRun, active)
                             requestRefresh()
                         else
                             print("|cffff6060Nexus:|r " .. tostring(err or
-                                "activate a real saved loadout first"))
+                                T("editor.chat.candidate_activate_loadout")))
                         end
                         end)
                     end)
@@ -2488,11 +2501,13 @@ local function RefreshView(catalogRevision)
             -- server. Identity-only content stays visible without implying
             -- that it is safe to assign before its target roles are confirmed.
             trackingText:SetText(candidates[1].lockEvidenceStatus == "unavailable"
-                and "|cffff9040Found a wishlist identity|r -- choose its locked targets before assigning:"
-                or "|cffff9040Found a wishlist|r -- click to assign it to the active loadout:")
+                and ("|cffff9040" .. T("editor.status.found_identity") .. "|r -- "
+                    .. T("editor.status.found_identity_choose"))
+                or ("|cffff9040" .. T("editor.status.found_wishlist") .. "|r -- "
+                    .. T("editor.status.found_wishlist_assign")))
             candidateButtons[1]:SetText((DisplayUntrusted(
                 candidates[1].name, 1024, false)
-                or ("Slot " .. tostring(candidates[1].slot)))
+                or TF("editor.value.slot_fallback", {slot = tostring(candidates[1].slot)}))
                 .. CandidateEvidenceSuffix(candidates[1]))
             candidateButtons[1]:SetScript("OnClick", function()
                 -- With Auto selected the Auto-ON confirmation comes first
@@ -2507,28 +2522,19 @@ local function RefreshView(catalogRevision)
                 local ok, err, active, firstRun =
                     Controller.AssociateCandidate(candidates[1])
                 if ok then
-                    if firstRun then
-                        print("|cff4dff80Nexus:|r selected '"
-                            .. (DisplayUntrusted(candidates[1].name, 1024, false)
-                                or "Wishlist")
-                            .. "' as the first-run wishlist.")
-                    else
-                        print("|cff4dff80Nexus:|r assigned '"
-                            .. (DisplayUntrusted(candidates[1].name, 1024, false)
-                                or "Wishlist")
-                            .. "' with Loadout " .. tostring(active) .. ".")
-                    end
+                    M.PrintCandidateAssigned(candidates[1].name, firstRun, active)
                     requestRefresh()
                 else
                     print("|cffff6060Nexus:|r " .. tostring(err or
-                        "activate a real saved loadout first"))
+                        T("editor.chat.candidate_activate_loadout")))
                 end
                 end)
             end)
             candidateButtons[1]:Show()
             for i = 2, #candidateButtons do candidateButtons[i]:Hide() end
         else
-            trackingText:SetText("|cff888888No wishlist yet|r -- build one below, or check Build Library.")
+            trackingText:SetText("|cff888888" .. T("editor.status.no_wishlist_yet") .. "|r -- "
+                .. T("editor.status.no_wishlist_build_one"))
             for _, b in ipairs(candidateButtons) do b:Hide() end
         end
     end
@@ -2537,8 +2543,8 @@ local function RefreshView(catalogRevision)
     -- cell is editContextText); M.Refresh words it from the controller's
     -- captured descriptor. Only the title is set here.
     if titleText then
-        titleText:SetText(editingContext and "Plan / Edit Wishlist"
-            or "Plan / Create Wishlist")
+        titleText:SetText(T(editingContext and "editor.title.edit"
+            or "editor.title.create"))
     end
 
     -- The destination row's view observation: this refresh's one existing
@@ -2592,26 +2598,29 @@ local function RefreshView(catalogRevision)
         -- nothing, so the label names that Saved Build and says whether it is
         -- the server's active one.
         if selected and selected > 0 then
-            if selectedName == "" then selectedName = "Saved Build " .. tostring(selected) end
-            local state = ""
-            if active and active > 0 then
-                state = active == selected and " (active)" or " (not active)"
+            if selectedName == "" then
+                selectedName = TF("editor.value.saved_build_number", {slot = tostring(selected)})
             end
-            loadoutSwitchBtn:SetText("Saved Build: " .. selectedName .. state)
+            local stateKey = "editor.button.saved_build_named"
+            if active and active > 0 then
+                stateKey = active == selected and "editor.button.saved_build_active"
+                    or "editor.button.saved_build_inactive"
+            end
+            loadoutSwitchBtn:SetText(TF(stateKey, {name = selectedName}))
         elseif editingContext then
             -- As the context line and the switch list say: none.
-            loadoutSwitchBtn:SetText("Saved Build: None")
+            loadoutSwitchBtn:SetText(T("editor.button.saved_build_none"))
         else
-            loadoutSwitchBtn:SetText("Saved Build: choose one")
+            loadoutSwitchBtn:SetText(T("editor.button.saved_build_choose"))
         end
     end
 
     if wishlistSwitchBtn then
         if editingContext then
-            wishlistSwitchBtn:SetText("Editing: "
-                .. (DisplayUntrusted(editingContext.name, 1024, false) or "Wishlist"))
+            wishlistSwitchBtn:SetText(TF("editor.button.editing",
+                {name = DisplayUntrusted(editingContext.name, 1024, false) or T("editor.value.wishlist_fallback")}))
         else
-            wishlistSwitchBtn:SetText("New Wishlist  -  choose another")
+            wishlistSwitchBtn:SetText(T("editor.button.new_wishlist_choose"))
         end
     end
 
@@ -2654,7 +2663,7 @@ local function RefreshView(catalogRevision)
             local chosen = pending[DraftKey(data.spellId, catalog)]
             local suffix = ""
             if chosen and tonumber(chosen.spellId) == tonumber(data.spellId) then
-                suffix = "  |cff4dff80(selected)|r"
+                suffix = "  |cff4dff80" .. T("editor.value.catalog_selected_marker") .. "|r"
             end
             row.text:SetText(data.name .. suffix)
             local exactProgress = EntryProgress and EntryProgress({{
@@ -2664,15 +2673,16 @@ local function RefreshView(catalogRevision)
                 and exactProgress.rows[1] and exactProgress.rows[1].have
                 or ownedBySpell[data.spellId] or 0
             local isLocked = (tonumber(lockedBySpell[data.spellId]) or 0) > 0
-            local qualityName = ({ [0] = "Common", [1] = "Uncommon", [2] = "Rare", [3] = "Epic", [4] = "Legendary" })[tonumber(data.quality) or 0] or "Echo"
+            local qualityName = QualityName(tonumber(data.quality) or 0) or T("editor.value.quality_fallback")
             if isLocked then
                 -- Permanently secured -- never needs a wishlist slot again.
                 -- Distinct from RollStatus's unrelated "locked" (tome-gated).
-                row.status:SetText("|cffb266ffLocked|r")
+                row.status:SetText("|cffb266ff" .. T("editor.value.catalog_locked") .. "|r")
             elseif chosen and tonumber(chosen.spellId) == tonumber(data.spellId) then
-                row.status:SetText("|cff4dff80Selected|r")
+                row.status:SetText("|cff4dff80" .. T("editor.value.catalog_selected") .. "|r")
             elseif ownedCount > 0 then
-                row.status:SetText("|cffffd200" .. qualityName .. " · Owned|r")
+                row.status:SetText("|cffffd200" .. TF("editor.value.catalog_quality_owned",
+                    {quality = qualityName}) .. "|r")
             else
                 row.status:SetText("|cffb8b8b8" .. qualityName .. "|r")
             end
@@ -2687,9 +2697,10 @@ local function RefreshView(catalogRevision)
     end
     local uniqueAvailable = 0
     for _ in pairs(availableFamilies) do uniqueAvailable = uniqueAvailable + 1 end
-    footerText:SetText(string.format("Showing %d-%d of %d Echo/quality entries  •  %d distinct Echo names",
-        math.min(scrollOffset + 1, #available), math.min(#available, scrollOffset + catalogVisible),
-        #available, uniqueAvailable))
+    footerText:SetText(TF("editor.label.catalog_footer_range", {
+        first = N(math.min(scrollOffset + 1, #available)),
+        last = N(math.min(#available, scrollOffset + catalogVisible)), total = N(#available)})
+        .. "  \226\128\162  " .. TF("editor.label.catalog_footer_names", {count = N(uniqueAvailable)}))
 
     local list = {}
     local designedCount = 0
@@ -2698,7 +2709,8 @@ local function RefreshView(catalogRevision)
         list[#list + 1] = { spellId = p.spellId, family = p.family, stacks = p.stacks,
             draftKey = rowKey,
             maxStack = p.maxStack, quality = p.quality, lockIntent = p.lockIntent,
-            name = (row and row.name) or ("spell " .. p.spellId), replaces = p.replaces }
+            name = (row and row.name) or TF("editor.value.spell_id_fallback", {id = tostring(p.spellId)}),
+            replaces = p.replaces }
         if p.lockIntent then designedCount = designedCount + 1 end
     end
     table.sort(list, function(a, b) return tostring(a.name) < tostring(b.name) end)
@@ -2738,7 +2750,8 @@ local function RefreshView(catalogRevision)
                 withGhosts[#withGhosts + 1] = {
                     spellId = e.replaces,
                     quality = oldRow and tonumber(oldRow.quality) or 0,
-                    name = (oldRow and oldRow.name) or ("spell " .. tostring(e.replaces)),
+                    name = (oldRow and oldRow.name)
+                        or TF("editor.value.spell_id_fallback", {id = tostring(e.replaces)}),
                     ghost = true,
                 }
             end
@@ -2764,17 +2777,18 @@ local function RefreshView(catalogRevision)
     -- M4 (UX-13): the editor counts a plan, so its rolled copies are planned.
     -- Displayed item 4 (#173): that total is what a player checks before
     -- saving, so it leads the first line (M.PackFooterText).
-    local footerParts = { "Planned rolled copies: " .. PendingTotal() .. "/79" }
+    local footerParts = { TF("editor.label.pick_planned", {count = N(PendingTotal())}) }
     if lockedCount > 0 then
-        footerParts[#footerParts + 1] = "Currently locked: " .. lockedCount
-            .. (lockedMaximum and ("/" .. lockedMaximum) or "")
+        footerParts[#footerParts + 1] = lockedMaximum
+            and TF("editor.label.pick_locked_max", {count = N(lockedCount), max = N(lockedMaximum)})
+            or TF("editor.label.pick_locked", {count = N(lockedCount)})
     end
     local totalDesigned = designedCount + toLockCount
-    local targetParts = { "Locked targets: " .. totalDesigned .. "/6" }
+    local targetParts = { TF("editor.label.pick_targets", {count = N(totalDesigned)}) }
     -- realEntryCount, not #list -- the spliced-in "replaces" ghost rows are
     -- a display aid, not separate wishlist entries, and shouldn't inflate
     -- this count.
-    targetParts[#targetParts + 1] = realEntryCount .. " Echo/quality entries"
+    targetParts[#targetParts + 1] = TF("editor.label.pick_entries", {count = N(realEntryCount)})
     -- The footer is packed first: when its counts need more lines than its
     -- 28 units, it grows upward and the list above shows fewer whole rows
     -- (at least 8 units above the footer; exactly 8 at 28), so no count is
@@ -2796,8 +2810,8 @@ local function RefreshView(catalogRevision)
             row.icon:SetTexture(SpellIcon(data.spellId))
             row.icon:SetVertexColor(0.5, 0.5, 0.5)
             row.text:SetTextColor(0.6, 0.6, 0.6)
-            M.SetPickRowText(row, "    |cff8a8a8a-> replaces|r " .. data.name,
-                "|cff8a8a8a(currently locked)|r", true)
+            M.SetPickRowText(row, "    |cff8a8a8a-> " .. T("editor.value.pick_replaces") .. "|r " .. data.name,
+                "|cff8a8a8a" .. T("editor.value.pick_currently_locked") .. "|r", true)
             if row.minus then row.minus:Hide() end
             if row.plus then row.plus:Hide() end
             if row.remove then row.remove:Hide() end
@@ -2816,14 +2830,15 @@ local function RefreshView(catalogRevision)
             if data.toLock then
                 -- Separate locked-slot target: core/Main.lua injects it into
                 -- automation without consuming or uploading a normal slot.
-                M.SetPickRowText(row, "|cffff9040" .. data.name .. "|r", "|cffff9040(locked slot)|r")
+                M.SetPickRowText(row, "|cffff9040" .. data.name .. "|r",
+                    "|cffff9040" .. T("editor.value.pick_locked_slot") .. "|r")
             elseif data.lockIntent then
                 -- Same separate locked-slot intent, represented on a pending
                 -- row for compatibility with an in-progress editor session.
                 -- It is excluded from the 79-copy upload and automated by its
                 -- committed exact spellId.
                 M.SetPickRowText(row, data.name, "|cffffd200x" .. tostring(data.stacks or 1)
-                    .. "|r  |cff40c0ff(locked slot)|r")
+                    .. "|r  |cff40c0ff" .. T("editor.value.pick_locked_slot") .. "|r")
             else
                 M.SetPickRowText(row, data.name, "|cffffd200x" .. tostring(data.stacks or 1) .. "|r")
             end
@@ -2903,7 +2918,7 @@ end
         -- (M.ApplyAction), so the button never does other than it says.
         local label, intent = M.ApplyAction()
         if frame then frame._applyIntent = intent end
-        applyBtn:SetText(saving and "Saving..." or label)
+        applyBtn:SetText(saving and T("editor.button.saving") or label)
         if saving or blocked then applyBtn:Disable() else applyBtn:Enable() end
         M.RenderIntentControls(applyBtn, saving, blocked)
         -- Every refresh, warm or not: the result row survives it unchanged.
@@ -3115,8 +3130,19 @@ end
         return height
     end
 
+    -- The chat line after a candidate button assigned its Wishlist.
+    function M.PrintCandidateAssigned(name, firstRun, active)
+        local shown = DisplayUntrusted(name, 1024, false) or T("editor.value.wishlist_fallback")
+        if firstRun then
+            print("|cff4dff80Nexus:|r " .. TF("editor.chat.candidate_first_run", {name = shown}))
+        else
+            print("|cff4dff80Nexus:|r " .. TF("editor.chat.candidate_assigned",
+                {name = shown, slot = tostring(active)}))
+        end
+    end
+
     function M.SetApplySaved()
-        if applyBtn then applyBtn:SetText("Saved") end
+        if applyBtn then applyBtn:SetText(T("editor.button.saved")) end
     end
 
     ------------------------------------------------------------------------
@@ -3134,13 +3160,17 @@ end
         if type(destination) ~= "table" then return nil end
         if destination.kind == "savedBuild" then
             local slot = tonumber(destination.slot)
-            local fallback = "Saved Build " .. tostring(slot or "?")
+            -- The controller stores this English default as a captured
+            -- name; it is compared raw and only the shown fallback is
+            -- localized.
+            local raw = "Saved Build " .. tostring(slot or "?")
+            local fallback = TF("editor.value.saved_build_number", {slot = tostring(slot or "?")})
             local name = DisplayUntrusted(destination.name, 1024, false)
-            if not name or name == fallback then return fallback end
-            return "Saved Build '" .. name .. "' (slot " .. tostring(slot) .. ")"
+            if not name or name == raw then return fallback end
+            return TF("editor.value.saved_build_named_slot", {name = name, slot = tostring(slot)})
         elseif destination.kind == "firstRun" then
-            return "the first-run target for "
-                .. (DisplayUntrusted(destination.character, 1024, false) or "this character")
+            return TF("editor.value.first_run_target_for", {character =
+                DisplayUntrusted(destination.character, 1024, false) or T("editor.value.this_character")})
         end
         return nil
     end
@@ -3188,15 +3218,12 @@ end
         local okSettings, settings = false, nil
         if store and type(store.Settings) == "function" then okSettings, settings = pcall(store.Settings) end
         if okSettings and type(settings) == "table" and not settings.autoSave then
-            return "Auto is ON, but its permission to save finished runs (autoSave) is off, so Auto does not "
-                .. "replace " .. label .. " with a run."
+            return TF("editor.popup.auto_save_off", {label = label})
         end
         local held = M.AutoHeldReason()
-        return "Auto is ON" .. (held and (" (paused at its last update: " .. held
-                .. "; it acts again when that clears)") or "")
-            .. ": when " .. label .. " is active and a finished run at level 80 "
-            .. "passes Auto's save checks, Nexus may replace that Saved Build with the run; this save can "
-            .. "make Auto check again. Turn Auto OFF to keep the Saved Build unchanged."
+        return (held and TF("editor.popup.auto_replace_paused", {reason = held, label = label})
+            or TF("editor.popup.auto_replace", {label = label}))
+            .. " " .. T("editor.popup.auto_turn_off")
     end
 
     -- What the apply button does for this draft (its tooltip): the captured
@@ -3206,9 +3233,9 @@ end
         local sent, uncertain
         if Controller.SentDraft then sent, uncertain = Controller.SentDraft() end
         if sent then
-            lines[#lines + 1] = "This draft was " .. (uncertain and "possibly " or "") .. "sent as '"
-                .. (DisplayUntrusted(sent, 1024, false) or "?") .. "'; pressing it again sends nothing. "
-                .. "Change the plan or its name, or use New Wishlist, to create another Wishlist."
+            lines[#lines + 1] = TF(uncertain and "editor.tooltip.intent_possibly_sent"
+                or "editor.tooltip.intent_sent", {name = DisplayUntrusted(sent, 1024, false) or "?"})
+                .. " " .. T("editor.tooltip.intent_create_another")
             return lines
         end
         if Controller.IsEditing() then
@@ -3216,19 +3243,18 @@ end
             local destination = Controller.SaveDestinationDescriptor and Controller.SaveDestinationDescriptor() or nil
             local where = destination and destination.kind == "savedBuild" and M.DestinationLabel(destination) or nil
             if where and Controller.SaveAssignsOpened and Controller.SaveAssignsOpened() then
-                lines[#lines + 1] = "Save & assign saves your edits and makes it the Wishlist of " .. where
-                    .. ", the Saved Build this editor opened it for. Save changes beside it saves without assigning."
+                lines[#lines + 1] = TF("editor.tooltip.intent_save_assign_opened", {where = where})
+                    .. " " .. T("editor.tooltip.intent_save_changes_beside")
             elseif where then
-                lines[#lines + 1] = "Save changes saves your edits; " .. where .. " keeps using this Wishlist."
+                lines[#lines + 1] = TF("editor.tooltip.intent_save_changes_keeps", {where = where})
             end
             return lines
         end
         local target = Controller.SaveAndAssignTarget and Controller.SaveAndAssignTarget() or nil
         local label = target and M.DestinationLabel(target) or nil
         if label then
-            lines[#lines + 1] = "Creates it and assigns it to " .. label
-                .. ", the destination this editor captured (named again in the confirmation)."
-            lines[#lines + 1] = "Create unassigned saves it without any assignment."
+            lines[#lines + 1] = TF("editor.tooltip.intent_create_assign", {label = label})
+            lines[#lines + 1] = T("editor.tooltip.intent_create_unassigned")
         end
         return lines
     end
@@ -3251,22 +3277,21 @@ end
             if Controller.IsEditing() then
                 -- An opened Wishlist whose Saved Build does not hold it.
                 local destination = Controller.SaveDestinationDescriptor and Controller.SaveDestinationDescriptor()
-                local where = destination and M.DestinationLabel(destination) or "the Saved Build this editor opened"
-                GameTooltip:AddLine("Save changes", 1, 0.8, 0.3)
-                GameTooltip:AddLine("Saves your edits to this server Wishlist without assigning it: " .. where
-                    .. " keeps its current Wishlist choice and no first-run target changes.", 0.8, 0.8, 0.8, true)
-                GameTooltip:AddLine("Save & assign saves them and makes it the Wishlist of " .. where
-                    .. ". A confirmation is shown first.", 0.8, 0.8, 0.8, true)
+                local where = destination and M.DestinationLabel(destination)
+                    or T("editor.value.opened_saved_build_fallback")
+                GameTooltip:AddLine(T("editor.tooltip.save_changes_heading"), 1, 0.8, 0.3)
+                GameTooltip:AddLine(TF("editor.tooltip.save_changes_body", {where = where}), 0.8, 0.8, 0.8, true)
+                GameTooltip:AddLine(TF("editor.tooltip.save_assign_them", {where = where}) .. " "
+                    .. T("editor.tooltip.confirmation_first"), 0.8, 0.8, 0.8, true)
                 GameTooltip:Show()
                 return
             end
             local target = Controller.SaveAndAssignTarget and Controller.SaveAndAssignTarget() or nil
-            local label = target and M.DestinationLabel(target) or "the captured destination"
-            GameTooltip:AddLine("Create unassigned", 1, 0.8, 0.3)
-            GameTooltip:AddLine("Saves this new plan as a server Wishlist without assigning it: " .. label
-                .. " keeps its current Wishlist choice and no first-run target changes.", 0.8, 0.8, 0.8, true)
-            GameTooltip:AddLine("Assign it later with Assign now... or the Wishlist selector in the Echo Journal. "
-                .. "A confirmation is shown first.", 0.8, 0.8, 0.8, true)
+            local label = target and M.DestinationLabel(target) or T("editor.value.captured_destination_fallback")
+            GameTooltip:AddLine(T("editor.tooltip.create_unassigned_heading"), 1, 0.8, 0.3)
+            GameTooltip:AddLine(TF("editor.tooltip.create_unassigned_body", {label = label}), 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine(T("editor.tooltip.assign_later") .. " "
+                .. T("editor.tooltip.confirmation_first"), 0.8, 0.8, 0.8, true)
             GameTooltip:Show()
         end)
         button:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3298,6 +3323,9 @@ end
     function M.ApplyAction()
         local intent = Controller.INTENT or {}
         local choice = frame and frame._saveChoice == true
+        -- Localization pending: these four action labels stay source
+        -- literals (help_action_first checks that Help's quoted labels are UI
+        -- source literals); the click carries the intent, not the label.
         if Controller.IsEditing() then
             if choice then return "Save & assign", intent.SAVE_AND_ASSIGN or "saveAndAssign" end
             return "Save changes", intent.SAVE_CHANGES or "saveChanges"
@@ -3350,30 +3378,27 @@ end
         local destination = type(data) == "table" and data.destination or nil
         local kind = type(destination) == "table" and destination.kind or "unknown"
         local label = M.DestinationLabel(destination)
-        local parts = {string.format("%d of 79 rolled copies planned; planned locked targets are saved separately.",
-            EchoListTotal(type(data) == "table" and data.echoes or {}))}
+        local parts = {TF("editor.popup.confirm_planned",
+            {count = N(EchoListTotal(type(data) == "table" and data.echoes or {}))})}
         -- Save changes of a new plan that could have been assigned: named as
         -- saved without an assignment (the captured destination is untouched).
         local saveOnly = mode ~= "update" and type(data) == "table" and data.intent == "saveChanges"
             and (kind == "savedBuild" or kind == "firstRun")
         if mode == "update" then
-            parts[#parts + 1] = "Updates this server Wishlist."
+            parts[#parts + 1] = T("editor.popup.confirm_updates")
             if kind == "savedBuild" and type(data) == "table" and data.keepsAssignment then
                 -- Save changes of a Wishlist opened for a Saved Build that
                 -- does not hold it: nothing is written for that Saved Build.
-                parts[#parts + 1] = label .. " keeps the Wishlist it uses now; this save changes no Saved Build's "
-                    .. "Wishlist and no first-run target."
+                parts[#parts + 1] = TF("editor.popup.confirm_keeps", {label = label})
             elseif kind == "savedBuild" then
-                parts[#parts + 1] = "Saving also updates its assignment to " .. label
-                    .. ", the Saved Build this editor opened. Nothing is activated, and that Saved Build's Echoes do not change."
+                parts[#parts + 1] = TF("editor.popup.confirm_updates_assignment", {label = label})
+                    .. " " .. T("editor.popup.confirm_nothing_activated")
             elseif kind == "firstRun" then
-                parts[#parts + 1] = "Saving also updates " .. label
-                    .. " (used until a Saved Build with Echoes is active)."
+                parts[#parts + 1] = TF("editor.popup.confirm_updates_first_run", {label = label})
             else
                 -- Scoped to this editor and this save: no claim about what
                 -- other Saved Builds use, and no promise about assignments.
-                parts[#parts + 1] = "This editor has no Saved Build destination for it, so this save leaves "
-                    .. "every Saved Build's Wishlist choice as it is."
+                parts[#parts + 1] = T("editor.popup.confirm_no_destination_update")
             end
         else
             -- The name this Create will really use (the title names it too):
@@ -3382,37 +3407,35 @@ end
             local requested = type(data) == "table" and data.requestedName or nil
             if requested ~= nil and requested ~= data.name then
                 -- "Exists" here means listed where the player can see it.
-                parts[#parts + 1] = "A Wishlist named '" .. (DisplayUntrusted(requested, 1024, false) or "?")
-                    .. "' already exists (on the server list, in your saved plans or created this session), "
-                    .. "so this new one is named '"
-                    .. (DisplayUntrusted(data.name, 1024, false) or "?") .. "'. Existing Wishlists keep their names."
+                parts[#parts + 1] = TF("editor.popup.confirm_name_taken", {
+                    requested = DisplayUntrusted(requested, 1024, false) or "?",
+                    name = DisplayUntrusted(data.name, 1024, false) or "?"})
+                    .. " " .. T("editor.popup.confirm_existing_keep_names")
             end
             -- Also beside a copy name: that name was chosen without the
             -- server's list, so it could not be checked against it either.
             if type(data) == "table" and data.namesUnknown then
-                parts[#parts + 1] = "Existing Wishlist names are not loaded yet, so this name could not be "
-                    .. "checked against them."
+                parts[#parts + 1] = T("editor.popup.confirm_names_unknown")
             end
             if saveOnly then
-                parts[#parts + 1] = "It is saved without an assignment, as you chose: "
-                    .. (kind == "savedBuild" and (label .. " keeps its current Wishlist choice")
-                        or "the first-run target does not change")
-                    .. ". Assign it later with Assign now... or the Wishlist selector in the Echo Journal."
+                parts[#parts + 1] = (kind == "savedBuild"
+                    and TF("editor.popup.confirm_save_only_saved_build", {label = label})
+                    or T("editor.popup.confirm_save_only_first_run"))
+                    .. " " .. T("editor.popup.assign_later")
             elseif kind == "savedBuild" then
-                parts[#parts + 1] = "After a successful save it is assigned to " .. label
-                    .. ", the destination this editor captured when the draft began."
+                parts[#parts + 1] = TF("editor.popup.confirm_assigned_after", {label = label})
             elseif kind == "firstRun" then
-                parts[#parts + 1] = "After a successful save it becomes " .. label
-                    .. ", used until a Saved Build with Echoes is active."
+                parts[#parts + 1] = TF("editor.popup.confirm_becomes_first_run", {label = label})
             elseif kind == "unknown" then
-                parts[#parts + 1] = "Saved Build data is not loaded yet, so it will be saved without an assignment."
+                parts[#parts + 1] = T("editor.popup.confirm_not_loaded")
             else
                 -- What the editor captured, not what was open in the game: a
                 -- copied draft can begin while a Saved Build is selected.
-                parts[#parts + 1] = "The editor did not capture a Saved Build for this draft, so it will be saved "
-                    .. "without an assignment. You can assign it afterwards in the Echo Journal."
+                parts[#parts + 1] = T("editor.popup.confirm_no_capture") .. " "
+                    .. T("editor.popup.confirm_assign_afterwards")
             end
-            parts[#parts + 1] = "Existing Wishlists are not overwritten. Nothing is rolled, spent or activated."
+            parts[#parts + 1] = T("editor.popup.confirm_not_overwritten") .. " "
+                .. T("editor.popup.confirm_nothing_spent")
         end
         -- Only a save that writes a Saved Build destination carries Auto's
         -- consequence (M.AutoConsentLine): ON, held ON, or its save permission off.
@@ -3426,68 +3449,75 @@ end
     -- Plain words for a refusal or a failed assignment; the code itself is
     -- kept only as a hover detail when no plain wording is known.
     function M.PlainSaveReason(kind, reason, detail, label)
-        local where = label or "the Saved Build"
+        -- Reason and detail codes stay raw (they are matched here and kept
+        -- as the hover detail); only the plain words are localized.
+        local where = label or T("editor.value.the_saved_build")
         if kind == "partial" then
             local refused = {
-                ["that loadout slot is empty or unavailable"] = where .. " is empty or not loaded",
-                ["invalid loadout"] = where .. " is outside the Saved Builds the server declares",
-                ["store unavailable"] = "the assignment could not be stored right now",
-                ["unavailable"] = "the assignment could not be stored right now",
-                ["invalid wishlist"] = "the saved plan could not be recorded as an assignment",
-                ["invalid slot"] = "the server Wishlist slot could not be identified",
+                ["that loadout slot is empty or unavailable"] = "editor.status.reason_partial_empty",
+                ["invalid loadout"] = "editor.status.reason_partial_outside",
+                ["store unavailable"] = "editor.status.reason_partial_not_stored",
+                ["unavailable"] = "editor.status.reason_partial_not_stored",
+                ["invalid wishlist"] = "editor.status.reason_partial_not_recorded",
+                ["invalid slot"] = "editor.status.reason_partial_slot_unknown",
             }
-            if reason == "draftChanged" then return "the editor changed during the upload" end
-            if reason == "localTargets" then return "its locked targets could not be saved on this character" end
-            if reason == "error" then return "an error stopped the save after the upload" end
+            if reason == "draftChanged" then return T("editor.status.reason_partial_draft_changed") end
+            if reason == "localTargets" then return T("editor.status.reason_partial_local_targets") end
+            if reason == "error" then return T("editor.status.reason_partial_error") end
             -- A writer that gave no reason is shown neutrally, not as a guess.
-            if detail == nil then return "the assignment was refused" end
-            local plain = refused[tostring(detail)]
-            if plain then return plain end
-            return "the assignment was refused", detail
+            if detail == nil then return T("editor.status.reason_partial_refused") end
+            local plainKey = refused[tostring(detail)]
+            if plainKey == "editor.status.reason_partial_empty"
+                or plainKey == "editor.status.reason_partial_outside" then
+                return TF(plainKey, {where = where})
+            end
+            if plainKey then return T(plainKey) end
+            return T("editor.status.reason_partial_refused"), detail
         end
         local words = {
-            stale_confirmation = "the editor changed after you confirmed; review and save again",
-            retry_draft_changed = "the draft changed while the save waited; review and save again",
-            assignment_changed = where .. " was assigned, unassigned or restored while the editor was "
-                .. "open, and that choice is kept; close and reopen the editor",
-            destination_empty = where .. " is empty or not loaded; add Echoes to it and save again",
-            stale_slot = "the server Wishlist slot no longer holds the Wishlist this editor opened; "
-                .. "open it again from the Echo Journal",
-            design_limit = "the plan designs more than six locked target copies; untag one first",
-            mirror_unresolved = "this saved plan has no distinct current server Wishlist to save to",
-            stale_candidate = "the copied record changed; reopen the current record",
-            stale_payload = "the plan changed while the save waited; review and save again",
-            empty = "the plan is empty; add an Echo first",
-            name = "enter a Wishlist name first",
-            adapter = "the editor is not ready yet",
-            expired = "the server stayed busy with another build operation; try again in a moment",
-            refused = "the server refused the change",
-            ["no echoes"] = "the plan has no Echoes",
-            ["no valid echoes"] = "none of the plan's Echoes look valid",
-            invalid_locked_design = "the locked-target design is invalid or no longer matches the Echo catalog",
-            name_taken = "a Wishlist with this name exists now; press Create again to see the name it will get",
-            name_unavailable = "no free name was found for this Wishlist; choose another name",
-            destination_changed = "the destination named in the confirmation is not the one this editor would "
-                .. "use now; review and save again",
-            no_destination = "Save & assign needs a destination this editor captured, and this draft has none",
-            invalid_intent = "the save action was not recognised",
-            error = "an error stopped the save before anything was sent",
+            stale_confirmation = "editor.status.reason_stale_confirmation",
+            retry_draft_changed = "editor.status.reason_retry_draft_changed",
+            assignment_changed = "editor.status.reason_assignment_changed",
+            destination_empty = "editor.status.reason_destination_empty",
+            stale_slot = "editor.status.reason_stale_slot",
+            design_limit = "editor.status.reason_design_limit",
+            mirror_unresolved = "editor.status.reason_mirror_unresolved",
+            stale_candidate = "editor.status.reason_stale_candidate",
+            stale_payload = "editor.status.reason_stale_payload",
+            empty = "editor.status.reason_empty",
+            name = "editor.status.reason_name",
+            adapter = "editor.status.reason_adapter",
+            expired = "editor.status.reason_expired",
+            refused = "editor.status.reason_refused",
+            ["no echoes"] = "editor.status.reason_no_echoes",
+            ["no valid echoes"] = "editor.status.reason_no_valid_echoes",
+            invalid_locked_design = "editor.status.reason_invalid_locked_design",
+            name_taken = "editor.status.reason_name_taken",
+            name_unavailable = "editor.status.reason_name_unavailable",
+            destination_changed = "editor.status.reason_destination_changed",
+            no_destination = "editor.status.reason_no_destination",
+            invalid_intent = "editor.status.reason_invalid_intent",
+            error = "editor.status.reason_error",
         }
-        local plain = words[tostring(reason or "")]
-        if plain then return plain end
-        return "the save could not be completed", reason
+        local plainKey = words[tostring(reason or "")]
+        if plainKey == "editor.status.reason_assignment_changed"
+            or plainKey == "editor.status.reason_destination_empty" then
+            return TF(plainKey, {where = where})
+        end
+        if plainKey then return T(plainKey) end
+        return T("editor.status.reason_not_completed"), reason
     end
 
     -- The row's one line and its hover lines for a SaveResult copy.
     function M.SaveResultLines(result)
-        local plan = "'" .. (DisplayUntrusted(result.name, 1024, false) or "Wishlist") .. "'"
+        local plan = "'" .. (DisplayUntrusted(result.name, 1024, false) or T("editor.value.wishlist_fallback")) .. "'"
         local destination = type(result.destination) == "table" and result.destination or {}
         local label = M.DestinationLabel(destination)
         local copies = tonumber(result.copies)
-        local planned = copies and string.format("%d of 79 rolled copies planned (a plan, not owned Echoes); "
-            .. "planned locked targets are separate.", copies) or nil
-        local journal = "Assign now... opens the Echo Journal with its Wishlist chooser; nothing is assigned "
-            .. "until you choose a Wishlist there, and nothing is uploaded again."
+        local planned = copies and TF("editor.tooltip.result_planned", {count = N(copies)}) or nil
+        local journal = T("editor.tooltip.result_journal")
+        -- The colored state word of the row, then the rest of its line.
+        local function Head(color, key) return color .. T(key) .. "|r" end
         local kind, reason = result.kind, result.reason
         -- Hover lines without the ones that do not apply (no gaps for ipairs).
         local function Lines(...)
@@ -3500,89 +3530,100 @@ end
         end
         -- What this save wrote on this character was accepted for this session
         -- only (saved data cannot be written now): said, never shown as kept.
-        local session = result.sessionOnly and ("Saved data cannot be written right now ("
-            .. tostring(DisplayUntrusted(result.writeReason or result.sessionOnly, 140, false) or "unavailable")
-            .. "), so what this save stored on this character (its assignment and locked targets) lasts only "
-            .. "until you reload or log out. The plan itself was uploaded and is not uploaded again.") or nil
+        local session = result.sessionOnly and (TF("editor.tooltip.result_session_only", {reason =
+            tostring(DisplayUntrusted(result.writeReason or result.sessionOnly, 140, false)
+                or T("editor.value.reason_unavailable"))})
+            .. " " .. T("editor.tooltip.result_not_uploaded_again")) or nil
         if kind == "assigned" then
+            local where = label or T("editor.value.its_saved_build")
             if session then
-                return "|cffffd200Saved|r " .. plan .. " \226\128\162 Assigned to " .. (label or "its Saved Build")
-                    .. " for this session only",
-                    Lines(session, "Nothing was activated or rolled, and no Saved Build's Echoes changed.", planned)
+                return Head("|cffffd200", "editor.status.result_saved") .. " "
+                    .. TF("editor.status.result_assigned_session", {plan = plan, label = where}),
+                    Lines(session, T("editor.tooltip.result_nothing_activated"), planned)
             end
-            return "|cff4dff80Saved|r " .. plan .. " \226\128\162 Assigned to " .. (label or "its Saved Build"),
-                {"Saved, and " .. (label or "its Saved Build") .. " now uses this plan. Nothing was "
-                    .. "activated or rolled, and no Saved Build's Echoes changed.", planned}
+            return Head("|cff4dff80", "editor.status.result_saved") .. " "
+                .. TF("editor.status.result_assigned", {plan = plan, label = where}),
+                {TF("editor.tooltip.result_now_uses", {label = where}) .. " "
+                    .. T("editor.tooltip.result_nothing_activated"), planned}
         elseif kind == "firstRun" then
-            local who = DisplayUntrusted(destination.character, 1024, false) or "this character"
+            local who = DisplayUntrusted(destination.character, 1024, false) or T("editor.value.this_character")
             if session then
-                return "|cffffd200Saved|r " .. plan .. " \226\128\162 First-run target for " .. who
-                    .. " for this session only",
-                    Lines(session, "No Saved Build was activated or changed in the game.", planned)
+                return Head("|cffffd200", "editor.status.result_saved") .. " "
+                    .. TF("editor.status.result_first_run_session", {plan = plan, character = who}),
+                    Lines(session, T("editor.tooltip.result_no_saved_build_changed"), planned)
             end
-            return "|cff4dff80Saved|r " .. plan .. " \226\128\162 First-run target for " .. who,
-                {"Used until a Saved Build with Echoes is active. No Saved Build was activated or changed "
-                    .. "in the game.", planned}
+            return Head("|cff4dff80", "editor.status.result_saved") .. " "
+                .. TF("editor.status.result_first_run", {plan = plan, character = who}),
+                {T("editor.tooltip.result_used_until") .. " "
+                    .. T("editor.tooltip.result_no_saved_build_changed"), planned}
         elseif kind == "unassigned" and reason == "saveOnly" then
             -- Save changes of a plan that could have been assigned: as chosen.
-            return "|cffffd200Saved \226\128\162 Not assigned|r " .. plan .. ": saved without an assignment, as you chose",
-                Lines("The plan is saved. No Saved Build or first-run target changed.", journal, session, planned)
+            return Head("|cffffd200", "editor.status.result_saved_not_assigned") .. " "
+                .. TF("editor.status.result_save_only", {plan = plan}),
+                Lines(T("editor.tooltip.result_plan_saved") .. " " .. T("editor.tooltip.result_no_target_changed"),
+                    journal, session, planned)
         elseif kind == "unassigned" then
             -- What this editor captured for this save, not a claim about what
             -- other Saved Builds use.
-            local why = reason == "notLoaded" and "Saved Build data was not loaded"
-                or reason == "unboundPlan" and "this editor has no Saved Build destination for it"
-                or "the editor captured no Saved Build for this draft"
-            return "|cffffd200Saved \226\128\162 Not assigned|r " .. plan .. ": " .. why,
-                Lines("The plan is saved. This save assigned it to nothing: the editor had no Saved Build or "
-                    .. "first-run destination for it.", journal, session, planned)
+            local why = T(reason == "notLoaded" and "editor.status.result_why_not_loaded"
+                or reason == "unboundPlan" and "editor.status.result_why_unbound"
+                or "editor.status.result_why_no_capture")
+            return Head("|cffffd200", "editor.status.result_saved_not_assigned") .. " "
+                .. TF("editor.status.result_with_reason", {plan = plan, reason = why}),
+                Lines(T("editor.tooltip.result_plan_saved") .. " " .. T("editor.tooltip.result_assigned_nothing"),
+                    journal, session, planned)
         elseif kind == "uncertain" then
             -- The host call ended in an error: whether it arrived is unknown.
-            return "|cffff6060Not confirmed|r " .. plan .. ": the game reported an error while sending it",
-                Lines("It may or may not have reached the server. Nexus does not send it again from this draft, "
-                    .. "and nothing was assigned.",
-                 "Check the Wishlist list in the Echo Journal. To create another Wishlist anyway, change the "
-                    .. "plan or its name, or use New Wishlist.", planned)
+            return Head("|cffff6060", "editor.status.result_not_confirmed") .. " "
+                .. TF("editor.status.result_send_error", {plan = plan}),
+                Lines(T("editor.tooltip.result_may_have_reached") .. " " .. T("editor.tooltip.result_not_sent_again"),
+                 T("editor.tooltip.result_check_journal") .. " " .. T("editor.tooltip.result_create_another_anyway"),
+                 planned)
         elseif kind == "kept" then
-            return "|cffffd200Saved \226\128\162 Not assigned|r " .. plan .. ": "
-                .. (label or "its destination") .. " changed meanwhile; that choice is kept",
-                {"The plan is saved. Its destination was assigned, unassigned or restored while the editor "
-                    .. "was open, and that newer choice is kept.", journal, planned}
+            return Head("|cffffd200", "editor.status.result_saved_not_assigned") .. " "
+                .. TF("editor.status.result_kept", {plan = plan,
+                    label = label or T("editor.value.its_destination")}),
+                {T("editor.tooltip.result_plan_saved") .. " " .. T("editor.tooltip.result_newer_choice_kept"),
+                    journal, planned}
         elseif kind == "partial" then
             local plain, code = M.PlainSaveReason(kind, reason, result.detail, label)
             local lines = {}
             -- The safe next step never uploads again (F7): pressing Create for
             -- this draft sends nothing, while a changed plan or name would
             -- create another Wishlist.
-            local again = result.create and ("Pressing Create again does not upload this draft again; "
-                .. "creating with a changed plan or name would make another Wishlist.") or nil
+            local again = result.create and T("editor.tooltip.result_press_create_again") or nil
             if reason == "association" then
-                lines[1] = "Your plan is saved on the server, but the assignment was refused. Nothing will be "
-                    .. "uploaded again."
+                lines[1] = T("editor.tooltip.result_assignment_refused") .. " "
+                    .. T("editor.tooltip.result_nothing_uploaded_again")
                 lines[2] = journal
                 lines[#lines + 1] = again
             elseif reason == "draftChanged" then
-                lines[1] = "The upload completed, but the editor changed during it, so nothing was assigned "
-                    .. "and local targets were not updated. Review the draft and save again."
+                lines[1] = T("editor.tooltip.result_editor_changed") .. " "
+                    .. T("editor.tooltip.result_review_save_again")
             elseif reason == "error" then
-                lines[1] = "The upload completed, but a later step failed with an error, so nothing more was "
-                    .. "done. Nothing will be uploaded again from this draft."
+                lines[1] = T("editor.tooltip.result_later_step_failed") .. " "
+                    .. T("editor.tooltip.result_nothing_uploaded_from_draft")
                 lines[2] = again
             else
-                lines[1] = "The upload completed, but the plan's locked targets could not be saved on this "
-                    .. "character, so nothing was assigned. Your draft is kept."
+                lines[1] = T("editor.tooltip.result_targets_not_saved") .. " "
+                    .. T("editor.tooltip.result_draft_kept")
                 lines[2] = result.create
-                    and ("To store its locked targets, open " .. plan .. " from the Echo Journal's Wishlist list "
-                        .. "and save it there; that updates the same Wishlist. " .. again)
-                    or "Save it again from this editor when saved data can be written; that updates the same Wishlist."
+                    and (TF("editor.tooltip.result_store_targets", {plan = plan}) .. " " .. again)
+                    or T("editor.tooltip.result_save_again_later")
             end
-            if code then lines[#lines + 1] = "Details: " .. tostring(DisplayUntrusted(code, 140, false) or "") end
-            return "|cffff6060Uploaded \226\128\162 Not assigned|r " .. plan .. ": " .. plain, lines
+            if code then
+                lines[#lines + 1] = TF("editor.tooltip.result_details",
+                    {code = tostring(DisplayUntrusted(code, 140, false) or "")})
+            end
+            return Head("|cffff6060", "editor.status.result_uploaded_not_assigned") .. " "
+                .. TF("editor.status.result_with_reason", {plan = plan, reason = plain}), lines
         end
         local plain, code = M.PlainSaveReason("notSaved", reason, nil, label)
-        local lines = {"Nothing was saved or assigned; your edits are kept."}
-        if code then lines[2] = "Details: " .. tostring(DisplayUntrusted(code, 140, false) or "") end
-        return "|cffff6060Not saved|r: " .. plain, lines
+        local lines = {T("editor.tooltip.result_nothing_saved")}
+        if code then
+            lines[2] = TF("editor.tooltip.result_details", {code = tostring(DisplayUntrusted(code, 140, false) or "")})
+        end
+        return Head("|cffff6060", "editor.status.result_not_saved") .. ": " .. plain, lines
     end
 
     function M.EnsureSaveResultRow()
@@ -3621,15 +3662,14 @@ end
         local button = CreateFrame("Button", "NexusWishlistAssignNowButton", frame, "UIPanelButtonTemplate")
         button:SetSize(120, 20)
         button:SetPoint("TOPLEFT", 736, -91)
-        button:SetText("Assign now...")
+        button:SetText(T("editor.button.assign_now"))
         button:SetScript("OnClick", function() M.AssignNow() end)
         button:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:AddLine("Assign now", 1, 0.8, 0.3)
-            GameTooltip:AddLine("Closes the editor and opens the Echo Journal with its Wishlist chooser, the "
-                .. "same route as Assign Wishlist. The chooser names the Saved Build it assigns to; nothing is "
-                .. "assigned until you choose a Wishlist there.", 0.8, 0.8, 0.8, true)
-            GameTooltip:AddLine("Nothing is uploaded again, no Saved Build is activated, and Auto is not changed.",
+            GameTooltip:AddLine(T("editor.tooltip.assign_now_heading"), 1, 0.8, 0.3)
+            GameTooltip:AddLine(T("editor.tooltip.assign_now_route") .. " "
+                .. T("editor.tooltip.assign_now_chooser"), 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine(T("editor.tooltip.assign_now_safe"),
                 0.8, 0.8, 0.8, true)
             GameTooltip:Show()
         end)
@@ -3666,28 +3706,23 @@ end
     function M.AssignNowRefusal(why, destination)
         local label = M.DestinationLabel(destination)
         if why == "not_loaded" then
-            return "Saved Build data is not loaded yet, so the Wishlist selector was not opened and nothing "
-                .. "was assigned. Try again when it has loaded."
+            return T("editor.chat.assign_now_not_loaded") .. " " .. T("editor.chat.assign_now_try_again")
         elseif why == "elsewhere" then
             if type(destination) == "table" and destination.kind == "firstRun" then
-                return "The Echo Journal now assigns to a Saved Build, not to the first-run target this plan "
-                    .. "was saved for, so the selector was not opened and nothing was assigned. Close and "
-                    .. "reopen the editor to continue."
+                return T("editor.chat.assign_now_elsewhere_first_run") .. " "
+                    .. T("editor.chat.assign_now_reopen_continue")
             end
             -- No advice to switch Saved Builds: that is a game action with
             -- its own consequences, and Nexus never does it for the player.
-            return "The Echo Journal now assigns to a different Saved Build than " .. (label or "the one")
-                .. " this plan was saved for, so the selector was not opened and nothing was assigned. "
-                .. "Close and reopen the editor to work with the Saved Build the Journal targets now."
+            return TF("editor.chat.assign_now_elsewhere", {label = label or T("editor.value.the_one")})
+                .. " " .. T("editor.chat.assign_now_reopen_work")
         elseif why == "empty_target" then
-            return "The Echo Journal targets " .. (label or "a Saved Build") .. ", which is empty or not "
-                .. "loaded, so it refuses any assignment to it. The selector was not opened and nothing was assigned."
+            return TF("editor.chat.assign_now_empty_target", {label = label or T("editor.value.a_saved_build")})
+                .. " " .. T("editor.chat.assign_now_not_opened")
         elseif why == "route_unavailable" then
-            return "Could not find the game's Character Progression button, so nothing was opened or "
-                .. "assigned. The editor stays open; open Character Progression → Echoes yourself and use "
-                .. "the Nexus Wishlist selector at its top."
+            return T("editor.chat.assign_now_no_route") .. " " .. T("editor.chat.assign_now_open_yourself")
         end
-        return "Assign now no longer applies to this plan, so nothing was opened or assigned."
+        return T("editor.chat.assign_now_stale")
     end
 
     function M.AssignNow()
@@ -3699,7 +3734,8 @@ end
         end
         local journal = Nexus.JournalTab
         if not (journal and type(journal.OpenBuilds) == "function") then
-            print("|cffff6060Nexus:|r The Echo Journal's Wishlist selector is unavailable. Nothing was assigned.")
+            print("|cffff6060Nexus:|r " .. T("editor.chat.assign_now_selector_unavailable") .. " "
+                .. T("editor.chat.nothing_assigned"))
             return false
         end
         -- The route must be able to open before the editor (and its result)
@@ -3771,10 +3807,10 @@ end
 -- Confirmation for removing one retained wishlist. Everything it needs comes
 -- in as data, so this registration holds no editor state and the dialog
 -- cannot act on a plan other than the one the clicked row named.
-StaticPopupDialogs["NEXUS_FORGET_WISHLIST"] = {
+-- The accept and cancel labels resolve when the popup reads them (the
+-- session language is chosen after this file loads).
+StaticPopupDialogs["NEXUS_FORGET_WISHLIST"] = setmetatable({
     text = "%s",
-    button1 = "Remove",
-    button2 = "Cancel",
     OnAccept = function(self, data)
         data = type(data) == "table" and data
             or (type(self) == "table" and self.data) or nil
@@ -3786,11 +3822,14 @@ StaticPopupDialogs["NEXUS_FORGET_WISHLIST"] = {
         })
         if not ok then
             print("|cffff9040Nexus:|r " .. tostring(reason
-                or "that wishlist could not be removed"))
+                or T("editor.chat.forget_failed_default")))
         end
         if type(data.after) == "function" then data.after() end
     end,
     timeout = 0, whileDead = true, hideOnEscape = true,
-}
+}, {__index = function(_, field)
+    if field == "button1" then return T("editor.button.remove") end
+    if field == "button2" then return T("editor.button.cancel") end
+end})
 
 Nexus.WishlistInternals.Renderer = Renderer
