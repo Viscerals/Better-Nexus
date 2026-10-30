@@ -390,7 +390,7 @@ local function LoadImportedWishlist(parsed, chosenName)
         wishlistController.LoadImported(parsed, chosenName)
     if not ok then
         print("|cffff6060Nexus:|r " .. TF("editor.chat.import_failed",
-            {reason = tostring(why or T("editor.error.import_roles_unrepresentable"))}))
+            {reason = tostring(why and Nexus.UserText.Recognized(why) or T("editor.error.import_roles_unrepresentable"))}))
         EndGuidedImport()
         return false
     end
@@ -556,7 +556,7 @@ function RolePicker.Accept()
     end
     local prepared,why=DraftModel.NormalizeCandidateEvidence(ordinary,lockedRows,
         {catalog=wishlistController.CatalogProjection(),lockedBySpell={}})
-    if not prepared then RolePicker.Message(why or T("editor.status.role_not_representable"));return false end
+    if not prepared then RolePicker.Message(why and Nexus.UserText.Recognized(why) or T("editor.status.role_not_representable"));return false end
     if state.kind=="import" then
         local name,class=state.name,state.class
         RolePicker.Hide(true)
@@ -586,7 +586,7 @@ function RolePicker.Accept()
         resolved,reason=Adapter.ConfirmWishlistRoles(state.candidate,echoes,
             state.usedCurrentLocks and "current-locks" or "user-confirmed")
     end
-    if not resolved then RolePicker.Message(reason or T("editor.status.role_not_preserved"));return false end
+    if not resolved then RolePicker.Message(reason and Nexus.UserText.Recognized(reason) or T("editor.status.role_not_preserved"));return false end
     local loadoutSlot=state.loadoutSlot
     if state.assign then
         local ok,err
@@ -596,7 +596,7 @@ function RolePicker.Accept()
             ok=ok==true,reason=err,key=resolved.key,slot=resolved.slot,name=resolved.name,guide=state.guide})
         if not ok then
             RolePicker.Message(TF("editor.status.role_assign_incomplete",
-                {reason=tostring(err or T("editor.value.reason_unavailable"))}))
+                {reason=tostring(err and Nexus.UserText.Recognized(err) or T("editor.value.reason_unavailable"))}))
             return false
         end
         loadoutSlot=state.activeSlot>0 and state.activeSlot or nil

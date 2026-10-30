@@ -81,11 +81,9 @@ end
 -- listed as pending in fragments/wishlist.json or owned by another family.
 -- (The six Help-quoted editor action labels are reviewed keys now: owner
 -- follow-up v2.)
-local PENDING_TEXT={
- ['Plan']='FullUIWorkspaces tab label (workspace family)',
- ['Explore']='FullUIWorkspaces tab label (workspace family)',
- ['Records']='FullUIWorkspaces tab label (workspace family)',
-}
+-- v3: the workspace tab labels are said through workspace.tab.* keys, so
+-- nothing is allowed raw any more.
+local PENDING_TEXT={}
 local function Strip(text,data)
  local t=tostring(text or '')
  for _,d in ipairs(data) do
@@ -215,6 +213,12 @@ menuTexts=S.VisibleTexts(manage)
 missing=Untranslated(menuTexts)
 check(#missing==0,'A3: Manage rows and header passed the seam: '..Report(missing))
 check(Has(menuTexts,S.OPEN..'Saved wishlists on this character: 2'..S.CLOSE),'A3: the Manage count reaches its header')
+do
+ local header
+ for _,t in ipairs(menuTexts) do if t.text:find('Wishlist deletion call',1,true) then header=t.text end end
+ check(header and header:find(S.OPEN..'this client build exposes no Wishlist deletion call'..S.CLOSE,1,true)~=nil,
+  "A3: the adapter's deletion reason in the Manage header is said through its key: "..tostring(header))
+end
 
 -- A4: the removal confirmation, opened from a Manage row (not accepted).
 local manageRow=Find(manage.rows,function(r) return r:IsShown() and r:IsEnabled() and tostring(r._label:GetText()):find('Remove',1,true) end)
@@ -358,6 +362,55 @@ do
   end
  end
  check(nested>40,'A11: record reasons checked inside Copy lines: '..nested)
+ -- The Wishlist and Plan reasons (exact) are said through their keys.
+ local reasons,count=Nexus.WishlistInternals.Controller.ReasonBook(),0
+ for raw,key in pairs(reasons.exact) do
+  if key:sub(1,14)=='editor.reason.' then
+   count=count+1
+   check(Nexus.UserText.Recognized(raw)==S.OPEN..raw..S.CLOSE,'A11: a Wishlist reason is said through '..key)
+  end
+ end
+ check(count>=44,'A11: Wishlist reasons covered: '..count)
+ -- Real receivers of producer reasons (only the producer is stubbed).
+ local function Said(lines,raw)
+  for _,line in ipairs(lines) do if line:find(S.OPEN..raw..S.CLOSE,1,true) then return true end end
+  return false,table.concat(lines,' | ')
+ end
+ local workspaces=Nexus.FullUIWorkspaces
+ local open=workspaces.OpenPlanAction
+ workspaces.OpenPlanAction=function() return false,'Plan action refused' end
+ for _,button in ipairs({f._workspaceAssignBtn,f._workspaceMyBuildsBtn}) do
+  local ok,lines=Said(S.CaptureChat(function() button:GetScript('OnClick')(button) end),'Plan action refused')
+  check(ok,'A11: a Plan action refusal is said through its key: '..tostring(lines))
+ end
+ workspaces.OpenPlanAction=open
+ local dialog=StaticPopupDialogs.NEXUS_FORGET_WISHLIST
+ local ok,lines=Said(S.CaptureChat(function()
+  dialog.OnAccept({},{plan={associationIndex=1,key='k'},forget=function() return false,'that plan could not be removed' end})
+ end),'that plan could not be removed')
+ check(ok,'A11: a Manage removal refusal is said through its key: '..tostring(lines))
+ local editor=Nexus.WishlistEditor
+ local suspend=editor.SuspendForWorkspace
+ editor.SuspendForWorkspace=function() return false,'finish or cancel the pending Save before leaving Plan' end
+ check(NexusEditorFrame:IsShown(),'A11: Plan is open for the workspace refusal')
+ ok,lines=Said(S.CaptureChat(function() Nexus.Panel.OpenMyBuilds() end),'finish or cancel the pending Save before leaving Plan')
+ editor.SuspendForWorkspace=suspend
+ check(ok,'A11: a Plan workspace refusal in the HUD is said through its key: '..tostring(lines))
+ -- The model's fallback name of an Echo the catalog lacks, at display.
+ local renderer
+ for _,fn in pairs(Nexus.WishlistEditor) do
+  if type(fn)=='function' then
+   for i=1,200 do
+    local n,v=debug.getupvalue(fn,i)
+    if n==nil then break end
+    if n=='wishlistRenderer' then renderer=v end
+   end
+  end
+ end
+ renderer=assert(renderer,'the editor renderer')
+ check(renderer.DraftName({spellId=990001,name='spell 990001'})==S.OPEN..'spell 990001'..S.CLOSE,'A11: the model fallback name is said through its key')
+ check(renderer.DraftName({spellId=990001,name=LONG_NAME})==LONG_NAME,'A11: a real Echo name stays verbatim')
+ check(renderer.DraftName({spellId=990002,name='spell 990001'})=='spell 990001','A11: a name that only looks like the fallback stays verbatim')
  -- An unknown line keeps its existing presentation.
  local other='|cffff6060Nexus:|r '..LONG_NAME
  check(Nexus.UserText.Message(other)==other,'A11: an unknown chat line is shown unchanged')
@@ -453,6 +506,9 @@ do
   if shown~=before then bad[#bad+1]=line..' -> '..shown..' (before: '..before..')' end
  end
  check(#bad==0,'D: every Wishlist chat line shows the English bytes it showed before:\n'..table.concat(bad,'\n'))
+ for raw,key in pairs(Nexus.WishlistInternals.Controller.ReasonBook().exact) do
+  check(Nexus.UserText.Recognized(raw)==raw,'D: '..key..' is the exact producer reason')
+ end
  check(Nexus.UserText.Message('|cffff9040Nexus:|r Wishlist identity found; awaiting authoritative locked-Echo evidence.')
   =='|cffff9040Nexus:|r awaiting authoritative locked-Echo evidence.','D: the legacy-rewritten line keeps its earlier English')
  -- The editor's callback prints the controller's line as given: the

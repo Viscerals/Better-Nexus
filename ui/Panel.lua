@@ -2882,7 +2882,7 @@ local function ProtectVisiblePlanRoute()
     end
     local allowed, reason = editor.SuspendForWorkspace()
     if not allowed then
-        print("|cffffd200Nexus:|r " .. tostring(reason or LT("panel.chat.plan_action_open")))
+        print("|cffffd200Nexus:|r " .. tostring(reason and Nexus.UserText.Recognized(reason) or LT("panel.chat.plan_action_open")))
         return false, false
     end
     return true, true
@@ -2902,7 +2902,7 @@ local function FinishPlanRoute(suspended, opened)
         local restored, reason = editor.ResumeWorkspaceDraft()
         if not restored then
             print("|cffffd200Nexus:|r " .. LT("panel.chat.plan_not_reopened") .. " "
-                .. tostring(reason or LT("panel.chat.plan_resume_draft")))
+                .. tostring(reason and Nexus.UserText.Recognized(reason) or LT("panel.chat.plan_resume_draft")))
         end
     end
 end

@@ -328,6 +328,17 @@ end
 
 -- Compact management list. State lives on the menu frame and the function
 -- on M, so this adds no upvalue to Renderer.New.
+-- A draft row's name: the model's own fallback for an Echo the catalog
+-- lacks ("spell <id>", core/WishlistModel.lua) through its key; any other
+-- name verbatim.
+function M.DraftName(p)
+    if type(p) ~= "table" then return nil end
+    if p.name ~= nil and p.name == "spell " .. tostring(p.spellId) then
+        return TF("editor.value.spell_id_fallback", {id = tostring(p.spellId)})
+    end
+    return p.name
+end
+
 function M.HideManageWishlistsMenu()
     if M._manageMenu then M._manageMenu:Hide() end
 end
@@ -380,7 +391,8 @@ function M.ShowManageWishlistsMenu(anchor, offset)
         .. "  |cff777777" .. (support.supported
             and T("editor.note.manage_removals_local")
             or TF("editor.note.manage_removals_reason",
-                {reason = tostring(support.reason or T("editor.note.manage_no_deletion_call"))})) .. "|r")
+                {reason = tostring(support.reason and Nexus.UserText.Recognized(support.reason)
+                    or T("editor.note.manage_no_deletion_call"))})) .. "|r")
     -- The header wraps to its measured height; the rows start below it.
     local metrics = Nexus.LayoutMetrics
     local top = 8 + (metrics and metrics.WrapHeight(menu.header, 340, 12) or 14) + 4
@@ -493,7 +505,7 @@ function M.ShowManageWishlistsMenu(anchor, offset)
             row:SetScript("OnClick", function()
                 local ok, reason, detail = Controller.RestoreForgottenPlan(take)
                 if not ok then
-                    print("|cffff9040Nexus:|r " .. tostring(reason))
+                    print("|cffff9040Nexus:|r " .. tostring(Nexus.UserText.Recognized(reason)))
                 elseif type(detail) == "table" and detail.movedFrom ~= nil then
                     print("|cff4dff80Nexus:|r " .. TF("editor.chat.manage_restored_moved",
                         {name = undoName, slot = tostring(detail.loadoutSlot), from = tostring(detail.movedFrom)}))
@@ -1589,7 +1601,7 @@ local function EnsureFrame()
     frame._workspaceAssignBtn:SetScript("OnClick", function()
         if Nexus.FullUIWorkspaces then
             local ok, reason = Nexus.FullUIWorkspaces.OpenPlanAction("assignment")
-            if not ok then print("|cffffd200Nexus:|r " .. tostring(reason)) end
+            if not ok then print("|cffffd200Nexus:|r " .. tostring(Nexus.UserText.Recognized(reason))) end
         end
     end)
     frame._workspaceAssignBtn:SetScript("OnEnter", function(self)
@@ -1771,7 +1783,7 @@ local function EnsureFrame()
     frame._workspaceMyBuildsBtn:SetScript("OnClick", function()
         if Nexus.FullUIWorkspaces then
             local ok, reason = Nexus.FullUIWorkspaces.OpenPlanAction("mybuilds")
-            if not ok then print("|cffffd200Nexus:|r " .. tostring(reason)) end
+            if not ok then print("|cffffd200Nexus:|r " .. tostring(Nexus.UserText.Recognized(reason))) end
         end
     end)
     frame._workspaceMyBuildsBtn:SetScript("OnEnter", function(self)
@@ -2140,7 +2152,7 @@ local function EnsureFrame()
         GameTooltip:AddLine(L.Text(editingContext and "editor.tooltip.apply_heading_save"
             or "editor.tooltip.apply_heading_create"), 1, 0.8, 0.3)
         GameTooltip:AddLine(blocked and (L.Format("editor.tooltip.apply_unavailable",
-            {reason = SafeDisplay(blocked, 1024, false) or L.Text("editor.value.unknown_reason")}))
+            {reason = SafeDisplay(Nexus.UserText.Recognized(blocked), 1024, false) or L.Text("editor.value.unknown_reason")}))
             or (editingContext and (L.Format("editor.tooltip.apply_edits_only",
                 {name = SafeDisplay(editingContext.name, 1024, false) or L.Text("editor.value.wishlist_fallback")}))
             or L.Text("editor.tooltip.apply_uploads_new")), 0.8, 0.8, 0.8, true)
@@ -2317,7 +2329,7 @@ local function RefreshView(catalogRevision)
                 local row = catalog and catalog.rows and catalog.rows[p.spellId]
                 designed[#designed + 1] = {
                     spellId=p.spellId,family=p.family,draftKey=rowKey,
-                    name=(row and row.name) or p.name
+                    name=(row and row.name) or M.DraftName(p)
                         or TF("editor.value.spell_id_fallback", {id = tostring(p.spellId)}),
                     replaces=copyIndex == 1 and p.replaces or nil,
                 }
@@ -2486,7 +2498,7 @@ local function RefreshView(catalogRevision)
                             M.PrintCandidateAssigned(c.name, firstRun, active)
                             requestRefresh()
                         else
-                            print("|cffff6060Nexus:|r " .. tostring(err or
+                            print("|cffff6060Nexus:|r " .. tostring(err and Nexus.UserText.Recognized(err) or
                                 T("editor.chat.candidate_activate_loadout")))
                         end
                         end)
@@ -2525,7 +2537,7 @@ local function RefreshView(catalogRevision)
                     M.PrintCandidateAssigned(candidates[1].name, firstRun, active)
                     requestRefresh()
                 else
-                    print("|cffff6060Nexus:|r " .. tostring(err or
+                    print("|cffff6060Nexus:|r " .. tostring(err and Nexus.UserText.Recognized(err) or
                         T("editor.chat.candidate_activate_loadout")))
                 end
                 end)
@@ -2722,7 +2734,7 @@ local function RefreshView(catalogRevision)
         local copies = math.max(1, tonumber(p.stacks) or 1)
         toLockList[#toLockList + 1] = { spellId = p.spellId, family = p.family,
             draftKey = key,
-            stacks = copies, maxStack = copies, quality = p.quality, name = p.name, toLock = true,
+            stacks = copies, maxStack = copies, quality = p.quality, name = M.DraftName(p), toLock = true,
             replaces = p.replaces }
         toLockCount = toLockCount + copies
     end
@@ -3823,7 +3835,7 @@ StaticPopupDialogs["NEXUS_FORGET_WISHLIST"] = setmetatable({
             key = plan.key, assignmentId = plan.assignmentId,
         })
         if not ok then
-            print("|cffff9040Nexus:|r " .. tostring(reason
+            print("|cffff9040Nexus:|r " .. tostring(reason and Nexus.UserText.Recognized(reason)
                 or T("editor.chat.forget_failed_default")))
         end
         if type(data.after) == "function" then data.after() end
