@@ -841,6 +841,74 @@ do
  soft((Nexus.UserText.Message('Wishlist identity found; an external no net gain; reason.'))==O..'Not saved: no additional matching Wishlist copies were confirmed.'..C,
   'S16 opaque control: a text that only resembles an identity note keeps the legacy route')
 end
+-- 7h. UserText.EnglishMessage stays English for the adapter's trusted
+-- identity note while another language is active (the scoped English-only
+-- override reaches the typed identity route). The real session pack and the
+-- real adapter note are used; only the read-only evidence leaf's reason is
+-- controlled for the opaque case. Expected texts are written out here.
+do
+ local UT=function() return Nexus.UserText end
+ local KNOWN='active loadout is not verified; locked-Echo evidence is pending'
+ local OPAQUE='an external no net gain; opaque TARGET: A {x} 100%'
+ local function Snap(h) return Serialize(NexusDB)..'|'..Serialize(WishlistRealizerDB)..'|'..#h.sent..'|'..#h.actions end
+ for _,mode in ipairs({'candidate','missing','invalid','english'}) do
+  local entries
+  if mode=='english' then entries=false else
+   entries=S.PseudoEntries()
+   if mode=='missing' then entries['orb.assignment.identity_found_reason_open_editor']=nil
+   elseif mode=='invalid' then entries['orb.assignment.identity_found_reason_open_editor']='{reason} {nope}' end
+  end
+  local h,A=IdentityWorld(entries)
+  h.perks.serverBuildSlots[1].verified=false
+  local set,restore=Leaf(A)
+  for _,case in ipairs({{name='known',reason=nil},{name='opaque',reason=OPAQUE}}) do
+   if case.reason then set(case.reason) else restore() end
+   A.Wishlist()
+   local note=A.WishlistNote()
+   local reason=case.reason or KNOWN
+   local tag='S16 English '..mode..' '..case.name
+   soft(note=='Wishlist identity found; '..reason..'.'..ID_SUFFIX,tag..': the adapter keeps its raw note',note)
+   local english=reason..'.'..ID_SUFFIX
+   local shown
+   if mode=='candidate' then
+    shown=case.reason and (O..reason..'.'..ID_SUFFIX..C) or (O..O..reason..C..'.'..ID_SUFFIX..C)
+   else shown=english end
+   local before=Snap(h)
+   local d1=UT().Message(note)
+   local e1=UT().EnglishMessage(note)
+   local d2=UT().Message(note)
+   soft(d1==shown,tag..': the display says the note in the active language',d1)
+   soft(e1==english,tag..': EnglishMessage is the exact English, reason and pending instruction whole, no lead',e1)
+   soft(d2==shown,tag..': the active language is restored after English conversion',d2)
+   soft(Snap(h)==before and A.WishlistNote()==note,tag..': conversion is passive and the raw note unchanged')
+  end
+  restore()
+  if mode=='candidate' then
+   -- An error inside the English conversion still restores the active language.
+   A.Wishlist()
+   local note=A.WishlistNote()
+   local real=A.WishlistNoteFacts
+   A.WishlistNoteFacts=function() error('probe: facts unavailable') end
+   local ok=pcall(UT().EnglishMessage,note)
+   A.WishlistNoteFacts=real
+   soft(not ok,'S16 English error: the conversion error reaches the caller')
+   soft(UT().Message(note)==O..O..KNOWN..C..'.'..ID_SUFFIX..C,'S16 English error: the active language is restored after a failed English conversion',UT().Message(note))
+   -- Close controls: a keyed wait sentence, an unrelated refusal and the
+   -- wrapped advisor line keep their historical English presentation.
+   set(nil) restore()
+   h.perks.serverBuildSlots[1].verified=true;h.locked=nil
+   A.Wishlist()
+   local sync=A.WishlistNote()
+   soft(UT().EnglishMessage(sync)=="Waiting for the server's current locked Echo list. Details: "..sync,'S16 English control: the keyed wait sentence stays its English',UT().EnglishMessage(sync))
+   soft(UT().EnglishMessage('save refused: no net gain over the saved build')=='Not saved: no additional matching Wishlist copies were confirmed.','S16 English control: an unrelated refusal keeps its English rewrite')
+   h.perks.serverBuildSlots[1].verified=false;h.locked={}
+   for _,id in ipairs({200690,200756,200882,201250,201262,201270}) do h.locked[#h.locked+1]={spellId=id,stacks=1} end
+   A.Wishlist()
+   local line='TARGET: none -- advisor only  ('..A.WishlistNote()..')'
+   soft(UT().EnglishMessage(line)=='WISHLIST: none -- advisor only  ('..KNOWN..'.'..ID_SUFFIX..')','S16 English control: the wrapped advisor line keeps its historical English',UT().EnglishMessage(line))
+  end
+ end
+end
 check(#S16==0,'Source16 Orb receivers:\n'..table.concat(S16,'\n'))
 
 print('l10n_ui_orb: '..checks..' checks')

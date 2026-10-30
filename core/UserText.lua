@@ -280,9 +280,11 @@ function T.IdentityNote(value,whole)
     local facts=type(value)=="string" and type(adapter)=="table" and type(adapter.WishlistNoteFacts)=="function"
         and adapter.WishlistNoteFacts(value) or nil
     if not facts or type(localization)~="table" or type(localization.Format)~="function" then return nil end
+    -- englishPack: while T.EnglishMessage runs, no candidate is used, so the
+    -- route below shows the exact English from the facts.
     local reason,reasonKey=facts.reason,IDENTITY_REASONS[facts.reason]
     if reasonKey then
-        local text,source=localization.Text(reasonKey)
+        local text,source=localization.Text(reasonKey,englishPack)
         if source=="candidate" then reason=text end
     end
     local key
@@ -291,7 +293,7 @@ function T.IdentityNote(value,whole)
     else
         key=facts.pending and "orb.assignment.identity_found_reason_open_editor" or "orb.assignment.identity_found_reason"
     end
-    local shown,source=localization.Format(key,{reason=reason})
+    local shown,source=localization.Format(key,{reason=reason},englishPack)
     if source=="candidate" then return shown end
     return nil
 end
