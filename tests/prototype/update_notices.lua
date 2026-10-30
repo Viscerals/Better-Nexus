@@ -171,7 +171,8 @@ for _,version in ipairs({'1.96.6','999.0.0',FORGED,'2.0.0-beta.1+test.1','1.20.0
    if not hinted then
     assert(not item.text:find(version:match('^[%d%.]+'),1,true) or item.text:find('Installed',1,true),'no menu entry names the peer version '..version..': '..item.text)
    end
-   if item.text=='Update status unknown - open Releases page' then found=not item.disabled end
+   -- Owner-approved item 12 (issue #175): the unknown row says no verified update information.
+   if item.text=='Version and updates: no verified update info' then found=not item.disabled end
    if hinted and item.text=='Newer public test reported: 1.20.0-beta.1 test.99999 (unverified)' then found=not item.disabled end
   end
  end

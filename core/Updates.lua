@@ -565,6 +565,12 @@ end
 -- Everything the menu, the popup, /nexus update and Help show. It needs no
 -- Community catalog and no peer. "unknown" means no evidence was received; it
 -- is never a statement that this installation is the latest.
+-- Owner-approved item 12 (issue #175): plain words, one fact per line. The
+-- first line is always the exact installed build, channel and label for
+-- support; "unknown" is said as "no verified update information", never as
+-- latest, current or an error; the next action is the Releases page. Wording
+-- only: the evidence, comparison, trust, preference and saved keys are as
+-- before.
 function Updates.Status()
     local installed = Installed()
     local enabled = Updates.IsEnabled()
@@ -585,8 +591,9 @@ function Updates.Status()
     local listens = enabled and Updates.Preference() ~= "stable"
         and installed.channel == "public-test" and type(installed.test) == "number"
     if not enabled then
-        status.state, status.menu = "disabled", "Update notices off - open Releases page"
-        status.detail = have .. " Update notices are off."
+        status.state, status.menu = "disabled", "Version and updates: notices off"
+        status.detail = have
+            .. LINE .. "Update notices are off, so Nexus names no newer build. To check yourself, open the Releases page."
     elseif not candidate and hint then
         -- A hint is never trusted release information, so it never becomes the
         -- candidate, never hides bundled evidence and says what it is.
@@ -597,15 +604,16 @@ function Updates.Status()
             .. LINE .. "Reported by another client; not checked against GitHub."
             .. LINE .. "Check the Better Nexus Releases page before updating."
     elseif not candidate then
-        status.state, status.menu = "unknown", "Update status unknown - open Releases page"
+        status.state, status.menu = "unknown", "Version and updates: no verified update info"
         -- Bundled evidence that only the stable-only preference hides is named.
         local hidden = Updates.Preference() == "stable" and BundledCandidate(true) or nil
-        status.detail = have .. (hidden
-            and (" A newer test build (" .. hidden.display .. ") is not announced because notices are set to stable releases only.")
-            or " This client has no release information about a newer build.")
-            .. (listens and " No newer public-test announcement was received." or "")
-            .. " Nexus does not check GitHub, and versions stated by other players' clients are not release information."
-            .. " That is not proof that this build is the latest: check the Releases page."
+        status.detail = have
+            .. LINE .. (hidden
+                and ("A newer test build (" .. hidden.display .. ") is not announced because notices are set to stable releases only.")
+                or "No verified update information. Nexus cannot check for updates by itself.")
+            .. (listens and (LINE .. "No newer public-test announcement was received.") or "")
+            .. LINE .. "Versions stated by other players' clients are not release information."
+            .. LINE .. "That is not proof that this build is the latest: to check, open the Releases page."
     else
         status.state = "available"
         status.menu = "Update available: " .. candidate.display
@@ -619,8 +627,9 @@ function Updates.Status()
                 .. " (unverified, not checked against GitHub)."
         end
     end
-    status.detail = status.detail .. " Notices: "
-        .. (status.preference == "stable" and "stable releases only." or "stable releases and public test builds.")
+    local announce = status.preference == "stable" and "stable releases only" or "stable releases and public test builds"
+    status.detail = status.detail .. LINE .. "Update notices: "
+        .. (enabled and ("on, " .. announce .. ".") or ("off (when on: " .. announce .. ")."))
     return status
 end
 

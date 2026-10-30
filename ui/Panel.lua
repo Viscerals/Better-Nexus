@@ -65,7 +65,10 @@ local renderStats = {
 }
 
 StaticPopupDialogs["NEXUS_UPDATE_RELEASES"] = {
-    text = "%s\n\nInstallation is manual. Nexus downloads and installs nothing. Copy the Releases page below:",
+    -- Owner-approved item 12 (issue #175): what to do next, in plain words.
+    -- The box below keeps the full Releases address, selected for copying.
+    text = "%s\n\nTo check or update, copy this Releases page address into your web browser. "
+        .. "Installation is manual: Nexus downloads and installs nothing.",
     button1 = "Close",
     hasEditBox = true,
     editBoxWidth = 380,
@@ -1973,6 +1976,8 @@ function M.FinishPanelDrag()
         local saved = M.SavedLayoutRoot()
         saved.panelX, saved.panelY = x, y
     end
+    -- A shown paused banner keeps to the side of the moved panel with room.
+    if frame and frame._pauseBanner and frame._pauseBanner:IsShown() then pcall(M.PlacePauseBanner) end
     return true
 end
 
@@ -2517,6 +2522,11 @@ local function EnsureFrame()
                 break
             end
         end
+        -- Owner-approved item 7: where the complete list is.
+        if #shedNamesCache > 2 then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Every extra copy: Show all, at the end of the Details list.", 0.4, 0.8, 1, true)
+        end
         GameTooltip:Show()
     end)
     shedHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3030,6 +3040,79 @@ local HIDE_NOTE = "Hiding does not turn Nexus off or change Auto; type "
     .. "/nexus panel or click the Nexus minimap button to show it again."
 local HIDE_TOOLTIP = "Hide the Nexus panel. " .. HIDE_NOTE
 
+-- Owner-approved item 8 (issue #164): the player's own hide from the panel
+-- (its X or Options > Hide Nexus Panel). It hides as M.Hide does, and only
+-- when it really hides the panel the player wanted shown it says once, in
+-- chat, how the panel comes back, and lights the Nexus minimap button until
+-- the panel is shown again or that button is pointed at. A second hide of an
+-- already hidden panel says nothing more. Auto, the pause and every other
+-- setting stay as they are; /nexus panel stays the command (not /nexus).
+function M.HideByPlayer()
+    LoadWantedVisibility()
+    local wanted = panelWantedVisible
+    M.Hide()
+    if not wanted then return false end
+    print("|cffffd200Nexus:|r |cffffffffThe Nexus panel is hidden.|r Show it again: type "
+        .. "|cffffffff/nexus panel|r or click the Nexus minimap button. "
+        .. "Hiding does not turn Nexus off or change Auto.")
+    M.CueMinimapRestore(true)
+    return true
+end
+
+-- Owner-approved item 15 (issue #169): the panel's direct FAQ shortcut, a
+-- small "?" at the right end of the footer, beside the hubs and away from
+-- Options and Close on header line 1 (design/current keeps that line to
+-- Auto, Options and Close). It opens the existing FAQ page through Help's
+-- own route, Help.Show("faq"), exactly as Options > Questions (FAQ) does;
+-- the FAQ content and its styling stay Help's. Its hover also says where
+-- the panel's numbers are explained (owner-approved item 14): each number's
+-- own hover, with the facts that hover already carries. Opening the FAQ
+-- reads only; it works while Nexus is paused. Built lazily (EnsureFrame is
+-- at the upvalue ceiling).
+function M.ShowFaq()
+    local help = Nexus.Help
+    if not (help and type(help.Show) == "function") then return false end
+    help.Show("faq")
+    return true
+end
+M.NUMBERS_HINT = "What a number means: point at it. The difficulty card shows the difficulty, Soul Ash, its "
+    .. "multiplier and Intensity; a count lists its Echoes; a DPS row shows its records."
+function M.EnsureFaqButton()
+    if not frame then return nil end
+    local faq = frame._faqBtn
+    if faq then return faq end
+    faq = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    faq:SetText("?")
+    faq:SetScript("OnClick", function()
+        if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
+        M.ShowFaq()
+    end)
+    faq:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+        GameTooltip:AddLine("Questions (FAQ)", 1, 1, 1)
+        GameTooltip:AddLine("Short answers: what to do next, which Wishlist is used, Auto, Sync, pause or hide. "
+            .. "Opening it changes nothing.", 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(M.NUMBERS_HINT, 1, 0.82, 0, true)
+        GameTooltip:Show()
+    end)
+    faq:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    if Nexus.Theme and Nexus.Theme.StyleButton then pcall(Nexus.Theme.StyleButton, faq) end
+    frame._faqBtn = faq
+    return faq
+end
+
+-- The minimap button's restore cue: its own highlight, held while the panel
+-- is hidden by the player. Memory only; no timer, frame update or saved data.
+function M.CueMinimapRestore(on)
+    local btn = minimapBtn
+    M._restoreCue = on and true or nil
+    if not btn then return false end
+    local method = on and btn.LockHighlight or btn.UnlockHighlight
+    if type(method) == "function" then pcall(method, btn) end
+    return true
+end
+
 -- The Play header's close control (Claude Design full UI: "... and X" on
 -- header line 1): it hides the panel exactly as Hide Nexus Panel does, and
 -- its hover says that closing is not pausing. Built lazily (EnsureFrame is
@@ -3042,10 +3125,7 @@ function M.EnsureHeaderClose()
         close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
         close:SetText("X")
         close:SetFrameLevel(frame:GetFrameLevel() + 8)
-        close:SetScript("OnClick", function()
-            M.Hide()
-            print("|cffffd200Nexus:|r The Nexus panel is hidden. " .. HIDE_NOTE)
-        end)
+        close:SetScript("OnClick", function() M.HideByPlayer() end)
         close:SetScript("OnEnter", function(self)
             if not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
@@ -3125,12 +3205,21 @@ function M.EnsureHeaderGrip()
     return grip
 end
 
--- The Options menu: every established route and owner is a direct choice on
--- its top level, grouped under titles (native QA test.163008: no single
--- Manage hover chain). design/current "Nexus Main Panel - Compact Redesign":
--- Appearance is a direct entry; only Appearance, Automation settings and the
--- language chooser keep their own list. Opening it only reads current labels
--- and never changes a setting or starts automation.
+-- The Options menu (owner-approved items 2 and 9, issue #165): a short top
+-- level, grouped under titles. The everyday choices stay direct (the FAQ, the
+-- guided setup, Auto explained, every setting, the session pause and the
+-- panel); the optional windows wait one level down under "More help and
+-- windows", each under its own label with its own guarded route. The former
+-- "Help / Getting Started" entry opened the same coach at the same step as
+-- Setup / Welcome (Help.OpenGuide and GuidedSetupUI.Show), so the coach has
+-- one entry, Setup / Welcome, the name the guide, Help and the setup chat
+-- lines already use. A setting row keeps its action words, which other
+-- windows quote ("Show DPS records", "Use Server Difficulty / Soul Ash HUD"),
+-- and adds the current value ("Show DPS records (now hidden)"); a row that
+-- acts is never ticked, and a tick marks only the current choice inside a
+-- list. Appearance keeps its direct entry
+-- (design/current "Nexus Main Panel - Compact Redesign"). Opening it only
+-- reads current labels and never changes a setting or starts automation.
 -- No fixed row cap is assumed: the 3.3.5a export of UIDropDownMenu.lua starts
 -- with 8 buttons per level and creates further rows as items are added
 -- (build 12340, UIDropDownMenu.lua L1-5 and L178-229). Whether the whole
@@ -3140,52 +3229,23 @@ function M.MoreMenuItems(anchor)
     local items = {}
     local function Add(item) items[#items + 1] = item end
     Add(MenuTitle("Help and setup"))
-    -- Help is the guided setup coach at its current step, as /nexus help
-    -- (design/current "Nexus Setup Alternative": Help and Setup open the
-    -- coach, Reference on request). It takes Help's own guarded route
-    -- (Help.OpenGuide), which does not open over an Auto warning that waits
-    -- for its answer and says why in chat; then nothing else opens, as for
-    -- /nexus help (Reference is its own entry below), and choosing Help again
-    -- after the answer opens the coach. Opening it assigns, saves, sends,
-    -- spends and changes Auto nothing.
-    Add({ text = "Help / Getting Started", notCheckable = true,
-        tooltipTitle = "Help / Getting Started",
-        tooltipText = "Opens the step-by-step setup guide where you left it, as /nexus help. The full manual is "
-            .. "Reference (full manual).",
-        func = MenuAction(function()
-            local help = Nexus.Help
-            if help and type(help.OpenGuide) == "function" then help.OpenGuide() end
-        end) })
-    -- The optional long manual (ui/Help.lua pages, also /nexus reference),
-    -- from its first page. Read only; its own buttons only navigate.
-    Add({ text = "Reference (full manual)", notCheckable = true,
-        tooltipTitle = "Reference",
-        tooltipText = "The full Nexus manual, one page per topic, also /nexus reference. Reading it changes nothing.",
-        func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("start") end end) })
-    -- Issue #169: the complete Auto explanation (every permission with its
-    -- current value, the hold and each consequence) and short answers, both
-    -- on Help pages. Reading them changes nothing.
-    Add({ text = "Auto explained (full details)", notCheckable = true,
-        tooltipTitle = "Auto explained",
-        tooltipText = "Everything Auto may do, each permission's current value and why it is held. Read it "
-            .. "before you turn Auto ON. Reading it changes nothing.",
-        func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("rolling") end end) })
+    -- Short answers (also the panel's "?" button, M.ShowFaq).
     Add({ text = "Questions (FAQ)", notCheckable = true,
         tooltipTitle = "Questions (FAQ)",
         tooltipText = "Short answers: what to do next, which Wishlist is used, Auto, Sync, pause or hide. "
             .. "Reading it changes nothing.",
-        func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("faq") end end) })
-    -- Setup / Welcome is the guided setup coach itself, as in Help (the
-    -- original guided design: "Reopen: Nexus menu > Setup / Welcome", and the
-    -- full UI's Help > Setup guide). It resumes at the step it left, with its
+        func = MenuAction(function() M.ShowFaq() end) })
+    -- Setup / Welcome is the guided setup coach itself, as /nexus help and
+    -- Help's own Setup / Welcome (the original guided design: "Reopen: Nexus
+    -- menu > Setup / Welcome"). It resumes at the step it left, with its
     -- choices read again from what Nexus lists and every result checked again
     -- (core/GuidedSetup.lua). Opening it assigns, saves, sends, spends and
-    -- changes Auto nothing. Like Help's route it does not open over an Auto
-    -- warning that waits for its answer, says so and queues nothing.
+    -- changes Auto nothing. It does not open over an Auto warning that waits
+    -- for its answer, says so and queues nothing.
     Add({ text = "Setup / Welcome", notCheckable = true,
         tooltipTitle = "Setup / Welcome",
-        tooltipText = "Opens the step-by-step setup guide where you left it. Opening it assigns, saves, sends, "
-            .. "spends and changes Auto nothing.",
+        tooltipText = "Opens the step-by-step setup guide where you left it, as /nexus help. Opening it assigns, "
+            .. "saves, sends, spends and changes Auto nothing.",
         func = MenuAction(function()
             local ui = Nexus.GuidedSetupUI
             local shown, why
@@ -3196,39 +3256,18 @@ function M.MoreMenuItems(anchor)
                     or "Setup / Welcome is not available right now."))
             end
         end) })
-    -- Secondary reference: the information-only overview of the entry
-    -- routes (QuickStart.ShowSetup). It records nothing and never turns Auto
-    -- ON; its own Guided setup button opens the coach.
-    Add({ text = "Setup information (read only)", notCheckable = true,
-        tooltipTitle = "Setup information",
-        tooltipText = "The information-only overview of the setup routes. It records nothing and never turns "
-            .. "Auto ON. The step-by-step guide is Setup / Welcome.",
-        func = MenuAction(function()
-            local quick = Nexus.QuickStart
-            local shown, why
-            if quick and quick.ShowSetup then shown, why = quick.ShowSetup() end
-            if not shown then
-                print("|cffffd200Nexus:|r " .. (why == "warning-open"
-                    and "Setup information did not open. Answer the open Auto warning (Yes or No), then open it again."
-                    or "Setup information is not available right now."))
-            end
-        end) })
-    -- Read-only: what Nexus can read now about setup and status
-    -- (QuickStart.ShowChecklist); it completes nothing for you.
-    Add({ text = "Setup checklist and status", notCheckable = true,
-        func = MenuAction(function()
-            if Nexus.QuickStart and Nexus.QuickStart.ShowChecklist then Nexus.QuickStart.ShowChecklist() end
-        end) })
-    -- The page /nexus report opens. Opening it reads; only its own Prepare
-    -- report file writes, to the separate support storage.
-    Add({ text = "Support report...", notCheckable = true,
-        func = MenuAction(function()
-            if Nexus.SupportReportUI and Nexus.SupportReportUI.Show then
-                Nexus.SupportReportUI.Show()
-            else
-                print("|cffff6060Nexus:|r the support report view is not loaded.")
-            end
-        end) })
+    -- Issue #169: the complete Auto explanation (every permission with its
+    -- current value, the hold and each consequence). Reading it changes nothing.
+    Add({ text = "Auto explained (full details)", notCheckable = true,
+        tooltipTitle = "Auto explained",
+        tooltipText = "Everything Auto may do, each permission's current value and why it is held. Read it "
+            .. "before you turn Auto ON. Reading it changes nothing.",
+        func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("rolling") end end) })
+    Add({ text = "More help and windows", notCheckable = true, hasArrow = true,
+        tooltipTitle = "More help and windows",
+        tooltipText = "The full manual, the read-only setup overview and checklist, the support report, the log "
+            .. "viewer, and the Orb and Wishlist windows. Opening a window changes nothing.",
+        menuList = M.MoreWindowsItems() })
 
     Add(MenuTitle("Settings"))
     -- design/current "Nexus Main Panel - Compact Redesign": Options opens
@@ -3264,22 +3303,16 @@ function M.MoreMenuItems(anchor)
     -- choice is submitted, through the lifecycle callback.
     Add({ text = M.LanguageMenuLabel(), notCheckable = true, hasArrow = true,
         menuList = M.LanguageMenuItems(MenuAction) })
-    Add({ text = showPerformance and "Hide DPS records" or "Show DPS records",
+    Add({ text = showPerformance and "Hide DPS records (now shown)" or "Show DPS records (now hidden)",
         notCheckable = true,
+        tooltipTitle = "DPS records",
+        tooltipText = "Shows or hides the DPS record rows on this panel. Recording and Sync are not changed.",
         func = MenuAction(function()
             showPerformance = not showPerformance
             M.SavedLayoutRoot().uiShowPerformance = showPerformance
             if M.Refresh then M.Refresh() end
         end) })
-    Add({ text = (Nexus.ServerStatus and Nexus.ServerStatus.IsUsingNexusHud and Nexus.ServerStatus.IsUsingNexusHud())
-            and "Use Server Difficulty / Soul Ash HUD" or "Use Nexus Difficulty / Soul Ash HUD",
-        notCheckable = true,
-        disabled = not (Nexus.ServerStatus and Nexus.ServerStatus.IsDetected and Nexus.ServerStatus.IsDetected()),
-        func = MenuAction(function()
-            if Nexus.ServerStatus then
-                Nexus.ServerStatus.SetMode(Nexus.ServerStatus.IsUsingNexusHud() and "server" or "nexus")
-            end
-        end) })
+    Add(M.HudModeMenuItem())
 
     Add(MenuTitle("Notices"))
     -- Never disabled: the Releases page and the installed build are
@@ -3288,41 +3321,7 @@ function M.MoreMenuItems(anchor)
             and Nexus.Updates.Status().menu or "Open Releases page",
         notCheckable = true,
         func = MenuAction(function() M.ShowUpdateStatus() end) })
-    Add({ text = (Nexus.Updates and Nexus.Updates.Preference
-            and Nexus.Updates.Preference() == "stable")
-            and "Update notices: stable only (click for stable + test)"
-            or "Update notices: stable + test builds (click for stable only)",
-        notCheckable = true,
-        func = MenuAction(function()
-            if Nexus.Updates and Nexus.Updates.SetPreference then
-                Nexus.Updates.SetPreference(
-                    Nexus.Updates.Preference() == "stable" and "test" or "stable")
-            end
-        end) })
-    Add({ text = (Nexus.Updates and Nexus.Updates.IsEnabled
-            and Nexus.Updates.IsEnabled())
-            and "Disable Update Notices" or "Enable Update Notices",
-        notCheckable = true,
-        func = MenuAction(function()
-            if Nexus.Updates and Nexus.Updates.SetEnabled then
-                Nexus.Updates.SetEnabled(not Nexus.Updates.IsEnabled())
-            end
-        end) })
-
-    Add(MenuTitle("Logs"))
-    -- The viewer /nexus log opens; opening it changes nothing.
-    Add({ text = "Log viewer...", notCheckable = true,
-        func = MenuAction(function() if Nexus.LogViewer and Nexus.LogViewer.Show then Nexus.LogViewer.Show() end end) })
-
-    -- Their old labels stay here for this release; the footer hubs open the
-    -- same windows.
-    Add(MenuTitle("Also on the panel footer"))
-    Add({ text = "Orbs / Lost Memories", notCheckable = true,
-        tooltipTitle = "Orbs / Lost Memories", tooltipText = "Also Orbs on the panel footer.",
-        func = MenuAction(function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end) })
-    Add({ text = "Wishlist Editor", notCheckable = true,
-        tooltipTitle = "Wishlist Editor", tooltipText = "Also under Plan on the panel footer.",
-        func = MenuAction(OpenEditor) })
+    Add(M.UpdateNoticesMenuItem())
 
     Add(MenuTitle("Session"))
     for _, item in ipairs(M.SessionMenuItems()) do Add(item) end
@@ -3336,15 +3335,124 @@ function M.MoreMenuItems(anchor)
             M._restorePlacement = nil
             frame:ClearAllPoints()
             frame:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
+            M.PlacePauseBanner()
         end) })
     -- Hiding is not pausing: it says how the panel comes back.
     Add({ text = "Hide Nexus Panel", notCheckable = true,
         tooltipTitle = "Hide Nexus Panel", tooltipText = HIDE_TOOLTIP,
-        func = MenuAction(function()
-            M.Hide()
-            print("|cffffd200Nexus:|r The Nexus panel is hidden. " .. HIDE_NOTE)
-        end) })
+        func = MenuAction(function() M.HideByPlayer() end) })
     return items
+end
+
+-- Options > More help and windows: the optional windows, each its existing
+-- route under its own label. Each only opens a window; nothing is assigned,
+-- saved, sent or spent by opening one.
+function M.MoreWindowsItems()
+    local rows = {}
+    local function Add(item) rows[#rows + 1] = item end
+    -- The optional long manual (ui/Help.lua pages, also /nexus reference),
+    -- from its first page. Read only; its own buttons only navigate.
+    Add({ text = "Reference (full manual)", notCheckable = true,
+        tooltipTitle = "Reference",
+        tooltipText = "The full Nexus manual, one page per topic, also /nexus reference. Reading it changes nothing.",
+        func = MenuAction(function() if Nexus.Help then Nexus.Help.Show("start") end end) })
+    -- Secondary reference: the information-only overview of the entry
+    -- routes (QuickStart.ShowSetup). It records nothing and never turns Auto
+    -- ON; its own Guided setup button opens the coach.
+    Add({ text = "Setup information (read only)", notCheckable = true,
+        tooltipTitle = "Setup information",
+        tooltipText = "The information-only overview of the setup routes. It records nothing and never turns "
+            .. "Auto ON. The step-by-step guide is Setup / Welcome.",
+        func = MenuAction(function()
+            local quick = Nexus.QuickStart
+            local shown, why
+            if quick and quick.ShowSetup then shown, why = quick.ShowSetup() end
+            if not shown then
+                print("|cffffd200Nexus:|r " .. (why == "warning-open"
+                    and "Setup information did not open. Answer the open Auto warning (Yes or No), then open it again."
+                    or "Setup information is not available right now."))
+            end
+        end) })
+    -- Read-only: what Nexus can read now about setup and status
+    -- (QuickStart.ShowChecklist); it completes nothing for you.
+    Add({ text = "Setup checklist and status", notCheckable = true,
+        func = MenuAction(function()
+            if Nexus.QuickStart and Nexus.QuickStart.ShowChecklist then Nexus.QuickStart.ShowChecklist() end
+        end) })
+    -- The page /nexus report opens. Opening it reads; only its own Prepare
+    -- report file writes, to the separate support storage.
+    Add({ text = "Support report...", notCheckable = true,
+        func = MenuAction(function()
+            if Nexus.SupportReportUI and Nexus.SupportReportUI.Show then
+                Nexus.SupportReportUI.Show()
+            else
+                print("|cffff6060Nexus:|r the support report view is not loaded.")
+            end
+        end) })
+    -- The viewer /nexus log opens; opening it changes nothing.
+    Add({ text = "Log viewer...", notCheckable = true,
+        func = MenuAction(function() if Nexus.LogViewer and Nexus.LogViewer.Show then Nexus.LogViewer.Show() end end) })
+    -- The same windows as the footer's Orbs and Plan, under their old labels.
+    Add({ text = "Orbs / Lost Memories", notCheckable = true,
+        tooltipTitle = "Orbs / Lost Memories", tooltipText = "Also Orbs on the panel footer.",
+        func = MenuAction(function() if Nexus.OrbPanel then Nexus.OrbPanel.Show() end end) })
+    Add({ text = "Wishlist Editor", notCheckable = true,
+        tooltipTitle = "Wishlist Editor", tooltipText = "Also under Plan on the panel footer.",
+        func = MenuAction(OpenEditor) })
+    return rows
+end
+
+-- Options > the difficulty / Soul Ash HUD choice: the switch, then which HUD
+-- shows now. Without a detected game HUD the choice is disabled and says so;
+-- without its owner the HUD in use is not known. Reads only.
+function M.HudModeMenuItem()
+    local status = Nexus.ServerStatus
+    if not (status and type(status.IsDetected) == "function" and type(status.IsUsingNexusHud) == "function") then
+        return { text = "Difficulty / Soul Ash HUD (not known)", notCheckable = true, disabled = true }
+    end
+    local nexus = status.IsUsingNexusHud() and true or false
+    local text = nexus and "Use Server Difficulty / Soul Ash HUD" or "Use Nexus Difficulty / Soul Ash HUD"
+    if not status.IsDetected() then
+        return { text = text .. " (game HUD not detected)", notCheckable = true, disabled = true }
+    end
+    return { text = text .. (nexus and " (now: Nexus)" or " (now: Server)"),
+        notCheckable = true,
+        func = MenuAction(function()
+            if Nexus.ServerStatus then
+                Nexus.ServerStatus.SetMode(Nexus.ServerStatus.IsUsingNexusHud() and "server" or "nexus")
+            end
+        end) }
+end
+
+-- Options > Update notices: the current state on the row itself and two
+-- small choices inside it, each ticked at its current value: notices on or
+-- off (Updates.SetEnabled) and which builds are announced
+-- (Updates.SetPreference). Each row calls only its own existing setter, so
+-- the announced builds are kept while notices are off. Reads only until a
+-- row is clicked.
+function M.UpdateNoticesMenuItem()
+    local updates = Nexus.Updates
+    if not (updates and type(updates.IsEnabled) == "function" and type(updates.Preference) == "function"
+        and type(updates.SetEnabled) == "function" and type(updates.SetPreference) == "function") then
+        return { text = "Update notices: unavailable", notCheckable = true, disabled = true }
+    end
+    local enabled = updates.IsEnabled() and true or false
+    local stable = updates.Preference() == "stable"
+    local which = stable and "stable releases only" or "stable + test builds"
+    return { text = "Update notices: " .. (enabled and ("on, " .. which) or "off"), notCheckable = true,
+        hasArrow = true, tooltipTitle = "Update notices",
+        tooltipText = "Whether Nexus says in chat that a newer build is known, and which builds it names. "
+            .. "Nexus never downloads or installs anything.",
+        menuList = {
+            MenuTitle("Update notices"),
+            { text = "On", checked = enabled, func = MenuAction(function() updates.SetEnabled(true) end) },
+            { text = "Off", checked = not enabled, func = MenuAction(function() updates.SetEnabled(false) end) },
+            MenuTitle(enabled and "Announce" or "Announce (when on)"),
+            { text = "Stable releases and test builds", checked = not stable,
+                func = MenuAction(function() updates.SetPreference("test") end) },
+            { text = "Stable releases only", checked = stable,
+                func = MenuAction(function() updates.SetPreference("stable") end) },
+        } }
 end
 
 -- The Plan and Explore hub menus. Each consequence note is a visible row:
@@ -3524,11 +3632,14 @@ local function EnsureMinimapButton()
         if button == "RightButton" and Nexus.WishlistEditor then Nexus.WishlistEditor.Show() else M.Toggle() end
     end)
     btn:SetScript("OnEnter", function(self)
+        -- Pointing at it is enough: the restore cue has been seen.
+        if M._restoreCue then M.CueMinimapRestore(false) end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("|cff7fd5ffNexus|r  |cff888888" .. SafeText(Nexus.VERSION) .. "|r")
         GameTooltip:AddLine("Echo build automation · Community Builds · DPS Leaderboard", 0.6,0.8,1,true)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Left-click: HUD  |  Right-click: Wishlists  |  Drag to reposition", 0.7,0.7,0.7,true)
+        GameTooltip:AddLine("Left-click: show or hide the Nexus panel  |  Right-click: Wishlists  |  Drag to reposition",
+            0.7,0.7,0.7,true)
         GameTooltip:Show()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3761,6 +3872,7 @@ function M.ShowDetailRows(column)
     for index = 2, #rows do
         SetVisible(rows[index], shown and (rows[index]:GetText() or "") ~= "")
     end
+    if column == shedText then M.SyncExtraListLink() end
 end
 
 function M.SetDetailNames(column, lines, empty, r, g, b)
@@ -3778,9 +3890,176 @@ end
 function M.RenderDetailNames(missing, shed)
     local need = M.SetDetailNames(needText, M.DetailNameLines(missing, true),
         "|cff888888No remaining demand|r", 1, 0.5, 0.2)
-    local extra = M.SetDetailNames(shedText, M.DetailNameLines(shed, false),
-        "|cff888888None|r", 0.72, 0.52, 1)
+    local lines = M.DetailNameLines(shed, false)
+    -- A longer list than the face shows names its complete-list route on
+    -- the "+N more" row itself (M.SyncExtraListLink).
+    if lines[3] then lines[3] = lines[3] .. " - Show all" end
+    local extra = M.SetDetailNames(shedText, lines, "|cff888888None|r", 0.72, 0.52, 1)
+    M.SyncExtraListLink()
     return math.max(need, extra)
+end
+
+------------------------------------------------------------------------
+-- Owner-approved item 7 (issue #174): the complete extra-copies list. The
+-- Details column shows two names and "+N more - Show all"; that row is a
+-- button which opens a read-only window with every name of the last
+-- committed model's progress.shed, whole, in order, numbered, with the same
+-- comparison facts the column's hover gives (exact-quality targets; locked
+-- copies protected by the Saved Build are never listed). The names are the
+-- run's own cached strings: nothing is recomputed, read from the game or
+-- the inventory, or decided here. A list that was never received is "not
+-- known", an empty one "none", and one kept from before a failed panel
+-- update says so. Opening, scrolling and closing it delete, assign, save,
+-- send and spend nothing, and it works while Nexus is paused. It scrolls in
+-- its own window, away from the panel's drag surfaces; Close, its X and
+-- Escape (UISpecialFrames) close it. Built lazily, through M and frame
+-- fields (EnsureFrame is at the upvalue ceiling).
+------------------------------------------------------------------------
+function M.ExtraListFacts()
+    local model = type(M._lastModel) == "table" and M._lastModel or nil
+    local pr = model and type(model.progress) == "table" and model.progress or nil
+    local stale = renderState.committed ~= true
+    if not (pr and type(pr.shed) == "table") then return {state = "unknown", names = {}, stale = stale} end
+    local names = {}
+    for index = 1, #pr.shed do names[index] = tostring(pr.shed[index]) end
+    return {state = #names > 0 and "listed" or "empty", names = names, stale = stale}
+end
+
+-- The "+N more - Show all" row's button: shown exactly while that row is.
+function M.SyncExtraListLink()
+    local rows = shedText and shedText._nexusRows
+    local row = rows and rows[3]
+    local shown = row ~= nil and row:IsShown() and (row:GetText() or "") ~= ""
+    local link = frame and frame._extraAllBtn
+    if not shown then
+        if link then link:Hide() end
+        return false
+    end
+    if not link then
+        link = CreateFrame("Button", nil, frame)
+        link:SetFrameLevel(frame:GetFrameLevel() + 6)
+        link:RegisterForClicks("LeftButtonUp")
+        local hover = link:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetTexture(1, 1, 1, 0.12)
+        link:SetScript("OnClick", function() M.ShowExtraList() end)
+        link:SetScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine("Show all extra copies", 1, 1, 1)
+            GameTooltip:AddLine("Opens every extra rolled copy in a list you can scroll. Reading it changes nothing.",
+                0.85, 0.85, 0.85, true)
+            GameTooltip:Show()
+        end)
+        link:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        frame._extraAllBtn = link
+    end
+    link:ClearAllPoints()
+    link:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+    link:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+    link:Show()
+    return true
+end
+
+function M.EnsureExtraList()
+    local list = M._extraList
+    if list then return list end
+    list = CreateFrame("Frame", "NexusExtraCopiesList", UIParent)
+    list:SetFrameStrata("DIALOG")
+    list:SetSize(340, 380)
+    list:SetClampedToScreen(true)
+    list:EnableMouse(true)
+    list:SetBackdrop({bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 16,
+        insets = {left = 4, right = 4, top = 4, bottom = 4}})
+    list:SetBackdropColor(0.04, 0.04, 0.07, 0.96)
+    list.title = list:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    list.title:SetPoint("TOPLEFT", list, "TOPLEFT", 14, -12)
+    list.title:SetWidth(280)
+    list.title:SetJustifyH("LEFT")
+    list.note = list:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    list.note:SetPoint("TOPLEFT", list.title, "BOTTOMLEFT", 0, -6)
+    list.note:SetWidth(312)
+    list.note:SetJustifyH("LEFT")
+    list.note:SetText("Rolled copies above your exact Wishlist targets, including unrequested or different-quality "
+        .. "copies. This is a comparison, not a delete action. Locked copies protected by this Saved Build are "
+        .. "never listed here.")
+    list.closeX = CreateFrame("Button", nil, list, "UIPanelCloseButton")
+    list.closeX:SetPoint("TOPRIGHT", list, "TOPRIGHT", -2, -2)
+    list.scroll = CreateFrame("ScrollFrame", "NexusExtraCopiesListScroll", list, "UIPanelScrollFrameTemplate")
+    list.scroll:SetPoint("TOPLEFT", list, "TOPLEFT", 14, -84)
+    list.scroll:SetPoint("BOTTOMRIGHT", list, "BOTTOMRIGHT", -32, 40)
+    list.child = CreateFrame("Frame", nil, list.scroll)
+    list.child:SetSize(290, 1)
+    list.scroll:SetScrollChild(list.child)
+    list.body = list.child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    list.body:SetPoint("TOPLEFT", list.child, "TOPLEFT", 0, 0)
+    list.body:SetWidth(290)
+    list.body:SetJustifyH("LEFT")
+    list.body:SetJustifyV("TOP")
+    list.body:SetWordWrap(true)
+    list.body:SetTextColor(0.78, 0.66, 1)
+    list.close = CreateFrame("Button", nil, list, "UIPanelButtonTemplate")
+    list.close:SetText("Close")
+    list.close:SetSize(90, 22)
+    list.close:SetPoint("BOTTOM", list, "BOTTOM", 0, 12)
+    list.close:SetScript("OnClick", function() list:Hide() end)
+    if type(UISpecialFrames) == "table" then table.insert(UISpecialFrames, "NexusExtraCopiesList") end
+    if Nexus.Theme and Nexus.Theme.StyleButton then pcall(Nexus.Theme.StyleButton, list.close) end
+    list:Hide()
+    M._extraList = list
+    return list
+end
+
+-- The window's words from M.ExtraListFacts; returns those facts.
+function M.FillExtraList(list)
+    local facts = M.ExtraListFacts()
+    local lines = {}
+    if facts.stale then
+        lines[#lines + 1] = "|cffd9d9d9From the last completed panel update; it may be out of date.|r"
+    end
+    if facts.state == "unknown" then
+        list.title:SetText("Extra rolled copies: not known")
+        lines[#lines + 1] = "|cffd9d9d9The extra copies of this run are not known yet.|r"
+    elseif facts.state == "empty" then
+        list.title:SetText("Extra rolled copies: none")
+        lines[#lines + 1] = "|cffd9d9d9No extra rolled copies are listed.|r"
+    else
+        list.title:SetText("Extra rolled copies: " .. #facts.names)
+        for index, name in ipairs(facts.names) do lines[#lines + 1] = index .. ". " .. name end
+    end
+    list.body:SetText(table.concat(lines, "\n"))
+    local ok, height = pcall(list.body.GetStringHeight, list.body)
+    height = ok and tonumber(height) or nil
+    -- At least one 12-unit row per line: a short measurement never makes a
+    -- list taller than its scroll child.
+    if not height or height ~= height or height == math.huge then height = 0 end
+    height = math.max(height, 12 * #lines)
+    list.body:SetHeight(height)
+    list.child:SetHeight(math.max(1, height))
+    list._nexusFacts = facts
+    return facts
+end
+
+-- Opens the list beside the panel, at its top.
+function M.ShowExtraList()
+    local list = M.EnsureExtraList()
+    M.FillExtraList(list)
+    list:ClearAllPoints()
+    if frame then list:SetPoint("TOPLEFT", frame, "TOPRIGHT", 6, 0)
+    else list:SetPoint("CENTER", UIParent, "CENTER", 0, 0) end
+    list.scroll:SetVerticalScroll(0)
+    list:Show()
+    return list._nexusFacts
+end
+
+-- A committed render redraws an open list from that model; a closed one is
+-- not built or filled.
+function M.RefreshExtraList()
+    local list = M._extraList
+    if not (list and list:IsShown()) then return false end
+    M.FillExtraList(list)
+    return true
 end
 
 -- LayoutMetrics.Panel, with the open Details name columns reserved at the
@@ -4898,16 +5177,25 @@ local function LayoutFooter(showAuto)
         autoBtn:SetSize(slots.autoWidth, slots.height)
         AUTO_LABEL.Fit()
     else autoBtn:Hide() end
+    -- Three 116 px hubs and the 24 px FAQ shortcut (M.EnsureFaqButton) at
+    -- their right: 10 + 3 x 116 + 2 x 10 + 8 + 24 = 410 of the 420 px row.
     planBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, 7)
-    planBtn:SetSize(126, 22)
+    planBtn:SetSize(116, 22)
     exploreBtn:SetPoint("LEFT", planBtn, "RIGHT", 10, 0)
-    exploreBtn:SetSize(126, 22)
+    exploreBtn:SetSize(116, 22)
     orbsHub:SetPoint("LEFT", exploreBtn, "RIGHT", 10, 0)
-    orbsHub:SetSize(126, 22)
+    orbsHub:SetSize(116, 22)
 
     planBtn:Show()
     exploreBtn:Show()
     orbsHub:Show()
+    local faq = M.EnsureFaqButton()
+    if faq then
+        faq:ClearAllPoints()
+        faq:SetPoint("LEFT", orbsHub, "RIGHT", 8, 0)
+        faq:SetSize(24, 22)
+        faq:Show()
+    end
 end
 
 local function PlacePanelRect(widget, x, y, width, height, relative)
@@ -5846,6 +6134,11 @@ function M.Render(model)
     end
     ApplyWantedVisibility()
     M.SettlePanelDrag()
+    -- After the commit: presentation only. The paused banner (session pause
+    -- Status) and an open extra-copies list (this committed model) follow it;
+    -- neither can undo the commit.
+    pcall(M.UpdatePauseBanner)
+    pcall(M.RefreshExtraList)
     return true
 end
 
@@ -5882,6 +6175,8 @@ local PAUSE_UNKNOWN = "The session pause cannot be read right now, so Nexus may 
 -- refresh step, no action is prepared).
 local function RepaintPause()
     if M._lastModel then pcall(M.Render, M._lastModel) end
+    -- The banner follows the session pause even without a committed model.
+    pcall(M.UpdatePauseBanner)
 end
 local function Transition(method, want, verb)
     local api = PauseAPI()
@@ -5898,6 +6193,159 @@ local function Transition(method, want, verb)
 end
 function M.PauseNexus() return Transition("Pause", true, "pause") end
 function M.ResumeNexus() return Transition("Resume", false, "resume") end
+
+-- Owner-approved item 1 (issue #171): the paused banner. A strip outside the
+-- panel's own box (above it, or below it when the screen has no room above),
+-- so no panel layout, header slot or difficulty card moves. It is drawn from
+-- the session pause's own Status after every committed render and after each
+-- banner click, never from a flag of the panel's own:
+--   "paused"  confirmed paused: the banner and its Resume button, which calls
+--             M.ResumeNexus (the same owner route as Options > Resume Nexus)
+--             once per click, and only while Status still confirms a pause;
+--   "unknown" Status failed or was malformed: the banner says so and offers
+--             no Resume, since nothing confirms a pause to resume;
+--   nil       not paused, or a build without the control: no banner.
+-- Resuming removes only the session pause: Auto keeps its selection, an Orb
+-- run stays paused and nothing held is replayed (SessionPause.Resume). The
+-- banner is a child of the panel, so it hides and shows with it; windows
+-- opened from the panel keep working while paused. Built lazily (EnsureFrame
+-- is at the upvalue ceiling).
+local BANNER_H = 36
+function M.PauseBannerState()
+    local status = M.PauseStatus()
+    if status.unknown then return "unknown" end
+    if status.available and status.paused == true then return "paused" end
+    return nil
+end
+function M.EnsurePauseBanner()
+    if not frame then return nil end
+    local banner = frame._pauseBanner
+    if banner then return banner end
+    banner = CreateFrame("Frame", nil, frame)
+    banner._nexusThemeExempt = true
+    banner:SetFrameLevel(frame:GetFrameLevel() + 10)
+    banner:EnableMouse(true)
+    banner.fill = banner:CreateTexture(nil, "BACKGROUND")
+    banner.fill:SetAllPoints()
+    banner.fill:SetTexture(0.36, 0.22, 0.02, 0.96)
+    banner.edge = banner:CreateTexture(nil, "BORDER")
+    banner.edge:SetPoint("BOTTOMLEFT", banner, "BOTTOMLEFT", 0, 0)
+    banner.edge:SetPoint("BOTTOMRIGHT", banner, "BOTTOMRIGHT", 0, 0)
+    banner.edge:SetHeight(2)
+    banner.edge:SetTexture(1, 0.72, 0.1, 1)
+    banner.title = banner:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    banner.title:SetPoint("TOPLEFT", banner, "TOPLEFT", 8, -4)
+    banner.title:SetJustifyH("LEFT")
+    banner.title:SetWordWrap(false)
+    banner.title:SetTextColor(1, 0.82, 0)
+    banner.note = banner:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    banner.note:SetPoint("TOPLEFT", banner.title, "BOTTOMLEFT", 0, -2)
+    banner.note:SetJustifyH("LEFT")
+    banner.note:SetWordWrap(false)
+    banner:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        if self._nexusState == "paused" then
+            GameTooltip:AddLine("Nexus is paused for this session", 1, 0.82, 0)
+            GameTooltip:AddLine(PAUSE_EXPLAIN, 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine("Resume (or Options > Resume Nexus): " .. RESUME_NOTE, 0.9, 0.9, 0.9, true)
+            GameTooltip:AddLine("A reload or logout also ends the pause.", 0.75, 0.75, 0.75, true)
+        else
+            GameTooltip:AddLine("Session pause", 1, 0.82, 0)
+            GameTooltip:AddLine(PAUSE_UNKNOWN, 0.9, 0.9, 0.9, true)
+        end
+        GameTooltip:Show()
+    end)
+    banner:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    local resume = CreateFrame("Button", nil, banner, "UIPanelButtonTemplate")
+    resume:SetText("Resume")
+    resume:SetSize(76, 22)
+    resume:SetPoint("RIGHT", banner, "RIGHT", -6, 0)
+    resume:SetScript("OnClick", function() M.ResumeFromBanner() end)
+    resume:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Resume Nexus", 1, 1, 1)
+        GameTooltip:AddLine(RESUME_NOTE, 0.85, 0.85, 0.85, true)
+        GameTooltip:Show()
+    end)
+    resume:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    resume:Disable()
+    resume:Hide()
+    -- The banner's own colours are exempt from the theme walk; its button
+    -- keeps the panel's button style.
+    if Nexus.Theme and Nexus.Theme.StyleButton then pcall(Nexus.Theme.StyleButton, resume) end
+    banner.resume = resume
+    -- No action of its own: a plain left drag on it moves the panel.
+    M.PassiveDragSurface(banner)
+    banner:Hide()
+    frame._pauseBanner = banner
+    return banner
+end
+-- Above the panel when the screen holds the strip there, else below it.
+function M.PlacePauseBanner()
+    local banner = frame and frame._pauseBanner
+    if not banner then return nil end
+    local function Read(region, method)
+        local ok, value = pcall(region[method], region)
+        return ok and tonumber(value) or nil
+    end
+    banner:SetSize(math.max(240, Read(frame, "GetWidth") or 420), BANNER_H)
+    local top, uiTop = Read(frame, "GetTop"), Read(UIParent, "GetTop")
+    local fs, us = Read(frame, "GetEffectiveScale") or 1, Read(UIParent, "GetEffectiveScale") or 1
+    local above = not (top and uiTop) or (top + BANNER_H + 2) * fs <= uiTop * us
+    banner:ClearAllPoints()
+    if above then banner:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, 2)
+    else banner:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, -2) end
+    banner._nexusSide = above and "above" or "below"
+    return banner._nexusSide
+end
+function M.UpdatePauseBanner()
+    if not frame then return nil end
+    local state = M.PauseBannerState()
+    local banner = frame._pauseBanner
+    if not state then
+        if banner then
+            banner._nexusState = nil
+            banner.resume:Disable(); banner.resume:Hide()
+            banner:Hide()
+        end
+        return nil
+    end
+    banner = M.EnsurePauseBanner()
+    banner._nexusState = state
+    if state == "paused" then
+        banner.title:SetText("Nexus is paused for this session.")
+        banner.note:SetText("Auto, Orb actions, sharing and DPS recording wait.")
+        banner.resume:Enable(); banner.resume:Show()
+    else
+        banner.title:SetText("Pause state cannot be read right now.")
+        banner.note:SetText("Nexus may or may not be paused.")
+        banner.resume:Disable(); banner.resume:Hide()
+    end
+    M.PlacePauseBanner()
+    local textWidth = math.max(100, (tonumber(banner:GetWidth()) or 420) - 16 - (state == "paused" and 82 or 0))
+    local metrics = Nexus.LayoutMetrics
+    for _, label in ipairs({banner.title, banner.note}) do
+        label:SetWidth(textWidth)
+        if metrics and type(metrics.OneLineLabel) == "function" then metrics.OneLineLabel(label, nil, 16) end
+    end
+    banner:Show()
+    return state
+end
+-- The banner's Resume: once per click, and only while the session pause
+-- confirms a pause now (a stale click on a banner whose pause already ended
+-- elsewhere calls nothing). Its failure is reported by Transition; the
+-- banner then shows whatever the session pause reports.
+function M.ResumeFromBanner()
+    if M.PauseBannerState() ~= "paused" then
+        M.UpdatePauseBanner()
+        return false
+    end
+    local ok = M.ResumeNexus()
+    M.UpdatePauseBanner()
+    return ok
+end
 
 -- Options > Session: Pause or Resume with its note beside it, or the
 -- unavailable control. Building it reads Status only.
@@ -6012,7 +6460,7 @@ function M.AutoSummaryLines()
     if pause.unknown then lines[1] = PAUSE_UNKNOWN end
     if pause.paused then
         lines[1] = "Nexus is paused for this session: Auto, Orb actions, sharing and DPS recording wait."
-        lines[2] = "To continue: Options > Resume Nexus. " .. RESUME_NOTE
+        lines[2] = "To continue: Resume on the paused banner, or Options > Resume Nexus. " .. RESUME_NOTE
     else
         local refusal = model.auto ~= true and type(M._autoRefusal) == "table" and M._autoRefusal.text or nil
         local state, action
@@ -6466,6 +6914,7 @@ end
 -- tell the stock HUD owner; neither touches Auto or any gameplay setting.
 function M.Show()
     SetWantedVisibility(true)
+    if M._restoreCue then M.CueMinimapRestore(false) end
     EnsureFrame()
     ReleaseStaleMenuSuppression()
     RequestDisplayRecovery()
