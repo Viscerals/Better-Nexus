@@ -4145,17 +4145,18 @@ function A.TomeStateObservation(unavailableReason)
         catalogAvailable=cat ~= nil, serverFreshness="unverified" }
     local nameFacts = {}
     for lever, lv in pairs(cat and cat.levers or {}) do
-        local names, seenNames, generatedIds = {}, {}, {}
+        local names, seenNames, generatedIds, suppliedNames = {}, {}, {}, {}
         local yes, no, unreadable, known, invalidDiscovery = 0, 0, 0, false, false
         local members = lv.members or {}
         for i = 1, #members do
             local id = members[i]
             local member = cat.rows[id]
             local name = member and member.name or ("Echo name unavailable (#" .. tostring(id) .. ")")
-            if not seenNames[name] then
-                names[#names + 1] = name; seenNames[name] = true
-                if not (member and member.name) then generatedIds[name] = id end
-            end
+            if not seenNames[name] then names[#names + 1] = name; seenNames[name] = true end
+            -- A name is generated only when every member that gives these
+            -- bytes is generated; any supplied contributor keeps it literal.
+            if member and member.name then suppliedNames[name] = true
+            elseif generatedIds[name] == nil then generatedIds[name] = id end
             if type(discovered) == "table" then
                 local marker = discovered[id]
                 if marker == true or (type(marker) == "number" and marker == marker
@@ -4194,7 +4195,10 @@ function A.TomeStateObservation(unavailableReason)
         -- Display facts (A.TomeNameFacts): which of these names this function
         -- generated; supplied names, however they read, have none.
         local memberIds, echoCopy = {}, {}
-        for i = 1, #names do echoCopy[i] = names[i]; memberIds[i] = generatedIds[names[i]] end
+        for i = 1, #names do
+            echoCopy[i] = names[i]
+            memberIds[i] = not suppliedNames[names[i]] and generatedIds[names[i]] or nil
+        end
         nameFacts[lever] = {name = name, echoNames = echoCopy, nameGenerated = not supplied, memberIds = memberIds}
         -- The tome's own icon, else the first member Echo that has one; the
         -- source is stated, and with neither the Journal shows a neutral tile.

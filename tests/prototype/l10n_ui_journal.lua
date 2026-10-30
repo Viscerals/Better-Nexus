@@ -1085,6 +1085,63 @@ do
  check(raw[LC].name==GEN_C and passive,'S17 names English: raw names unchanged and passive')
 end
 
+------------------------------------------------------------------------------
+-- SOURCE18-9DE4-SPEC-P2-01: a generated member name and a supplied member
+-- name with the SAME bytes collapse into one deduplicated name. It is said
+-- as generated only when every contributor is generated; any supplied
+-- contributor keeps the literal name, whatever the member order. The raw
+-- names, their order and count are unchanged. Expected outputs are written
+-- out here (candidate markers MISSING-{id} and TOME({echoes}), ASCII bytes).
+------------------------------------------------------------------------------
+local COLLIDE='Echo name unavailable (#400301)'
+local MARKS=S.PseudoEntries()
+MARKS['journal.provider.generated_echo_name']='MISSING-{id}'
+MARKS['journal.provider.generated_tome_name']='TOME({echoes})'
+-- LC: no tome name. members: a list of IDs; supplied: ID -> catalog name
+-- (nil = the catalog gives none).
+local function Collide(entries,members,supplied)
+ local h,provider=NamesFixture(entries)
+ local cat=Nexus.GameAdapter.Catalog()
+ cat.levers[LC].members=members
+ for id,name in pairs(supplied) do
+  cat.rows[id]=cat.rows[id] or {spellId=id}
+  cat.rows[id].name=name or nil
+ end
+ return h,provider
+end
+local function Case(label,members,supplied,wantNames,wantLabel,wantEchoes,entries)
+ local h,provider=Collide(entries==nil and MARKS or entries,members,supplied)
+ local raw,shown,_,passive=NamesRead(h,provider)
+ local r=raw[LC]
+ local same=r and #r.echoNames==#wantNames
+ for i=1,#wantNames do same=same and r.echoNames[i]==wantNames[i] end
+ check(same and r.name=='Tome name unavailable: '..table.concat(wantNames,', '),'S18 collision '..label..': the adapter keeps its raw deduplicated names, order and count',
+  r and (r.name..' | '..table.concat(r.echoNames,' | ')))
+ check(shown[LC] and shown[LC].label==wantLabel and shown[LC].heading==wantLabel,'S18 collision '..label..': the row label and hover heading are the complete intended name',shown[LC] and shown[LC].label)
+ check(EchoesLine(shown,LC)==wantEchoes,'S18 collision '..label..': the Echo hover line is the complete intended list',EchoesLine(shown,LC))
+ check(passive,'S18 collision '..label..': reading, refreshing and hovering are passive')
+end
+-- A generated name and a supplied name with the same bytes, in both orders:
+-- the supplied name stays literal (inside the generated tome wrapper).
+Case('generated first',{400301,400302},{[400301]=false,[400302]=COLLIDE},{COLLIDE},
+ 'TOME('..COLLIDE..')',O..'Echo: '..COLLIDE..C)
+Case('supplied first',{400302,400301},{[400301]=false,[400302]=COLLIDE},{COLLIDE},
+ 'TOME('..COLLIDE..')',O..'Echo: '..COLLIDE..C)
+-- Only generated contributors (the same missing member listed twice): said
+-- as generated.
+Case('generated only',{400301,400301},{[400301]=false},{COLLIDE},
+ 'TOME(MISSING-400301)',O..'Echo: MISSING-400301'..C)
+-- Mixed: the colliding supplied name, and another generated member.
+Case('mixed',{400399,400301,400302},{[400301]=false,[400302]=COLLIDE,[400399]=false},{COLLIDE,'Echo name unavailable (#400399)'},
+ 'TOME('..COLLIDE..', MISSING-400399)',O..'Echoes: '..COLLIDE..', MISSING-400399'..C)
+Case('mixed reversed',{400302,400301,400399},{[400301]=false,[400302]=COLLIDE,[400399]=false},{COLLIDE,'Echo name unavailable (#400399)'},
+ 'TOME('..COLLIDE..', MISSING-400399)',O..'Echoes: '..COLLIDE..', MISSING-400399'..C)
+-- ENGLISH: the exact names, both orders.
+Case('English generated first',{400301,400302},{[400301]=false,[400302]=COLLIDE},{COLLIDE},
+ 'Tome name unavailable: '..COLLIDE,'Echo: '..COLLIDE,false)
+Case('English mixed',{400399,400301,400302},{[400301]=false,[400302]=COLLIDE,[400399]=false},{COLLIDE,'Echo name unavailable (#400399)'},
+ 'Tome name unavailable: '..COLLIDE..', Echo name unavailable (#400399)','Echoes: '..COLLIDE..', Echo name unavailable (#400399)',false)
+
 if #failures>0 then
  for _,f in ipairs(failures) do print('FAIL '..f) end
  error('l10n_ui_journal: '..#failures..' of '..checks..' checks failed')
