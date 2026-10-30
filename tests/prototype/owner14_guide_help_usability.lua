@@ -415,6 +415,30 @@ C.scenario('D6 assigned now and captured read apart; shape, codes and minimums u
   local cs=Cells({kind='savedBuild',slot=2,name='Fire PvE',captured=true,wishlist='W-Free',wishlistState='assigned'})
   C.guard(cs.wishlist.value=='W-Free (assigned)' and not cs.state.value:find('not checked',1,true) and cs.state.minimum=='C:?',
    'D6: a stated assignment is worded as stated, without the not-checked words',cs.state.value)
+  -- Review SPEC-GH-1: the captured hover words the assignment from the facts
+  -- supplied with it. A stated state (assigned, none, unavailable,
+  -- restoring) or an empty Saved Build's refusal is never contradicted by
+  -- "not checked"; only an unstated one says it is not checked. Each still
+  -- explains the held destination; none is called in use.
+  local function Note(tip) for _,l in ipairs(tip) do if l:find('^Captured:') then return l end end end
+  local function Line(tip,label) for _,l in ipairs(tip) do if l:find('^'..label..': ') then return l end end end
+  for _,state in ipairs({'assigned','unassigned','unavailable','restoring'}) do
+   local cells,tip=Cells({kind='savedBuild',slot=2,name='Fire PvE',captured=true,wishlist='W-Free',wishlistState=state})
+   local n=Note(tip) or ''
+   C.expect(not n:find('not checked',1,true) and not cells.state.value:find('not checked',1,true),
+    'D6 '..state..': a captured view with a stated assignment never says it is not checked, in the hover or the state',n)
+   C.guard(n:find('shown as captured earlier',1,true)~=nil and n:find('held',1,true)~=nil and not n:lower():find('in use',1,true)
+    and #tip==5,'D6 '..state..': the hover still explains the held destination in one note line',n)
+  end
+  local stated,stip=Cells({kind='savedBuild',slot=2,name='Fire PvE',captured=true,wishlist='W-Free',wishlistState='assigned'})
+  C.guard(stated.wishlist.value=='W-Free (assigned)' and Line(stip,'Wishlist')=='Wishlist: W-Free (assigned)'
+   and stated.wishlist.minimum=='W-Free','D6 assigned: the supplied assignment is kept in the cell and the hover',Line(stip,'Wishlist'))
+  local _,etip=Cells({kind='savedBuild',slot=3,name='Empty three',empty=true,captured=true,wishlist='W-Free',wishlistState='assigned'})
+  local en=Note(etip) or ''
+  C.expect(not en:find('not checked',1,true) and (en:lower():find('refused',1,true) or en:find('no Echoes',1,true)),
+   'D6 empty: a captured empty Saved Build\'s hover keeps the refusal, never not checked',en)
+  local _,utip=Cells({kind='savedBuild',slot=6,name='Six',captured=true,wishlist='W-Six'})
+  C.guard((Note(utip) or ''):find('not checked as assigned now',1,true)~=nil,'D6 unknown: an unstated assignment still says not checked as assigned now',Note(utip))
   -- First-run captured, unavailable and an empty Saved Build keep their codes.
   local fr=Cells({kind='firstRun',captured=true,wishlist='W-Free'})
   C.guard(fr.state.compact=='Captured: first-run target' and fr.state.minimum=='C:1' and fr.savedBuild.compact=='None',

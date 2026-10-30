@@ -515,8 +515,20 @@ function T.DestinationFields(d)
         tooltip[index] = fields[index].label .. ": " .. fields[index].value
     end
     if captured then
+        -- The assignment words follow the facts given with it (review
+        -- SPEC-GH-1): an empty Saved Build's refusal and a stated
+        -- d.wishlistState are kept as given; only an unstated one is called
+        -- not checked. Nothing is looked up here.
+        local assignment
+        if noAssignment then
+            assignment = "Assigning to it is refused: the Saved Build holds no Echoes."
+        elseif stated then
+            assignment = "Its Wishlist line gives the assignment as stated for it; assigned now means the current link, which the Nexus panel shows."
+        else
+            assignment = "It is not checked as assigned now: assigned now means the current link, which the Nexus panel shows."
+        end
         tooltip[#tooltip + 1] = "Captured: shown as captured earlier, the destination held when this edit or view opened. "
-            .. "It is not checked as assigned now: assigned now means the current link, which the Nexus panel shows."
+            .. assignment
     end
     if preview then
         tooltip[#tooltip + 1] = "Preview: a Community Build preview is shown; it is not this destination's assignment."
