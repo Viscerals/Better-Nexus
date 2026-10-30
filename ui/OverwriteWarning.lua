@@ -3,22 +3,53 @@ Nexus = Nexus or {}
 local M = { VERSION = 1 }
 Nexus.OverwriteWarning = M
 local frame, active, onboardingOutcome
-local TEXT_HEAD = "Auto can overwrite your active game Saved Build. It may replace Echoes you value, including Echoes obtained with Orbs. Nexus cannot undo that save or recover spent Orbs.\n\nAfter a finished run at level 80, changing the assignment or saving edits to its assigned Wishlist can cause replacement without a new run.\n\n"
-local TEXT_TAIL = "Choose No to keep Auto OFF. Opening this warning does not enable Auto."
-local TEXT = TEXT_HEAD .. TEXT_TAIL
+-- Full visible-UI localization (guide family, consent.* keys): each visible
+-- sentence is a reviewed catalog meaning, looked up through Nexus.Localization
+-- when it is shown (never cached here). Without the seam (a standalone load)
+-- or for a key it cannot show, the exact English beside the key is shown.
+-- The consequence and consent wording stays complete in every language: the
+-- paragraphs are joined here, in this order, by code-owned blank lines.
+local function T(key, english)
+    local seam = Nexus.Localization
+    if type(seam) ~= "table" or type(seam.Text) ~= "function" then return english end
+    local text, source = seam.Text(key)
+    if source == "unavailable" then return english end
+    return text
+end
+local function TF(key, args, english)
+    local seam = Nexus.Localization
+    if type(seam) ~= "table" or type(seam.Format) ~= "function" or type(seam.Count) ~= "function" then
+        return english
+    end
+    local text, source = seam.Format(key, args(seam))
+    if source == "unavailable" then return english end
+    return text
+end
+local function HeadText()
+    return T("consent.body.overwrite_risk", "Auto can overwrite your active game Saved Build. It may replace Echoes you value, including Echoes obtained with Orbs. Nexus cannot undo that save or recover spent Orbs.")
+        .. "\n\n"
+        .. T("consent.body.replacement_without_run", "After a finished run at level 80, changing the assignment or saving edits to its assigned Wishlist can cause replacement without a new run.")
+        .. "\n\n"
+end
+local function TailText()
+    return T("consent.body.keep_auto_off", "Choose No to keep Auto OFF. Opening this warning does not enable Auto.")
+end
+local function FullText() return HeadText() .. TailText() end
 -- The first-launch warning's answers are Continue / Close (BindAnswers), so its
--- closing choice names Close. The Auto warning and any other kind keep TEXT_TAIL.
-local ONBOARDING_TEXT = TEXT_HEAD .. "Continue may open the guided setup if this is your first use. Close opens information-only setup. Neither turns Auto on."
+-- closing choice names Close. The Auto warning and any other kind keep TailText.
+local function OnboardingText()
+    return HeadText() .. T("consent.body.onboarding_choices", "Continue may open the guided setup if this is your first use. Close opens information-only setup. Neither turns Auto on.")
+end
 
 -- The Auto warning (kind "auto") also lists what Auto may do, from the
 -- current permissions (Readout.AutomationScopeLines, read only), and what it
 -- does to tomes (Readout.TOME_PARAGRAPH), before the closing choice. The
--- first-launch warning keeps TEXT_HEAD and ends with its own Close choice
--- (ONBOARDING_TEXT), with or without Readout. Reading changes nothing.
+-- first-launch warning keeps HeadText and ends with its own Close choice
+-- (OnboardingText), with or without Readout. Reading changes nothing.
 local function BodyText(kind)
-    if kind == "onboarding" then return ONBOARDING_TEXT end
+    if kind == "onboarding" then return OnboardingText() end
     local readout = Nexus.Readout
-    if kind ~= "auto" or not (readout and type(readout.AutomationScopeLines) == "function") then return TEXT end
+    if kind ~= "auto" or not (readout and type(readout.AutomationScopeLines) == "function") then return FullText() end
     local store, internals = Nexus.Store, Nexus.MainInternals
     local okSettings, settings = false, nil
     if store and type(store.Settings) == "function" then okSettings, settings = pcall(store.Settings) end
@@ -31,10 +62,10 @@ local function BodyText(kind)
     -- Without its first line ("Auto: OFF ..."): this warning is the step that turns it ON.
     local scope = {}
     for index = 2, #lines do scope[#scope + 1] = lines[index] end
-    scope[#scope + 1] = "Current values: ... menu on the Nexus panel, Automation settings."
-    return TEXT_HEAD .. table.concat(scope, "\n") .. "\n\n"
+    scope[#scope + 1] = T("consent.body.current_values_route", "Current values: ... menu on the Nexus panel, Automation settings.")
+    return HeadText() .. table.concat(scope, "\n") .. "\n\n"
         .. (type(readout.TOME_PARAGRAPH) == "string" and (readout.TOME_PARAGRAPH .. "\n\n") or "")
-        .. TEXT_TAIL
+        .. TailText()
 end
 
 local function CurrentOwner()
@@ -151,8 +182,10 @@ UpdateCountdown = function()
     local remaining = Remaining()
     if remaining ~= frame.lastCountdown then
         frame.lastCountdown = remaining
-        frame.countdown:SetText(remaining > 0 and ("Read the warning: " .. remaining .. " seconds")
-            or "Do you understand?")
+        frame.countdown:SetText(remaining > 0
+            and TF("consent.status.read_countdown", function(seam) return {seconds = seam.Count(remaining)} end,
+                "Read the warning: " .. remaining .. " seconds")
+            or T("consent.status.understand", "Do you understand?"))
     end
     if remaining == 0 then
         frame.yes:Enable(); frame.no:Enable(); frame.suppress:Enable()
@@ -177,19 +210,19 @@ local function EnsureFrame()
     frame:SetBackdropColor(.055,.065,.09,1)
     local heading = frame:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
     heading:SetPoint("TOPLEFT",24,-22); heading:SetWidth(472)
-    heading:SetJustifyH("LEFT"); heading:SetText("Saved Build overwrite warning")
+    heading:SetJustifyH("LEFT"); heading:SetText(T("consent.title.overwrite_warning", "Saved Build overwrite warning"))
     local scroll = CreateFrame("ScrollFrame","NexusOverwriteWarningScroll",frame,"UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT",24,-58); scroll:SetSize(446,230)
     local content = CreateFrame("Frame",nil,scroll); content:SetWidth(446)
     scroll:SetScrollChild(content)
     local body = content:CreateFontString(nil,"OVERLAY","GameFontHighlight")
     body:SetPoint("TOPLEFT"); body:SetWidth(446); body:SetJustifyH("LEFT")
-    body:SetText(TEXT); body:SetHeight(math.max(220,body:GetStringHeight()))
+    body:SetText(FullText()); body:SetHeight(math.max(220,body:GetStringHeight()))
     content:SetHeight(body:GetHeight()); frame.body = body; frame.scroll = scroll; frame.content = content
     frame.suppress = CreateFrame("CheckButton",nil,frame,"UICheckButtonTemplate")
     frame.suppress:SetSize(24,24); frame.suppress:SetPoint("TOPLEFT",24,-298)
     local label = frame:CreateFontString(nil,"OVERLAY","GameFontHighlight")
-    label:SetPoint("LEFT",frame.suppress,"RIGHT",4,0); label:SetText("Don't warn again")
+    label:SetPoint("LEFT",frame.suppress,"RIGHT",4,0); label:SetText(T("consent.label.dont_warn_again", "Don't warn again"))
     frame.suppress:SetScript("OnClick",function(self)
         if not active then
             self:SetChecked(false)
@@ -205,7 +238,7 @@ local function EnsureFrame()
     frame.no = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
     frame.yes:SetSize(110,28); frame.no:SetSize(110,28)
     frame.yes:SetPoint("BOTTOMRIGHT",-148,20); frame.no:SetPoint("BOTTOMRIGHT",-24,20)
-    frame.yes:SetText("Yes"); frame.no:SetText("No")
+    frame.yes:SetText(T("consent.button.yes", "Yes")); frame.no:SetText(T("consent.button.no", "No"))
     frame.yes:SetScript("OnClick",function() return Finish(true,false) end)
     frame.no:SetScript("OnClick",function() return Finish(false,false,true) end)
     frame.close = CreateFrame("Button",nil,frame,"UIPanelButtonTemplate")
@@ -290,8 +323,9 @@ end
 -- 520 px and grows only if both answers would not otherwise fit inside it.
 local function BindAnswers(kind)
     local onboarding = kind == "onboarding"
-    frame.yes:SetText(onboarding and ONBOARDING_YES or "Yes")
-    frame.no:SetText(onboarding and "Close" or "No")
+    frame.yes:SetText(onboarding and T("consent.button.onboarding_continue", ONBOARDING_YES)
+        or T("consent.button.yes", "Yes"))
+    frame.no:SetText(onboarding and T("consent.button.onboarding_close", "Close") or T("consent.button.no", "No"))
     local noWidth, yesWidth = FitAnswer(frame.no), FitAnswer(frame.yes)
     frame:SetWidth(math.max(WINDOW_W, 2 * ANSWER_EDGE + noWidth + ANSWER_GAP + yesWidth))
     frame.yes:ClearAllPoints()

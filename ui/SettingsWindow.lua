@@ -11,14 +11,46 @@ local selected, page = "automation", 1
 -- Three tall rows leave a bounded text area above paging, even on the
 -- 420px compact viewport. Every row also exposes its complete copy on hover.
 local PAGE_SIZE = 3
+-- Full visible-UI localization (guide family, settings.* keys). Each visible
+-- English label below is a reviewed catalog meaning, looked up through
+-- Nexus.Localization when it is shown (never cached here); without the seam
+-- or for a key it cannot show, the exact English beside the key is shown.
+-- Category ids and Sync mode values are identities and are never shown or
+-- translated. Rows from other owners (Panel, Theme, SyncModePolicy) arrive
+-- already worded by them. The row thresholds below (#label > 100, #detail >
+-- 56) count bytes: a translated label may reach them earlier, and its full
+-- text stays available on hover. The window title "Nexus Settings" stays
+-- English for now: adopted, its phrase would enter data/LocalizationEnglish.lua,
+-- which the terminology lint (ux_record_scope_terms R5) refuses (pending).
+local function T(key, english)
+    local seam = Nexus.Localization
+    if type(seam) ~= "table" or type(seam.Text) ~= "function" then return english end
+    local text, source = seam.Text(key)
+    if source == "unavailable" then return english end
+    return text
+end
+local function TF(key, args, english)
+    local seam = Nexus.Localization
+    if type(seam) ~= "table" or type(seam.Format) ~= "function" then return english end
+    local text, source = seam.Format(key, args)
+    if source == "unavailable" then return english end
+    return text
+end
 local categories = {
-    {id="automation", label="Automation", note="Changing a permission uses Nexus's existing controls. Opening this page never starts Auto or spends Orbs."},
-    {id="sync", label="Share & Sync", tab="Sync", note="The library's Sync choices and Share use their existing explicit controls."},
-    {id="appearance", label="Appearance", note="Style and colour change only how Nexus windows look; they do not change gameplay."},
-    {id="language", label="Language", note="A language choice applies after reload or login. Some text remains English in this build."},
-    {id="display", label="Display", note="Display choices affect the local HUD. Server Difficulty is available only when detected."},
-    {id="notices", label="Notices", note="Choose which update notices to show; this does not install or download an update."},
-    {id="support", label="Help & Support", tab="Support", note="These views read information. Preparing a report remains a separate action inside Support."},
+    {id="automation", label="Automation", labelKey="settings.label.category_automation", note="Changing a permission uses Nexus's existing controls. Opening this page never starts Auto or spends Orbs.",
+        noteKey="settings.note.category_automation"},
+    {id="sync", label="Share & Sync", labelKey="settings.label.category_sync", tab="Sync", tabKey="settings.tab.sync", note="The library's Sync choices and Share use their existing explicit controls.",
+        noteKey="settings.note.category_sync"},
+    {id="appearance", label="Appearance", labelKey="settings.label.category_appearance", note="Style and colour change only how Nexus windows look; they do not change gameplay.",
+        noteKey="settings.note.category_appearance"},
+    {id="language", label="Language", labelKey="settings.label.category_language", note="A language choice applies after reload or login. Some text remains English in this build.",
+        noteKey="settings.note.category_language"},
+    {id="display", label="Display", labelKey="settings.label.category_display", note="Display choices affect the local HUD. Server Difficulty is available only when detected.",
+        noteKey="settings.note.category_display"},
+    {id="notices", label="Notices", labelKey="settings.label.category_notices", note="Choose which update notices to show; this does not install or download an update.",
+        noteKey="settings.note.category_notices"},
+    {id="support", label="Help & Support", labelKey="settings.label.category_support", tab="Support", tabKey="settings.tab.support", note="These views read information. Preparing a report remains a separate action inside Support.",
+        noteKey="settings.note.category_support"},
 }
 local byId = {}
 for _, entry in ipairs(categories) do byId[entry.id] = entry end
@@ -62,6 +94,16 @@ function M.Categories()
     return ids
 end
 
+-- The shown words of a category (its stable id stays the identity).
+local function CategoryLabel(entry) return T(entry.labelKey, entry.label) end
+local function CategoryTab(entry)
+    if entry.tab then return T(entry.tabKey, entry.tab) end
+    return CategoryLabel(entry)
+end
+local function CategoryNote(entry) return T(entry.noteKey, entry.note) end
+local SYNC_MODE_KEYS = {automatic="settings.value.sync_automatic", manual="settings.value.sync_manual",
+    off="settings.value.sync_off"}
+
 -- A fresh, read-only model. No callback is invoked while it is assembled.
 function M.Rows(category)
     local out, panel = {}, Nexus.Panel
@@ -74,13 +116,16 @@ function M.Rows(category)
         local policy = Nexus.SyncModePolicy
         local mode = policy and type(policy.Mode) == "function" and policy.Mode() or "unknown"
         local names = {automatic="Automatic", manual="Manual", off="Off"}
-        out[#out+1] = {text="Current Sync: " .. (names[mode] or "Unknown"), disabled=true,
+        local modeName = names[mode] and T(SYNC_MODE_KEYS[mode], names[mode])
+            or T("settings.value.sync_unknown", "Unknown")
+        local english = "Current Sync: " .. (names[mode] or "Unknown")
+        out[#out+1] = {text=TF("settings.label.current_sync", {mode=modeName}, english), disabled=true,
             detail=policy and type(policy.Text) == "function" and policy.Text(mode) or ""}
-        out[#out+1] = Route("Open Build Library / Sync choices", function()
+        out[#out+1] = Route(T("settings.button.open_library_sync", "Open Build Library / Sync choices"), function()
             if Nexus.CommunityBuilds and type(Nexus.CommunityBuilds.Show) == "function" then
                 Nexus.CommunityBuilds.Show()
             end
-        end, "The library's own Sync dialog asks before applying a choice.")
+        end, T("settings.note.library_sync_dialog", "The library's own Sync dialog asks before applying a choice."))
     elseif category == "appearance" then
         local theme = Nexus.Theme
         if theme and type(theme.MenuItems) == "function" then AddMenuRows(out, theme.MenuItems()) end
@@ -98,20 +143,22 @@ function M.Rows(category)
     elseif category == "notices" then
         out = MoreSection("notices")
     elseif category == "support" then
-        out[#out+1] = Route("Guided setup", function()
+        out[#out+1] = Route(T("settings.button.guided_setup", "Guided setup"), function()
             if Nexus.Help and Nexus.Help.OpenGuide then Nexus.Help.OpenGuide() end
-        end, "Opens or resumes the step-by-step coach; it never enables Auto by navigation.")
-        out[#out+1] = Route("Welcome information", function()
+        end, T("settings.note.guided_setup", "Opens or resumes the step-by-step coach; it never enables Auto by navigation."))
+        out[#out+1] = Route(T("settings.button.welcome_information", "Welcome information"), function()
             if Nexus.QuickStart and Nexus.QuickStart.ShowSetup then Nexus.QuickStart.ShowSetup() end
-        end, "Secondary information-only Welcome; the guided coach is the separate row above.")
-        out[#out+1] = Route("Support report", function()
+        end, T("settings.note.welcome_information", "Secondary information-only Welcome; the guided coach is the separate row above."))
+        out[#out+1] = Route(T("settings.button.support_report", "Support report"), function()
             if Nexus.SupportReportUI and Nexus.SupportReportUI.Show then Nexus.SupportReportUI.Show() end
         end)
-        out[#out+1] = Route("Log viewer", function()
+        out[#out+1] = Route(T("settings.button.log_viewer", "Log viewer"), function()
             if Nexus.LogViewer and Nexus.LogViewer.Show then Nexus.LogViewer.Show() end
         end)
     end
-    if #out == 0 then out[1] = {text="This setting is not available yet.", disabled=true} end
+    if #out == 0 then
+        out[1] = {text=T("settings.status.not_available", "This setting is not available yet."), disabled=true}
+    end
     return out
 end
 
@@ -169,14 +216,14 @@ local function EnsureFrame()
     close:SetScript("OnClick", function() M.Hide() end)
     for index, entry in ipairs(categories) do
         local column, row = (index-1)%3, math.floor((index-1)/3)
-        local button = StyledButton(frame, entry.label, 118, 29, "TOPLEFT",
+        local button = StyledButton(frame, CategoryLabel(entry), 118, 29, "TOPLEFT",
             16 + column*124, -54 - row*33)
         button:SetScript("OnClick", function() M.Select(entry.id) end)
         button:SetScript("OnEnter", function(self)
             if not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(entry.label, 1, 1, 1, true)
-            GameTooltip:AddLine(entry.note, 0.85, 0.85, 0.85, true)
+            GameTooltip:AddLine(CategoryLabel(entry), 1, 1, 1, true)
+            GameTooltip:AddLine(CategoryNote(entry), 0.85, 0.85, 0.85, true)
             GameTooltip:Show()
         end)
         button:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
@@ -223,11 +270,11 @@ local function EnsureFrame()
         button._nexusInfoHover = infoHover
         rowButtons[index] = {button=button, detail=detail, infoHover=infoHover}
     end
-    previous = StyledButton(frame, "Previous", 92, 25, "BOTTOMLEFT", 16, 13)
+    previous = StyledButton(frame, T("settings.button.previous", "Previous"), 92, 25, "BOTTOMLEFT", 16, 13)
     previous:SetScript("OnClick", function() page=math.max(1,page-1);M.Refresh() end)
     pageLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     pageLabel:SetPoint("BOTTOM", 0, 20)
-    nextPage = StyledButton(frame, "Next", 92, 25, "BOTTOMRIGHT", -16, 13)
+    nextPage = StyledButton(frame, T("settings.button.next", "Next"), 92, 25, "BOTTOMRIGHT", -16, 13)
     nextPage:SetScript("OnClick", function() page=page+1;M.Refresh() end)
     if UISpecialFrames then table.insert(UISpecialFrames, "NexusSettingsWindow") end
     return frame
@@ -240,9 +287,9 @@ function M.Refresh()
     local pages = math.max(1, math.ceil(#rows/PAGE_SIZE))
     page = math.max(1, math.min(page, pages))
     title:SetText("Nexus Settings")
-    explanation:SetText(entry.note)
+    explanation:SetText(CategoryNote(entry))
     for index, button in ipairs(categoryButtons) do
-        button:SetText(categories[index].tab or categories[index].label)
+        button:SetText(CategoryTab(categories[index]))
         if categories[index].id == selected then
             if button.LockHighlight then button:LockHighlight() end
         elseif button.UnlockHighlight then button:UnlockHighlight() end
@@ -257,7 +304,7 @@ function M.Refresh()
             -- The rendered label is bounded to the two-line action area;
             -- the complete original text remains available on hover.
             widget.button._nexusFullLabel:SetText(#label > 100
-                and "Long setting — hover for full label" or label)
+                and T("settings.label.long_setting", "Long setting — hover for full label") or label)
             widget.button:SetScript("OnClick", function() M.Activate(index, row.text) end)
             if row.action then
                 widget.button:Enable();widget.infoHover:Hide()
@@ -265,7 +312,7 @@ function M.Refresh()
                 widget.button:Disable();widget.infoHover:Show()
             end
             widget.detail:SetText(#(row.detail or "") > 56
-                and "Hover for the full explanation." or (row.detail or ""))
+                and T("settings.note.hover_explanation", "Hover for the full explanation.") or (row.detail or ""))
             widget.button:Show();widget.detail:Show()
         else
             widget.button:Hide();widget.detail:Hide();widget.infoHover:Hide()
