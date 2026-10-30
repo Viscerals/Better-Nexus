@@ -125,8 +125,26 @@ def walk(value, path="$"):
             yield from walk(item, "%s[%d]" % (path, index))
 
 
+# The one structural true value: the code-owned `lines = true` schema flag of
+# a template key row of KEY_CONTEXT.json (core/Localization.lua "Full-UI
+# kinds"). It is a text contract, not acceptance; anywhere else, including a
+# text, block or format row, true still fails.
+_SCHEMA_LINES = re.compile(r"^\$\.keys\[(\d+)\]\.lines$")
+
+
+def schema_lines_flag(document, path):
+    found = _SCHEMA_LINES.match(path)
+    if not found or not isinstance(document, dict) or not isinstance(document.get("keys"), list):
+        return False
+    rows = document["keys"]
+    index = int(found.group(1))
+    return index < len(rows) and isinstance(rows[index], dict) and rows[index].get("kind") == "template"
+
+
 def assert_no_true(test, document):
     for path, value in walk(document):
+        if value is True and schema_lines_flag(document, path):
+            continue
         test.assertIsNot(value, True, path + " is true; no boolean may imply acceptance")
 
 
@@ -242,6 +260,15 @@ CHECKOUT_PHYSICAL_INPUTS = {
     "data/LocalizationEnglish.lua":
         ("755f2f5d434a23bbff28ad01f23711e14601e1a4c8df5ee99269038ee13b5cf8", 3970),
 }
+# Full visible-UI scope (#143-#148): a file named here was intentionally
+# changed after its dated reference above. The dated (SHA-256, length) and
+# blob identities stay recorded as history, never refreshed; the current
+# bytes must differ from them and keep the dated 28 meanings (checked by the
+# tests that read the file). No new hash is attested for the successor.
+REFERENCE_SUCCESSORS = {
+    "data/LocalizationEnglish.lua": "#143-#148 full visible-UI catalog: the 28 dated meanings first, "
+                                    "then the generated NEXUS-L10N-FULL-UI section",
+}
 CURRENT_OBSERVATION_GATES = {"finalComposition": "PENDING", "finalButtonFit": "PENDING",
                              "m7Span": "PENDING", "fullUiCoverage": "PENDING",
                              "fluentHumanAcceptance": "UNASSIGNED",
@@ -280,11 +307,17 @@ def assert_current_reference_bytes(test, relative, physical):
     physical bytes, with that identity."""
     canonical = canonical_git_lf(physical)
     digest = (hashlib.sha256(canonical).hexdigest(), len(canonical))
-    test.assertEqual(digest, CURRENT_REFERENCE_INPUTS[relative], relative)
     test.assertNotEqual(digest, REFERENCE_ENGLISH_INPUT, relative)
+    physical_digest = (hashlib.sha256(bytes(physical)).hexdigest(), len(physical))
+    if relative in REFERENCE_SUCCESSORS:
+        # A declared successor: its dated identities are history, not current.
+        test.assertNotEqual(digest, CURRENT_REFERENCE_INPUTS[relative], relative)
+        if relative in CHECKOUT_PHYSICAL_INPUTS:
+            test.assertNotEqual(physical_digest, CHECKOUT_PHYSICAL_INPUTS[relative], relative)
+        return canonical
+    test.assertEqual(digest, CURRENT_REFERENCE_INPUTS[relative], relative)
     if relative in CHECKOUT_PHYSICAL_INPUTS:
-        test.assertEqual((hashlib.sha256(bytes(physical)).hexdigest(), len(physical)),
-                         CHECKOUT_PHYSICAL_INPUTS[relative], relative)
+        test.assertEqual(physical_digest, CHECKOUT_PHYSICAL_INPUTS[relative], relative)
     return canonical
 
 
@@ -731,9 +764,15 @@ class KeyContextContract(unittest.TestCase):
         self.assertEqual(rows[:len(EXPECTED_KEYS)], EXPECTED_KEYS)
         self.assertEqual(rows[len(EXPECTED_KEYS):len(HISTORICAL_TECHNICAL_KEYS)],
                          CURRENT_PANEL_KEYS)
-        self.assertEqual(rows[len(HISTORICAL_TECHNICAL_KEYS):], CURRENT_OPTIONS_KEYS)
-        self.assertEqual(rows, CURRENT_KEYS)
-        self.assertEqual(list(current_english_oracle()), [row[0] for row in rows])
+        self.assertEqual(rows[len(HISTORICAL_TECHNICAL_KEYS):len(CURRENT_KEYS)], CURRENT_OPTIONS_KEYS)
+        self.assertEqual(rows[:len(CURRENT_KEYS)], CURRENT_KEYS)
+        self.assertEqual(list(current_english_oracle()), [row[0] for row in rows[:len(CURRENT_KEYS)]])
+        # Full visible-UI scope: every later row is a generated full-UI row
+        # (cohort fullui:<family>) for a new key; the dated 28 rows carry none.
+        later = self.doc["keys"][len(CURRENT_KEYS):]
+        self.assertTrue(all(re.fullmatch(r"fullui:[a-z0-9_]+", r.get("cohort", "")) for r in later))
+        self.assertTrue(all("cohort" not in r for r in self.doc["keys"][:len(CURRENT_KEYS)]))
+        self.assertFalse({r["key"] for r in later} & set(current_english_oracle()))
         for name, _, _, _ in CURRENT_PANEL_KEYS + CURRENT_OPTIONS_KEYS:
             self.assertEqual(self.keys[name]["placeholders"], [], name)
             self.assertNotIn("resultLimitBytes", self.keys[name], name)
@@ -743,6 +782,23 @@ class KeyContextContract(unittest.TestCase):
         self.assertEqual(adoption["keys"], [row[0] for row in CURRENT_KEYS])
         self.assertEqual(adoption["allWindowSemanticCoverage"], "PENDING")
         assert_current_adoption_scope(self, adoption["scope"])
+
+    def test_no_true_guard_admits_only_the_template_lines_schema_flag(self):
+        rows = [row for row in self.doc["keys"] if row.get("lines") is not None]
+        self.assertTrue(rows)
+        self.assertTrue(all(row["kind"] == "template" and row["lines"] is True for row in rows))
+        assert_no_true(self, self.doc)
+        allowed = {"keys": [{"key": "a.b", "kind": "template", "lines": True}]}
+        assert_no_true(self, allowed)
+        for refused in ({"keys": [{"key": "a.b", "kind": "text", "lines": True}]},
+                        {"keys": [{"key": "a.b", "kind": "template", "accepted": True}]},
+                        {"keys": [{"key": "a.b", "kind": "template", "lines": True, "x": {"lines": True}}]},
+                        {"lines": True},
+                        {"review": {"fluentHumanAcceptance": True}},
+                        {"rows": [{"kind": "template", "lines": True}]}):
+            with self.subTest(refused=refused):
+                with self.assertRaises(AssertionError):
+                    assert_no_true(self, refused)
 
     def test_current_adoption_scope_names_both_commits_and_no_stale_qualifier(self):
         scope = self.doc["currentAdoption"]["scope"]
@@ -1225,8 +1281,11 @@ class CatalogParserGrammar(unittest.TestCase):
         table = self.catalog.parse_english(data)
         self.assertIs(type(table), dict)
         expected = current_english_oracle()
-        self.assertEqual(table, expected)
-        self.assertEqual(list(table), list(expected))
+        # Full visible-UI scope: the dated 28 meanings keep their exact bytes
+        # and order, first; every later key is new, never a changed meaning.
+        self.assertEqual({key: table[key] for key in expected}, expected)
+        self.assertEqual(list(table)[:len(expected)], list(expected))
+        self.assertFalse(set(list(table)[len(expected):]) & set(expected))
         self.assertEqual({key: table[key] for key in CATALOG_CURRENT_ENGLISH},
                          CATALOG_CURRENT_ENGLISH)
         assert_current_reference_bytes(self, "data/LocalizationEnglish.lua", data)
@@ -1237,7 +1296,13 @@ class CatalogParserGrammar(unittest.TestCase):
         canonical = assert_current_reference_bytes(self, name, physical)
         # The Git blob ID of the canonical bytes, computed without Git.
         blob = hashlib.sha1(b"blob %d\0" % len(canonical) + canonical).hexdigest()
-        self.assertEqual(blob, CURRENT_ENGLISH_GIT_BLOB["blob"])
+        # A declared successor of the dated 28-key blob: that blob is history.
+        self.assertIn(name, REFERENCE_SUCCESSORS)
+        self.assertNotEqual(blob, CURRENT_ENGLISH_GIT_BLOB["blob"])
+        # Where Git can read it, the canonical bytes are exactly the committed blob.
+        indexed = git_object_id(":" + name)
+        if indexed is not None:
+            self.assertEqual(blob, indexed)
         self.assertNotEqual((hashlib.sha256(canonical).hexdigest(), len(canonical)),
                             HISTORICAL_REFERENCE_INPUTS[name])
         # The physical checkout bytes are CRLF, so they are not the canonical bytes.

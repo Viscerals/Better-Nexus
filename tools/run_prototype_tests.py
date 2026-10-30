@@ -467,6 +467,8 @@ PYTHON_TESTS=['tools/tests/test_l10n_inventory.py','tools/tests/test_l10n_catalo
 PYTHON_TESTS += ['tools/tests/test_l10n_parity.py']
 # Issue #147 R union: nonexecuting declaration parser of core/Localization.lua and the five-input registry-bound API and report v2.
 PYTHON_TESTS += ['tools/tests/test_l10n_registry.py']
+# Full visible-UI (#143-#148, #147): the final six-pack composition gate over the actual bytes, its runtime seam/receiver cross-check under LuaJIT and its synthetic controls (offline; native NOT_RUN).
+PYTHON_TESTS += ['tools/tests/test_l10n_full_ui_gate.py']
 # Wall-clock limit for one Python test process, read by tools/ci_check.py.
 PYTHON_TEST_TIMEOUT_SECONDS=DEFAULT_TIMEOUT_SECONDS
 

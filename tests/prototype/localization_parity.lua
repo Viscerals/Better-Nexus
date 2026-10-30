@@ -12,6 +12,14 @@
 -- load the real file unchanged, with an in-memory edit of the real English
 -- and the real packs. LF and CRLF variants are derived in memory and must
 -- give equal data and outcomes.
+-- Runtime cap (full visible-UI scope): the derived block holds at most the
+-- loaded runtime's cap. Each case is checked against the real file (its
+-- MAX_BASE_ENTRIES must equal cases.lua runtimeCap.current); the pilot cases
+-- are also loaded by a legacy-cap loader, the same bytes with only that line
+-- set to runtimeCap.pilot in memory, which must reproduce the historical
+-- pilot expectation. runtimeCap.controls add the current 4096/4097 English,
+-- declaration and pack boundaries in memory. A bound registry row checks its
+-- change from the unedited real load, so no catalog count is fixed here.
 -- P8 is the intended divergence: a Lua constructor keeps the last duplicate
 -- value. P19 (Lua 5.1 versus LuaJIT escapes) and P20 (UTF-8 BOM) native WoW
 -- behaviour is UNKNOWN: their controls only record the harness fact and
@@ -89,6 +97,21 @@ do
  check(openEnd and closeStart and openEnd<closeStart and count==2,'the runtime has exactly one declaration block between its two marker lines')
  head,tail=runtimeBytes:sub(1,openEnd),runtimeBytes:sub(closeStart+1)
 end
+-- The cap line of the real runtime, and the pilot (legacy-cap) variant of a
+-- source: only that one line changes.
+local CAP=corpus.runtimeCap
+local CAP_LINE='local MAX_BASE_ENTRIES = '
+do
+ local value=runtimeBytes:match('\n'..CAP_LINE..'(%d+)\r?\n')
+ local _,lines=runtimeBytes:gsub('\n'..CAP_LINE..'%d+','')
+ check(lines==1 and tonumber(value)==CAP.current,'the real runtime cap is cases.lua runtimeCap.current: '..tostring(value))
+ check(CAP.pilot<CAP.current,'the pilot cap is below the current cap')
+end
+local function legacy(source)
+ local out,count=source:gsub('\n'..CAP_LINE..CAP.current..'(\r?\n)','\n'..CAP_LINE..CAP.pilot..'%1')
+ check(count==1,'the legacy-cap loader changes exactly the cap line')
+ return out
+end
 local CHARGE_KEY='readout.charge_counts'
 local CHARGE_DECLARATION=runtimeBytes:match('%["readout%.charge_counts"%] = (%b{})')
 check(CHARGE_DECLARATION and CHARGE_DECLARATION:find('kind = "format"',1,true),'the real charge-row format declaration is read from the real block')
@@ -98,15 +121,17 @@ local function validKey(key)
   and not key:find('%.[^a-z]')
 end
 -- The case rule of cases.lua: each valid key of the decoded English, in byte
--- order, at most 64; the charge key with its real declaration, others text.
-local function derivedKeys(english)
+-- order, at most the loaded runtime's cap; the charge key with its real
+-- declaration, others text. extra keys (declared without English) follow.
+local function derivedKeys(english,cap,extra)
  local keys={}
  for key in pairs(english)do if validKey(key) then keys[#keys+1]=key end end
  table.sort(keys)
- while #keys>64 do keys[#keys]=nil end
+ while #keys>(cap or CAP.current) do keys[#keys]=nil end
+ for _,key in ipairs(extra or {})do keys[#keys+1]=key end
  return keys
 end
-local function withDeclarations(keys)
+local function withDeclarations(keys,pilot)
  local lines={'local DECLARATIONS = {'}
  for _,key in ipairs(keys)do
   lines[#lines+1]=('    ["%s"] = %s,'):format(key,key==CHARGE_KEY and CHARGE_DECLARATION or '{kind = "text"}')
@@ -114,7 +139,7 @@ local function withDeclarations(keys)
  lines[#lines+1]='}'
  local source=head..table.concat(lines,'\n')..'\n'..tail
  check(source:sub(1,#head)==runtimeBytes:sub(1,#head) and source:sub(-#tail)==runtimeBytes:sub(-#tail),'a test block changes only the lines between the markers')
- return source
+ return pilot and legacy(source) or source
 end
 
 local savedNexus=Nexus
@@ -137,10 +162,13 @@ end
 
 -- The observed runtime outcome: load facts, offered languages and, for
 -- each probe, a fresh session with the probe's language selected once.
--- real=true loads the real file; otherwise the case's derived block is used.
-local function outcome(english,packs,case,real,want)
+-- real=true loads the real file; otherwise the case's derived block is used
+-- (opts.pilot: under the legacy-cap loader; opts.extra: extra declarations).
+local function outcome(english,packs,case,real,want,opts)
  want=want or case.runtime
- local source=not real and withDeclarations(derivedKeys(english)) or nil
+ opts=opts or {}
+ local cap=opts.pilot and CAP.pilot or CAP.current
+ local source=not real and withDeclarations(derivedKeys(english,cap,opts.extra),opts.pilot) or nil
  local L=boot(english,packs,case.enum,source)
  local d=L.Diagnostics()
  local o={base=d.base,packs=d.packs,languages={},probes={}}
@@ -166,6 +194,23 @@ end
 for _,row in ipairs(corpus.mappedRows)do check(covered[row],'mapped row covered by a case: '..row)end
 for _,row in ipairs(corpus.unknownRows)do check(covered[row],'UNKNOWN row has a control: '..row)end
 
+local pilotCases={}
+for _,id in ipairs(CAP.pilotCases)do pilotCases[id]=true end
+local function sameOutcome(o,want,label,declared)
+ check(same(o.base,want.base),'base load facts '..label..': '..show(o.base))
+ -- Every derived declaration has an English entry, so outside the
+ -- whole-base limit each rejected entry is undeclared or declared-invalid.
+ check(o.base.missingDeclared==declared-o.base.accepted and (o.base.oversized
+  or o.base.rejected==o.base.undeclared+o.base.missingDeclared),'derived block load facts reconcile '..label)
+ check(same(o.packs,want.packs),'pack load facts '..label..': '..show(o.packs))
+ check(same(o.languages,want.languages),'offered languages '..label..': '..show(o.languages))
+ check(#o.probes==#want.probes,'probe count '..label)
+ for i,p in ipairs(want.probes)do
+  check(same(o.probes[i],{kind=p.kind,language=p.language,key=p.key,text=p.text,source=p.source,reason=p.reason}),
+   'probe '..i..' '..label..': '..show(o.probes[i]))
+ end
+end
+
 -- Every committed case: both variants load equal data and give the expected outcome.
 local harness={}
 local function runCase(case,englishBytes,packsBytes)
@@ -181,19 +226,11 @@ local function runCase(case,englishBytes,packsBytes)
     check(same(seen.english,english) and same(seen.packs,packs),'LF and CRLF give equal decoded data: '..label)
     check(same(seen.outcome,o),'LF and CRLF give equal runtime outcomes: '..label)
    else seen={english=english,packs=packs,outcome=o} end
-   local want=case.runtime
-   check(same(o.base,want.base),'base load facts '..label..': '..show(o.base))
-   -- Every derived declaration has an English entry, so outside the
-   -- whole-base limit each rejected entry is undeclared or declared-invalid.
-   local declared=#derivedKeys(english)
-   check(o.base.missingDeclared==declared-o.base.accepted and (o.base.oversized
-    or o.base.rejected==o.base.undeclared+o.base.missingDeclared),'derived block load facts reconcile '..label)
-   check(same(o.packs,want.packs),'pack load facts '..label..': '..show(o.packs))
-   check(same(o.languages,want.languages),'offered languages '..label..': '..show(o.languages))
-   check(#o.probes==#want.probes,'probe count '..label)
-   for i,p in ipairs(want.probes)do
-    check(same(o.probes[i],{kind=p.kind,language=p.language,key=p.key,text=p.text,source=p.source,reason=p.reason}),
-     'probe '..i..' '..label..': '..show(o.probes[i]))
+   sameOutcome(o,case.runtime,label,#derivedKeys(english))
+   if pilotCases[case.id] then
+    -- The historical pilot expectation under the legacy-cap loader.
+    local want=case.pilotRuntime or case.runtime
+    sameOutcome(outcome(english,packs,case,false,want,{pilot=true}),want,label..' (pilot cap)',#derivedKeys(english,CAP.pilot))
    end
   end
  end
@@ -219,6 +256,53 @@ for _,case in ipairs(corpus.cases)do
    check(not same(case.decoded.lua51,case.decoded.luajit),'P19 readings differ, so the row stays UNKNOWN')
    harness[case.id]=reading
   end
+ end
+end
+
+-- The current 4096/4097 boundaries, derived in memory from committed cases.
+local controls=0
+do
+ local function grow(entries,count)
+  local out,n={},0
+  for key,value in pairs(entries)do out[key]=value;n=n+1 end
+  local index=0
+  while n<count do
+   index=index+1
+   local key=('parity.g%04d'):format(index)
+   if out[key]==nil then out[key]=('Generated %04d'):format(index);n=n+1 end
+  end
+  return out
+ end
+ local seenPilot={}
+ for _,id in ipairs(CAP.pilotCases)do check(byId[id] and not byId[id].derive,'pilot case is committed: '..id);seenPilot[id]=true end
+ for _,control in ipairs(CAP.controls)do
+  local source=byId[control.from]
+  check(source and not source.derive and (control.file=='english' or control.file=='packs'),'cap control derives from a committed case: '..control.id)
+  local dir=CORPUS..source.id..'/'
+  local english=assert(loadData(readBytes(dir..'english.lua'),control.id,'LocalizationEnglish'))
+  local packs=assert(loadData(readBytes(dir..'packs.lua'),control.id,'LocalizationPacks'))
+  if control.file=='english' then english=grow(english,control.entries)
+  else
+   local id=source.enum[1]
+   packs[id].entries=grow(packs[id].entries,control.entries)
+  end
+  local count,n=0,nil
+  for _ in pairs(control.file=='english' and english or packs[source.enum[1]].entries)do count=count+1 end
+  check(count==control.entries,'cap control holds its entry count: '..control.id)
+  local o=outcome(english,packs,source,false,control.runtime,{extra=control.extraDeclarations})
+  local declared=#derivedKeys(english,CAP.current,control.extraDeclarations)
+  if control.extraDeclarations then
+   -- Above the cap the block declares nothing: every entry is undeclared.
+   check(declared>CAP.current,'the declaration control exceeds the cap: '..control.id)
+   check(same(o.base,control.runtime.base),'base load facts '..control.id..': '..show(o.base))
+   check(same(o.packs,control.runtime.packs) and same(o.languages,control.runtime.languages),'pack and language facts '..control.id)
+   for i,p in ipairs(control.runtime.probes)do
+    check(same(o.probes[i],{kind=p.kind,language=p.language,key=p.key,text=p.text,source=p.source,reason=p.reason}),'probe '..i..' '..control.id..': '..show(o.probes[i]))
+   end
+  else
+   sameOutcome(o,control.runtime,control.id,declared)
+  end
+  controls=controls+1
  end
 end
 
@@ -282,6 +366,24 @@ local function edited(data,input)
 end
 local bound=0
 check(registry.parser=='parse_registry_declarations' and registry.marker.open==MARK_OPEN and registry.marker.close==MARK_CLOSE,'registry convention recorded once')
+-- The unedited real load: its base facts, pack rows and, per probe, result.
+local realEnglish=assert(loadData(readBytes('data/LocalizationEnglish.lua'),'english','LocalizationEnglish'))
+local realPacks=assert(loadData(readBytes('data/LocalizationPacks.lua'),'packs','LocalizationPacks'))
+local function realOutcome(probes)
+ return outcome(realEnglish,realPacks,{enum=registry.enum},true,{probes=probes})
+end
+-- The pack rows a real load must show when the edit removes English keys:
+-- each real pack entry of a removed key is rejected instead of copied.
+local function packRowsAfter(rows,removed)
+ local out={}
+ for index,row in ipairs(rows)do
+  local entries=realPacks[row.id].entries
+  local lost=0
+  for key in pairs(removed)do if entries[key]~=nil then lost=lost+1 end end
+  out[index]={id=row.id,accepted=row.accepted-lost,rejected=row.rejected+lost}
+ end
+ return out
+end
 for _,row in ipairs(registry.rows)do
  check(row.state==registry.bound,'registry row is bound: '..row.id)
  local want=row.expect and row.expect.runtime
@@ -289,6 +391,17 @@ for _,row in ipairs(registry.rows)do
   check(want~=nil,'an English registry row has a runtime expectation: '..row.id)
   local englishBytes=edited(readBytes(row.input.file),row.input)
   local packsBytes=readBytes('data/LocalizationPacks.lua')
+  local unedited=realOutcome(want.probes)
+  local removed={}
+  if row.input.remove then removed[assert(row.input.remove:match('^%s*%["([^"]+)"%]'),'removed line names a key')]=true end
+  local wantBase,change={},want.baseChange
+  for name,value in pairs(unedited.base)do
+   wantBase[name]=type(value)=='number' and value+(change.add[name] or 0)-(change.subtract[name] or 0) or value
+  end
+  for _,part in ipairs({change.add,change.subtract})do
+   for name in pairs(part)do check(type(unedited.base[name])=='number','baseChange names a load fact: '..name)end
+  end
+  local wantRows=packRowsAfter(unedited.packs.rows,removed)
   local seen
   for _,ev in ipairs(variants(englishBytes,row.id..'/english'))do
    for _,pv in ipairs(variants(packsBytes,'data/LocalizationPacks.lua'))do
@@ -297,14 +410,16 @@ for _,row in ipairs(registry.rows)do
     local packs=assert(loadData(pv[2],'packs','LocalizationPacks'))
     local o=outcome(english,packs,{enum=registry.enum},true,want)
     if seen then check(same(seen,o),'LF and CRLF give equal registry outcomes: '..label) else seen=o end
-    check(same(o.base,want.base),'registry base load facts '..label..': '..show(o.base))
+    check(same(o.base,wantBase),'registry base load facts '..label..': '..show(o.base)..' predicted '..show(wantBase))
     check(o.packs.present and o.packs.adopted==#registry.enum-1 and o.packs.refused==0,'every real pack stays adopted '..label)
-    for _,packRow in ipairs(o.packs.rows)do check(packRow.accepted==27 and packRow.rejected==0,'real pack copy unchanged '..label..' '..packRow.id)end
+    check(same(o.packs.rows,wantRows),'real pack copies change only by removed keys '..label..': '..show(o.packs.rows))
     check(same(o.languages,registry.enum),'every enum language stays offered '..label..': '..show(o.languages))
     check(#o.probes==#want.probes,'registry probe count '..label)
     for i,p in ipairs(want.probes)do
-     check(same(o.probes[i],{kind=p.kind,language=p.language,key=p.key,text=p.text,source=p.source,reason=p.reason}),
-      'registry probe '..i..' '..label..': '..show(o.probes[i]))
+     local expected=p.unchanged and unedited.probes[i]
+      or {kind=p.kind,language=p.language,key=p.key,text=p.text,source=p.source,reason=p.reason}
+     check(not p.unchanged or (expected.text~=nil and not removed[p.key]),'an unchanged probe has an unedited result '..label)
+     check(same(o.probes[i],expected),'registry probe '..i..' '..label..': '..show(o.probes[i]))
     end
    end
   end
@@ -313,14 +428,26 @@ for _,row in ipairs(registry.rows)do
   check(want==nil and row.runtime=='not applicable','a document-only registry row has no runtime expectation: '..row.id)
  end
 end
--- The real file and data: the 28 declarations admit exactly the 28 English keys.
+-- The real file and data: the declarations admit exactly the whole real
+-- English base, and every real pack entry is copied. The counts come from
+-- the data and the declaration block text, not from the runtime.
 do
- local english=assert(loadData(readBytes('data/LocalizationEnglish.lua'),'english','LocalizationEnglish'))
- local packs=assert(loadData(readBytes('data/LocalizationPacks.lua'),'packs','LocalizationPacks'))
- local o=outcome(english,packs,{enum=registry.enum},true,{probes={}})
- check(same(o.base,{present=true,accepted=28,rejected=0,oversized=false,formatted=1,undeclared=0,missingDeclared=0}),'real declarations admit the whole real English base: '..show(o.base))
+ local count=0
+ for _ in pairs(realEnglish)do count=count+1 end
+ local block=runtimeBytes:sub(#head+1,-#tail-1)
+ local _,formats=block:gsub('kind = "format"','')
+ local _,templates=block:gsub('kind = "template"','')
+ local _,declarations=block:gsub('\n    %["[^"]+"%] = {','')
+ check(count>0 and declarations==count and count<=CAP.current,'one declaration line per real English key: '..declarations..' / '..count)
+ local o=realOutcome({})
+ check(same(o.base,{present=true,accepted=count,rejected=0,oversized=false,formatted=formats+templates,undeclared=0,missingDeclared=0}),'real declarations admit the whole real English base: '..show(o.base))
+ for _,row in ipairs(o.packs.rows)do
+  local entries=0
+  for _ in pairs(realPacks[row.id].entries)do entries=entries+1 end
+  check(row.accepted==entries and row.rejected==0,'every real pack entry is copied: '..row.id)
+ end
 end
 
 check(Nexus==savedNexus,'the global Nexus is restored after every load')
-print(('localization_parity: %d cases, %d bound registry runtime rows, %d checks; harness P19=%s, P20=%s; native P19/P20 UNKNOWN')
- :format(#corpus.cases,bound,checks,tostring(harness.p19_ambiguous_escapes),tostring(harness.p20_bom)))
+print(('localization_parity: %d cases (%d also under the pilot cap %d), %d cap controls (cap %d), %d bound registry runtime rows, %d checks; harness P19=%s, P20=%s; native P19/P20 UNKNOWN')
+ :format(#corpus.cases,#CAP.pilotCases,CAP.pilot,controls,CAP.current,bound,checks,tostring(harness.p19_ambiguous_escapes),tostring(harness.p20_bom)))

@@ -25,11 +25,21 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Record the tested commit and tree
+        # The results below belong to this commit only. For a pull request it is
+        # GitHub's generated merge commit; literal-head records and checks the head.
+        run: |
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse 'HEAD^{tree}')
+          echo "tested commit $sha, tree $tree"
+          echo "### Offline suite: commit \`$sha\`, tree \`$tree\`" >> "$GITHUB_STEP_SUMMARY"
       - name: Install LuaJIT
         run: sudo apt-get update && sudo apt-get install --yes luajit
       - name: Inventory check and complete offline suite
         # Every listed test runs from this checkout. A NOT RUN, FAIL or TIMEOUT row
-        # fails the check; nothing unexecuted is counted as passed.
+        # fails the check; nothing unexecuted is counted as passed. This includes the
+        # full visible-UI composition gate (tools/tests/test_l10n_full_ui_gate.py),
+        # which fails while a shipped optional pack is incomplete.
         shell: bash   # explicit bash runs with pipefail, so a failed suite fails this step
         run: python3 tools/ci_check.py | tee ci-summary.txt
       - name: Summary
