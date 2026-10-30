@@ -7776,7 +7776,7 @@
    "P2 with English active, every status title/text GetText() is byte-identical to the pre-change output for all five kinds and the unknown-kind fallback; existing English tests unchanged and green",
    "P3 a non-English fixture pack (test fixture, not a translation) reaches ShowDetailStatus through the real renderer for all five kinds; a missing pack entry falls back to the English text and is counted missing_candidate; no draft pack text is added by this batch",
    "P4 status.kind, DETAIL_STATUS kind codes, CommunityProjection reason codes and selection identity are unchanged",
-   "P5 strict no-action (original #144 criterion, unchanged): for every entry point in entryPoints and every kind, opening, selecting, refreshing, cancelling and changing language make no Sync.RequestLoadout call or other Sync send or queue, write no SavedVariables beyond the existing selection state, and assign, save, share, delete or spend nothing. The ShowBuild/incomplete case is expected RED at the base; P5 passes only after Root resolves PD-1 or explicitly scopes the criterion; reporting the violation does not pass P5",
+   "P5 strict no-action (original #144 criterion, unchanged): for every entry point in entryPoints and every kind, opening, selecting, refreshing, cancelling and changing language make no Sync.RequestLoadout call or other Sync send or queue, make ZERO SavedVariables writes, and assign, save, share, delete or spend nothing. Selection needs no exemption: the Build Library selection is the closure-local selectedId declared at core/CommunityController.lua:46, which Select (core/CommunityController.lua:821-824) only reassigns in memory; that state is ephemeral and distinct from SavedVariables. There is no persisted-selection allowance: any persisted write found on these paths stays an UNRESOLVED Root dependency with an expected-red control, never an accepted exception. The ShowBuild/incomplete case is expected RED at the base; P5 passes only after Root resolves PD-1 or explicitly scopes the criterion; reporting the violation does not pass P5",
    "P6 long text: with a 256-byte fixture body the FontString keeps word-wrapped width anchoring and GetText() returns the full text (no truncation); native glyph/height fit is NOT_RUN and stated so",
    "P7 family status remains PENDING; the four exclusions above are restated in the ledger; competent review UNASSIGNED and localized native NOT_RUN unchanged",
    "P8 full CI on the final source pin, independent Spec and Standards review with fixes and re-review; existing merge/native/release authority unchanged",
@@ -7866,7 +7866,7 @@
    "search/filter/sort results identical under a fixture pack (operands are game data, not keys)"
   ],
   "noAction": [
-   "for each adopted surface and every entry point: open, select, hover, refresh, cancel and language change make no Sync send or queue (hook Nexus.Sync.RequestLoadout and the Sync queue), no SavedVariables write beyond existing UI state (hook the Store writer/UpdateStoreState), and no assignment, save, share, delete or spend",
+   "for each adopted surface and every entry point: open, select, hover, refresh, cancel and language change make no Sync send or queue (hook Nexus.Sync.RequestLoadout and the Sync queue), zero SavedVariables writes (hook the Store writer/UpdateStoreState; any write found, including PD-2 and PD-4, stays an UNRESOLVED Root dependency with an expected-red control, never an accepted exception), and no assignment, save, share, delete or spend",
    "named entry points: ShowBuild/incomplete (PD-1), overlay refresh under the PD-2 preconditions, leaderboard row selection (PD-3), first unit-tooltip hover with pending migrations (PD-4)",
    "expected baseline RED at 75178765 for PD-1..PD-4 controls (planned, NOT RUN); a red result is evidence for Root, never redefined as passing"
   ],
@@ -7911,7 +7911,8 @@
    "privacy scan of record text for user paths, e-mail, credentials and saved data (only 'token' as in command/class token found)",
    "JSON parses; Markdown totals generated from the same data",
    "record schema: ID pattern ^(ED|OV|LB|LD|UT)-[A-Z]{2}-\\d{4}-[a-z]+$, uniqueness, anchor line within [line, lineEnd] (equal to line except the documented ED-WR-3132-a), class/state/reachability vocabulary",
-   "document consistency (consistency.py, outside the repo): every family total, state index, candidate subcount, measuredTotals value and the reuse summary recomputed from records and compared; record IDs/English/spans/classes/worker labels/states unchanged from the reviewed JSON; Markdown numbers compared with the JSON"
+   "document consistency (consistency.py, outside the repo): every family total, state index, candidate subcount, measuredTotals value and the reuse summary recomputed from records and compared; record IDs/English/spans/classes/worker labels/states unchanged from the reviewed JSON; Markdown numbers compared with the JSON",
+   "P5 consistency (db172cde review fix): no persisted-selection or UI-state SavedVariables allowance remains in either document (regex scan); P5 states zero SavedVariables writes and names the closure-local selection anchors"
   ],
   "notRun": [
    "599 Lua / 84 Python suite (not commissioned for an inventory; no source change)",
@@ -7980,6 +7981,14 @@
     "path": "task-4/T3_144_SPEC_MECHANICAL_9E5CA1AA_20261030.json",
     "sha256": "4d2a070e4e9ceaf6ae8a81618c63398c0c53d5c279ff304330af821201fb5950",
     "use": "the 54 qualification records (re-triaged, not assumed dead)"
+   },
+   {
+    "path": "task-4/T3_144_SPEC_DB172CDE_20261030.json",
+    "sha256": "9606b2da484beaa06e2ca7499882f15bf88e2a070613ffd4a78041956d78347b"
+   },
+   {
+    "path": "task-4/T3_144_STANDARDS_DB172CDE_20261030.json",
+    "sha256": "a30b4b2f0e9c84eac82c41f407d7ce537259378b6273516983367ca6f1943ef4"
    }
   ],
   "reviewedDocument": {
@@ -7992,7 +8001,8 @@
    "SPEC144-03": "passivityDependencies PD-1..PD-4 UNRESOLVED; overlay noActionPaths corrected; cohort entryPoints, expectedBaselineRed, strict P5 and ADOPTION_HELD",
    "SPEC144-04 / S144-1 / S144-2": "reuse adopted 0 / proposed 1; state indexes derived from records (editor invalid 73 all-source); candidate subcounts derived from recordIds with worker numbers kept and their unit marked unspecified",
    "N144-1": "ID anchor rule restated; ED-WR-3132-a interior anchor documented",
-   "N144-2": "unit tooltip alternative: 4 static, 1 independent static"
+   "N144-2": "unit tooltip alternative: 4 static, 1 independent static",
+   "SPEC144-FIX-01 / S144-R1": "P5 and futureControls.noAction no longer allow any SavedVariables write: zero writes for passive reading, selection, refresh, cancellation and language change. Selection is the ephemeral closure-local selectedId (core/CommunityController.lua:46; Select 821-824), not SavedVariables. A targeted search found no persisted selection write on the cohort or leaderboard selection paths (Leaderboard selectedKey is file-local, ui/Leaderboard.lua:16, 386); the known real writes PD-2 and PD-4 stay UNRESOLVED."
   },
   "qualificationCrossTab": {
    "reviewerRecords": 54,

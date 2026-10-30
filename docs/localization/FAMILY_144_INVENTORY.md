@@ -14,7 +14,10 @@ them. Where the two differ, the JSON is authoritative.
 This revision corrects the reviewed commit `9e5ca1aa` (JSON SHA-256
 `0751adb9…`) against two independent reviews, Spec and Standards
 (`reviewCorrections` in the JSON). No record ID, English text, source span,
-class, worker label or exclusion was changed or removed.
+class, worker label or exclusion was changed or removed. A follow-up fix to
+`db172cde` removes the persisted-selection allowance from P5 and from the
+no-action control. Passive operations now require zero SavedVariables writes
+(Spec SPEC144-FIX-01, Standards S144-R1).
 
 ## Source binding
 
@@ -475,8 +478,15 @@ Acceptance predicate for Root review:
 5. **P5 (strict no-action; the original #144 criterion, unchanged):** for
    every entry point and kind, opening, selecting, refreshing, cancelling and
    changing language make no `Sync.RequestLoadout` call or other Sync send or
-   queue, and no SavedVariables write beyond the existing selection state.
-   They assign, save, share, delete and spend nothing.
+   queue, and **zero SavedVariables writes**. They assign, save, share, delete
+   and spend nothing.
+   - Selection needs no exemption. The Build Library selection is the
+     closure-local `selectedId` declared at `core/CommunityController.lua:46`,
+     which `Select` (`:821-824`) only reassigns in memory. That state is
+     ephemeral and distinct from SavedVariables.
+   - There is no persisted-selection allowance. Any persisted write found on
+     these paths stays an UNRESOLVED Root dependency with an expected-red
+     control, never an accepted exception.
    - The `ShowBuild`/incomplete case is expected RED at the base.
    - P5 passes only after Root resolves PD-1 or explicitly scopes the
      criterion. Reporting the violation does not pass P5.
@@ -513,7 +523,10 @@ Alternatives considered and not chosen:
 - **No action:** hooks on `Nexus.Sync.RequestLoadout`, the Sync queue and the
   Store writer for every entry point, including `ShowBuild`/incomplete,
   overlay refresh under the PD-2 preconditions, Leaderboard row selection and
-  first hover. The expected baseline RED cases are planned, not run.
+  first hover. Each requires zero Sync sends or queues and zero
+  SavedVariables writes; any write found, including PD-2 and PD-4, stays an
+  UNRESOLVED Root dependency, never an accepted exception. The expected
+  baseline RED cases are planned, not run.
 - **Long text:** 256-byte fixtures keep the existing wrap, scroll or full-text
   tooltip.
 - **Unknown versus zero:** the unknown form, never 0.
