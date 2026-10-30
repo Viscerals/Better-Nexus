@@ -4,14 +4,67 @@
 -- arrive pre-bridged (spellId -> name) by the caller; a missing name
 -- falls back to the spellId so a line is never blank.
 
+-- Full-UI localization (issues #143-#148): the visible copy built here is
+-- resolved through Nexus.Localization at call time (never cached at load, so
+-- the session's pack, or a test's swapped seam, applies). Each call carries
+-- the exact English this file built before; while the seam is absent or a key
+-- answers "unavailable" that English is returned unchanged. What another
+-- builder parses or matches stays raw: CardLine text (its quality tokens and
+-- guarantee prefix are read back by CardTarget and OfferCard), raw hold
+-- reasons and the QUALITY_NAMES tokens. Translation happens only in the
+-- display values built from them.
+
 Nexus = Nexus or {}
 local M = {}
 Nexus.Readout = M
+
+-- Static text for `key`, or `english` when the seam cannot answer it.
+local function T(key, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Text) == "function" then
+        local text, source = localization.Text(key)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
+
+-- A template with code-supplied slot values, or `english` (the legacy
+-- composition of the same values) when the seam cannot answer it.
+local function TF(key, args, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Format) == "function" then
+        local text, source = localization.Format(key, args)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
 
 local QUALITY_NAMES = {
     [0] = "Common", [1] = "Uncommon", [2] = "Rare",
     [3] = "Epic", [4] = "Legendary",
 }
+-- The shown word of each quality token (display only; the tokens above
+-- stay the parse vocabulary of CardLine text).
+local QUALITY_KEYS = {
+    Common = "readout.value.quality_common", Uncommon = "readout.value.quality_uncommon",
+    Rare = "readout.value.quality_rare", Epic = "readout.value.quality_epic",
+    Legendary = "readout.value.quality_legendary",
+}
+local function QualityShown(quality)
+    local key = QUALITY_KEYS[quality]
+    return key and T(key, quality) or quality
+end
+
+-- "Name (Quality)" as shown, from a whole name and a quality token.
+local function TargetShown(name, quality)
+    return TF("readout.value.echo_with_quality", {name = name, quality = QualityShown(quality)},
+        name .. " (" .. quality .. ")")
+end
+
+-- The code-owned "[Guaranteed offer]" marker as shown.
+local function GuaranteedShown()
+    return "[" .. T("readout.label.guaranteed_offer", "Guaranteed offer") .. "]"
+end
 
 -- %d on a raw float truncates silently on this toolchain; round first.
 local function Round(x)
@@ -35,22 +88,29 @@ function M.Status(model)
     if model.text ~= nil then
         main = Nexus.UserText and Nexus.UserText.Message(model.text) or tostring(model.text)
     elseif model.advisorOnly then
-        main = "No Wishlist assigned - recommendations only"
+        main = T("readout.status.no_wishlist_advisor", "No Wishlist assigned - recommendations only")
     elseif model.synced == false then
-        main = "Waiting for current Echo data - automatic choices paused"
+        main = T("readout.status.waiting_echo_data", "Waiting for current Echo data - automatic choices paused")
     else
-        main = "idle"
+        main = T("readout.status.idle", "idle")
     end
     if type(model.level) == "number" then
-        main = string.format("Lv %d - %s", Round(model.level), main)
+        local level = string.format("%d", Round(model.level))
+        main = TF("readout.status.level_prefixed", {level = level, status = main},
+            string.format("Lv %d - %s", Round(model.level), main))
     end
     local c = model.charges
     if type(c) == "table" then
-        local s = string.format("Banish:%d Reroll:%d Freeze:%d",
-            Round(tonumber(c.banish) or 0),
-            Round(tonumber(c.reroll) or 0),
-            Round(tonumber(c.freeze) or 0))
-        if c.trustworthy == false then s = s .. " (estimated)" end
+        -- This legacy line keeps its own knownness contract: a count the
+        -- game has not reported is written 0 here (unlike ChargesLine).
+        local banish = string.format("%d", Round(tonumber(c.banish) or 0))
+        local reroll = string.format("%d", Round(tonumber(c.reroll) or 0))
+        local freeze = string.format("%d", Round(tonumber(c.freeze) or 0))
+        local s = TF("readout.status.charges_full", {banish = banish, reroll = reroll, freeze = freeze},
+            "Banish:" .. banish .. " Reroll:" .. reroll .. " Freeze:" .. freeze)
+        if c.trustworthy == false then
+            s = TF("readout.status.charges_estimated", {charges = s}, s .. " (estimated)")
+        end
         main = main .. " | " .. s
     end
     return main
@@ -166,28 +226,38 @@ end
 -- "Name (Quality)" from a CardLine text; nil when the line carries no known
 -- quality, since the name then cannot be told from its annotation. With the
 -- card's own facts (CardFacts), nil when they hold no quality.
-function M.CardTarget(text, facts)
+-- The whole name and quality token CardTarget names, or nil.
+local function TargetParts(text, facts)
     text = tostring(text or ""):gsub("^%[Guaranteed offer%] ", "")
     if type(facts) == "table" then
         local name, quality = LineFacts(text, facts)
-        return quality and (name .. " (" .. quality .. ")") or nil
+        if quality then return name, quality end
+        return nil
     end
-    local first, last = QualityToken(text)
+    local first, _, quality = QualityToken(text)
     if not first or first <= 1 then return nil end
-    return text:sub(1, last)
+    return text:sub(1, first - 1), quality
+end
+
+function M.CardTarget(text, facts)
+    local name, quality = TargetParts(text, facts)
+    return name and (name .. " (" .. quality .. ")") or nil
 end
 
 -- An unstepped recommendation with its definite target named:
 -- "<reason>: <Name (Quality)>". A stepped plan (numbered lines) already
 -- names each step and is returned unchanged, as is a line with no target.
--- `facts` (optional): the card's own CardFacts, as CardTarget.
+-- `facts` (optional): the card's own CardFacts, as CardTarget. The returned
+-- text is display copy only (its quality word is the shown one).
 function M.RecommendationWithTarget(recommendation, cardText, facts)
     local text = tostring(recommendation or "")
     if text:find("^%d+%. ") or text:find("\n%d+%. ") then return text end
-    local target = M.CardTarget(cardText, facts)
-    if not target then return text end
-    if text == "" then return "Take: " .. target end
-    return text .. ": " .. target
+    local name, quality = TargetParts(cardText, facts)
+    if not name then return text end
+    local target = TargetShown(name, quality)
+    if text == "" then return TF("readout.body.take_target", {target = target}, "Take: " .. target) end
+    return TF("readout.body.recommendation_target", {recommendation = text, target = target},
+        text .. ": " .. target)
 end
 
 -- One offer card of the Play panel (Claude Design full UI, "Main panel
@@ -214,12 +284,17 @@ end
 -- Freeze, never the pick, since the pick means Take. Text only; it decides
 -- and chooses nothing.
 -- -> {name, quality, tag, shown, full, marked, freeze, guaranteed}
-M.OFFER_PICK_TAG = "> Wishlist pick"
-M.OFFER_RECOMMENDED_TAG = "> Recommended"
-M.OFFER_FREEZE_TAG = "> Freeze"
-M.OFFER_GUARANTEED_TAG = "[Guaranteed offer]"
-function M.OfferCard(text, marked, auto, facts, freeze)
-    local full = tostring(text or "")
+-- The shown tags and notes below (OFFER_*_TAG, WAITING_OFFER_*, AUTO_ON_NOTE,
+-- TOME_PARAGRAPH) are fields that Panel, the Auto warning and the tests read
+-- when they draw. M holds none of them itself: each read comes through the
+-- metatable at the end of this file and is resolved at that moment, so the
+-- session's language applies without a caller change. Their code-owned marks
+-- ("> ", "[...]", "... ") stay outside the translated words.
+
+-- One offer card's parse of its CardLine text (the CardTarget rule; see
+-- OfferCard): whether it is guaranteed, the body after that prefix, and the
+-- whole name, quality token and rest when they are known.
+local function ParseOfferLine(full, facts)
     local body, guaranteed = full, false
     if body:find("^%[Guaranteed offer%] ") then
         guaranteed = true
@@ -234,24 +309,51 @@ function M.OfferCard(text, marked, auto, facts, freeze)
             name, quality, rest = body:sub(1, first - 1), q, body:sub(last + 1)
         end
     end
-    local card = {full = full, marked = marked == true, guaranteed = guaranteed}
+    return guaranteed, body, name, quality, rest
+end
+
+-- A CardLine text as shown: the same line with its guarantee marker and
+-- quality word in the shown language. Only a line whose parse rebuilds the
+-- exact text is re-rendered; any other line (and its annotation words, which
+-- UserText owns) is kept as it is. Display only: never parse its result.
+-- `facts` (optional): the card's own CardFacts.
+function M.CardLineShown(text, facts)
+    local full = tostring(text or "")
+    local guaranteed, body, name, quality, rest = ParseOfferLine(full, facts)
+    local shown = body
+    if quality and name and rest and (name .. " (" .. quality .. ")" .. rest) == body then
+        shown = TargetShown(name, quality) .. rest
+    end
+    return (guaranteed and (GuaranteedShown() .. " ") or "") .. shown
+end
+
+function M.OfferCard(text, marked, auto, facts, freeze)
+    local full = tostring(text or "")
+    local guaranteed, body, name, quality, rest = ParseOfferLine(full, facts)
+    -- `full` is the complete line for the card's hover: display copy.
+    local card = {full = M.CardLineShown(full, facts), marked = marked == true, guaranteed = guaranteed}
     card.freeze = freeze == true and not card.marked
     local note
+    local unknown = "? " .. T("readout.value.quality_unknown", "Quality unknown")
     if quality then
         card.name = name
         note = rest:gsub("^%s+", ""):gsub("%s+$", "")
         if note == "" then note = nil end
-        card.quality = quality .. ((guaranteed and (card.marked or card.freeze)) and " - guaranteed" or "")
+        local word = QualityShown(quality)
+        if guaranteed and (card.marked or card.freeze) then
+            word = TF("readout.value.quality_guaranteed", {quality = word}, word .. " - guaranteed")
+        end
+        card.quality = word
     elseif name then
         -- The card's own facts hold no quality: the whole name, and what
         -- follows it is its annotation.
         card.name = name
         note = rest:gsub("^%s+", ""):gsub("%s+$", "")
         if note == "" then note = nil end
-        card.quality = "? Quality unknown"
+        card.quality = unknown
     else
         card.name = body
-        card.quality = "? Quality unknown"
+        card.quality = unknown
     end
     if card.marked then
         card.tag = auto == false and M.OFFER_PICK_TAG or M.OFFER_RECOMMENDED_TAG
@@ -269,32 +371,35 @@ end
 -- The offer heading: whose choice the current offer is. Auto unknown says
 -- only "Current offer".
 function M.OfferHeading(auto)
-    if auto == false then return "Current offer - you choose" end
-    if auto == true then return "Current offer - Auto ON" end
-    return "Current offer"
+    if auto == false then return T("readout.heading.offer_you_choose", "Current offer - you choose") end
+    if auto == true then return T("readout.heading.offer_auto_on", "Current offer - Auto ON") end
+    return T("readout.heading.offer", "Current offer")
 end
 
 -- The heading's forms, longest first, for a row that cannot hold the full
 -- one: each still says whose choice the offer is ("you choose" or "Auto ON").
 function M.OfferHeadingForms(auto)
-    if auto == false then return {M.OfferHeading(false), "Offer - you choose", "You choose"} end
-    if auto == true then return {M.OfferHeading(true), "Offer - Auto ON", "Auto ON"} end
-    return {M.OfferHeading(nil), "Offer"}
+    if auto == false then
+        return {M.OfferHeading(false), T("readout.heading.offer_you_choose_short", "Offer - you choose"),
+            T("readout.heading.you_choose", "You choose")}
+    end
+    if auto == true then
+        return {M.OfferHeading(true), T("readout.heading.offer_auto_on_short", "Offer - Auto ON"),
+            T("readout.heading.auto_on", "Auto ON")}
+    end
+    return {M.OfferHeading(nil), T("readout.heading.offer_short", "Offer")}
 end
 
 -- The waiting state (design "Waiting for Echo data"): the runtime's
 -- "unsynced" hold. Nothing is chosen while it lasts, and it is never "0
--- offers". The short form is the heading.
-M.WAITING_OFFER_HEADING = "... Waiting for offer data"
-M.WAITING_OFFER_NOTE = "... Waiting for current Echo data. Recommendations and automatic choices resume once "
-    .. "the offer is read. Nothing is chosen meanwhile."
+-- offers". The short form is the heading. WAITING_OFFER_HEADING and
+-- WAITING_OFFER_NOTE are shown fields (see SHOWN below).
 function M.WaitingForOffer(reason) return reason == "unsynced" end
 
 -- The Auto ON line under the offer (design "Auto ON, active"), from the
 -- permissions AutomationScopeLines lists: choosing is Auto's, saving needs its
--- own permission, and Saved Builds and Orb runs are never Auto's.
-M.AUTO_ON_NOTE = "Auto may choose offers and, if its save permission is on, save a better finished run over "
-    .. "this Saved Build. It never loads a build or starts Orbs."
+-- own permission, and Saved Builds and Orb runs are never Auto's. It is the
+-- shown field AUTO_ON_NOTE (see SHOWN below).
 
 -- Compact charges for the roll heading, "B:2 R:1 F:0". A count the game has
 -- not reported (charges.arrived == false, or no number) is "?", never 0;
@@ -338,14 +443,19 @@ end
 -- The legend of that line (its hover). Text only, from GameAdapter.Charges'
 -- own rules: counts the runtime last read for its decision; "?" before the
 -- game reports them; "~" when they look like the game's placeholder format.
+-- The first line explains the abbreviations of the shown row, so it is
+-- translated together with "readout.charge_counts" (the same letters); the
+-- "?" and "~" marks are ChargesLine's own code-owned marks and stay here.
 function M.ChargesLegend()
     return {
-        "B, R and F: the Banish, Reroll and Freeze charges left this run, as the game reported them when "
-            .. "Nexus made its last decision.",
-        "?: the game has not reported that count yet. It is unknown, not zero.",
-        "~: estimated. The counts look like the placeholder the game sends without real counts, so they may "
-            .. "be wrong.",
-        "Shown with Auto OFF, where you choose; with Auto ON Nexus uses these charges itself.",
+        T("readout.tooltip.charges_legend_letters", "B, R and F: the Banish, Reroll and Freeze charges left "
+            .. "this run, as the game reported them when Nexus made its last decision."),
+        "?: " .. T("readout.tooltip.charges_legend_unknown",
+            "the game has not reported that count yet. It is unknown, not zero."),
+        "~: " .. T("readout.tooltip.charges_legend_estimated", "estimated. The counts look like the "
+            .. "placeholder the game sends without real counts, so they may be wrong."),
+        T("readout.tooltip.charges_legend_auto",
+            "Shown with Auto OFF, where you choose; with Auto ON Nexus uses these charges itself."),
     }
 end
 
@@ -358,24 +468,24 @@ end
 -- never decides it, and an unlisted kind is said as unknown, never as a
 -- success or as zero.
 local STATUS = {
-    confirmed   = {glyph = "+",   word = "Confirmed"},
-    requested   = {glyph = ">",   word = "Request prepared"},
-    awaiting    = {glyph = "...", word = "Awaiting result"},
-    choice      = {glyph = ">",   word = "Waiting for choice"},
-    offer       = {glyph = "...", word = "Waiting for offer"},
-    paused      = {glyph = "=",   word = "Paused"},
-    unconfirmed = {glyph = "?",   word = "Unconfirmed"},
-    spendUnconfirmed = {glyph = "?", word = "Spend not confirmed"},
-    notSent     = {glyph = "-",   word = "Not sent"},
-    sent        = {glyph = "->",  word = "Sent, not confirmed"},
-    stored      = {glyph = "*",   word = "Stored on this client"},
-    refused     = {glyph = "x",   word = "Refused"},
-    unavailable = {glyph = "!",   word = "Unavailable"},
-    estimated   = {glyph = "~",   word = "Estimated"},
-    stale       = {glyph = "?",   word = "Stale"},
-    loading     = {glyph = "...", word = "Loading"},
-    ready       = {glyph = "+",   word = "Ready"},
-    unknown     = {glyph = "?",   word = "Unknown"},
+    confirmed   = {glyph = "+",   word = "Confirmed", key = "readout.status.state_confirmed"},
+    requested   = {glyph = ">",   word = "Request prepared", key = "readout.status.state_requested"},
+    awaiting    = {glyph = "...", word = "Awaiting result", key = "readout.status.state_awaiting"},
+    choice      = {glyph = ">",   word = "Waiting for choice", key = "readout.status.state_choice"},
+    offer       = {glyph = "...", word = "Waiting for offer", key = "readout.status.state_offer"},
+    paused      = {glyph = "=",   word = "Paused", key = "readout.status.state_paused"},
+    unconfirmed = {glyph = "?",   word = "Unconfirmed", key = "readout.status.state_unconfirmed"},
+    spendUnconfirmed = {glyph = "?", word = "Spend not confirmed", key = "readout.status.state_spend_unconfirmed"},
+    notSent     = {glyph = "-",   word = "Not sent", key = "readout.status.state_not_sent"},
+    sent        = {glyph = "->",  word = "Sent, not confirmed", key = "readout.status.state_sent"},
+    stored      = {glyph = "*",   word = "Stored on this client", key = "readout.status.state_stored"},
+    refused     = {glyph = "x",   word = "Refused", key = "readout.status.state_refused"},
+    unavailable = {glyph = "!",   word = "Unavailable", key = "readout.status.state_unavailable"},
+    estimated   = {glyph = "~",   word = "Estimated", key = "readout.status.state_estimated"},
+    stale       = {glyph = "?",   word = "Stale", key = "readout.status.state_stale"},
+    loading     = {glyph = "...", word = "Loading", key = "readout.status.state_loading"},
+    ready       = {glyph = "+",   word = "Ready", key = "readout.status.state_ready"},
+    unknown     = {glyph = "?",   word = "Unknown", key = "readout.status.state_unknown"},
 }
 M.STATUS_KINDS = {"confirmed", "requested", "awaiting", "choice", "offer", "paused", "unconfirmed", "spendUnconfirmed", "notSent",
     "sent", "stored", "refused", "unavailable", "estimated", "stale", "loading", "ready", "unknown"}
@@ -386,15 +496,21 @@ M.STATUS_KINDS = {"confirmed", "requested", "awaiting", "choice", "offer", "paus
 function M.StatusParts(kind)
     local entry = type(kind) == "string" and STATUS[kind] or nil
     if not entry then kind, entry = "unknown", STATUS.unknown end
-    return {kind = kind, glyph = entry.glyph, word = entry.word}
+    -- The word is display copy in the shown language; the kind and glyph
+    -- are code-owned. OrbHistory.RESULTS holds the same English words as
+    -- its own labels (orb family); both must say the same state.
+    return {kind = kind, glyph = entry.glyph, word = T(entry.key, entry.word)}
 end
 
 -- "<glyph> <word>", or "<glyph> <word>: <detail>" with a nonempty detail.
 function M.StatusText(kind, detail)
     local s = M.StatusParts(kind)
-    local text = s.glyph .. " " .. s.word
-    if detail ~= nil and tostring(detail) ~= "" then text = text .. ": " .. tostring(detail) end
-    return text
+    if detail ~= nil and tostring(detail) ~= "" then
+        local words = s.word .. ": " .. tostring(detail)
+        return s.glyph .. " " .. TF("readout.status.state_with_detail",
+            {state = s.word, detail = tostring(detail)}, words)
+    end
+    return s.glyph .. " " .. s.word
 end
 
 -- A count as shown: a whole number, "~N" when the caller says it is
@@ -408,22 +524,26 @@ end
 
 -- Plain words for why a selected Auto is not acting (the runtime's
 -- AutoAllowed and effective-state reasons). Anything else keeps the
--- player wording of UserText. Text only; it changes no gate.
+-- player wording of UserText. Text only; it changes no gate. The raw reason
+-- is only the lookup input here; it is never translated or matched again.
 local HOLD_TEXT = {
-    ["manual mode"] = "Auto is OFF: Nexus only recommends.",
-    ["loading screen (waiting for world entry)"] = "A loading screen is in progress; Nexus waits until you "
-        .. "are in the world.",
-    ["settling after world entry"] = "Nexus waits a few seconds after a loading screen before it acts.",
-    ["user acting"] = "You made an Echo choice in the game's window; Nexus waits about 3 seconds before it "
-        .. "acts again.",
-    ["Another Echo automation addon is loaded -- disable it"] = "Another Echo automation addon is loaded; "
-        .. "Nexus does not act while it is enabled. Disable that addon to let Nexus act.",
-    ["client auto-accept re-enabled"] = "The game's own option to accept loadout Echoes automatically is on; "
-        .. "Nexus does not act while it is on. Turn it off in the game's options.",
+    ["manual mode"] = {"readout.status.hold_manual", "Auto is OFF: Nexus only recommends."},
+    ["loading screen (waiting for world entry)"] = {"readout.status.hold_loading_screen", "A loading screen is "
+        .. "in progress; Nexus waits until you are in the world."},
+    ["settling after world entry"] = {"readout.status.hold_settling",
+        "Nexus waits a few seconds after a loading screen before it acts."},
+    ["user acting"] = {"readout.status.hold_user_acting", "You made an Echo choice in the game's window; Nexus "
+        .. "waits about 3 seconds before it acts again."},
+    ["Another Echo automation addon is loaded -- disable it"] = {"readout.status.hold_other_addon", "Another Echo "
+        .. "automation addon is loaded; Nexus does not act while it is enabled. Disable that addon to let Nexus act."},
+    ["client auto-accept re-enabled"] = {"readout.status.hold_client_auto_accept", "The game's own option to "
+        .. "accept loadout Echoes automatically is on; Nexus does not act while it is on. Turn it off in the "
+        .. "game's options."},
 }
 function M.AutoHoldText(reason)
     local s = tostring(reason or "")
-    if HOLD_TEXT[s] then return HOLD_TEXT[s] end
+    local entry = HOLD_TEXT[s]
+    if entry then return T(entry[1], entry[2]) end
     local text = Nexus.UserText and Nexus.UserText.Message
     return type(text) == "function" and text(s) or s
 end
@@ -431,24 +551,27 @@ end
 -- What the player can do about a hold, for the same reasons. A reason whose
 -- own text already says what to do (an unresolved action across a loading
 -- screen) gets none. Text only.
+local HINT_BY_ITSELF = {"readout.status.help_continues", "What helps: nothing; it continues by itself."}
 local HELP_HINT = {
-    ["loading screen (waiting for world entry)"] = "What helps: nothing; it continues by itself.",
-    ["settling after world entry"] = "What helps: nothing; it continues by itself.",
-    ["user acting"] = "What helps: wait without choosing; it continues by itself.",
-    ["Another Echo automation addon is loaded -- disable it"] = "What helps: disable the other addon in the "
-        .. "AddOns list at character selection.",
-    ["client auto-accept re-enabled"] = "What helps: turn off the game's option to accept loadout Echoes "
-        .. "automatically.",
+    ["loading screen (waiting for world entry)"] = HINT_BY_ITSELF,
+    ["settling after world entry"] = HINT_BY_ITSELF,
+    ["user acting"] = {"readout.status.help_wait_without_choosing",
+        "What helps: wait without choosing; it continues by itself."},
+    ["Another Echo automation addon is loaded -- disable it"] = {"readout.status.help_disable_addon",
+        "What helps: disable the other addon in the AddOns list at character selection."},
+    ["client auto-accept re-enabled"] = {"readout.status.help_client_auto_accept",
+        "What helps: turn off the game's option to accept loadout Echoes automatically."},
 }
 function M.AutoHelpHint(reason)
     local s = tostring(reason or "")
-    if HELP_HINT[s] then return HELP_HINT[s] end
+    local entry = HELP_HINT[s]
+    if entry then return T(entry[1], entry[2]) end
     if s == "" or s == "manual mode" or s:find("no confirmed result for", 1, true) then return nil end
     if s:find("Orb", 1, true) or s:find("orb", 1, true) then
-        return "What helps: finish, pause or stop the Orb run in Orbs (... menu), or wait until Nexus can "
-            .. "read the Orb state."
+        return T("readout.status.help_orb", "What helps: finish, pause or stop the Orb run in Orbs (... menu), "
+            .. "or wait until Nexus can read the Orb state.")
     end
-    return "What helps: point at the Auto button for details."
+    return T("readout.status.help_point_auto", "What helps: point at the Auto button for details.")
 end
 
 -- The inline line for a selected Auto that is not acting: the plain reason
@@ -456,7 +579,12 @@ end
 function M.AutoHoldNote(reason)
     if M.WaitingForOffer(reason) then return M.WAITING_OFFER_NOTE end
     local hint = M.AutoHelpHint(reason)
-    return "Paused: " .. M.AutoHoldText(reason) .. (hint and (" " .. hint) or "")
+    local text = M.AutoHoldText(reason)
+    if hint then
+        return TF("readout.status.paused_with_hint", {reason = text, hint = hint},
+            "Paused: " .. text .. " " .. hint)
+    end
+    return TF("readout.status.paused_reason", {reason = text}, "Paused: " .. text)
 end
 
 -- The inline line for an Auto click that left Auto OFF without opening the
@@ -464,17 +592,19 @@ end
 -- "warning" (the warning is unavailable), else the runtime's status line.
 function M.AutoRefusalText(kind, status)
     if kind == "orb" then
-        return "Auto stayed OFF: an Orb run is active or unresolved. What helps: finish or stop it in "
-            .. "Orbs (... menu, Orbs / Lost Memories)."
+        return T("readout.status.auto_refused_orb", "Auto stayed OFF: an Orb run is active or unresolved. "
+            .. "What helps: finish or stop it in Orbs (... menu, Orbs / Lost Memories).")
     elseif kind == "warning" then
-        return "Auto stayed OFF: its overwrite warning is unavailable, and Auto never turns ON without it. "
-            .. "What helps: type /nexus report and report it."
+        local command = "/nexus report"
+        return TF("readout.status.auto_refused_warning", {command = command}, "Auto stayed OFF: its overwrite "
+            .. "warning is unavailable, and Auto never turns ON without it. What helps: type " .. command
+            .. " and report it.")
     end
     local s = tostring(status or "")
     if s == "" then
-        return "Auto stayed OFF. What helps: point at the Auto button for details."
+        return T("readout.status.auto_refused", "Auto stayed OFF. What helps: point at the Auto button for details.")
     end
-    return "Auto stayed OFF: " .. s
+    return TF("readout.status.auto_refused_status", {status = s}, "Auto stayed OFF: " .. s)
 end
 
 -- The Automation scope in plain lines, from facts the caller read without
@@ -482,7 +612,8 @@ end
 -- acting, if it is not), `settings` (Store.Settings) and `readOnly` (saved
 -- data is read-only). Each line names a permission the runtime actually
 -- gates on, its current value and the existing control that changes it.
--- Reading it changes nothing.
+-- Reading it changes nothing. Setting names (autoPick ...) and slash
+-- commands are code-owned slot values, never translated.
 -- How each gate reads a permission that was never saved: Reroll and Freeze
 -- are blocked only by a saved false; every other gate needs a saved true.
 local UNSET_ACTS_ON = {autoReroll = true, autoFreeze = true}
@@ -490,37 +621,63 @@ local function OnOff(settings, key, raw)
     -- Not `settings[key] or nil`: that turns a saved false into "not set".
     local value
     if type(settings) == "table" then value = settings[key] end
-    if value == true then return "on" elseif value == false then return "off" end
-    if raw then return "not set" end
-    return UNSET_ACTS_ON[key] and "not set (acts as on)" or "not set (acts as off)"
+    if value == true then return T("readout.value.setting_on", "on") end
+    if value == false then return T("readout.value.setting_off", "off") end
+    if raw then return T("readout.value.setting_not_set", "not set") end
+    if UNSET_ACTS_ON[key] then return T("readout.value.setting_unset_acts_on", "not set (acts as on)") end
+    return T("readout.value.setting_unset_acts_off", "not set (acts as off)")
+end
+-- One permission line: `key` its template over the saved setting name, its
+-- shown value and (for two lines) the slash command; `english` the legacy
+-- line built from the same values.
+local function Permission(key, setting, value, english, command)
+    return TF(key, {setting = setting, value = value, command = command}, english)
 end
 function M.AutomationScopeLines(facts)
     facts = type(facts) == "table" and facts or {}
     local s = facts.settings
     local lines = {}
     lines[#lines + 1] = facts.selected
-        and "Auto: ON for this session. The selection is OFF again after every login or reload."
-        or "Auto: OFF. Nexus only recommends; it takes, banishes, rerolls, freezes, saves and locks nothing."
+        and T("readout.body.scope_auto_on", "Auto: ON for this session. The selection is OFF again after every "
+            .. "login or reload.")
+        or T("readout.body.scope_auto_off", "Auto: OFF. Nexus only recommends; it takes, banishes, rerolls, "
+            .. "freezes, saves and locks nothing.")
     if facts.selected and facts.held then
-        lines[#lines + 1] = "Paused because: " .. M.AutoHoldText(facts.held)
+        local held = M.AutoHoldText(facts.held)
+        lines[#lines + 1] = TF("readout.body.scope_paused_because", {reason = held}, "Paused because: " .. held)
     end
-    lines[#lines + 1] = "With Auto ON, Nexus may only do what these permissions allow:"
-    lines[#lines + 1] = "- Take needed Echoes (autoPick): " .. OnOff(s, "autoPick")
-    lines[#lines + 1] = "- Banish (autoBanish): " .. OnOff(s, "autoBanish")
-    lines[#lines + 1] = "- Reroll (autoReroll): " .. OnOff(s, "autoReroll") .. "; change with /nexus reroll on|off"
-    lines[#lines + 1] = "- Freeze (autoFreeze): " .. OnOff(s, "autoFreeze") .. "; change with /nexus freeze on|off"
-    lines[#lines + 1] = "- Echo availability controls (tomes) (autoDisable): " .. OnOff(s, "autoDisable")
-        .. "; disables off-Wishlist and re-enables Wishlist controls"
-    lines[#lines + 1] = "- Save a better finished level-80 run over the active Saved Build (autoSave): "
-        .. OnOff(s, "autoSave") .. "; no in-game control, and Auto OFF stops it"
-    lines[#lines + 1] = "- Lock Wishlist Echoes into locked slots (autoLockEchoes): " .. OnOff(s, "autoLockEchoes")
-        .. "; its own option in the Wishlist editor"
-    lines[#lines + 1] = "- Activate a Saved Build: never. Nexus does not activate or load Saved Builds; the "
-        .. "saved autoActivate value (" .. OnOff(s, "autoActivate", true) .. ") is not used by any action."
-    lines[#lines + 1] = "- Orb runs: never by Auto; each one needs its own approval in the Orb window."
+    lines[#lines + 1] = T("readout.body.scope_intro", "With Auto ON, Nexus may only do what these permissions allow:")
+    local v = OnOff(s, "autoPick")
+    lines[#lines + 1] = "- " .. Permission("readout.body.scope_take", "autoPick", v,
+        "Take needed Echoes (autoPick): " .. v)
+    v = OnOff(s, "autoBanish")
+    lines[#lines + 1] = "- " .. Permission("readout.body.scope_banish", "autoBanish", v, "Banish (autoBanish): " .. v)
+    v = OnOff(s, "autoReroll")
+    lines[#lines + 1] = "- " .. Permission("readout.body.scope_reroll", "autoReroll", v,
+        "Reroll (autoReroll): " .. v .. "; change with /nexus reroll on|off", "/nexus reroll on|off")
+    v = OnOff(s, "autoFreeze")
+    lines[#lines + 1] = "- " .. Permission("readout.body.scope_freeze", "autoFreeze", v,
+        "Freeze (autoFreeze): " .. v .. "; change with /nexus freeze on|off", "/nexus freeze on|off")
+    v = OnOff(s, "autoDisable")
+    lines[#lines + 1] = "- " .. Permission("readout.body.scope_tomes", "autoDisable", v,
+        "Echo availability controls (tomes) (autoDisable): " .. v
+        .. "; disables off-Wishlist and re-enables Wishlist controls")
+    v = OnOff(s, "autoSave")
+    lines[#lines + 1] = "- " .. Permission("readout.body.scope_save", "autoSave", v,
+        "Save a better finished level-80 run over the active Saved Build (autoSave): " .. v
+        .. "; no in-game control, and Auto OFF stops it")
+    v = OnOff(s, "autoLockEchoes")
+    lines[#lines + 1] = "- " .. Permission("readout.body.scope_lock", "autoLockEchoes", v,
+        "Lock Wishlist Echoes into locked slots (autoLockEchoes): " .. v .. "; its own option in the Wishlist editor")
+    v = OnOff(s, "autoActivate", true)
+    lines[#lines + 1] = "- " .. Permission("readout.body.scope_activate", "autoActivate", v,
+        "Activate a Saved Build: never. Nexus does not activate or load Saved Builds; the saved autoActivate value ("
+        .. v .. ") is not used by any action.")
+    lines[#lines + 1] = "- " .. T("readout.body.scope_orbs",
+        "Orb runs: never by Auto; each one needs its own approval in the Orb window.")
     if facts.readOnly then
-        lines[#lines + 1] = "Saved data is read-only: a permission counts as on only when it was saved as on, "
-            .. "and a change lasts this session only."
+        lines[#lines + 1] = T("readout.body.scope_read_only", "Saved data is read-only: a permission counts as on "
+            .. "only when it was saved as on, and a change lasts this session only.")
     end
     return lines
 end
@@ -528,18 +685,15 @@ end
 -- What the tome permission (autoDisable) does, from AutomationRuntime StepArm:
 -- with Auto acting it turns off tomes the Wishlist does not use and turns
 -- needed ones back on; nothing turns them back on when Auto stops. Shared by
--- the Auto warning; Help carries the same paragraph.
-M.TOME_PARAGRAPH = "Tomes: with Auto ON and the tome permission (autoDisable) on, once the game's tome data is "
-    .. "ready Nexus turns off Echo tomes your Wishlist does not use and turns back on tomes it needs, one change "
-    .. "about every half second. It never turns off a tome you opted out of. Nexus does not turn tomes back on "
-    .. "when you turn Auto OFF, log out or change the Wishlist: it turns back on only tomes a Wishlist needs (or "
-    .. "that you opted out of), and only while Auto is ON. The tome list in the Echo Journal shows their state."
+-- the Auto warning; Help carries the same paragraph. It is the shown field
+-- TOME_PARAGRAPH (see SHOWN below).
 
 -- The rows of the Automation settings menu, from facts the caller read
 -- without acting (as AutomationScopeLines). Each row: `text`; `kind` "title",
 -- "info" (shown, not changeable here), "toggle" (an existing setter:
 -- `command` is the /nexus argument to run, `checked` the current value),
--- "editor" (the option lives in the Wishlist editor) or "help". Pure.
+-- "editor" (the option lives in the Wishlist editor) or "help". Pure. `text`
+-- is display copy; `kind`, `key` and `command` are the row's identity.
 function M.AutomationSettingsRows(facts)
     facts = type(facts) == "table" and facts or {}
     local s = facts.settings
@@ -553,35 +707,48 @@ function M.AutomationSettingsRows(facts)
         if type(s) == "table" then return s[key] end
         return nil
     end
-    Add("title", "Automation settings")
-    Add("info", facts.selected and "Auto: ON for this session (the Auto button turns it OFF)"
-        or "Auto: OFF (the Auto button turns it ON after its warning)")
+    Add("title", T("readout.menu.auto_settings_title", "Automation settings"))
+    Add("info", facts.selected and T("readout.menu.auto_selected_on", "Auto: ON for this session (the Auto button "
+        .. "turns it OFF)") or T("readout.menu.auto_selected_off", "Auto: OFF (the Auto button turns it ON after "
+        .. "its warning)"))
     -- The two permissions that have an in-game setter (/nexus reroll|freeze).
-    for _, item in ipairs({{"autoReroll", "Allow Reroll", "reroll"}, {"autoFreeze", "Allow Freeze", "freeze"}}) do
+    for _, item in ipairs({{"autoReroll", "Allow Reroll", "reroll", "readout.menu.allow_reroll"},
+        {"autoFreeze", "Allow Freeze", "freeze", "readout.menu.allow_freeze"}}) do
         local on = Value(item[1]) ~= false
-        Add("toggle", item[2] .. " (" .. item[1] .. "): " .. OnOff(s, item[1]),
+        local v = OnOff(s, item[1])
+        Add("toggle", Permission(item[4], item[1], v, item[2] .. " (" .. item[1] .. "): " .. v),
             {key = item[1], checked = on, command = item[3] .. (on and " off" or " on")})
     end
-    Add("info", "Take needed Echoes (autoPick): " .. OnOff(s, "autoPick") .. "; no in-game switch")
-    Add("info", "Banish (autoBanish): " .. OnOff(s, "autoBanish") .. "; no in-game switch")
-    Add("info", "Turn tomes off and on (autoDisable): " .. OnOff(s, "autoDisable") .. "; no in-game switch")
-    Add("info", "Save a better finished run over the active Saved Build (autoSave): " .. OnOff(s, "autoSave")
-        .. "; no in-game switch; Auto OFF stops it")
-    Add("editor", "Lock Wishlist Echoes (autoLockEchoes): " .. OnOff(s, "autoLockEchoes")
-        .. "; set in the Wishlist Editor...", {key = "autoLockEchoes"})
-    Add("info", "Activate a Saved Build: never (the saved autoActivate value is not used)")
-    Add("info", "Orb runs: never by Auto; each needs its own approval in Orbs")
+    local v = OnOff(s, "autoPick")
+    Add("info", Permission("readout.menu.take_needed", "autoPick", v,
+        "Take needed Echoes (autoPick): " .. v .. "; no in-game switch"))
+    v = OnOff(s, "autoBanish")
+    Add("info", Permission("readout.menu.banish", "autoBanish", v, "Banish (autoBanish): " .. v .. "; no in-game switch"))
+    v = OnOff(s, "autoDisable")
+    Add("info", Permission("readout.menu.tomes", "autoDisable", v,
+        "Turn tomes off and on (autoDisable): " .. v .. "; no in-game switch"))
+    v = OnOff(s, "autoSave")
+    Add("info", Permission("readout.menu.save_run", "autoSave", v,
+        "Save a better finished run over the active Saved Build (autoSave): " .. v
+        .. "; no in-game switch; Auto OFF stops it"))
+    v = OnOff(s, "autoLockEchoes")
+    Add("editor", Permission("readout.menu.lock_echoes", "autoLockEchoes", v,
+        "Lock Wishlist Echoes (autoLockEchoes): " .. v .. "; set in the Wishlist Editor..."), {key = "autoLockEchoes"})
+    Add("info", TF("readout.menu.activate_never", {setting = "autoActivate"},
+        "Activate a Saved Build: never (the saved autoActivate value is not used)"))
+    Add("info", T("readout.menu.orb_never", "Orb runs: never by Auto; each needs its own approval in Orbs"))
     if facts.readOnly then
-        Add("info", "Saved data is read-only: a change lasts this session only")
+        Add("info", T("readout.menu.read_only", "Saved data is read-only: a change lasts this session only"))
     end
     -- The manual's Auto page, named Reference (Help is the guided coach).
-    Add("help", "What Auto may do (Reference)...")
+    Add("help", T("readout.menu.auto_reference", "What Auto may do (Reference)..."))
     return rows
 end
 
 -- Next n predicted guaranteed arrivals, "(predicted)" suffixed --
 -- injection order is measured but not version-stable, never state it
 -- as fact. queue = Ratchet.PredictQueue output (entries pre-bridged).
+-- The wanted and the plain form are two keys, chosen here as before.
 function M.QueueLines(queue, n)
     local out = {}
     if type(queue) ~= "table" then return out end
@@ -591,9 +758,41 @@ function M.QueueLines(queue, n)
     for i = 1, math.min(#entries, limit) do
         local e = entries[i]
         if type(e) == "table" then
-            out[#out + 1] = string.format("%d. %s%s (predicted)",
-                i, NameOf(e), e.wanted and " [wanted]" or "")
+            local index, name = string.format("%d", i), NameOf(e)
+            if e.wanted then
+                out[#out + 1] = TF("readout.value.queue_wanted", {index = index, name = name},
+                    index .. ". " .. name .. " [wanted] (predicted)")
+            else
+                out[#out + 1] = TF("readout.value.queue_entry", {index = index, name = name},
+                    index .. ". " .. name .. " (predicted)")
+            end
         end
     end
     return out
 end
+
+-- The shown fields (see the note above OfferCard): a code-owned mark, the
+-- key and its English words, and a code-owned closing mark. M holds none of
+-- these names, so each read resolves here, in the session's language.
+local SHOWN = {
+    OFFER_PICK_TAG = {"> ", "readout.label.offer_pick", "Wishlist pick", ""},
+    OFFER_RECOMMENDED_TAG = {"> ", "readout.label.offer_recommended", "Recommended", ""},
+    OFFER_FREEZE_TAG = {"> ", "readout.label.offer_freeze", "Freeze", ""},
+    OFFER_GUARANTEED_TAG = {"[", "readout.label.guaranteed_offer", "Guaranteed offer", "]"},
+    WAITING_OFFER_HEADING = {"... ", "readout.heading.waiting_offer_data", "Waiting for offer data", ""},
+    WAITING_OFFER_NOTE = {"... ", "readout.note.waiting_offer_data", "Waiting for current Echo data. "
+        .. "Recommendations and automatic choices resume once the offer is read. Nothing is chosen meanwhile.", ""},
+    AUTO_ON_NOTE = {"", "readout.note.auto_on_scope", "Auto may choose offers and, if its save permission is on, "
+        .. "save a better finished run over this Saved Build. It never loads a build or starts Orbs.", ""},
+    TOME_PARAGRAPH = {"", "readout.body.tome_permission", "Tomes: with Auto ON and the tome permission "
+        .. "(autoDisable) on, once the game's tome data is ready Nexus turns off Echo tomes your Wishlist does not "
+        .. "use and turns back on tomes it needs, one change about every half second. It never turns off a tome you "
+        .. "opted out of. Nexus does not turn tomes back on when you turn Auto OFF, log out or change the Wishlist: "
+        .. "it turns back on only tomes a Wishlist needs (or that you opted out of), and only while Auto is ON. The "
+        .. "tome list in the Echo Journal shows their state.", ""},
+}
+setmetatable(M, {__index = function(_, name)
+    local entry = SHOWN[name]
+    if entry then return entry[1] .. T(entry[2], entry[3]) .. entry[4] end
+    return nil
+end})
