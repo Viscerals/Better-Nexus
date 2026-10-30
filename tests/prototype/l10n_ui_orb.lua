@@ -212,6 +212,14 @@ check(shown:find('^Orb run: Running %- Waiting for the Orb offer; Used 0 of 3 ap
 check(full:find('Orbs used: 0 of 3 approved. ',1,true)~=nil,'panel line hover keeps the full usage: '..full)
 local mini=UI.ShowMini()
 check(mini.title:GetText()=='Orb run status' and mini.usage:GetText()=='Orbs used: 0 of 3 approved','mini English')
+-- R5 copy correction: the usage hover names the run's current approved maximum.
+do
+ local lines=S.CaptureTooltip(mini.usageHit:GetScript('OnEnter'),mini.usageHit)
+ local want='Orbs this run has used, against its current approved maximum. Unavailable means it could not be read; it is not 0.'
+ local found=false
+ for _,l in ipairs(lines) do if l==want then found=true end end
+ check(found,'R5 mini_usage: the usage hover says the corrected English: '..table.concat(lines,' | '))
+end
 check(mini.pending:GetText()=='Pending: 1 Orb requested, not confirmed yet','mini pending English: '..mini.pending:GetText())
 local strip=assert(Strip(),'the main-panel Orb strip is attached by the real panel')
 strip.refresh()

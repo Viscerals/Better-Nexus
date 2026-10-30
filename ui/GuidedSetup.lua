@@ -156,6 +156,11 @@ end
 -- Translated static words handed out by the view (bounded by the catalog):
 -- Fmt never formats them.
 local LOCALIZED = {}
+-- The English copy's own printf leaves ("Step %d of %d", ...): LocalizeCopy
+-- leaves them raw, and every Fmt caller passes one with its values. Such a
+-- leaf is formatted as that leaf (its key, counts and fallback) even when a
+-- static leaf of another key was translated to the same characters.
+local RAW_PRINTF = {}
 -- The view is built from the live copy table on every call (a caller or a
 -- test may change a word in place), with two memos: a leaf's key by its
 -- table and field, and a key's shown text by the exact English it was
@@ -199,6 +204,7 @@ local function LocalizeCopy(node, path, seam)
         elseif type(v) == 'string' and not COPY_SKIP[k] and not v:find('%', 1, true) and v:find('%a%a') then
             copy[k] = Shown(seam, LeafKey(node, k, path, seg), v)
         else
+            if type(v) == 'string' and v:find('%', 1, true) then RAW_PRINTF[v] = true end
             copy[k] = v
         end
     end
@@ -349,10 +355,12 @@ local function FormatCopy(spec, ...)
 end
 -- The legacy printf result, unless the text is a printf leaf of the copy
 -- (its template in the active language) or a translated word (never
--- formatted). A failing format still shows the text as it was.
+-- formatted). Origin decides, not contents: a translated word that happens
+-- to equal an English printf leaf of the copy does not stop that leaf from
+-- being formatted. A failing format still shows the text as it was.
 local function Fmt(text, ...)
     local raw = tostring(text or '')
-    if LOCALIZED[raw] then return raw end
+    if LOCALIZED[raw] and not RAW_PRINTF[raw] and not GUIDE_FORMATS[raw] then return raw end
     local ok, s = pcall(string.format, raw, ...)
     if not ok then return raw end
     local spec = GUIDE_FORMATS[raw]

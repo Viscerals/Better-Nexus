@@ -4071,7 +4071,7 @@ local DECLARATIONS = {
     ["editor.note.manage_removals_reason"] = {kind = "template", fields = {"reason"}, slots = {"text"}, resultLimit = 1090},
     ["editor.placeholder.search"] = {kind = "text"},
     ["editor.popup.assign_later"] = {kind = "text"},
-    ["editor.popup.auto_replace"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 1380},
+    ["editor.popup.auto_replace"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 2048, lines = true},
     ["editor.popup.auto_replace_paused"] = {kind = "template", fields = {"reason", "label"}, slots = {"text", "text"}, resultLimit = 2048, lines = true},
     ["editor.popup.auto_save_off"] = {kind = "template", fields = {"label"}, slots = {"text"}, resultLimit = 1256},
     ["editor.popup.auto_turn_off"] = {kind = "text"},

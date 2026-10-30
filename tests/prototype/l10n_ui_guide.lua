@@ -488,9 +488,43 @@ do
  U.Show();G.SetPath('new');G.GoTo('target');U.Render()
  local guide=Nexus.UserText.Guide
  check(U.VisibleText():find(guide.target.title,1,true)~=nil and U.VisibleText():find('Step 3 of 7',1,true)~=nil,'P5 coach shows UserText\'s exact English')
+ -- R5 copy correction (paired raw leaf and catalog): the Saved Build uses the
+ -- Wishlist; choosing the target is only a choice.
+ local why='A Saved Build is the build slot the game loads. Choose which Saved Build should use your Wishlist.'
+ check(guide.why.target==why and L.Text('guide.body.why_target')==why,'R5 why_target: the raw leaf and the catalog say the same corrected English')
+ check(U.VisibleText():find(why,1,true)~=nil and not U.VisibleText():find('will follow',1,true),'R5 why_target: the target step shows the corrected English: '..U.VisibleText():sub(1,300))
  U.Hide()
  check(L.Format('guide.label.kicker',{step=L.Count(3),total=L.Count(7)})=='Step 3 of 7','P5 template English')
  check(L.Diagnostics().misses==0,'P5 English boot and display resolved without any fallback')
+end
+
+-- R5 (FULLUI-GUIDE-SPEC-P2-01): a valid static translation of one leaf
+-- (guide.button.next = "Step %d of %d", literal percent signs) must not make
+-- an unrelated printf leaf of the same English contents (the step kicker)
+-- skip its own counts, key and fallback. Real startup -> Show -> Wishlist
+-- step -> Render -> VisibleText, one fresh boot per case.
+do
+ local function Coach(entries)
+  local H=Boot('wrap',entries)
+  local U,G=Nexus.GuidedSetupUI,Nexus.GuidedSetup
+  local before=Effects(H)
+  U.Show();G.SetPath('new');G.GoTo('wishlist');U.Render()
+  return U.VisibleText(),U,H,before
+ end
+ -- 1. Colliding label, missing kicker entry: the kicker's exact English counts.
+ local e=S.PseudoEntries();e['guide.button.next']='Step %d of %d';e['guide.label.kicker']=nil
+ local text,U=Coach(e)
+ check(text:find('Step 2 of 7',1,true)~=nil,'R5 guide: a missing kicker falls back to exact English with its counts despite the colliding label: '..text:sub(1,200))
+ check(buttonWith(_G.NexusGuidedSetup,'Step %d of %d')~=nil,'R5 guide: the colliding static label is shown literally on its button')
+ -- 2. Colliding label, independent translated kicker: its own template and counts.
+ e=S.PseudoEntries();e['guide.button.next']='Step %d of %d';e['guide.label.kicker']='Schritt {step}/{total}'
+ text=Coach(e)
+ check(text:find('Schritt 2/7',1,true)~=nil and not text:find('Schritt {step}',1,true),'R5 guide: the kicker keeps its own translation and counts: '..text:sub(1,200))
+ -- 3. Non-colliding literal percent: shown literally; the kicker is unaffected.
+ e=S.PseudoEntries();e['guide.button.next']='Weiter (100%)'
+ local text3=Coach(e)
+ check(buttonWith(_G.NexusGuidedSetup,'Weiter (100%)')~=nil,'R5 guide: a literal percent in a static label stays literal')
+ check(text3:find(P('Step 2 of 7'),1,true)~=nil,'R5 guide: the translated kicker keeps its counts beside a literal-percent label')
 end
 
 if #failed>0 then error('l10n_ui_guide: '..#failed..' of '..checks..' checks failed; first: '..failed[1]) end

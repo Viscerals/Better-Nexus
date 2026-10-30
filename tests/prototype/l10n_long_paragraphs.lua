@@ -24,7 +24,9 @@ local function check(v,m) assert(v,m);checks=checks+1 end
 
 local NINE={'panel.body.extra_list_note','panel.note.language_scope','panel.tooltip.details_body','panel.tooltip.size_explained',
  'orb.tooltip.mini_missing','editor.popup.auto_replace_paused','editor.popup.context_changed','editor.chat.imported_draft_many',
- 'editor.chat.imported_draft_one'}
+ 'editor.chat.imported_draft_one',
+ -- R5 (Source86): the tenth paragraph, the unpaused Auto line (same contract move).
+ 'editor.popup.auto_replace'}
 -- The v2 English bytes of the eight unchanged paragraphs, and the v4 scope note.
 local ENGLISH={
  ['panel.body.extra_list_note']="Rolled copies above your exact Wishlist targets, including unrequested or different-quality copies. This is a comparison, not a delete action. Locked copies protected by this Saved Build are never listed here.",
@@ -36,8 +38,9 @@ local ENGLISH={
  ['editor.popup.context_changed']="The character or selected Saved Build changed while your Plan draft was hidden. Discard draft deletes that unsaved draft and opens Plan for the current character and Saved Build, without it. Keep draft leaves it set aside as it is.",
  ['editor.chat.imported_draft_many']="imported {count} Echo entries as new wishlist '{name}'. Review this draft; Create & assign saves it and assigns it to the loadout shown by the editor, Create unassigned saves it without an assignment.",
  ['editor.chat.imported_draft_one']="imported {count} Echo entry as new wishlist '{name}'. Review this draft; Create & assign saves it and assigns it to the loadout shown by the editor, Create unassigned saves it without an assignment.",
+ ['editor.popup.auto_replace']="Auto is ON: when {label} is active and a finished run at level 80 passes Auto's save checks, Nexus may replace that Saved Build with the run; this save can make Auto check again.",
 }
-local BOUND={['editor.popup.auto_replace_paused']=1024,['editor.chat.imported_draft_many']=1024,['editor.chat.imported_draft_one']=1024}
+local BOUND={['editor.popup.auto_replace_paused']=1024,['editor.popup.auto_replace']=1024,['editor.chat.imported_draft_many']=1024,['editor.chat.imported_draft_one']=1024}
 
 local H
 local function Boot(mode,entries)
@@ -125,6 +128,17 @@ local function Receivers(want,tag)
  R.AutoIsOn,R.AutoHeldReason,Nexus.Store.Settings=on,held,settingsFn
  local wantLine=Fill(want('editor.popup.auto_replace_paused'),{reason='Qv held reason',label='Qv Build'})
  check(line:sub(1,#wantLine)==wantLine,tag..': the confirmation Auto line is the whole paragraph with its slots: '..line)
+ -- 6b. Unpaused (the tenth paragraph): the destination label the
+ -- confirmation itself composes (M.DestinationLabel), a long player name.
+ local label=R.DestinationLabel({kind='savedBuild',slot=2,name=string.rep('N',600)..' Qv'})
+ R.AutoIsOn=function() return true end
+ R.AutoHeldReason=function() return nil end
+ Nexus.Store.Settings=function() local s={};for k,v in pairs(settingsFn()) do s[k]=v end;s.autoSave=true;return s end
+ local unpaused=R.AutoConsentLine(label)
+ R.AutoIsOn,R.AutoHeldReason,Nexus.Store.Settings=on,held,settingsFn
+ local wantUnpaused=Fill(want('editor.popup.auto_replace'),{label=label})
+ check(#label>600 and unpaused:sub(1,#wantUnpaused)==wantUnpaused and unpaused:find('600',1,true)==nil,
+  tag..': the unpaused Auto line is the whole paragraph with the whole composed label: '..unpaused:sub(1,160))
  -- 7. The context-changed popup.
  local dialog=StaticPopupDialogs.NEXUS_WORKSPACE_CONTEXT_CHANGED
  check(dialog.text==want('editor.popup.context_changed'),tag..': the context-changed popup says the whole paragraph')
@@ -182,7 +196,7 @@ for _,key in ipairs(NINE) do
  if BOUND[key] then
   local fields={count=Nexus.Localization.Count(2),name='Qv',reason='Qv',label='Qv'}
   local args={}
-  for _,f in ipairs(key:find('imported') and {'count','name'} or {'reason','label'}) do args[f]=fields[f] end
+  for _,f in ipairs(key:find('imported') and {'count','name'} or key=='editor.popup.auto_replace' and {'label'} or {'reason','label'}) do args[f]=fields[f] end
   text,source=Nexus.Localization.Format(key,args)
   check(source=='base' and text==Fill(ENGLISH[key],{count=2,name='Qv',reason='Qv',label='Qv'}),'fallback: '..key..' shows its exact English')
  else
@@ -191,6 +205,35 @@ for _,key in ipairs(NINE) do
  end
 end
 Receivers(function(key) return ENGLISH[key] end,'fallback')
+
+-- The tenth paragraph at its bounds, through the confirmation's own
+-- AutoConsentLine (Auto ON, not held; only the Auto facts are supplied).
+-- A label is a text slot of at most 1024 bytes and a translation at most
+-- 1024 bytes, so a result is at most 2041 bytes: resultLimit 2048 suffices.
+-- A composed label above the slot bound (a 1024-byte name inside "Saved
+-- Build '...' (slot N)") cannot be a slot: the exact English sentence with
+-- the whole label is shown, never the seam's "cannot be shown" status.
+do
+ local big=S.PseudoEntries()
+ local pad=1020-#S.OPEN-#S.CLOSE-#'{label}'
+ big['editor.popup.auto_replace']=S.OPEN..string.rep('L',pad)..'{label}'..S.CLOSE
+ check(#big['editor.popup.auto_replace']==1020,'a valid translation near the 1024-byte raw bound')
+ Boot('wrap',big)
+ local R=assert(Renderer(),'the editor renderer')
+ local on,held,settingsFn=R.AutoIsOn,R.AutoHeldReason,Nexus.Store.Settings
+ R.AutoIsOn=function() return true end
+ R.AutoHeldReason=function() return nil end
+ Nexus.Store.Settings=function() local s={};for k,v in pairs(settingsFn()) do s[k]=v end;s.autoSave=true;return s end
+ local over=R.DestinationLabel({kind='savedBuild',slot=2,name=string.rep('N',1024)})
+ local line=R.AutoConsentLine(over)
+ local english=Fill(ENGLISH['editor.popup.auto_replace'],{label=over})
+ check(#over>1024 and line:sub(1,#english)==english,'a label above the 1024-byte slot: the exact English sentence with the whole label ('..#over..' bytes): '..line:sub(1,80))
+ local fits=string.rep('N',1024)
+ line=R.AutoConsentLine(fits)
+ local want=Fill(big['editor.popup.auto_replace'],{label=fits})
+ check(#want==2037 and line:sub(1,#want)==want,'a 1024-byte label with a 1020-byte translation: the whole translation ('..#want..' bytes)')
+ R.AutoIsOn,R.AutoHeldReason,Nexus.Store.Settings=on,held,settingsFn
+end
 
 ------------------------------------------------------------------------------
 -- 3. English: the exact bytes at the same receivers

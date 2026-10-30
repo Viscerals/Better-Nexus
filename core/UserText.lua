@@ -1248,7 +1248,7 @@ T.Guide = {
     whyLabel = 'WHY THIS MATTERS', doLabel = 'DO THIS',
     why = {welcome = 'Nexus points at Echoes from a Wishlist you choose. Nothing changes in game until you confirm a step.',
         wishlist = 'A Wishlist is the Echoes you want. Recommendations and Orb runs work from it.',
-        target = 'A Saved Build is the build slot the game loads. It is the build your Wishlist will follow.',
+        target = 'A Saved Build is the build slot the game loads. Choose which Saved Build should use your Wishlist.',
         assign = 'Once they are linked, recommendations follow your Wishlist for the build you play.',
         manual = 'This is what Nexus points at while you roll.',
         auto = 'Auto can act for you. It is optional.',

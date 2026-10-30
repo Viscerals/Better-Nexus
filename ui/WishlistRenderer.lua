@@ -3224,17 +3224,32 @@ end
     -- with its finished-run save permission (autoSave) off, that Auto does not
     -- replace the Saved Build; otherwise the conditional replacement, and,
     -- when Auto was held at its last update, why it was not acting then.
+    -- A consent sentence the seam cannot hold (a composed destination label
+    -- above its 1024-byte text slot): its exact English, whole, never the
+    -- seam's "cannot be shown" status in place of the consequence.
+    function M.ConsentSentence(key, args, english)
+        local text, source = Nexus.Localization.Format(key, args)
+        if source == "unavailable" then return english end
+        return text
+    end
+
     function M.AutoConsentLine(label)
         if not M.AutoIsOn() then return nil end
         local store = Nexus.Store
         local okSettings, settings = false, nil
         if store and type(store.Settings) == "function" then okSettings, settings = pcall(store.Settings) end
         if okSettings and type(settings) == "table" and not settings.autoSave then
-            return TF("editor.popup.auto_save_off", {label = label})
+            return M.ConsentSentence("editor.popup.auto_save_off", {label = label}, "Auto is ON, but its permission to save "
+                .. "finished runs (autoSave) is off, so Auto does not replace " .. tostring(label) .. " with a run.")
         end
         local held = M.AutoHeldReason()
-        return (held and TF("editor.popup.auto_replace_paused", {reason = held, label = label})
-            or TF("editor.popup.auto_replace", {label = label}))
+        return (held and M.ConsentSentence("editor.popup.auto_replace_paused", {reason = held, label = label},
+                "Auto is ON (paused at its last update: " .. tostring(held) .. "; it acts again when that clears): when "
+                .. tostring(label) .. " is active and a finished run at level 80 passes Auto's save checks, Nexus may "
+                .. "replace that Saved Build with the run; this save can make Auto check again.")
+            or M.ConsentSentence("editor.popup.auto_replace", {label = label}, "Auto is ON: when " .. tostring(label)
+                .. " is active and a finished run at level 80 passes Auto's save checks, Nexus may replace that Saved "
+                .. "Build with the run; this save can make Auto check again."))
             .. " " .. T("editor.popup.auto_turn_off")
     end
 

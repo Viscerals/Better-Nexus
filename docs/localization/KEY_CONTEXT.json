@@ -5122,10 +5122,10 @@
     {
       "key": "guide.body.why_target",
       "kind": "text",
-      "english": "A Saved Build is the build slot the game loads. It is the build your Wishlist will follow.",
+      "english": "A Saved Build is the build slot the game loads. Choose which Saved Build should use your Wishlist.",
       "placeholders": [],
       "group": "guide",
-      "meaning": "The step's one-line reason under WHY THIS MATTERS. Guided setup coach (the \"Nexus setup\" window). Opening, moving between steps or closing it assigns, saves, sends, spends and changes Auto nothing: keep such statements complete. Game terms (Echo, Wishlist, Saved Build, Echo Journal, My Builds, Orb, Lost Memories, Auto ON/OFF) follow the client's and Nexus's own wording. A leading mark (+ x ! ? * > < = v ^ -) is a code status glyph: keep it first, followed by a space. \"Nexus\" stays.",
+      "meaning": "The step's one-line reason under WHY THIS MATTERS. Guided setup coach (the \"Nexus setup\" window). Opening, moving between steps or closing it assigns, saves, sends, spends and changes Auto nothing: keep such statements complete. Game terms (Echo, Wishlist, Saved Build, Echo Journal, My Builds, Orb, Lost Memories, Auto ON/OFF) follow the client's and Nexus's own wording. A leading mark (+ x ! ? * > < = v ^ -) is a code status glyph: keep it first, followed by a space. \"Nexus\" stays. v5 copy correction: the Saved Build uses the Wishlist as its plan; choosing the target here is only a choice (it assigns, loads, saves and activates nothing).",
       "consumer": "ui/GuidedSetup.lua Copy() view of core/UserText.lua T.Guide.why.target",
       "familySurface": "guide: Guided setup coach (body); family coverage PENDING review",
       "cohort": "fullui:guide"
@@ -25607,10 +25607,10 @@
     {
       "key": "orb.tooltip.mini_usage",
       "kind": "text",
-      "english": "Orbs this run has used, against the maximum approved when it started. The maximum cannot change during a run. Unavailable means it could not be read; it is not 0.",
+      "english": "Orbs this run has used, against its current approved maximum. Unavailable means it could not be read; it is not 0.",
       "placeholders": [],
       "group": "orb",
-      "meaning": "Hover of the usage line.",
+      "meaning": "Hover of the usage line. v5 copy correction: 'current approved maximum' is the run's maximum as read now; do not promise that it can or cannot change, and do not mention any increase control.",
       "consumer": "Orb run status mini panel (NexusOrbMini), opened by Mini panel in the Orb window tooltip",
       "familySurface": "orb: Orb run status mini panel (NexusOrbMini), opened by Mini panel in the Orb window (tooltip); family coverage PENDING review",
       "cohort": "fullui:orb"
@@ -47790,9 +47790,10 @@
           "meaning": "destination label (editor.value.saved_build_named_slot / saved_build_number / first_run_target_for)"
         }
       ],
-      "resultLimitBytes": 1380,
+      "resultLimitBytes": 2048,
+      "lines": true,
       "group": "editor",
-      "meaning": "Auto consequence. Followed by editor.popup.auto_turn_off.",
+      "meaning": "Auto consequence. Followed by editor.popup.auto_turn_off. Contract v5: a long paragraph; translate it completely and naturally, keeping every fact, consequence and condition. Do not shorten it to fit; it may be up to 1024 bytes. The receiver wraps it: add no line break. Keep every condition: Auto is ON, the destination is active, the run is finished, it is at level 80 AND passes Auto's save checks; Nexus MAY replace that Saved Build; this save can make Auto check again. The label is the composed destination (player name inside), inserted verbatim; above a 2048-byte result the English sentence is shown.",
       "consumer": "Save/Create Wishlist confirmation popup (second paragraph) popup",
       "familySurface": "wishlist: Save/Create Wishlist confirmation popup (second paragraph) (popup); family coverage PENDING review",
       "cohort": "fullui:wishlist"
@@ -53437,7 +53438,8 @@
       "remainder_misc": 10,
       "remainder_runtime_chat": 24,
       "remainder_runtime_status": 35,
-      "v4_long_paragraphs": 0
+      "v4_long_paragraphs": 0,
+      "v5_source86_amendments": 0
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }
