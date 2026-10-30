@@ -18,8 +18,9 @@ unchanged.
   first and unchanged, then a generated `NEXUS-L10N-FULL-UI` section per family.
   `docs/localization/KEY_CONTEXT.json` has one row per key (`cohort: fullui:<family>`
   for the new rows) and a `fullUiCatalog` summary.
-- 3,356 keys: 28 original and 3,328 full-UI keys of ten families (panel, hud, usertext,
-  chat, library, wishlist, orb, journal, records, guide) plus 8 owner integration keys.
+- 3,366 keys: 28 original, 3,320 keys of ten families (panel, hud, usertext, chat,
+  library, wishlist, orb, journal, records, guide) and 18 owner integration keys (labels
+  Help quotes by name that the families had kept as literals for tests).
 - Every visible string adopted in a family is looked up at its real display receiver
   (`Nexus.Localization.Text/Format`, at call time). English output is byte-identical;
   a missing or invalid pack entry shows the exact English.
