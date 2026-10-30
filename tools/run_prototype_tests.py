@@ -432,6 +432,8 @@ NAMES += ['l10n_passivity_library']
 NAMES += ['l10n_catalog_consumers']
 # Full-UI pseudo-locale support guards (early review FULLUI-FOUNDATION-1/2): tooltip capture restores every method incl. inherited nil originals on success and failure; an unmatched pseudo opener never hides English (synthetic; native NOT_RUN).
 NAMES += ['l10n_pseudo_support_guards']
+# Full-UI family library (helper a6a913ced96885815): Build Library window, detail states, Sync mode dialog and hovers through the seam under a pseudo pack; English, long and missing-entry fallback runs; passive re-render/hover/select (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_library']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.

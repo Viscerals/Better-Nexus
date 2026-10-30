@@ -54,6 +54,21 @@ end
 local dataAt,seamAt,textAt=tocIndex('data\\LocalizationEnglish.lua'),tocIndex('core\\Localization.lua'),tocIndex('core\\UserText.lua')
 check(dataAt and seamAt and textAt and dataAt<seamAt and seamAt<textAt,'English data, then the seam, then UserText in the TOC')
 local L=assert(Nexus.Localization,'localization seam loaded');checks=checks+1
+-- Full visible-UI catalog (#143-#148): the real catalog holds the original 28
+-- reviewed meanings (asserted literally below) plus the composed full-UI keys.
+-- Its size and its number of formatted meanings (the charge format and every
+-- template) are read here independently of the runtime admission: the entries
+-- of the English data file and the declaration kinds in the registry block.
+local REAL_TOTAL,REAL_FORMATTED
+do
+ local env={};local chunk=assert(loadfile('data/LocalizationEnglish.lua'));if setfenv then setfenv(chunk,env) end;chunk()
+ local n=0;for _ in pairs(env.Nexus.LocalizationEnglish)do n=n+1 end;REAL_TOTAL=n
+ local f=assert(io.open('core/Localization.lua','rb'));local src=f:read('*a');f:close()
+ local registry=assert(src:match('NEXUS%-L10N%-REGISTRY BEGIN(.-)NEXUS%-L10N%-REGISTRY END'))
+ local _,templates=registry:gsub('kind = "template"','');local _,formats=registry:gsub('kind = "format"','')
+ REAL_FORMATTED=templates+formats
+ check(REAL_TOTAL>=28 and formats==1,'SETUP the real catalog holds at least the 28 original meanings and the one charge format')
+end
 assert(Nexus.GameAdapter.SetFirstLoadoutWishlistIdentity('Seam guard target',{{spellId=200001,quality=1,stacks=2}}))
 local function same(a,b,seen)
  if type(a)~='table' or type(b)~='table' then return a==b end
@@ -71,7 +86,7 @@ local before={actions=#H.actions,sent=#H.sent,chat=#H.chat,popup=H.popup,auto=Ne
 local d0=L.Diagnostics()
 -- Issue #165 added one reviewed static meaning (panel.button.options, the HUD
 -- Options label), so the whole base is now 27 static texts and one template.
-check(d0.base.present and d0.base.accepted==28 and d0.base.formatted==1 and d0.base.rejected==0 and not d0.base.oversized,'English base loaded whole at boot: twenty-seven static texts and one template')
+check(d0.base.present and d0.base.accepted==REAL_TOTAL and d0.base.formatted==REAL_FORMATTED and d0.base.rejected==0 and not d0.base.oversized,'English base loaded whole at boot: every declared meaning, the charge format and every template')
 check(d0.misses==0,'English boot resolved without any fallback')
 local keys=L.Keys()
 -- Issues #143/#148: the 21 static ui/Panel.lua meanings with their exact
@@ -107,9 +122,10 @@ for i=1,#keys do
  if i>1 then sorted=sorted and keys[i-1]<keys[i] end
 end
 check(#panelCohort==21 and panelSeen==21,'SETUP the Panel cohort names 21 distinct keys')
+local listed={};for _,k in ipairs(keys)do listed[k]=true end
 local optionsListed=false
 for i=1,#keys do if keys[i]=='panel.button.options' then optionsListed=true end end
-check(#keys==28 and panelListed==21 and optionsListed and sorted and keys[23]=='readout.charge_counts' and keys[24]=='reason.list_preparing' and keys[25]=='reason.save_in_progress' and keys[26]=='reason.saved_data_reading' and keys[27]=='reason.wait_pending_pick_count' and keys[28]=='reason.wait_three_choices','base holds exactly the 28 reviewed keys, sorted: the 21 Panel meanings and the #165 Options label, then the inherited six')
+check(#keys==REAL_TOTAL and panelListed==21 and optionsListed and sorted and listed['readout.charge_counts'] and listed['reason.list_preparing'] and listed['reason.save_in_progress'] and listed['reason.saved_data_reading'] and listed['reason.wait_pending_pick_count'] and listed['reason.wait_three_choices'],'base holds the 28 original reviewed keys within the sorted full catalog: the 21 Panel meanings and the #165 Options label, then the inherited six')
 -- The #165 Options label: reviewed English static text that resolves from the
 -- base with no fallback. The six packs do not carry it yet, so with a pack
 -- active it is an intentional, counted missing_candidate fallback to this
@@ -122,7 +138,7 @@ check(L.Kind('readout.charge_counts')=='format' and L.Kind('reason.wait_three_ch
 local env={};local chunk=setfenv and setfenv(assert(loadfile('data/LocalizationEnglish.lua')),env) or assert(loadfile('data/LocalizationEnglish.lua','t',env));chunk()
 local data=env.Nexus and env.Nexus.LocalizationEnglish
 local function count(t)local n=0;for _ in pairs(t)do n=n+1 end;return n end
-check(count(env)==1 and count(env.Nexus)==1 and type(data)=='table' and getmetatable(data)==nil and count(data)==28 and data['panel.button.options']=='Options','English data file sets one plain table and calls nothing')
+check(count(env)==1 and count(env.Nexus)==1 and type(data)=='table' and getmetatable(data)==nil and count(data)==REAL_TOTAL and data['panel.button.options']=='Options','English data file sets one plain table and calls nothing')
 local cohort={
  {'ROOT_MUTATION_PENDING','reason.save_in_progress','Saving is still in progress; wait for its final result'},
  {'CURSOR_REQUIRED','reason.list_preparing','This list is still being prepared'},
@@ -405,7 +421,7 @@ do
  for i=1,CAP-count(realData)+1 do realBig['reason.extra_'..i]='Extra '..i end
  check(count(realBig)==CAP+1,'SETUP the real English plus test entries is CAP+1 entries')
  facts=assert(reload(realBig)).Diagnostics().base
- check(facts.present and facts.oversized and facts.accepted==0 and facts.rejected==CAP+1 and facts.undeclared==0 and facts.missingDeclared==28,'R: the real declarations keep the whole-base CAP+1 refusal; all 28 declared meanings are then unavailable')
+ check(facts.present and facts.oversized and facts.accepted==0 and facts.rejected==CAP+1 and facts.undeclared==0 and facts.missingDeclared==REAL_TOTAL,'R: the real declarations keep the whole-base CAP+1 refusal; every declared meaning is then unavailable')
  for key in pairs(many)do
   text,source,why=big.Resolve(key,{[key]='Candidate cannot add it'})
   check(not big.Has(key) and text==U and source=='unavailable' and why=='unknown_key','GUARD oversized base cannot be resurrected: '..key)
@@ -415,12 +431,12 @@ do
  for _=1,3 do record.Text('reason.counter_9')end
  local rd=record.Diagnostics()
  check(#rd.keys==8 and rd.keysNotKept==3 and rd.misses==11 and rd.byReason.unknown_key==11,'GUARD unkept ninth key counts every occurrence without retention')
- check(#L.Keys()==28 and Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'GUARD real 28-key English seam restored after boundary fixtures')
+ check(#L.Keys()==REAL_TOTAL and Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'GUARD real English seam restored after boundary fixtures')
 end
 local partial=assert(reload({['reason.save_in_progress']='Saving is still in progress; wait for its final result',['Bad Key']='Bad',['reason.blank']='  ',['reason.number']=5}))
 local pd=partial.Diagnostics().base
 check(#partial.Keys()==1 and pd.accepted==1 and pd.rejected==3 and select(3,partial.Resolve(K))=='unknown_key','invalid base entries are left out and counted')
-check(pd.undeclared==3 and pd.missingDeclared==27,'R: with the real declarations the three test-only entries are undeclared and 27 declared meanings lack English')
+check(pd.undeclared==3 and pd.missingDeclared==REAL_TOTAL-1,'R: with the real declarations the three test-only entries are undeclared and every other declared meaning lacks English')
 do
  local declaredPartial=assert(reloadDeclared({['reason.save_in_progress']='Saving is still in progress; wait for its final result',['Bad Key']='Bad',['reason.blank']='  ',['reason.number']=5}))
  local dp=declaredPartial.Diagnostics().base
@@ -486,7 +502,7 @@ do
   local value,source,why=accepting.Resolve(key)
   check(accepting.Has(key) and value==validBase[key] and source=='base' and why==nil,'scalar base text resolves with its exact bytes: '..key)
  end
- check(#L.Keys()==28 and L.Has(K) and L.Resolve(K)==E,'the real English base is unchanged by the loader checks')
+ check(#L.Keys()==REAL_TOTAL and L.Has(K) and L.Resolve(K)==E,'the real English base is unchanged by the loader checks')
 end
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'real seam and data restored after the loader checks')
 -- Issue #147, R union (C14, R-P1 and R-P3): the code-owned declarations of
@@ -499,9 +515,9 @@ check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'real sea
 do
  local function copyOf(t)local out={};for key,value in pairs(t)do out[key]=value end;return out end
  local b0=L.Diagnostics().base
- check(b0.undeclared==0 and b0.missingDeclared==0 and b0.accepted==28 and b0.rejected==0,'R: the 28 declarations admit exactly the 28 real English entries')
+ check(b0.undeclared==0 and b0.missingDeclared==0 and b0.accepted==REAL_TOTAL and b0.rejected==0,'R: the declarations admit exactly the real English entries')
  local keys=L.Keys()
- check(#keys==28 and count(data)==28,'R: the declared set, the admitted keys and the English data are the same 28 meanings')
+ check(#keys==REAL_TOTAL and count(data)==REAL_TOTAL,'R: the declared set, the admitted keys and the English data are the same meanings')
  for _,key in ipairs(keys)do check(data[key]~=nil,'R: admitted key is in the English data: '..key)end
  -- The registry runtime keeps the dated Automatic record's behaviour: the
  -- Automatic value resolves English, with no client code or alias evidence.
@@ -514,7 +530,7 @@ do
  local undeclared=copyOf(realData);undeclared['parity.undeclared']='Undeclared parity text'
  local u=assert(reload(undeclared),'loader with an undeclared English entry');checks=checks+1
  local ud=u.Diagnostics()
- check(ud.base.accepted==28 and ud.base.rejected==1 and ud.base.undeclared==1 and ud.base.missingDeclared==0 and ud.base.formatted==1 and not ud.base.oversized,'R-P1: an undeclared English entry is rejected and counted')
+ check(ud.base.accepted==REAL_TOTAL and ud.base.rejected==1 and ud.base.undeclared==1 and ud.base.missingDeclared==0 and ud.base.formatted==REAL_FORMATTED and not ud.base.oversized,'R-P1: an undeclared English entry is rejected and counted')
  local text,source,why=u.Resolve('parity.undeclared',{['parity.undeclared']='Pack text'})
  check(not u.Has('parity.undeclared') and u.Kind('parity.undeclared')==nil and text==U and source=='unavailable' and why=='unknown_key','R-P1: an undeclared key is unavailable, and a pack cannot add it')
  check(ud.packs.adopted==6 and ud.packs.refused==0 and #u.Languages()==7,'R-P1: the six packs stay adopted and offered')
@@ -522,29 +538,32 @@ do
  local missing=copyOf(realData);missing['panel.button.options']=nil
  local m=assert(reload(missing),'loader without one declared English entry');checks=checks+1
  local md=m.Diagnostics()
- check(md.base.accepted==27 and md.base.rejected==0 and md.base.undeclared==0 and md.base.missingDeclared==1,'R-P3: a declared key without English is counted')
+ check(md.base.accepted==REAL_TOTAL-1 and md.base.rejected==0 and md.base.undeclared==0 and md.base.missingDeclared==1,'R-P3: a declared key without English is counted')
  text,source,why=m.Text('panel.button.options')
  check(not m.Has('panel.button.options') and text==U and source=='unavailable' and why=='unknown_key','R-P3: the declared key without English is unavailable, as an unknown key was')
  check(md.packs.adopted==6 and #m.Languages()==7,'R-P3: completeness never gates pack availability')
  for _,bad in ipairs({'Opt|ions','',string.rep('x',257),5,'Options'..B(0xFF)})do
   local invalid=copyOf(realData);invalid['panel.button.options']=bad
   local idg=assert(reload(invalid)).Diagnostics().base
-  check(idg.accepted==27 and idg.rejected==1 and idg.undeclared==0 and idg.missingDeclared==1,'R: invalid English for a declared key is rejected and counted as missing: '..tostring(bad):sub(1,12))
+  check(idg.accepted==REAL_TOTAL-1 and idg.rejected==1 and idg.undeclared==0 and idg.missingDeclared==1,'R: invalid English for a declared key is rejected and counted as missing: '..tostring(bad):sub(1,12))
  end
  -- Kind follows the declaration: static text for the template key is refused.
  local wrongKind=copyOf(realData);wrongKind['readout.charge_counts']='Charges'
  local wk=assert(reload(wrongKind))
- check(wk.Kind('readout.charge_counts')==nil and wk.Diagnostics().base.missingDeclared==1 and wk.Diagnostics().base.formatted==0,'R: a declared template key never admits static text')
+ check(wk.Kind('readout.charge_counts')==nil and wk.Diagnostics().base.missingDeclared==1 and wk.Diagnostics().base.formatted==REAL_FORMATTED-1,'R: a declared template key never admits static text')
  local braces=copyOf(realData);braces['panel.button.options']='B:{banish}'
  local br=assert(reload(braces))
  check(br.Kind('panel.button.options')=='text' and br.Resolve('panel.button.options')=='B:{banish}','R: a declared static text stays plain text, shown exactly, never formatted')
  -- The format schemas are derived from the declarations.
+ -- Every other key keeps its own real declaration (text, block or template).
+ local REAL_DECL={}
+ for key,decl in runtimeSource:gmatch('\n    %["([^"]+)"%] = (%b{})')do REAL_DECL[key]=decl end
  local function block(charge,extra)
   local lines={'local DECLARATIONS = {'}
   for key in pairs(realData)do
    if key=='readout.charge_counts' then
     if charge then lines[#lines+1]='    ["readout.charge_counts"] = '..charge..',' end
-   else lines[#lines+1]=('    ["%s"] = {kind = "text"},'):format(key) end
+   else lines[#lines+1]=('    ["%s"] = %s,'):format(key,assert(REAL_DECL[key],'real declaration of '..key)) end
   end
   if extra then lines[#lines+1]=extra end
   lines[#lines+1]='}'
@@ -552,7 +571,7 @@ do
  end
  local args={banish={known=true,value=2},reroll={known=true,value=1},freeze={known=true,value=0}}
  local mirror=assert(reloadWith(realData,block('{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 254}')))
- check(mirror.Diagnostics().base.accepted==28 and mirror.Format('readout.charge_counts',args)=='B:2 R:1 F:0','R: a test block equal to the real declarations gives the real behaviour')
+ check(mirror.Diagnostics().base.accepted==REAL_TOTAL and mirror.Format('readout.charge_counts',args)=='B:2 R:1 F:0','R: a test block equal to the real declarations gives the real behaviour')
  local dropped={
   {'no charge declaration',nil},
   {'result limit 253','{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 253}'},
@@ -578,14 +597,14 @@ do
   local fb=mod.Diagnostics().base
   local fText,fSource,fWhy=mod.Format('readout.charge_counts',args)
   local static=case[1]=='declared as text'
-  check(fb.accepted==27+(static and 1 or 0) and fb.rejected==(static and 0 or 1) and fb.formatted==0 and fText==U and fSource=='unavailable'
+  check(fb.accepted==REAL_TOTAL-1+(static and 1 or 0) and fb.rejected==(static and 0 or 1) and fb.formatted==REAL_FORMATTED-1 and fText==U and fSource=='unavailable'
    and fWhy==(static and 'wrong_key_kind' or 'unknown_key'),'R: '..case[1]..': the charge template is not admitted as a template')
   check(fb.undeclared==((static or case[1]=='other field name') and 0 or 1) and fb.missingDeclared==(case[1]=='other field name' and 1 or 0),'R: '..case[1]..': counted as undeclared or missing as declared')
  end
  for _,case in ipairs({{'invalid key','    ["Bad Key"] = {kind = "text"},'},{'text with a field','    ["parity.extra"] = {kind = "text", fields = {"a"}},'},{'unknown kind','    ["parity.extra"] = {kind = "plural"},'}})do
   local extra=copyOf(realData);extra['Bad Key']='Bad';extra['parity.extra']='Extra'
   local xb=assert(reloadWith(extra,block('{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 254}',case[2]))).Diagnostics().base
-  check(xb.accepted==28 and xb.rejected==2 and xb.undeclared==2 and xb.missingDeclared==0,'R: a malformed declaration is left out ('..case[1]..')')
+  check(xb.accepted==REAL_TOTAL and xb.rejected==2 and xb.undeclared==2 and xb.missingDeclared==0,'R: a malformed declaration is left out ('..case[1]..')')
  end
  -- More than CAP declarations, or no declaration table: nothing is declared.
  local tooMany={'local DECLARATIONS = {'}
@@ -597,7 +616,7 @@ do
    {'with a metatable','local DECLARATIONS = setmetatable({["reason.list_preparing"] = {kind = "text"}}, {})'}})do
   local none=assert(reloadWith(realData,case[2]),'loader with '..case[1]);checks=checks+1
   local nb=none.Diagnostics().base
-  check(nb.present and nb.accepted==0 and nb.rejected==28 and nb.undeclared==28 and nb.missingDeclared==0 and #none.Keys()==0 and none.Text(K)==U,'R: '..case[1]..' fails closed: no English is admitted')
+  check(nb.present and nb.accepted==0 and nb.rejected==REAL_TOTAL and nb.undeclared==REAL_TOTAL and nb.missingDeclared==0 and #none.Keys()==0 and none.Text(K)==U,'R: '..case[1]..' fails closed: no English is admitted')
   check(none.Diagnostics().packs.adopted==6,'R: '..case[1]..': packs stay adopted (their entries are then left out)')
  end
  check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData and L.Text(K)==E,'R: real seam and data restored after the registry checks')
@@ -618,7 +637,7 @@ do
   return text
  end
  local fd=F.Diagnostics().base
- check(fd.accepted==28 and fd.formatted==1 and fd.rejected==0 and F.Has(CK) and F.Kind(CK)=='format','the formatted meaning is admitted and listed')
+ check(fd.accepted==REAL_TOTAL and fd.formatted==REAL_FORMATTED and fd.rejected==0 and F.Has(CK) and F.Kind(CK)=='format','the formatted meaning is admitted and listed')
  local misses0=L.Diagnostics().misses
  fmt(L,A3(kn(2),kn(1),kn(0)),nil,'B:2 R:1 F:0','base',nil,'all-known counts')
  fmt(L,A3(un(),kn(0),un()),nil,'B:? R:0 F:?','base',nil,'explicit unknown is ? and known zero is 0')
