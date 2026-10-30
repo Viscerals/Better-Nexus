@@ -2747,6 +2747,11 @@ class ConsumerBindingTests(unittest.TestCase):
             # replaces it; no other write makes that copy carry the proof.
             ("field overwritten by the same field of an empty table", False, left
              + b'specLeft.SpecShared=specRight.SpecShared; specLabel:SetText(specLeft.SpecShared)'),
+            # A write is assumed to pass only while all its definitions are
+            # reached: one copying that overwritten field proves nothing either.
+            ("field copied from a field overwritten by an empty table", False, left
+             + b'specLeft.SpecShared=specRight.SpecShared; local specOther={SpecCopy=' + text
+             + b'}; specOther.SpecCopy=specLeft.SpecShared; specLabel:SetText(specOther.SpecCopy)'),
         ]
         for name, binds, code in cases:
             with self.subTest(case=name):
@@ -2759,9 +2764,10 @@ class ConsumerBindingTests(unittest.TestCase):
                     assert_binding_receipt(self, receipt)
                 self.assertEqual([(problem["code"], problem.get("key"))
                                   for problem in receipt["problems"]], [("binding-unbound", key)])
+                # Every localization call of the case is an unproven site.
                 self.assertEqual([site["reason"] for site
                                   in self.binding(receipt, key)["unprovenSites"]],
-                                 ["output-not-reached"])
+                                 ["output-not-reached"] * code.count(text))
 
 
 class ConsumerCommandLineTests(unittest.TestCase):
