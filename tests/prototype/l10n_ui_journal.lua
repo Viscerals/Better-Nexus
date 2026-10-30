@@ -286,7 +286,22 @@ local function SameSnapshot(a,b)
 end
 
 local PENDING_LITERALS={['Assign in My Builds']=true,['Unassign Wishlist']=true}
+-- Owner integration (pseudo helper fix f571dd5): a seam text that the code
+-- shortens (ShortName: a prefix plus "...") has no closing marker. It counts
+-- as reviewed text only when it is the opener plus a prefix, cut on a UTF-8
+-- character boundary, of a real pseudo entry, then "...", with optional
+-- code-owned trailing ":"; anything else stays reported.
+local PSEUDO_VALUES
+local function Plain(text) return (tostring(text):gsub('|c%x%x%x%x%x%x%x%x',''):gsub('|r','')) end
+local function ShortenedSeamText(text)
+ local body=Plain(text):match('^('..S.OPEN..'.-)%.%.%.:?$')
+ if not body or body:find(S.CLOSE,1,true) or not Nexus.Localization.IsText(body) then return false end
+ PSEUDO_VALUES=PSEUDO_VALUES or S.PseudoEntries()
+ for _,value in pairs(PSEUDO_VALUES) do if value:sub(1,#body)==body then return true end end
+ return false
+end
 local function Allowed(text)
+ if ShortenedSeamText(text) then return true end
  local rest=S.Unmarked(text):gsub('^%s+',''):gsub('%s+$','')
  if rest=='' or DATA[rest] or PENDING_LITERALS[rest] then return true end
  -- A row or selector shows a data name plus code-owned punctuation.
@@ -449,6 +464,25 @@ do
  end
  chooser.Hide()
 end
+-- Every shown text is well-formed UTF-8 (a shortened label never ends inside
+-- a multi-byte character), colour codes aside.
+local function WellFormedUtf8(t)
+ local i,n=1,#t
+ while i<=n do
+  local c=t:byte(i);local w
+  if c<0x80 then w=1 elseif c>=0xC2 and c<=0xDF then w=2 elseif c>=0xE0 and c<=0xEF then w=3 elseif c>=0xF0 and c<=0xF4 then w=4 else return false end
+  if i+w-1>n then return false end
+  for k=i+1,i+w-1 do local d=t:byte(k);if d<0x80 or d>0xBF then return false end end
+  i=i+w
+ end
+ return true
+end
+local broken={}
+for _,item in ipairs(collected) do
+ local plain=Plain(item.text):gsub('||','|')
+ if not WellFormedUtf8(plain) then broken[#broken+1]=item.where..': '..item.text end
+end
+check(#broken==0,'PSEUDO: every shown text is well-formed UTF-8 ('..#collected..' texts)',table.concat(broken,string.char(10)..'  '))
 local missing=Untranslated()
 check(#missing==0,'PSEUDO: every visible code-owned text passed the seam ('..#collected..' texts scanned)',
  table.concat(missing,'\n  '))
@@ -518,6 +552,26 @@ for _,item in ipairs(S.VisibleTexts(NexusFlexiblePlanChooser)) do if item.text:f
 check(persistText=="Not saved. Save pool stores this character's planning pool; Load saved restores it. Hide keeps this session; Reset clears only this session.",
  'MISSING: the pool status falls back to exact English',persistText)
 c.Hide()
+
+------------------------------------------------------------------------
+-- UTF8 (owner integration): a multi-byte translation that the strip label
+-- shortens (ShortName, 21 bytes) is cut on a character boundary, never
+-- inside a UTF-8 sequence. Synthetic Cyrillic draft text, not a reviewed
+-- translation.
+------------------------------------------------------------------------
+do
+ local utf8Entries=S.PseudoEntries()
+ -- Cyrillic "empty saved build slot": 2-byte letters, so an 18-byte prefix
+ -- ends inside a character.
+ utf8Entries['journal.label.empty_saved_build']='\208\159\209\131\209\129\209\130\208\190\208\185 \209\129\208\187\208\190\209\130 \209\129\208\190\209\133\209\128\208\176\208\189\209\145\208\189\208\189\208\190\208\185 \209\129\208\177\208\190\209\128\208\186\208\184'
+ Boot('wrap',utf8Entries)
+ J=Nexus.JournalTab
+ H.perks.serverActiveSlot=3;H.Notify();Nexus.GameAdapter.Poll();J.RefreshAssociations()
+ local label=NexusLoadoutAssociationPanel.label and NexusLoadoutAssociationPanel.label:GetText()
+ check(type(label)=='string' and label:find('...',1,true)~=nil,'UTF8 SETUP: the empty Saved Build strip label is shortened',label)
+ check(label and WellFormedUtf8(Plain(label)),'UTF8: the shortened multi-byte strip label is well-formed UTF-8',label)
+ H.perks.serverActiveSlot=1;H.Notify();Nexus.GameAdapter.Poll();J.RefreshAssociations()
+end
 
 ------------------------------------------------------------------------
 -- ENGLISH exact bytes at the real receivers

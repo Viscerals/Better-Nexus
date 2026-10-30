@@ -1151,7 +1151,17 @@ local function ShortName(name, maxLen)
     name = tostring(name or "")
     maxLen = tonumber(maxLen) or 28
     if #name <= maxLen then return name end
-    return name:sub(1, maxLen - 3) .. "..."
+    -- Cut on a UTF-8 character boundary: translated labels and player names
+    -- are UTF-8, so a byte count alone could end inside a character. ASCII
+    -- text is cut exactly as before.
+    local cut = name:sub(1, maxLen - 3)
+    local lead = cut:find("[\192-\255][\128-\191]*$")
+    if lead then
+        local first = cut:byte(lead)
+        local width = first >= 240 and 4 or first >= 224 and 3 or 2
+        if #cut - lead + 1 < width then cut = cut:sub(1, lead - 1) end
+    end
+    return cut .. "..."
 end
 
 
