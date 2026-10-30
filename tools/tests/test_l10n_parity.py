@@ -484,6 +484,32 @@ class ParityCorpusTests(unittest.TestCase):
         self.assertEqual(len(problems), 4)
         self.assertTrue(all(problem.startswith("p15_pipe_colour") for problem in problems))
 
+    def test_runtime_cap_records_agree_with_their_sources(self):
+        # The corpus records the cap of the real runtime and, apart, the pilot
+        # cap that the scoped offline API still applies (a preserved contract).
+        cap = self.corpus["runtimeCap"]
+        found = re.findall(rb"^local MAX_BASE_ENTRIES = (\d+)\r?$", LOCALIZATION.read_bytes(), re.M)
+        self.assertEqual([int(value) for value in found], [cap["current"]])
+        self.assertEqual(cap["pilot"], self.catalog._MAX_BASE_ENTRIES)
+        self.assertLess(cap["pilot"], cap["current"])
+        # The pilot cases keep their committed bytes and their pilot-cap
+        # offline verdicts; the current-runtime boundaries are derived controls.
+        self.assertEqual(cap["pilotCases"], ["p03_english_65", "p06_pack_65", "p17_bounds_64"])
+        self.assertEqual([self.by_id[case]["offline"]["code"] for case in cap["pilotCases"]],
+                         ["english-too-many", "pack-too-many-entries", "valid"])
+        for case in cap["pilotCases"]:
+            self.assertNotIn("derive", self.by_id[case])
+        self.assertIn("pilotRuntime", self.by_id["p03_english_65"])
+        self.assertTrue(self.by_id["p03_english_65"]["pilotRuntime"]["base"]["oversized"])
+        self.assertFalse(self.by_id["p03_english_65"]["runtime"]["base"]["oversized"])
+        boundaries = sorted((control["file"], control["entries"]) for control in cap["controls"])
+        self.assertEqual(boundaries, [("english", cap["current"]), ("english", cap["current"]),
+                                      ("english", cap["current"] + 1), ("packs", cap["current"]),
+                                      ("packs", cap["current"] + 1)])
+        for control in cap["controls"]:
+            self.assertIn(control["from"], cap["pilotCases"])
+            self.assertNotIn(control["id"], self.by_id)
+
     def test_lua_side_reads_the_same_corpus(self):
         source = LUA_TEST.read_bytes()
         self.assertIn(b"local CORPUS='tests/prototype/fixtures/l10n_parity/'", source)
@@ -594,7 +620,7 @@ class RegistrySentinelTests(unittest.TestCase):
                 parsed = catalog.parse_english(edited)
                 self.assertEqual(set(catalog.parse_english(data)) - set(parsed),
                                  {"panel.button.options"})
-                self.assertEqual(len(parsed), 27)
+                self.assertEqual(len(parsed), len(catalog.parse_english(data)) - 1)
                 drifted[0] = edited
                 problems = registry_binding(catalog, self.registry, drifted)
                 self.assertTrue(any("key sets differ" in problem for problem in problems), problems)
