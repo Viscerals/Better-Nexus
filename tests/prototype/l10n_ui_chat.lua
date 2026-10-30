@@ -143,8 +143,9 @@ for key,text in pairs(catalog) do
  end
 end
 -- 160 reviewed (v2) keys plus the 8 of the v3 supplemental cohort
--- (remainder_misc: the /nexus status WISHLIST: and Rolled Echoes lines).
-check(familyKeys==160+8,'the 168 chat-family keys (160 v2 + 8 v3 supplemental) are in the English catalog: '..familyKeys)
+-- (remainder_misc: the /nexus status WISHLIST: and Rolled Echoes lines) and
+-- 1 of the v5 supplemental cohort (main.value.unknown_tome, Source86 P73).
+check(familyKeys==160+8+1,'the 169 chat-family keys (160 v2 + 8 v3 + 1 v5 supplemental) are in the English catalog: '..familyKeys)
 
 ------------------------------------------------------------------------------
 -- 2. Pseudo pack: real commands

@@ -719,6 +719,85 @@ check(L~=Nexus.Localization and Nexus.Localization.Format('journal.heading.missi
   =='0 Echoes in this pool no longer match the catalog; their saved details and counts are kept.','ENGLISH templates: unknown ?, zero 0')
 c.Hide()
 
+------------------------------------------------------------------------------
+-- R5 P60: the REAL provider (core/AutomationRuntime.lua JournalData, as
+-- MainLifecycle installs it) at the Journal page. Its raw sections stay the
+-- runtime's English (Summarize / EstimateLine classify them); the page says
+-- the owned titles and lines in the active language. Wishlist, family and
+-- tome names, numbers and the version stay data.
+------------------------------------------------------------------------------
+local function RealJournal(mode)
+ Nexus=nil;WishlistRealizerDB=nil;SlashCmdList=nil;NexusDB=nil
+ if mode then S.InstallBootHook(mode~='wrap' and mode or nil) end
+ local h=dofile('tests/prototype/harness.lua')
+ H=h
+ h.Boot()
+ local real
+ for i=1,60 do local n,v=debug.getupvalue(Nexus.JournalTab.TryInstall,i);if n==nil then break end;if n=='provider' then real=v end end
+ assert(type(real)=='function','SETUP: the real Journal provider is installed at boot')
+ local echoes={{spellId=200001,quality=1,stacks=1},{spellId=200002,quality=2,stacks=1}}
+ h.perks.serverBuildSlots={[1]={name='Main Build',verified=true,echoes=h.Clone(echoes)}}
+ h.perks.serverActiveSlot=1;h.Notify();Nexus.GameAdapter.Poll();h.Advance(2)
+ assert(Nexus.GameAdapter.SetLoadoutWishlistIdentity(1,'L10n plan',{{spellId=200001,quality=1,stacks=1},{spellId=200003,quality=2,stacks=1}}),'SETUP: assign a plan')
+ h.Advance(1)
+ local journal=CreateFrame('Frame','ProjectEbonholdEchoJournal',UIParent);journal:SetSize(570,450)
+ CreateFrame('ScrollFrame','ProjectEbonholdEchoJournalScroll',journal)
+ CreateFrame('Button','ProjectEbonholdEchoJournalTab1',journal)
+ assert(Nexus.JournalTab.TryInstall(real),'SETUP: install the real provider')
+ if NexusJournalScroll then NexusJournalScroll:SetSize(520,360) end
+ journal:Show()
+ return h,real()
+end
+do
+ local h,data=RealJournal('wrap')
+ local titles,lines={},{}
+ for _,sec in ipairs(data.sections) do titles[#titles+1]=sec.title;for _,l in ipairs(sec.lines or {}) do lines[#lines+1]=l end end
+ check(#titles>=6,'R5 P60: the real provider wrote its sections ('..#titles..')')
+ OpenPage();Nexus.JournalTab.Refresh()
+ local toggle=ButtonOn(Page(),function(f) return f:GetText()==Nexus.Localization.Text('journal.button.show_details') end)
+ assert(toggle,'SETUP: the Show details control');toggle:Click();Nexus.JournalTab.Refresh()
+ local texts={}
+ for _,t in ipairs(S.VisibleTexts(Page())) do texts[t.text]=true end
+ local missing={}
+ for _,title in ipairs(titles) do
+  local shown=Nexus.JournalTab.JournalShown(title)
+  if shown==title or not texts[shown] then missing[#missing+1]='title '..title end
+ end
+ local owned=0
+ for _,line in ipairs(lines) do
+  local shown,known=Nexus.JournalTab.JournalShown(line)
+  if known then owned=owned+1;if not texts[shown] then missing[#missing+1]='line '..line end end
+ end
+ check(#missing==0,'R5 P60: every real title and owned line is shown through its key: '..table.concat(missing,' | '))
+ check(owned>=5,'R5 P60: real owned lines recognized ('..owned..')')
+ -- The target line keeps the Wishlist name and its counts verbatim.
+ local target
+ for _,line in ipairs(lines) do if line:find("^Wishlist 'L10n plan'") then target=line end end
+ local shown=target and Nexus.JournalTab.JournalShown(target)
+ check(shown and shown:find("'L10n plan'",1,true) and S.IsPseudo(shown),'R5 P60: the target line names the Wishlist verbatim inside the translated sentence: '..tostring(shown))
+ -- The raw sections the page classifies are unchanged English.
+ check(titles[1]=='Target' and target~=nil,'R5 P60: the runtime keeps the raw English the page classifies')
+end
+do
+ local h,data=RealJournal(nil)
+ OpenPage();Nexus.JournalTab.Refresh()
+ local toggle=ButtonOn(Page(),function(f) return f:GetText()==Nexus.Localization.Text('journal.button.show_details') end)
+ assert(toggle,'SETUP: the Show details control');toggle:Click();Nexus.JournalTab.Refresh()
+ local texts={}
+ for _,t in ipairs(S.VisibleTexts(Page())) do texts[t.text]=true end
+ local missing={}
+ for _,sec in ipairs(data.sections) do
+  if not texts[sec.title] then missing[#missing+1]=sec.title end
+ end
+ check(#missing==0,'R5 P60 English: every title is the runtime\'s exact English: '..table.concat(missing,' | '))
+ for _,sec in ipairs(data.sections) do
+  for _,l in ipairs(sec.lines or {}) do
+   local shown,known=Nexus.JournalTab.JournalShown(l)
+   if known then check(shown==l,'R5 P60 English: '..l) end
+  end
+ end
+end
+
 if #failures>0 then
  for _,f in ipairs(failures) do print('FAIL '..f) end
  error('l10n_ui_journal: '..#failures..' of '..checks..' checks failed')

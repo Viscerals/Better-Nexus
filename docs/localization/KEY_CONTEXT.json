@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 4017,
+    "declaredKeys": 4068,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -46060,6 +46060,711 @@
       "cohort": "fullui:v5_source86_supplemental"
     },
     {
+      "key": "journal.provider.catalog_known",
+      "kind": "template",
+      "english": "Known client catalog: {count} tomes; coverage of the whole game is unverified.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "tomes in the client catalog"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). ",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.catalog_stale",
+      "kind": "template",
+      "english": "catalog may be stale ({state})",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "the catalog state code (identifier, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A reason the tome state may be stale.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.catalog_unavailable",
+      "kind": "text",
+      "english": "Catalog unavailable; no complete tome list can be shown.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). ",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.compares_plan",
+      "kind": "text",
+      "english": "Compares the assigned Wishlist with the active Saved Build; planned locked targets are not proof of ownership.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). ",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.design_hint",
+      "kind": "text",
+      "english": "Design a build with 'New Wishlist' (the Echo Wishlist section).",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). 'New Wishlist' is a button name.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.estimate_advisor",
+      "kind": "text",
+      "english": "no estimate (advisor mode)",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Lower-case estimate line.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.estimate_complete",
+      "kind": "text",
+      "english": "wishlist complete - 0 wanted echoes pending",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Lower-case estimate line.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.estimate_many",
+      "kind": "template",
+      "english": "~{count} wishlist echoes pending; no future random roll is assumed (rate unmeasured)",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "pending Wishlist Echoes (2 or more)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Lower-case estimate line.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.estimate_no_target",
+      "kind": "text",
+      "english": "no wishlist target - advisor mode",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Lower-case estimate line.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.estimate_one",
+      "kind": "template",
+      "english": "~{count} wishlist echo pending; no future random roll is assumed (rate unmeasured)",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "always 1"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Lower-case estimate line (one Echo).",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.estimate_unavailable",
+      "kind": "text",
+      "english": "estimate unavailable",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Lower-case estimate line.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.extra_compare_next_run",
+      "kind": "template",
+      "english": "{family}  (not on the target plan; compare after the next run)",
+      "placeholders": [
+        {
+          "name": "family",
+          "type": "text",
+          "meaning": "an Echo family name (game data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Keep the two spaces before the bracket.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.extra_later_run",
+      "kind": "template",
+      "english": "{family}  (a later run may reduce these extras)",
+      "placeholders": [
+        {
+          "name": "family",
+          "type": "text",
+          "meaning": "an Echo family name (game data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Keep the two spaces before the bracket.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.mirror_observed",
+      "kind": "text",
+      "english": "Client mirror observed when this page was refreshed; server freshness and current server state are unverified.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). ",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.missing_tomes_meaning",
+      "kind": "text",
+      "english": "Missing Tomes means undiscovered Wishlist requirements; disabled tomes and pending requests are separate below.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). 'Missing Tomes' names the summary row.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.no_tome_requests",
+      "kind": "text",
+      "english": "No pending requests recorded for tomes in the known catalog.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). ",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.no_wishlist",
+      "kind": "text",
+      "english": "No wishlist set -- advisor only.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Nexus only recommends: no Wishlist is targeted.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.none_observed",
+      "kind": "text",
+      "english": "None observed in this client catalog.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). ",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.none_observed_stale",
+      "kind": "text",
+      "english": "None observed; state may be stale.",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). ",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.plan_disable",
+      "kind": "text",
+      "english": "plan: disable",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Tome hover: Nexus plans to disable this tome.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.plan_keep_opted_out",
+      "kind": "text",
+      "english": "plan: keep enabled (opted out of automatic disabling)",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Tome hover.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.plan_keep_wishlist",
+      "kind": "text",
+      "english": "plan: keep enabled (a Wishlist family uses it)",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Tome hover.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.plan_skipped_unsupported",
+      "kind": "text",
+      "english": "automatic toggle skipped: unsupported availability data",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Tome hover.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.reason_discovery_unavailable",
+      "kind": "text",
+      "english": "discovery state unavailable",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Tome hover reason.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.reason_undiscovered",
+      "kind": "text",
+      "english": "undiscovered in the client mirror",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Tome hover reason.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.stale_awaiting_reconciliation",
+      "kind": "text",
+      "english": "client mirror update is awaiting reconciliation",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A reason the tome state may be stale.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.stale_catalog_unavailable",
+      "kind": "text",
+      "english": "catalog is unavailable",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A reason the tome state may be stale (lower-case).",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.stale_character_not_ready",
+      "kind": "text",
+      "english": "character data is not ready",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A reason the tome state may be stale.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.stale_discovery_unavailable",
+      "kind": "text",
+      "english": "discovery state is unavailable",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A reason the tome state may be stale.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.stale_mirror_unsynced",
+      "kind": "text",
+      "english": "discovery mirror is unsynced",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A reason the tome state may be stale.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.stale_settling",
+      "kind": "text",
+      "english": "character data is settling after a world transition",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A reason the tome state may be stale.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.stale_world_transition",
+      "kind": "text",
+      "english": "world transition in progress",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A reason the tome state may be stale.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.state_stale",
+      "kind": "template",
+      "english": "State may be stale: {reasons}.",
+      "placeholders": [
+        {
+          "name": "reasons",
+          "type": "text",
+          "meaning": "why (one reason shown through its key; several are joined by '; ' and shown as given)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). ",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.target_active",
+      "kind": "template",
+      "english": "Wishlist '{name}' (active loadout): {families} Echo families -- {represented} represented, {missing} missing, {off} off-Wishlist families in the saved build",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name (player data, verbatim)"
+        },
+        {
+          "name": "families",
+          "type": "count",
+          "meaning": "Echo families in the Wishlist"
+        },
+        {
+          "name": "represented",
+          "type": "count",
+          "meaning": "families the saved build already has"
+        },
+        {
+          "name": "missing",
+          "type": "count",
+          "meaning": "families still missing"
+        },
+        {
+          "name": "off",
+          "type": "count",
+          "meaning": "families in the saved build that the Wishlist does not want"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). The target line of an active-loadout Wishlist.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.target_designed",
+      "kind": "template",
+      "english": "Wishlist '{name}' (Echo Wishlist build): {families} Echo families -- {represented} represented, {missing} missing, {off} off-Wishlist families in the saved build",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name (player data, verbatim)"
+        },
+        {
+          "name": "families",
+          "type": "count",
+          "meaning": "Echo families in the Wishlist"
+        },
+        {
+          "name": "represented",
+          "type": "count",
+          "meaning": "families the saved build already has"
+        },
+        {
+          "name": "missing",
+          "type": "count",
+          "meaning": "families still missing"
+        },
+        {
+          "name": "off",
+          "type": "count",
+          "meaning": "families in the saved build that the Wishlist does not want"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). The target line of a designed Wishlist build.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.target_plain",
+      "kind": "template",
+      "english": "Wishlist '{name}': {families} Echo families -- {represented} represented, {missing} missing, {off} off-Wishlist families in the saved build",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name (player data, verbatim)"
+        },
+        {
+          "name": "families",
+          "type": "count",
+          "meaning": "Echo families in the Wishlist"
+        },
+        {
+          "name": "represented",
+          "type": "count",
+          "meaning": "families the saved build already has"
+        },
+        {
+          "name": "missing",
+          "type": "count",
+          "meaning": "families still missing"
+        },
+        {
+          "name": "off",
+          "type": "count",
+          "meaning": "families in the saved build that the Wishlist does not want"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). The target line of any other Wishlist.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.title_extra_copies",
+      "kind": "text",
+      "english": "Extra copies compared with the plan",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Section title.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.title_notes",
+      "kind": "text",
+      "english": "Notes",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Section title.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.title_pending",
+      "kind": "template",
+      "english": "Pending ({count})",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "missing Echo families"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Section title: missing families.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.title_target",
+      "kind": "text",
+      "english": "Target",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Section title: the targeted Wishlist.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.title_tome_coverage",
+      "kind": "text",
+      "english": "Tome state coverage",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Section title: how much of the tome state is known.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.title_tome_requests",
+      "kind": "text",
+      "english": "Tome requests awaiting confirmation",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Section title.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.title_tomes_disabled",
+      "kind": "text",
+      "english": "Disabled tomes (client mirror)",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Section title. \"Client mirror\": the game client's local copy of the server state.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.title_tomes_enabled",
+      "kind": "text",
+      "english": "Enabled tomes (client mirror)",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Section title.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.title_tomes_unknown",
+      "kind": "text",
+      "english": "Unknown or mixed tome state",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). Section title.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.tome_disabled",
+      "kind": "text",
+      "english": "Disabled",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A tome's observed state (row badge).",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.tome_enabled",
+      "kind": "text",
+      "english": "Enabled",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A tome's observed state (row badge).",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.tome_mixed",
+      "kind": "text",
+      "english": "Mixed",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A tome's observed state: its Echoes disagree.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.tome_status_stale",
+      "kind": "template",
+      "english": "{status} (stale)",
+      "placeholders": [
+        {
+          "name": "status",
+          "type": "text",
+          "meaning": "the tome's observed state word (shown through its key)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A tome badge whose reading may be stale.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.tome_undiscovered",
+      "kind": "text",
+      "english": "Undiscovered",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A tome's observed state: not discovered yet.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "journal.provider.tome_unknown_state",
+      "kind": "text",
+      "english": "Unknown",
+      "placeholders": [],
+      "group": "journal",
+      "meaning": "Echo Journal > Nexus Progress page: a line the automation runtime writes for this page (it keeps the raw English, which the page also reads to classify sections). A tome's observed state: not known.",
+      "consumer": "Echo Journal > Nexus Progress body",
+      "familySurface": "v5_source86_supplemental: Echo Journal > Nexus Progress (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
       "key": "leaderboard.value.generated_build",
       "kind": "text",
       "english": "Leaderboard Build",
@@ -53726,7 +54431,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 4017,
+    "totalKeys": 4068,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -53750,7 +54455,7 @@
       "remainder_runtime_status": 35,
       "v4_long_paragraphs": 0,
       "v5_source86_amendments": 0,
-      "v5_source86_supplemental": 22
+      "v5_source86_supplemental": 73
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

@@ -360,8 +360,9 @@ local function EstimateLine(sections)
     if not (lines and #lines == 2 and lines[1] == NOTES_FIRST) then return nil end
     local est = lines[2]
     if NO_ESTIMATE[est] then return T("journal.status.estimate_unavailable") end
-    -- The estimate itself is the provider's text, inserted as supplied.
-    return TF("journal.status.estimate", {estimate = est}, "Estimate, not a prediction: " .. est
+    -- The estimate itself is the provider's text, said through the Journal
+    -- book when it is one of its own forms (M.JournalShown), else as supplied.
+    return TF("journal.status.estimate", {estimate = (M.JournalShown(est))}, "Estimate, not a prediction: " .. est
         .. ". Based only on what is known to be missing; no future offer is assumed.")
 end
 
@@ -454,6 +455,81 @@ local function RowLeave(self)
 end
 
 -- A provider string worth showing, or nil.
+-- The automation runtime's Journal sections (core/AutomationRuntime.lua
+-- JournalData, with logic/Ratchet.lua's estimate and core/GameAdapter.lua's
+-- tome-state reasons) keep their raw English: Summarize and EstimateLine
+-- classify that raw text. Only the display says it in the active language:
+-- exact titles and lines, and the provider's own formats (%d a count, %s a
+-- name or code value; nested: a value through this same book). Any other
+-- text (a family or tome name, an unknown reason) is shown as before.
+-- JOURNAL-PROVIDER BEGIN (generated from the fragment)
+local JOURNAL_PHRASES = {exact = {
+    ["Target"] = "journal.provider.title_target",
+    ["Extra copies compared with the plan"] = "journal.provider.title_extra_copies",
+    ["Tome state coverage"] = "journal.provider.title_tome_coverage",
+    ["Disabled tomes (client mirror)"] = "journal.provider.title_tomes_disabled",
+    ["Tome requests awaiting confirmation"] = "journal.provider.title_tome_requests",
+    ["Unknown or mixed tome state"] = "journal.provider.title_tomes_unknown",
+    ["Enabled tomes (client mirror)"] = "journal.provider.title_tomes_enabled",
+    ["Notes"] = "journal.provider.title_notes",
+    ["No wishlist set -- advisor only."] = "journal.provider.no_wishlist",
+    ["Design a build with 'New Wishlist' (the Echo Wishlist section)."] = "journal.provider.design_hint",
+    ["Client mirror observed when this page was refreshed; server freshness and current server state are unverified."] = "journal.provider.mirror_observed",
+    ["Missing Tomes means undiscovered Wishlist requirements; disabled tomes and pending requests are separate below."] = "journal.provider.missing_tomes_meaning",
+    ["Catalog unavailable; no complete tome list can be shown."] = "journal.provider.catalog_unavailable",
+    ["No pending requests recorded for tomes in the known catalog."] = "journal.provider.no_tome_requests",
+    ["None observed; state may be stale."] = "journal.provider.none_observed_stale",
+    ["None observed in this client catalog."] = "journal.provider.none_observed",
+    ["Compares the assigned Wishlist with the active Saved Build; planned locked targets are not proof of ownership."] = "journal.provider.compares_plan",
+    ["no estimate (advisor mode)"] = "journal.provider.estimate_advisor",
+    ["estimate unavailable"] = "journal.provider.estimate_unavailable",
+    ["no wishlist target - advisor mode"] = "journal.provider.estimate_no_target",
+    ["wishlist complete - 0 wanted echoes pending"] = "journal.provider.estimate_complete",
+    ["catalog is unavailable"] = "journal.provider.stale_catalog_unavailable",
+    ["character data is not ready"] = "journal.provider.stale_character_not_ready",
+    ["discovery mirror is unsynced"] = "journal.provider.stale_mirror_unsynced",
+    ["client mirror update is awaiting reconciliation"] = "journal.provider.stale_awaiting_reconciliation",
+    ["discovery state is unavailable"] = "journal.provider.stale_discovery_unavailable",
+    ["world transition in progress"] = "journal.provider.stale_world_transition",
+    ["character data is settling after a world transition"] = "journal.provider.stale_settling",
+    ["Disabled"] = "journal.provider.tome_disabled",
+    ["Enabled"] = "journal.provider.tome_enabled",
+    ["Mixed"] = "journal.provider.tome_mixed",
+    ["Undiscovered"] = "journal.provider.tome_undiscovered",
+    ["Unknown"] = "journal.provider.tome_unknown_state",
+    ["plan: disable"] = "journal.provider.plan_disable",
+    ["plan: keep enabled (a Wishlist family uses it)"] = "journal.provider.plan_keep_wishlist",
+    ["plan: keep enabled (opted out of automatic disabling)"] = "journal.provider.plan_keep_opted_out",
+    ["automatic toggle skipped: unsupported availability data"] = "journal.provider.plan_skipped_unsupported",
+    ["undiscovered in the client mirror"] = "journal.provider.reason_undiscovered",
+    ["discovery state unavailable"] = "journal.provider.reason_discovery_unavailable",
+}, formats = {
+    {format = "Pending (%d)", key = "journal.provider.title_pending", fields = {"count"}},
+    {format = "Known client catalog: %d tomes; coverage of the whole game is unverified.", key = "journal.provider.catalog_known", fields = {"count"}},
+    {format = "State may be stale: %s.", key = "journal.provider.state_stale", fields = {"reasons"}, nested = {reasons = true}},
+    {format = "catalog may be stale (%s)", key = "journal.provider.catalog_stale", fields = {"state"}},
+    {format = "Wishlist '%s' (Echo Wishlist build): %d Echo families -- %d represented, %d missing, %d off-Wishlist families in the saved build", key = "journal.provider.target_designed", fields = {"name", "families", "represented", "missing", "off"}},
+    {format = "Wishlist '%s' (active loadout): %d Echo families -- %d represented, %d missing, %d off-Wishlist families in the saved build", key = "journal.provider.target_active", fields = {"name", "families", "represented", "missing", "off"}},
+    {format = "Wishlist '%s': %d Echo families -- %d represented, %d missing, %d off-Wishlist families in the saved build", key = "journal.provider.target_plain", fields = {"name", "families", "represented", "missing", "off"}},
+    {format = "%s  (not on the target plan; compare after the next run)", key = "journal.provider.extra_compare_next_run", fields = {"family"}},
+    {format = "%s  (a later run may reduce these extras)", key = "journal.provider.extra_later_run", fields = {"family"}},
+    {format = "~%d wishlist echo pending; no future random roll is assumed (rate unmeasured)", key = "journal.provider.estimate_one", fields = {"count"}},
+    {format = "~%d wishlist echoes pending; no future random roll is assumed (rate unmeasured)", key = "journal.provider.estimate_many", fields = {"count"}},
+    {format = "%s (stale)", key = "journal.provider.tome_status_stale", fields = {"status"}, nested = {status = true}},
+}}
+-- JOURNAL-PROVIDER END
+local journalBook
+local function JournalShown(raw)
+    local L = Nexus.Localization
+    if type(raw) ~= "string" or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return raw, false end
+    if not journalBook or journalBook.seam ~= L then
+        journalBook = L.PhraseBook(JOURNAL_PHRASES)
+        journalBook.seam = L
+    end
+    return L.Phrase(raw, journalBook)
+end
+M.JournalShown = JournalShown
+
 local function Filled(value)
     return type(value) == "string" and value ~= "" and value or nil
 end
@@ -475,7 +551,7 @@ local function TomeRowEnter(self)
     GameTooltip:AddLine(t.name, 1, 1, 1, true)
     -- The observation (t.status), reason, plan and names are the provider's
     -- text, shown as supplied; only the words around them are reviewed keys.
-    local observed = Filled(t.status) or T("journal.value.tome_unknown")
+    local observed = (Filled(t.status) and (JournalShown(t.status))) or T("journal.value.tome_unknown")
     if self.tomeRequest then
         GameTooltip:AddLine(RequestText(t.pending), 1, 0.82, 0, true)
         GameTooltip:AddLine(TF("journal.tooltip.tome_last_observed", {state = observed},
@@ -485,8 +561,8 @@ local function TomeRowEnter(self)
             0.82, 0.82, 0.82, true)
         if t.pending ~= nil then GameTooltip:AddLine(RequestText(t.pending), 1, 0.82, 0, true) end
     end
-    if Filled(t.reason) then GameTooltip:AddLine(t.reason, 0.82, 0.82, 0.82, true) end
-    if Filled(t.plan) then GameTooltip:AddLine(t.plan, 0.82, 0.82, 0.82, true) end
+    if Filled(t.reason) then GameTooltip:AddLine((JournalShown(t.reason)), 0.82, 0.82, 0.82, true) end
+    if Filled(t.plan) then GameTooltip:AddLine((JournalShown(t.plan)), 0.82, 0.82, 0.82, true) end
     local names = {}
     if type(t.echoNames) == "table" then
         for i = 1, #t.echoNames do names[#names + 1] = Filled(t.echoNames[i]) end
@@ -810,7 +886,7 @@ local function DoRefresh()
         -- A request shows its reviewed badge; an observation shows the
         -- provider's status text as supplied, or Unknown without one.
         row.status:SetText(request and T(PENDING_BADGE[t.pending] or "journal.status.tome_request_pending")
-            or Filled(t.status) or T("journal.value.tome_unknown"))
+            or (Filled(t.status) and (JournalShown(t.status))) or T("journal.value.tome_unknown"))
         -- Requests and clean observations take the palette accent; mixed,
         -- unknown, undiscovered and possibly stale readings are muted.
         local clean = t.stale ~= true and (t.observed == "disabled"
@@ -957,7 +1033,9 @@ local function DoRefresh()
             for i = 1, #sections do
                 local sec = sections[i]
                 if type(sec) == "table" then
-                    AddLine(tostring(sec.title or ""), "GameFontNormalSmall")
+                    -- Classified above from the raw title; said here.
+                    local title, titled = JournalShown(tostring(sec.title or ""))
+                    AddLine(title, "GameFontNormalSmall", nil, titled)
                     -- Structured tome rows stand in for the same entries'
                     -- text lines; every other section keeps its lines.
                     local tomes = TomeRows(sec.tomeRows)
@@ -975,7 +1053,8 @@ local function DoRefresh()
                         local lines = sec.lines
                         if type(lines) == "table" then
                             for j = 1, #lines do
-                                AddLine(tostring(lines[j] or ""), nil, 8)
+                                local line, said = JournalShown(tostring(lines[j] or ""))
+                                AddLine(line, nil, 8, said)
                             end
                         end
                     end
