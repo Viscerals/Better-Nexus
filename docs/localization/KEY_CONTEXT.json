@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 3783,
+    "declaredKeys": 3801,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -36921,6 +36921,83 @@
       "cohort": "fullui:remainder_orb"
     },
     {
+      "key": "orb.assignment.choose_or_create",
+      "kind": "text",
+      "english": "Choose or create a wishlist to begin your first run.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Assignment note produced by core/GameAdapter.lua (WishlistNote / mirror note); the adapter keeps the raw English (also in diagnostics). Shown in the Orb window targets line or Advanced section. ",
+      "consumer": "ui/OrbPanel.lua truthful (Orb phrasebook)",
+      "familySurface": "remainder_orb: Orb window targets line and Advanced section (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.assignment.first_run_target",
+      "kind": "text",
+      "english": "First-run wishlist target",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Assignment note produced by core/GameAdapter.lua (WishlistNote / mirror note); the adapter keeps the raw English (also in diagnostics). Shown in the Orb window targets line or Advanced section. Label: the Wishlist used for a first run (no Saved Build assignment yet).",
+      "consumer": "ui/OrbPanel.lua truthful (Orb phrasebook)",
+      "familySurface": "remainder_orb: Orb window targets line and Advanced section (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.assignment.first_run_unavailable",
+      "kind": "text",
+      "english": "First-run wishlist data is temporarily unavailable; waiting for the server mirror.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Assignment note produced by core/GameAdapter.lua (WishlistNote / mirror note); the adapter keeps the raw English (also in diagnostics). Shown in the Orb window targets line or Advanced section. ",
+      "consumer": "ui/OrbPanel.lua truthful (Orb phrasebook)",
+      "familySurface": "remainder_orb: Orb window targets line and Advanced section (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.assignment.mirror_absent",
+      "kind": "text",
+      "english": "Assigned Wishlist is absent from the current server list. Its saved plan is retained. Refresh the list or reassign deliberately.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Assignment note produced by core/GameAdapter.lua (WishlistNote / mirror note); the adapter keeps the raw English (also in diagnostics). Shown in the Orb window targets line or Advanced section. An absent copy is not proof of deletion.",
+      "consumer": "ui/OrbPanel.lua truthful (Orb phrasebook)",
+      "familySurface": "remainder_orb: Orb window targets line and Advanced section (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.assignment.mirror_not_distinct",
+      "kind": "text",
+      "english": "Assigned Wishlist has no distinct current server mirror. Its exact saved plan is retained. Refresh the list or reassign deliberately.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Assignment note produced by core/GameAdapter.lua (WishlistNote / mirror note); the adapter keeps the raw English (also in diagnostics). Shown in the Orb window targets line or Advanced section. The server list has no copy that can be told apart from others; Nexus keeps using the saved plan.",
+      "consumer": "ui/OrbPanel.lua truthful (Orb phrasebook)",
+      "familySurface": "remainder_orb: Orb window targets line and Advanced section (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.assignment.needs_locked_targets",
+      "kind": "text",
+      "english": "Wishlist needs locked targets. Open the Wishlist Editor to choose and confirm them.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Assignment note produced by core/GameAdapter.lua (WishlistNote / mirror note); the adapter keeps the raw English (also in diagnostics). Shown in the Orb window targets line or Advanced section. ",
+      "consumer": "ui/OrbPanel.lua truthful (Orb phrasebook)",
+      "familySurface": "remainder_orb: Orb window targets line and Advanced section (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.assignment.waiting_loadout",
+      "kind": "text",
+      "english": "Waiting for loadout data...",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Assignment note produced by core/GameAdapter.lua (WishlistNote / mirror note); the adapter keeps the raw English (also in diagnostics). Shown in the Orb window targets line or Advanced section. Saved Builds have not been read from the game yet.",
+      "consumer": "ui/OrbPanel.lua truthful (Orb phrasebook)",
+      "familySurface": "remainder_orb: Orb window targets line and Advanced section (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
       "key": "orb.continue.attribution_owned_gain",
       "kind": "block",
       "english": "Your fresh Echo ownership shows the distinct chosen gain, but an earlier unconfirmed action could have caused it. This action remains UNCONFIRMED. Explicit Continue ends this old run and archives its original receipt unchanged, with confidence NONE. ",
@@ -37943,6 +38020,134 @@
       "meaning": "Text of the explicit Continue check of an unresolved Orb action (core/OrbRuntime.lua). Shown in the Continue window body/notice and the status Details. Consent and refusal wording: keep every consequence (nothing is refunded, repeated or chosen).",
       "consumer": "ui/OrbPanel.lua truthful / Continue body (Orb phrasebook)",
       "familySurface": "remainder_orb: Orb window (Orbs / Lost Memories), Continue window, history and mini panel (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.action_not_confirmed",
+      "kind": "text",
+      "english": "The game has not confirmed an Echo action yet.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. ",
+      "consumer": "logic/OrbGuidance.lua Shown (ui/Panel.lua roll body, Open Orbs hover)",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) and Open Orbs hover (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.choice_open",
+      "kind": "text",
+      "english": "An Echo choice is open in the game window.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. ",
+      "consumer": "logic/OrbGuidance.lua Shown (ui/Panel.lua roll body, Open Orbs hover)",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) and Open Orbs hover (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.finished",
+      "kind": "text",
+      "english": "Normal rolls finished. Review Orbs for remaining rolled targets.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. ",
+      "consumer": "logic/OrbGuidance.lua Shown (ui/Panel.lua roll body, Open Orbs hover)",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) and Open Orbs hover (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.finished_no_orbs",
+      "kind": "text",
+      "english": "Normal rolls finished. This client does not expose Orb mode.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. ",
+      "consumer": "logic/OrbGuidance.lua Shown (ui/Panel.lua roll body, Open Orbs hover)",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) and Open Orbs hover (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.finished_unknown",
+      "kind": "text",
+      "english": "Normal rolls finished. Target progress is not available.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. ",
+      "consumer": "logic/OrbGuidance.lua Shown (ui/Panel.lua roll body, Open Orbs hover)",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) and Open Orbs hover (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.last_action_unconfirmed",
+      "kind": "text",
+      "english": "The last Echo action has no confirmed result yet.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. ",
+      "consumer": "logic/OrbGuidance.lua Shown (ui/Panel.lua roll body, Open Orbs hover)",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) and Open Orbs hover (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.locks_only",
+      "kind": "text",
+      "english": "Rolled targets are complete. Orbs do not fill locked slots.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. ",
+      "consumer": "logic/OrbGuidance.lua Shown (ui/Panel.lua roll body, Open Orbs hover)",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) and Open Orbs hover (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.no_orb_mode",
+      "kind": "text",
+      "english": "This client does not expose Orb mode.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. ",
+      "consumer": "logic/OrbGuidance.lua Shown (ui/Panel.lua roll body, Open Orbs hover)",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) and Open Orbs hover (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.no_plan",
+      "kind": "text",
+      "english": "No assigned Wishlist: Orb guidance needs one.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. ",
+      "consumer": "logic/OrbGuidance.lua Shown (ui/Panel.lua roll body, Open Orbs hover)",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) and Open Orbs hover (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.state_open_orbs",
+      "kind": "template",
+      "english": "{reason}. Open Orbs to inspect it.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why ordinary rolling is held by the Orb state: a reason sentence without its final period, already in the shown language (for example 'Ordinary rolling paused while the Orb choice is active or cannot be confirmed')"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. The reason comes first; keep it as the start of the sentence.",
+      "consumer": "logic/OrbGuidance.lua Shown",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_orb"
+    },
+    {
+      "key": "orb.guidance.waiting_confirm",
+      "kind": "text",
+      "english": "Waiting for the game to confirm the last Echo action.",
+      "placeholders": [],
+      "group": "orb",
+      "meaning": "Orb guidance in the main panel's roll block (logic/OrbGuidance.lua): what Orbs can do now. The model keeps the English; the panel shows it through this key. ",
+      "consumer": "logic/OrbGuidance.lua Shown (ui/Panel.lua roll body, Open Orbs hover)",
+      "familySurface": "remainder_orb: Main panel roll block (Orb guidance) and Open Orbs hover (status); family coverage PENDING review",
       "cohort": "fullui:remainder_orb"
     },
     {
@@ -50479,7 +50684,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 3783,
+    "totalKeys": 3801,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -50495,7 +50700,7 @@
       "guide": 700,
       "integration2": 10,
       "remainder_library": 128,
-      "remainder_orb": 289
+      "remainder_orb": 307
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

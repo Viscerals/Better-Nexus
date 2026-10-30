@@ -731,6 +731,13 @@ local ORB_REMAINDER={exact={
     ["Turn off the game's automatic Echo acceptance before starting Orb mode."]="orb.adapter.turn_off_auto_accept",
     ["unreadable error"]="orb.adapter.unreadable_error",
     ["Waiting for the complete three-choice offer."]="orb.adapter.waiting_three_choices",
+    ["Choose or create a wishlist to begin your first run."]="orb.assignment.choose_or_create",
+    ["First-run wishlist target"]="orb.assignment.first_run_target",
+    ["First-run wishlist data is temporarily unavailable; waiting for the server mirror."]="orb.assignment.first_run_unavailable",
+    ["Assigned Wishlist is absent from the current server list. Its saved plan is retained. Refresh the list or reassign deliberately."]="orb.assignment.mirror_absent",
+    ["Assigned Wishlist has no distinct current server mirror. Its exact saved plan is retained. Refresh the list or reassign deliberately."]="orb.assignment.mirror_not_distinct",
+    ["Wishlist needs locked targets. Open the Wishlist Editor to choose and confirm them."]="orb.assignment.needs_locked_targets",
+    ["Waiting for loadout data..."]="orb.assignment.waiting_loadout",
     ["Your fresh Echo ownership shows the distinct chosen gain, but an earlier unconfirmed action could have caused it. This action remains UNCONFIRMED. Explicit Continue ends this old run and archives its original receipt unchanged, with confidence NONE. "]="orb.continue.attribution_owned_gain",
     ["The check asks read-only for the Orb count and Echoes twice and requires quiet unchanged state. Those arrivals do not prove that no older reply is still on its way. "]="orb.continue.check_explanation",
     ["Checking the game's current state. Nexus asked the game for the Orb count (and for your Echoes) and waits for an answer observed after that request began; it asks a second time after the first. No spend and no choice is sent, only these read-only questions. Any change in the game, or a loading screen, cancels this check."]="orb.continue.checking",
@@ -934,6 +941,7 @@ local ORB_REMAINDER={exact={
     ["Local saved data is still loading. Wait a moment, then try again."]="orb.runtime.write_lifecycle_loading",
     ["Saved data carries a storage migration marker this build does not support, so it is kept unchanged and read-only."]="orb.runtime.write_marker",
     ["This character's saved data has an unsupported shape."]="orb.runtime.write_row",
+    ["Restoring assigned Wishlist..."]="orb.status.restoring_assignment",
 },formats={
     {format="The saved data format marker is not a valid format number (%s%s). This build writes format %s. The data is kept unchanged and read-only.",
         key="orb.runtime.format_marker_invalid", fields={"marker_type", "marker_text", "supported"}, nested={marker_type={["unknown type"]="orb.runtime.marker_type_unknown"}}},
@@ -1382,9 +1390,9 @@ local function refresh()
     local targets
     if s.progress then targets=TF("orb.status.rolled_missing",{count=N(s.progress.rolledMissing)})
     elseif a.state=="ready" then
-        -- The note is the assignment's own text (raw; its owner localizes it).
-        targets=a.note and (T("orb.label.progress_unavailable").." "..tostring(a.note)) or T("orb.status.progress_unavailable")
-    else targets=a.note or T("orb.status.assign_to_begin") end
+        -- The note is the adapter's raw English, said through the Orb book.
+        targets=a.note and (T("orb.label.progress_unavailable").." "..tostring(truthful(a.note))) or T("orb.status.progress_unavailable")
+    else targets=truthful(a.note) or T("orb.status.assign_to_begin") end
     frame.targets:SetText(targets)
     local permanent=s.progress and s.progress.permanentMissing
     frame.permanent:SetText(permanent and permanent>0 and TF("orb.status.locked_copies_remain",{count=N(permanent)})or "")
@@ -1481,7 +1489,7 @@ local function refresh()
         local label=T("orb.label.start_reason")
         setFull(frame.startWhy,line~="" and (label.." "..line) or "",why~="" and (label.." "..why) or nil)
     end
-    frame.assignmentNote:SetText(a.mirrorNote or "")
+    frame.assignmentNote:SetText(truthful(a.mirrorNote) or "")
     if advanced then
         local rows=s.sources or {};sourcePage=math.max(1,math.min(sourcePage,math.max(1,math.ceil(#rows/4))))
         for i,r in ipairs(frame.sourceRows)do

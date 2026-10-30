@@ -2391,7 +2391,8 @@ local function EnsureFrame()
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.orbs_heading"), 1, 0.82, 0)
         GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.orbs_open_inspect"), 0.85, 0.85, 0.85, true)
         for _, b in ipairs(self.blockers or {}) do
-            GameTooltip:AddLine(tostring(b.text), 1, 0.6, 0.4, true)
+            local guidance = Nexus.OrbGuidance
+            GameTooltip:AddLine(tostring(guidance and guidance.Shown and guidance.Shown(b.text) or b.text), 1, 0.6, 0.4, true)
         end
         GameTooltip:Show()
     end)
@@ -3065,7 +3066,11 @@ function M.OrbHubLine()
     if orb == false then return LT("panel.status.orb_none_approved") end
     local history = Nexus.OrbHistory
     local states = history and type(history.RUN_STATES) == "table" and history.RUN_STATES or {}
-    local stateText = orb.state and (states[orb.state] or LF("panel.status.orb_state_undescribed", {state = tostring(orb.state)}))
+    -- The state's meaning through its key (OrbHistory.RUN_STATE_KEYS); the
+    -- English label table only without one.
+    local stateKeys = history and type(history.RUN_STATE_KEYS) == "table" and history.RUN_STATE_KEYS or {}
+    local stateText = orb.state and (stateKeys[orb.state] and LT(stateKeys[orb.state]) or states[orb.state]
+        or LF("panel.status.orb_state_undescribed", {state = tostring(orb.state)}))
         or LT("panel.status.orb_state_not_recorded")
     -- A restored receipt can precede the offer, selection and result. Do not
     -- call it a previous result merely because recovery is active.
@@ -5613,8 +5618,11 @@ local function ApplyModel(model, signatures, roll)
     local cards = type(model.cards) == "table" and model.cards or {}
     local recommendation = SafeText(model.recommendation)
     local guide = type(model.orbGuidance) == "table" and model.orbGuidance or nil
-    -- With no build, the setup view already names the missing Wishlist.
-    local guideText = (guide and total > 0 and name) and SafeText(guide.text) or ""
+    -- With no build, the setup view already names the missing Wishlist. The
+    -- model keeps English; the guidance says it in the shown language.
+    local guidance = Nexus.OrbGuidance
+    local guideText = (guide and total > 0 and name) and SafeText(guidance and guidance.Shown
+        and guidance.Shown(guide.text) or guide.text) or ""
     -- The inline Auto line (M.AutoNoteFor): why a selected Auto is not acting,
     -- or why the last Auto click left it OFF. It shows the roll block too.
     local autoNote = SafeText(model.autoNote)

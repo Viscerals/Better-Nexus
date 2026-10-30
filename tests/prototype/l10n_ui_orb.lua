@@ -96,10 +96,15 @@ do
    if type(map)=='table' then for _,key in pairs(map) do if not bookKeys[key] then bookKeys[key]=true;bookN=bookN+1 end end end
   end
  end
+ for key in pairs(bookKeys) do check(english[key]~=nil,'a book key is a catalog key: '..key) end
+ -- Keys the Orb guidance (logic/OrbGuidance.lua) shows itself.
+ local guidanceKeys={}
+ for _,key in pairs(Nexus.OrbGuidance.SHOWN_KEYS) do guidanceKeys[key]=true end
+ guidanceKeys['orb.guidance.state_open_orbs']=true
  local catalog,remainderN=0,0
  for key in pairs(english) do
   if key:sub(1,4)=='orb.' then
-   if bookKeys[key] and not fallback[key] then
+   if (bookKeys[key] or guidanceKeys[key]) and not fallback[key] then
     remainderN=remainderN+1
     check(not src:find('T%("'..key:gsub('%p','%%%0')..'"')  and not src:find('TF%("'..key:gsub('%p','%%%0')..'"'),'remainder key is never asked by name: '..key)
    else
@@ -108,7 +113,7 @@ do
   end
  end
  check(n==catalog and n>300,'every other orb.* key has exactly one fallback: '..n..'/'..catalog)
- check(remainderN==bookN and remainderN>280,'every remainder book key is an orb.* catalog key: '..remainderN..'/'..bookN)
+ check(remainderN>290 and bookN>290,'remainder book keys: '..remainderN..' remainder-only of '..bookN..' book keys')
  -- The display-boundary map of raw runtime texts: each raw text is a literal
  -- of the Orb core (the producer keeps it), and its key's English is that
  -- same text, so the English window shows exactly what it showed before.
@@ -161,6 +166,14 @@ for _,raw in ipairs(COMPOSED) do
  local shown,known=L.Phrase(raw,BOOK)
  check(known==true and shown==raw,'English: a composed producer text shows its exact bytes: '..raw:sub(1,60))
 end
+-- The assignment note of the unassigned window: the adapter's exact bytes.
+do
+ local f=UI.Show();UI.Refresh()
+ local note=Nexus.GameAdapter.WishlistNote()
+ check(note=='Choose or create a wishlist to begin your first run.','English: the adapter note is raw English: '..tostring(note))
+ check(f.targets:GetText()==note,'English: the targets line shows its exact bytes: '..tostring(f.targets:GetText()))
+ f:Hide()
+end
 Plan(3)
 local f=UI.Show()
 check(f.title:GetText()=='Orbs / Lost Memories','title English')
@@ -208,12 +221,11 @@ check(englishReport:find('^Nexus Orb history %(current run%)%. History clears on
 -- runtime keeps its English; it is compared and recorded elsewhere), and
 -- Readout's status words come from ui/Readout.lua (another family).
 local DATA={WISHLIST,'Disposable A','Desired A','Disposable B','Desired B','Protected low','Excess high','Locked','Unsafe fallback'}
-local PENDING_RUNTIME={
- -- core/GameAdapter.lua assignment note and mirror note (another owner).
- 'Choose or create a wishlist to begin your first run.',
- 'Assigned Wishlist has no distinct current server mirror. Its exact saved plan is retained. Refresh the list or reassign deliberately.',
-}
-local READOUT_WORDS={'Stored on this client','Request prepared','Awaiting result','Waiting for choice','Unconfirmed','Confirmed','Spend not confirmed','Paused'}
+-- v3: the GameAdapter assignment notes pass the seam (Orb book) and the
+-- Readout status words are said by ui/Readout.lua through their keys, so
+-- nothing raw is allowed any more.
+local PENDING_RUNTIME={}
+local READOUT_WORDS={}
 local function allow(word,text)
  local rest=S.Unmarked(text)
  -- Data may be shortened in its cell ("'Za..."): a word of a data value.
@@ -282,9 +294,11 @@ do
  UI.HideMini();f:Hide()
  Nexus.StartupStatus=real
 end
--- Idle without an assigned Wishlist.
+-- Idle without an assigned Wishlist: the adapter's note through the book.
 local f=UI.Show()
 Passive('idle render and hovers',function() UI.Refresh();Scan('idle unassigned',Collect(f)) end)
+check(f.targets:GetText()==S.OPEN..'Choose or create a wishlist to begin your first run.'..S.CLOSE,
+ 'the assignment note is said through the seam: '..tostring(f.targets:GetText()))
 -- Idle with a plan; Max hover; Advanced; refusals.
 Plan(3)
 UI.Refresh()

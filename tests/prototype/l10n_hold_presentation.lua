@@ -70,6 +70,18 @@ local held=Held()
 check(held=='orb state not yet known','English: the HUD holds on the raw gate code: '..tostring(held))
 check(Nexus.Readout.AutoHoldText(held)==englishReason,'English: the display says the same bytes (presented once)')
 
+do
+ local G=Nexus.OrbGuidance
+ local g=Nexus.Panel._lastModel.orbGuidance
+ check(g.text==NOT_KNOWN..'. Open Orbs to inspect it.' and G.Shown(g.text)==g.text,'English: the guidance shows its exact bytes: '..tostring(g.text))
+ check(NexusPanel._rollRec:GetText():find(g.text,1,true)==1,'English: the HUD roll body shows the exact guidance: '..NexusPanel._rollRec:GetText())
+ for raw,key in pairs(G.SHOWN_KEYS) do check(G.Shown(raw)==raw,'English: '..key..' is the exact producer text') end
+ local history=Nexus.OrbHistory
+ for state,key in pairs(history.RUN_STATE_KEYS) do
+  check(Nexus.Localization.Text(key)==history.RUN_STATES[state],'English: run state '..state..' keeps its English label')
+ end
+end
+
 ------------------------------------------------------------------------------
 -- 4. EnglishMessage equals Message in English (same session)
 ------------------------------------------------------------------------------
@@ -126,6 +138,37 @@ do
  check(Nexus.Readout.AutoHoldText(raw)==display,'pseudo: AutoHoldText shows the same single presentation')
  local unknown='Ordinary rolling is paused: '..'Zażółć'
  check(Nexus.UserText.Message(unknown)==unknown,'pseudo: an unknown text keeps its existing presentation')
+end
+
+------------------------------------------------------------------------------
+-- 5. Orb guidance (logic/OrbGuidance.lua) at the panel: English model,
+--    said once at the display (roll body and the Open Orbs hover)
+------------------------------------------------------------------------------
+do
+ local G=Nexus.OrbGuidance
+ local g=Nexus.Panel._lastModel.orbGuidance
+ local OPEN_TAIL='. Open Orbs to inspect it.'
+ check(type(g)=='table' and g.state=='orb-state','pseudo: the guidance holds on the Orb state: '..tostring(g and g.state))
+ check(g.text==NOT_KNOWN..OPEN_TAIL,'pseudo: the guidance model keeps the English: '..tostring(g.text))
+ check(g.blockers[1] and g.blockers[1].text==NOT_KNOWN,'pseudo: its blocker keeps the English: '..tostring(g.blockers[1] and g.blockers[1].text))
+ local shown=G.Shown(g.text)
+ check(shown==S.OPEN..S.OPEN..NOT_KNOWN..S.CLOSE..OPEN_TAIL..S.CLOSE,'pseudo: the guidance is said once with its reason: '..shown)
+ local button=NexusPanel._orbsBtn
+ button.blockers=g.blockers
+ local lines=S.CaptureTooltip(button:GetScript('OnEnter'),button)
+ local found=false
+ for _,line in ipairs(lines) do if line==S.OPEN..NOT_KNOWN..S.CLOSE then found=true end end
+ check(found,'pseudo: the Open Orbs hover says the blocker through the seam: '..table.concat(lines,' | '))
+ for raw,key in pairs(G.SHOWN_KEYS) do
+  check(G.Shown(raw)==S.OPEN..raw..S.CLOSE,'pseudo: guidance text said through '..key)
+ end
+ check(G.Shown('Zażółć')=='Zażółć','pseudo: an unknown guidance text is shown unchanged')
+ check(NexusPanel._rollRec:GetText():find(shown,1,true)==1,'pseudo: the HUD roll body says the guidance once: '..NexusPanel._rollRec:GetText())
+ -- The Orb run line of the hub: the run state's meaning through its key.
+ local history=Nexus.OrbHistory
+ for state,key in pairs(history.RUN_STATE_KEYS) do
+  check(Nexus.Localization.Text(key)==S.OPEN..history.RUN_STATES[state]..S.CLOSE,'pseudo: run state '..state..' has its keyed meaning')
+ end
 end
 
 print('l10n_hold_presentation: '..checks..' checks')

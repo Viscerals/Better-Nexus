@@ -252,6 +252,14 @@ local function FromPhraseSources(s)
     end
     return nil
 end
+-- A text another owner's display recognizes (an English reason wording or
+-- a phrase source), in the active language; any other text unchanged. Unlike
+-- T.Message it never rewrites an unknown text.
+function T.Recognized(value)
+    if type(value)~="string" then return value end
+    local shown=FromPhraseSources(value)
+    return shown or value
+end
 function T.Message(value)
     local s=tostring(value or "")
     if reasons[s] then return SeamReason(reasonKeys[s],reasons[s]) end
