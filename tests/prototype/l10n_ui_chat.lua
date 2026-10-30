@@ -65,12 +65,37 @@ check(Has(status,PREFIX..'v'..version..' build='..label..' -- level 40, auto OFF
 check(Has(status,PREFIX..'ACTIVE: no build activated right now.'),'status ACTIVE line exact')
 check(Has(status,PREFIX..'READABLE: 0 confirmed Saved Build(s), 0 desired Wishlist plan(s)'),'status READABLE line exact (count slots)')
 check(Has(status,PREFIX..'No confirmed Saved Build yet; complete and save your first run.'),'status Saved Build line exact')
+-- v3: every runtime/adapter chat line of Main's runtime phrase source,
+-- rebuilt as its producer builds it (a count 7, a text 'Frostwake'), with
+-- and without a producer's coloured tag; and the Auto hold line.
+local function RuntimeLines()
+ local book=Nexus.MainRuntimeBook()
+ local out={}
+ for raw in pairs(book.exact) do out[#out+1]=raw;out[#out+1]='|cffff9040Nexus:|r '..raw end
+ for _,entry in ipairs(book.formats) do
+  local args={}
+  for n,slot in ipairs(entry.slots) do args[n]=slot=='count' and 7 or 'Frostwake' end
+  local line=string.format(entry.format,unpack(args))
+  out[#out+1]=line;out[#out+1]='|cff4dff80Nexus:|r '..line
+ end
+ out[#out+1]='Auto is ON but paused: user acting'
+ return out,book
+end
 -- v3: the raw status lines show the English UserText's rewrite showed before.
 for _,raw in ipairs({'OWNED this run: 3 echoes (synced).','OWNED this run: 0 echoes (not synced yet).','TARGET: none -- advisor only',
  "TARGET: |cff7fff7f'Plan'|r (your active loadout) -- 12 echoes",'TARGET: none -- advisor only  (Waiting for loadout data...)'}) do
  check(Nexus.UserText.Message(raw)==Nexus.UserText.EnglishMessage(raw),'v3: English status line unchanged: '..Nexus.UserText.Message(raw))
 end
 check(Nexus.UserText.Message('OWNED this run: 3 echoes (synced).')=='Rolled Echoes this run: 3 echoes (server confirmed).','v3: the owned line keeps its exact English')
+do
+ local lines,book=RuntimeLines()
+ local n=0
+ for _ in pairs(book.exact) do n=n+1 end
+ check(n==10 and #book.formats==11,'v3: the runtime chat book is admitted whole: '..n..' exact, '..#book.formats..' formats')
+ for _,line in ipairs(lines) do
+  check(Nexus.UserText.Message(line)==Nexus.UserText.EnglishMessage(line),'v3: English runtime chat line unchanged: '..line)
+ end
+end
 check(Has(status,PREFIX..'rolling strategy: adaptive') and Has(status,PREFIX..'rolling strategy last decision: none'),'rolling lines exact')
 local recording
 for _,l in ipairs(status) do if l:find('roll recording: ',1,true) then recording=l end end
@@ -165,6 +190,18 @@ local COMMANDS={'status','wishlist','progress','missing','dps','sync','reference
  'freeze off','currentlocks on','currentlocks off','anchor 123','anchor off','prototype','nameplate','update',
  'legacy','legacy bogus','restore','auto','auto','pause','pause','paused','resume','resume','logclear','trace clear'}
 local pseudo={}
+do
+ local lines=RuntimeLines()
+ for _,line in ipairs(lines) do
+  local shown=Nexus.UserText.Message(line)
+  local tag=line:match('^(|c%x+Nexus:|r )') or ''
+  check(shown:sub(1,#tag)==tag and S.IsPseudo(shown:sub(#tag+1)) and S.LooksUntranslated(shown:sub(#tag+1),function(w) return w=='Frostwake' end)==nil,
+   'v3: runtime chat line said through the seam, its tag kept: '..shown)
+ end
+ check(Nexus.UserText.Message('Auto is ON but paused: Ordinary rolling paused while the Orb choice is active or cannot be confirmed')
+  ==S.OPEN..'Auto is ON but paused: '..S.OPEN..'Ordinary rolling paused while the Orb choice is active or cannot be confirmed'..S.CLOSE..S.CLOSE,
+  'v3: a recognized Auto hold reason is said through its key inside the line')
+end
 for _,cmd in ipairs(COMMANDS) do
  local lines=Run(cmd)
  pseudo[cmd]=lines

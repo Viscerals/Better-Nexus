@@ -58,8 +58,77 @@ local function StatusPhrase(text)
     return L.Phrase(text, statusBook)
 end
 Nexus.MainStatusPhrase = StatusPhrase
+-- The chat lines core/AutomationRuntime.lua and core/GameAdapter.lua print
+-- through Print (options.print / OnStatus), after an optional coloured
+-- "Nexus:" tag of their own that stays code-owned. An Auto hold reason is
+-- shown through UserText.Recognized (its words otherwise).
+-- RUNTIME-CHAT BEGIN (generated from the fragment)
+local RUNTIME_PHRASES = {exact = {
+    ["select: the client's pending flag is still set after 10s with no result observed; it no longer holds other Echo actions, and Nexus sends no Select while it is set."] = "adapter.chat.outside_select_pending",
+    ["Select still unresolved after 10s: the client's pending flag is still set although a matching grant is visible. Nexus sends nothing new and waits for the flag to clear. The game gives no receipt for a selection, so this wait can last until a new run."] = "adapter.chat.select_unresolved_seen",
+    ["Select still unresolved after 10s: the client's pending flag is still set although a matching grant is visible. Nexus sends nothing new and waits; another selection of the same Echo was seen, so no grant can settle it. The game gives no receipt for a selection, so this wait can last until a new run."] = "adapter.chat.select_unresolved_seen_competing",
+    ["Select still unresolved after 10s: the client's pending flag is still set and its grant is not visible yet. Nexus sends nothing new and waits; while Auto is ON it re-reads the granted Echoes. The game gives no receipt for a selection, so this wait can last until a new run."] = "adapter.chat.select_unresolved_unseen",
+    ["Select still unresolved after 10s: the client's pending flag is still set and its grant is not visible yet. Nexus sends nothing new and waits; another selection of the same Echo was seen, so no grant can settle it. The game gives no receipt for a selection, so this wait can last until a new run."] = "adapter.chat.select_unresolved_unseen_competing",
+    ["Select: the game still shows a selection pending after 10s with no result observed; Nexus sends no Echo action until it clears."] = "adapter.chat.selection_pending_held",
+    ["I couldn't create the first Saved Build automatically. Open Echo Journal > My Builds and save this finished run into a Saved Build slot before resetting."] = "automation.chat.first_run_create_failed",
+    ["your first run is finished, but Nexus found no free Saved Build slot. Save this loadout manually in Echo Journal > My Builds before resetting."] = "automation.chat.first_run_no_slot",
+    ["the first-run Saved Build write was not confirmed before the reset. Open Echo Journal > My Builds and verify/save the loadout manually before relying on automated convergence."] = "automation.chat.first_run_unconfirmed_reset",
+    ["Nexus cannot safely choose or overwrite a Saved Build while none is active. Open Echo Journal > My Builds, save this finished run into a slot, and activate that slot before resetting."] = "automation.chat.no_active_saved_build",
+}, formats = {
+    {format = "unlocked %s -- %s is acquired and ready to replace it.",
+        key = "automation.chat.unlocked_ready", fields = {"old", "new"}},
+    {format = "couldn't unlock %s: %s",
+        key = "automation.chat.unlock_failed", fields = {"echo", "error"}},
+    {format = "lock request sent for %s; waiting for server confirmation.",
+        key = "automation.chat.lock_sent", fields = {"echo"}},
+    {format = "couldn't lock %s: %s",
+        key = "automation.chat.lock_failed", fields = {"echo", "error"}},
+    {format = "Save sent — %s. Checking the Saved Build now. Still needed: %s.",
+        key = "automation.chat.save_sent", fields = {"change", "needed"}, nested = {change = {["loadout improved"]="automation.value.loadout_improved", ["first completed run"]="automation.value.first_completed_run"}, needed = {["none"]="automation.value.none_needed"}}},
+    {format = "No improvement run — not saving. Still needed: %s.",
+        key = "automation.chat.no_improvement", fields = {"needed"}, nested = {needed = {["none"]="automation.value.none_needed"}}},
+    {format = "first run complete. Nexus is attempting to store it in Saved Build %s. Wait for the confirmation message before resetting; if it does not confirm, save this finished loadout manually in Echo Journal > My Builds.",
+        key = "automation.chat.first_run_storing", fields = {"slot"}},
+    {format = "first run saved to Saved Build %s. Activate that slot in My Builds before starting the next run.",
+        key = "automation.chat.first_run_saved", fields = {"slot"}},
+    {format = "I couldn't confirm that your first completed run was stored in Saved Build %s. Open Echo Journal > My Builds and save this finished loadout into a slot before resetting.",
+        key = "automation.chat.first_run_not_confirmed", fields = {"slot"}},
+    {format = "Auto is ON but paused: %s",
+        key = "automation.chat.auto_on_paused", fields = {"reason"}, nested = {reason = true}},
+    {format = "%s: the client's pending flag is still set after 10s with no result observed -- no longer waited on (it is honoured again if the flag clears)",
+        key = "adapter.chat.action_pending_released", fields = {"action"}},
+}}
+-- RUNTIME-CHAT END
+local runtimeBook
+local function RuntimePhrase(text)
+    local L = Nexus.Localization
+    if type(text) ~= "string" or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return text, false end
+    local tag, body = text:match("^(|c%x%x%x%x%x%x%x%xNexus:|r )(.*)$")
+    tag, body = tag or "", body or text
+    local reason = body:match("^Auto is ON but paused: (.*)$")
+    if reason then
+        local user = Nexus.UserText
+        local shown, source = L.Format("automation.chat.auto_on_paused",
+            {reason = user and type(user.Recognized) == "function" and user.Recognized(reason) or reason})
+        if source == "unavailable" then return text, false end
+        return tag .. shown, true
+    end
+    if not runtimeBook or runtimeBook.seam ~= L then
+        runtimeBook = L.PhraseBook(RUNTIME_PHRASES)
+        runtimeBook.seam = L
+    end
+    local shown, known = L.Phrase(body, runtimeBook)
+    if known then return tag .. shown, true end
+    return text, false
+end
+Nexus.MainRuntimePhrase = RuntimePhrase
+function Nexus.MainRuntimeBook()
+    RuntimePhrase("")
+    return runtimeBook
+end
 if Nexus.UserText and type(Nexus.UserText.AddPhraseSource) == "function" then
     Nexus.UserText.AddPhraseSource(StatusPhrase)
+    Nexus.UserText.AddPhraseSource(RuntimePhrase)
 end
 
 -- Full-UI localization, chat family. A reviewed chat line resolves through
