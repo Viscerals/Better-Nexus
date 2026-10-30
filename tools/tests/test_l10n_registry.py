@@ -1906,7 +1906,7 @@ class ConsumerBindingTests(unittest.TestCase):
         receipt = self.gate_fails(with_file(self.files, PANEL, panel))
         self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
         self.assertEqual(self.binding(receipt, key)["sites"], [])
-        self.assertEqual([(problem["code"], problem["key"]) for problem in receipt["problems"]],
+        self.assertEqual([(problem["code"], problem.get("key")) for problem in receipt["problems"]],
                          [("binding-unbound", key)])
         # The fakes are seen as literal leads but never bind.
         leads = self.binding(receipt, key)["excludedLiteralLeads"]
@@ -2154,13 +2154,13 @@ class ConsumerBindingTests(unittest.TestCase):
         orphan = edit(self.files[PANEL], PROGRESS_CALL,
                       PROGRESS_CALL + b' local o = Nexus.Localization.Text("panel.never_declared")')
         receipt = self.gate_fails(with_file(self.files, PANEL, orphan))
-        self.assertEqual([(problem["code"], problem["key"]) for problem in receipt["problems"]],
+        self.assertEqual([(problem["code"], problem.get("key")) for problem in receipt["problems"]],
                          [("binding-orphan", "panel.never_declared")])
         mapped = edit(self.files[USER_TEXT], b'    ["STORE_PENDING"]="reason.saved_data_reading",\n',
                       b'    ["STORE_PENDING"]="reason.saved_data_reading",\n'
                       b'    ["NEVER"]="reason.never_declared",\n')
         receipt = self.gate_fails(with_file(self.files, USER_TEXT, mapped))
-        self.assertEqual([(problem["code"], problem["key"]) for problem in receipt["problems"]],
+        self.assertEqual([(problem["code"], problem.get("key")) for problem in receipt["problems"]],
                          [("binding-orphan", "reason.never_declared")])
         for name, line in (("seam field", b' Nexus.Localization.Text = tostring'),
                            ("seam table", b' Nexus.Localization = {}'),
@@ -2284,7 +2284,7 @@ class ConsumerBindingTests(unittest.TestCase):
                    b'"Progress" end; progressLabel:SetText(SpecProgress("panel.heading.progress"))')
         receipt = self.gate_fails(with_file(self.files, PANEL, edit(
             self.files[PANEL], PROGRESS_CALL, discard)))
-        self.assertEqual([(problem["code"], problem["key"]) for problem in receipt["problems"]],
+        self.assertEqual([(problem["code"], problem.get("key")) for problem in receipt["problems"]],
                          [("binding-unbound", key)])
         self.assertEqual([site["reason"] for site in self.binding(receipt, key)["unprovenSites"]],
                          ["wrapper-result-not-returned"])
@@ -2458,7 +2458,7 @@ class ConsumerBindingTests(unittest.TestCase):
                     continue
                 with self.assertRaises(AssertionError):
                     assert_binding_receipt(self, receipt)
-                self.assertEqual([(problem["code"], problem["key"])
+                self.assertEqual([(problem["code"], problem.get("key"))
                                   for problem in receipt["problems"]], [("binding-unbound", key)])
                 self.assertEqual([site["reason"] for site
                                   in self.binding(receipt, key)["unprovenSites"]],
