@@ -33,6 +33,30 @@ local function DataStrings()
  return out
 end
 
+-- The Wishlist controller's chat lines (v3 remainder): every entry of its
+-- phrasebook rebuilt as core/WishlistController.lua builds it, after one of
+-- its coloured tags. A count slot gets 7, a text slot a data name.
+local TAGS={'|cffff6060Nexus:|r ','|cff4dff80Nexus:|r ','|cffffd200Nexus:|r '}
+local function NotifyLines()
+ local book=Nexus.WishlistInternals.Controller.NotifyBook()
+ local out,i={},0
+ local function add(body) i=i+1;out[#out+1]=TAGS[i%#TAGS+1]..body end
+ for raw,key in pairs(book.exact) do
+  if key:sub(1,14)=='editor.notify.' then add(raw)
+  -- A Library record reason in the Copy line it fills, unless an earlier
+  -- UserText rule already presents that whole line (existing behaviour).
+  elseif Nexus.UserText.EnglishMessage(TAGS[1]..'Copy unavailable: '..raw..'.')==TAGS[1]..'Copy unavailable: '..raw..'.' then
+   add('Copy unavailable: '..raw..'.')
+  end
+ end
+ for _,entry in ipairs(book.formats) do
+  local args={}
+  for n,slot in ipairs(entry.slots) do args[n]=slot=='count' and 7 or 'Qv Plan' end
+  add(string.format(entry.format,unpack(args)))
+ end
+ return out,book
+end
+
 local function Boot(mode,entries)
  if mode~='english' then S.InstallBootHook(mode~='wrap' and mode or nil,entries) end
  local H=F.Boot(F.Database({mutate=function(db)
@@ -302,8 +326,42 @@ missing=Untranslated({popup})
 check(#missing==0,'A10: the Create confirmation passed the seam: '..Report(missing))
 check(popup:find(S.OPEN.."Create '"..OTHER_NAME..' 2'.."'?"..S.CLOSE,1,true)~=nil,'A10: the question names the Wishlist verbatim')
 check(StaticPopupDialogs[p.which].button2==S.OPEN..'Cancel'..S.CLOSE,'A10: Cancel resolves through the seam')
-H.AcceptPopup()
-H.now=H.now+3.1;H.Advance(.6,.05)
+local saveChat=S.CaptureChat(function() H.AcceptPopup();H.now=H.now+3.1;H.Advance(.6,.05) end)
+do
+ local found
+ for _,line in ipairs(saveChat) do if line:find('Wishlist saved (',1,true) then found=line end end
+ check(found=='|cff4dff80Nexus:|r '..S.OPEN..'Wishlist saved (1/79 rolled copies planned; planned locked targets are saved separately).'..S.CLOSE,
+  'A10: the real save chat line is said once through the seam, its tag kept: '..tostring(found))
+end
+do
+ local lines,book=NotifyLines()
+ check(#lines>150,'A11: the chat book holds the controller lines and the record reasons: '..#lines)
+ local bad={}
+ for _,line in ipairs(lines) do
+  local shown=Nexus.UserText.Message(line)
+  local tag=line:match('^(|c%x+Nexus:|r )')
+  if shown:sub(1,#tag)~=tag or S.LooksUntranslated(shown:sub(#tag+1),function(w) return w=='Qv' or w=='Plan' end)~=nil then
+   bad[#bad+1]=line..' -> '..shown
+  end
+ end
+ check(#bad==0,'A11: every Wishlist chat line passes the seam once:\n'..table.concat(bad,'\n'))
+ -- A Library record reason inside a Copy line is said through its own key.
+ local nested=0
+ for raw,key in pairs(book.exact) do
+  local line=TAGS[1]..'Copy unavailable: '..raw..'.'
+  -- (A whole line the controller writes itself is its own exact entry.)
+  if key:sub(1,14)~='editor.notify.' and Nexus.UserText.EnglishMessage(line)==line
+   and not book.exact['Copy unavailable: '..raw..'.'] then
+   nested=nested+1
+   local shown=Nexus.UserText.Message(line)
+   check(shown:find(S.OPEN..raw..S.CLOSE,1,true)~=nil,'A11: the record reason is said through its key inside the Copy line: '..shown)
+  end
+ end
+ check(nested>40,'A11: record reasons checked inside Copy lines: '..nested)
+ -- An unknown line keeps its existing presentation.
+ local other='|cffff6060Nexus:|r '..LONG_NAME
+ check(Nexus.UserText.Message(other)==other,'A11: an unknown chat line is shown unchanged')
+end
 local result=f._saveResultText
 if result and result:IsShown() then
  missing=Untranslated({result:GetText()})
@@ -387,6 +445,37 @@ check(StaticPopupDialogs.NEXUS_IMPORT_WISHLIST.text=='Paste a Wishlist import co
 check(StaticPopupDialogs.WISHLISTREALIZER_CREATE_WISHLIST.text=="Create '%s'?\n%s",'D: the Create question keeps its exact format')
 chat=S.CaptureChat(function() Nexus.WishlistEditor.ImportEBH1String('not a code') end)
 check(chat[1]=="|cffff6060Nexus:|r couldn't parse that as an EBH1 string.",'D: chat line in exact English')
+do
+ local lines=NotifyLines()
+ local bad={}
+ for _,line in ipairs(lines) do
+  local shown,before=Nexus.UserText.Message(line),Nexus.UserText.EnglishMessage(line)
+  if shown~=before then bad[#bad+1]=line..' -> '..shown..' (before: '..before..')' end
+ end
+ check(#bad==0,'D: every Wishlist chat line shows the English bytes it showed before:\n'..table.concat(bad,'\n'))
+ check(Nexus.UserText.Message('|cffff9040Nexus:|r Wishlist identity found; awaiting authoritative locked-Echo evidence.')
+  =='|cffff9040Nexus:|r awaiting authoritative locked-Echo evidence.','D: the legacy-rewritten line keeps its earlier English')
+ -- The editor's callback prints the controller's line as given: the
+ -- controller's notify is its one presentation (UserText.Message).
+ local function Up(fn,name)
+  for i=1,200 do
+   local n,v=debug.getupvalue(fn,i)
+   if n==nil then return nil end
+   if n==name then return v end
+  end
+ end
+ local controller
+ for _,fn in pairs(Nexus.WishlistEditor) do
+  if type(fn)=='function' then controller=controller or Up(fn,'wishlistController') end
+ end
+ local notify=assert(Up(assert(controller,'the editor controller').ToggleEmptyAssignment,'notify'),'the controller notify')
+ local options=assert(Up(notify,'options'),'the editor options')
+ local presented=Nexus.UserText.Message('|cffff6060Nexus:|r retry refused because its payload changed.')
+ local printed=S.CaptureChat(function() options.notify(presented) end)
+ check(printed[1]==presented,'D: the editor prints the presented line as given (no second presentation): '..tostring(printed[1]))
+ local said=S.CaptureChat(function() notify('|cffff6060Nexus:|r retry refused because its payload changed.') end)
+ check(said[1]==presented,'D: the real controller notify presents its line once: '..tostring(said[1]))
+end
 Nexus.WishlistOverlay.Show();H.Advance(1.1,.05)
 check(Find(S.VisibleTexts(NexusOverlayControls),function(t) return t.text=='Unlock position' end)~=nil,'D: overlay control in exact English')
 

@@ -155,11 +155,182 @@ local function WithTraceback(err)
     return err
 end
 
+-- Full-UI localization (v3): the chat lines below (notify) keep their raw
+-- English; UserText.Message says them in the active language through this
+-- phrase source. Each entry is a message body after the coloured "Nexus:"
+-- tag, exactly as this file builds it (string.format: %d a count, %s a
+-- code-filled slot; nested: a slot value shown through its key or through
+-- this same book, which also holds the Library's record reasons).
+-- WISHLIST-NOTIFY BEGIN (generated from the fragment)
+local NOTIFY_PHRASES={exact={
+    ["adapter not ready."]="editor.notify.adapter_not_ready",
+    ["there are no echoes in your pending list"]="editor.notify.apply_no_echoes",
+    ["none of the pending echoes look valid"]="editor.notify.apply_no_valid_echoes",
+    ["the server refused the change (are you in a state that allows editing your build?)"]="editor.notify.apply_refused",
+    ["the server is busy with another build operation -- try again in a moment"]="editor.notify.apply_spacing",
+    ["click an Echo -- either list -- to assign it to this locked slot."]="editor.notify.assign_locked_slot",
+    ["Wishlist uploaded and targets saved, but assignment failed. Select a valid loadout and assign it again."]="editor.notify.assignment_failed",
+    ["Associated wishlist data is unavailable."]="editor.notify.associated_unavailable",
+    ["cancelled."]="editor.notify.cancelled",
+    ["This confirmation was already used for a save of this draft, so nothing was sent again."]="editor.notify.confirmation_used",
+    ["Copy unavailable: record validation is unavailable."]="editor.notify.copy_validation_unavailable",
+    ["More than one saved locked-target design exists for these rolled contents, so no locked targets were filled in. Set this plan's locked targets here; nothing is saved until you save."]="editor.notify.design_ambiguous",
+    ["Not saved: the locked-target design is invalid or no longer matches the Echo catalog. Nothing was uploaded or assigned; your edits are kept. Review the locked targets before saving again."]="editor.notify.design_invalid",
+    ["Not saved: the destination named in the confirmation is not the one this editor would use now (the active or selected Saved Build changed). Nothing was uploaded or assigned; your edits are kept. Review and save again."]="editor.notify.destination_changed",
+    ["Wishlist identity found; awaiting authoritative locked-Echo evidence."]="editor.notify.identity_found_awaiting",
+    ["Not saved: this save action is not recognised. Nothing was uploaded or assigned."]="editor.notify.intent_unrecognised",
+    ["the first-run Wishlist"]="editor.notify.label_first_run",
+    ["Wishlist uploaded, but local designed targets could not be saved. Your draft is preserved."]="editor.notify.local_targets_unsaved",
+    ["This saved plan has no distinct current server mirror. It is kept exactly as it is; saving it would need a mirror to write to, and no other Wishlist will be overwritten."]="editor.notify.mirror_unresolved",
+    ["Enter a wishlist name before saving."]="editor.notify.name_required",
+    ["Not saved: Save & assign needs a destination this editor captured, and this draft has none. Nothing was uploaded or assigned; your edits are kept."]="editor.notify.no_destination",
+    ["the normal wishlist is already full -- remove another Echo before moving this locked target back into it."]="editor.notify.normal_full_move_back",
+    ["pending list is empty -- add something first."]="editor.notify.pending_empty",
+    ["click an Echo in either list to plan its replacement. Your current one remains in its locked Echo slot. Automatic changes require both Automation and locked-Echo slot management ON, plus the acquired target and safety checks."]="editor.notify.plan_replacement",
+    ["record evidence is ambiguous"]="editor.notify.reason_record_ambiguous",
+    ["record evidence changed"]="editor.notify.reason_record_changed",
+    ["Save retry cancelled: the draft changed. Review and save again."]="editor.notify.retry_cancelled",
+    ["Save cancelled: the editor changed. Review and save again."]="editor.notify.save_cancelled_changed",
+    ["A save is already in progress; this click sends nothing."]="editor.notify.save_in_progress",
+    ["This save is already waiting for the server's spacing; the editor sends it when the server is ready and does not start another one."]="editor.notify.save_pending_spacing",
+    ["the active Saved Build"]="editor.notify.value_active_saved_build",
+    ["off"]="editor.notify.value_off",
+    ["on"]="editor.notify.value_on",
+    ["that Echo"]="editor.notify.value_that_echo",
+    ["wishlist is full (79 / 79 Echoes)."]="editor.notify.wishlist_full",
+    ["wishlist is full (79 / 79 Echoes). Use an empty Locked slot to design an additional locked Echo."]="editor.notify.wishlist_full_use_locked",
+},formats={
+    {format="this wishlist has more than %d Echo copies -- %d don't fit and aren't locked yet. They're listed below as locked-slot targets and are pursued separately from the 79-copy wishlist.",
+        key="editor.notify.overflow_not_locked", fields={"max", "count"}},
+    {format="This import exceeds %d rolled copies, and %d copies could not be assigned a locked role. Keep the original build. Review and confirm the intended locked targets before saving; do not delete the original to clear this message.",
+        key="editor.notify.import_overflow_unassigned", fields={"max", "count"}},
+    {format="This plan has %d locked target different from your currently locked Echoes (gold in the target strip). Choosing targets changes no owned Echoes. Review any replacement yourself, or use locked-Echo slot automation only with both Automation and that option enabled.",
+        key="editor.notify.locked_swaps_one", fields={"count"}},
+    {format="This plan has %d locked targets different from your currently locked Echoes (gold in the target strip). Choosing targets changes no owned Echoes. Review any replacement yourself, or use locked-Echo slot automation only with both Automation and that option enabled.",
+        key="editor.notify.locked_swaps_many", fields={"count"}},
+    {format="%d of this build's locked picks share an Echo with one already queued (different quality copies of the same Echo) -- only the higher-quality copy of each is kept, so fewer than 6 locked-design slots may be filled.",
+        key="editor.notify.lock_design_collisions", fields={"count"}},
+    {format="this build asks for %d more locked-design Echoes than the %d locked target copies a plan designs -- they were left out entirely, not just queued.",
+        key="editor.notify.lock_budget_exceeded", fields={"count", "max"}},
+    {format="locked-Echo slot automation was not changed (%s).",
+        key="editor.notify.auto_lock_not_changed", fields={"reason"}},
+    {format="locked-Echo slot automation is %s for this session only: %s.",
+        key="editor.notify.auto_lock_session_only", fields={"state", "note"}, nested={state={["on"]="editor.notify.value_on", ["off"]="editor.notify.value_off"}}},
+    {format="%s is already locked -- it doesn't need a wishlist slot.",
+        key="editor.notify.already_locked", fields={"echo"}, nested={echo={["that Echo"]="editor.notify.value_that_echo"}}},
+    {format="a plan designs at most %d locked target copies -- untag one first.",
+        key="editor.notify.lock_designs_full", fields={"max"}},
+    {format="all %d locked Echo slots the game reports are occupied or planned -- untag a target, or right-click a locked Echo to plan its replacement.",
+        key="editor.notify.lock_slots_occupied", fields={"count"}},
+    {format="the game has not stated its locked Echo slots, so at most %d occupied or planned are counted -- untag a target, or right-click a locked Echo to plan its replacement.",
+        key="editor.notify.lock_slots_unstated", fields={"max"}},
+    {format="%s is now designed for a locked slot and no longer consumes the 79-copy wishlist budget.",
+        key="editor.notify.designed_locked", fields={"echo"}},
+    {format="%s is already designed for a locked slot.",
+        key="editor.notify.already_designed_locked", fields={"echo"}},
+    {format="added %s as a locked-slot target. It is pursued separately from the 79-copy wishlist.",
+        key="editor.notify.added_locked_target", fields={"echo"}},
+    {format="Copy unavailable: %s.",
+        key="editor.notify.copy_unavailable", fields={"reason"}, nested={reason=true}},
+    {format="Not saved: %s was assigned, unassigned or restored while the editor was open, and that choice is kept. Nothing was uploaded or assigned; your edits are still shown. Close and reopen the editor to edit the current Wishlist.",
+        key="editor.notify.assignment_changed_open", fields={"destination"}, nested={destination=true}},
+    {format="Saved Build '%s'",
+        key="editor.notify.label_saved_build_named", fields={"name"}},
+    {format="Saved Build %s",
+        key="editor.notify.label_saved_build_number", fields={"slot"}},
+    {format="Not saved: Saved Build %s is empty or not loaded, so this Wishlist cannot be assigned to it. Nothing was uploaded or assigned; your assignments and your edits are kept. Add Echoes to that Saved Build and save again.",
+        key="editor.notify.destination_empty", fields={"slot"}},
+    {format="Not saved: server Wishlist slot %s no longer holds the Wishlist this editor opened (the slot is empty or not loaded). Nothing was uploaded or assigned; your edits are kept. Close the editor and open the Wishlist again from the Echo Journal.",
+        key="editor.notify.server_slot_stale_missing", fields={"slot"}},
+    {format="Not saved: server Wishlist slot %s no longer holds the Wishlist this editor opened. Nothing was uploaded or assigned; your edits are kept. Close the editor and open the Wishlist again from the Echo Journal.",
+        key="editor.notify.server_slot_stale", fields={"slot"}},
+    {format="Not saved: this plan's locked targets hold %d copies, and a plan designs at most %d locked target copies -- untag one first. Nothing was uploaded or assigned; your edits are kept.",
+        key="editor.notify.design_limit", fields={"count", "max"}},
+    {format="'%s' may already have been sent from this draft (the game reported an error during that upload), so nothing was uploaded again. Check the Wishlist list in the Echo Journal. To create another Wishlist anyway, change the plan or its name, or use New Wishlist.",
+        key="editor.notify.maybe_sent", fields={"name"}},
+    {format="'%s' was sent from this draft and the game accepted the upload, so it counts as already created and nothing was uploaded again. To create another Wishlist, change the plan or its name, or use New Wishlist.",
+        key="editor.notify.already_created", fields={"name"}},
+    {format="Not saved: a Wishlist named '%s' now exists. Nothing was uploaded; your edits are kept. Press Create again to see the name it will get.",
+        key="editor.notify.name_taken", fields={"name"}},
+    {format="'%s' was uploaded, but the editor changed during the upload (another draft was opened or this one was edited). This save changed no assignment and updated no locked targets, so any assignment it already had is kept; nothing is uploaded again. To edit the uploaded Wishlist, open it from the Echo Journal.",
+        key="editor.notify.uploaded_draft_changed", fields={"name"}},
+    {format="'%s' was uploaded, but its assignment was changed while the editor was open; that choice is kept.",
+        key="editor.notify.uploaded_assignment_kept", fields={"name"}},
+    {format="'%s' saved without an assignment, as you chose. No Saved Build or first-run target changed. To assign it, use Assign now... or the Wishlist selector in the Echo Journal.",
+        key="editor.notify.saved_unassigned_new", fields={"name"}},
+    {format="'%s' saved without an assignment, as you chose. The Saved Build this editor opened it for keeps its current Wishlist, and no first-run target changed. To assign it, use Save & assign or the Wishlist selector in the Echo Journal.",
+        key="editor.notify.saved_unassigned_opened", fields={"name"}},
+    {format="assigned '%s' to %s.",
+        key="editor.notify.assigned_to", fields={"name", "destination"}, nested={destination={["the active Saved Build"]="editor.notify.value_active_saved_build"}}},
+    {format="'%s' is the first-run Wishlist target (used until a Saved Build with Echoes is active).",
+        key="editor.notify.first_run_target", fields={"name"}},
+    {format="'%s' saved. Saved Build data is not loaded yet, so it is not assigned. To assign it, use the Wishlist selector in My Builds.",
+        key="editor.notify.saved_not_loaded", fields={"name"}},
+    {format="'%s' saved. This editor has no Saved Build destination for it, so it is not assigned. To assign it, use the Wishlist selector in My Builds.",
+        key="editor.notify.saved_no_destination", fields={"name"}},
+    {format="'%s' saved. The editor did not capture a Saved Build for this draft, so it is not assigned. To assign it, use the Wishlist selector in My Builds.",
+        key="editor.notify.saved_not_captured", fields={"name"}},
+    {format="Wishlist uploaded and targets saved, but assignment failed (%s). Select a valid loadout and assign it again.",
+        key="editor.notify.assignment_failed_reason", fields={"reason"}},
+    {format="Wishlist saved (%d/79 rolled copies planned; planned locked targets are saved separately). Saved data cannot be written right now, so its assignment and locked targets on this character last this session only.",
+        key="editor.notify.saved_session_only", fields={"count"}},
+    {format="Wishlist saved (%d/79 rolled copies planned; planned locked targets are saved separately).",
+        key="editor.notify.saved", fields={"count"}},
+    {format="The game reported an error while sending '%s'. It may or may not have reached the server, so it is not sent again from this draft and nothing was assigned. Check the Wishlist list in the Echo Journal before saving again.",
+        key="editor.notify.host_error", fields={"name"}},
+    {format="couldn't apply: %s",
+        key="editor.notify.apply_failed", fields={"reason"}, nested={reason=true}},
+    {format="Copy can no longer be saved: %s. Reopen the current record.",
+        key="editor.notify.copy_stale", fields={"reason"}, nested={reason=true}},
+    {format="the %s character is not kept in a wishlist name; this plan will be named \"%s\".",
+        key="editor.notify.name_character_dropped", fields={"character", "name"}},
+    {format="Not saved: no free name was found for \"%s\". Choose another name.",
+        key="editor.notify.no_free_name", fields={"name"}},
+    {format="A Wishlist named \"%s\" is already listed (on the server list, in your saved plans or created this session), so this new one will be named \"%s\".",
+        key="editor.notify.name_listed_renamed", fields={"name", "unique"}},
+    {format="Copy save refused: %s. Reopen the current record.",
+        key="editor.notify.copy_save_refused", fields={"reason"}, nested={reason=true}},
+}}
+-- WISHLIST-NOTIFY END
+local notifyBook
+local function NotifyPhrase(text)
+    if type(text) ~= "string" then return text, false end
+    local prefix, body = text:match("^(|c%x%x%x%x%x%x%x%xNexus:|r )(.*)$")
+    local L = Nexus.Localization
+    if not prefix or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return text, false end
+    if not notifyBook or notifyBook.seam ~= L then
+        local spec = {exact = {}, formats = NOTIFY_PHRASES.formats}
+        for raw, key in pairs(NOTIFY_PHRASES.exact) do spec.exact[raw] = key end
+        local community = Nexus.CommunityInternals
+        local reasons = community and type(community.ReasonBook) == "function" and community.ReasonBook() or nil
+        if type(reasons) == "table" and type(reasons.exact) == "table" then
+            for raw, key in pairs(reasons.exact) do
+                if spec.exact[raw] == nil then spec.exact[raw] = key end
+            end
+        end
+        notifyBook = L.PhraseBook(spec)
+        notifyBook.seam = L
+    end
+    local shown, known = L.Phrase(body, notifyBook)
+    if known then return prefix .. shown, true end
+    return text, false
+end
+Controller.NotifyPhrase = NotifyPhrase
+function Controller.NotifyBook()
+    NotifyPhrase("|cffffffffNexus:|r ")
+    return notifyBook
+end
+if Nexus.UserText and type(Nexus.UserText.AddPhraseSource) == "function" then
+    Nexus.UserText.AddPhraseSource(NotifyPhrase)
+end
+
 function Controller.New(options)
     options = type(options) == "table" and options or {}
     local DraftModel = assert(options.model, "Wishlist controller requires WishlistModel")
     local Store = assert(options.store, "Wishlist controller requires Store")
     boundStore = Store
+    -- The one presentation of a chat line (UserText.Message); the callback
+    -- prints what it is given.
     local notify = function(message)
         local callback=type(options.notify)=="function" and options.notify or print
         callback(Nexus.UserText and Nexus.UserText.Message(message) or message)

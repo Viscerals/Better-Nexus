@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 3801,
+    "declaredKeys": 3882,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -39891,6 +39891,1256 @@
       "cohort": "fullui:remainder_orb"
     },
     {
+      "key": "editor.notify.adapter_not_ready",
+      "kind": "text",
+      "english": "adapter not ready.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.added_locked_target",
+      "kind": "template",
+      "english": "added {echo} as a locked-slot target. It is pursued separately from the 79-copy wishlist.",
+      "placeholders": [
+        {
+          "name": "echo",
+          "type": "text",
+          "meaning": "the Echo name (game data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.already_created",
+      "kind": "template",
+      "english": "'{name}' was sent from this draft and the game accepted the upload, so it counts as already created and nothing was uploaded again. To create another Wishlist, change the plan or its name, or use New Wishlist.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.already_designed_locked",
+      "kind": "template",
+      "english": "{echo} is already designed for a locked slot.",
+      "placeholders": [
+        {
+          "name": "echo",
+          "type": "text",
+          "meaning": "the Echo name (game data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.already_locked",
+      "kind": "template",
+      "english": "{echo} is already locked -- it doesn't need a wishlist slot.",
+      "placeholders": [
+        {
+          "name": "echo",
+          "type": "text",
+          "meaning": "the Echo name (game data, verbatim), or 'that Echo' when unknown"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.apply_failed",
+      "kind": "template",
+      "english": "couldn't apply: {reason}",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why the change was not applied (one of the texts below when known; otherwise the code, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.apply_no_echoes",
+      "kind": "text",
+      "english": "there are no echoes in your pending list",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.apply_no_valid_echoes",
+      "kind": "text",
+      "english": "none of the pending echoes look valid",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.apply_refused",
+      "kind": "text",
+      "english": "the server refused the change (are you in a state that allows editing your build?)",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.apply_spacing",
+      "kind": "text",
+      "english": "the server is busy with another build operation -- try again in a moment",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.assign_locked_slot",
+      "kind": "text",
+      "english": "click an Echo -- either list -- to assign it to this locked slot.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.assigned_to",
+      "kind": "template",
+      "english": "assigned '{name}' to {destination}.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        },
+        {
+          "name": "destination",
+          "type": "text",
+          "meaning": "the Saved Build name (player data, verbatim), or 'the active Saved Build'"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.assignment_changed_open",
+      "kind": "template",
+      "english": "Not saved: {destination} was assigned, unassigned or restored while the editor was open, and that choice is kept. Nothing was uploaded or assigned; your edits are still shown. Close and reopen the editor to edit the current Wishlist.",
+      "placeholders": [
+        {
+          "name": "destination",
+          "type": "text",
+          "meaning": "the destination: \"Saved Build '<name>'\", 'the first-run Wishlist' or 'Saved Build <number>' (shown through these same texts)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.assignment_failed",
+      "kind": "text",
+      "english": "Wishlist uploaded and targets saved, but assignment failed. Select a valid loadout and assign it again.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.assignment_failed_reason",
+      "kind": "template",
+      "english": "Wishlist uploaded and targets saved, but assignment failed ({reason}). Select a valid loadout and assign it again.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "the assignment writer's reason code (verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.associated_unavailable",
+      "kind": "text",
+      "english": "Associated wishlist data is unavailable.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.auto_lock_not_changed",
+      "kind": "template",
+      "english": "locked-Echo slot automation was not changed ({reason}).",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "the saved-data store's reason (a code-owned phrase, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.auto_lock_session_only",
+      "kind": "template",
+      "english": "locked-Echo slot automation is {state} for this session only: {note}.",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "'on' or 'off'"
+        },
+        {
+          "name": "note",
+          "type": "text",
+          "meaning": "the saved-data store's note why it lasts this session only (verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.cancelled",
+      "kind": "text",
+      "english": "cancelled.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.confirmation_used",
+      "kind": "text",
+      "english": "This confirmation was already used for a save of this draft, so nothing was sent again.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.copy_save_refused",
+      "kind": "template",
+      "english": "Copy save refused: {reason}. Reopen the current record.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why the copied record changed (the Library's record reasons; otherwise verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.copy_stale",
+      "kind": "template",
+      "english": "Copy can no longer be saved: {reason}. Reopen the current record.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why the copied record changed (the Library's record reasons; otherwise verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.copy_unavailable",
+      "kind": "template",
+      "english": "Copy unavailable: {reason}.",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why the record cannot be copied (the Library's record reasons; otherwise verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.copy_validation_unavailable",
+      "kind": "text",
+      "english": "Copy unavailable: record validation is unavailable.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.design_ambiguous",
+      "kind": "block",
+      "english": "More than one saved locked-target design exists for these rolled contents, so no locked targets were filled in. Set this plan's locked targets here; nothing is saved until you save.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.design_invalid",
+      "kind": "block",
+      "english": "Not saved: the locked-target design is invalid or no longer matches the Echo catalog. Nothing was uploaded or assigned; your edits are kept. Review the locked targets before saving again.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.design_limit",
+      "kind": "template",
+      "english": "Not saved: this plan's locked targets hold {count} copies, and a plan designs at most {max} locked target copies -- untag one first. Nothing was uploaded or assigned; your edits are kept.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "copies the locked targets hold"
+        },
+        {
+          "name": "max",
+          "type": "count",
+          "meaning": "locked target copies a plan designs (6)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.designed_locked",
+      "kind": "template",
+      "english": "{echo} is now designed for a locked slot and no longer consumes the 79-copy wishlist budget.",
+      "placeholders": [
+        {
+          "name": "echo",
+          "type": "text",
+          "meaning": "the Echo name (game data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.destination_changed",
+      "kind": "block",
+      "english": "Not saved: the destination named in the confirmation is not the one this editor would use now (the active or selected Saved Build changed). Nothing was uploaded or assigned; your edits are kept. Review and save again.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.destination_empty",
+      "kind": "template",
+      "english": "Not saved: Saved Build {slot} is empty or not loaded, so this Wishlist cannot be assigned to it. Nothing was uploaded or assigned; your assignments and your edits are kept. Add Echoes to that Saved Build and save again.",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "the Saved Build number"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.first_run_target",
+      "kind": "template",
+      "english": "'{name}' is the first-run Wishlist target (used until a Saved Build with Echoes is active).",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.host_error",
+      "kind": "template",
+      "english": "The game reported an error while sending '{name}'. It may or may not have reached the server, so it is not sent again from this draft and nothing was assigned. Check the Wishlist list in the Echo Journal before saving again.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.identity_found_awaiting",
+      "kind": "text",
+      "english": "awaiting authoritative locked-Echo evidence.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.import_overflow_unassigned",
+      "kind": "template",
+      "english": "This import exceeds {max} rolled copies, and {count} copies could not be assigned a locked role. Keep the original build. Review and confirm the intended locked targets before saving; do not delete the original to clear this message.",
+      "placeholders": [
+        {
+          "name": "max",
+          "type": "count",
+          "meaning": "the Wishlist copy limit (79)"
+        },
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "copies without a locked role"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.intent_unrecognised",
+      "kind": "text",
+      "english": "Not saved: this save action is not recognised. Nothing was uploaded or assigned.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.label_first_run",
+      "kind": "text",
+      "english": "the first-run Wishlist",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.label_saved_build_named",
+      "kind": "template",
+      "english": "Saved Build '{name}'",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Saved Build name (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.label_saved_build_number",
+      "kind": "template",
+      "english": "Saved Build {slot}",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "the Saved Build number"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.local_targets_unsaved",
+      "kind": "text",
+      "english": "Wishlist uploaded, but local designed targets could not be saved. Your draft is preserved.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.lock_budget_exceeded",
+      "kind": "template",
+      "english": "this build asks for {count} more locked-design Echoes than the {max} locked target copies a plan designs -- they were left out entirely, not just queued.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "locked-design Echoes left out"
+        },
+        {
+          "name": "max",
+          "type": "count",
+          "meaning": "locked target copies a plan designs (6)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.lock_design_collisions",
+      "kind": "template",
+      "english": "{count} of this build's locked picks share an Echo with one already queued (different quality copies of the same Echo) -- only the higher-quality copy of each is kept, so fewer than 6 locked-design slots may be filled.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "locked picks that share an Echo"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.lock_designs_full",
+      "kind": "template",
+      "english": "a plan designs at most {max} locked target copies -- untag one first.",
+      "placeholders": [
+        {
+          "name": "max",
+          "type": "count",
+          "meaning": "locked target copies a plan designs (6)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.lock_slots_occupied",
+      "kind": "template",
+      "english": "all {count} locked Echo slots the game reports are occupied or planned -- untag a target, or right-click a locked Echo to plan its replacement.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "locked Echo slots the game reports"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.lock_slots_unstated",
+      "kind": "template",
+      "english": "the game has not stated its locked Echo slots, so at most {max} occupied or planned are counted -- untag a target, or right-click a locked Echo to plan its replacement.",
+      "placeholders": [
+        {
+          "name": "max",
+          "type": "count",
+          "meaning": "locked slots counted at most (6)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.locked_swaps_many",
+      "kind": "template",
+      "english": "This plan has {count} locked targets different from your currently locked Echoes (gold in the target strip). Choosing targets changes no owned Echoes. Review any replacement yourself, or use locked-Echo slot automation only with both Automation and that option enabled.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "locked targets that differ (2 or more)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.locked_swaps_one",
+      "kind": "template",
+      "english": "This plan has {count} locked target different from your currently locked Echoes (gold in the target strip). Choosing targets changes no owned Echoes. Review any replacement yourself, or use locked-Echo slot automation only with both Automation and that option enabled.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "always 1 (the singular form)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.maybe_sent",
+      "kind": "template",
+      "english": "'{name}' may already have been sent from this draft (the game reported an error during that upload), so nothing was uploaded again. Check the Wishlist list in the Echo Journal. To create another Wishlist anyway, change the plan or its name, or use New Wishlist.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.mirror_unresolved",
+      "kind": "block",
+      "english": "This saved plan has no distinct current server mirror. It is kept exactly as it is; saving it would need a mirror to write to, and no other Wishlist will be overwritten.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.name_character_dropped",
+      "kind": "template",
+      "english": "the {character} character is not kept in a wishlist name; this plan will be named \"{name}\".",
+      "placeholders": [
+        {
+          "name": "character",
+          "type": "text",
+          "meaning": "the dropped character (always the vertical bar, inserted by code)"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.name_listed_renamed",
+      "kind": "template",
+      "english": "A Wishlist named \"{name}\" is already listed (on the server list, in your saved plans or created this session), so this new one will be named \"{unique}\".",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        },
+        {
+          "name": "unique",
+          "type": "text",
+          "meaning": "the free name the new Wishlist gets (player data plus a code-made number, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.name_required",
+      "kind": "text",
+      "english": "Enter a wishlist name before saving.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.name_taken",
+      "kind": "template",
+      "english": "Not saved: a Wishlist named '{name}' now exists. Nothing was uploaded; your edits are kept. Press Create again to see the name it will get.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.no_destination",
+      "kind": "text",
+      "english": "Not saved: Save & assign needs a destination this editor captured, and this draft has none. Nothing was uploaded or assigned; your edits are kept.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.no_free_name",
+      "kind": "template",
+      "english": "Not saved: no free name was found for \"{name}\". Choose another name.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.normal_full_move_back",
+      "kind": "text",
+      "english": "the normal wishlist is already full -- remove another Echo before moving this locked target back into it.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.overflow_not_locked",
+      "kind": "template",
+      "english": "this wishlist has more than {max} Echo copies -- {count} don't fit and aren't locked yet. They're listed below as locked-slot targets and are pursued separately from the 79-copy wishlist.",
+      "placeholders": [
+        {
+          "name": "max",
+          "type": "count",
+          "meaning": "the Wishlist copy limit (79)"
+        },
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "copies that don't fit"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.pending_empty",
+      "kind": "text",
+      "english": "pending list is empty -- add something first.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.plan_replacement",
+      "kind": "block",
+      "english": "click an Echo in either list to plan its replacement. Your current one remains in its locked Echo slot. Automatic changes require both Automation and locked-Echo slot management ON, plus the acquired target and safety checks.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.reason_record_ambiguous",
+      "kind": "text",
+      "english": "record evidence is ambiguous",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.reason_record_changed",
+      "kind": "text",
+      "english": "record evidence changed",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.retry_cancelled",
+      "kind": "text",
+      "english": "Save retry cancelled: the draft changed. Review and save again.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.save_cancelled_changed",
+      "kind": "text",
+      "english": "Save cancelled: the editor changed. Review and save again.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.save_in_progress",
+      "kind": "text",
+      "english": "A save is already in progress; this click sends nothing.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.save_pending_spacing",
+      "kind": "text",
+      "english": "This save is already waiting for the server's spacing; the editor sends it when the server is ready and does not start another one.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.saved",
+      "kind": "template",
+      "english": "Wishlist saved ({count}/79 rolled copies planned; planned locked targets are saved separately).",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "rolled copies planned"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.saved_no_destination",
+      "kind": "template",
+      "english": "'{name}' saved. This editor has no Saved Build destination for it, so it is not assigned. To assign it, use the Wishlist selector in My Builds.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.saved_not_captured",
+      "kind": "template",
+      "english": "'{name}' saved. The editor did not capture a Saved Build for this draft, so it is not assigned. To assign it, use the Wishlist selector in My Builds.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.saved_not_loaded",
+      "kind": "template",
+      "english": "'{name}' saved. Saved Build data is not loaded yet, so it is not assigned. To assign it, use the Wishlist selector in My Builds.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.saved_session_only",
+      "kind": "template",
+      "english": "Wishlist saved ({count}/79 rolled copies planned; planned locked targets are saved separately). Saved data cannot be written right now, so its assignment and locked targets on this character last this session only.",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "rolled copies planned"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.saved_unassigned_new",
+      "kind": "template",
+      "english": "'{name}' saved without an assignment, as you chose. No Saved Build or first-run target changed. To assign it, use Assign now... or the Wishlist selector in the Echo Journal.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.saved_unassigned_opened",
+      "kind": "template",
+      "english": "'{name}' saved without an assignment, as you chose. The Saved Build this editor opened it for keeps its current Wishlist, and no first-run target changed. To assign it, use Save & assign or the Wishlist selector in the Echo Journal.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.server_slot_stale",
+      "kind": "template",
+      "english": "Not saved: server Wishlist slot {slot} no longer holds the Wishlist this editor opened. Nothing was uploaded or assigned; your edits are kept. Close the editor and open the Wishlist again from the Echo Journal.",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "the server Wishlist slot number"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.server_slot_stale_missing",
+      "kind": "template",
+      "english": "Not saved: server Wishlist slot {slot} no longer holds the Wishlist this editor opened (the slot is empty or not loaded). Nothing was uploaded or assigned; your edits are kept. Close the editor and open the Wishlist again from the Echo Journal.",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "the server Wishlist slot number"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.uploaded_assignment_kept",
+      "kind": "template",
+      "english": "'{name}' was uploaded, but its assignment was changed while the editor was open; that choice is kept.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.uploaded_draft_changed",
+      "kind": "template",
+      "english": "'{name}' was uploaded, but the editor changed during the upload (another draft was opened or this one was edited). This save changed no assignment and updated no locked targets, so any assignment it already had is kept; nothing is uploaded again. To edit the uploaded Wishlist, open it from the Echo Journal.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "the Wishlist name the player typed or chose (player data, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "lines": true,
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.value_active_saved_build",
+      "kind": "text",
+      "english": "the active Saved Build",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Stands in for a Saved Build whose name is unknown.",
+      "consumer": "nested value of a Wishlist chat line",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.value_off",
+      "kind": "text",
+      "english": "off",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Locked-Echo slot automation state word ('off').",
+      "consumer": "nested value of a Wishlist chat line",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.value_on",
+      "kind": "text",
+      "english": "on",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Locked-Echo slot automation state word ('on').",
+      "consumer": "nested value of a Wishlist chat line",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.value_that_echo",
+      "kind": "text",
+      "english": "that Echo",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Stands in for an Echo whose name is unknown.",
+      "consumer": "nested value of a Wishlist chat line",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.wishlist_full",
+      "kind": "text",
+      "english": "wishlist is full (79 / 79 Echoes).",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
+      "key": "editor.notify.wishlist_full_use_locked",
+      "kind": "text",
+      "english": "wishlist is full (79 / 79 Echoes). Use an empty Locked slot to design an additional locked Echo.",
+      "placeholders": [],
+      "group": "editor",
+      "meaning": "Chat line of the Wishlist editor (core/WishlistController.lua), printed after a coloured 'Nexus:' tag. The controller keeps the raw English; the line is shown through the Wishlist chat phrasebook. Lower-case start: it follows the tag directly.",
+      "consumer": "core/WishlistController.lua notify -> UserText.Message (phrase source)",
+      "familySurface": "remainder_wishlist_chat: Chat (Wishlist editor) (chat); family coverage PENDING review",
+      "cohort": "fullui:remainder_wishlist_chat"
+    },
+    {
       "key": "count.copies_progress",
       "kind": "template",
       "english": "{have} / {want} copies",
@@ -50684,7 +51934,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 3801,
+    "totalKeys": 3882,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -50700,7 +51950,8 @@
       "guide": 700,
       "integration2": 10,
       "remainder_library": 128,
-      "remainder_orb": 307
+      "remainder_orb": 307,
+      "remainder_wishlist_chat": 81
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

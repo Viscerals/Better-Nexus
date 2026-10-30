@@ -190,7 +190,8 @@ wishlistController = WishlistControllerFactory.New({
         end
         return NexusDB
     end,
-    notify = function(message) print(Nexus.UserText and Nexus.UserText.Message(message) or message) end,
+    -- The controller already says its line through UserText.Message once.
+    notify = function(message) print(message) end,
     requestRecompute = function()
         if Nexus.RequestRecompute then Nexus.RequestRecompute() end
     end,
