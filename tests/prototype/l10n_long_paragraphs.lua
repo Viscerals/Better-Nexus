@@ -325,17 +325,37 @@ do
  for k,v in pairs(before) do check(after[k]==v,'S16 RU lines: presenting is passive: '..k) end
 end
 do
- local entries=S.PseudoEntries()
- for _,key in ipairs(RU_LINES) do entries[key]=S.OPEN..EN4[key]..string.rep(' x',520)..S.CLOSE end
- Boot('wrap',entries)
- for _,key in ipairs(RU_LINES) do
-  local shown,raw=Present(key,EN4[key])
-  check(#entries[key]>1024 and not shown:find(' x x x',1,true),'S16 RU lines: an over-bound '..key..' candidate is not shown: '..tostring(shown):sub(1,100))
-  if key:sub(1,4)=='orb.' then
-   local tail=raw:match('.*(/nexus orbs.*)$')
-   check(shown:find(tail,1,true)~=nil,'S16 RU lines: '..key..' over-bound keeps the exact English sentence: '..tostring(shown):sub(1,100))
-  else
-   check(shown==NOTIFY_TAG..raw,'S16 RU lines: '..key..' over-bound shows the exact English: '..tostring(shown):sub(1,100))
+ -- The whole fallback of each key (SOURCE16-D5-EARLY-SPEC-P2-01). Without a
+ -- valid candidate the outer sentence is the exact declared English, while a
+ -- nested known value keeps its own key: the Orb subject and next step stay
+ -- translated inside the English sentence (a whole MIXED sentence). Written
+ -- out here from the declared English and this fixture's values, not taken
+ -- from the code under test; each check compares the complete output.
+ local O,C=S.OPEN,S.CLOSE
+ local WHOLE={
+  ['orb.runtime.blocked_submitted_unresolved']=O..'Ordinary rolling'..C..' is blocked: a submitted Orb action is unresolved. Finish its offer in the game;'
+   ..' Nexus confirms it only from the matching result. If it cannot be confirmed, reload the game: Continue in /nexus orbs may then apply.',
+  ['orb.runtime.blocked_unattributable_next']=O..'A new Orb run'..C..' is blocked: the observed gain cannot be attributed to this action. '
+   ..O..'Stop this Orb run first, then open'..C..' /nexus orbs for its explicit checked Continue exit. The record is kept until that check passes'
+   ..' and you confirm; no spending restarts.',
+ }
+ local function Whole(key,raw)
+  if WHOLE[key] then return WHOLE[key] end
+  return NOTIFY_TAG..raw
+ end
+ for _,case in ipairs({{'overbound',function(key) return S.OPEN..EN4[key]..string.rep(' x',520)..S.CLOSE end},
+   {'missing',function() return nil end},
+   {'invalid',function(key) return S.OPEN..EN4[key]..' {not_a_field}'..S.CLOSE end}}) do
+  local label,candidate=case[1],case[2]
+  local entries=S.PseudoEntries()
+  for _,key in ipairs(RU_LINES) do entries[key]=candidate(key) end
+  Boot('wrap',entries)
+  for _,key in ipairs(RU_LINES) do
+   local shown,raw=Present(key,EN4[key])
+   if label=='overbound' then
+    check(#entries[key]>1024 and not shown:find(' x x x',1,true),'S16 RU lines: an over-bound '..key..' candidate is not shown: '..tostring(shown):sub(1,100))
+   end
+   check(shown==Whole(key,raw),'S16 RU lines whole fallback ('..label..'): '..key..' shows the complete intended sentence: '..tostring(shown))
   end
  end
 end
