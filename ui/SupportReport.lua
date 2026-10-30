@@ -42,9 +42,45 @@ local REASON_KEYS = {
     ["the support component refused the report"] = "support.reason.component_refused",
     ["preparation did not finish within its step budget"] = "support.reason.step_budget",
 }
+-- The refusals companion/NexusSupport/Storage.lua writes (its loader, its
+-- report check and Replace), every fixed and composed one at this version:
+-- exact texts and its own formats (%d a count: chunk index, byte limit;
+-- %s a code value: format number, meta field name; a nested reason through
+-- this same book). The component keeps and returns them raw; a note it
+-- writes that is not listed is shown as it is.
+local STORAGE_PHRASES = {exact = {
+    ["the saved value is not a table"] = "support.reason.storage_not_table",
+    ["the saved data has no known format marker"] = "support.reason.storage_no_format",
+    ["report must be a table"] = "support.reason.report_not_table",
+    ["report carries a metatable"] = "support.reason.report_metatable",
+    ["report has no meta section"] = "support.reason.report_no_meta",
+    ["report has no chunks"] = "support.reason.report_no_chunks",
+    ["report has no content"] = "support.reason.report_no_content",
+    ["report has too many chunks"] = "support.reason.report_too_many_chunks",
+    ["support storage is unavailable"] = "support.reason.storage_unavailable",
+    ["the support component is not loaded"] = "support.reason.component_not_loaded",
+}, formats = {
+    {format = "the saved data was written by a newer version (%s)", key = "support.reason.storage_newer_format", fields = {"format"}},
+    {format = "the saved data uses an earlier format (%s)", key = "support.reason.storage_earlier_format", fields = {"format"}},
+    {format = "meta field is not a scalar: %s", key = "support.reason.report_meta_not_scalar", fields = {"field"}},
+    {format = "chunk %d is not text", key = "support.reason.report_chunk_not_text", fields = {"index"}},
+    {format = "chunk %d is larger than the supported %d bytes", key = "support.reason.report_chunk_too_large", fields = {"index", "limit"}},
+    {format = "the report is larger than the supported %d bytes", key = "support.reason.report_too_large", fields = {"limit"}},
+    {format = "existing support data was left untouched: %s", key = "support.reason.storage_left_untouched",
+        fields = {"reason"}, nested = {reason = true}},
+}}
+local storageBook
 local function ReasonText(raw)
     local key = type(raw) == "string" and REASON_KEYS[raw]
     if key then return T(key) end
+    local L = Nexus.Localization
+    if type(raw) == "string" and type(L) == "table" and type(L.PhraseBook) == "function" then
+        if not storageBook or storageBook.seam ~= L then
+            storageBook = L.PhraseBook(STORAGE_PHRASES)
+            storageBook.seam = L
+        end
+        return (L.Phrase(raw, storageBook))
+    end
     return raw
 end
 
@@ -87,7 +123,7 @@ local function storageLine()
         return T("support.status.storage_not_loaded")
     end
     if status.incompatible then
-        local reason = builder.Escape(status.incompatible)
+        local reason = builder.Escape(ReasonText(status.incompatible))
         return TF("support.status.storage_left_untouched", {reason = reason},
             "Support storage: left untouched (" .. reason .. "). Use Copy summary instead.")
     end
@@ -277,7 +313,7 @@ function UI.PrepareFile(extended)
     if status.incompatible then
         -- Known before any work is done: do not build a report that cannot be
         -- stored, and leave the existing data exactly as it is.
-        local reason = builder.Escape(status.incompatible)
+        local reason = builder.Escape(ReasonText(status.incompatible))
         lastPrepared = TF("support.status.not_prepared_left_untouched", {reason = reason},
             "Not prepared: existing support data was left untouched ("
             .. reason .. "). Use Copy summary instead.")

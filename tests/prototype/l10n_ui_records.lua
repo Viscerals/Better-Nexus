@@ -416,6 +416,55 @@ Scan('support prepared',{preparedText,NexusSupportReport.storage:GetText()})
 Button(T('support.button.inspect_prepared'),NexusSupportReport):Click()
 Scan('support inspect',{NexusSupportReport.prepared:GetText()})
 NexusSupportReport:Hide()
+-- R5 P30: the companion Storage's own refusals at the Support page, with
+-- their typed facts (format number, chunk index, byte limit) and nested
+-- reason; the component's raw reasons and returns are unchanged.
+do
+ local O,C=S.OPEN,S.CLOSE
+ -- An incompatible saved format: the real loader marks it, the page says it.
+ NexusSupportDB={format=7}
+ dofile('companion/NexusSupport/Storage.lua');H.Fire('ADDON_LOADED','NexusSupport')
+ local status=NexusSupportStorage.Status()
+ check(status.incompatible=='the saved data was written by a newer version (7)','R5 P30: the component keeps its raw reason: '..tostring(status.incompatible))
+ Nexus.SupportReportUI.Show()
+ local line=NexusSupportReport.storage:GetText()
+ check(line:find(O..'the saved data was written by a newer version (7)'..C,1,true)~=nil,'R5 P30: the storage line says the reason through its key, the format number verbatim: '..line)
+ local refused,why=Nexus.SupportReportUI.PrepareFile(false)
+ check(refused==nil and why==status.incompatible,'R5 P30: Prepare returns the raw reason')
+ check(NexusSupportReport.prepared:GetText():find(O..'the saved data was written by a newer version (7)'..C,1,true)~=nil,
+  'R5 P30: the Not prepared line says it through its key: '..NexusSupportReport.prepared:GetText())
+ -- Replace's own notes (real Storage, a valid component) reach the page
+ -- through the builder's store hand-off (only that hand-off is stubbed).
+ NexusSupportDB=nil
+ dofile('companion/NexusSupport/Storage.lua');H.Fire('ADDON_LOADED','NexusSupport')
+ local builder=Nexus.SupportReport
+ local realStore=builder.Store
+ local cases={
+  {report={meta={},chunks={{}}},raw='chunk 1 is not text',shown=O..'chunk 1 is not text'..C},
+  {report={meta={},chunks={string.rep('x',8193)}},raw='chunk 1 is larger than the supported 8192 bytes',shown=O..'chunk 1 is larger than the supported 8192 bytes'..C},
+  {report={meta={a={}},chunks={'x'}},raw='meta field is not a scalar: a',shown=O..'meta field is not a scalar: a'..C},
+  {report={chunks={'x'}},raw='report has no meta section',shown=O..'report has no meta section'..C},
+ }
+ for _,case in ipairs(cases) do
+  local ok,note=NexusSupportStorage.Replace(case.report)
+  check(ok==nil and note==case.raw,'R5 P30: the real Storage note is raw: '..tostring(note))
+  builder.Store=function() return nil,note end
+  local r,w=Nexus.SupportReportUI.PrepareFile(false)
+  check(r==nil and w==case.raw,'R5 P30: Prepare returns the raw note')
+  check(NexusSupportReport.prepared:GetText():find(case.shown,1,true)~=nil,'R5 P30: the page says the note through its key: '..NexusSupportReport.prepared:GetText())
+ end
+ -- The nested reason: the composed Replace refusal says its inner reason too.
+ builder.Store=function() return nil,'existing support data was left untouched: the saved data uses an earlier format (0.5)' end
+ Nexus.SupportReportUI.PrepareFile(false)
+ check(NexusSupportReport.prepared:GetText():find(O..'existing support data was left untouched: '..O..'the saved data uses an earlier format (0.5)'..C..C,1,true)~=nil,
+  'R5 P30: a nested reason is said through its own key: '..NexusSupportReport.prepared:GetText())
+ -- An unknown external note stays verbatim.
+ builder.Store=function() return nil,'disk quota exceeded on drive Z' end
+ Nexus.SupportReportUI.PrepareFile(false)
+ check(NexusSupportReport.prepared:GetText():find('disk quota exceeded on drive Z',1,true)~=nil,'R5 P30: an unknown note is shown as it is')
+ builder.Store=realStore
+ NexusSupportReport:Hide()
+end
 -- Explicit log actions after the passive window: export and clear.
 Nexus.LogViewer.Show('state');for _=1,10 do H.Advance(.05,.05) end
 local logEdit=Find(function(f) return f.kind=='EditBox' and f:GetParent()==NexusLogScroll end)

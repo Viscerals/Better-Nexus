@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 4000,
+    "declaredKeys": 4016,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -46100,6 +46100,236 @@
       "cohort": "fullui:v5_source86_supplemental"
     },
     {
+      "key": "support.reason.report_chunk_not_text",
+      "kind": "template",
+      "english": "chunk {index} is not text",
+      "placeholders": [
+        {
+          "name": "index",
+          "type": "count",
+          "meaning": "the position of the report piece"
+        }
+      ],
+      "resultLimitBytes": 1200,
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.report_chunk_too_large",
+      "kind": "template",
+      "english": "chunk {index} is larger than the supported {limit} bytes",
+      "placeholders": [
+        {
+          "name": "index",
+          "type": "count",
+          "meaning": "the position of the report piece"
+        },
+        {
+          "name": "limit",
+          "type": "count",
+          "meaning": "the byte limit of one piece"
+        }
+      ],
+      "resultLimitBytes": 1200,
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.report_meta_not_scalar",
+      "kind": "template",
+      "english": "meta field is not a scalar: {field}",
+      "placeholders": [
+        {
+          "name": "field",
+          "type": "text",
+          "meaning": "the code name of the report header field (identifier, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1200,
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.report_metatable",
+      "kind": "text",
+      "english": "report carries a metatable",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.report_no_chunks",
+      "kind": "text",
+      "english": "report has no chunks",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.report_no_content",
+      "kind": "text",
+      "english": "report has no content",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.report_no_meta",
+      "kind": "text",
+      "english": "report has no meta section",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.report_not_table",
+      "kind": "text",
+      "english": "report must be a table",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.report_too_large",
+      "kind": "template",
+      "english": "the report is larger than the supported {limit} bytes",
+      "placeholders": [
+        {
+          "name": "limit",
+          "type": "count",
+          "meaning": "the byte limit of a whole report"
+        }
+      ],
+      "resultLimitBytes": 1200,
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.report_too_many_chunks",
+      "kind": "text",
+      "english": "report has too many chunks",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.storage_earlier_format",
+      "kind": "template",
+      "english": "the saved data uses an earlier format ({format})",
+      "placeholders": [
+        {
+          "name": "format",
+          "type": "text",
+          "meaning": "the format number the saved data names (a number as written, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1200,
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.storage_left_untouched",
+      "kind": "template",
+      "english": "existing support data was left untouched: {reason}",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why the saved data was left as it is (one of these same support reasons, already in the shown language)"
+        }
+      ],
+      "resultLimitBytes": 1200,
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.storage_newer_format",
+      "kind": "template",
+      "english": "the saved data was written by a newer version ({format})",
+      "placeholders": [
+        {
+          "name": "format",
+          "type": "text",
+          "meaning": "the format number the saved data names (a number as written, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1200,
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.storage_no_format",
+      "kind": "text",
+      "english": "the saved data has no known format marker",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.storage_not_table",
+      "kind": "text",
+      "english": "the saved value is not a table",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "support.reason.storage_unavailable",
+      "kind": "text",
+      "english": "support storage is unavailable",
+      "placeholders": [],
+      "group": "support",
+      "meaning": "A reason the NexusSupport companion (its saved-data loader, its report check or its Replace step) gives for not storing a support report; shown inside the Support page's status sentence (after 'left untouched (' or 'Not prepared: '). Lower-case phrase without a final period. The component keeps and returns the raw English. ",
+      "consumer": "Support page (status and Prepare report file lines) status",
+      "familySurface": "v5_source86_supplemental: Support page (status and Prepare report file lines) (status); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
       "key": "editor.body.role_help_plan_only",
       "kind": "text",
       "english": "This edits only the Wishlist plan; your character's Echoes are unchanged.",
@@ -53478,7 +53708,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 4000,
+    "totalKeys": 4016,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -53502,7 +53732,7 @@
       "remainder_runtime_status": 35,
       "v4_long_paragraphs": 0,
       "v5_source86_amendments": 0,
-      "v5_source86_supplemental": 5
+      "v5_source86_supplemental": 21
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }
