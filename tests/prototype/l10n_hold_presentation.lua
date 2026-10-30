@@ -49,6 +49,22 @@ local function ReportLine()
   if line:sub(1,13)=='Auto reason: ' then return line end
  end
 end
+-- v3: every runtime status line of Main's status source, rebuilt as
+-- core/AutomationRuntime.lua builds it (colour codes as written).
+local function StatusLines()
+ local book=Nexus.MainRuntimeStatusBook()
+ local out={}
+ for raw in pairs(book.exact) do out[#out+1]=raw end
+ for _,entry in ipairs(book.formats) do
+  local args={}
+  for n,slot in ipairs(entry.slots) do args[n]=slot=='count' and 7 or 'Qv' end
+  if entry.key=='automation.status.banished_echo' then args[1],args[2]='|cffff6666','|r' end
+  if entry.key=='automation.status.froze_echo' then args[1],args[2]='|cff66aaff ','|r' end
+  out[#out+1]=string.format(entry.format,unpack(args))
+ end
+ out[#out+1]='auto paused: user acting'
+ return out,book
+end
 local function Held()
  local model=Nexus.Panel._lastModel
  return type(model)=='table' and model.auto==true and type(model.paused)=='string' and model.paused or nil
@@ -80,6 +96,18 @@ do
  for state,key in pairs(history.RUN_STATE_KEYS) do
   check(Nexus.Localization.Text(key)==history.RUN_STATES[state],'English: run state '..state..' keeps its English label')
  end
+end
+
+do
+ local lines,book=StatusLines()
+ local n=0
+ for _ in pairs(book.exact) do n=n+1 end
+ check(n==26 and #book.formats==8,'English: the runtime status book is admitted whole: '..n..'/'..#book.formats)
+ for _,line in ipairs(lines) do
+  check(Nexus.UserText.Message(line)==Nexus.UserText.EnglishMessage(line),'English: runtime status line unchanged: '..line)
+ end
+ Nexus.Panel.SetStatus('waiting for slot data')
+ check(Nexus.Panel._lastModel.status=='waiting for slot data','English: the panel shows the exact status bytes')
 end
 
 ------------------------------------------------------------------------------
@@ -171,6 +199,17 @@ do
  end
 end
 
+-- v3: the runtime status lines are said through the seam at the panel.
+do
+ local lines=StatusLines()
+ for _,line in ipairs(lines) do
+  local shown=Nexus.UserText.Message(line)
+  check(S.IsPseudo(shown) and S.LooksUntranslated(shown,function(w) return w=='Qv' end)==nil,'pseudo: runtime status line said through the seam: '..shown)
+ end
+ Nexus.Panel.SetStatus('waiting for slot data')
+ check(Nexus.Panel._lastModel.status==S.OPEN..'waiting for slot data'..S.CLOSE,'pseudo: the panel status receiver says it once: '..tostring(Nexus.Panel._lastModel.status))
+ check(Nexus.UserText.Message('|cffff6666Banished|r echo #3')==S.OPEN..'|cffff6666Banished|r echo #3'..S.CLOSE,'pseudo: the colour codes stay around the action word')
+end
 -- The Options hover's status when the Identity gate refuses the status text:
 -- its stand-in is said through its key (only the gate is stubbed).
 do

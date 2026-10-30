@@ -126,9 +126,75 @@ function Nexus.MainRuntimeBook()
     RuntimePhrase("")
     return runtimeBook
 end
+-- The main panel's status lines core/AutomationRuntime.lua sets
+-- (SetStatus); the panel says model.status through UserText.Message. "auto
+-- paused: <reason>" shows its reason through UserText.Recognized.
+-- RUNTIME-STATUS BEGIN (generated from the fragment)
+local RUNTIME_STATUS = {exact = {
+    ["Banish refused -- trying another action"] = "automation.status.banish_refused",
+    ["Choose or create a wishlist to begin your first run"] = "automation.status.choose_or_create",
+    ["error (see /nexus err)"] = "automation.status.error_see_err",
+    ["final-search Banish refused -- re-evaluating"] = "automation.status.final_banish_refused",
+    ["final-search Reroll refused -- taking held Echo"] = "automation.status.final_reroll_refused",
+    ["finishing run — Echo count not synchronized yet"] = "automation.status.finishing_count_unsynced",
+    ["finishing final Echo selections"] = "automation.status.finishing_final_selections",
+    ["First run complete — no free Saved Build slot; save manually before resetting"] = "automation.status.first_run_no_free_slot",
+    ["First run not confirmed — save it manually in My Builds before resetting"] = "automation.status.first_run_not_confirmed",
+    ["First run complete — save/activate it in My Builds before resetting"] = "automation.status.first_run_save_activate",
+    ["First run complete — save it manually in My Builds before resetting"] = "automation.status.first_run_save_manually",
+    ["First-run wishlist active — Saved Build will be created by normal server progression"] = "automation.status.first_run_wishlist_active",
+    ["active loadout changed before save -- write cancelled"] = "automation.status.loadout_changed_cancelled",
+    ["No wishlist set -- advisor only"] = "automation.status.no_wishlist_advisor",
+    ["No wishlist set -- not saving"] = "automation.status.no_wishlist_not_saving",
+    ["Ordinary Automation stays OFF while the Orb operation is active or unresolved."] = "automation.status.orb_keeps_auto_off",
+    ["Auto stays OFF while Nexus is paused. Resume Nexus first."] = "automation.status.paused_keeps_auto_off",
+    ["Reroll refused -- taking the least-harmful Echo"] = "automation.status.reroll_refused",
+    ["save data matched, but active loadout changed — not claiming overwrite"] = "automation.status.save_matched_loadout_changed",
+    ["Save sent — checking server"] = "automation.status.save_sent_checking",
+    ["Save request sent; server confirmation not received. Check My Builds before resetting."] = "automation.status.save_unconfirmed",
+    ["saved loadout unchanged — no current run observed"] = "automation.status.saved_unchanged_no_run",
+    ["waiting for board"] = "automation.status.waiting_board",
+    ["waiting for ProjectEbonhold"] = "automation.status.waiting_project_ebonhold",
+    ["waiting for slot data"] = "automation.status.waiting_slot_data",
+    ["Auto stays OFF: its overwrite warning is unavailable."] = "automation.status.warning_keeps_auto_off",
+}, formats = {
+    {format = "%sBanished%s echo #%d", key = "automation.status.banished_echo", fields = {"open", "close", "index"}},
+    {format = "%sFroze%s echo #%d -- waiting for board to update", key = "automation.status.froze_echo", fields = {"open", "close", "index"}},
+    {format = "Working toward '%s' — run complete, no improvement (%s)", key = "automation.status.no_improvement", fields = {"wishlist", "detail"}},
+    {format = "First run saved to Saved Build %s — activate it in My Builds before resetting", key = "automation.status.first_run_saved", fields = {"slot"}},
+    {format = "Save complete — server confirmed Active Loadout %s", key = "automation.status.save_confirmed", fields = {"slot"}},
+    {format = "first-run save sent to Saved Build %s -- confirming", key = "automation.status.first_run_save_sent", fields = {"slot"}},
+    {format = "Save sent to Active Loadout %d — checking server (+%ss)", key = "automation.status.save_sent_checking_seconds", fields = {"slot", "seconds"}},
+    {format = "finishing run — %d/79 Echoes", key = "automation.status.finishing_count", fields = {"count"}},
+}}
+-- RUNTIME-STATUS END
+local runtimeStatusBook
+local function RuntimeStatusPhrase(text)
+    local L = Nexus.Localization
+    if type(text) ~= "string" or type(L) ~= "table" or type(L.PhraseBook) ~= "function" then return text, false end
+    local reason = text:match("^auto paused: (.*)$")
+    if reason then
+        local user = Nexus.UserText
+        local shown, source = L.Format("automation.status.auto_paused",
+            {reason = user and type(user.Recognized) == "function" and user.Recognized(reason) or reason})
+        if source == "unavailable" then return text, false end
+        return shown, true
+    end
+    if not runtimeStatusBook or runtimeStatusBook.seam ~= L then
+        runtimeStatusBook = L.PhraseBook(RUNTIME_STATUS)
+        runtimeStatusBook.seam = L
+    end
+    return L.Phrase(text, runtimeStatusBook)
+end
+Nexus.MainRuntimeStatusPhrase = RuntimeStatusPhrase
+function Nexus.MainRuntimeStatusBook()
+    RuntimeStatusPhrase("")
+    return runtimeStatusBook
+end
 if Nexus.UserText and type(Nexus.UserText.AddPhraseSource) == "function" then
     Nexus.UserText.AddPhraseSource(StatusPhrase)
     Nexus.UserText.AddPhraseSource(RuntimePhrase)
+    Nexus.UserText.AddPhraseSource(RuntimeStatusPhrase)
 end
 
 -- Full-UI localization, chat family. A reviewed chat line resolves through

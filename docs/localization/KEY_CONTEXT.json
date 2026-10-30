@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 3960,
+    "declaredKeys": 3995,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -40407,6 +40407,484 @@
       "cohort": "fullui:remainder_runtime_chat"
     },
     {
+      "key": "automation.status.auto_paused",
+      "kind": "template",
+      "english": "auto paused: {reason}",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "why Auto is held (a reason Nexus recognizes is shown through its key; otherwise the runtime's words, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source. Lower-case: a status line start.",
+      "consumer": "core/Main.lua status phrase source",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.banish_refused",
+      "kind": "text",
+      "english": "Banish refused -- trying another action",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.banished_echo",
+      "kind": "template",
+      "english": "{open}Banished{close} echo #{index}",
+      "placeholders": [
+        {
+          "name": "open",
+          "type": "text",
+          "meaning": "the colour code that opens the action word (code formatting, verbatim; keep it just before the word)"
+        },
+        {
+          "name": "close",
+          "type": "text",
+          "meaning": "the colour reset after the action word (code formatting, verbatim; keep it just after the word)"
+        },
+        {
+          "name": "index",
+          "type": "count",
+          "meaning": "the board position of the Echo"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.choose_or_create",
+      "kind": "text",
+      "english": "Choose or create a wishlist to begin your first run",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.error_see_err",
+      "kind": "text",
+      "english": "error (see /nexus err)",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.final_banish_refused",
+      "kind": "text",
+      "english": "final-search Banish refused -- re-evaluating",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.final_reroll_refused",
+      "kind": "text",
+      "english": "final-search Reroll refused -- taking held Echo",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.finishing_count",
+      "kind": "template",
+      "english": "finishing run — {count}/79 Echoes",
+      "placeholders": [
+        {
+          "name": "count",
+          "type": "count",
+          "meaning": "rolled Echoes so far"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.finishing_count_unsynced",
+      "kind": "text",
+      "english": "finishing run — Echo count not synchronized yet",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.finishing_final_selections",
+      "kind": "text",
+      "english": "finishing final Echo selections",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.first_run_no_free_slot",
+      "kind": "text",
+      "english": "First run complete — no free Saved Build slot; save manually before resetting",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.first_run_not_confirmed",
+      "kind": "text",
+      "english": "First run not confirmed — save it manually in My Builds before resetting",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.first_run_save_activate",
+      "kind": "text",
+      "english": "First run complete — save/activate it in My Builds before resetting",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.first_run_save_manually",
+      "kind": "text",
+      "english": "First run complete — save it manually in My Builds before resetting",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.first_run_save_sent",
+      "kind": "template",
+      "english": "first-run save sent to Saved Build {slot} -- confirming",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "the Saved Build number"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.first_run_saved",
+      "kind": "template",
+      "english": "First run saved to Saved Build {slot} — activate it in My Builds before resetting",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "the Saved Build number"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.first_run_wishlist_active",
+      "kind": "text",
+      "english": "First-run wishlist active — Saved Build will be created by normal server progression",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.froze_echo",
+      "kind": "template",
+      "english": "{open}Froze{close} echo #{index} -- waiting for board to update",
+      "placeholders": [
+        {
+          "name": "open",
+          "type": "text",
+          "meaning": "the colour code that opens the action word (code formatting, verbatim; keep it just before the word)"
+        },
+        {
+          "name": "close",
+          "type": "text",
+          "meaning": "the colour reset after the action word (code formatting, verbatim; keep it just after the word)"
+        },
+        {
+          "name": "index",
+          "type": "count",
+          "meaning": "the board position of the Echo"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.loadout_changed_cancelled",
+      "kind": "text",
+      "english": "active loadout changed before save -- write cancelled",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.no_improvement",
+      "kind": "template",
+      "english": "Working toward '{wishlist}' — run complete, no improvement ({detail})",
+      "placeholders": [
+        {
+          "name": "wishlist",
+          "type": "text",
+          "meaning": "the Wishlist name (player data, verbatim)"
+        },
+        {
+          "name": "detail",
+          "type": "text",
+          "meaning": "why the run is not saved (composed detail, verbatim)"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.no_wishlist_advisor",
+      "kind": "text",
+      "english": "No wishlist set -- advisor only",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.no_wishlist_not_saving",
+      "kind": "text",
+      "english": "No wishlist set -- not saving",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.orb_keeps_auto_off",
+      "kind": "text",
+      "english": "Ordinary Automation stays OFF while the Orb operation is active or unresolved.",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.paused_keeps_auto_off",
+      "kind": "text",
+      "english": "Auto stays OFF while Nexus is paused. Resume Nexus first.",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.reroll_refused",
+      "kind": "text",
+      "english": "Reroll refused -- taking the least-harmful Echo",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.save_confirmed",
+      "kind": "template",
+      "english": "Save complete — server confirmed Active Loadout {slot}",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "the Saved Build number"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.save_matched_loadout_changed",
+      "kind": "text",
+      "english": "save data matched, but active loadout changed — not claiming overwrite",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.save_sent_checking",
+      "kind": "text",
+      "english": "Save sent — checking server",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.save_sent_checking_seconds",
+      "kind": "template",
+      "english": "Save sent to Active Loadout {slot} — checking server (+{seconds}s)",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "count",
+          "meaning": "the Saved Build number"
+        },
+        {
+          "name": "seconds",
+          "type": "text",
+          "meaning": "seconds since the save was sent (a whole number as written)"
+        }
+      ],
+      "resultLimitBytes": 1024,
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.save_unconfirmed",
+      "kind": "text",
+      "english": "Save request sent; server confirmation not received. Check My Builds before resetting.",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.saved_unchanged_no_run",
+      "kind": "text",
+      "english": "saved loadout unchanged — no current run observed",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.waiting_board",
+      "kind": "text",
+      "english": "waiting for board",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.waiting_project_ebonhold",
+      "kind": "text",
+      "english": "waiting for ProjectEbonhold",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.waiting_slot_data",
+      "kind": "text",
+      "english": "waiting for slot data",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
+      "key": "automation.status.warning_keeps_auto_off",
+      "kind": "text",
+      "english": "Auto stays OFF: its overwrite warning is unavailable.",
+      "placeholders": [],
+      "group": "automation",
+      "meaning": "Status line of the main panel set by core/AutomationRuntime.lua (SetStatus). The runtime keeps the raw English (also in diagnostics); the panel shows it through Main's status phrase source.",
+      "consumer": "ui/Panel.lua Present -> UserText.Message (core/Main.lua status phrase source)",
+      "familySurface": "remainder_runtime_status: Main panel status line (status); family coverage PENDING review",
+      "cohort": "fullui:remainder_runtime_status"
+    },
+    {
       "key": "editor.notify.adapter_not_ready",
       "kind": "text",
       "english": "adapter not ready.",
@@ -52934,7 +53412,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 3960,
+    "totalKeys": 3995,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -52954,7 +53432,8 @@
       "remainder_wishlist_chat": 81,
       "remainder_wishlist_reasons": 44,
       "remainder_misc": 10,
-      "remainder_runtime_chat": 24
+      "remainder_runtime_chat": 24,
+      "remainder_runtime_status": 35
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }
