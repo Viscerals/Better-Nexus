@@ -63,8 +63,11 @@ local function SyncNote(f)
     if not (f and f.sync) then return f end
     local policy = Nexus.SyncModePolicy
     local mode = policy and type(policy.Mode) == "function" and policy.Mode() or nil
+    -- The mode's display sentence (SyncModePolicy.DisplayText where its owner
+    -- provides it; Text stays raw English for code that compares it).
+    local display = policy and (type(policy.DisplayText) == "function" and policy.DisplayText or policy.Text)
     local text = mode == "automatic" and SyncAutomaticText()
-        or mode and type(policy.Text) == "function" and policy.Text(mode) or nil
+        or mode and type(display) == "function" and display(mode) or nil
     f.sync:SetText(text and TF("setup.body.sync_reference", function() return {sync = tostring(text)} end,
         text .. " Reference: Sharing lists what is sent.") or "")
     return f

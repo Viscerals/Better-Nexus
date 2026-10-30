@@ -119,8 +119,11 @@ function M.Rows(category)
         local modeName = names[mode] and T(SYNC_MODE_KEYS[mode], names[mode])
             or T("settings.value.sync_unknown", "Unknown")
         local english = "Current Sync: " .. (names[mode] or "Unknown")
+        -- The detail is the mode owner's display sentence (DisplayText where
+        -- provided; Text stays raw English for code that compares it).
+        local display = policy and (type(policy.DisplayText) == "function" and policy.DisplayText or policy.Text)
         out[#out+1] = {text=TF("settings.label.current_sync", {mode=modeName}, english), disabled=true,
-            detail=policy and type(policy.Text) == "function" and policy.Text(mode) or ""}
+            detail=type(display) == "function" and display(mode) or ""}
         out[#out+1] = Route(T("settings.button.open_library_sync", "Open Build Library / Sync choices"), function()
             if Nexus.CommunityBuilds and type(Nexus.CommunityBuilds.Show) == "function" then
                 Nexus.CommunityBuilds.Show()
