@@ -22,6 +22,29 @@ local stats = {
     menuFills=0,
 }
 
+-- Full-UI localization (issues #143-#148): the shown style and colour names,
+-- hue words, menu rows, outcome notices and HELP resolve through
+-- Nexus.Localization at call time; while the seam is absent or a key answers
+-- "unavailable" the exact English below is shown. Style and palette ids, the
+-- saved values and the STYLES/PALETTES label fields stay raw (data and the
+-- names tests and callers compare); only the shown copy is translated.
+local function Say(key, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Text) == "function" then
+        local text, source = localization.Text(key)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
+local function SayF(key, args, english)
+    local localization = Nexus.Localization
+    if type(localization) == "table" and type(localization.Format) == "function" then
+        local text, source = localization.Format(key, args)
+        if type(text) == "string" and source ~= "unavailable" then return text end
+    end
+    return english
+end
+
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 local EDGE = "Interface\\Tooltips\\UI-Tooltip-Border"
 T.STYLE_KEY, T.PALETTE_KEY = "uiStyle", "uiPalette"
@@ -76,6 +99,36 @@ local PALETTES = {
         disabledBorder={0.13, 0.15, 0.18}},
 }
 T.STYLES, T.PALETTES = STYLES, PALETTES
+
+-- Shown names by id (label key, then summary or hue key). Display only.
+local STYLE_KEYS = {
+    vista = {"theme.label.style_vista", "theme.tooltip.style_vista"},
+    slate = {"theme.label.style_slate", "theme.tooltip.style_slate"},
+}
+local PALETTE_KEYS = {
+    sapphire = {"theme.label.palette_sapphire", "theme.value.hue_blue"},
+    emerald = {"theme.label.palette_emerald", "theme.value.hue_green"},
+    amethyst = {"theme.label.palette_amethyst", "theme.value.hue_purple"},
+    ember = {"theme.label.palette_ember", "theme.value.hue_orange"},
+    auric = {"theme.label.palette_auric", "theme.value.hue_gold"},
+    graphite = {"theme.label.palette_graphite", "theme.value.hue_gray"},
+}
+local function StyleLabel(style)
+    local keys = STYLE_KEYS[style.id]
+    return keys and Say(keys[1], style.label) or style.label
+end
+local function StyleSummary(style)
+    local keys = STYLE_KEYS[style.id]
+    return keys and Say(keys[2], style.summary) or style.summary
+end
+local function PaletteLabel(palette)
+    local keys = PALETTE_KEYS[palette.id]
+    return keys and Say(keys[1], palette.label) or palette.label
+end
+local function PaletteHue(palette)
+    local keys = PALETTE_KEYS[palette.id]
+    return keys and Say(keys[2], palette.hue) or palette.hue
+end
 
 local BUTTON_BACKDROP = {bgFile=WHITE, edgeFile=EDGE, tile=false, edgeSize=10,
     insets={left=2, right=2, top=2, bottom=2}}
@@ -775,7 +828,8 @@ end
 
 function T.Summary()
     local a = Active()
-    return a.style.label .. ", " .. a.palette.label
+    local style, palette = StyleLabel(a.style), PaletteLabel(a.palette)
+    return SayF("theme.value.summary", {style = style, palette = palette}, style .. ", " .. palette)
 end
 
 local OUTCOME = {
@@ -785,6 +839,19 @@ local OUTCOME = {
     unavailable="Applied for this session only. The settings owner is not available, so nothing was saved.",
 }
 T.OUTCOME = OUTCOME
+-- The shown outcome sentence (OUTCOME keeps the English by outcome name).
+local OUTCOME_KEYS = {
+    durable = "theme.status.outcome_saved",
+    database = "theme.status.outcome_database_loading",
+    session = "theme.status.outcome_session_read_only",
+    unavailable = "theme.status.outcome_owner_unavailable",
+}
+local function Applied(outcome)
+    local summary = T.Summary()
+    local said = Say(OUTCOME_KEYS[outcome], OUTCOME[outcome])
+    return SayF("theme.chat.appearance_applied", {summary = summary, outcome = said},
+        "Appearance: " .. summary .. ". " .. said)
+end
 
 -- An explicit selection is the only write. It goes through the Store
 -- settings owner; a refusal keeps saved data untouched and applies the choice
@@ -814,19 +881,19 @@ end
 
 function T.SetStyle(id)
     if type(id) ~= "string" or not STYLES[id] then
-        return nil, "That style is not available in this build. Nothing changed."
+        return nil, Say("theme.chat.style_unavailable", "That style is not available in this build. Nothing changed.")
     end
     local outcome = Choose("style", T.STYLE_KEY, id)
-    return outcome, "Appearance: " .. T.Summary() .. ". " .. OUTCOME[outcome]
+    return outcome, Applied(outcome)
 end
 
 -- nil returns to the style's own colours.
 function T.SetPalette(id)
     if id ~= nil and (type(id) ~= "string" or not PALETTES[id]) then
-        return nil, "That colour is not available in this build. Nothing changed."
+        return nil, Say("theme.chat.colour_unavailable", "That colour is not available in this build. Nothing changed.")
     end
     local outcome = Choose("palette", T.PALETTE_KEY, id)
-    return outcome, "Appearance: " .. T.Summary() .. ". " .. OUTCOME[outcome]
+    return outcome, Applied(outcome)
 end
 
 function T.Notify(message)
@@ -835,12 +902,18 @@ function T.Notify(message)
     end
 end
 
-T.HELP = "Appearance changes only how Nexus windows look. Style sets the "
+-- T.HELP (the Appearance hover) is a shown field: it resolves at each read
+-- through the metatable below, in the session's language.
+local HELP = "Appearance changes only how Nexus windows look. Style sets the "
     .. "structure (Nexus Vista is the default; Nexus Slate is the earlier shared "
     .. "dark style of the imported 1.19.3 source and test.9094, with the same "
     .. "colours and shapes; the Orb windows, plain in test.9094, now use it too). "
     .. "Colour sets the accents; Nexus Amethyst purple is the Vista default. The difficulty / Soul Ash card keeps its own "
     .. "look, and no choice changes automation or gameplay."
+setmetatable(T, {__index = function(_, name)
+    if name == "HELP" then return Say("theme.tooltip.appearance_help", HELP) end
+    return nil
+end})
 
 -- Items for one flat 3.3.5 EasyMenu. A check mark, not only a colour, marks
 -- the active choice; a saved value this build does not know is named and kept.
@@ -857,37 +930,46 @@ function T.MenuItems(close)
             T.Notify(message)
         end
     end
-    local items = {{text="Appearance: style", isTitle=true, notCheckable=true}}
+    local items = {{text=Say("theme.menu.style_title", "Appearance: style"), isTitle=true, notCheckable=true}}
     for _, style in ipairs(T.Styles()) do
+        local label = StyleLabel(style)
         items[#items + 1] = {
-            text=style.label .. (style.id == T.DEFAULT_STYLE and " (default)" or ""),
-            checked=a.style == style, tooltipTitle=style.label, tooltipText=style.summary,
+            text=style.id == T.DEFAULT_STYLE
+                and SayF("theme.menu.style_default", {style = label}, label .. " (default)") or label,
+            checked=a.style == style, tooltipTitle=label, tooltipText=StyleSummary(style),
             func=pick(T.SetStyle, style.id),
         }
     end
     if a.unknownStyle then
+        local value = DisplayValue(a.savedStyle)
         items[#items + 1] = {notCheckable=true, disabled=true,
-            text="Saved style \"" .. DisplayValue(a.savedStyle) .. "\" is not in this build; it stays saved."}
+            text=SayF("theme.menu.unknown_style", {value = value},
+                "Saved style \"" .. value .. "\" is not in this build; it stays saved.")}
     end
-    items[#items + 1] = {text="Appearance: colour", isTitle=true, notCheckable=true}
+    items[#items + 1] = {text=Say("theme.menu.colour_title", "Appearance: colour"), isTitle=true, notCheckable=true}
     local own = PALETTES[a.style.palette]
+    local ownLabel, ownHue = PaletteLabel(own), PaletteHue(own)
     items[#items + 1] = {
-        text="Default (" .. own.label .. ", " .. own.hue .. ")",
+        text=SayF("theme.menu.colour_default", {palette = ownLabel, hue = ownHue},
+            "Default (" .. ownLabel .. ", " .. ownHue .. ")"),
         checked=not a.unknownPalette and (not a.explicitPalette or SameColours(a.palette, own)),
         func=pick(T.SetPalette, nil),
     }
     for _, palette in ipairs(T.Palettes()) do
         if not SameColours(palette, own) then
+            local label, hue = PaletteLabel(palette), PaletteHue(palette)
             items[#items + 1] = {
-                text=palette.label .. " (" .. palette.hue .. ")",
+                text=SayF("theme.menu.colour_choice", {palette = label, hue = hue}, label .. " (" .. hue .. ")"),
                 checked=a.explicitPalette and a.palette == palette,
                 func=pick(T.SetPalette, palette.id),
             }
         end
     end
     if a.unknownPalette then
+        local value = DisplayValue(a.savedPalette)
         items[#items + 1] = {notCheckable=true, disabled=true,
-            text="Saved colour \"" .. DisplayValue(a.savedPalette) .. "\" is not in this build; it stays saved."}
+            text=SayF("theme.menu.unknown_colour", {value = value},
+                "Saved colour \"" .. value .. "\" is not in this build; it stays saved.")}
     end
     return items
 end
