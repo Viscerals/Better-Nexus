@@ -498,6 +498,13 @@ do
  local keys=L.Keys()
  check(#keys==28 and count(data)==28,'R: the declared set, the admitted keys and the English data are the same 28 meanings')
  for _,key in ipairs(keys)do check(data[key]~=nil,'R: admitted key is in the English data: '..key)end
+ -- The registry runtime keeps the dated Automatic record's behaviour: the
+ -- Automatic value resolves English, with no client code or alias evidence.
+ local auto=assert(reload(realData),'loader for the registry Automatic control');checks=checks+1
+ check(auto.AUTOMATIC_PREFERENCE=='automatic' and not auto.IsLanguage('automatic') and auto.EffectiveLanguage('automatic')=='enUS'
+  and auto.EffectiveLanguage(nil)=='enUS' and auto.ResolveAutomaticLanguage('frFR')=='enUS' and auto.ResolveAutomaticLanguage('enGB')=='enUS'
+  and auto.InitializeActiveLanguage('automatic')=='enUS' and select(3,auto.ActiveLanguage())==true and auto.Diagnostics().base.undeclared==0,
+  'R: with the declaration registry, Automatic still resolves English without an alias')
  -- R-P1: an undeclared but otherwise valid English entry.
  local undeclared=copyOf(realData);undeclared['parity.undeclared']='Undeclared parity text'
  local u=assert(reload(undeclared),'loader with an undeclared English entry');checks=checks+1

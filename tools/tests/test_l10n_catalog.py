@@ -337,6 +337,85 @@ def assert_current_automatic_preference(test, record):
     test.assertEqual(record, CURRENT_AUTOMATIC_PREFERENCE)
 
 
+# Issue #147 (R union): the dated record's blobs describe its source commit.
+# A file named here was intentionally changed after that observation, so its
+# dated blob is bound to the recorded Git object, not to the working tree.
+# Every other file of the record must still hold its dated blob.
+DATED_SOURCE_SUCCESSORS = {
+    "core/Localization.lua": "#147 R union: the code-owned declaration registry",
+}
+
+
+def git_object_store():
+    """'complete' for a full Git checkout of this repository, 'shallow' for
+    a shallow clone (CI checks out one commit), or None without Git."""
+    try:
+        run = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--is-shallow-repository"],
+                             capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    answer = run.stdout.decode("ascii", "replace").strip()
+    if run.returncode != 0 or answer not in ("true", "false"):
+        return None
+    return "shallow" if answer == "true" else "complete"
+
+
+def git_object_id(revision):
+    """The object ID of a revision expression such as <commit>:<path>, or
+    None when this object store does not hold it."""
+    try:
+        run = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet",
+                              revision], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = run.stdout.decode("ascii", "replace").strip()
+    return value if run.returncode == 0 and re.fullmatch("[0-9a-f]{40}", value) else None
+
+
+def cohort_blob(relative, commit):
+    """The Git blob that the frozen CURRENT_COHORT_EVIDENCE.json records for
+    relative at its source pin, when that pin is commit; else None."""
+    evidence = load_document("CURRENT_COHORT_EVIDENCE.json")
+    if evidence["sourcePin"]["commit"] != commit:
+        return None
+    rows = [row for row in evidence["sourceInputs"]["files"] if row["path"] == relative]
+    return rows[0]["gitBlob"] if len(rows) == 1 else None
+
+
+def assert_dated_source_blobs(test, record, store=None, successors=DATED_SOURCE_SUCCESSORS):
+    """Each recorded blob is the Git object of its file at the recorded source
+    commit, whose tree is the recorded tree. With a complete object store
+    that is read from Git, and a missing commit or object fails. A shallow
+    clone without the commit falls back to the independent frozen cohort
+    evidence for the same file at the unchangedSince pin, which must agree.
+    The working tree must still hold the dated blob, except for a declared
+    successor file, which must now differ from it. store is the object-store
+    state ('complete', 'shallow' or 'none' for no Git); None reads it."""
+    store = git_object_store() if store is None else store
+    store = None if store == "none" else store
+    binding = record["sourceBinding"]
+    commit, tree = binding.get("commit"), binding.get("tree")
+    test.assertRegex(commit or "", "^[0-9a-f]{40}$")
+    test.assertRegex(tree or "", "^[0-9a-f]{40}$")
+    present = store is not None and git_object_id(commit + "^{commit}") is not None
+    if store == "complete":
+        test.assertTrue(present, "the dated source commit is not in this repository")
+    if present:
+        test.assertEqual(git_object_id(commit + "^{tree}"), tree, "dated source tree")
+    for relative, blob in record["unchangedSourceBlobs"].items():
+        test.assertRegex(blob, "^[0-9a-f]{40}$", relative)
+        if present:
+            test.assertEqual(git_object_id("%s:%s" % (commit, relative)), blob, relative)
+        else:
+            test.assertEqual(cohort_blob(relative, record["unchangedSince"]), blob, relative)
+        canonical = canonical_git_lf((ROOT / relative).read_bytes())
+        current = hashlib.sha1(b"blob %d\0" % len(canonical) + canonical).hexdigest()
+        if relative in successors:
+            test.assertNotEqual(current, blob, relative)
+        else:
+            test.assertEqual(current, blob, relative)
+
+
 def historical_context():
     """A coherent six-key historical fixture projected from the actual
     KEY_CONTEXT.json: its six original key rows, unchanged; a six-key
@@ -510,10 +589,56 @@ class ReleaseLanguagesContract(unittest.TestCase):
                       localization)
         self.assertIn("production Automatic holds no evidence and resolves English",
                       read_text("tests/prototype/terminology.lua"))
-        for relative, blob in record["unchangedSourceBlobs"].items():
-            canonical = canonical_git_lf((ROOT / relative).read_bytes())
-            self.assertEqual(hashlib.sha1(b"blob %d\0" % len(canonical) + canonical).hexdigest(),
-                             blob, relative)
+        # The dated blobs are bound to their recorded source revision (see
+        # assert_dated_source_blobs); data/DefaultProfile.lua is still live.
+        assert_dated_source_blobs(self, record)
+        # Live R control: the current core/Localization.lua is the declared
+        # successor, still resolves Automatic as recorded (fragments above) and
+        # carries the 28-key declaration registry.
+        canonical = canonical_git_lf((ROOT / "core/Localization.lua").read_bytes())
+        current = hashlib.sha1(b"blob %d\0" % len(canonical) + canonical).hexdigest()
+        self.assertNotEqual(current, record["unchangedSourceBlobs"]["core/Localization.lua"])
+        declarations = load_catalog_parser().parse_registry_declarations(
+            (ROOT / "core/Localization.lua").read_bytes())
+        self.assertEqual(len(declarations), 28)
+        self.assertEqual(sorted(declarations), sorted(current_english_oracle()))
+        # Controls: forged dated evidence fails in each object-store state
+        # this checkout can show (Git with the dated commit; no Git, as in a
+        # shallow clone without it): the current R blob or another file's
+        # blob in place of the dated one, a forged source tree, an unknown
+        # commit (Git only), and drift of a dated file that is not a
+        # declared successor.
+        r_blob = dict(record["unchangedSourceBlobs"], **{"core/Localization.lua": current})
+        swapped = dict(record["unchangedSourceBlobs"], **{
+            "core/Localization.lua": record["unchangedSourceBlobs"]["data/DefaultProfile.lua"]})
+        forged_tree = dict(record["sourceBinding"], tree="0" * 40)
+        unknown = dict(record["sourceBinding"], commit="f" * 40)
+        forgeries = {"R blob": ("unchangedSourceBlobs", r_blob),
+                     "swapped blob": ("unchangedSourceBlobs", swapped),
+                     "forged tree": ("sourceBinding", forged_tree),
+                     "unknown commit": ("sourceBinding", unknown)}
+        with_object = git_object_id(record["sourceBinding"]["commit"] + "^{commit}") is not None
+        stores = ["none"] + ([git_object_store()] if with_object else [])
+        for store in stores:
+            for label, (field, value) in forgeries.items():
+                if store == "none" and label in ("forged tree", "unknown commit"):
+                    continue  # without the object only the blob is checkable; see below
+                with self.subTest(forgery=label, store=store):
+                    changed = dict(record)
+                    changed[field] = value
+                    with self.assertRaises(AssertionError):
+                        assert_dated_source_blobs(self, changed, store)
+            with self.subTest(forgery="undeclared drift", store=store):
+                with self.assertRaises(AssertionError):
+                    assert_dated_source_blobs(self, record, store, successors={})
+            with self.subTest(store=store):
+                assert_dated_source_blobs(self, record, store)
+        for label, (field, value) in forgeries.items():
+            with self.subTest(forgery=label, check="recorded value"):
+                changed = dict(record)
+                changed[field] = value
+                with self.assertRaises(AssertionError):
+                    assert_current_automatic_preference(self, changed)
         # Controls: an invented mapping or alias, a non-English resolution or
         # a missing source commit fails.
         mutations = {
