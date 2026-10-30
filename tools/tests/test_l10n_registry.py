@@ -20,6 +20,16 @@ RELEASE_LANGUAGES.json through pack_provenance_diagnostics: the real UNKNOWN
 records are technically valid with support held, while malformed and stale
 variants of the real bytes are refused.
 
+S8 adds the required-CI static consumer binding of the current repository
+through consumer_binding_report: the real registry inputs, both TOCs and every
+Lua file they load bind all 28 declared keys (23 direct, 5 mapped) with no
+problem, each counted site with a proven output, and in-memory mutants of
+the real bytes (a removed last consumer with fakes retained, a broken map
+chain, a wrong method kind, a TOC or source omission, hash drift and path
+collisions) fail the same gate. Review fix 1 adds discarded, overwritten,
+compared and unused-helper results, review fix 2 a dispatcher overwritten
+through a module alias, and review fix 3 the closed two-TOC contract.
+
 Synthetic offline evidence only: no Lua runs, and this is not fluent, human
 or native evidence. Python 3.9+, standard library only. Registered in
 PYTHON_TESTS of tools/run_prototype_tests.py.
@@ -1618,6 +1628,1311 @@ class ProvenanceCommandLineTests(unittest.TestCase):
                     self.assertEqual(self.run_cli("--root", root, *args).returncode, 0)
             after = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
             self.assertEqual(after, before)
+
+
+# S8 (Refs #147): static consumer binding. The gate reads the real registry
+# inputs, both TOCs and every Lua file they load; every mutant below is an
+# in-memory edit of those real bytes and is never written to the checkout.
+CONSUMER_TOCS = ("Nexus.toc", "companion/NexusSupport/NexusSupport.toc")
+MAPPED_KEYS = CURRENT_KEYS[:5]
+DIRECT_KEYS = CURRENT_KEYS[5:]
+HUD_FAMILY = "Main panel (HUD)"
+DISPATCHER = "Nexus.UserText.Message"
+EXPECTED_CONSUMER_CODES = (
+    "consumer-input-structure", "consumer-path", "consumer-duplicate-path",
+    "consumer-hash-mismatch", "consumer-length-mismatch", "consumer-toc-required",
+    "consumer-toc-unknown", "consumer-toc-not-utf8", "consumer-toc-entry", "consumer-toc-duplicate",
+    "consumer-source-missing", "consumer-source-unlisted", "consumer-registry-unloaded",
+    "consumer-registry-order", "consumer-registry-conflict",
+)
+EXPECTED_BINDING_PROBLEM_CODES = (
+    "binding-unparsed", "binding-unbound", "binding-orphan", "binding-kind",
+    "binding-unresolved", "binding-mutation",
+)
+PANEL, READOUT, USER_TEXT = "ui/Panel.lua", "ui/Readout.lua", "core/UserText.lua"
+PROGRESS_CALL = b'progressLabel:SetText((Nexus.Localization.Text("panel.heading.progress")))'
+# The progress label loses its only consumer. A long comment, a string
+# holding the call text, an unrelated object with a Text method, a local
+# Nexus with a Text method, a Has query, a data table and a closing short
+# comment keep the key literal on the same line, so no line number moves.
+PROGRESS_FAKE_CODE = (
+    b'progressLabel:SetText("Progress")'
+    b' --[[ Nexus.Localization.Text("panel.heading.progress") ]]'
+    b' local fakeCall = \'Nexus.Localization.Text("panel.heading.progress")\''
+    b' local Other = {Text = tostring}; Other.Text("panel.heading.progress")'
+    b' do local Nexus = {Localization = {Text = tostring}}; Nexus.Localization.Text("panel.heading.progress") end'
+    b' local known = Nexus.Localization.Has("panel.heading.progress")'
+    b' local data = {["panel.heading.progress"] = "Progress"}')
+PROGRESS_FAKE_COMMENT = b' -- Nexus.Localization.Text("panel.heading.progress")'
+PROGRESS_FAKES = PROGRESS_FAKE_CODE + PROGRESS_FAKE_COMMENT
+
+
+def edit(data, old, new):
+    """data with its one occurrence of old replaced by new. The match runs on
+    the LF form of data, and the result keeps the line breaks of data (LF or
+    CRLF), so one edit serves both representations."""
+    lf = data.replace(b"\r\n", b"\n")
+    crlf = lf != data
+    if crlf and b"\n" in data.replace(b"\r\n", b""):
+        raise AssertionError("mixed line breaks")
+    result = replace_once(lf, old, new)
+    return result.replace(b"\n", b"\r\n") if crlf else result
+
+
+def toc_listing(toc, data):
+    """Independent oracle: the Lua paths one TOC loads, in order."""
+    base = toc.rpartition("/")[0]
+    paths = []
+    for line in data.decode("utf-8", "replace").splitlines():
+        entry = line.strip()
+        if entry and not entry.startswith("#"):
+            paths.append((base + "/" if base else "") + entry.replace("\\", "/"))
+    return paths
+
+
+def current_files():
+    """The exact physical bytes of the five registry inputs, both TOCs and
+    every Lua file the TOCs load, keyed by repository path."""
+    files = {path: (ROOT / path).read_bytes() for path in INPUTS + CONSUMER_TOCS}
+    for toc in CONSUMER_TOCS:
+        for path in toc_listing(toc, files[toc]):
+            files[path] = (ROOT / path).read_bytes()
+    return files
+
+
+def record(path, data):
+    return {"path": path, "sha256": hashlib.sha256(data).hexdigest(),
+            "byteLength": len(data), "data": data}
+
+
+def binding_args(files, omit=(), extra=()):
+    """The seven arguments of consumer_binding_report for files: the five
+    registry inputs, a record per TOC and a record per loaded Lua file
+    (except omit, plus the extra (path, bytes) records)."""
+    tocs = [record(path, files[path]) for path in CONSUMER_TOCS if path in files]
+    sources = [record(path, files[path]) for toc in CONSUMER_TOCS if toc in files
+               for path in toc_listing(toc, files[toc]) if path in files and path not in omit]
+    sources += [record(path, data) for path, data in extra]
+    return [files[path] for path in INPUTS] + [tocs, sources]
+
+
+def with_file(files, path, data):
+    changed = dict(files)
+    changed[path] = data
+    return changed
+
+
+def assert_current_bindings(test, catalog, args):
+    """The registered current-source binding gate over the receipt of args."""
+    return assert_binding_receipt(test, catalog.consumer_binding_report(*args))
+
+
+def assert_binding_receipt(test, receipt):
+    """The gate itself: every declared key has a genuine static consumer of
+    the expected class, nothing is unresolved, orphaned or mismatched, the
+    mapped reasons reach their exported dispatcher, and family declarations
+    stay apart from binding."""
+    test.assertEqual(receipt["problems"], [])
+    test.assertIs(receipt["valid"], True)
+    rows = {row["key"]: row for row in receipt["keys"]}
+    test.assertEqual([row["key"] for row in receipt["keys"]], list(CURRENT_KEYS))
+    expected = dict.fromkeys(MAPPED_KEYS, "MAPPED_TO_CONSUMER")
+    expected.update(dict.fromkeys(DIRECT_KEYS, "DIRECT_LITERAL_CONSUMER"))
+    test.assertEqual({key: row["binding"] for key, row in rows.items()}, expected)
+    test.assertEqual((receipt["counts"]["DIRECT_LITERAL_CONSUMER"],
+                      receipt["counts"]["MAPPED_TO_CONSUMER"], receipt["counts"]["UNBOUND"]),
+                     (23, 5, 0))
+    for key in DIRECT_KEYS:
+        test.assertTrue({site["site"] for site in rows[key]["sites"]}
+                        & {"direct-call", "wrapper-call"}, key)
+        test.assertEqual(rows[key]["family"]["state"], "DECLARED")
+        test.assertEqual([family["name"] for family in rows[key]["family"]["families"]],
+                         [HUD_FAMILY])
+    for key in MAPPED_KEYS:
+        test.assertEqual({site["site"] for site in rows[key]["sites"]}, {"map-value"})
+        test.assertEqual(rows[key]["family"], {
+            "state": "UNCLASSIFIED", "families": [],
+            "familySurface": ("PENDING: shared reason text; the families and surfaces "
+                              "that show it are not classified")})
+    # Review fix 1 (SPEC-147-S8-1): a counted site is one whose localization
+    # result reaches an output, never merely a call location.
+    for row in receipt["keys"]:
+        for site in row["sites"]:
+            test.assertTrue(site["outputs"], (row["key"], site))
+    test.assertEqual(len(receipt["mapChains"]), 1)
+    chain = receipt["mapChains"][0]
+    test.assertEqual((chain["wrapper"]["name"], chain["wrapper"]["method"],
+                      chain["dispatcher"]), ("LocalizedReason", "Text", DISPATCHER))
+    test.assertEqual((chain["established"], chain["wrapperReturnsResult"]), (True, True))
+    test.assertTrue(chain["outputs"])
+    test.assertEqual(sorted(chain["boundKeys"]), sorted(MAPPED_KEYS))
+    return receipt
+
+
+_S8_CATALOG, _S8_FILES = [], []
+
+
+def s8_catalog():
+    """One loaded tool for every S8 class, so its parse memo is shared."""
+    if not _S8_CATALOG:
+        _S8_CATALOG.append(load_catalog())
+    return _S8_CATALOG[0]
+
+
+def s8_files():
+    """The current input files, read once for every S8 class (callers copy)."""
+    if not _S8_FILES:
+        _S8_FILES.append(current_files())
+    return dict(_S8_FILES[0])
+
+
+class ConsumerBindingTests(unittest.TestCase):
+    """S8: the registered current-repository static consumer binding gate
+    and its negative controls on in-memory edits of the real bytes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = s8_catalog()
+        cls.files = s8_files()
+        cls.report = staticmethod(cls.catalog.consumer_binding_report)
+
+    def receipt(self, files, **options):
+        return self.report(*binding_args(files, **options))
+
+    def refuse(self, args, code):
+        with self.assertRaises(self.catalog.CatalogConsumerError) as raised:
+            self.report(*args)
+        self.assertEqual(raised.exception.code, code)
+        return raised.exception
+
+    def gate_fails(self, files, **options):
+        """The receipt of files, after the same gate failed on it."""
+        receipt = self.receipt(files, **options)
+        with self.assertRaises(AssertionError):
+            assert_binding_receipt(self, receipt)
+        return receipt
+
+    def problems(self, receipt, code=None):
+        return [problem for problem in receipt["problems"]
+                if code is None or problem["code"] == code]
+
+    def binding(self, receipt, key):
+        return next(row for row in receipt["keys"] if row["key"] == key)
+
+    def test_c1_public_seam_codes_and_signature(self):
+        catalog = self.catalog
+        self.assertEqual(list(inspect.signature(catalog.consumer_binding_report).parameters),
+                         ["english_source", "packs_source", "key_context_json", "release_json",
+                          "localization_source", "toc_records", "source_records"])
+        self.assertEqual(catalog.CONSUMER_CODES, EXPECTED_CONSUMER_CODES)
+        self.assertEqual(catalog.BINDING_PROBLEM_CODES, EXPECTED_BINDING_PROBLEM_CODES)
+        self.assertEqual(catalog.BINDING_CLASSES,
+                         ("DIRECT_LITERAL_CONSUMER", "MAPPED_TO_CONSUMER", "UNBOUND"))
+        self.assertTrue(issubclass(catalog.CatalogConsumerError, ValueError))
+        ours = set(EXPECTED_CONSUMER_CODES) | set(EXPECTED_BINDING_PROBLEM_CODES)
+        self.assertEqual(len(ours), len(EXPECTED_CONSUMER_CODES)
+                         + len(EXPECTED_BINDING_PROBLEM_CODES))
+        for codes in (catalog.CODES, catalog.VALIDATION_CODES, catalog.EVIDENCE_CODES,
+                      catalog.REGISTRY_CODES, catalog.CLI_CODES, catalog.DIAGNOSTIC_CODES,
+                      catalog.PROVENANCE_CODES):
+            self.assertFalse(set(codes) & ours)
+        # The earlier seams keep their exact signatures.
+        five = ["english_source", "packs_source", "key_context_json", "release_json",
+                "localization_source"]
+        for name in ("validate_registry_catalog_data", "registry_catalog_report",
+                     "registry_catalog_diagnostics", "pack_provenance_diagnostics"):
+            self.assertEqual(list(inspect.signature(getattr(catalog, name)).parameters), five)
+        for name in ("validate_catalog_data", "catalog_report"):
+            self.assertEqual(list(inspect.signature(getattr(catalog, name)).parameters),
+                             five[:4])
+
+    def test_c2_registered_gate_binds_the_current_repository(self):
+        args = binding_args(self.files)
+        receipt = assert_current_bindings(self, self.catalog, args)
+        # The gate ran on the real repository input set, not a fixture.
+        self.assertEqual(len(args[6]), 100)
+        self.assertEqual([row["path"] for row in receipt["tocs"]], list(CONSUMER_TOCS))
+        self.assertEqual([row["path"] for row in receipt["sources"]],
+                         [path for toc in CONSUMER_TOCS
+                          for path in toc_listing(toc, self.files[toc])])
+        for row in receipt["tocs"] + receipt["sources"]:
+            data = self.files[row["path"]]
+            self.assertEqual((row["sha256"], row["byteLength"]),
+                             (hashlib.sha256(data).hexdigest(), len(data)))
+        self.assertEqual({row["analysis"] for row in receipt["sources"]}, {"PARSED"})
+        self.assertEqual([row["source"] for row in receipt["inputs"]], list(INPUTS))
+        roles = {row["path"]: row["role"] for row in receipt["sources"]}
+        self.assertEqual((roles["core/Localization.lua"], roles["data/LocalizationEnglish.lua"],
+                          roles["data/LocalizationPacks.lua"], roles[PANEL]),
+                         ("provider", "catalog-data", "catalog-data", "scanned"))
+        self.assertEqual(roles["companion/NexusSupport/Storage.lua"], "scanned")
+        rows = {row["key"]: row for row in receipt["keys"]}
+        # Format stays Format and Text stays Text; Options also uses Resolve.
+        self.assertEqual({site["method"] for site in rows[CHARGE]["sites"]}, {"Format"})
+        self.assertEqual({site["method"] for site in rows["panel.button.options"]["sites"]},
+                         {"Text", "Resolve"})
+        self.assertEqual({site["path"] for site in rows[CHARGE]["sites"]}, {READOUT})
+        for key in MAPPED_KEYS:
+            self.assertEqual({site["path"] for site in rows[key]["sites"]}, {USER_TEXT})
+        # Review fix 1 oracle correction: the Hub menu wrapper returns its
+        # localization result, but that result only fills tooltipText of an item
+        # for the stock dropdown, which is outside the loaded source. Its site is
+        # therefore listed as unproven, never counted; the direct tooltip call binds.
+        row = rows["panel.tooltip.create_wishlist_draft"]
+        self.assertEqual([site["site"] for site in row["sites"]], ["direct-call"])
+        self.assertEqual([(site["site"], site["reason"]) for site in row["unprovenSites"]],
+                         [("wrapper-call", "output-not-reached")])
+        self.assertEqual(sum(len(row["unprovenSites"]) for row in receipt["keys"]), 5)
+        # The proven outputs of the evidenced chains.
+        outputs = {(output["path"], output["output"])
+                   for site in rows[CHARGE]["sites"] for output in site["outputs"]}
+        self.assertEqual(outputs, {(PANEL, "SetText")})
+        options = {(output["path"], output["output"]) for site
+                   in rows["panel.button.options"]["sites"] for output in site["outputs"]}
+        self.assertEqual(options, {(PANEL, "SetText"), (PANEL, "AddLine")})
+        chain = receipt["mapChains"][0]
+        self.assertIn(("core/Main.lua", "AddMessage"),
+                      {(output["path"], output["output"]) for output in chain["outputs"]})
+        self.assertEqual(receipt["counts"]["keys"], 28)
+        self.assertEqual(receipt["completeness"]["established"], False)
+        for family in self.catalog.validate_registry_catalog_data(
+                *args[:5])["keyContext"]["windowFamilies"]:
+            self.assertEqual(family["coverageStatus"], "PENDING")
+
+    def test_c3_last_genuine_direct_consumer_removed_with_fakes_retained(self):
+        key = "panel.heading.progress"
+        panel = edit(self.files[PANEL], PROGRESS_CALL, PROGRESS_FAKES)
+        self.assertEqual(panel.count(key.encode()), self.files[PANEL].count(key.encode()) + 6)
+        receipt = self.gate_fails(with_file(self.files, PANEL, panel))
+        self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+        self.assertEqual(self.binding(receipt, key)["sites"], [])
+        self.assertEqual([(problem["code"], problem.get("key")) for problem in receipt["problems"]],
+                         [("binding-unbound", key)])
+        # The fakes are seen as literal leads but never bind.
+        leads = self.binding(receipt, key)["excludedLiteralLeads"]
+        self.assertEqual(leads["byPath"][PANEL], 4)
+        self.assertEqual(receipt["counts"]["DIRECT_LITERAL_CONSUMER"], 22)
+        # The declaration and English data still hold the key.
+        self.assertIn(key.encode(), self.files["data/LocalizationEnglish.lua"])
+        self.assertIn(key.encode(), self.files["core/Localization.lua"])
+
+    def test_c3_a_retained_secondary_consumer_still_binds_until_the_last_is_removed(self):
+        key, panel = "panel.heading.still_needed", self.files[PANEL]
+        first = b'\n    needLabel:SetText((Nexus.Localization.Text("panel.heading.still_needed")))\n'
+        second = b'\n        needLabel:SetText((Nexus.Localization.Text("panel.heading.still_needed")))\n'
+        one = edit(panel, first, b'\n    needLabel:SetText("Still needed")\n')
+        receipt = assert_current_bindings(self, self.catalog,
+                                          binding_args(with_file(self.files, PANEL, one)))
+        self.assertEqual(len(self.binding(receipt, key)["sites"]), 1)
+        both = edit(one, second, b'\n        needLabel:SetText("Still needed")\n')
+        receipt = self.gate_fails(with_file(self.files, PANEL, both))
+        self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+        # Review fix 1 oracle correction: without its direct tooltip call, the
+        # draft key is no longer kept by the Hub menu wrapper, whose result only
+        # reaches the stock dropdown outside the loaded source.
+        key = "panel.tooltip.create_wishlist_draft"
+        direct = (b'GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.create_wishlist_draft"),'
+                  b' 0.75, 0.75, 0.75, true)')
+        no_direct = edit(panel, direct, b'GameTooltip:AddLine("draft", 0.75, 0.75, 0.75, true)')
+        receipt = self.gate_fails(with_file(self.files, PANEL, no_direct))
+        self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+        self.assertEqual([site["site"] for site in self.binding(receipt, key)["unprovenSites"]],
+                         ["wrapper-call"])
+        # A secondary wrapper consumer whose result reaches the tooltip keeps it ...
+        shown = edit(panel, direct, b'local function DraftLine(key) return Nexus.Localization.Text'
+                     b'(key) end; GameTooltip:AddLine(DraftLine("panel.tooltip.create_wishlist_draft"),'
+                     b' 0.75, 0.75, 0.75, true)')
+        receipt = assert_current_bindings(self, self.catalog,
+                                          binding_args(with_file(self.files, PANEL, shown)))
+        self.assertEqual([site["site"] for site in self.binding(receipt, key)["sites"]],
+                         ["wrapper-call"])
+        # ... until the wrapper discards that result.
+        discarded = edit(shown, b"return Nexus.Localization.Text(key) end",
+                         b'Nexus.Localization.Text(key); return "draft" end')
+        receipt = self.gate_fails(with_file(self.files, PANEL, discarded))
+        self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+        self.assertEqual([site["reason"] for site in self.binding(receipt, key)["unprovenSites"]
+                          if site["site"] == "wrapper-call" and site["wrapper"]["name"]
+                          == "DraftLine"], ["wrapper-result-not-returned"])
+
+    def test_c4_mapped_chain_breaks_fail_the_gate(self):
+        user = self.files[USER_TEXT]
+        dispatch = b"if localizedReasons[s] then return LocalizedReason(localizedReasons[s],s) end"
+        alias = b"local function LocalizedReason(key,code)\n    local localization=Nexus.Localization\n"
+        variants = {
+            "dispatch argument": (USER_TEXT, edit(user, dispatch, dispatch.replace(
+                b"LocalizedReason(localizedReasons[s],s)", b"LocalizedReason(s,s)"))),
+            "wrapper receiver": (USER_TEXT, edit(user, alias, alias.replace(
+                b"=Nexus.Localization", b"=Nexus.Other"))),
+            "wrong Text object": (USER_TEXT, edit(user, b"local text,source=localization.Text(key)",
+                                                  b"local text,source=T.Text(key)")),
+            "alias reassigned": (USER_TEXT, edit(user, alias, alias + b"    localization={}\n")),
+            "wrapper reassigned": (USER_TEXT, edit(user, b"function T.Message(value)\n",
+                                                   b"LocalizedReason=nil\nfunction T.Message(value)\n")),
+            "earlier unverified return": (USER_TEXT, edit(user, dispatch,
+                                                          b'if s=="x" then return s end ' + dispatch)),
+            "dispatch variable reassigned": (USER_TEXT, edit(user, dispatch,
+                                                             b's=s:lower() ' + dispatch)),
+            "map mutated": (USER_TEXT, edit(user, dispatch,
+                                            b'localizedReasons.x="reason.list_preparing" ' + dispatch)),
+            "dispatcher disconnected": (USER_TEXT, edit(user, b"function T.Message(value)\n",
+                                                        b"function T.Unused(value)\n")),
+        }
+        receipts = {}
+        for name, (path, data) in variants.items():
+            with self.subTest(variant=name):
+                # The receipt is kept before the gate assertion, so a later
+                # check of this variant never fails on a missing receipt.
+                receipt = receipts[name] = self.receipt(with_file(self.files, path, data))
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                for key in MAPPED_KEYS:
+                    self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+                self.assertEqual(receipt["counts"]["DIRECT_LITERAL_CONSUMER"], 23)
+        # An earlier reasons-table entry shadows exactly the one mapped code.
+        shadow = edit(user, b"local reasons={\n",
+                      b'local reasons={\n    ["STORE_PENDING"]="Saved data shadow",\n')
+        receipt = self.gate_fails(with_file(self.files, USER_TEXT, shadow))
+        self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
+                         ["reason.saved_data_reading"])
+        self.assertEqual([(row["code"], row["key"]) for row in receipt["shadowedMapEntries"]],
+                         [("STORE_PENDING", "reason.saved_data_reading")])
+        # The unresolved constructs are named, not assumed bindings.
+        for name in ("alias reassigned", "wrapper reassigned", "earlier unverified return",
+                     "dispatch variable reassigned", "map mutated"):
+            with self.subTest(unresolved=name):
+                self.assertTrue(self.problems(receipts[name], "binding-unresolved"))
+
+    def test_c5_method_kind_mismatch_is_not_a_binding(self):
+        readout = edit(self.files[READOUT], b'localization.Format("readout.charge_counts",',
+                       b'localization.Text("readout.charge_counts",')
+        receipt = self.gate_fails(with_file(self.files, READOUT, readout))
+        self.assertEqual(self.binding(receipt, CHARGE)["binding"], "UNBOUND")
+        self.assertEqual([(problem["code"], problem["key"], problem["method"])
+                          for problem in self.problems(receipt, "binding-kind")],
+                         [("binding-kind", CHARGE, "Text")])
+        panel = edit(self.files[PANEL], PROGRESS_CALL,
+                     PROGRESS_CALL.replace(b"Localization.Text(", b"Localization.Format("))
+        receipt = self.gate_fails(with_file(self.files, PANEL, panel))
+        self.assertEqual([(problem["key"], problem["method"])
+                          for problem in self.problems(receipt, "binding-kind")],
+                         [("panel.heading.progress", "Format")])
+
+    def test_c6_toc_and_source_omission_fail(self):
+        toc = self.files["Nexus.toc"]
+        no_panel = edit(toc, b"ui\\Panel.lua\n", b"")
+        # Still supplied but no longer loaded: refused, not silently scanned.
+        unlisted = binding_args(with_file(self.files, "Nexus.toc", no_panel), extra=(
+            (PANEL, self.files[PANEL]),))
+        error = self.refuse(unlisted, "consumer-source-unlisted")
+        self.assertEqual(error.path, PANEL)
+        # Neither loaded nor supplied: the inventory shrinks and the gate fails.
+        # The 22 Panel keys lose their calls and, since review fix 1, the charge
+        # template its only output, the Panel charge widget: 23 unbound.
+        receipt = self.gate_fails(with_file(self.files, "Nexus.toc", no_panel))
+        self.assertEqual(receipt["counts"]["UNBOUND"], 23)
+        # Loaded but not supplied: refused, never shrunk.
+        error = self.refuse(binding_args(self.files, omit=(READOUT,)), "consumer-source-missing")
+        self.assertEqual((error.path, error.subject), (READOUT, "Nexus.toc"))
+        # A non-TOC file with genuine call text cannot satisfy a consumer.
+        fake = b'local x = Nexus.Localization.Text("panel.heading.progress")\n'
+        self.refuse(binding_args(self.files, extra=(("tools/fake_consumer.lua", fake),)),
+                    "consumer-source-unlisted")
+        # The registry Lua sources must be loaded by Nexus.toc, in order.
+        no_core = edit(toc, b"core\\Localization.lua\n", b"")
+        self.refuse(binding_args(with_file(self.files, "Nexus.toc", no_core)),
+                    "consumer-registry-unloaded")
+        swapped = edit(edit(toc, b"data\\LocalizationEnglish.lua\n", b""),
+                       b"core\\Localization.lua\n",
+                       b"core\\Localization.lua\ndata\\LocalizationEnglish.lua\n")
+        self.refuse(binding_args(with_file(self.files, "Nexus.toc", swapped)),
+                    "consumer-registry-order")
+        args = binding_args(self.files)
+        args[5] = [row for row in args[5] if row["path"] != "Nexus.toc"]
+        args[6] = [row for row in args[6] if row["path"] == "companion/NexusSupport/Storage.lua"]
+        self.refuse(args, "consumer-toc-required")
+
+    def test_c7_manifest_hashes_and_paths_are_checked_against_the_bytes(self):
+        args = binding_args(self.files)
+        panel = next(row for row in args[6] if row["path"] == PANEL)
+        drifted = edit(panel["data"], b'"panel.heading.progress"', b'"panel.heading.pROGRESS"')
+        self.assertEqual(len(drifted), len(panel["data"]))
+        for field, value, code in (("data", drifted, "consumer-hash-mismatch"),
+                                   ("byteLength", panel["byteLength"] + 1,
+                                    "consumer-length-mismatch"),
+                                   ("sha256", "0" * 64, "consumer-hash-mismatch")):
+            with self.subTest(field=field):
+                changed = binding_args(self.files)
+                row = next(row for row in changed[6] if row["path"] == PANEL)
+                row[field] = value
+                self.assertEqual(self.refuse(changed, code).path, PANEL)
+        toc_row = dict(args[5][0], data=args[5][0]["data"] + b"\n")
+        self.refuse(args[:5] + [[toc_row, args[5][1]], args[6]], "consumer-hash-mismatch")
+        for extra, code in (((("UI/Panel.lua", self.files[PANEL]),), "consumer-duplicate-path"),
+                            (((PANEL, self.files[PANEL]),), "consumer-duplicate-path"),
+                            ((("../outside.lua", b""),), "consumer-path"),
+                            ((("/abs.lua", b""),), "consumer-path"),
+                            ((("C:/abs.lua", b""),), "consumer-path"),
+                            ((("ui\\Panel2.lua", b""),), "consumer-path"),
+                            ((("ui//Panel2.lua", b""),), "consumer-path"),
+                            ((("./ui/Panel2.lua", b""),), "consumer-path"),
+                            ((("ui/Panel2.txt", b""),), "consumer-path")):
+            with self.subTest(extra=extra[0][0]):
+                self.refuse(binding_args(self.files, extra=extra), code)
+        toc = self.files["Nexus.toc"]
+        for line, code in ((b"..\\outside.lua\n", "consumer-toc-entry"),
+                           (b"ui\\Panel.xml\n", "consumer-toc-entry"),
+                           (b"C:\\abs.lua\n", "consumer-toc-entry"),
+                           (b"UI\\Panel.lua\n", "consumer-toc-duplicate")):
+            with self.subTest(toc_line=line):
+                changed = with_file(self.files, "Nexus.toc", edit(toc, b"core\\Main.lua\n",
+                                                                   b"core\\Main.lua\n" + line))
+                error = self.refuse(binding_args(changed), code)
+                self.assertEqual(error.subject, "Nexus.toc")
+                self.assertIsInstance(error.line, int)
+        bad_toc = with_file(self.files, "Nexus.toc", toc + b"\xff\n")
+        self.refuse(binding_args(bad_toc), "consumer-toc-not-utf8")
+        conflict = binding_args(self.files)
+        conflict[0] = conflict[0].replace(b"\r\n", b"\n") + b"\n"
+        self.refuse(conflict, "consumer-registry-conflict")
+
+    def test_c7_input_structure_and_types(self):
+        args = binding_args(self.files)
+        for index in range(5):
+            with self.subTest(argument=index):
+                changed = list(args)
+                changed[index] = changed[index].decode("utf-8")
+                with self.assertRaises(TypeError):
+                    self.report(*changed)
+        row = args[6][0]
+        for bad in ("not a list", [dict(row, extra=1)], [{k: v for k, v in row.items()
+                                                         if k != "sha256"}],
+                    [dict(row, data=row["data"].decode("utf-8"))], [dict(row, byteLength=True)],
+                    [dict(row, sha256=row["sha256"].upper())], [None]):
+            with self.subTest(records=repr(bad)[:40]):
+                self.refuse(args[:6] + [bad], "consumer-input-structure")
+
+    def test_c8_fake_and_unrelated_consumers_never_bind(self):
+        key = "panel.heading.progress"
+        panel = edit(self.files[PANEL], PROGRESS_CALL, PROGRESS_FAKES)
+        receipt = self.receipt(with_file(self.files, PANEL, panel))
+        self.assertEqual(self.binding(receipt, key)["sites"], [])
+        self.assertFalse(self.problems(receipt, "binding-unresolved"))
+        # Unsupported forms on the real seam are explicit, never assumed.
+        for name, call, construct in (
+                ("method call", b'Nexus.Localization:Text("panel.heading.progress")',
+                 "method-call"),
+                ("indirect reference", b'local T2 = Nexus.Localization.Text',
+                 "indirect-key-method"),
+                ("method alias call",
+                 b'local T2 = Nexus.Localization.Text; T2("panel.heading.progress")',
+                 "indirect-key-method"),
+                ("rawget reference", b'local T2 = rawget(Nexus.Localization, "Text")',
+                 "indirect-key-method"),
+                ("reassigned alias",
+                 b'do local L2 = Nexus.Localization; L2 = {}; L2.Text("panel.heading.progress") end',
+                 "alias")):
+            with self.subTest(form=name):
+                changed = edit(panel, PROGRESS_FAKES,
+                               PROGRESS_FAKE_CODE + b" " + call + PROGRESS_FAKE_COMMENT)
+                receipt = self.gate_fails(with_file(self.files, PANEL, changed))
+                self.assertEqual(self.binding(receipt, key)["sites"], [])
+                self.assertEqual([problem["construct"] for problem in
+                                  self.problems(receipt, "binding-unresolved")], [construct])
+        # A supported alias of the real seam does bind.
+        # Review fix 1 oracle correction: the alias call must also show its
+        # result; a discarded alias call is no consumer.
+        alias = (b' do local L2 = Nexus.Localization; progressLabel:SetText('
+                 b'L2.Text("panel.heading.progress")) end')
+        changed = edit(panel, PROGRESS_FAKES, PROGRESS_FAKE_CODE + alias + PROGRESS_FAKE_COMMENT)
+        receipt = assert_current_bindings(self, self.catalog,
+                                          binding_args(with_file(self.files, PANEL, changed)))
+        self.assertEqual([site["receiver"]["form"] for site in self.binding(receipt, key)["sites"]],
+                         ["alias"])
+
+    def test_c9_orphan_references_and_seam_mutation_fail(self):
+        orphan = edit(self.files[PANEL], PROGRESS_CALL,
+                      PROGRESS_CALL + b' local o = Nexus.Localization.Text("panel.never_declared")')
+        receipt = self.gate_fails(with_file(self.files, PANEL, orphan))
+        self.assertEqual([(problem["code"], problem.get("key")) for problem in receipt["problems"]],
+                         [("binding-orphan", "panel.never_declared")])
+        mapped = edit(self.files[USER_TEXT], b'    ["STORE_PENDING"]="reason.saved_data_reading",\n',
+                      b'    ["STORE_PENDING"]="reason.saved_data_reading",\n'
+                      b'    ["NEVER"]="reason.never_declared",\n')
+        receipt = self.gate_fails(with_file(self.files, USER_TEXT, mapped))
+        self.assertEqual([(problem["code"], problem.get("key")) for problem in receipt["problems"]],
+                         [("binding-orphan", "reason.never_declared")])
+        for name, line in (("seam field", b' Nexus.Localization.Text = tostring'),
+                           ("seam table", b' Nexus.Localization = {}'),
+                           ("global", b' Nexus = {}')):
+            with self.subTest(mutation=name):
+                changed = edit(self.files[PANEL], PROGRESS_CALL, PROGRESS_CALL + line)
+                receipt = self.gate_fails(with_file(self.files, PANEL, changed))
+                self.assertEqual([problem["code"] for problem in receipt["problems"]],
+                                 ["binding-mutation"])
+
+    def test_c10_unparseable_loaded_source_fails(self):
+        broken = edit(self.files[READOUT], b"local M = {}\n", b"local M = {\n")
+        receipt = self.gate_fails(with_file(self.files, READOUT, broken))
+        rows = {row["path"]: row["analysis"] for row in receipt["sources"]}
+        self.assertEqual(rows[READOUT], "UNPARSED")
+        self.assertEqual([(problem["code"], problem["path"])
+                          for problem in self.problems(receipt, "binding-unparsed")],
+                         [("binding-unparsed", READOUT)])
+        self.assertEqual(self.binding(receipt, CHARGE)["binding"], "UNBOUND")
+
+    def test_c11_lf_and_crlf_bind_alike_with_exact_hashes(self):
+        # Every file on a binding or output chain, both TOCs and the registry
+        # Lua sources change representation; the others keep their bytes.
+        chained = set(INPUTS + CONSUMER_TOCS) | {PANEL, READOUT, USER_TEXT, "core/Main.lua",
+                                                 "core/WishlistController.lua",
+                                                 "ui/JournalTab.lua", "ui/WishlistEditor.lua",
+                                                 "companion/NexusSupport/Storage.lua"}
+        receipts = {}
+        for name in ("lf", "crlf"):
+            files = {path: representations(data)[name]
+                     if path in chained and path.endswith((".lua", ".toc")) else data
+                     for path, data in self.files.items()}
+            receipts[name] = assert_current_bindings(self, self.catalog, binding_args(files))
+            for row in receipts[name]["sources"]:
+                data = files[row["path"]]
+                self.assertEqual(row["sha256"], hashlib.sha256(data).hexdigest())
+        self.assertNotEqual([row["sha256"] for row in receipts["lf"]["sources"]],
+                            [row["sha256"] for row in receipts["crlf"]["sources"]])
+
+        def semantic(receipt):
+            return (receipt["keys"], receipt["mapChains"], receipt["dynamicUnknown"],
+                    receipt["counts"])
+        self.assertEqual(semantic(receipts["lf"]), semantic(receipts["crlf"]))
+
+    def test_c12_pure_deterministic_and_never_mutates_caller_inputs(self):
+        args = binding_args(self.files)
+        expected = self.report(*args)
+        mutable = [bytearray(value) for value in args[:5]]
+        tocs = [dict(row, data=bytearray(row["data"])) for row in args[5]]
+        sources = [dict(row, data=bytearray(row["data"])) for row in args[6]]
+        before = json.dumps([[bytes(value).hex() for value in mutable],
+                             [dict(row, data=bytes(row["data"]).hex()) for row in tocs + sources]])
+        self.assertEqual(self.report(*mutable, tocs, sources), expected)
+        after = json.dumps([[bytes(value).hex() for value in mutable],
+                            [dict(row, data=bytes(row["data"]).hex()) for row in tocs + sources]])
+        self.assertEqual(after, before)
+        json.dumps(expected, sort_keys=True).encode("ascii")
+        blocked = ProvenanceTests.blocked_calls()
+        try:
+            self.assertEqual(self.report(*args), expected)
+        finally:
+            blocked()
+        # The cyclic collector's state is the caller's after every call,
+        # also when a new parse pauses it (review fix 4).
+        import gc
+        fresh = with_file(self.files, "core/SessionPause.lua",
+                          self.files["core/SessionPause.lua"] + b"\n-- gc state control\n")
+        for enabled in (True, False):
+            (gc.enable if enabled else gc.disable)()
+            try:
+                self.report(*binding_args(with_file(fresh, "core/SessionPause.lua",
+                                                    fresh["core/SessionPause.lua"] + b"-- "
+                                                    + str(enabled).encode() + b"\n")))
+                self.assertIs(gc.isenabled(), enabled)
+            finally:
+                gc.enable()
+        # A caller that rewrites every nested value of a returned receipt
+        # cannot change the next receipt through the parse memo.
+        snapshot = json.dumps(expected, sort_keys=True)
+        stack = [self.report(*args)]
+        while stack:
+            value = stack.pop()
+            items = value.items() if type(value) is dict else enumerate(value) \
+                if type(value) is list else ()
+            for index, item in list(items):
+                if type(item) in (dict, list):
+                    stack.append(item)
+                else:
+                    value[index] = "poisoned"
+        self.assertEqual(json.dumps(self.report(*args), sort_keys=True), snapshot)
+        # The earlier seams give the same results with the binding seam present.
+        registry = args[:5]
+        self.assertEqual(self.catalog.registry_catalog_report(*registry)["registry"]
+                         ["declarationCount"], 28)
+        self.assertIs(self.catalog.registry_catalog_diagnostics(*registry)["valid"], True)
+        self.assertIs(self.catalog.pack_provenance_diagnostics(*registry)["valid"], True)
+
+    def test_c13_binding_stays_apart_from_family_status_and_dynamic_leads(self):
+        receipt = assert_current_bindings(self, self.catalog, binding_args(self.files))
+        # Five keys are bound and still family-unclassified; no family is
+        # adopted or complete because of a binding.
+        unclassified = [row["key"] for row in receipt["keys"]
+                        if row["family"]["state"] == "UNCLASSIFIED"]
+        self.assertEqual(unclassified, list(MAPPED_KEYS))
+        self.assertEqual({row["binding"] for row in receipt["keys"]
+                          if row["key"] in unclassified}, {"MAPPED_TO_CONSUMER"})
+        self.assertEqual(receipt["completeness"]["established"], False)
+        # Dynamic constructs are listed, never counted toward a key.
+        for row in receipt["dynamicUnknown"]:
+            self.assertNotIn("key", row)
+        self.assertEqual(receipt["counts"]["dynamicUnknown"], len(receipt["dynamicUnknown"]))
+
+    def test_c14_an_invalid_catalog_gets_no_binding_receipt(self):
+        core = "core/Localization.lua"
+        changed = with_file(self.files, core, edit(self.files[core], b"resultLimit = 254",
+                                                   b"resultLimit = 253"))
+        with self.assertRaises(self.catalog.CatalogRegistryError) as raised:
+            self.receipt(changed)
+        self.assertEqual((raised.exception.code, raised.exception.key), ("registry-limit", CHARGE))
+
+    def test_c15_a_localization_result_must_reach_an_output(self):
+        # Review fix 1 (SPEC-147-S8-1): a call whose result is overwritten,
+        # discarded or only reaches an unused helper never binds.
+        user, key = self.files[USER_TEXT], "panel.heading.progress"
+        call = b"local text,source=localization.Text(key)"
+        receipt = self.gate_fails(with_file(self.files, USER_TEXT, edit(
+            user, call, call + b"\n        text=code")))
+        self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
+                         list(MAPPED_KEYS))
+        self.assertEqual(receipt["mapChains"][0]["wrapperReturnsResult"], False)
+        self.assertEqual({site["reason"] for key in MAPPED_KEYS
+                          for site in self.binding(receipt, key)["unprovenSites"]},
+                         {"wrapper-result-not-returned"})
+        discard = (b'local function SpecProgress(key) Nexus.Localization.Text(key); return '
+                   b'"Progress" end; progressLabel:SetText(SpecProgress("panel.heading.progress"))')
+        receipt = self.gate_fails(with_file(self.files, PANEL, edit(
+            self.files[PANEL], PROGRESS_CALL, discard)))
+        self.assertEqual([(problem["code"], problem.get("key")) for problem in receipt["problems"]],
+                         [("binding-unbound", key)])
+        self.assertEqual([site["reason"] for site in self.binding(receipt, key)["unprovenSites"]],
+                         ["wrapper-result-not-returned"])
+        # A result only compared, never shown, is no output either; shown
+        # through 'and'/'or' and '..' it is.
+        compared = (b'progressLabel:SetText(Nexus.Localization.Text("panel.heading.progress") '
+                    b'== "x" and "Yes" or "No")')
+        receipt = self.gate_fails(with_file(self.files, PANEL, edit(
+            self.files[PANEL], PROGRESS_CALL, compared)))
+        self.assertEqual([site["reason"] for site in self.binding(receipt, key)["unprovenSites"]],
+                         ["output-not-reached"])
+        joined = (b'progressLabel:SetText(ready and ("> " .. Nexus.Localization.Text('
+                  b'"panel.heading.progress")) or "")')
+        assert_current_bindings(self, self.catalog, binding_args(with_file(
+            self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL, joined))))
+        # All seven real dispatcher callers disconnected: the mapped keys go,
+        # and an unused helper that discards a Message result does not restore them.
+        callers = {"core/WishlistController.lua": (b"Nexus.UserText.Message(message)",),
+                   READOUT: (b"Nexus.UserText.Message(model.text)",),
+                   PANEL: (b"userText.Message(raw)", b"Nexus.UserText.Message(reason)"),
+                   "ui/JournalTab.lua": (b"Nexus.UserText.Message(text)",),
+                   "ui/WishlistEditor.lua": (b"Nexus.UserText.Message(message)",),
+                   "core/Main.lua": (b"Nexus.UserText.Message(msg)",)}
+        changed = dict(self.files)
+        for path, needles in callers.items():
+            for needle in needles:
+                changed[path] = edit(changed[path], needle,
+                                     needle.replace(b".Message(", b".MessageDisconnected("))
+        receipt = self.gate_fails(changed)
+        self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
+                         list(MAPPED_KEYS))
+        changed["core/WishlistController.lua"] += (
+            b'\nlocal function SpecUnusedReasonCall() local ignored=Nexus.UserText.Message('
+            b'"STORE_PENDING"); return "constant" end\n')
+        receipt = self.gate_fails(changed)
+        self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
+                         list(MAPPED_KEYS))
+        self.assertEqual(receipt["mapChains"][0]["established"], False)
+        # One real caller restored with its chat output binds them again.
+        restored = with_file(changed, "core/Main.lua", self.files["core/Main.lua"])
+        receipt = assert_current_bindings(self, self.catalog, binding_args(restored))
+        self.assertEqual({(output["path"], output["output"])
+                          for output in receipt["mapChains"][0]["outputs"]},
+                         {("core/Main.lua", "AddMessage")})
+
+    def test_c16_a_module_alias_overwriting_the_dispatcher_is_unresolved(self):
+        # Review fix 2 (SPEC-147-S8-2): a field written through a local alias
+        # of the exported module is a definition of that module's field.
+        user = self.files[USER_TEXT]
+        overwrite = (b'\nlocal userTextAlias=T\nuserTextAlias.Message=function(value) return '
+                     b'tostring(value or "") end\n')
+        receipt = self.gate_fails(with_file(self.files, USER_TEXT, user + overwrite))
+        self.assertEqual([(problem["construct"], problem["detail"]) for problem
+                          in self.problems(receipt, "binding-unresolved")],
+                         [("dispatcher", "T.Message has 2 definitions, directly or through a "
+                                         "local alias")])
+        self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
+                         list(MAPPED_KEYS))
+        for name, tail, detail in (
+                ("escaping module", b'\nlocal function Keep(t) return t end Keep(T)\n',
+                 "the module table T is assigned again, written through a computed key or "
+                 "escapes its file"),
+                ("computed field", b'\nlocal fieldName="Message" T[fieldName]=tostring\n',
+                 "the module table T is assigned again, written through a computed key or "
+                 "escapes its file"),
+                ("exported path assigned", b'\nNexus.UserText.Message=tostring\n',
+                 "Nexus.UserText or Nexus.UserText.Message is assigned elsewhere")):
+            with self.subTest(form=name):
+                receipt = self.gate_fails(with_file(self.files, USER_TEXT, user + tail))
+                self.assertEqual([problem["detail"] for problem
+                                  in self.problems(receipt, "binding-unresolved")], [detail])
+        # A same-named alias in another function is a different local.
+        benign = (b'\nlocal function SpecOtherScope() local localization=Nexus.Other; '
+                  b'localization={}; return localization.Text("not.a.binding") end\n')
+        assert_current_bindings(self, self.catalog,
+                                binding_args(with_file(self.files, USER_TEXT, user + benign)))
+
+    def test_c17_both_product_tocs_are_required(self):
+        # Review fix 3 (SPEC-147-S8-3): the companion TOC and its source cannot
+        # disappear together; a TOC outside the product contract is refused.
+        support, storage = CONSUMER_TOCS[1], "companion/NexusSupport/Storage.lua"
+        paired = dict(self.files)
+        del paired[support], paired[storage]
+        args = binding_args(paired)
+        self.assertEqual((len(args[5]), len(args[6])), (1, 99))
+        self.assertEqual(self.refuse(args, "consumer-toc-required").path, support)
+        alone = dict(self.files)
+        del alone[support]
+        self.assertEqual(self.refuse(binding_args(alone, extra=((storage, self.files[storage]),)),
+                                     "consumer-toc-required").path, support)
+        self.assertEqual(self.refuse(binding_args(self.files, omit=(storage,)),
+                                     "consumer-source-missing").path, storage)
+        args = binding_args(self.files)
+        args[5] = args[5] + [record("tools/Other.toc", b"Other.lua\n")]
+        self.assertEqual(self.refuse(args, "consumer-toc-unknown").path, "tools/Other.toc")
+        # A genuine addition to a product TOC is derived from its bytes.
+        added = "companion/NexusSupport/Extra.lua"
+        grown = with_file(self.files, support, self.files[support] + b"Extra.lua\n")
+        grown[added] = b"local x = 1\n"
+        receipt = assert_current_bindings(self, self.catalog, binding_args(grown))
+        self.assertEqual(len(receipt["sources"]), 101)
+        self.assertEqual(receipt["tocs"][1]["loaded"], [storage, added])
+        self.refuse(binding_args(with_file(self.files, support, grown[support])),
+                    "consumer-source-missing")
+
+    def test_c18_accurately_rehashed_benign_source_changes_stay_admissible(self):
+        panel = self.files[PANEL] + b"\r\n-- A benign comment; the Panel semantics are unchanged.\r\n"
+        receipt = assert_current_bindings(self, self.catalog,
+                                          binding_args(with_file(self.files, PANEL, panel)))
+        row = next(row for row in receipt["sources"] if row["path"] == PANEL)
+        self.assertEqual((row["sha256"], row["byteLength"]),
+                         (hashlib.sha256(panel).hexdigest(), len(panel)))
+        self.assertNotEqual(row["sha256"], hashlib.sha256(self.files[PANEL]).hexdigest())
+
+    def test_c19_value_origin_and_output_receiver_are_proved(self):
+        # Review fix 2 (SPEC-147-S8-RF1-1..3): a field value reaches only a
+        # read of the same table, a parameter value returns only to the call
+        # that passed it, and an output needs a client receiver.
+        key, panel = "panel.heading.progress", self.files[PANEL]
+        # The three review reproductions, each replacing the real progress call.
+        cases = [
+            ("unrelated table field", False, PANEL, (
+                b'local specLeft={SpecUniqueField=Nexus.Localization.Text("panel.heading.progress")}; '
+                b'local specRight={}; progressLabel:SetText(specRight.SpecUniqueField)')),
+            ("distinct call result", False, PANEL, (
+                b'local function SpecCarry(value) return value end; local specDiscard=SpecCarry('
+                b'Nexus.Localization.Text("panel.heading.progress")); '
+                b'progressLabel:SetText(SpecCarry("fixed"))')),
+            ("fake local output", False, PANEL, (
+                b'local specFake={SetText=function(self,value) return nil end}; '
+                b'specFake:SetText(Nexus.Localization.Text("panel.heading.progress"))')),
+        ]
+        # Further identity and receiver controls in a small loaded file, with
+        # the real progress call replaced by fixed text in Panel.
+        host, bare = "core/SessionPause.lua", edit(panel, PROGRESS_CALL,
+                                                  b'progressLabel:SetText("Progress")')
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        cases += [(name, binds, host, label + code) for name, binds, code in (
+            ("same table field", True,
+             b'local specLeft={Field=' + text + b'}; specLabel:SetText(specLeft.Field)\n'),
+            ("same table through an alias", True,
+             b'local specLeft={}; specLeft.Field=' + text + b'; local specAlias=specLeft; '
+             b'specLabel:SetText(specAlias.Field)\n'),
+            ("reassigned table", False,
+             b'local specLeft={}; specLeft.Field=' + text + b'; specLeft={}; '
+             b'specLabel:SetText(specLeft.Field)\n'),
+            ("same call result", True,
+             b'local function SpecCarry(value) return value end; '
+             b'specLabel:SetText(SpecCarry(' + text + b'))\n'),
+            ("nested calls keep their own return", False,
+             b'local function SpecInner(value) return value end; local function SpecOuter(value) '
+             b'local ignored=SpecInner(value); return SpecInner("fixed") end; '
+             b'specLabel:SetText(SpecOuter(' + text + b'))\n'),
+            ("fake field output", False,
+             b'local specHolder={}; specHolder._specOut={SetText=function(self,value) end}; '
+             b'specHolder._specOut:SetText(' + text + b')\n'),
+            ("real widget field output", True,
+             b'local specHolder={}; specHolder._specOut=UIParent:CreateFontString(); '
+             b'specHolder._specOut:SetText(' + text + b')\n'))]
+        for name, binds, path, code in cases:
+            with self.subTest(case=name):
+                if path == PANEL:
+                    files = with_file(self.files, PANEL, edit(panel, PROGRESS_CALL, code))
+                else:
+                    files = with_file(with_file(self.files, PANEL, bare), host,
+                                      self.files[host] + code)
+                receipt = self.receipt(files)
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+        # A client global assigned by the loaded source is no receiver: with
+        # both chat outputs of the mapped reasons replaced they are unbound,
+        # and either one alone still binds them.
+        main, editor = "core/Main.lua", "ui/WishlistEditor.lua"
+        chat = self.files[main] + b"\nDEFAULT_CHAT_FRAME = {AddMessage = function() end}\n"
+        printer = self.files[editor] + b"\nprint = function() end\n"
+        for files, binds in ((with_file(self.files, main, chat), True),
+                             (with_file(self.files, editor, printer), True),
+                             (with_file(with_file(self.files, main, chat), editor, printer), False)):
+            receipt = self.receipt(files)
+            self.assertEqual({row["binding"] for row in receipt["keys"] if row["key"]
+                              in MAPPED_KEYS}, {"MAPPED_TO_CONSUMER" if binds else "UNBOUND"})
+        # A CreateFontString redefined by the loaded source makes no widget.
+        made = self.files[host] + b"\nlocal specMaker = {}\nfunction specMaker:CreateFontString() end\n"
+        receipt = self.gate_fails(with_file(self.files, host, made))
+        self.assertIn(key, [row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"])
+
+    def test_c20_table_write_and_receiver_origins_follow_the_actual_object(self):
+        # Review fix 3 (SPEC-147-S8-RF2-1..3): a table written through a
+        # parameter is the one the value's own call passed; a receiver field
+        # is bound to the object holding it; a widget factory and a client
+        # global need an evidenced client root.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        store = b'local function SpecStore(target,value) target.SpecUniqueField=value end; '
+        show = b'local function SpecShow(target,value) target:SetText(value) end; '
+        cases = (
+            ("same-call table write", True, store + b'local specLeft={}; SpecStore(specLeft,'
+             + text + b'); specLabel:SetText(specLeft.SpecUniqueField)'),
+            ("separate-call table write", False, store + b'local specLeft={}; local specRight={}; '
+             b'SpecStore(specLeft,' + text + b'); SpecStore(specRight,"fixed"); '
+             b'specLabel:SetText(specRight.SpecUniqueField)'),
+            ("same-object widget field", True, b'local specLeft={_SpecUniqueOutput=UIParent:'
+             b'CreateFontString()}; specLeft._SpecUniqueOutput:SetText(' + text + b')'),
+            ("unrelated-object widget field", False, b'local specLeft={_SpecUniqueOutput=UIParent:'
+             b'CreateFontString()}; local specRight={}; specRight._SpecUniqueOutput:SetText('
+             + text + b')'),
+            ("factory on an empty table", False, b'local specMaker={}; local specMade=specMaker:'
+             b'CreateFontString(); specMade:SetText(' + text + b')'),
+            ("unknown global receiver", False,
+             b'SpecUnknownNotAClientFrame:SetText(' + text + b')'),
+            ("widget passed to every call", True, show + b'SpecShow(specLabel,' + text + b')'),
+            ("value shown by the call passing the widget", True, show + b'SpecShow(specLabel,'
+             + text + b'); SpecShow({SetText=function() end},"fixed")'),
+            ("value given to the call passing a fake table", False, show
+             + b'SpecShow({SetText=function() end},' + text + b'); SpecShow(specLabel,"fixed")'),
+            # A value made inside the function reaches the receiver of every
+            # call, so every call must pass a client object.
+            ("own value shown on a widget passed by every call", True,
+             b'local function SpecOwn(target) target:SetText(' + text + b') end; '
+             b'SpecOwn(specLabel)'),
+            ("own value shown on a fake table passed by a call", False,
+             b'local function SpecOwn(target) target:SetText(' + text + b') end; '
+             b'SpecOwn(specLabel); SpecOwn({SetText=function() end})'),
+        )
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+
+    def test_c21_reads_receiver_fields_methods_and_nil_follow_the_actual_origin(self):
+        # Review fix 4 (SPEC-147-S8-RF3-1..4): a field read through a
+        # parameter returns only to the call that passed the read table; a
+        # receiver field through a parameter is resolved on that call's
+        # table; a replaced output method is no output; and a later nil
+        # assignment is a definition of the receiver.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        read = b'local function SpecRead(target) return target.SpecReadField end; '
+        show = b'local function SpecShow(target,value) target.SpecOutput:SetText(value) end; '
+        cases = (
+            ("same-call field read", True, read + b'local specLeft={SpecReadField=' + text
+             + b'}; specLabel:SetText(SpecRead(specLeft))'),
+            ("separate-call field read", False, read + b'local specLeft={SpecReadField=' + text
+             + b'}; local specRight={}; local specDiscard=SpecRead(specLeft); '
+             b'specLabel:SetText(SpecRead(specRight))'),
+            ("separate-call field read through a parameter alias", False,
+             b'local function SpecRead(target) local held=target; return held.SpecReadField end; '
+             b'local specLeft={SpecReadField=' + text + b'}; local specRight={}; '
+             b'local specDiscard=SpecRead(specLeft); specLabel:SetText(SpecRead(specRight))'),
+            ("same-object parameter receiver field", True, show
+             + b'local specLeft={SpecOutput=specLabel}; SpecShow(specLeft,' + text + b')'),
+            ("other-call parameter receiver field", False, show
+             + b'local specLeft={SpecOutput=specLabel}; local specRight={}; '
+             b'SpecShow(specLeft,"fixed"); SpecShow(specRight,' + text + b')'),
+            ("output method replaced on the widget", False,
+             b'specLabel.SetText=function(self,value) return nil end; specLabel:SetText(' + text
+             + b')'),
+            ("output method replaced through a widget alias", False,
+             b'local specSame=specLabel; specSame.SetText=function(self,value) end; '
+             b'specLabel:SetText(' + text + b')'),
+            ("unmodified widget method", True, b'specLabel:SetText(' + text + b')'),
+            ("initial nil then created", True, b'local specMaybe=nil; specMaybe=UIParent:'
+             b'CreateFontString(); specMaybe:SetText(' + text + b')'),
+            ("created then nil", False, b'specLabel=nil; specLabel:SetText(' + text + b')'),
+        )
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+
+    def test_c22_nested_calls_keep_every_enclosing_invocation(self):
+        # SPEC-147-S8-RF4-1: a field read through a parameter that a wrapper
+        # passes on from its own parameter returns only under the enclosing
+        # call whose argument holds the written table, so the wrapper's
+        # result reaches only that call. A resolved helper that receives the
+        # widget leaves it an output unless it replaces the output method.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        read = b'local function SpecRead(target) return target.SpecReadField end; '
+        wrap = read + b'local function SpecWrap(target) return SpecRead(target) end; '
+        outer = wrap + b'local function SpecOuter(target) return SpecWrap(target) end; '
+        left = b'local specLeft={SpecReadField=' + text + b'}; local specRight={}; '
+        fill = read + (b'local function SpecFill(target,value) target.SpecReadField=value; '
+                       b'return SpecRead(target) end; ')
+        cases = (
+            ("nested-field-read-same-call-positive", True, wrap + b'local specLeft={SpecReadField='
+             + text + b'}; specLabel:SetText(SpecWrap(specLeft))'),
+            ("nested-field-read-wrong-call-origin", False, wrap + left
+             + b'local specDiscard=SpecWrap(specLeft); specLabel:SetText(SpecWrap(specRight))'),
+            ("nested read through an alias of the wrapper parameter", False, read
+             + b'local function SpecWrap(target) local held=target; return SpecRead(held) end; '
+             + left + b'local specDiscard=SpecWrap(specLeft); '
+             b'specLabel:SetText(SpecWrap(specRight))'),
+            ("two enclosing wrappers, same call", True, outer + left
+             + b'specLabel:SetText(SpecOuter(specLeft))'),
+            ("two enclosing wrappers, wrong call", False, outer + left
+             + b'local specDiscard=SpecOuter(specLeft); specLabel:SetText(SpecOuter(specRight))'),
+            ("table written and read in one enclosing call", True, fill
+             + b'specLabel:SetText(SpecFill({},' + text + b')); local specOther=SpecFill({},"x")'),
+            ("table written and read in a discarded enclosing call", False, fill
+             + b'local specDiscard=SpecFill({},' + text + b'); '
+             b'specLabel:SetText(SpecFill({},"fixed"))'),
+            ("method-helper-unmodified-positive", True,
+             b'local function SpecTouch(target) local same=target end; SpecTouch(specLabel); '
+             b'specLabel:SetText(' + text + b')'),
+            ("method-helper-overwrite-origin", False,
+             b'local function SpecTouch(target) target.SetText=function(self,value) return nil '
+             b'end end; SpecTouch(specLabel); specLabel:SetText(' + text + b')'),
+        )
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+
+    def test_c23_a_carrier_made_in_a_call_belongs_to_that_call(self):
+        # SPEC-147-S8-RF5-1: a table made inside a function is a fresh object
+        # in each of its invocations, so a field written and read on it, read
+        # directly or passed on, stays with the invocation that wrote it.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        read = b'local function SpecRead(target) return target.SpecBridge end; '
+        left = b'local specLeft={SpecSource=' + text + b'}; local specRight={}; '
+        shown = b'specLabel:SetText(SpecWrap(specLeft))'
+        wrong = b'local specDiscard=SpecWrap(specLeft); specLabel:SetText(SpecWrap(specRight))'
+        wraps = (
+            ("constructor carrier", read + b'local function SpecWrap(target) local box='
+             b'{SpecBridge=target.SpecSource}; return SpecRead(box) end; '),
+            ("assigned carrier", read + b'local function SpecWrap(target) local box={}; '
+             b'box.SpecBridge=target.SpecSource; return SpecRead(box) end; '),
+            ("carrier read in place", b'local function SpecWrap(target) local box='
+             b'{SpecBridge=target.SpecSource}; return box.SpecBridge end; '),
+            ("carrier passed as a constructor", read + b'local function SpecWrap(target) '
+             b'return SpecRead({SpecBridge=target.SpecSource}) end; '),
+        )
+        cases = [(name + ", same call", True, wrap + left + shown) for name, wrap in wraps]
+        cases += [(name + ", wrong call", False, wrap + left + wrong) for name, wrap in wraps]
+        # A carrier made in a nested function whose invocation the value's
+        # call stack does not hold stays unproven.
+        cases.append(("carrier made in a nested function, wrong call", False, read
+                      + b'local function SpecWrap(target) local function SpecInner() local box='
+                      b'{SpecBridge=target.SpecSource}; return SpecRead(box) end; '
+                      b'return SpecInner() end; ' + left + wrong))
+        # A value made inside the function reaches the carrier of every call.
+        cases.append(("own value through a carrier", True, read + b'local function SpecMake() '
+                      b'local box={SpecBridge=' + text + b'}; return SpecRead(box) end; '
+                      b'specLabel:SetText(SpecMake())'))
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+
+    def test_c24_a_field_copied_into_the_same_field_name_still_binds(self):
+        # SPEC-147-S8-RF6-1: every write of a field name must carry the proof,
+        # and a carrier copy of the same field name is itself such a write, fed
+        # only by the field it copies; that dependency cycle must not refuse a
+        # genuine same-call display, while a copy from a table that never holds
+        # the value, or a discarded call, still proves nothing.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        direct = b'local function SpecRead(target) return target.SpecShared end; '
+        alias = b'local function SpecRead(target) local same=target; return same.SpecShared end; '
+        built = (b'local function SpecWrap(target) local box={SpecShared=target.SpecShared}; '
+                 b'return SpecRead(box) end; ')
+        assigned = (b'local function SpecWrap(target) local box={}; '
+                    b'box.SpecShared=target.SpecShared; return SpecRead(box) end; ')
+        left = b'local specLeft={SpecShared=' + text + b'}; local specRight={}; '
+        shown = b'specLabel:SetText(SpecWrap(specLeft))'
+        wrong = b'local specDiscard=SpecWrap(specLeft); specLabel:SetText(SpecWrap(specRight))'
+        forms = (("constructor carrier", direct + built), ("constructor carrier, reader alias",
+                                                          alias + built),
+                 ("assigned carrier", direct + assigned), ("assigned carrier, reader alias",
+                                                           alias + assigned))
+        cases = [(name + ", same call", True, code + left + shown) for name, code in forms]
+        cases += [(name + ", wrong call", False, code + left + wrong) for name, code in forms]
+        cases += [
+            ("aliased reader without a carrier", True, alias + left
+             + b'specLabel:SetText(SpecRead(specLeft))'),
+            ("carrier with another field name", True, b'local function SpecRead(target) return '
+             b'target.SpecBridge end; local function SpecWrap(target) local box={SpecBridge='
+             b'target.SpecShared}; return SpecRead(box) end; ' + left + shown),
+            # The same field copied from a table that never holds the value
+            # replaces it; no other write makes that copy carry the proof.
+            ("field overwritten by the same field of an empty table", False, left
+             + b'specLeft.SpecShared=specRight.SpecShared; specLabel:SetText(specLeft.SpecShared)'),
+            # A write is assumed to pass only while all its definitions are
+            # reached: one copying that overwritten field proves nothing either.
+            ("field copied from a field overwritten by an empty table", False, left
+             + b'specLeft.SpecShared=specRight.SpecShared; local specOther={SpecCopy=' + text
+             + b'}; specOther.SpecCopy=specLeft.SpecShared; specLabel:SetText(specOther.SpecCopy)'),
+        ]
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                # Every localization call of the case is an unproven site.
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"] * code.count(text))
+
+    def test_c25_a_field_copied_through_two_fresh_carriers_still_binds(self):
+        # SPEC-147-S8-RF7-1: a field copied through two fresh carrier tables,
+        # each written once, binds for the call that displays it; a field
+        # written back from its own copy after an empty table overwrote it
+        # (the order of those writes is unknown) proves nothing, whether the
+        # copy keeps the field name or crosses to another one.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        direct = b'local function SpecRead(target) return target.SpecShared end; '
+        alias = b'local function SpecRead(target) local same=target; return same.SpecShared end; '
+        built = (b'local function SpecWrap(target) local first={SpecShared=target.SpecShared}; '
+                 b'local box={SpecShared=first.SpecShared}; return SpecRead(box) end; ')
+        assigned = (b'local function SpecWrap(target) local first={}; '
+                    b'first.SpecShared=target.SpecShared; local box={}; '
+                    b'box.SpecShared=first.SpecShared; return SpecRead(box) end; ')
+        left = b'local specLeft={SpecShared=' + text + b'}; local specRight={}; '
+        shown = b'specLabel:SetText(SpecWrap(specLeft))'
+        wrong = b'local specDiscard=SpecWrap(specLeft); specLabel:SetText(SpecWrap(specRight))'
+        forms = (("two constructor carriers", direct + built),
+                 ("two constructor carriers, reader alias", alias + built),
+                 ("two assigned carriers", direct + assigned))
+        cases = [(name + ", same call", True, code + left + shown) for name, code in forms]
+        cases += [(name + ", wrong call", False, code + left + wrong) for name, code in forms]
+        cases += [
+            ("two carriers in the chunk", True, left + b'local first={SpecShared=specLeft.SpecShared}; '
+             b'local box={SpecShared=first.SpecShared}; specLabel:SetText(box.SpecShared)'),
+            ("one carrier in the chunk", True, left + b'local box={SpecShared=specLeft.SpecShared}; '
+             b'specLabel:SetText(box.SpecShared)'),
+            ("two carriers, the first with another field name", True, direct
+             + b'local function SpecWrap(target) local first={SpecBridge=target.SpecShared}; '
+             b'local box={SpecShared=first.SpecBridge}; return SpecRead(box) end; ' + left + shown),
+            ("round trip after an empty overwrite", False, left + b'specLeft.SpecShared='
+             b'specRight.SpecShared; specRight.SpecShared=specLeft.SpecShared; '
+             b'specLabel:SetText(specLeft.SpecShared)'),
+            ("round trip after an empty overwrite, copy shown", False, left
+             + b'specLeft.SpecShared=specRight.SpecShared; specRight.SpecShared='
+             b'specLeft.SpecShared; specLabel:SetText(specRight.SpecShared)'),
+            ("cross-field round trip after an empty overwrite", False, b'local specLeft={SpecA='
+             + text + b'}; local specRight={}; specLeft.SpecA=specRight.SpecB; '
+             b'specRight.SpecB=specLeft.SpecA; specLabel:SetText(specRight.SpecB)'),
+        ]
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"] * code.count(text))
+
+
+class ConsumerCommandLineTests(unittest.TestCase):
+    """S8: --consumers reads both TOCs and every Lua file they load from the
+    confined root and prints one consumers record; the earlier modes are
+    unchanged."""
+
+    def run_process(self, *args):
+        return subprocess.run([sys.executable, "-B", str(CATALOG_TOOL), *[str(a) for a in args]],
+                              capture_output=True, cwd=str(ROOT))
+
+    def run_cli(self, *args):
+        """main() of the shared loaded tool in this process, with the exact
+        stdout and stderr bytes it writes; one real process run is kept in
+        test_repository_root, and the parse memo keeps the rest within the
+        registered time budget."""
+        import io
+        out, err = io.TextIOWrapper(io.BytesIO()), io.TextIOWrapper(io.BytesIO())
+        saved = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = out, err
+        try:
+            code = s8_catalog().main([str(arg) for arg in args])
+        finally:
+            sys.stdout, sys.stderr = saved
+        return subprocess.CompletedProcess(args, code, out.buffer.getvalue(),
+                                           err.buffer.getvalue())
+
+    def copy_root(self, root, files):
+        for relative, value in files.items():
+            target = root.joinpath(*relative.split("/"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(value)
+
+    def test_repository_root(self):
+        # main() on the actual repository root (named explicitly, so the
+        # result never depends on where the tool file lives) reads both TOCs
+        # and all 100 loaded files itself and writes exactly the API receipt.
+        run = self.run_cli("--root", ROOT, "--consumers")
+        self.assertEqual((run.returncode, run.stderr), (0, b""))
+        record = json.loads(run.stdout)
+        self.assertEqual((record["record"], record["exitCode"]), ("consumers", 0))
+        expected = s8_catalog().consumer_binding_report(*binding_args(s8_files()))
+        self.assertEqual(record["consumers"], json.loads(json.dumps(expected)))
+        self.assertEqual(len(record["consumers"]["sources"]), 100)
+        # A real process on a small confined root: the same entry point, exit
+        # status and one record, with unbound keys there (exit 2).
+        files = s8_files()
+        small = {path: files[path] for path in INPUTS + CONSUMER_TOCS[1:]
+                 + ("companion/NexusSupport/Storage.lua",)}
+        small["Nexus.toc"] = b"".join(line for line in files["Nexus.toc"].splitlines(True)
+                                      if b"Localization" in line or line.startswith(b"#"))
+        with tempfile.TemporaryDirectory() as temp:
+            self.copy_root(Path(temp), small)
+            process = self.run_process("--root", temp, "--consumers")
+            self.assertEqual((process.returncode, process.stderr), (2, b""))
+            self.assertEqual(process.stdout, self.run_cli("--root", temp, "--consumers").stdout)
+            receipt = json.loads(process.stdout)["consumers"]
+            self.assertEqual((len(receipt["sources"]), receipt["counts"]["UNBOUND"]), (4, 28))
+        held = self.run_cli("--root", ROOT, "--consumers", "--require-complete")
+        self.assertEqual((held.returncode, json.loads(held.stdout)["exitCode"]), (1, 1))
+        for args, code in ((("--consumers", "--consumers"), "argument-duplicate"),
+                           (("--consumers", "--diagnose"), "argument-conflict"),
+                           (("--provenance", "--consumers"), "argument-conflict")):
+            with self.subTest(args=args):
+                run = self.run_cli(*args)
+                self.assertEqual((run.returncode, run.stdout), (2, b""))
+                self.assertEqual(json.loads(run.stderr)["code"], code)
+
+    def test_mutated_root_fails_only_in_consumers_mode(self):
+        files = s8_files()
+        files[PANEL] = edit(files[PANEL], PROGRESS_CALL, PROGRESS_FAKES)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.copy_root(root, files)
+            before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            run = self.run_cli("--root", root, "--consumers")
+            self.assertEqual((run.returncode, run.stderr), (2, b""))
+            receipt = json.loads(run.stdout)["consumers"]
+            self.assertIs(receipt["valid"], False)
+            self.assertEqual([problem["code"] for problem in receipt["problems"]],
+                             ["binding-unbound"])
+            for args in ((), ("--registry",), ("--diagnose",), ("--provenance",)):
+                with self.subTest(args=args):
+                    self.assertEqual(self.run_cli("--root", root, *args).returncode, 0)
+            after = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            self.assertEqual(after, before)
+
+    def test_unsafe_or_missing_listed_source_fails(self):
+        files = s8_files()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "repo"
+            self.copy_root(root, files)
+            (Path(temp) / "outside.lua").write_bytes(b"local x = 1\n")
+            toc = root / "Nexus.toc"
+            toc.write_bytes(edit(files["Nexus.toc"], b"core\\Main.lua\n",
+                                 b"core\\Main.lua\n..\\outside.lua\n"))
+            run = self.run_cli("--root", root, "--consumers")
+            self.assertEqual((run.returncode, run.stdout), (2, b""))
+            error = json.loads(run.stderr)
+            self.assertEqual((error["code"], error["subject"]), ("consumer-toc-entry", "Nexus.toc"))
+            toc.write_bytes(files["Nexus.toc"])
+            (root / "ui" / "Readout.lua").unlink()
+            run = self.run_cli("--root", root, "--consumers")
+            self.assertEqual((run.returncode, run.stdout), (2, b""))
+            error = json.loads(run.stderr)
+            self.assertEqual((error["code"], error["subject"]), ("input-missing", READOUT))
 
 
 if __name__ == "__main__":
