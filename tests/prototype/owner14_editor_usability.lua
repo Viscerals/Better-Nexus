@@ -358,6 +358,103 @@ for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.double}) do
  end
 end
 G.UseFont(G.MODELS.default)
+
+------------------------------------------------------------------------
+-- E4e: adjacent rows stay apart; scrolling still reaches every entry
+------------------------------------------------------------------------
+-- The same replacement-route plan (normal, pairing, normal rows), plus
+-- ordinary catalog picks so the Selected list is longer than its window.
+local function ShownPicks()
+ local t={}
+ for _,r in ipairs(pickArea.children) do if r:IsShown() and r.data then t[#t+1]=r end end
+ table.sort(t,function(a,b) return G.Rect(a,f)[2]<G.Rect(b,f)[2] end)
+ return t
+end
+local function CatalogShown()
+ local t={}
+ for _,r in ipairs(leftArea.children) do if r:IsShown() and r.data then t[#t+1]=r end end
+ table.sort(t,function(a,b) return G.Rect(a,f)[2]<G.Rect(b,f)[2] end)
+ return t
+end
+search:SetText('');Refresh()
+-- Click catalog rows not yet in the plan until the draft holds 24 entries.
+local Pending=Nexus.WishlistEditor.DebugPendingCount
+for _=1,20 do
+ for _,r in ipairs(CatalogShown()) do
+  if Pending()<24 and r.data.spellId~=200080 and not Plain(r.status:GetText()):find('Selected',1,true) then
+   r:Click();Refresh()
+  end
+ end
+ leftArea.scripts.OnMouseWheel(leftArea,-1);Refresh()
+end
+check(Pending()>=24,'E4e fixture: the plan holds 24 entries: '..Pending())
+for _,model in ipairs({G.MODELS.default,G.MODELS.px16,G.MODELS.double}) do
+ G.UseFont(model);search:SetText('x');search:SetText('');Refresh()
+ local tag='E4e '..model.name
+ -- Every scrolled window, from the top to the clamped end: rows lie
+ -- inside the list, each part inside its own row, and adjacent rows'
+ -- names, counts/notes and buttons stay apart.
+ local ar=G.Rect(pickArea,f)
+ local sawGhost,seen,first=false,{},nil
+ local function Window(at)
+  local rows=ShownPicks()
+  check(#rows>=2,tag..at..': several Selected rows are shown')
+  for i,r in ipairs(rows) do
+   local rr=G.Rect(r,f)
+   check(rr[2]>=ar[2]-0.5 and rr[4]<=ar[4]+0.5,tag..at..': row '..i..' lies inside the list '..G.Text(rr)..' / '..G.Text(ar))
+   seen[r.data.ghost and ('ghost'..r.data.spellId) or tostring(r.data.draftKey)]=true
+   if r.data.ghost then sawGhost=true end
+   for _,part in ipairs({r.text,r.count,r.minus,r.plus,r.remove}) do
+    if part and part:IsShown() then
+     local pr=G.Rect(part,f)
+     check(pr[2]>=rr[2]-0.5 and pr[4]<=rr[4]+0.5,tag..at..': row '..i..' part stays in its row '..G.Text(pr)..' / '..G.Text(rr))
+    end
+   end
+   check(r.count==nil or r.count:GetHeight()>=model.line,tag..at..': row '..i..' count/note keeps a full line')
+   local nxt=rows[i+1]
+   if nxt then
+    check(rr[4]<=G.Rect(nxt,f)[2]+0.5,tag..at..': rows '..i..' and '..(i+1)..' do not overlap')
+    for _,a in ipairs({r.text,r.count,r.minus,r.plus,r.remove}) do
+     for _,b in ipairs({nxt.text,nxt.count,nxt.minus,nxt.plus,nxt.remove}) do
+      if a and b and a:IsShown() and b:IsShown() then
+       check(G.Apart(G.Rect(a,f),G.Rect(b,f)),tag..at..': rows '..i..'/'..(i+1)..' labels and buttons stay apart '
+        ..G.Text(G.Rect(a,f))..' / '..G.Text(G.Rect(b,f)))
+      end
+     end
+    end
+   end
+  end
+  return rows
+ end
+ for _=1,40 do pickArea.scripts.OnMouseWheel(pickArea,1) end;Refresh()
+ first=Window(' top')[1]
+ local window
+ for step=1,40 do
+  pickArea.scripts.OnMouseWheel(pickArea,-1);Refresh()
+  window=Window(' step '..step)
+ end
+ check(sawGhost,tag..': the pairing row is shown and checked')
+ local count=0;for _ in pairs(seen) do count=count+1 end
+ -- Every draft entry once, plus the one read-only pairing row.
+ local expected=Nexus.WishlistEditor.DebugPendingCount()+1
+ check(expected>=18,tag..': fixture: the plan is longer than one window: '..expected)
+ check(count==expected,tag..': scrolling reaches every Selected row exactly: '..count..' of '..expected)
+ local pitch=G.Rect(window[1],f)[4]-G.Rect(window[1],f)[2]
+ check(#window==math.floor(pickArea:GetHeight()/pitch+0.0001),tag..': the clamped last window is full: '..#window)
+ check(G.Rect(window[#window],f)[4]<=ar[4]+0.5,tag..': the last row ends inside the list')
+ for _=1,40 do pickArea.scripts.OnMouseWheel(pickArea,1) end;Refresh()
+ local top=ShownPicks()[1]
+ check(top~=nil and first~=nil and top.data==first.data,tag..': the wheel returns to the same first row')
+ -- The catalog rows likewise stay apart and inside their list.
+ local cat=CatalogShown();local lr=G.Rect(leftArea,f)
+ for i,r in ipairs(cat) do
+  local rr=G.Rect(r,f)
+  check(rr[4]<=lr[4]+0.5,tag..': catalog row '..i..' ends inside its list')
+  check(r.text:GetHeight()>=model.line and r.status:GetHeight()>=model.line,tag..': catalog row '..i..' name and status keep a full line')
+  if cat[i+1] then check(rr[4]<=G.Rect(cat[i+1],f)[2]+0.5,tag..': catalog rows '..i..'/'..(i+1)..' do not overlap') end
+ end
+end
+G.UseFont(G.MODELS.default)
 check(#H.actions==before.actions and #H.sent==before.sent,'editing the draft acted and sent nothing')
 f:Hide()
 

@@ -1904,6 +1904,7 @@ local function EnsureFrame()
     local leftArea = CreateFrame("Frame", nil, frame)
     leftArea:SetPoint("TOPLEFT", 34, -180)
     leftArea:SetSize(600, MAX_ROWS * ROW_HEIGHT)
+    frame._leftArea = leftArea
     leftArea:EnableMouseWheel(true)
     leftArea:SetScript("OnMouseWheel", function(_, delta)
         Controller.AdjustScroll(delta)
@@ -2145,9 +2146,9 @@ local function EnsureFrame()
 
     -- The lists, their titles, Plan alternatives and the divider move down
     -- by `drop` units while the locked-slot caption has its own line
-    -- (frame._fitAutoLock; 0 otherwise, the original places). The catalog
-    -- shows as many whole rows as fit above its former bottom edge; the
-    -- Selected Echoes list is sized at refresh, above its footer.
+    -- (frame._fitAutoLock; 0 otherwise, the original places). Both lists
+    -- are sized at refresh: the catalog to the whole rows above its former
+    -- bottom edge, the Selected Echoes list to those above its footer.
     frame._applyContentDrop = function(drop)
         drop = math.max(0, math.floor(tonumber(drop) or 0))
         header:ClearAllPoints()
@@ -2158,8 +2159,9 @@ local function EnsureFrame()
         planBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -34, -154 - drop)
         leftArea:ClearAllPoints()
         leftArea:SetPoint("TOPLEFT", 34, -180 - drop)
-        frame._catalogVisible = math.max(1, math.min(MAX_ROWS, math.floor((MAX_ROWS * ROW_HEIGHT - drop) / ROW_HEIGHT)))
-        leftArea:SetHeight(frame._catalogVisible * ROW_HEIGHT)
+        local pitch = frame._rowPitch or ROW_HEIGHT
+        leftArea:SetHeight(math.max(1, math.min(MAX_ROWS, math.floor(
+            (MAX_ROWS * ROW_HEIGHT - drop) / pitch))) * pitch)
         pickArea:ClearAllPoints()
         pickArea:SetPoint("TOPLEFT", 674, -180 - drop)
         if frame._divider then
@@ -2631,7 +2633,15 @@ local function RefreshView(catalogRevision)
 
     local available = BuildAvailableList(catalog, catalogRevision)
     -- Fewer whole rows while the lists sit lower (frame._applyContentDrop).
-    local catalogVisible = frame._catalogVisible or MAX_ROWS
+    -- Row pitch: at least ROW_HEIGHT, else one measured text line and 2
+    -- units, so a larger text size never runs a row into its neighbour.
+    local rowPitch = M.RowPitch(rows, pickRows)
+    frame._rowPitch = rowPitch
+    M.ApplyRowPitch(rows, rowPitch)
+    M.ApplyRowPitch(pickRows, rowPitch)
+    local catalogVisible = math.max(1, math.min(MAX_ROWS, math.floor(
+        (MAX_ROWS * ROW_HEIGHT - (frame._contentDrop or 0)) / rowPitch)))
+    if frame._leftArea then frame._leftArea:SetHeight(catalogVisible * rowPitch) end
     scrollOffset = Controller.ClampScroll(#available, catalogVisible)
     for i, row in ipairs(rows) do
         local data = i <= catalogVisible and available[scrollOffset + i] or nil
@@ -2771,8 +2781,8 @@ local function RefreshView(catalogRevision)
     -- under a row.
     local footerHeight = M.PackFooterText(pickFooterText, footerParts, targetParts)
     local pickVisible = math.max(1, math.min(PICK_ROWS, math.floor((
-        PICK_ROWS * ROW_HEIGHT + 28 - footerHeight - (frame._contentDrop or 0)) / ROW_HEIGHT)))
-    if frame._pickArea then frame._pickArea:SetHeight(pickVisible * ROW_HEIGHT) end
+        PICK_ROWS * ROW_HEIGHT + 28 - footerHeight - (frame._contentDrop or 0)) / rowPitch)))
+    if frame._pickArea then frame._pickArea:SetHeight(pickVisible * rowPitch) end
     pickOffset = Controller.ClampPick(#list, pickVisible)
     for i, row in ipairs(pickRows) do
         local data = i <= pickVisible and list[pickOffset + i] or nil
@@ -2988,6 +2998,41 @@ end
         row.text:SetWidth(math.max(1, math.min(420, rowWidth - 28 - 8 - statusWidth - 12)))
     end
 
+    -- One text line's measured height in the list fonts (the catalog status
+    -- and a Selected row's copies), and the row pitch that leaves 2 units
+    -- between lines: ROW_HEIGHT (24) at the default sizes, more only when a
+    -- larger text size needs it (displayed item 4, #173).
+    function M.RowPitch(catalogRows, selectedRows)
+        local tallest = 0
+        for _, fs in ipairs({ catalogRows[1] and catalogRows[1].status,
+            catalogRows[1] and catalogRows[1].text,
+            selectedRows[1] and selectedRows[1].count }) do
+            local text, width = fs:GetText(), fs:GetWidth()
+            fs:SetWidth(1000)
+            fs:SetText("Xg")
+            local ok, h = pcall(fs.GetStringHeight, fs)
+            fs:SetText(text)
+            fs:SetWidth(width)
+            tallest = math.max(tallest, ok and tonumber(h) or 0)
+        end
+        return math.max(ROW_HEIGHT, math.ceil(tallest) + 2)
+    end
+
+    -- Rows placed `pitch` apart, each `pitch` high, with its name (and the
+    -- catalog status) as high as the row; buttons keep their sizes, centred.
+    function M.ApplyRowPitch(list, pitch)
+        for i, row in ipairs(list) do
+            if row._nexusPitch ~= pitch then
+                row._nexusPitch = pitch
+                row:SetHeight(pitch)
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", 0, -((i - 1) * pitch))
+                row.text:SetHeight(pitch)
+                if row.status then row.status:SetHeight(pitch) end
+            end
+        end
+    end
+
     -- A Selected Echoes row: the name, then its copies or locked-slot note
     -- right-aligned on one line. On a normal row the note ends the name's
     -- 224 units, left of the - / + / remove controls; on the read-only
@@ -3012,7 +3057,7 @@ end
         w = math.min(room, math.ceil(ok and tonumber(w) or 40))
         count:SetWidth(math.max(1, w + 2))
         local okH, h = pcall(count.GetStringHeight, count)
-        count:SetHeight(math.max(ROW_HEIGHT, math.ceil(okH and tonumber(h) or 0)))
+        count:SetHeight(math.max(1, math.ceil(okH and tonumber(h) or 14)))
         row.text:SetWidth(math.max(24, textRight - 26 - (w + 2) - 6))
         row.text:SetText(name)
     end
