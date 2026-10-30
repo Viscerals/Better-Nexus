@@ -813,6 +813,17 @@ C.scenario('F12 step actions: the main one filled like Continue, the others seco
   Press(Opt('W-Free'));Press(Btn('Continue'));Press(Opt('Fire PvE'))
   if not C.setup(Step()=='target' and G.TargetFacts() and G.TargetFacts().replaces,'F12: fixture: the replace card for Fire PvE') then return end
   Card('F12 replace',buttons.replace,buttons.cancel)
+  -- R5 P526: the replace card for the Saved Build the Echo Journal targets
+  -- names the traced trigger (the next recommendation uses the new Wishlist),
+  -- never a latency promise.
+  do
+   local facts,journal=G.TargetFacts(),(G.TargetOptions() or {}).journal
+   local active='The Echo Journal targets this slot now, so the next recommendation Nexus makes uses the new Wishlist.'
+   C.setup(facts.destination==journal,'R5 F12: fixture: the replaced Saved Build is the one the Echo Journal targets',
+    tostring(facts.destination)..' / '..tostring(journal))
+   C.expect(Text():find(active,1,true)~=nil and not Text():find('right away',1,true),
+    'R5 F12: the replace card states the next-recommendation trigger',Text())
+  end
   Press(Btn(buttons.replace))
   C.expect(On(nxt) and nxt.painted=='primary' and #Actions()==0,'F12: an accepted replacement leaves Continue the one filled action')
   Press(Btn('Continue'))

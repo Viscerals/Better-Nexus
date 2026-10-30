@@ -249,8 +249,8 @@ do
   for _,row in ipairs(SW.Rows(cat)) do
    if OTHER[cat] then foreign[row.text]=true;foreign['[x] '..row.text]=true;foreign[row.detail or '']=true end
   end
-  -- The window title stays English (pending: terminology lint coupling).
-  foreign['Nexus Settings']=true
+  -- R5 (Source86): the window title is keyed (settings.title.window); it is
+  -- no longer allowed raw.
   local function allowForeign(w,t) return foreign[t]==true end
   local pages=0
   repeat
@@ -493,6 +493,23 @@ do
  local why='A Saved Build is the build slot the game loads. Choose which Saved Build should use your Wishlist.'
  check(guide.why.target==why and L.Text('guide.body.why_target')==why,'R5 why_target: the raw leaf and the catalog say the same corrected English')
  check(U.VisibleText():find(why,1,true)~=nil and not U.VisibleText():find('will follow',1,true),'R5 why_target: the target step shows the corrected English: '..U.VisibleText():sub(1,300))
+ -- R5 P526: the consequence line for the Saved Build the Echo Journal
+ -- targets: the traced trigger, no latency promise (raw leaf = catalog).
+ local active='The Echo Journal targets this slot now, so the next recommendation Nexus makes uses the new Wishlist.'
+ check(guide.target.cActive==active and L.Text('guide.body.target_c_active')==active,'R5 target_c_active: the raw leaf and the catalog say the traced English')
+ -- (The real replace card that shows it: guided_setup_flow F12.)
+ check(not U.VisibleText():find('right away',1,true),'R5 target_c_active: no latency promise is shown')
+ -- R5 P525: the Options window title, keyed at creation and Refresh.
+ local SWin=Nexus.SettingsWindow
+ SWin.Show()
+ local titled=false
+ for _,t in ipairs(S.VisibleTexts(_G.NexusSettingsWindow)) do if t.text=='Nexus Options' then titled=true end end
+ check(titled and L.Text('settings.title.window')=='Nexus Options','R5 settings title: the window says Nexus Options')
+ SWin.Refresh()
+ titled=false
+ for _,t in ipairs(S.VisibleTexts(_G.NexusSettingsWindow)) do if t.text=='Nexus Options' then titled=true end end
+ check(titled,'R5 settings title: Refresh keeps the keyed title')
+ _G.NexusSettingsWindow:Hide()
  U.Hide()
  check(L.Format('guide.label.kicker',{step=L.Count(3),total=L.Count(7)})=='Step 3 of 7','P5 template English')
  check(L.Diagnostics().misses==0,'P5 English boot and display resolved without any fallback')

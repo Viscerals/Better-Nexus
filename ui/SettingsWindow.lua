@@ -19,9 +19,8 @@ local PAGE_SIZE = 3
 -- translated. Rows from other owners (Panel, Theme, SyncModePolicy) arrive
 -- already worded by them. The row thresholds below (#label > 100, #detail >
 -- 56) count bytes: a translated label may reach them earlier, and its full
--- text stays available on hover. The window title "Nexus Settings" stays
--- English for now: adopted, its phrase would enter data/LocalizationEnglish.lua,
--- which the terminology lint (ux_record_scope_terms R5) refuses (pending).
+-- text stays available on hover. The window title is "Nexus Options"
+-- (settings.title.window), the same word as the Options menu button.
 local function T(key, english)
     local seam = Nexus.Localization
     if type(seam) ~= "table" or type(seam.Text) ~= "function" then return english end
@@ -213,7 +212,7 @@ local function EnsureFrame()
     if Nexus.Theme and Nexus.Theme.StyleWindow then Nexus.Theme.StyleWindow(frame, 0.96) end
     title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -17)
-    title:SetText("Nexus Settings")
+    title:SetText(T("settings.title.window", "Nexus Options"))
     if Nexus.Theme and Nexus.Theme.StyleLabel then Nexus.Theme.StyleLabel(title, "accent") end
     local close = StyledButton(frame, "X", 30, 25, "TOPRIGHT", -12, -10)
     close:SetScript("OnClick", function() M.Hide() end)
@@ -289,7 +288,7 @@ function M.Refresh()
     local rows = M.Rows(selected)
     local pages = math.max(1, math.ceil(#rows/PAGE_SIZE))
     page = math.max(1, math.min(page, pages))
-    title:SetText("Nexus Settings")
+    title:SetText(T("settings.title.window", "Nexus Options"))
     explanation:SetText(CategoryNote(entry))
     for index, button in ipairs(categoryButtons) do
         button:SetText(CategoryTab(categories[index]))

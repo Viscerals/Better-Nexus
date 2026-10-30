@@ -1363,7 +1363,7 @@ T.Guide = {
         cAlready = '%s already follows %s.', cAlready2 = 'Nothing will change. The next step just confirms it with Nexus.',
         cReplace = '%s follows %s now. Assigning switches it to %s.', cKept = '%s stays in your Wishlists. Nothing is deleted.',
         cEchoes = 'Echoes in this slot are not touched.',
-        cActive = 'The Echo Journal targets this slot now, so recommendations change right away.',
+        cActive = 'The Echo Journal targets this slot now, so the next recommendation Nexus makes uses the new Wishlist.',
         cAutoOn = 'Auto is ON: a later finished run that fits the new Wishlist better may replace this Saved Build.',
         cNew = 'Nothing is linked here yet, so no link is replaced.',
         cUnknown = 'What this slot follows could not be read, so the consequence is unknown. Try again later.',

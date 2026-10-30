@@ -63,9 +63,9 @@ check(#static+#formatted>=20,'SETUP consumer lookups found: '..(#static+#formatt
 -- coach's words). Each listed key must be reviewed, or its words would show
 -- English; listed keys count as consumed.
 -- A derived leaf may stay English only when it is named here with its reason.
-local DERIVED_PENDING={
- ['guide.body.target_c_active']='its shipped English (core/UserText.lua Guide target.cActive) says "right away", which the ux_record_scope_terms R5 copy rule refuses in the catalog; wording is unchanged and a copy decision is pending (Root)',
-}
+-- (R5 Source86: guide.body.target_c_active is adopted with its traced wording,
+-- so no derived leaf is pending any more.)
+local DERIVED_PENDING={}
 local derived,derivedCount,undeclaredDerived={},0,{}
 for name,module in pairs(Nexus) do
  local list=type(module)=='table' and rawget(module,'L10nDerivedKeys')

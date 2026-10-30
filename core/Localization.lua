@@ -3948,6 +3948,9 @@ local DECLARATIONS = {
     ["usertext.value.wishlist_unavailable_cell"] = {kind = "text"},
     ["usertext.value.wishlist_unavailable_named"] = {kind = "template", fields = {"name"}, slots = {"text"}, resultLimit = 1400},
     ["usertext.value.wishlist_unknown_named"] = {kind = "template", fields = {"name"}, slots = {"text"}, resultLimit = 1400},
+    -- v5_source86_supplemental (2)
+    ["guide.body.target_c_active"] = {kind = "text"},
+    ["settings.title.window"] = {kind = "text"},
     -- wishlist (381)
     ["editor.body.role_help_plan_only"] = {kind = "text"},
     ["editor.body.role_help_targets"] = {kind = "text"},

@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 3995,
+    "declaredKeys": 3997,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -46038,6 +46038,28 @@
       "cohort": "fullui:usertext"
     },
     {
+      "key": "guide.body.target_c_active",
+      "kind": "text",
+      "english": "The Echo Journal targets this slot now, so the next recommendation Nexus makes uses the new Wishlist.",
+      "placeholders": [],
+      "group": "guide",
+      "meaning": "Saved Build step: pick which Saved Build follows the Wishlist and see the consequence before anything changes. Guided setup coach (the \"Nexus setup\" window). Opening, moving between steps or closing it assigns, saves, sends, spends and changes Auto nothing: keep such statements complete. Game terms (Echo, Wishlist, Saved Build, Echo Journal, My Builds, Orb, Lost Memories, Auto ON/OFF) follow the client's and Nexus's own wording. A leading mark (+ x ! ? * > < = v ^ -) is a code status glyph: keep it first, followed by a space. \"Nexus\" stays. Shown when the Echo Journal already targets this Saved Build. Say only that the next recommendation uses the new Wishlist; promise no timing (no 'right away', 'immediately', 'within seconds').",
+      "consumer": "Guided setup coach body",
+      "familySurface": "v5_source86_supplemental: Guided setup coach (body); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
+      "key": "settings.title.window",
+      "kind": "text",
+      "english": "Nexus Options",
+      "placeholders": [],
+      "group": "settings",
+      "meaning": "Window title. 'Options' is the same word as the main panel's Options button (UX-15); keep 'Nexus' as the product name.",
+      "consumer": "Nexus Options window (opened from the Options menu) title",
+      "familySurface": "v5_source86_supplemental: Nexus Options window (opened from the Options menu) (title); family coverage PENDING review",
+      "cohort": "fullui:v5_source86_supplemental"
+    },
+    {
       "key": "editor.body.role_help_plan_only",
       "kind": "text",
       "english": "This edits only the Wishlist plan; your character's Echoes are unchanged.",
@@ -53416,7 +53438,7 @@
       "format",
       "template"
     ],
-    "totalKeys": 3995,
+    "totalKeys": 3997,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
@@ -53439,7 +53461,8 @@
       "remainder_runtime_chat": 24,
       "remainder_runtime_status": 35,
       "v4_long_paragraphs": 0,
-      "v5_source86_amendments": 0
+      "v5_source86_amendments": 0,
+      "v5_source86_supplemental": 2
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }
