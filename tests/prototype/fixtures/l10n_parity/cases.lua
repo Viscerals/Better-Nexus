@@ -16,8 +16,14 @@
 -- offline: the first CatalogSyntaxError or CatalogValidationError of
 -- parse_english, parse_packs and the scoped English/pack checks of
 -- tools/l10n_catalog.py against the case enum ("valid" when none). runtime:
--- the Diagnostics() load facts, offered languages and probe results of the
--- unchanged core/Localization.lua. The two sides keep their own category
+-- the Diagnostics() load facts, offered languages and probe results of
+-- core/Localization.lua. These cases use test-only keys, so the harness
+-- replaces only the lines between the two declaration marker lines, in
+-- memory, with a block that declares each valid key of the case's decoded
+-- English (the charge key with its real format declaration, every other key
+-- as text; at most 64, in byte order). Every other byte is the real file.
+-- base.undeclared and base.missingDeclared are the R-union load facts of
+-- that block. The two sides keep their own category
 -- names: the mapping, not an equal name, is the parity claim (an invalid
 -- pack entry is invalid-text offline and missing_candidate at runtime).
 -- P19 and P20 native WoW behaviour is UNKNOWN: their controls record the
@@ -25,15 +31,16 @@
 --
 -- Registry interlock (G1): the declaration marker is the ASCII token
 -- NEXUS-L10N-REGISTRY in core/Localization.lua, used only as the two exact
--- lines registry.marker.open and registry.marker.close around the future
+-- lines registry.marker.open and registry.marker.close around the
 -- declaration block. The sentinel in tools/tests/test_l10n_parity.py passes
 -- while the marker, the registry-bound parser (registry.parser in
 -- tools/l10n_catalog.py) and bound registry rows are all absent, and only
 -- when all three are present together. U1, U2 and U3 cannot ship apart.
+-- Once bound, the rows run against the real declarations on both sides.
 return {
     schema = "nexus.l10n.parity_cases",
     schemaVersion = 1,
-    status = "S1 characterization of the unchanged runtime; not registry validation",
+    status = "S1 characterization cases with a derived declaration block; bound R-P1 to R-P3 registry rows against the real declarations",
     shippedProductIds = {},
     unavailable = "This status cannot be shown right now.",
     formatArguments = {banish = {known = true, value = 1}, reroll = {known = false}, freeze = {known = true, value = 3}},
@@ -68,30 +75,102 @@ return {
         parser = "parse_registry_declarations",
         pending = "pending_r_union",
         bound = "bound",
+        -- R union: each row is bound. Its input is one exact line or text
+        -- edit of a real source, made in memory (LF and CRLF variants) by
+        -- both sides; the real core/Localization.lua declarations govern
+        -- both. expect.offline is the first error of the registry-bound
+        -- validate_registry_catalog_data on the five real inputs with the
+        -- edit; expect.runtime is the Diagnostics() load facts, offered
+        -- languages and probes of the real core/Localization.lua loaded with
+        -- the edited English, the real packs and the row's enum.
+        enum = {"enUS", "frFR", "deDE", "esES", "plPL", "ptBR", "ruRU"},
         rows = {
             {
                 id = "R-P1",
-                state = "pending_r_union",
+                state = "bound",
                 topic = "complete English",
                 case = "undeclared but otherwise valid English entry",
                 offline = "undeclared-entry",
                 runtime = "rejected and counted (base.undeclared)",
+                input = {
+                    file = "data/LocalizationEnglish.lua",
+                    after = "Nexus.LocalizationEnglish = {",
+                    line = '    ["parity.undeclared"] = "Undeclared parity text",',
+                },
+                expect = {
+                    offline = {code = "undeclared-entry", key = "parity.undeclared"},
+                    runtime = {
+                        base = {present = true, accepted = 28, rejected = 1, oversized = false, formatted = 1, undeclared = 1, missingDeclared = 0},
+                        probes = {
+                            {
+                                kind = "text",
+                                key = "parity.undeclared",
+                                text = "This status cannot be shown right now.",
+                                source = "unavailable",
+                                reason = "unknown_key",
+                            },
+                            {
+                                kind = "text",
+                                language = "frFR",
+                                key = "panel.button.options",
+                                text = "Options",
+                                source = "base",
+                                reason = "missing_candidate",
+                            },
+                        },
+                    },
+                },
             },
             {
                 id = "R-P2",
-                state = "pending_r_union",
+                state = "bound",
                 topic = "registry-bound parsing",
                 case = "declaration and KEY_CONTEXT disagree on kind, placeholders or limit",
                 offline = "context-declaration-mismatch",
                 runtime = "not applicable",
+                input = {
+                    file = "docs/localization/KEY_CONTEXT.json",
+                    replace = '"kind": "format",',
+                    with = '"kind": "text",',
+                },
+                expect = {
+                    offline = {code = "context-declaration-mismatch", key = "readout.charge_counts"},
+                },
             },
             {
                 id = "R-P3",
-                state = "pending_r_union",
+                state = "bound",
                 topic = "complete English",
                 case = "declared key without English",
                 offline = "english-incomplete",
                 runtime = "base.missingDeclared +1; key unavailable",
+                input = {
+                    file = "data/LocalizationEnglish.lua",
+                    remove = '    ["panel.button.options"] = "Options",',
+                },
+                expect = {
+                    offline = {code = "english-incomplete", key = "panel.button.options"},
+                    runtime = {
+                        base = {present = true, accepted = 27, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
+                        probes = {
+                            {
+                                kind = "text",
+                                key = "panel.button.options",
+                                text = "This status cannot be shown right now.",
+                                source = "unavailable",
+                                reason = "unknown_key",
+                            },
+                            {
+                                kind = "text",
+                                language = "frFR",
+                                key = "panel.button.options",
+                                text = "This status cannot be shown right now.",
+                                source = "unavailable",
+                                reason = "unknown_key",
+                            },
+                        },
+                    },
+                },
             },
         },
     },
@@ -102,7 +181,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "valid"},
             runtime = {
-                base = {present = true, accepted = 4, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 4, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -158,7 +237,7 @@ return {
             enum = {},
             offline = {code = "invalid-key", key = "Parity.Upper"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 1, missingDeclared = 0},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -178,7 +257,7 @@ return {
             enum = {},
             offline = {code = "invalid-text", key = "parity.empty"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -198,7 +277,7 @@ return {
             enum = {},
             offline = {code = "invalid-template", key = "readout.charge_counts"},
             runtime = {
-                base = {present = true, accepted = 2, rejected = 1, oversized = false, formatted = 0},
+                base = {present = true, accepted = 2, rejected = 1, oversized = false, formatted = 0, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -218,7 +297,7 @@ return {
             enum = {},
             offline = {code = "english-too-many"},
             runtime = {
-                base = {present = true, accepted = 0, rejected = 65, oversized = true, formatted = 0},
+                base = {present = true, accepted = 0, rejected = 65, oversized = true, formatted = 0, undeclared = 0, missingDeclared = 64},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -238,7 +317,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "valid"},
             runtime = {
-                base = {present = true, accepted = 64, rejected = 0, oversized = false, formatted = 0},
+                base = {present = true, accepted = 64, rejected = 0, oversized = false, formatted = 0, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -266,7 +345,7 @@ return {
             enum = {},
             offline = {code = "invalid-key", key = "parity.kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 1, missingDeclared = 0},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -286,7 +365,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-text", key = "parity.alpha"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -314,7 +393,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-template", key = "readout.charge_counts"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -342,7 +421,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-template", key = "readout.charge_counts"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -370,7 +449,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-template", key = "readout.charge_counts"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -398,7 +477,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-template", key = "readout.charge_counts"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -426,7 +505,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-template", key = "readout.charge_counts"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -454,7 +533,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-template", key = "readout.charge_counts"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -482,7 +561,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-template", key = "readout.charge_counts"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -510,7 +589,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "orphan-entry", key = "reason.retired_example"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -538,7 +617,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "pack-too-many-entries", key = "qaQA"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {present = true, adopted = 0, refused = 1, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -552,7 +631,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-autonym", key = "qaQA"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {present = true, adopted = 0, refused = 1, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -566,7 +645,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-autonym", key = "qaQA"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {present = true, adopted = 0, refused = 1, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -580,7 +659,7 @@ return {
             enum = {},
             offline = {code = "duplicate-key", line = 7, column = 5},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -594,7 +673,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "duplicate-key", line = 8, column = 13},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -615,7 +694,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "pack-unknown", key = "qbQB"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -636,7 +715,7 @@ return {
             enum = {"qaQA", "qbQB"},
             offline = {code = "pack-missing", key = "qbQB"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -657,7 +736,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "unexpected-token", line = 6, column = 19},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {present = true, adopted = 0, refused = 1, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -671,7 +750,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "valid"},
             runtime = {
-                base = {present = true, accepted = 4, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 4, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -698,7 +777,7 @@ return {
             enum = {},
             offline = {code = "value-not-utf8", line = 7, column = 22},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -718,7 +797,7 @@ return {
             enum = {},
             offline = {code = "value-not-utf8", line = 7, column = 22},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -738,7 +817,7 @@ return {
             enum = {},
             offline = {code = "value-not-utf8", line = 7, column = 22},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -758,7 +837,7 @@ return {
             enum = {},
             offline = {code = "value-not-utf8", line = 7, column = 22},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -778,7 +857,7 @@ return {
             enum = {},
             offline = {code = "invalid-text", key = "parity.bad"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -798,7 +877,7 @@ return {
             enum = {},
             offline = {code = "invalid-text", key = "parity.bad"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -818,7 +897,7 @@ return {
             enum = {},
             offline = {code = "invalid-text", key = "parity.bad"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -838,7 +917,7 @@ return {
             enum = {},
             offline = {code = "invalid-text", key = "parity.bad"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -858,7 +937,7 @@ return {
             enum = {},
             offline = {code = "invalid-text", key = "parity.bad"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -878,7 +957,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-text", key = "parity.alpha"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -906,7 +985,7 @@ return {
             enum = {"qaQA"},
             offline = {code = "invalid-text", key = "parity.alpha"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {
                     present = true,
                     adopted = 1,
@@ -934,7 +1013,7 @@ return {
             enum = {},
             offline = {code = "invalid-text", key = "parity.blank"},
             runtime = {
-                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1},
+                base = {present = true, accepted = 3, rejected = 1, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 1},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -954,7 +1033,7 @@ return {
             enum = {},
             offline = {code = "valid"},
             runtime = {
-                base = {present = true, accepted = 4, rejected = 0, oversized = false, formatted = 1},
+                base = {present = true, accepted = 4, rejected = 0, oversized = false, formatted = 1, undeclared = 0, missingDeclared = 0},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {
@@ -968,7 +1047,7 @@ return {
             enum = {},
             offline = {code = "valid"},
             runtime = {
-                base = {present = true, accepted = 4, rejected = 0, oversized = false, formatted = 0},
+                base = {present = true, accepted = 4, rejected = 0, oversized = false, formatted = 0, undeclared = 0, missingDeclared = 0},
                 packs = {present = true, adopted = 0, refused = 0, rows = {}},
                 languages = {"enUS"},
                 probes = {

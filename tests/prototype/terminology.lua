@@ -311,6 +311,59 @@ local function reload(base)
  Nexus.Localization,Nexus.LocalizationEnglish=real,realData
  return ok and module~=real and module or nil
 end
+-- Issue #147 (R union): core/Localization.lua admits only English it
+-- declares. Loader fixtures that use test-only keys reload the real file
+-- with only the lines between its two declaration marker lines replaced, in
+-- memory, by a test block (by default each valid key of the fixture as text,
+-- the charge key with its real format declaration, at most 64 in byte
+-- order), so their text, key and entry limit rules still decide. Every other
+-- byte is the real file; reload() above keeps the real declarations.
+local REGISTRY_OPEN,REGISTRY_CLOSE='-- NEXUS-L10N-REGISTRY BEGIN','-- NEXUS-L10N-REGISTRY END'
+local runtimeSource
+do
+ local file=assert(io.open('core/Localization.lua','rb'));runtimeSource=file:read('*a');file:close()
+end
+local registryHead,registryTail
+do
+ local function line(mark)
+  local start,stop=runtimeSource:find('\n'..mark,1,true)
+  local after=stop and runtimeSource:match('^\r?\n',stop+1)
+  return after and start,after and stop+#after
+ end
+ local _,openEnd=line(REGISTRY_OPEN);local closeStart=line(REGISTRY_CLOSE)
+ local _,tokens=runtimeSource:gsub('NEXUS%-L10N%-REGISTRY','')
+ check(openEnd and closeStart and openEnd<closeStart and tokens==2,'R: core/Localization.lua holds one declaration block between its two marker lines')
+ registryHead,registryTail=runtimeSource:sub(1,openEnd),runtimeSource:sub(closeStart+1)
+end
+local CHARGE_DECLARATION=runtimeSource:match('%["readout%.charge_counts"%] = (%b{})')
+check(CHARGE_DECLARATION=='{fields = {"banish", "reroll", "freeze"},\r\n        kind = "format", slot = "count", resultLimit = 254}'
+ or CHARGE_DECLARATION=='{fields = {"banish", "reroll", "freeze"},\n        kind = "format", slot = "count", resultLimit = 254}','R: the charge row declares its three count fields, in order, and the 254-byte result limit')
+local function testKey(key)
+ return type(key)=='string' and #key>=3 and #key<=64 and key:find('^[a-z][a-z0-9_]*%.[a-z0-9_.]*[a-z0-9_]$')~=nil and not key:find('%.[^a-z]')
+end
+local function declaredBlock(base)
+ local keys={}
+ for key in pairs(base)do if testKey(key) then keys[#keys+1]=key end end
+ table.sort(keys)
+ while #keys>64 do keys[#keys]=nil end
+ local lines={'local DECLARATIONS = {'}
+ for _,key in ipairs(keys)do
+  lines[#lines+1]=('    ["%s"] = %s,'):format(key,key=='readout.charge_counts' and CHARGE_DECLARATION or '{kind = "text"}')
+ end
+ lines[#lines+1]='}'
+ return table.concat(lines,'\n'),#keys
+end
+local function reloadWith(base,block)
+ local source=registryHead..block..'\n'..registryTail
+ local chunk=assert((loadstring or load)(source,'=core/Localization.lua'))
+ Nexus.LocalizationEnglish=base
+ local ok=pcall(chunk);local module=Nexus.Localization
+ Nexus.Localization,Nexus.LocalizationEnglish=real,realData
+ return ok and module~=real and module or nil
+end
+local function reloadDeclared(base)
+ return reloadWith(base,(declaredBlock(base)))
+end
 local absent=assert(reload(nil),'loader without English data');checks=checks+1
 check(#absent.Keys()==0 and not absent.Diagnostics().base.present and absent.Resolve(K)==absent.UNAVAILABLE,'without the English data every key is the safe status, without error')
 local meta=assert(reload(setmetatable({},{__index=function()return E end})))
@@ -323,23 +376,31 @@ end
 do
  local key64='reason.'..string.rep('a',57);local key65=key64..'a'
  check(#key64==64 and #key65==65,'SETUP exact key byte boundaries')
- local bounded=assert(reload({[key64]='At key limit',[key65]='Beyond key limit'}))
+ local bounded=assert(reloadDeclared({[key64]='At key limit',[key65]='Beyond key limit'}))
  local facts,listed=bounded.Diagnostics().base,bounded.Keys()
  check(facts.present and facts.accepted==1 and facts.rejected==1 and not facts.oversized and #listed==1 and listed[1]==key64,'GUARD 64-byte key admitted; 65-byte key rejected')
+ check(facts.undeclared==1 and facts.missingDeclared==0,'R: the 65-byte key cannot be declared, so it is the one undeclared entry')
  local text,source,why=bounded.Resolve(key64)
  check(bounded.Has(key64) and text=='At key limit' and source=='base' and why==nil,'GUARD exact key limit resolves')
  text,source,why=bounded.Resolve(key65,{[key65]='Candidate cannot add it'})
  check(not bounded.Has(key65) and text==U and source=='unavailable' and why=='invalid_key','GUARD candidate cannot resurrect over-limit key')
  local many={};for i=1,64 do many['reason.entry_'..i]='Entry '..i end
- local full=assert(reload(many));facts=full.Diagnostics().base;listed=full.Keys()
+ local full=assert(reloadDeclared(many));facts=full.Diagnostics().base;listed=full.Keys()
  check(facts.present and facts.accepted==64 and facts.rejected==0 and not facts.oversized and #listed==64,'GUARD exactly 64 valid entries accepted')
+ check(facts.undeclared==0 and facts.missingDeclared==0,'R: 64 declarations admit exactly 64 declared entries')
  for _,key in ipairs(listed)do
   text,source,why=full.Resolve(key)
   check(full.Has(key) and text==many[key] and source=='base' and why==nil,'GUARD admitted boundary entry resolves: '..key)
  end
  many['reason.entry_65']='Entry 65'
- local big=assert(reload(many));facts=big.Diagnostics().base
+ local big=assert(reloadDeclared(many));facts=big.Diagnostics().base
  check(facts.present and facts.accepted==0 and facts.rejected==65 and facts.oversized and #big.Keys()==0,'GUARD 65-entry base fails closed and counts all entries')
+ check(facts.undeclared==0 and facts.missingDeclared==64,'R: an oversized base is refused whole before any entry is judged; every declaration is then without English')
+ local realBig={};for key,text in pairs(realData)do realBig[key]=text end
+ for i=1,64-count(realData)+1 do realBig['reason.extra_'..i]='Extra '..i end
+ check(count(realBig)==65,'SETUP the real English plus test entries is 65 entries')
+ facts=assert(reload(realBig)).Diagnostics().base
+ check(facts.present and facts.oversized and facts.accepted==0 and facts.rejected==65 and facts.undeclared==0 and facts.missingDeclared==28,'R: the real declarations keep the whole-base 65 refusal; all 28 declared meanings are then unavailable')
  for key in pairs(many)do
   text,source,why=big.Resolve(key,{[key]='Candidate cannot add it'})
   check(not big.Has(key) and text==U and source=='unavailable' and why=='unknown_key','GUARD oversized base cannot be resurrected: '..key)
@@ -354,6 +415,12 @@ end
 local partial=assert(reload({['reason.save_in_progress']='Saving is still in progress; wait for its final result',['Bad Key']='Bad',['reason.blank']='  ',['reason.number']=5}))
 local pd=partial.Diagnostics().base
 check(#partial.Keys()==1 and pd.accepted==1 and pd.rejected==3 and select(3,partial.Resolve(K))=='unknown_key','invalid base entries are left out and counted')
+check(pd.undeclared==3 and pd.missingDeclared==27,'R: with the real declarations the three test-only entries are undeclared and 27 declared meanings lack English')
+do
+ local declaredPartial=assert(reloadDeclared({['reason.save_in_progress']='Saving is still in progress; wait for its final result',['Bad Key']='Bad',['reason.blank']='  ',['reason.number']=5}))
+ local dp=declaredPartial.Diagnostics().base
+ check(#declaredPartial.Keys()==1 and dp.accepted==1 and dp.rejected==3 and dp.undeclared==1 and dp.missingDeclared==2,'GUARD with each valid key declared, the blank and non-string texts are still refused by the text contract')
+end
 -- Review fix (issue #123): the English base copied at load passes the same
 -- text boundary. A non-scalar or malformed base entry is left out and
 -- counted, is absent from Has and Keys, resolves to the safe status, and a
@@ -371,9 +438,10 @@ do
   end
  end
  check(count(invalidBase)==#rejected+1 and count(invalidBase)<=L.MAX_BASE_ENTRIES,'invalid base fixture stays within the entry limit')
- local refusing=assert(reload(invalidBase),'loader with non-scalar and malformed base entries');checks=checks+1
+ local refusing=assert(reloadDeclared(invalidBase),'loader with non-scalar and malformed base entries');checks=checks+1
  local rd=refusing.Diagnostics().base
  check(rd.present and not rd.oversized and rd.accepted==1 and rd.rejected==#rejected,'non-scalar and malformed base entries are left out and counted')
+ check(rd.undeclared==0 and rd.missingDeclared==#rejected,'R: every entry is declared, so the UTF-8 rule alone refuses them')
  local rk=refusing.Keys()
  check(#rk==1 and rk[1]=='reason.save_in_progress' and refusing.UNAVAILABLE==U,'only the valid base entry is listed; the safe status is the same')
  local unknown0=refusing.Diagnostics().byReason.unknown_key
@@ -402,9 +470,10 @@ do
  end
  table.sort(valid)
  check(#valid<=L.MAX_BASE_ENTRIES,'scalar base fixture stays within the entry limit')
- local accepting=assert(reload(validBase),'loader with scalar base entries');checks=checks+1
+ local accepting=assert(reloadDeclared(validBase),'loader with scalar base entries');checks=checks+1
  local ad=accepting.Diagnostics().base
  check(ad.present and not ad.oversized and ad.accepted==#valid and ad.rejected==0,'every scalar base entry is accepted')
+ check(ad.undeclared==0 and ad.missingDeclared==0,'R: every declared scalar entry is admitted')
  local ak,listed=accepting.Keys(),true
  for i=1,#valid do listed=listed and ak[i]==valid[i] end
  check(#ak==#valid and listed,'every scalar base key is listed, sorted')
@@ -415,6 +484,112 @@ do
  check(#L.Keys()==28 and L.Has(K) and L.Resolve(K)==E,'the real English base is unchanged by the loader checks')
 end
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData,'real seam and data restored after the loader checks')
+-- Issue #147, R union (C14, R-P1 and R-P3): the code-owned declarations of
+-- core/Localization.lua govern English admission. An undeclared entry is
+-- rejected and counted (base.undeclared); a declared meaning without valid
+-- English is counted (base.missingDeclared) and unavailable as before; the
+-- format schemas are derived from the declarations; a malformed declaration
+-- is left out, so its English is undeclared. Packs and their availability
+-- are unchanged. EXPECT red against a source without declarations.
+do
+ local function copyOf(t)local out={};for key,value in pairs(t)do out[key]=value end;return out end
+ local b0=L.Diagnostics().base
+ check(b0.undeclared==0 and b0.missingDeclared==0 and b0.accepted==28 and b0.rejected==0,'R: the 28 declarations admit exactly the 28 real English entries')
+ local keys=L.Keys()
+ check(#keys==28 and count(data)==28,'R: the declared set, the admitted keys and the English data are the same 28 meanings')
+ for _,key in ipairs(keys)do check(data[key]~=nil,'R: admitted key is in the English data: '..key)end
+ -- R-P1: an undeclared but otherwise valid English entry.
+ local undeclared=copyOf(realData);undeclared['parity.undeclared']='Undeclared parity text'
+ local u=assert(reload(undeclared),'loader with an undeclared English entry');checks=checks+1
+ local ud=u.Diagnostics()
+ check(ud.base.accepted==28 and ud.base.rejected==1 and ud.base.undeclared==1 and ud.base.missingDeclared==0 and ud.base.formatted==1 and not ud.base.oversized,'R-P1: an undeclared English entry is rejected and counted')
+ local text,source,why=u.Resolve('parity.undeclared',{['parity.undeclared']='Pack text'})
+ check(not u.Has('parity.undeclared') and u.Kind('parity.undeclared')==nil and text==U and source=='unavailable' and why=='unknown_key','R-P1: an undeclared key is unavailable, and a pack cannot add it')
+ check(ud.packs.adopted==6 and ud.packs.refused==0 and #u.Languages()==7,'R-P1: the six packs stay adopted and offered')
+ -- R-P3: a declared meaning without English, and one with invalid English.
+ local missing=copyOf(realData);missing['panel.button.options']=nil
+ local m=assert(reload(missing),'loader without one declared English entry');checks=checks+1
+ local md=m.Diagnostics()
+ check(md.base.accepted==27 and md.base.rejected==0 and md.base.undeclared==0 and md.base.missingDeclared==1,'R-P3: a declared key without English is counted')
+ text,source,why=m.Text('panel.button.options')
+ check(not m.Has('panel.button.options') and text==U and source=='unavailable' and why=='unknown_key','R-P3: the declared key without English is unavailable, as an unknown key was')
+ check(md.packs.adopted==6 and #m.Languages()==7,'R-P3: completeness never gates pack availability')
+ for _,bad in ipairs({'Opt|ions','',string.rep('x',257),5,'Options'..B(0xFF)})do
+  local invalid=copyOf(realData);invalid['panel.button.options']=bad
+  local idg=assert(reload(invalid)).Diagnostics().base
+  check(idg.accepted==27 and idg.rejected==1 and idg.undeclared==0 and idg.missingDeclared==1,'R: invalid English for a declared key is rejected and counted as missing: '..tostring(bad):sub(1,12))
+ end
+ -- Kind follows the declaration: static text for the template key is refused.
+ local wrongKind=copyOf(realData);wrongKind['readout.charge_counts']='Charges'
+ local wk=assert(reload(wrongKind))
+ check(wk.Kind('readout.charge_counts')==nil and wk.Diagnostics().base.missingDeclared==1 and wk.Diagnostics().base.formatted==0,'R: a declared template key never admits static text')
+ local braces=copyOf(realData);braces['panel.button.options']='B:{banish}'
+ local br=assert(reload(braces))
+ check(br.Kind('panel.button.options')=='text' and br.Resolve('panel.button.options')=='B:{banish}','R: a declared static text stays plain text, shown exactly, never formatted')
+ -- The format schemas are derived from the declarations.
+ local function block(charge,extra)
+  local lines={'local DECLARATIONS = {'}
+  for key in pairs(realData)do
+   if key=='readout.charge_counts' then
+    if charge then lines[#lines+1]='    ["readout.charge_counts"] = '..charge..',' end
+   else lines[#lines+1]=('    ["%s"] = {kind = "text"},'):format(key) end
+  end
+  if extra then lines[#lines+1]=extra end
+  lines[#lines+1]='}'
+  return table.concat(lines,'\n')
+ end
+ local args={banish={known=true,value=2},reroll={known=true,value=1},freeze={known=true,value=0}}
+ local mirror=assert(reloadWith(realData,block('{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 254}')))
+ check(mirror.Diagnostics().base.accepted==28 and mirror.Format('readout.charge_counts',args)=='B:2 R:1 F:0','R: a test block equal to the real declarations gives the real behaviour')
+ local dropped={
+  {'no charge declaration',nil},
+  {'result limit 253','{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 253}'},
+  {'result limit 256','{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 256}'},
+  {'limit as text','{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = "254"}'},
+  {'other slot type','{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "number", resultLimit = 254}'},
+  {'no slot','{fields = {"banish", "reroll", "freeze"}, kind = "format", resultLimit = 254}'},
+  {'extra field','{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 254, markup = true}'},
+  {'repeated field','{fields = {"banish", "banish", "freeze"}, kind = "format", slot = "count", resultLimit = 254}'},
+  {'no fields','{fields = {}, kind = "format", slot = "count", resultLimit = 254}'},
+  {'field with a hole','{fields = {"banish", nil, "freeze"}, kind = "format", slot = "count", resultLimit = 254}'},
+  {'keyed field','{fields = {"banish", "reroll", "freeze", x = "y"}, kind = "format", slot = "count", resultLimit = 254}'},
+  {'invalid field name','{fields = {"banish", "Reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 254}'},
+  {'other field name','{fields = {"banish", "reroll", "frost"}, kind = "format", slot = "count", resultLimit = 254}'},
+  {'declared as text','{kind = "text"}'},
+  {'text with fields','{kind = "text", fields = {"banish", "reroll", "freeze"}}'},
+  {'unknown kind','{kind = "plural", fields = {"banish", "reroll", "freeze"}, slot = "count", resultLimit = 254}'},
+  {'not a table','"format"'},
+  {'with a metatable','setmetatable({fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 254}, {})'},
+ }
+ for _,case in ipairs(dropped)do
+  local mod=assert(reloadWith(realData,block(case[2])),'loader with test block: '..case[1]);checks=checks+1
+  local fb=mod.Diagnostics().base
+  local fText,fSource,fWhy=mod.Format('readout.charge_counts',args)
+  local static=case[1]=='declared as text'
+  check(fb.accepted==27+(static and 1 or 0) and fb.rejected==(static and 0 or 1) and fb.formatted==0 and fText==U and fSource=='unavailable'
+   and fWhy==(static and 'wrong_key_kind' or 'unknown_key'),'R: '..case[1]..': the charge template is not admitted as a template')
+  check(fb.undeclared==((static or case[1]=='other field name') and 0 or 1) and fb.missingDeclared==(case[1]=='other field name' and 1 or 0),'R: '..case[1]..': counted as undeclared or missing as declared')
+ end
+ for _,case in ipairs({{'invalid key','    ["Bad Key"] = {kind = "text"},'},{'text with a field','    ["parity.extra"] = {kind = "text", fields = {"a"}},'},{'unknown kind','    ["parity.extra"] = {kind = "plural"},'}})do
+  local extra=copyOf(realData);extra['Bad Key']='Bad';extra['parity.extra']='Extra'
+  local xb=assert(reloadWith(extra,block('{fields = {"banish", "reroll", "freeze"}, kind = "format", slot = "count", resultLimit = 254}',case[2]))).Diagnostics().base
+  check(xb.accepted==28 and xb.rejected==2 and xb.undeclared==2 and xb.missingDeclared==0,'R: a malformed declaration is left out ('..case[1]..')')
+ end
+ -- More than 64 declarations, or no declaration table: nothing is declared.
+ local tooMany={'local DECLARATIONS = {'}
+ for key in pairs(realData)do tooMany[#tooMany+1]=('    ["%s"] = {kind = "text"},'):format(key)end
+ for i=1,64-count(realData)+1 do tooMany[#tooMany+1]=('    ["parity.extra_%d"] = {kind = "text"},'):format(i)end
+ tooMany[#tooMany+1]='}'
+ check(#tooMany-2==65,'SETUP 65 declarations')
+ for _,case in ipairs({{'65 declarations',table.concat(tooMany,'\n')},{'not a table','local DECLARATIONS = 7'},
+   {'with a metatable','local DECLARATIONS = setmetatable({["reason.list_preparing"] = {kind = "text"}}, {})'}})do
+  local none=assert(reloadWith(realData,case[2]),'loader with '..case[1]);checks=checks+1
+  local nb=none.Diagnostics().base
+  check(nb.present and nb.accepted==0 and nb.rejected==28 and nb.undeclared==28 and nb.missingDeclared==0 and #none.Keys()==0 and none.Text(K)==U,'R: '..case[1]..' fails closed: no English is admitted')
+  check(none.Diagnostics().packs.adopted==6,'R: '..case[1]..': packs stay adopted (their entries are then left out)')
+ end
+ check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData and L.Text(K)==E,'R: real seam and data restored after the registry checks')
+end
 -- Issue #142 first cohort: the named-template formatter. Failure cases run on
 -- a freshly loaded seam (F), so the real seam's record stays untouched; the
 -- real seam (L) is only asked cases that need no fallback.

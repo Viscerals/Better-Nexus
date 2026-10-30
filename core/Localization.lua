@@ -36,6 +36,20 @@
 --    metatable. It is read with next/rawget, never through a metamethod,
 --    and nothing in it is called.
 --
+-- Declarations (issue #147): DECLARATIONS below is the code-owned registry
+-- of every reviewed English meaning: its key, its kind ("text", or "format"
+-- with its count fields in order, slot type and result limit) and so its
+-- placeholders. Content is plain: the text contract above, never markup.
+-- It is one literal table between two marker lines, so the offline tool
+-- (tools/l10n_catalog.py parse_registry_declarations) reads exactly these
+-- bytes without running them. At load each declaration is admitted only
+-- when its key passes the key contract and it is exactly {kind = "text"} or
+-- exactly {kind = "format", fields = {...}, slot = "count", resultLimit =
+-- CHARGE_RESULT_LIMIT} with one or more distinct field names; any other
+-- declaration is left out. More than MAX_BASE_ENTRIES declarations, or a
+-- value that is not a plain table, declares nothing (fail closed). SCHEMAS
+-- is derived from the admitted format declarations.
+--
 -- English base: data/LocalizationEnglish.lua, loaded just before this file
 -- by Nexus.toc, sets Nexus.LocalizationEnglish. Its valid entries are copied
 -- once, here; a later change to that table changes nothing. An absent,
@@ -43,9 +57,14 @@
 -- (no entry count is invented). A plain base sets present=true; above
 -- MAX_BASE_ENTRIES it adopts nothing, sets oversized=true and rejected to
 -- the whole entry count. In an admitted plain base, invalid entries are
--- excluded and each is counted once as rejected. A key with a code-owned
--- schema is admitted only as a valid template (counted in both accepted
--- and formatted), never as static text.
+-- excluded and each is counted once as rejected. An entry is admitted only
+-- for a declared key and in its declared kind: a declared text as static
+-- text, a declared format only as a valid template under its schema
+-- (counted in both accepted and formatted), never as static text. An entry
+-- whose key is not declared is rejected and also counted in undeclared
+-- (complete English, issue #147). missingDeclared counts the declared
+-- meanings left without admitted English (absent, invalid, or the whole base
+-- refused); such a meaning resolves as an unknown key.
 --
 -- L.Resolve(key, pack) -> text, source, reason. It never raises and records
 -- nothing. In this order:
@@ -97,7 +116,8 @@
 -- has a fixed size, is never printed to chat, and Diagnostics() returns a
 -- programmatic copy; no diagnostic UI is added here. That copy also holds
 -- the base load facts (base.formatted counts the admitted templates, which
--- base.accepted also counts), the copied-pack facts (packs.present,
+-- base.accepted also counts; base.undeclared and base.missingDeclared are
+-- the declaration facts above), the copied-pack facts (packs.present,
 -- adopted, refused and a row of id, accepted and rejected per adopted
 -- pack) and the active-language facts (language.active, initialized).
 -- CHANGED CONTRACT (issue #123): with no pack, Text uses the active
@@ -105,8 +125,9 @@
 -- core/UserText.lua shows the active language. An explicit pack still
 -- decides alone, exactly as in Resolve.
 --
--- Formatted meanings (issue #142). A code-owned schema (SCHEMAS below) names
--- a key's placeholder names; every current slot has the count type defined
+-- Formatted meanings (issue #142). A code-owned schema (SCHEMAS below,
+-- derived from DECLARATIONS) names a key's placeholder names; every current
+-- slot has the count type defined
 -- below, never a translation-defined type. Its English
 -- entry is a template under the same text contract, in which "{name}" is a
 -- schema placeholder (each exactly once, in any order), "{{" and "}}" are a
@@ -222,20 +243,106 @@ end
 -- This is not an identifier validator; it does not normalize Unicode.
 function L.IsText(value) return ValidText(value) end
 
--- Code-owned schemas of the formatted meanings (issue #142). A schema, not a
--- translation, names each placeholder. All current slots have the same
--- typed known/unknown count contract (SlotText). A charge row is at most
--- MAX_TEXT_BYTES - 2 bytes, so the " ~" estimate marker its consumer may
--- append keeps the whole row within MAX_TEXT_BYTES.
+-- Code-owned schemas of the formatted meanings (issue #142), derived from
+-- the declarations below (issue #147). A schema, not a translation, names
+-- each placeholder. All current slots have the same typed known/unknown
+-- count contract (SlotText). A charge row is at most MAX_TEXT_BYTES - 2
+-- bytes, so the " ~" estimate marker its consumer may append keeps the
+-- whole row within MAX_TEXT_BYTES; a format declaration with any other
+-- result limit is left out.
 local CHARGE_RESULT_LIMIT = MAX_TEXT_BYTES - 2
 L.CHARGE_RESULT_LIMIT = CHARGE_RESULT_LIMIT
-local SCHEMAS = {
+local SLOT_TYPE = "count"
+
+-- The declarations of every reviewed English meaning (see "Declarations"
+-- above). Literal strings, whole numbers and plain tables only, between
+-- the two marker lines; the key order follows data/LocalizationEnglish.lua.
+-- NEXUS-L10N-REGISTRY BEGIN
+local DECLARATIONS = {
+    ["reason.save_in_progress"] = {kind = "text"},
+    ["reason.list_preparing"] = {kind = "text"},
+    ["reason.saved_data_reading"] = {kind = "text"},
+    ["reason.wait_three_choices"] = {kind = "text"},
+    ["reason.wait_pending_pick_count"] = {kind = "text"},
     ["readout.charge_counts"] = {fields = {"banish", "reroll", "freeze"},
-        resultLimit = CHARGE_RESULT_LIMIT},
+        kind = "format", slot = "count", resultLimit = 254},
+    ["panel.button.my_builds"] = {kind = "text"},
+    ["panel.tooltip.open_my_builds"] = {kind = "text"},
+    ["panel.tooltip.my_builds_destination"] = {kind = "text"},
+    ["panel.button.assign_wishlist"] = {kind = "text"},
+    ["panel.tooltip.assignment_heading"] = {kind = "text"},
+    ["panel.tooltip.assignment_chooser"] = {kind = "text"},
+    ["panel.button.create_wishlist"] = {kind = "text"},
+    ["panel.tooltip.create_wishlist_heading"] = {kind = "text"},
+    ["panel.tooltip.create_wishlist_source"] = {kind = "text"},
+    ["panel.tooltip.create_wishlist_draft"] = {kind = "text"},
+    ["panel.heading.locked_targets"] = {kind = "text"},
+    ["panel.tooltip.locked_remaining"] = {kind = "text"},
+    ["panel.tooltip.locked_plan"] = {kind = "text"},
+    ["panel.tooltip.locked_acquire"] = {kind = "text"},
+    ["panel.tooltip.locked_placement"] = {kind = "text"},
+    ["panel.tooltip.locked_not_freeze"] = {kind = "text"},
+    ["panel.tooltip.locked_acquire_list"] = {kind = "text"},
+    ["panel.tooltip.open_wishlist_editor"] = {kind = "text"},
+    ["panel.heading.progress"] = {kind = "text"},
+    ["panel.heading.still_needed"] = {kind = "text"},
+    ["panel.heading.extra_copies"] = {kind = "text"},
+    ["panel.button.options"] = {kind = "text"},
 }
-for _, schema in pairs(SCHEMAS) do
-    schema.index = {}
-    for _, name in ipairs(schema.fields) do schema.index[name] = true end
+-- NEXUS-L10N-REGISTRY END
+
+-- The number of fields of a plain table, read with next only.
+local function FieldCount(value)
+    local count, key = 0, next(value)
+    while key ~= nil do
+        count = count + 1
+        key = next(value, key)
+    end
+    return count
+end
+
+local function Plain(value)
+    return type(value) == "table" and getmetatable(value) == nil
+end
+
+-- The schema of an admitted format declaration, or nil: exactly the four
+-- fields kind, fields, slot and resultLimit; one or more distinct field
+-- names, each a lower-case word of at most MAX_KEY_BYTES bytes, as a plain
+-- list without holes; the count slot type; and CHARGE_RESULT_LIMIT.
+local function FormatSchema(declaration)
+    if FieldCount(declaration) ~= 4 or rawget(declaration, "slot") ~= SLOT_TYPE
+        or rawget(declaration, "resultLimit") ~= CHARGE_RESULT_LIMIT then return nil end
+    local fields = rawget(declaration, "fields")
+    if not Plain(fields) then return nil end
+    local count = FieldCount(fields)
+    if count < 1 then return nil end
+    local schema = {fields = {}, index = {}, resultLimit = CHARGE_RESULT_LIMIT}
+    for index = 1, count do
+        local name = rawget(fields, index)
+        if type(name) ~= "string" or #name > MAX_KEY_BYTES or not name:find("^[a-z][a-z0-9_]*$")
+            or schema.index[name] then return nil end
+        schema.fields[index], schema.index[name] = name, true
+    end
+    return schema
+end
+
+-- The admitted declarations: declared[key] is "text" or "format", and
+-- SCHEMAS[key] is the schema of each admitted format declaration.
+local declared, SCHEMAS, declaredCount = {}, {}, 0
+if Plain(DECLARATIONS) and FieldCount(DECLARATIONS) <= MAX_BASE_ENTRIES then
+    for key, declaration in next, DECLARATIONS do
+        if ValidKey(key) and Plain(declaration) then
+            local kind = rawget(declaration, "kind")
+            if kind == "text" and FieldCount(declaration) == 1 then
+                declared[key], declaredCount = kind, declaredCount + 1
+            elseif kind == "format" then
+                local schema = FormatSchema(declaration)
+                if schema then
+                    declared[key], SCHEMAS[key], declaredCount = kind, schema, declaredCount + 1
+                end
+            end
+        end
+    end
 end
 
 -- A template under the text contract compiled to literal strings and
@@ -336,11 +443,12 @@ local function Render(parts, values, limit)
     return text
 end
 
--- The English base, copied once from the plain data table (see above). A key
--- with a schema is admitted only as a valid template, never as static text.
+-- The English base, copied once from the plain data table (see above). Only
+-- a declared key is admitted, in its declared kind: a format key only as a
+-- valid template, never as static text.
 local base, baseKeys, templates = {}, {}, {}
 local baseLoad = {present = false, accepted = 0, rejected = 0, oversized = false,
-    formatted = 0}
+    formatted = 0, undeclared = 0, missingDeclared = 0}
 do
     local source = Nexus.LocalizationEnglish
     if type(source) == "table" and getmetatable(source) == nil then
@@ -351,24 +459,27 @@ do
             baseLoad.oversized, baseLoad.rejected = true, count
         else
             for key, text in next, source do
-                local schema = ValidKey(key) and SCHEMAS[key] or nil
-                local parts = schema and CompileTemplate(text, schema) or nil
+                local kind = declared[key]
+                local parts = kind == "format" and CompileTemplate(text, SCHEMAS[key]) or nil
                 if parts then
                     templates[key] = parts
                     baseKeys[#baseKeys + 1] = key
                     baseLoad.accepted = baseLoad.accepted + 1
                     baseLoad.formatted = baseLoad.formatted + 1
-                elseif not schema and ValidKey(key) and ValidText(text) then
+                elseif kind == "text" and ValidText(text) then
                     base[key] = text
                     baseKeys[#baseKeys + 1] = key
                     baseLoad.accepted = baseLoad.accepted + 1
                 else
                     baseLoad.rejected = baseLoad.rejected + 1
+                    if kind == nil then baseLoad.undeclared = baseLoad.undeclared + 1 end
                 end
             end
             table.sort(baseKeys)
         end
     end
+    -- Each declared key holds at most one admitted entry.
+    baseLoad.missingDeclared = declaredCount - baseLoad.accepted
 end
 
 local function Resolve(key, pack)
@@ -591,7 +702,8 @@ function L.Diagnostics()
     return {
         base = {present = baseLoad.present, accepted = baseLoad.accepted,
             rejected = baseLoad.rejected, oversized = baseLoad.oversized,
-            formatted = baseLoad.formatted},
+            formatted = baseLoad.formatted, undeclared = baseLoad.undeclared,
+            missingDeclared = baseLoad.missingDeclared},
         packs = {present = packLoad.present, adopted = packLoad.adopted,
             refused = packLoad.refused, rows = rows},
         language = {active = active.id, initialized = active.initialized},

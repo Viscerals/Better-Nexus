@@ -1,11 +1,17 @@
--- Issue #147, slice S1: the runtime side of the shared parity corpus
--- tests/prototype/fixtures/l10n_parity. Each case's english.lua and
--- packs.lua bytes are read once, compiled in an empty environment (the same
--- bytes tools/tests/test_l10n_parity.py parses without executing), injected
--- into a fresh load of the unchanged core/Localization.lua with the case's
--- language enum, and the Diagnostics() load facts, offered languages and
--- probe results must equal the case's runtime expectation. LF and CRLF
--- variants are derived in memory and must give equal data and outcomes.
+-- Issue #147, slice S1 and the R union: the runtime side of the shared
+-- parity corpus tests/prototype/fixtures/l10n_parity. Each case's
+-- english.lua and packs.lua bytes are read once, compiled in an empty
+-- environment (the same bytes tools/tests/test_l10n_parity.py parses
+-- without executing), injected into a fresh load of core/Localization.lua
+-- with the case's language enum, and the Diagnostics() load facts, offered
+-- languages and probe results must equal the case's runtime expectation.
+-- The cases use test-only keys, so for them only the lines between the two
+-- declaration marker lines are replaced, in memory, by a block declaring
+-- each valid key of the case's decoded English (cases.lua states the rule);
+-- every other byte is the real file. The bound registry rows R-P1 and R-P3
+-- load the real file unchanged, with an in-memory edit of the real English
+-- and the real packs. LF and CRLF variants are derived in memory and must
+-- give equal data and outcomes.
 -- P8 is the intended divergence: a Lua constructor keeps the last duplicate
 -- value. P19 (Lua 5.1 versus LuaJIT escapes) and P20 (UTF-8 BOM) native WoW
 -- behaviour is UNKNOWN: their controls only record the harness fact and
@@ -64,11 +70,65 @@ local function loadData(bytes,name,field)
  return env.Nexus and env.Nexus[field],nil
 end
 
+-- The declaration block of the real runtime: the real file split at its two
+-- marker lines (kept), so a test block replaces only the lines between.
+local RUNTIME='core/Localization.lua'
+local MARK_OPEN,MARK_CLOSE='-- NEXUS-L10N-REGISTRY BEGIN','-- NEXUS-L10N-REGISTRY END'
+local runtimeBytes=readBytes(RUNTIME)
+local head,tail
+do
+ -- A whole marker line: plain search, then the line break after it.
+ local function line(mark)
+  local start,stop=runtimeBytes:find('\n'..mark,1,true)
+  local after=stop and runtimeBytes:match('^\r?\n',stop+1)
+  return after and start,after and stop+#after
+ end
+ local _,openEnd=line(MARK_OPEN)
+ local closeStart=line(MARK_CLOSE)
+ local _,count=runtimeBytes:gsub('NEXUS%-L10N%-REGISTRY','')
+ check(openEnd and closeStart and openEnd<closeStart and count==2,'the runtime has exactly one declaration block between its two marker lines')
+ head,tail=runtimeBytes:sub(1,openEnd),runtimeBytes:sub(closeStart+1)
+end
+local CHARGE_KEY='readout.charge_counts'
+local CHARGE_DECLARATION=runtimeBytes:match('%["readout%.charge_counts"%] = (%b{})')
+check(CHARGE_DECLARATION and CHARGE_DECLARATION:find('kind = "format"',1,true),'the real charge-row format declaration is read from the real block')
+-- The key contract of core/Localization.lua (ValidKey), restated for the rule.
+local function validKey(key)
+ return type(key)=='string' and #key>=3 and #key<=64 and key:find('^[a-z][a-z0-9_]*%.[a-z0-9_.]*[a-z0-9_]$')~=nil
+  and not key:find('%.[^a-z]')
+end
+-- The case rule of cases.lua: each valid key of the decoded English, in byte
+-- order, at most 64; the charge key with its real declaration, others text.
+local function derivedKeys(english)
+ local keys={}
+ for key in pairs(english)do if validKey(key) then keys[#keys+1]=key end end
+ table.sort(keys)
+ while #keys>64 do keys[#keys]=nil end
+ return keys
+end
+local function withDeclarations(keys)
+ local lines={'local DECLARATIONS = {'}
+ for _,key in ipairs(keys)do
+  lines[#lines+1]=('    ["%s"] = %s,'):format(key,key==CHARGE_KEY and CHARGE_DECLARATION or '{kind = "text"}')
+ end
+ lines[#lines+1]='}'
+ local source=head..table.concat(lines,'\n')..'\n'..tail
+ check(source:sub(1,#head)==runtimeBytes:sub(1,#head) and source:sub(-#tail)==runtimeBytes:sub(-#tail),'a test block changes only the lines between the markers')
+ return source
+end
+
 local savedNexus=Nexus
--- A fresh load of the unchanged runtime with injected data and enum.
-local function boot(english,packs,enum)
+-- A fresh load of the runtime with injected data and enum: the real file
+-- unchanged (dofile), or the given source with a test declaration block.
+local function boot(english,packs,enum,source)
  Nexus={LocalizationEnglish=english,LocalizationPacks=packs,DefaultProfile={uiLanguages={ids=enum}}}
- local ok,err=pcall(dofile,'core/Localization.lua')
+ local ok,err
+ if source then
+  local chunk,cerr=compile(source,RUNTIME,_G)
+  if chunk then ok,err=pcall(chunk) else ok,err=false,cerr end
+ else
+  ok,err=pcall(dofile,'core/Localization.lua')
+ end
  local L=Nexus and Nexus.Localization
  Nexus=savedNexus
  assert(ok and L,'core/Localization.lua loads: '..tostring(err))
@@ -77,13 +137,16 @@ end
 
 -- The observed runtime outcome: load facts, offered languages and, for
 -- each probe, a fresh session with the probe's language selected once.
-local function outcome(english,packs,case)
- local L=boot(english,packs,case.enum)
+-- real=true loads the real file; otherwise the case's derived block is used.
+local function outcome(english,packs,case,real,want)
+ want=want or case.runtime
+ local source=not real and withDeclarations(derivedKeys(english)) or nil
+ local L=boot(english,packs,case.enum,source)
  local d=L.Diagnostics()
  local o={base=d.base,packs=d.packs,languages={},probes={}}
  for _,row in ipairs(L.Languages())do o.languages[#o.languages+1]=row.id end
- for index,probe in ipairs(case.runtime and case.runtime.probes or {})do
-  local P=boot(english,packs,case.enum)
+ for index,probe in ipairs(want and want.probes or {})do
+  local P=boot(english,packs,case.enum,source)
   if probe.language then P.InitializeActiveLanguage(probe.language) end
   local text,source,reason
   if probe.kind=='format' then text,source,reason=P.Format(probe.key,corpus.formatArguments)
@@ -120,6 +183,11 @@ local function runCase(case,englishBytes,packsBytes)
    else seen={english=english,packs=packs,outcome=o} end
    local want=case.runtime
    check(same(o.base,want.base),'base load facts '..label..': '..show(o.base))
+   -- Every derived declaration has an English entry, so outside the
+   -- whole-base limit each rejected entry is undeclared or declared-invalid.
+   local declared=#derivedKeys(english)
+   check(o.base.missingDeclared==declared-o.base.accepted and (o.base.oversized
+    or o.base.rejected==o.base.undeclared+o.base.missingDeclared),'derived block load facts reconcile '..label)
    check(same(o.packs,want.packs),'pack load facts '..label..': '..show(o.packs))
    check(same(o.languages,want.languages),'offered languages '..label..': '..show(o.languages))
    check(#o.probes==#want.probes,'probe count '..label)
@@ -193,6 +261,66 @@ for _,case in ipairs(corpus.cases)do
  end
 end
 
+-- The bound registry rows (R union): an in-memory edit of the real English,
+-- loaded with the real packs into the real core/Localization.lua.
+local registry=corpus.registry
+local function edited(data,input)
+ local lf=(data:gsub('\r\n','\n'))
+ local lines,found={},0
+ for line in (lf..'\n'):gmatch('([^\n]*)\n')do
+  if line==input.remove then found=found+1
+  else
+   lines[#lines+1]=line
+   if line==input.after then found=found+1;lines[#lines+1]=input.line end
+  end
+ end
+ check(found==1,'the edit names exactly one line: '..tostring(input.after or input.remove))
+ local text=table.concat(lines,'\n')
+ if lf:sub(-1)=='\n' then text=text:sub(1,-2) end
+ check(text~=lf,'the edit changes the source')
+ return text
+end
+local bound=0
+check(registry.parser=='parse_registry_declarations' and registry.marker.open==MARK_OPEN and registry.marker.close==MARK_CLOSE,'registry convention recorded once')
+for _,row in ipairs(registry.rows)do
+ check(row.state==registry.bound,'registry row is bound: '..row.id)
+ local want=row.expect and row.expect.runtime
+ if row.input.file=='data/LocalizationEnglish.lua' then
+  check(want~=nil,'an English registry row has a runtime expectation: '..row.id)
+  local englishBytes=edited(readBytes(row.input.file),row.input)
+  local packsBytes=readBytes('data/LocalizationPacks.lua')
+  local seen
+  for _,ev in ipairs(variants(englishBytes,row.id..'/english'))do
+   for _,pv in ipairs(variants(packsBytes,'data/LocalizationPacks.lua'))do
+    local label=row.id..' english '..ev[1]..' packs '..pv[1]
+    local english=assert(loadData(ev[2],row.id,'LocalizationEnglish'))
+    local packs=assert(loadData(pv[2],'packs','LocalizationPacks'))
+    local o=outcome(english,packs,{enum=registry.enum},true,want)
+    if seen then check(same(seen,o),'LF and CRLF give equal registry outcomes: '..label) else seen=o end
+    check(same(o.base,want.base),'registry base load facts '..label..': '..show(o.base))
+    check(o.packs.present and o.packs.adopted==#registry.enum-1 and o.packs.refused==0,'every real pack stays adopted '..label)
+    for _,packRow in ipairs(o.packs.rows)do check(packRow.accepted==27 and packRow.rejected==0,'real pack copy unchanged '..label..' '..packRow.id)end
+    check(same(o.languages,registry.enum),'every enum language stays offered '..label..': '..show(o.languages))
+    check(#o.probes==#want.probes,'registry probe count '..label)
+    for i,p in ipairs(want.probes)do
+     check(same(o.probes[i],{kind=p.kind,language=p.language,key=p.key,text=p.text,source=p.source,reason=p.reason}),
+      'registry probe '..i..' '..label..': '..show(o.probes[i]))
+    end
+   end
+  end
+  bound=bound+1
+ else
+  check(want==nil and row.runtime=='not applicable','a document-only registry row has no runtime expectation: '..row.id)
+ end
+end
+-- The real file and data: the 28 declarations admit exactly the 28 English keys.
+do
+ local english=assert(loadData(readBytes('data/LocalizationEnglish.lua'),'english','LocalizationEnglish'))
+ local packs=assert(loadData(readBytes('data/LocalizationPacks.lua'),'packs','LocalizationPacks'))
+ local o=outcome(english,packs,{enum=registry.enum},true,{probes={}})
+ check(same(o.base,{present=true,accepted=28,rejected=0,oversized=false,formatted=1,undeclared=0,missingDeclared=0}),'real declarations admit the whole real English base: '..show(o.base))
+end
+
 check(Nexus==savedNexus,'the global Nexus is restored after every load')
-print(('localization_parity: %d cases, %d checks; harness P19=%s, P20=%s; native P19/P20 UNKNOWN')
- :format(#corpus.cases,checks,tostring(harness.p19_ambiguous_escapes),tostring(harness.p20_bom)))
+print(('localization_parity: %d cases, %d bound registry runtime rows, %d checks; harness P19=%s, P20=%s; native P19/P20 UNKNOWN')
+ :format(#corpus.cases,bound,checks,tostring(harness.p19_ambiguous_escapes),tostring(harness.p20_bom)))
