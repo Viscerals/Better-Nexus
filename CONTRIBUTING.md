@@ -46,3 +46,5 @@ Every pull request should state:
 - confirmation that unrelated changes are excluded.
 
 Maintainers may ask for a smaller PR or additional evidence when review, provenance, compatibility, or player-data safety is unclear.
+
+For localization changes, review each changed meaning beside its pinned English source and the code that produces and displays it. Judge whether conditions, negation, rarity distinctions and ownership of player names retain their intended meaning. Separate a code-generated default from an existing player-supplied name; do not treat fluent wording or mechanically valid placeholders as proof of semantic equivalence. Record uncertain language or client terminology explicitly for independent language review.
