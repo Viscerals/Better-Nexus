@@ -2512,6 +2512,14 @@ class ConsumerBindingTests(unittest.TestCase):
              + text + b'); SpecShow({SetText=function() end},"fixed")'),
             ("value given to the call passing a fake table", False, show
              + b'SpecShow({SetText=function() end},' + text + b'); SpecShow(specLabel,"fixed")'),
+            # A value made inside the function reaches the receiver of every
+            # call, so every call must pass a client object.
+            ("own value shown on a widget passed by every call", True,
+             b'local function SpecOwn(target) target:SetText(' + text + b') end; '
+             b'SpecOwn(specLabel)'),
+            ("own value shown on a fake table passed by a call", False,
+             b'local function SpecOwn(target) target:SetText(' + text + b') end; '
+             b'SpecOwn(specLabel); SpecOwn({SetText=function() end})'),
         )
         for name, binds, code in cases:
             with self.subTest(case=name):
