@@ -2223,6 +2223,20 @@ class ConsumerBindingTests(unittest.TestCase):
             self.assertEqual(self.report(*args), expected)
         finally:
             blocked()
+        # The cyclic collector's state is the caller's after every call,
+        # also when a new parse pauses it (review fix 4).
+        import gc
+        fresh = with_file(self.files, "core/SessionPause.lua",
+                          self.files["core/SessionPause.lua"] + b"\n-- gc state control\n")
+        for enabled in (True, False):
+            (gc.enable if enabled else gc.disable)()
+            try:
+                self.report(*binding_args(with_file(fresh, "core/SessionPause.lua",
+                                                    fresh["core/SessionPause.lua"] + b"-- "
+                                                    + str(enabled).encode() + b"\n")))
+                self.assertIs(gc.isenabled(), enabled)
+            finally:
+                gc.enable()
         # A caller that rewrites every nested value of a returned receipt
         # cannot change the next receipt through the parse memo.
         snapshot = json.dumps(expected, sort_keys=True)
@@ -2520,6 +2534,60 @@ class ConsumerBindingTests(unittest.TestCase):
             ("own value shown on a fake table passed by a call", False,
              b'local function SpecOwn(target) target:SetText(' + text + b') end; '
              b'SpecOwn(specLabel); SpecOwn({SetText=function() end})'),
+        )
+        for name, binds, code in cases:
+            with self.subTest(case=name):
+                receipt = self.receipt(with_file(bare, host, self.files[host] + label + code
+                                                 + b'\n'))
+                if binds:
+                    assert_binding_receipt(self, receipt)
+                    continue
+                with self.assertRaises(AssertionError):
+                    assert_binding_receipt(self, receipt)
+                self.assertEqual([(problem["code"], problem.get("key"))
+                                  for problem in receipt["problems"]], [("binding-unbound", key)])
+                self.assertEqual([site["reason"] for site
+                                  in self.binding(receipt, key)["unprovenSites"]],
+                                 ["output-not-reached"])
+
+    def test_c21_reads_receiver_fields_methods_and_nil_follow_the_actual_origin(self):
+        # Review fix 4 (SPEC-147-S8-RF3-1..4): a field read through a
+        # parameter returns only to the call that passed the read table; a
+        # receiver field through a parameter is resolved on that call's
+        # table; a replaced output method is no output; and a later nil
+        # assignment is a definition of the receiver.
+        key, host = "panel.heading.progress", "core/SessionPause.lua"
+        bare = with_file(self.files, PANEL, edit(self.files[PANEL], PROGRESS_CALL,
+                                                 b'progressLabel:SetText("Progress")'))
+        label = b'\nlocal specLabel = UIParent:CreateFontString(nil, "OVERLAY")\n'
+        text = b'Nexus.Localization.Text("panel.heading.progress")'
+        read = b'local function SpecRead(target) return target.SpecReadField end; '
+        show = b'local function SpecShow(target,value) target.SpecOutput:SetText(value) end; '
+        cases = (
+            ("same-call field read", True, read + b'local specLeft={SpecReadField=' + text
+             + b'}; specLabel:SetText(SpecRead(specLeft))'),
+            ("separate-call field read", False, read + b'local specLeft={SpecReadField=' + text
+             + b'}; local specRight={}; local specDiscard=SpecRead(specLeft); '
+             b'specLabel:SetText(SpecRead(specRight))'),
+            ("separate-call field read through a parameter alias", False,
+             b'local function SpecRead(target) local held=target; return held.SpecReadField end; '
+             b'local specLeft={SpecReadField=' + text + b'}; local specRight={}; '
+             b'local specDiscard=SpecRead(specLeft); specLabel:SetText(SpecRead(specRight))'),
+            ("same-object parameter receiver field", True, show
+             + b'local specLeft={SpecOutput=specLabel}; SpecShow(specLeft,' + text + b')'),
+            ("other-call parameter receiver field", False, show
+             + b'local specLeft={SpecOutput=specLabel}; local specRight={}; '
+             b'SpecShow(specLeft,"fixed"); SpecShow(specRight,' + text + b')'),
+            ("output method replaced on the widget", False,
+             b'specLabel.SetText=function(self,value) return nil end; specLabel:SetText(' + text
+             + b')'),
+            ("output method replaced through a widget alias", False,
+             b'local specSame=specLabel; specSame.SetText=function(self,value) end; '
+             b'specLabel:SetText(' + text + b')'),
+            ("unmodified widget method", True, b'specLabel:SetText(' + text + b')'),
+            ("initial nil then created", True, b'local specMaybe=nil; specMaybe=UIParent:'
+             b'CreateFontString(); specMaybe:SetText(' + text + b')'),
+            ("created then nil", False, b'specLabel=nil; specLabel:SetText(' + text + b')'),
         )
         for name, binds, code in cases:
             with self.subTest(case=name):

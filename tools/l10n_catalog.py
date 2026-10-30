@@ -2632,7 +2632,14 @@ def _cli_provenance(receipt, toc, require_complete):
 # receiver is proved from evidenced roots only (UIParent, GameTooltip or
 # DEFAULT_CHAT_FRAME while never assigned, CreateFrame, and CreateFontString
 # called on a proved client object), through locals, object-bound fields and
-# parameters of fully resolved local functions.
+# parameters of fully resolved local functions. Review fix 4 keeps the same
+# call context everywhere: a field read through a parameter (or a local alias
+# of one) continues only under the call that passed the read table, so its
+# function returns the value only there; a receiver field through a parameter
+# is resolved on the table the value's own call passed; an output method that
+# the loaded source may replace on the receiver (any write of that field on
+# an object possibly the receiver, or on an untracked table) is no output;
+# and only a nil given by a local's own declaration is neutral for a receiver.
 #
 # Comments, strings that merely contain call text, data and declaration
 # tables, Has and Kind queries and Text methods of other objects never bind.
@@ -3880,6 +3887,7 @@ class _UnitFlow:
         self.module_defs, self.dynamic_modules = {}, set()
         self.alias_of, self.export_values, self.exports = {}, set(), []
         self.chunk_returns = set()
+        self.declared = set()   # values given by local declarations (not later assignments)
         self.object_memo = {}
         self.block(body, None)
         self.module_funcs = {}
@@ -3907,6 +3915,19 @@ class _UnitFlow:
             self.edge(value, ('fwrite', value))
             self.field_def_of.setdefault(value, []).append(name)
             self.field_bases[value] = (name, base)
+
+    def alias_root(self, base):
+        """The binding a chain of locals declared once as an alias (local a
+        = b, never assigned again) names, else base itself."""
+        for _ in range(16):
+            if type(base) is not _Binding or base.kind != 'local':
+                return base
+            defs = self.defs.get(base, ())
+            if len(defs) != 1 or defs[0] is _OPAQUE or defs[0].kind != 'name' \
+                    or defs[0].binding is None:
+                return base
+            base = defs[0].binding
+        return base
 
     def objects(self, base, depth=0):
         """The object origins a table reference may hold, or None when its
@@ -3971,6 +3992,7 @@ class _UnitFlow:
                 if index < len(stmt.exprs):
                     value = stmt.exprs[index]
                     self.define(name.binding, value)
+                    self.declared.add(value)
                     if value.kind == 'name' and value.binding is not None:
                         self.alias_of[value] = name.binding
                 elif stmt.exprs:
@@ -4163,8 +4185,32 @@ class _Unit:
 # memo, itself a function of the same bytes), so a memoized parse is the same parse;
 # nothing is read or written. Two equal files of one call get separate
 # parses (fresh), so their local names stay distinct.
+import gc
+
 _PARSE_MEMO = {}
 _PARSE_MEMO_LIMIT = 256
+
+
+def _parse_bytes(data):
+    """The uncached _parsed result of the exact bytes of one Lua file."""
+    try:
+        text = data.decode('utf-8')
+    except UnicodeDecodeError:
+        return None, {'code': 'not-utf8'}, [], None, None
+    try:
+        tokens = _lua_tokens(text)
+        body = _LuaParser(tokens).chunk()
+        resolver = _Resolver()
+        resolver.block(body, [])
+        scan, flow = _UnitScan(body, resolver.localfunctions), _UnitFlow(body)
+    except CatalogSyntaxError as error:
+        return None, {'code': error.code, 'line': error.line, 'column': error.column}, [], \
+            None, None
+    except RecursionError:
+        return None, {'code': 'nesting-too-deep'}, [], None, None
+    leads = [(token.value, token.line, token.column) for token in tokens
+             if token.kind == 'string']
+    return body, None, leads, scan, flow
 
 
 def _parsed(data, fresh=False):
@@ -4173,26 +4219,17 @@ def _parsed(data, fresh=False):
     digest = hashlib.sha256(data).digest()
     if digest in _PARSE_MEMO and not fresh:
         return _PARSE_MEMO[digest]
+    # Building one tree allocates hundreds of thousands of acyclic objects;
+    # the cyclic collector would rescan every memoized tree meanwhile. It is
+    # paused only for this build and always restored as it was. No result
+    # depends on it, and reference counting still frees memory.
+    collecting = gc.isenabled()
+    gc.disable()
     try:
-        text = data.decode('utf-8')
-    except UnicodeDecodeError:
-        result = None, {'code': 'not-utf8'}, [], None, None
-    else:
-        try:
-            tokens = _lua_tokens(text)
-            body = _LuaParser(tokens).chunk()
-            resolver = _Resolver()
-            resolver.block(body, [])
-            scan, flow = _UnitScan(body, resolver.localfunctions), _UnitFlow(body)
-        except CatalogSyntaxError as error:
-            result = None, {'code': error.code, 'line': error.line,
-                            'column': error.column}, [], None, None
-        except RecursionError:
-            result = None, {'code': 'nesting-too-deep'}, [], None, None
-        else:
-            leads = [(token.value, token.line, token.column) for token in tokens
-                     if token.kind == 'string']
-            result = body, None, leads, scan, flow
+        result = _parse_bytes(data)
+    finally:
+        if collecting:
+            gc.enable()
     while len(_PARSE_MEMO) >= _PARSE_MEMO_LIMIT:
         del _PARSE_MEMO[next(iter(_PARSE_MEMO))]
     _PARSE_MEMO[digest] = result
@@ -4279,11 +4316,13 @@ class _Linker:
 
     def objects_at(self, base, flow, stack, depth=0):
         """The object origins base holds when the value being followed was
-        passed in under stack (review fix 3): a parameter of a function
-        whose call is on the stack holds only the table that call passed
-        (recursively below it); otherwise flow.objects, every call's
-        origins, applies, which is right for a value made inside that
-        function, since every call then writes it."""
+        passed in under stack (review fixes 3 and 4): through a chain of
+        local aliases, a parameter of a function whose call is on the stack
+        holds only the table that call passed (recursively below it);
+        otherwise flow.objects, every call's origins, applies, which is right
+        for a value made inside that function, since every call then holds
+        it."""
+        base = flow.alias_root(base)
         if type(base) is _Binding and base.kind == 'param' and base.index is not None \
                 and depth <= 16:
             for position in range(len(stack) - 1, -1, -1):
@@ -4301,15 +4340,44 @@ class _Linker:
         return flow.objects(base)
 
     def field_reads(self, value, flow, stack):
-        """The reads of the field a write sets whose table shares an object
-        origin with the table written under this call stack, in the same
-        unit (review fixes 2 and 3)."""
+        """(read, stack) for each read of the field a write sets whose table
+        shares an object origin with the table written under this call
+        stack, in the same unit (review fixes 2 to 4). A read through a
+        parameter of a local function (directly or through local aliases)
+        matches per call: it continues only under each call whose argument
+        holds the written table, so its function returns the value only to
+        that call."""
         name, base = flow.field_bases[value]
         written = self.objects_at(base, flow, stack)
         if not written:
             return []
-        return [read for read, read_base in flow.field_reads.get(name, ())
-                if (flow.objects(read_base) or frozenset()) & written]
+        out = []
+        for read, read_base in flow.field_reads.get(name, ()):
+            root = flow.alias_root(read_base)
+            if type(root) is _Binding and root.kind == 'param' and root.index is not None \
+                    and not flow.defs.get(root):
+                if root in written:
+                    # Written through the same parameter: the same invocation.
+                    out.append((read, stack))
+                func = root.owner
+                calls = list(flow.direct_calls.get(func, ())) \
+                    + list(flow.pcall_calls.get(func, ()))
+                for call in calls:
+                    args = flow.call_arguments(func, call)
+                    if root.index < len(args) \
+                            and (self.argument_objects(args[root.index], flow) & written):
+                        out.append((read, (call,)))
+            elif (flow.objects(read_base) or frozenset()) & written:
+                out.append((read, ()))
+        return out
+
+    def argument_objects(self, arg, flow):
+        """The object origins an argument expression passes."""
+        if arg.kind == 'table':
+            return frozenset((arg,))
+        if arg.kind == 'name' and arg.binding is not None:
+            return flow.objects(arg.binding) or frozenset()
+        return frozenset()
 
     def successors(self, key, flow, stack):
         """(key, flow, call stack) successors. A value enters a local
@@ -4319,7 +4387,8 @@ class _Linker:
         if type(key) is tuple:
             tag = key[0]
             if tag == 'fwrite':
-                return [(read, flow, ()) for read in self.field_reads(key[1], flow, stack)]
+                return [(read, flow, next_stack)
+                        for read, next_stack in self.field_reads(key[1], flow, stack)]
             if tag == 'pret':
                 return [(call, unit.flow, ()) for unit in self.units
                         for call in unit.flow.path_calls.get(key[1], ())]
@@ -4383,15 +4452,19 @@ class _Linker:
     def output_ok(self, node, flow, stack=()):
         """A candidate output is a real one only on a client receiver: the
         never-assigned global print, or a SetText/AddLine/AddMessage method
-        whose receiver client_object proves (review fixes 2 and 3). A
-        parameter receiver is checked against the argument of the call on
-        the value's own stack when there is one. A local table with its own
-        SetText is never an output."""
+        whose receiver client_object proves (review fixes 2 to 4) and whose
+        method no loaded source replaces on that receiver (method_overridden).
+        A parameter receiver, or a receiver field read through a parameter,
+        is checked against the argument of the call on the value's own stack
+        when there is one. A local table with its own SetText is never an
+        output."""
         receiver = flow.sinks[node]
         if receiver is None:
             return node.func.value not in self.global_writes
         while receiver.kind == 'paren':
             receiver = receiver.expr
+        if self.method_overridden(node.name, receiver, flow, stack):
+            return False
         binding = receiver.binding if receiver.kind == 'name' else None
         if binding is not None and binding.kind == 'param' and binding.index is not None \
                 and not flow.defs.get(binding):
@@ -4400,22 +4473,95 @@ class _Linker:
                 if args is not None:
                     return binding.index < len(args) \
                         and self.client_value(args[binding.index], flow, 1)
-        return self.client_object(receiver, flow)
+        return self.client_object(receiver, flow, 0, stack)
 
-    def client_object(self, expr, flow, depth=0):
+    # -- output method replacement (review fix 4) ----------------------------
+
+    def identity(self, base, flow, stack):
+        """A broad identity of the object a binding may hold, used only to
+        refuse outputs: its object origins under stack, plus a token per
+        field it is read from (local a = x.F), so that any alias of a widget
+        read from a field shares that field's token."""
+        tokens = set(self.objects_at(base, flow, stack) or ())
+        root = flow.alias_root(base)
+        tokens.add(root)
+        defs = flow.defs.get(root, ()) if type(root) is _Binding else ()
+        for value in defs:
+            if value is not _OPAQUE and value.kind == 'index' and value.key.kind == 'string':
+                tokens.add(('field-value', value.key.value))
+        if type(root) is _Binding and root.kind == 'param':
+            for call in list(flow.direct_calls.get(root.owner, ())) \
+                    + list(flow.pcall_calls.get(root.owner, ())):
+                args = flow.call_arguments(root.owner, call)
+                if root.index is not None and root.index < len(args):
+                    arg = args[root.index]
+                    if arg.kind == 'index' and arg.key.kind == 'string':
+                        tokens.add(('field-value', arg.key.value))
+        return frozenset(tokens)
+
+    def receiver_identity(self, receiver, flow, stack):
+        """The broad identity of an output receiver, or None when unknown."""
+        if receiver.kind == 'name' and receiver.binding is None:
+            return frozenset((('global', receiver.value),))
+        if receiver.kind == 'name':
+            return self.identity(receiver.binding, flow, stack)
+        if receiver.kind == 'index' and receiver.key.kind == 'string' \
+                and receiver.key.value is not None:
+            tokens = {('field-value', receiver.key.value)}
+            for value in self.field_defs_values(receiver.key.value):
+                if value is not _OPAQUE and value.kind == 'name' and value.binding is not None:
+                    tokens |= self.identity(value.binding, self.write_flow(value), ())
+            return frozenset(tokens)
+        return None
+
+    def method_overridden(self, method, receiver, flow, stack):
+        """True when the loaded source may replace this output method on this
+        receiver: a write of field method on an untracked table, or on a
+        tracked object whose broad identity meets the receiver's. A write
+        on a table constructor (or a local holding only one) replaces a plain
+        Lua table's field, never a client object's, and is ignored."""
+        wanted = self.receiver_identity(receiver, flow, stack)
+        for value, other in self.field_defs(method):
+            base = other.field_bases[value][1] if value is not _OPAQUE else None
+            if base is None:
+                return True
+            if type(base) is not _Binding:
+                continue
+            root = other.alias_root(base)
+            defs = other.defs.get(root, ())
+            if root.kind == 'local' and len(defs) == 1 and defs[0] is not _OPAQUE \
+                    and defs[0].kind == 'table':
+                continue
+            if wanted is None or (self.identity(base, other, ()) & wanted):
+                return True
+        return False
+
+    def field_defs_values(self, name):
+        return [value for value, _ in self.field_defs(name)]
+
+    def write_flow(self, value):
+        """The unit flow a field-write value belongs to."""
+        for unit in self.units:
+            if value in unit.flow.field_bases:
+                return unit.flow
+        return None
+
+    def client_object(self, expr, flow, depth=0, stack=()):
         """True when expr can only hold a client object, proved from an
         evidenced root (review fix 3): a _CLIENT_GLOBALS name the loaded
-        source never assigns; a local whose every definition is one; a
-        parameter of a local function whose every use is a resolved call or
-        pcall, each passing one; a field of a tracked table whose every
-        write on that object (and every write of the field on an untracked
-        table) is one; or a widget client_value proves. Any other receiver,
-        such as an unknown global or an empty local table, proves nothing."""
+        source never assigns; a local whose every definition is one (a nil
+        given by its own declaration is neutral, a later nil assignment is
+        not: review fix 4); a parameter of a local function whose every use
+        is a resolved call or pcall, each passing one; a field of a table
+        resolved under the value's call stack whose every write on that
+        object (and every write of the field on an untracked table) is one;
+        or a widget client_value proves. Any other receiver, such as an
+        unknown global or an empty local table, proves nothing."""
         if depth > 16:
             return False
         while expr.kind == 'paren':
             expr = expr.expr
-        memo = id(expr)
+        memo = (id(expr), stack)
         if memo in self.receiver_memo:
             return self.receiver_memo[memo]
         self.receiver_memo[memo] = False    # a receiver cycle proves nothing
@@ -4423,19 +4569,16 @@ class _Linker:
         if expr.kind == 'name' and expr.binding is None:
             result = expr.value in _CLIENT_GLOBALS and expr.value not in self.global_writes
         elif expr.kind == 'name' and expr.binding.kind == 'local':
-            # An explicit nil definition cannot stand in for a receiver (a
-            # method call on nil raises); every other definition must be a
-            # client object, and at least one must exist.
             defs = [value for value in flow.defs.get(expr.binding, ())
                     if not (value is not _OPAQUE and value.kind == 'constant'
-                            and value.value == 'nil')]
+                            and value.value == 'nil' and value in flow.declared)]
             result = bool(defs) and all(value is not _OPAQUE
                                         and self.client_value(value, flow, depth)
                                         for value in defs)
         elif expr.kind == 'name' and expr.binding.kind == 'param':
             result = self.client_param(expr.binding, flow, depth)
         elif expr.kind == 'index' and expr.key.kind == 'string' and expr.key.value is not None:
-            result = self.client_field(expr, flow, depth)
+            result = self.client_field(expr, flow, depth, stack)
         elif expr.kind in ('call', 'method'):
             result = self.client_value(expr, flow, depth)
         self.receiver_memo[memo] = result
@@ -4455,13 +4598,14 @@ class _Linker:
                 return False
         return True
 
-    def client_field(self, expr, flow, depth):
-        """A receiver field X.F: X must be a tracked table, at least one write
-        of F must be on an object X may hold, and every such write, every
-        write of F on an untracked table here and every write of F in
-        another file on an untracked table must be a client object."""
+    def client_field(self, expr, flow, depth, stack=()):
+        """A receiver field X.F: X must be a tracked table, resolved under the
+        value's call stack (review fix 4), at least one write of F must be on
+        an object X may hold, and every such write, every write of F on an
+        untracked table here and every write of F in another file on an
+        untracked table must be a client object."""
         name = expr.key.value
-        held = flow.objects(expr.obj.binding) if expr.obj.kind == 'name' \
+        held = self.objects_at(expr.obj.binding, flow, stack) if expr.obj.kind == 'name' \
             and expr.obj.binding is not None else None
         if not held:
             return False
