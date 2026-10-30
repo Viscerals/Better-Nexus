@@ -9,6 +9,14 @@
 -- never turns a runtime outcome into "success": every label below maps one
 -- recorded state or one recorded selection kind, and anything else is stated
 -- as unknown.
+--
+-- Localization (full UI, issues #143-#148): every label here stays the exact
+-- English it was, because the copied report (M.Report) keeps its English
+-- bytes and other views read these tables. A code-owned label also carries
+-- the stable key of its meaning (textKey, detailKey, labelKey and the *_KEYS
+-- tables); the Orb window (ui/OrbPanel.lua) resolves those keys through
+-- Nexus.Localization at display time. This module never calls the seam and
+-- never reads a translated text back.
 
 Nexus = Nexus or {}
 local M = {}
@@ -20,6 +28,11 @@ Nexus.OrbHistory = M
 M.QUALITY_NAMES = {
     [0] = "Common", [1] = "Uncommon", [2] = "Rare",
     [3] = "Epic", [4] = "Legendary",
+}
+M.QUALITY_KEYS = {
+    [0] = "orb.value.quality_common", [1] = "orb.value.quality_uncommon",
+    [2] = "orb.value.quality_rare", [3] = "orb.value.quality_epic",
+    [4] = "orb.value.quality_legendary",
 }
 M.QUALITY_COLORS = {
     [0] = { 1, 1, 1 },
@@ -34,6 +47,13 @@ local UNKNOWN_COLOR = { 0.68, 0.68, 0.70 }
 -- that claims a replacement happened. `status` is the same state's kind in
 -- the shared status vocabulary (Readout.StatusParts, issue #163), whose word
 -- is this label; it adds no state.
+-- The status kind of a result names its label's meaning (one label per kind).
+M.RESULT_KEYS = {
+    confirmed = "orb.value.result_confirmed", awaiting = "orb.value.result_awaiting",
+    choice = "orb.value.result_choice", requested = "orb.value.result_requested",
+    unconfirmed = "orb.value.result_unconfirmed",
+    spendUnconfirmed = "orb.value.result_spend_unconfirmed", paused = "orb.value.result_paused",
+}
 local RESULTS = {
     ["confirmed"] = { label = "Confirmed", confirmed = true, status = "confirmed" },
     ["selected"] = { label = "Awaiting result", pending = true, status = "awaiting" },
@@ -60,10 +80,12 @@ local FALLBACK_DETAIL =
 -- produced from a recorded manual selection, so it cannot appear for a policy
 -- decision.
 local REASONS = {
-    ["TARGET"] = { label = "Missing Wishlist target" },
-    ["RECYCLE"] = { label = "Reusable fallback", detail = FALLBACK_DETAIL },
-    ["FALLBACK"] = { label = "Reusable fallback", detail = FALLBACK_DETAIL },
-    ["MANUAL"] = { label = "Manual choice" },
+    ["TARGET"] = { label = "Missing Wishlist target", textKey = "orb.value.reason_missing_target" },
+    ["RECYCLE"] = { label = "Reusable fallback", detail = FALLBACK_DETAIL,
+        textKey = "orb.value.reason_fallback", detailKey = "orb.tooltip.reason_fallback_detail" },
+    ["FALLBACK"] = { label = "Reusable fallback", detail = FALLBACK_DETAIL,
+        textKey = "orb.value.reason_fallback", detailKey = "orb.tooltip.reason_fallback_detail" },
+    ["MANUAL"] = { label = "Manual choice", textKey = "orb.value.reason_manual" },
 }
 M.REASONS = REASONS
 
@@ -82,6 +104,20 @@ local RUN_STATES = {
     FINISHED = "Finished - Orb limit reached",
 }
 M.RUN_STATES = RUN_STATES
+-- The meaning of each RUN_STATES label (the header's state sentence).
+M.RUN_STATE_KEYS = {
+    IDLE = "orb.status.history_state_idle", READY = "orb.status.history_state_ready",
+    WAIT_WORLD = "orb.status.history_state_wait_world",
+    WAIT_OFFER = "orb.status.history_state_wait_offer",
+    WAIT_RESULT = "orb.status.history_state_wait_result",
+    PAUSED = "orb.status.history_state_paused", STOPPED = "orb.status.history_state_stopped",
+    COMPLETE = "orb.status.history_state_complete",
+    ROLLED_COMPLETE = "orb.status.history_state_rolled_complete",
+    LIMIT = "orb.status.history_state_limit", OUT_OF_ORBS = "orb.status.history_state_out_of_orbs",
+    NO_SOURCES = "orb.status.history_state_no_sources",
+    RECOVERY = "orb.status.history_state_recovery",
+    FINISHED = "orb.status.history_state_finished",
+}
 
 M.SESSION_NOTE = "History clears on reload or logout."
 -- For an unresolved action restored after a reload: its saved record is kept,
@@ -159,10 +195,10 @@ function M.Rarity(quality)
     local label = q and M.QUALITY_NAMES[q]
     if not label then
         return { label = "Unknown quality", color = UNKNOWN_COLOR,
-            known = false, quality = q }
+            known = false, quality = q, labelKey = "orb.value.quality_unknown" }
     end
     return { label = label, color = M.QUALITY_COLORS[q], known = true,
-        quality = q }
+        quality = q, labelKey = M.QUALITY_KEYS[q] }
 end
 
 -- A recorded key is "<spellId>:<quality>". It is the identity the runtime
@@ -200,7 +236,8 @@ function M.Echo(key, entry, resolve)
     local spellId, quality = M.Identity(key)
     if not spellId then
         return { known = false, label = "Not recorded", full = "Not recorded",
-            text = "Not recorded", rarity = M.Rarity(nil), recorded = false }
+            text = "Not recorded", rarity = M.Rarity(nil), recorded = false,
+            textKey = "orb.value.echo_not_recorded" }
     end
     local label, icon = recordedName(entry, key, spellId), nil
     local source = label and "recorded" or nil
@@ -217,6 +254,11 @@ function M.Echo(key, entry, resolve)
         known = true, recorded = true, spellId = spellId, key = key,
         label = display(name, NAME_BYTES), full = display(name),
         text = (name:gsub("%c", " ")),
+        -- An unresolved name is the code-owned "Unknown Echo (<id>)" wording;
+        -- unknownId lets a display say it in the active language. fullName is
+        -- the complete escaped name without any marker a caller appends to
+        -- full (Rows adds " (proposed)").
+        unknownId = not label and spellId or nil, fullName = display(name),
         resolved = label ~= nil, labelSource = source or "unresolved",
         icon = icon, rarity = M.Rarity(quality),
     }
@@ -252,28 +294,35 @@ M.Result = resultOf
 -- runtime revision persists an explicit send receipt.
 function M.Timeline(entry)
     if type(entry) ~= "table" then return {} end
-    local stages = {{kind = "stored", text = "Operation recorded on this client."}}
+    local stages = {{kind = "stored", text = "Operation recorded on this client.",
+        textKey = "orb.body.timeline_stored"}}
     if entry.sourceKey then
         stages[#stages + 1] = {kind = "requested",
-            text = "Orb request prepared; a send receipt is not recorded."}
+            text = "Orb request prepared; a send receipt is not recorded.",
+            textKey = "orb.body.timeline_requested"}
     end
     if type(entry.offered) == "table" and #entry.offered > 0 then
-        stages[#stages + 1] = {kind = "choice", text = "Actual Orb offer observed."}
+        stages[#stages + 1] = {kind = "choice", text = "Actual Orb offer observed.",
+            textKey = "orb.body.timeline_offer"}
     end
     if entry.selectedKey then
         stages[#stages + 1] = {kind = "unconfirmed",
-            text = "Choice proposed; submission and result are not confirmed by this stage."}
+            text = "Choice proposed; submission and result are not confirmed by this stage.",
+            textKey = "orb.body.timeline_choice_proposed"}
     end
     local result = resultOf(entry)
     if result.confirmed then
         stages[#stages + 1] = {kind = "confirmed",
-            text = "Replacement confirmed from the recorded result."}
+            text = "Replacement confirmed from the recorded result.",
+            textKey = "orb.body.timeline_confirmed"}
     elseif entry.state == "not sent" then
         stages[#stages + 1] = {kind = "spendUnconfirmed",
-            text = "Spend not confirmed from this record; a host call may have occurred."}
+            text = "Spend not confirmed from this record; a host call may have occurred.",
+            textKey = "orb.body.timeline_spend_unconfirmed"}
     else
         stages[#stages + 1] = {kind = "unconfirmed",
-            text = "Result not confirmed; the current outcome remains unconfirmed."}
+            text = "Result not confirmed; the current outcome remains unconfirmed.",
+            textKey = "orb.body.timeline_unconfirmed"}
     end
     return stages
 end
@@ -283,7 +332,7 @@ local function reasonOf(entry)
     local mapped = kind and REASONS[tostring(kind):upper()]
     if mapped then
         return { label = mapped.label, full = mapped.label, detail = mapped.detail,
-            recorded = entry.selectionReason }
+            recorded = entry.selectionReason, textKey = mapped.textKey, detailKey = mapped.detailKey }
     end
     -- A recorded reason with no recognised kind is shown as it was recorded,
     -- never re-worded into one of the mapped labels: bounded in its cell,
@@ -293,7 +342,8 @@ local function reasonOf(entry)
             full = display(entry.selectionReason),
             recorded = entry.selectionReason, verbatim = true }
     end
-    return { label = "Reason unavailable", full = "Reason unavailable" }
+    return { label = "Reason unavailable", full = "Reason unavailable",
+        textKey = "orb.value.reason_unavailable" }
 end
 M.Reason = reasonOf
 
@@ -317,7 +367,8 @@ function M.Rows(view, resolve)
             local label = result.refused and "No replacement" or "Not recorded"
             replacement = { known = false, recorded = false,
                 label = label, full = label, text = label,
-                rarity = M.Rarity(nil) }
+                rarity = M.Rarity(nil),
+                textKey = result.refused and "orb.value.echo_no_replacement" or "orb.value.echo_not_recorded" }
         end
         rows[#rows + 1] = {
             ordinal = entry.ordinal, serial = entry.serial,
