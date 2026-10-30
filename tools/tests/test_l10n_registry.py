@@ -20,6 +20,13 @@ RELEASE_LANGUAGES.json through pack_provenance_diagnostics: the real UNKNOWN
 records are technically valid with support held, while malformed and stale
 variants of the real bytes are refused.
 
+S8 adds the required-CI static consumer binding of the current repository
+through consumer_binding_report: the real registry inputs, both TOCs and every
+Lua file they load bind all 28 declared keys (23 direct, 5 mapped) with no
+problem, and in-memory mutants of the real bytes (a removed last consumer
+with fakes retained, a broken map chain, a wrong method kind, a TOC or
+source omission, hash drift and path collisions) fail the same gate.
+
 Synthetic offline evidence only: no Lua runs, and this is not fluent, human
 or native evidence. Python 3.9+, standard library only. Registered in
 PYTHON_TESTS of tools/run_prototype_tests.py.
@@ -1618,6 +1625,635 @@ class ProvenanceCommandLineTests(unittest.TestCase):
                     self.assertEqual(self.run_cli("--root", root, *args).returncode, 0)
             after = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
             self.assertEqual(after, before)
+
+
+# S8 (Refs #147): static consumer binding. The gate reads the real registry
+# inputs, both TOCs and every Lua file they load; every mutant below is an
+# in-memory edit of those real bytes and is never written to the checkout.
+CONSUMER_TOCS = ("Nexus.toc", "companion/NexusSupport/NexusSupport.toc")
+MAPPED_KEYS = CURRENT_KEYS[:5]
+DIRECT_KEYS = CURRENT_KEYS[5:]
+HUD_FAMILY = "Main panel (HUD)"
+DISPATCHER = "Nexus.UserText.Message"
+EXPECTED_CONSUMER_CODES = (
+    "consumer-input-structure", "consumer-path", "consumer-duplicate-path",
+    "consumer-hash-mismatch", "consumer-length-mismatch", "consumer-toc-required",
+    "consumer-toc-not-utf8", "consumer-toc-entry", "consumer-toc-duplicate",
+    "consumer-source-missing", "consumer-source-unlisted", "consumer-registry-unloaded",
+    "consumer-registry-order", "consumer-registry-conflict",
+)
+EXPECTED_BINDING_PROBLEM_CODES = (
+    "binding-unparsed", "binding-unbound", "binding-orphan", "binding-kind",
+    "binding-unresolved", "binding-mutation",
+)
+PANEL, READOUT, USER_TEXT = "ui/Panel.lua", "ui/Readout.lua", "core/UserText.lua"
+PROGRESS_CALL = b'progressLabel:SetText((Nexus.Localization.Text("panel.heading.progress")))'
+# The progress label loses its only consumer. A long comment, a string
+# holding the call text, an unrelated object with a Text method, a local
+# Nexus with a Text method, a Has query, a data table and a closing short
+# comment keep the key literal on the same line, so no line number moves.
+PROGRESS_FAKE_CODE = (
+    b'progressLabel:SetText("Progress")'
+    b' --[[ Nexus.Localization.Text("panel.heading.progress") ]]'
+    b' local fakeCall = \'Nexus.Localization.Text("panel.heading.progress")\''
+    b' local Other = {Text = tostring}; Other.Text("panel.heading.progress")'
+    b' do local Nexus = {Localization = {Text = tostring}}; Nexus.Localization.Text("panel.heading.progress") end'
+    b' local known = Nexus.Localization.Has("panel.heading.progress")'
+    b' local data = {["panel.heading.progress"] = "Progress"}')
+PROGRESS_FAKE_COMMENT = b' -- Nexus.Localization.Text("panel.heading.progress")'
+PROGRESS_FAKES = PROGRESS_FAKE_CODE + PROGRESS_FAKE_COMMENT
+
+
+def edit(data, old, new):
+    """data with its one occurrence of old replaced by new. The match runs on
+    the LF form of data, and the result keeps the line breaks of data (LF or
+    CRLF), so one edit serves both representations."""
+    lf = data.replace(b"\r\n", b"\n")
+    crlf = lf != data
+    if crlf and b"\n" in data.replace(b"\r\n", b""):
+        raise AssertionError("mixed line breaks")
+    result = replace_once(lf, old, new)
+    return result.replace(b"\n", b"\r\n") if crlf else result
+
+
+def toc_listing(toc, data):
+    """Independent oracle: the Lua paths one TOC loads, in order."""
+    base = toc.rpartition("/")[0]
+    paths = []
+    for line in data.decode("utf-8", "replace").splitlines():
+        entry = line.strip()
+        if entry and not entry.startswith("#"):
+            paths.append((base + "/" if base else "") + entry.replace("\\", "/"))
+    return paths
+
+
+def current_files():
+    """The exact physical bytes of the five registry inputs, both TOCs and
+    every Lua file the TOCs load, keyed by repository path."""
+    files = {path: (ROOT / path).read_bytes() for path in INPUTS + CONSUMER_TOCS}
+    for toc in CONSUMER_TOCS:
+        for path in toc_listing(toc, files[toc]):
+            files[path] = (ROOT / path).read_bytes()
+    return files
+
+
+def record(path, data):
+    return {"path": path, "sha256": hashlib.sha256(data).hexdigest(),
+            "byteLength": len(data), "data": data}
+
+
+def binding_args(files, omit=(), extra=()):
+    """The seven arguments of consumer_binding_report for files: the five
+    registry inputs, a record per TOC and a record per loaded Lua file
+    (except omit, plus the extra (path, bytes) records)."""
+    tocs = [record(path, files[path]) for path in CONSUMER_TOCS if path in files]
+    sources = [record(path, files[path]) for toc in CONSUMER_TOCS if toc in files
+               for path in toc_listing(toc, files[toc]) if path in files and path not in omit]
+    sources += [record(path, data) for path, data in extra]
+    return [files[path] for path in INPUTS] + [tocs, sources]
+
+
+def with_file(files, path, data):
+    changed = dict(files)
+    changed[path] = data
+    return changed
+
+
+def assert_current_bindings(test, catalog, args):
+    """The registered current-source binding gate over the receipt of args."""
+    return assert_binding_receipt(test, catalog.consumer_binding_report(*args))
+
+
+def assert_binding_receipt(test, receipt):
+    """The gate itself: every declared key has a genuine static consumer of
+    the expected class, nothing is unresolved, orphaned or mismatched, the
+    mapped reasons reach their exported dispatcher, and family declarations
+    stay apart from binding."""
+    test.assertEqual(receipt["problems"], [])
+    test.assertIs(receipt["valid"], True)
+    rows = {row["key"]: row for row in receipt["keys"]}
+    test.assertEqual([row["key"] for row in receipt["keys"]], list(CURRENT_KEYS))
+    expected = dict.fromkeys(MAPPED_KEYS, "MAPPED_TO_CONSUMER")
+    expected.update(dict.fromkeys(DIRECT_KEYS, "DIRECT_LITERAL_CONSUMER"))
+    test.assertEqual({key: row["binding"] for key, row in rows.items()}, expected)
+    test.assertEqual((receipt["counts"]["DIRECT_LITERAL_CONSUMER"],
+                      receipt["counts"]["MAPPED_TO_CONSUMER"], receipt["counts"]["UNBOUND"]),
+                     (23, 5, 0))
+    for key in DIRECT_KEYS:
+        test.assertTrue({site["site"] for site in rows[key]["sites"]}
+                        & {"direct-call", "wrapper-call"}, key)
+        test.assertEqual(rows[key]["family"]["state"], "DECLARED")
+        test.assertEqual([family["name"] for family in rows[key]["family"]["families"]],
+                         [HUD_FAMILY])
+    for key in MAPPED_KEYS:
+        test.assertEqual({site["site"] for site in rows[key]["sites"]}, {"map-value"})
+        test.assertEqual(rows[key]["family"], {
+            "state": "UNCLASSIFIED", "families": [],
+            "familySurface": ("PENDING: shared reason text; the families and surfaces "
+                              "that show it are not classified")})
+    test.assertEqual(len(receipt["mapChains"]), 1)
+    chain = receipt["mapChains"][0]
+    test.assertEqual((chain["wrapper"]["name"], chain["wrapper"]["method"],
+                      chain["dispatcher"]), ("LocalizedReason", "Text", DISPATCHER))
+    test.assertTrue(chain["externalCallers"])
+    test.assertEqual(sorted(chain["boundKeys"]), sorted(MAPPED_KEYS))
+    return receipt
+
+
+class ConsumerBindingTests(unittest.TestCase):
+    """S8: the registered current-repository static consumer binding gate
+    and its negative controls on in-memory edits of the real bytes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = load_catalog()
+        cls.files = current_files()
+        cls.report = staticmethod(cls.catalog.consumer_binding_report)
+
+    def receipt(self, files, **options):
+        return self.report(*binding_args(files, **options))
+
+    def refuse(self, args, code):
+        with self.assertRaises(self.catalog.CatalogConsumerError) as raised:
+            self.report(*args)
+        self.assertEqual(raised.exception.code, code)
+        return raised.exception
+
+    def gate_fails(self, files, **options):
+        """The receipt of files, after the same gate failed on it."""
+        receipt = self.receipt(files, **options)
+        with self.assertRaises(AssertionError):
+            assert_binding_receipt(self, receipt)
+        return receipt
+
+    def problems(self, receipt, code=None):
+        return [problem for problem in receipt["problems"]
+                if code is None or problem["code"] == code]
+
+    def binding(self, receipt, key):
+        return next(row for row in receipt["keys"] if row["key"] == key)
+
+    def test_c1_public_seam_codes_and_signature(self):
+        catalog = self.catalog
+        self.assertEqual(list(inspect.signature(catalog.consumer_binding_report).parameters),
+                         ["english_source", "packs_source", "key_context_json", "release_json",
+                          "localization_source", "toc_records", "source_records"])
+        self.assertEqual(catalog.CONSUMER_CODES, EXPECTED_CONSUMER_CODES)
+        self.assertEqual(catalog.BINDING_PROBLEM_CODES, EXPECTED_BINDING_PROBLEM_CODES)
+        self.assertEqual(catalog.BINDING_CLASSES,
+                         ("DIRECT_LITERAL_CONSUMER", "MAPPED_TO_CONSUMER", "UNBOUND"))
+        self.assertTrue(issubclass(catalog.CatalogConsumerError, ValueError))
+        ours = set(EXPECTED_CONSUMER_CODES) | set(EXPECTED_BINDING_PROBLEM_CODES)
+        self.assertEqual(len(ours), len(EXPECTED_CONSUMER_CODES)
+                         + len(EXPECTED_BINDING_PROBLEM_CODES))
+        for codes in (catalog.CODES, catalog.VALIDATION_CODES, catalog.EVIDENCE_CODES,
+                      catalog.REGISTRY_CODES, catalog.CLI_CODES, catalog.DIAGNOSTIC_CODES,
+                      catalog.PROVENANCE_CODES):
+            self.assertFalse(set(codes) & ours)
+        # The earlier seams keep their exact signatures.
+        five = ["english_source", "packs_source", "key_context_json", "release_json",
+                "localization_source"]
+        for name in ("validate_registry_catalog_data", "registry_catalog_report",
+                     "registry_catalog_diagnostics", "pack_provenance_diagnostics"):
+            self.assertEqual(list(inspect.signature(getattr(catalog, name)).parameters), five)
+        for name in ("validate_catalog_data", "catalog_report"):
+            self.assertEqual(list(inspect.signature(getattr(catalog, name)).parameters),
+                             five[:4])
+
+    def test_c2_registered_gate_binds_the_current_repository(self):
+        args = binding_args(self.files)
+        receipt = assert_current_bindings(self, self.catalog, args)
+        # The gate ran on the real repository input set, not a fixture.
+        self.assertEqual(len(args[6]), 100)
+        self.assertEqual([row["path"] for row in receipt["tocs"]], list(CONSUMER_TOCS))
+        self.assertEqual([row["path"] for row in receipt["sources"]],
+                         [path for toc in CONSUMER_TOCS
+                          for path in toc_listing(toc, self.files[toc])])
+        for row in receipt["tocs"] + receipt["sources"]:
+            data = self.files[row["path"]]
+            self.assertEqual((row["sha256"], row["byteLength"]),
+                             (hashlib.sha256(data).hexdigest(), len(data)))
+        self.assertEqual({row["analysis"] for row in receipt["sources"]}, {"PARSED"})
+        self.assertEqual([row["source"] for row in receipt["inputs"]], list(INPUTS))
+        roles = {row["path"]: row["role"] for row in receipt["sources"]}
+        self.assertEqual((roles["core/Localization.lua"], roles["data/LocalizationEnglish.lua"],
+                          roles["data/LocalizationPacks.lua"], roles[PANEL]),
+                         ("provider", "catalog-data", "catalog-data", "scanned"))
+        self.assertEqual(roles["companion/NexusSupport/Storage.lua"], "scanned")
+        rows = {row["key"]: row for row in receipt["keys"]}
+        # Format stays Format and Text stays Text; Options also uses Resolve.
+        self.assertEqual({site["method"] for site in rows[CHARGE]["sites"]}, {"Format"})
+        self.assertEqual({site["method"] for site in rows["panel.button.options"]["sites"]},
+                         {"Text", "Resolve"})
+        self.assertEqual({site["path"] for site in rows[CHARGE]["sites"]}, {READOUT})
+        for key in MAPPED_KEYS:
+            self.assertEqual({site["path"] for site in rows[key]["sites"]}, {USER_TEXT})
+        # The secondary Hub menu wrapper is bound separately from the direct calls.
+        draft = rows["panel.tooltip.create_wishlist_draft"]["sites"]
+        self.assertEqual(sorted(site["site"] for site in draft), ["direct-call", "wrapper-call"])
+        self.assertEqual(receipt["counts"]["keys"], 28)
+        self.assertEqual(receipt["completeness"]["established"], False)
+        for family in self.catalog.validate_registry_catalog_data(
+                *args[:5])["keyContext"]["windowFamilies"]:
+            self.assertEqual(family["coverageStatus"], "PENDING")
+
+    def test_c3_last_genuine_direct_consumer_removed_with_fakes_retained(self):
+        key = "panel.heading.progress"
+        panel = edit(self.files[PANEL], PROGRESS_CALL, PROGRESS_FAKES)
+        self.assertEqual(panel.count(key.encode()), self.files[PANEL].count(key.encode()) + 6)
+        receipt = self.gate_fails(with_file(self.files, PANEL, panel))
+        self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+        self.assertEqual(self.binding(receipt, key)["sites"], [])
+        self.assertEqual([(problem["code"], problem["key"]) for problem in receipt["problems"]],
+                         [("binding-unbound", key)])
+        # The fakes are seen as literal leads but never bind.
+        leads = self.binding(receipt, key)["excludedLiteralLeads"]
+        self.assertEqual(leads["byPath"][PANEL], 4)
+        self.assertEqual(receipt["counts"]["DIRECT_LITERAL_CONSUMER"], 22)
+        # The declaration and English data still hold the key.
+        self.assertIn(key.encode(), self.files["data/LocalizationEnglish.lua"])
+        self.assertIn(key.encode(), self.files["core/Localization.lua"])
+
+    def test_c3_a_retained_secondary_consumer_still_binds_until_the_last_is_removed(self):
+        key, panel = "panel.heading.still_needed", self.files[PANEL]
+        first = b'\n    needLabel:SetText((Nexus.Localization.Text("panel.heading.still_needed")))\n'
+        second = b'\n        needLabel:SetText((Nexus.Localization.Text("panel.heading.still_needed")))\n'
+        one = edit(panel, first, b'\n    needLabel:SetText("Still needed")\n')
+        receipt = assert_current_bindings(self, self.catalog,
+                                          binding_args(with_file(self.files, PANEL, one)))
+        self.assertEqual(len(self.binding(receipt, key)["sites"]), 1)
+        both = edit(one, second, b'\n        needLabel:SetText("Still needed")\n')
+        receipt = self.gate_fails(with_file(self.files, PANEL, both))
+        self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+        # A key whose direct call goes keeps its Hub menu wrapper consumer ...
+        key = "panel.tooltip.create_wishlist_draft"
+        direct = (b'GameTooltip:AddLine(Nexus.Localization.Text("panel.tooltip.create_wishlist_draft"),'
+                  b' 0.75, 0.75, 0.75, true)')
+        no_direct = edit(panel, direct, b'GameTooltip:AddLine("draft", 0.75, 0.75, 0.75, true)')
+        receipt = assert_current_bindings(self, self.catalog,
+                                          binding_args(with_file(self.files, PANEL, no_direct)))
+        self.assertEqual([site["site"] for site in self.binding(receipt, key)["sites"]],
+                         ["wrapper-call"])
+        # ... until the wrapper no longer calls the localization seam.
+        wrapper = (b'local function Text(key) return L and type(L.Text) == "function"'
+                   b' and (L.Text(key)) or nil end')
+        broken = edit(no_direct, wrapper, wrapper.replace(b"(L.Text(key))", b"(M.Text(key))"))
+        receipt = self.gate_fails(with_file(self.files, PANEL, broken))
+        self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+
+    def test_c4_mapped_chain_breaks_fail_the_gate(self):
+        user = self.files[USER_TEXT]
+        dispatch = b"if localizedReasons[s] then return LocalizedReason(localizedReasons[s],s) end"
+        alias = b"local function LocalizedReason(key,code)\n    local localization=Nexus.Localization\n"
+        variants = {
+            "dispatch argument": (USER_TEXT, edit(user, dispatch, dispatch.replace(
+                b"LocalizedReason(localizedReasons[s],s)", b"LocalizedReason(s,s)"))),
+            "wrapper receiver": (USER_TEXT, edit(user, alias, alias.replace(
+                b"=Nexus.Localization", b"=Nexus.Other"))),
+            "wrong Text object": (USER_TEXT, edit(user, b"local text,source=localization.Text(key)",
+                                                  b"local text,source=T.Text(key)")),
+            "alias reassigned": (USER_TEXT, edit(user, alias, alias + b"    localization={}\n")),
+            "wrapper reassigned": (USER_TEXT, edit(user, b"function T.Message(value)\n",
+                                                   b"LocalizedReason=nil\nfunction T.Message(value)\n")),
+            "earlier unverified return": (USER_TEXT, edit(user, dispatch,
+                                                          b'if s=="x" then return s end ' + dispatch)),
+            "dispatch variable reassigned": (USER_TEXT, edit(user, dispatch,
+                                                             b's=s:lower() ' + dispatch)),
+            "map mutated": (USER_TEXT, edit(user, dispatch,
+                                            b'localizedReasons.x="reason.list_preparing" ' + dispatch)),
+            "dispatcher disconnected": (USER_TEXT, edit(user, b"function T.Message(value)\n",
+                                                        b"function T.Unused(value)\n")),
+        }
+        receipts = {}
+        for name, (path, data) in variants.items():
+            with self.subTest(variant=name):
+                receipt = receipts[name] = self.gate_fails(with_file(self.files, path, data))
+                for key in MAPPED_KEYS:
+                    self.assertEqual(self.binding(receipt, key)["binding"], "UNBOUND")
+                self.assertEqual(receipt["counts"]["DIRECT_LITERAL_CONSUMER"], 23)
+        # An earlier reasons-table entry shadows exactly the one mapped code.
+        shadow = edit(user, b"local reasons={\n",
+                      b'local reasons={\n    ["STORE_PENDING"]="Saved data shadow",\n')
+        receipt = self.gate_fails(with_file(self.files, USER_TEXT, shadow))
+        self.assertEqual([row["key"] for row in receipt["keys"] if row["binding"] == "UNBOUND"],
+                         ["reason.saved_data_reading"])
+        self.assertEqual([(row["code"], row["key"]) for row in receipt["shadowedMapEntries"]],
+                         [("STORE_PENDING", "reason.saved_data_reading")])
+        # The unresolved constructs are named, not assumed bindings.
+        for name in ("alias reassigned", "wrapper reassigned", "earlier unverified return",
+                     "dispatch variable reassigned", "map mutated"):
+            with self.subTest(unresolved=name):
+                self.assertTrue(self.problems(receipts[name], "binding-unresolved"))
+
+    def test_c5_method_kind_mismatch_is_not_a_binding(self):
+        readout = edit(self.files[READOUT], b'localization.Format("readout.charge_counts",',
+                       b'localization.Text("readout.charge_counts",')
+        receipt = self.gate_fails(with_file(self.files, READOUT, readout))
+        self.assertEqual(self.binding(receipt, CHARGE)["binding"], "UNBOUND")
+        self.assertEqual([(problem["code"], problem["key"], problem["method"])
+                          for problem in self.problems(receipt, "binding-kind")],
+                         [("binding-kind", CHARGE, "Text")])
+        panel = edit(self.files[PANEL], PROGRESS_CALL,
+                     PROGRESS_CALL.replace(b"Localization.Text(", b"Localization.Format("))
+        receipt = self.gate_fails(with_file(self.files, PANEL, panel))
+        self.assertEqual([(problem["key"], problem["method"])
+                          for problem in self.problems(receipt, "binding-kind")],
+                         [("panel.heading.progress", "Format")])
+
+    def test_c6_toc_and_source_omission_fail(self):
+        toc = self.files["Nexus.toc"]
+        no_panel = edit(toc, b"ui\\Panel.lua\n", b"")
+        # Still supplied but no longer loaded: refused, not silently scanned.
+        unlisted = binding_args(with_file(self.files, "Nexus.toc", no_panel), extra=(
+            (PANEL, self.files[PANEL]),))
+        error = self.refuse(unlisted, "consumer-source-unlisted")
+        self.assertEqual(error.path, PANEL)
+        # Neither loaded nor supplied: the inventory shrinks and the gate fails.
+        receipt = self.gate_fails(with_file(self.files, "Nexus.toc", no_panel))
+        self.assertEqual(receipt["counts"]["UNBOUND"], 22)
+        # Loaded but not supplied: refused, never shrunk.
+        error = self.refuse(binding_args(self.files, omit=(READOUT,)), "consumer-source-missing")
+        self.assertEqual((error.path, error.subject), (READOUT, "Nexus.toc"))
+        # A non-TOC file with genuine call text cannot satisfy a consumer.
+        fake = b'local x = Nexus.Localization.Text("panel.heading.progress")\n'
+        self.refuse(binding_args(self.files, extra=(("tools/fake_consumer.lua", fake),)),
+                    "consumer-source-unlisted")
+        # The registry Lua sources must be loaded by Nexus.toc, in order.
+        no_core = edit(toc, b"core\\Localization.lua\n", b"")
+        self.refuse(binding_args(with_file(self.files, "Nexus.toc", no_core)),
+                    "consumer-registry-unloaded")
+        swapped = edit(edit(toc, b"data\\LocalizationEnglish.lua\n", b""),
+                       b"core\\Localization.lua\n",
+                       b"core\\Localization.lua\ndata\\LocalizationEnglish.lua\n")
+        self.refuse(binding_args(with_file(self.files, "Nexus.toc", swapped)),
+                    "consumer-registry-order")
+        args = binding_args(self.files)
+        args[5] = [row for row in args[5] if row["path"] != "Nexus.toc"]
+        args[6] = [row for row in args[6] if row["path"] == "companion/NexusSupport/Storage.lua"]
+        self.refuse(args, "consumer-toc-required")
+
+    def test_c7_manifest_hashes_and_paths_are_checked_against_the_bytes(self):
+        args = binding_args(self.files)
+        panel = next(row for row in args[6] if row["path"] == PANEL)
+        drifted = edit(panel["data"], b'"panel.heading.progress"', b'"panel.heading.pROGRESS"')
+        self.assertEqual(len(drifted), len(panel["data"]))
+        for field, value, code in (("data", drifted, "consumer-hash-mismatch"),
+                                   ("byteLength", panel["byteLength"] + 1,
+                                    "consumer-length-mismatch"),
+                                   ("sha256", "0" * 64, "consumer-hash-mismatch")):
+            with self.subTest(field=field):
+                changed = binding_args(self.files)
+                row = next(row for row in changed[6] if row["path"] == PANEL)
+                row[field] = value
+                self.assertEqual(self.refuse(changed, code).path, PANEL)
+        toc_row = dict(args[5][0], data=args[5][0]["data"] + b"\n")
+        self.refuse(args[:5] + [[toc_row, args[5][1]], args[6]], "consumer-hash-mismatch")
+        for extra, code in (((("UI/Panel.lua", self.files[PANEL]),), "consumer-duplicate-path"),
+                            (((PANEL, self.files[PANEL]),), "consumer-duplicate-path"),
+                            ((("../outside.lua", b""),), "consumer-path"),
+                            ((("/abs.lua", b""),), "consumer-path"),
+                            ((("C:/abs.lua", b""),), "consumer-path"),
+                            ((("ui\\Panel2.lua", b""),), "consumer-path"),
+                            ((("ui//Panel2.lua", b""),), "consumer-path"),
+                            ((("./ui/Panel2.lua", b""),), "consumer-path"),
+                            ((("ui/Panel2.txt", b""),), "consumer-path")):
+            with self.subTest(extra=extra[0][0]):
+                self.refuse(binding_args(self.files, extra=extra), code)
+        toc = self.files["Nexus.toc"]
+        for line, code in ((b"..\\outside.lua\n", "consumer-toc-entry"),
+                           (b"ui\\Panel.xml\n", "consumer-toc-entry"),
+                           (b"C:\\abs.lua\n", "consumer-toc-entry"),
+                           (b"UI\\Panel.lua\n", "consumer-toc-duplicate")):
+            with self.subTest(toc_line=line):
+                changed = with_file(self.files, "Nexus.toc", edit(toc, b"core\\Main.lua\n",
+                                                                   b"core\\Main.lua\n" + line))
+                error = self.refuse(binding_args(changed), code)
+                self.assertEqual(error.subject, "Nexus.toc")
+                self.assertIsInstance(error.line, int)
+        bad_toc = with_file(self.files, "Nexus.toc", toc + b"\xff\n")
+        self.refuse(binding_args(bad_toc), "consumer-toc-not-utf8")
+        conflict = binding_args(self.files)
+        conflict[0] = conflict[0].replace(b"\r\n", b"\n") + b"\n"
+        self.refuse(conflict, "consumer-registry-conflict")
+
+    def test_c7_input_structure_and_types(self):
+        args = binding_args(self.files)
+        for index in range(5):
+            with self.subTest(argument=index):
+                changed = list(args)
+                changed[index] = changed[index].decode("utf-8")
+                with self.assertRaises(TypeError):
+                    self.report(*changed)
+        row = args[6][0]
+        for bad in ("not a list", [dict(row, extra=1)], [{k: v for k, v in row.items()
+                                                         if k != "sha256"}],
+                    [dict(row, data=row["data"].decode("utf-8"))], [dict(row, byteLength=True)],
+                    [dict(row, sha256=row["sha256"].upper())], [None]):
+            with self.subTest(records=repr(bad)[:40]):
+                self.refuse(args[:6] + [bad], "consumer-input-structure")
+
+    def test_c8_fake_and_unrelated_consumers_never_bind(self):
+        key = "panel.heading.progress"
+        panel = edit(self.files[PANEL], PROGRESS_CALL, PROGRESS_FAKES)
+        receipt = self.receipt(with_file(self.files, PANEL, panel))
+        self.assertEqual(self.binding(receipt, key)["sites"], [])
+        self.assertFalse(self.problems(receipt, "binding-unresolved"))
+        # Unsupported forms on the real seam are explicit, never assumed.
+        for name, call, construct in (
+                ("method call", b'Nexus.Localization:Text("panel.heading.progress")',
+                 "method-call"),
+                ("indirect reference", b'local T2 = Nexus.Localization.Text',
+                 "indirect-key-method"),
+                ("method alias call",
+                 b'local T2 = Nexus.Localization.Text; T2("panel.heading.progress")',
+                 "indirect-key-method"),
+                ("rawget reference", b'local T2 = rawget(Nexus.Localization, "Text")',
+                 "indirect-key-method"),
+                ("reassigned alias",
+                 b'do local L2 = Nexus.Localization; L2 = {}; L2.Text("panel.heading.progress") end',
+                 "alias")):
+            with self.subTest(form=name):
+                changed = edit(panel, PROGRESS_FAKES,
+                               PROGRESS_FAKE_CODE + b" " + call + PROGRESS_FAKE_COMMENT)
+                receipt = self.gate_fails(with_file(self.files, PANEL, changed))
+                self.assertEqual(self.binding(receipt, key)["sites"], [])
+                self.assertEqual([problem["construct"] for problem in
+                                  self.problems(receipt, "binding-unresolved")], [construct])
+        # A supported alias of the real seam does bind.
+        alias = b' do local L2 = Nexus.Localization; L2.Text("panel.heading.progress") end'
+        changed = edit(panel, PROGRESS_FAKES, PROGRESS_FAKE_CODE + alias + PROGRESS_FAKE_COMMENT)
+        receipt = assert_current_bindings(self, self.catalog,
+                                          binding_args(with_file(self.files, PANEL, changed)))
+        self.assertEqual([site["receiver"]["form"] for site in self.binding(receipt, key)["sites"]],
+                         ["alias"])
+
+    def test_c9_orphan_references_and_seam_mutation_fail(self):
+        orphan = edit(self.files[PANEL], PROGRESS_CALL,
+                      PROGRESS_CALL + b' local o = Nexus.Localization.Text("panel.never_declared")')
+        receipt = self.gate_fails(with_file(self.files, PANEL, orphan))
+        self.assertEqual([(problem["code"], problem["key"]) for problem in receipt["problems"]],
+                         [("binding-orphan", "panel.never_declared")])
+        mapped = edit(self.files[USER_TEXT], b'    ["STORE_PENDING"]="reason.saved_data_reading",\n',
+                      b'    ["STORE_PENDING"]="reason.saved_data_reading",\n'
+                      b'    ["NEVER"]="reason.never_declared",\n')
+        receipt = self.gate_fails(with_file(self.files, USER_TEXT, mapped))
+        self.assertEqual([(problem["code"], problem["key"]) for problem in receipt["problems"]],
+                         [("binding-orphan", "reason.never_declared")])
+        for name, line in (("seam field", b' Nexus.Localization.Text = tostring'),
+                           ("seam table", b' Nexus.Localization = {}'),
+                           ("global", b' Nexus = {}')):
+            with self.subTest(mutation=name):
+                changed = edit(self.files[PANEL], PROGRESS_CALL, PROGRESS_CALL + line)
+                receipt = self.gate_fails(with_file(self.files, PANEL, changed))
+                self.assertEqual([problem["code"] for problem in receipt["problems"]],
+                                 ["binding-mutation"])
+
+    def test_c10_unparseable_loaded_source_fails(self):
+        broken = edit(self.files[READOUT], b"local M = {}\n", b"local M = {\n")
+        receipt = self.gate_fails(with_file(self.files, READOUT, broken))
+        rows = {row["path"]: row["analysis"] for row in receipt["sources"]}
+        self.assertEqual(rows[READOUT], "UNPARSED")
+        self.assertEqual([(problem["code"], problem["path"])
+                          for problem in self.problems(receipt, "binding-unparsed")],
+                         [("binding-unparsed", READOUT)])
+        self.assertEqual(self.binding(receipt, CHARGE)["binding"], "UNBOUND")
+
+    def test_c11_lf_and_crlf_bind_alike_with_exact_hashes(self):
+        receipts = {}
+        for name in ("lf", "crlf"):
+            files = {path: representations(data)[name] if path.endswith((".lua", ".toc")) else data
+                     for path, data in self.files.items()}
+            receipts[name] = assert_current_bindings(self, self.catalog, binding_args(files))
+            for row in receipts[name]["sources"]:
+                data = files[row["path"]]
+                self.assertEqual(row["sha256"], hashlib.sha256(data).hexdigest())
+        self.assertNotEqual([row["sha256"] for row in receipts["lf"]["sources"]],
+                            [row["sha256"] for row in receipts["crlf"]["sources"]])
+
+        def semantic(receipt):
+            return (receipt["keys"], receipt["mapChains"], receipt["dynamicUnknown"],
+                    receipt["counts"])
+        self.assertEqual(semantic(receipts["lf"]), semantic(receipts["crlf"]))
+
+    def test_c12_pure_deterministic_and_never_mutates_caller_inputs(self):
+        args = binding_args(self.files)
+        expected = self.report(*args)
+        mutable = [bytearray(value) for value in args[:5]]
+        tocs = [dict(row, data=bytearray(row["data"])) for row in args[5]]
+        sources = [dict(row, data=bytearray(row["data"])) for row in args[6]]
+        before = json.dumps([[bytes(value).hex() for value in mutable],
+                             [dict(row, data=bytes(row["data"]).hex()) for row in tocs + sources]])
+        self.assertEqual(self.report(*mutable, tocs, sources), expected)
+        after = json.dumps([[bytes(value).hex() for value in mutable],
+                            [dict(row, data=bytes(row["data"]).hex()) for row in tocs + sources]])
+        self.assertEqual(after, before)
+        json.dumps(expected, sort_keys=True).encode("ascii")
+        blocked = ProvenanceTests.blocked_calls()
+        try:
+            self.assertEqual(self.report(*args), expected)
+        finally:
+            blocked()
+        # The earlier seams give the same results with the binding seam present.
+        registry = args[:5]
+        self.assertEqual(self.catalog.registry_catalog_report(*registry)["registry"]
+                         ["declarationCount"], 28)
+        self.assertIs(self.catalog.registry_catalog_diagnostics(*registry)["valid"], True)
+        self.assertIs(self.catalog.pack_provenance_diagnostics(*registry)["valid"], True)
+
+    def test_c13_binding_stays_apart_from_family_status_and_dynamic_leads(self):
+        receipt = assert_current_bindings(self, self.catalog, binding_args(self.files))
+        # Five keys are bound and still family-unclassified; no family is
+        # adopted or complete because of a binding.
+        unclassified = [row["key"] for row in receipt["keys"]
+                        if row["family"]["state"] == "UNCLASSIFIED"]
+        self.assertEqual(unclassified, list(MAPPED_KEYS))
+        self.assertEqual({row["binding"] for row in receipt["keys"]
+                          if row["key"] in unclassified}, {"MAPPED_TO_CONSUMER"})
+        self.assertEqual(receipt["completeness"]["established"], False)
+        # Dynamic constructs are listed, never counted toward a key.
+        for row in receipt["dynamicUnknown"]:
+            self.assertNotIn("key", row)
+        self.assertEqual(receipt["counts"]["dynamicUnknown"], len(receipt["dynamicUnknown"]))
+
+    def test_c14_an_invalid_catalog_gets_no_binding_receipt(self):
+        core = "core/Localization.lua"
+        changed = with_file(self.files, core, edit(self.files[core], b"resultLimit = 254",
+                                                   b"resultLimit = 253"))
+        with self.assertRaises(self.catalog.CatalogRegistryError) as raised:
+            self.receipt(changed)
+        self.assertEqual((raised.exception.code, raised.exception.key), ("registry-limit", CHARGE))
+
+
+class ConsumerCommandLineTests(unittest.TestCase):
+    """S8: --consumers reads both TOCs and every Lua file they load from the
+    confined root and prints one consumers record; the earlier modes are
+    unchanged."""
+
+    def run_cli(self, *args):
+        return subprocess.run([sys.executable, "-B", str(CATALOG_TOOL), *[str(a) for a in args]],
+                              capture_output=True, cwd=str(ROOT))
+
+    def copy_root(self, root, files):
+        for relative, value in files.items():
+            target = root.joinpath(*relative.split("/"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(value)
+
+    def test_repository_root(self):
+        run = self.run_cli("--consumers")
+        self.assertEqual((run.returncode, run.stderr), (0, b""))
+        record = json.loads(run.stdout)
+        self.assertEqual((record["record"], record["exitCode"]), ("consumers", 0))
+        expected = load_catalog().consumer_binding_report(*binding_args(current_files()))
+        self.assertEqual(record["consumers"], json.loads(json.dumps(expected)))
+        held = self.run_cli("--consumers", "--require-complete")
+        self.assertEqual((held.returncode, json.loads(held.stdout)["exitCode"]), (1, 1))
+        for args, code in ((("--consumers", "--consumers"), "argument-duplicate"),
+                           (("--consumers", "--diagnose"), "argument-conflict"),
+                           (("--provenance", "--consumers"), "argument-conflict")):
+            with self.subTest(args=args):
+                run = self.run_cli(*args)
+                self.assertEqual((run.returncode, run.stdout), (2, b""))
+                self.assertEqual(json.loads(run.stderr)["code"], code)
+
+    def test_mutated_root_fails_only_in_consumers_mode(self):
+        files = current_files()
+        files[PANEL] = edit(files[PANEL], PROGRESS_CALL, PROGRESS_FAKES)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.copy_root(root, files)
+            before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            run = self.run_cli("--root", root, "--consumers")
+            self.assertEqual((run.returncode, run.stderr), (2, b""))
+            receipt = json.loads(run.stdout)["consumers"]
+            self.assertIs(receipt["valid"], False)
+            self.assertEqual([problem["code"] for problem in receipt["problems"]],
+                             ["binding-unbound"])
+            for args in ((), ("--registry",), ("--diagnose",), ("--provenance",)):
+                with self.subTest(args=args):
+                    self.assertEqual(self.run_cli("--root", root, *args).returncode, 0)
+            after = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            self.assertEqual(after, before)
+
+    def test_unsafe_or_missing_listed_source_fails(self):
+        files = current_files()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "repo"
+            self.copy_root(root, files)
+            (Path(temp) / "outside.lua").write_bytes(b"local x = 1\n")
+            toc = root / "Nexus.toc"
+            toc.write_bytes(edit(files["Nexus.toc"], b"core\\Main.lua\n",
+                                 b"core\\Main.lua\n..\\outside.lua\n"))
+            run = self.run_cli("--root", root, "--consumers")
+            self.assertEqual((run.returncode, run.stdout), (2, b""))
+            error = json.loads(run.stderr)
+            self.assertEqual((error["code"], error["subject"]), ("consumer-toc-entry", "Nexus.toc"))
+            toc.write_bytes(files["Nexus.toc"])
+            (root / "ui" / "Readout.lua").unlink()
+            run = self.run_cli("--root", root, "--consumers")
+            self.assertEqual((run.returncode, run.stdout), (2, b""))
+            error = json.loads(run.stderr)
+            self.assertEqual((error["code"], error["subject"]), ("input-missing", READOUT))
 
 
 if __name__ == "__main__":

@@ -82,6 +82,19 @@ Opt-in provenance seam (S7 of #147, at the end of this file):
     CatalogProvenanceError
         .code (stable, one of PROVENANCE_CODES), .path and .key
 
+Static consumer binding seam (S8 of #147, after the provenance seam):
+
+    consumer_binding_report(the same five byte strings, toc_records,
+                            source_records) -> dict
+        a read-only binding receipt over the TOC-loaded Lua source: each
+        declared key is DIRECT_LITERAL_CONSUMER, MAPPED_TO_CONSUMER or
+        UNBOUND by a bounded syntactic check that never executes Lua, with
+        unresolved, orphan, kind and mutation problems kept explicit; valid
+        only without any problem. Each record is {"path", "sha256",
+        "byteLength", "data"}, and the claims are checked against the data.
+    CatalogConsumerError
+        .code (stable, one of CONSUMER_CODES), .path, .line and .subject
+
 Both functions take the exact bytes of a source (bytes or bytearray), never a
 filename. They read and write no file. They never evaluate, import or execute
 Lua, never call back into the data and never interpret its text. After Lua 5.1
@@ -147,7 +160,7 @@ Error codes (CODES):
 Run directly, this file is the read-only report command line:
 
     python tools/l10n_catalog.py [--root DIR] [--require-complete] [--registry]
-                                 [--diagnose | --provenance]
+                                 [--diagnose | --provenance | --consumers]
 
 DIR defaults to the repository that contains this tool, never the current
 directory. Inside the resolved root it reads exactly
@@ -177,8 +190,13 @@ incomplete, else 0, or 1 with --require-complete. With --provenance,
 core/Localization.lua is read the same way and one provenance record with
 the pack_provenance_diagnostics receipt is written on stdout; its exit
 status is 2 while the receipt is invalid, else 0, or 1 with
---require-complete, because support is always held. --diagnose and
---provenance together are argument-conflict. Python 3.9+, standard library
+--require-complete, because support is always held. With --consumers,
+core/Localization.lua, companion/NexusSupport/NexusSupport.toc and every Lua
+file the two TOCs load (each entry a safe relative .lua path) are read the
+same way and one consumers record with the consumer_binding_report receipt
+is written on stdout; its exit status is 2 while the receipt is invalid,
+else 0, or 1 with --require-complete. Any two of --diagnose, --provenance and
+--consumers together are argument-conflict. Python 3.9+, standard library
 only.
 """
 from __future__ import annotations
@@ -1435,14 +1453,16 @@ _CLI_FAILURES = (CatalogCliError, CatalogSyntaxError, CatalogValidationError,
 
 def _cli_arguments(arguments):
     """Return (root or None, require_complete, registry, diagnose,
-    provenance). Only --root DIR, --root=DIR, --require-complete, --registry,
-    --diagnose and --provenance are accepted, each at most once, and
-    --diagnose and --provenance not together."""
+    provenance, consumers). Only --root DIR, --root=DIR, --require-complete,
+    --registry, --diagnose, --provenance and --consumers are accepted, each
+    at most once, and at most one of --diagnose, --provenance and
+    --consumers."""
     root, seen, index = None, set(), 0
     while index < len(arguments):
         argument, position = arguments[index], index
         index += 1
-        if argument in ('--require-complete', '--registry', '--diagnose', '--provenance'):
+        if argument in ('--require-complete', '--registry', '--diagnose', '--provenance',
+                        '--consumers'):
             name, value = argument, None
         elif argument == '--root':
             if index >= len(arguments):
@@ -1462,8 +1482,10 @@ def _cli_arguments(arguments):
             root = value
     if '--diagnose' in seen and '--provenance' in seen:
         raise CatalogCliError('argument-conflict', '--provenance')
+    if '--consumers' in seen and ('--diagnose' in seen or '--provenance' in seen):
+        raise CatalogCliError('argument-conflict', '--consumers')
     return (root, '--require-complete' in seen, '--registry' in seen, '--diagnose' in seen,
-            '--provenance' in seen)
+            '--provenance' in seen, '--consumers' in seen)
 
 
 def _cli_root(root):
@@ -1602,7 +1624,7 @@ def main(argv=None) -> int:
     """The read-only report command line described in the module documentation:
 
         python tools/l10n_catalog.py [--root DIR] [--require-complete] [--registry]
-                                     [--diagnose | --provenance]
+                                     [--diagnose | --provenance | --consumers]
 
     Exactly one ASCII JSON record is written: a report on stdout or an error
     on stderr. The return value is 0 for a valid report, also for partial
@@ -1612,16 +1634,21 @@ def main(argv=None) -> int:
     (report schemaVersion 1). With it, core/Localization.lua is read as a
     sixth fixed input and the report is registry_catalog_report
     (schemaVersion 2), marked registryBinding "requested". With --diagnose a
-    diagnostics record is written on stdout instead (_cli_diagnostics), and
-    with --provenance a provenance record (_cli_provenance)."""
+    diagnostics record is written on stdout instead (_cli_diagnostics), with
+    --provenance a provenance record (_cli_provenance) and with --consumers
+    a consumers record (_cli_consumers)."""
     arguments = sys.argv[1:] if argv is None else list(argv)
     try:
-        root, require_complete, registry, diagnose, provenance = _cli_arguments(arguments)
+        root, require_complete, registry, diagnose, provenance, consumers = \
+            _cli_arguments(arguments)
         resolved = _cli_root(_DEFAULT_ROOT if root is None else root)
         data = [_cli_read(resolved, source) for source in _CLI_INPUTS]
-        if registry or diagnose or provenance:
+        if registry or diagnose or provenance or consumers:
             localization = _cli_read(resolved, _AUTHORITY)
         toc_entries = _cli_toc(data[-1])
+        if consumers:
+            return _cli_consumers(resolved, data, localization,
+                                  _cli_toc_row(data[-1], toc_entries), require_complete)
         if diagnose:
             return _cli_diagnostics(registry_catalog_diagnostics(*data[:-1], localization),
                                     _cli_toc_row(data[-1], toc_entries), require_complete)
@@ -1632,7 +1659,7 @@ def main(argv=None) -> int:
             report = registry_catalog_report(*data[:-1], localization)
         else:
             report = catalog_report(*data[:-1])
-    except _CLI_FAILURES + (CatalogRegistryError,) as error:
+    except _CLI_FAILURES + (CatalogRegistryError, CatalogConsumerError) as error:
         _cli_emit(sys.stderr, _cli_error(error))
         return _EXIT_ERROR
     blocking, readiness = _cli_readiness(report)
@@ -2544,6 +2571,1468 @@ def _cli_provenance(receipt, toc, require_complete):
         'inputBinding': _INPUT_BINDING,
         'toc': toc,
         'provenance': receipt,
+    })
+    return exit_code
+
+
+# ---------------------------------------------------------------------------
+# S8 (Refs #147): static consumer binding of the declared keys. The strict
+# APIs prove that every declared key has valid English; consumer_binding_report
+# proves, by a bounded syntactic check of the loaded Lua source, that each one
+# also has a genuine static consumer. It takes the five registry-bound byte
+# strings, a record per TOC and a record per Lua file those TOCs load. Each
+# record is {"path", "sha256", "byteLength", "data"}: the claimed digest and
+# length are checked against the exact data, never normalized. The TOC entries
+# and the source records must be the same set of safe relative paths, the
+# registry Lua sources must be loaded by Nexus.toc in their runtime order and
+# be the same bytes as the registry inputs, and a failure there raises
+# CatalogConsumerError (CONSUMER_CODES) instead of shrinking the inventory.
+#
+# Every loaded file is tokenized with the trusted lexer and parsed with a Lua
+# 5.1 grammar into a syntax tree; nothing is evaluated, imported or executed,
+# and no control flow, reachability or runtime value is decided. Local names
+# are resolved lexically. A receiver is the global Nexus followed by
+# .Localization, directly or through a local alias that is never assigned
+# again; only Text, Resolve and Format are consumer methods, each bound to the
+# declared kind (text, text, format). A key is bound by:
+#
+# - direct-call: a consumer method called on a receiver with a literal key;
+# - wrapper-call: a literal key passed to a local function whose parameter
+#   goes unchanged into a consumer method call on a receiver;
+# - map-value: a value of a read-only local table of literal string pairs,
+#   dispatched as wrapper(MAP[v], ...) by the sole return of
+#   "if MAP[v] then ... end" in the body of an exported module function
+#   (function T.Name, with Nexus.<Module> = T) that a call elsewhere reaches
+#   by its Nexus path. Only an earlier "if OTHER[v] then" guard over another
+#   such table may precede it; the codes it holds shadow the map's entries.
+#
+# Comments, strings that merely contain call text, data and declaration
+# tables, Has and Kind queries and Text methods of other objects never bind.
+# A literal key that is not declared is binding-orphan, a method of the other
+# kind binding-kind. A reassigned alias or wrapper, a method call, an indirect
+# reference to a consumer method, an unsupported dispatch and an assignment to
+# the seam outside core/Localization.lua are binding-unresolved or
+# binding-mutation, never assumed bindings. A dynamic key or an unresolvable
+# receiver is listed in dynamicUnknown (issue #142 scope) and never counted.
+# The receipt is valid only without any problem. Family membership is
+# reported separately from binding; no family, language or support
+# acceptance follows from either. The command line writes the receipt with
+# --consumers (exit 2 while invalid).
+
+CONSUMER_SCHEMA = 'nexus.l10n.consumer_binding_receipt'
+CONSUMER_SCHEMA_VERSION = 1
+CONSUMER_CODES = (
+    'consumer-input-structure', 'consumer-path', 'consumer-duplicate-path',
+    'consumer-hash-mismatch', 'consumer-length-mismatch', 'consumer-toc-required',
+    'consumer-toc-not-utf8', 'consumer-toc-entry', 'consumer-toc-duplicate',
+    'consumer-source-missing', 'consumer-source-unlisted', 'consumer-registry-unloaded',
+    'consumer-registry-order', 'consumer-registry-conflict',
+)
+BINDING_PROBLEM_CODES = (
+    'binding-unparsed', 'binding-unbound', 'binding-orphan', 'binding-kind',
+    'binding-unresolved', 'binding-mutation',
+)
+BINDING_CLASSES = ('DIRECT_LITERAL_CONSUMER', 'MAPPED_TO_CONSUMER', 'UNBOUND')
+CONSUMER_SCOPE = (
+    'Static consumer binding of the currently declared keys: syntactic call, alias, wrapper '
+    'and literal-map dispatch chains in the TOC-loaded Lua source, parsed without executing '
+    'Lua. Not runtime reachability, branch occurrence, rendering, native UI acceptance, family '
+    'coverage or adoption, dynamic-key grammar (#142) or whole #147.')
+_MAIN_TOC = 'Nexus.toc'
+_CONSUMER_TOCS = (_MAIN_TOC, 'companion/NexusSupport/NexusSupport.toc')
+_RECORD_FIELDS_S8 = frozenset(('path', 'sha256', 'byteLength', 'data'))
+_PATH_SEGMENT = re.compile('[A-Za-z0-9_][A-Za-z0-9_.-]*')
+_LOCALIZATION = 'Nexus.Localization'
+_KEY_METHODS = types.MappingProxyType({'Text': 'text', 'Resolve': 'text', 'Format': 'format'})
+_QUERY_METHODS = frozenset(('Has', 'Kind'))
+_SEAM_METHODS = frozenset(_KEY_METHODS) | _QUERY_METHODS
+_DIRECT, _MAPPED, _UNBOUND = BINDING_CLASSES
+_CONSUMER_MODE = ('opt-in read-only static binding receipt over the exact supplied bytes; the '
+                  'strict catalog verdict must be valid first')
+_HASH_BASIS = ('each sha256 and byteLength is of the exact supplied bytes, LF or CRLF as given; '
+               'nothing is normalized and no Git object is read')
+_BINDING_RULE = ('DIRECT_LITERAL_CONSUMER: a direct-call or wrapper-call site. '
+                 'MAPPED_TO_CONSUMER: only map-value sites. UNBOUND: no site; a literal lead, '
+                 'comment, declaration or unrelated Text method never binds')
+_FAMILY_RULE = ('binding and family classification are independent: DECLARED names the window '
+                'families whose adoptedKeys hold the key, UNCLASSIFIED none; neither adopts a '
+                'key or establishes family coverage')
+_CONSUMER_COMPLETENESS = ('this receipt never establishes completeness: dynamic keys, branch '
+                          'reachability, rendering and native display are outside it')
+_CONSUMER_LIMITS = (
+    'static syntax only: a bound site is not proved to run, to be reached or to be displayed',
+    'a localization table passed to another function, stored in a global or a table field, or '
+    'reached through a computed name is not followed',
+    'map dispatch is accepted only in the exact guarded shape described for this seam',
+    'Lua 5.1 lexical and grammar rules; LuaJIT and Lua 5.2 additions are refused',
+)
+_CONSUMER_INPUT_BINDING = ('exact bytes read once from the resolved root for the registry inputs, '
+                           'both TOCs and every Lua file they load; no Git revision is read')
+
+
+class CatalogConsumerError(ValueError):
+    """Raised by consumer_binding_report for malformed, inconsistent or
+    incomplete TOC and source records. It carries a stable code (one of
+    CONSUMER_CODES), the path concerned and, for a TOC line, the TOC as
+    subject and its 1-based line number."""
+
+    def __init__(self, code: str, path: str = None, line: int = None, subject: str = None):
+        detail = '' if path is None else ' at ' + path
+        if subject is not None:
+            detail += ' (%s' % subject + ('' if line is None else ', line %d' % line) + ')'
+        super().__init__(code + detail)
+        self.code, self.path, self.line, self.subject = code, path, line, subject
+
+
+def _consumer(condition, code, path=None, line=None, subject=None):
+    if not condition:
+        raise CatalogConsumerError(code, path, line, subject)
+
+
+def _safe_path(path, suffix):
+    """A relative POSIX path of plain segments that ends with suffix."""
+    return (type(path) is str and path.endswith(suffix)
+            and all(_PATH_SEGMENT.fullmatch(segment) for segment in path.split('/')))
+
+
+def _consumer_records(records, suffix, name):
+    """[(path, exact bytes)] after the record shape and the claimed digest
+    and length are checked against the bytes."""
+    _consumer(type(records) in (list, tuple), 'consumer-input-structure', name)
+    rows = []
+    for index, row in enumerate(records):
+        where = '%s[%d]' % (name, index)
+        _consumer(type(row) is dict and set(row) == _RECORD_FIELDS_S8, 'consumer-input-structure',
+                  where)
+        _consumer(isinstance(row['data'], (bytes, bytearray)), 'consumer-input-structure',
+                  where + '.data')
+        _consumer(type(row['sha256']) is str and _SHA256_HEX.fullmatch(row['sha256']) is not None,
+                  'consumer-input-structure', where + '.sha256')
+        _consumer(type(row['byteLength']) is int, 'consumer-input-structure',
+                  where + '.byteLength')
+        path = row['path']
+        _consumer(_safe_path(path, suffix), 'consumer-path', path if type(path) is str else where)
+        data = bytes(row['data'])
+        _consumer(hashlib.sha256(data).hexdigest() == row['sha256'], 'consumer-hash-mismatch', path)
+        _consumer(len(data) == row['byteLength'], 'consumer-length-mismatch', path)
+        rows.append((path, data))
+    return rows
+
+
+def _toc_entries(toc, data):
+    """[(path, line)] of the Lua files one TOC loads: blank, comment and
+    metadata lines are skipped, slash and backslash runs become one /, and
+    each entry is relative to the directory of the TOC."""
+    try:
+        text = data.decode('utf-8')
+    except UnicodeDecodeError:
+        raise CatalogConsumerError('consumer-toc-not-utf8', toc) from None
+    if text.startswith('\ufeff'):
+        text = text[1:]
+    base = toc.rpartition('/')[0]
+    entries = []
+    for number, line in enumerate(_TOC_LINE_BREAK.split(text), 1):
+        entry = line.strip()
+        if entry and not entry.startswith('#'):
+            path = (base + '/' if base else '') + _TOC_SEPARATORS.sub('/', entry)
+            _consumer(_safe_path(path, '.lua'), 'consumer-toc-entry', None, number, toc)
+            entries.append((path, number))
+    return entries
+
+
+def _consumer_inputs(registry, toc_records, source_records):
+    """Check the TOC and source records against each other and against the
+    registry inputs. Returns (tocs, sources, listed), where listed maps each
+    loaded path to (TOC, line, load order)."""
+    tocs = _consumer_records(toc_records, '.toc', 'toc_records')
+    sources = _consumer_records(source_records, '.lua', 'source_records')
+    seen = set()
+    for path, _ in tocs + sources:
+        _consumer(path.casefold() not in seen, 'consumer-duplicate-path', path)
+        seen.add(path.casefold())
+    _consumer(any(path == _MAIN_TOC for path, _ in tocs), 'consumer-toc-required', _MAIN_TOC)
+    listed, folded = {}, set()
+    for toc, data in tocs:
+        for path, number in _toc_entries(toc, data):
+            _consumer(path.casefold() not in folded, 'consumer-toc-duplicate', path, number, toc)
+            folded.add(path.casefold())
+            listed[path] = (toc, number, len(listed))
+    supplied = dict(sources)
+    for path, (toc, number, _) in listed.items():
+        _consumer(path in supplied, 'consumer-source-missing', path, number, toc)
+    for path in supplied:
+        _consumer(path in listed, 'consumer-source-unlisted', path)
+    order = []
+    for data, path in zip(registry, (_ENGLISH_SOURCE, _PACKS_SOURCE, _AUTHORITY)):
+        entry = listed.get(path)
+        _consumer(entry is not None and entry[0] == _MAIN_TOC, 'consumer-registry-unloaded', path)
+        _consumer(supplied[path] == data, 'consumer-registry-conflict', path)
+        order.append(entry[2])
+    _consumer(order == sorted(order), 'consumer-registry-order', _AUTHORITY, None, _MAIN_TOC)
+    return tocs, supplied, listed
+
+
+# The Lua 5.1 tokens and syntax tree. Strings and comments use the trusted
+# lexer, exactly as the data parsers above; the tree keeps only what the
+# binding needs and is never evaluated.
+
+_LuaToken = namedtuple('_LuaToken', 'kind value line column')
+# Optional spaces, then a name (group 1), a numeral as the Lua 5.1 lexer reads
+# it (group 2) or an operator (group 3). A - that starts a comment and a [
+# that opens a long bracket are left to the lexer, as are strings and line
+# breaks.
+_LUA_TOKEN = re.compile(
+    '[ \t\v\f]*(?:([A-Za-z_][A-Za-z0-9_]*)'
+    '|((?:[0-9]|[.][0-9])[0-9.]*(?:[eE][+-]?)?[A-Za-z0-9_]*)'
+    r'|(\.\.\.|\.\.|==|~=|<=|>=|-(?!-)|\[(?!=*\[)|[+*/%^#<>=(){}\];:,.]))?')
+_LUA_LINE_REST = re.compile('[^\r\n]*')
+_LUA_NUMBER = re.compile('0[xX][0-9a-fA-F]+|(?:[0-9]+[.]?[0-9]*|[.][0-9]+)(?:[eE][+-]?[0-9]+)?')
+_BLOCK_END = frozenset(('end', 'else', 'elseif', 'until'))
+_BINARY = frozenset(('+', '-', '*', '/', '%', '^', '..', '==', '~=', '<', '<=', '>', '>=',
+                     'and', 'or'))
+_UNARY = frozenset(('-', 'not', '#'))
+
+
+def _lua_tokens(text):
+    """Every Lua 5.1 token of text, ending with one 'eof' token. A short
+    string whose value is not UTF-8 keeps the value None: it is never a key.
+    A lexical error raises CatalogSyntaxError."""
+    scanner = _LEXER.Scanner(text)
+    tokens, length, match = [], len(text), _LUA_TOKEN.match
+    append = tokens.append
+    try:
+        while True:
+            found = match(text, scanner.index)
+            group = found.lastindex
+            if group is not None:
+                value, start = found.group(group), found.start(group)
+                line, column = scanner.line, start - scanner.line_start + 1
+                if group == 1:
+                    append(_LuaToken('keyword' if value in _RESERVED else 'name', value, line,
+                                     column))
+                elif group == 2:
+                    if _LUA_NUMBER.fullmatch(value) is None:
+                        raise CatalogSyntaxError('unexpected-token', line, column)
+                    append(_LuaToken('number', value, line, column))
+                else:
+                    append(_LuaToken('op', value, line, column))
+                scanner.index = found.end()
+                continue
+            index = scanner.index = found.end()
+            if index >= length:
+                append(_LuaToken('eof', None, scanner.line, scanner.column()))
+                return tokens
+            char = text[index]
+            if char in _NEWLINE:
+                scanner.newline()
+                continue
+            line, column = scanner.line, index - scanner.line_start + 1
+            if char == '-' and text.startswith('--', index):
+                scanner.index += 2
+                if scanner.peek() == '[' and scanner.level() >= 0:
+                    _long_body(scanner, 'unfinished-comment', line, column)
+                else:
+                    scanner.index = _LUA_LINE_REST.match(text, scanner.index).end()
+            elif char == '[' and scanner.level() >= 0:
+                value = _long_body(scanner, 'unfinished-string', line, column)
+                tokens.append(_LuaToken('string', value, line, column))
+            elif char in ('"', "'"):
+                raw = scanner.short_string(char, line, column)
+                try:
+                    value = raw.decode('utf-8')
+                except UnicodeDecodeError:
+                    value = None
+                append(_LuaToken('string', value, line, column))
+            else:
+                raise CatalogSyntaxError('unexpected-token', line, column)
+    except _LEXER.SourceError as error:
+        raise CatalogSyntaxError(error.code, error.line, error.column) from None
+
+
+class _Node:
+    """One syntax-tree node: its kind, the position of its first token and
+    the fields of that kind."""
+
+    def __init__(self, kind, at, **fields):
+        self.kind, self.line, self.column = kind, at.line, at.column
+        self.__dict__.update(fields)
+
+
+class _LuaParser:
+    """The Lua 5.1 grammar over a token list. Each method reads tokens in
+    order and raises CatalogSyntaxError at the first token it refuses."""
+
+    def __init__(self, tokens):
+        self.tokens, self.index = tokens, 0
+
+    def fail(self, token):
+        raise CatalogSyntaxError('unexpected-end' if token.kind == 'eof' else 'unexpected-token',
+                                 token.line, token.column)
+
+    def at(self, kind, value=None):
+        token = self.tokens[self.index]
+        return token.kind == kind and (value is None or token.value == value)
+
+    def accept(self, kind, value):
+        if self.at(kind, value):
+            self.index += 1
+            return True
+        return False
+
+    def take(self, kind, value=None):
+        token = self.tokens[self.index]
+        if token.kind != kind or (value is not None and token.value != value):
+            self.fail(token)
+        self.index += 1
+        return token
+
+    def ends_block(self):
+        token = self.tokens[self.index]
+        return token.kind == 'eof' or (token.kind == 'keyword' and token.value in _BLOCK_END)
+
+    def chunk(self):
+        body = self.block()
+        self.take('eof')
+        return body
+
+    def block(self):
+        body = []
+        while not self.ends_block():
+            token = self.tokens[self.index]
+            if token.kind == 'keyword' and token.value in ('return', 'break'):
+                # Lua 5.1: return and break are the last statement of a block.
+                self.index += 1
+                if token.value == 'break':
+                    body.append(_Node('break', token))
+                else:
+                    empty = self.ends_block() or self.at('op', ';')
+                    body.append(_Node('return', token, exprs=[] if empty else self.exprlist()))
+                self.accept('op', ';')
+                return body
+            body.append(self.statement())
+            self.accept('op', ';')
+        return body
+
+    def name(self):
+        token = self.take('name')
+        return _Node('name', token, value=token.value, binding=None)
+
+    def statement(self):
+        token = self.tokens[self.index]
+        word = token.value if token.kind == 'keyword' else None
+        if word == 'if':
+            return self.if_statement(token)
+        if word == 'while':
+            self.index += 1
+            cond = self.expr()
+            self.take('keyword', 'do')
+            body = self.block()
+            self.take('keyword', 'end')
+            return _Node('while', token, cond=cond, body=body)
+        if word == 'do':
+            self.index += 1
+            body = self.block()
+            self.take('keyword', 'end')
+            return _Node('do', token, body=body)
+        if word == 'for':
+            return self.for_statement(token)
+        if word == 'repeat':
+            self.index += 1
+            body = self.block()
+            self.take('keyword', 'until')
+            return _Node('repeat', token, body=body, cond=self.expr())
+        if word == 'function':
+            self.index += 1
+            target = self.name()
+            while self.accept('op', '.'):
+                key = self.take('name')
+                target = _Node('index', key, obj=target, key=_Node('string', key, value=key.value))
+            method = self.take('name').value if self.accept('op', ':') else None
+            func = self.function_body(token, method is not None)
+            return _Node('funcstat', token, target=target, method=method, func=func)
+        if word == 'local':
+            self.index += 1
+            if self.accept('keyword', 'function'):
+                name = self.name()
+                return _Node('localfunction', token, name=name,
+                             func=self.function_body(token, False))
+            names = [self.name()]
+            while self.accept('op', ','):
+                names.append(self.name())
+            exprs = self.exprlist() if self.accept('op', '=') else []
+            return _Node('local', token, names=names, exprs=exprs)
+        expr = self.suffixed()
+        if self.at('op', '=') or self.at('op', ','):
+            targets = [expr]
+            while self.accept('op', ','):
+                targets.append(self.suffixed())
+            self.take('op', '=')
+            for target in targets:
+                if target.kind not in ('name', 'index'):
+                    raise CatalogSyntaxError('unexpected-token', target.line, target.column)
+            return _Node('assign', token, targets=targets, exprs=self.exprlist())
+        if expr.kind not in ('call', 'method'):
+            raise CatalogSyntaxError('unexpected-token', token.line, token.column)
+        return _Node('callstat', token, call=expr)
+
+    def if_statement(self, token):
+        clauses = []
+        while True:
+            self.index += 1
+            cond = self.expr()
+            self.take('keyword', 'then')
+            clauses.append((cond, self.block()))
+            if not self.at('keyword', 'elseif'):
+                break
+        orelse = self.block() if self.accept('keyword', 'else') else None
+        self.take('keyword', 'end')
+        return _Node('if', token, clauses=clauses, orelse=orelse)
+
+    def for_statement(self, token):
+        self.index += 1
+        first = self.name()
+        if self.accept('op', '='):
+            start = self.expr()
+            self.take('op', ',')
+            stop = self.expr()
+            step = self.expr() if self.accept('op', ',') else None
+            self.take('keyword', 'do')
+            body = self.block()
+            self.take('keyword', 'end')
+            return _Node('fornum', token, var=first, start=start, stop=stop, step=step, body=body)
+        names = [first]
+        while self.accept('op', ','):
+            names.append(self.name())
+        self.take('keyword', 'in')
+        exprs = self.exprlist()
+        self.take('keyword', 'do')
+        body = self.block()
+        self.take('keyword', 'end')
+        return _Node('forin', token, names=names, exprs=exprs, body=body)
+
+    def function_body(self, token, method):
+        self.take('op', '(')
+        params, vararg = [], False
+        if not self.at('op', ')'):
+            while True:
+                if self.accept('op', '...'):
+                    vararg = True
+                    break
+                params.append(self.name())
+                if not self.accept('op', ','):
+                    break
+        self.take('op', ')')
+        body = self.block()
+        self.take('keyword', 'end')
+        return _Node('function', token, params=params, vararg=vararg, method=method, body=body)
+
+    def exprlist(self):
+        exprs = [self.expr()]
+        while self.accept('op', ','):
+            exprs.append(self.expr())
+        return exprs
+
+    def expr(self):
+        """Operands and binary operators in source order; precedence is not
+        needed for a binding and is not modelled."""
+        operands, ops = [self.unary()], []
+        while True:
+            token = self.tokens[self.index]
+            if token.kind in ('op', 'keyword') and token.value in _BINARY:
+                self.index += 1
+                ops.append(token.value)
+                operands.append(self.unary())
+            else:
+                break
+        if not ops:
+            return operands[0]
+        return _Node('operation', operands[0], operands=operands, ops=ops)
+
+    def unary(self):
+        token = self.tokens[self.index]
+        if token.kind in ('op', 'keyword') and token.value in _UNARY:
+            self.index += 1
+            return _Node('operation', token, operands=[self.unary()], ops=[token.value])
+        return self.simple()
+
+    def simple(self):
+        token = self.tokens[self.index]
+        if token.kind == 'number' or (token.kind == 'keyword'
+                                      and token.value in ('nil', 'true', 'false')):
+            self.index += 1
+            return _Node('constant', token, value=token.value)
+        if token.kind == 'string':
+            self.index += 1
+            return _Node('string', token, value=token.value)
+        if token.kind == 'keyword' and token.value == 'function':
+            self.index += 1
+            return self.function_body(token, False)
+        if token.kind == 'op' and token.value == '...':
+            self.index += 1
+            return _Node('constant', token, value='...')
+        if token.kind == 'op' and token.value == '{':
+            return self.table()
+        return self.suffixed()
+
+    def suffixed(self):
+        token = self.tokens[self.index]
+        if token.kind == 'name':
+            expr = self.name()
+        elif token.kind == 'op' and token.value == '(':
+            self.index += 1
+            inner = self.expr()
+            self.take('op', ')')
+            expr = _Node('paren', token, expr=inner)
+        else:
+            self.fail(token)
+        while True:
+            token = self.tokens[self.index]
+            if token.kind == 'op' and token.value == '.':
+                self.index += 1
+                key = self.take('name')
+                expr = _Node('index', token, obj=expr, key=_Node('string', key, value=key.value))
+            elif token.kind == 'op' and token.value == '[':
+                self.index += 1
+                key = self.expr()
+                self.take('op', ']')
+                expr = _Node('index', token, obj=expr, key=key)
+            elif token.kind == 'op' and token.value == ':':
+                self.index += 1
+                name = self.take('name').value
+                expr = _Node('method', token, obj=expr, name=name, args=self.args())
+            elif token.kind == 'string' or (token.kind == 'op' and token.value in ('(', '{')):
+                expr = _Node('call', token, func=expr, args=self.args())
+            else:
+                return expr
+
+    def args(self):
+        token = self.tokens[self.index]
+        if token.kind == 'string':
+            self.index += 1
+            return [_Node('string', token, value=token.value)]
+        if token.kind == 'op' and token.value == '{':
+            return [self.table()]
+        self.take('op', '(')
+        if self.accept('op', ')'):
+            return []
+        args = self.exprlist()
+        self.take('op', ')')
+        return args
+
+    def table(self):
+        start = self.take('op', '{')
+        fields = []
+        while not self.at('op', '}'):
+            token = self.tokens[self.index]
+            if token.kind == 'op' and token.value == '[':
+                self.index += 1
+                key = self.expr()
+                self.take('op', ']')
+                self.take('op', '=')
+                fields.append(_Node('field', token, key=key, value=self.expr()))
+            elif token.kind == 'name' and self.tokens[self.index + 1].kind == 'op' \
+                    and self.tokens[self.index + 1].value == '=':
+                self.index += 2
+                fields.append(_Node('field', token, key=_Node('string', token, value=token.value),
+                                    value=self.expr()))
+            else:
+                fields.append(_Node('field', token, key=None, value=self.expr()))
+            if not (self.accept('op', ',') or self.accept('op', ';')):
+                break
+        self.take('op', '}')
+        return _Node('table', start, fields=fields)
+
+
+def _children(node):
+    """The direct child nodes of node, in source order. Declared names are
+    not children: they are not expressions."""
+    kind = node.kind
+    if kind in ('local', 'return'):
+        return list(node.exprs)
+    if kind == 'localfunction':
+        return [node.func]
+    if kind == 'funcstat':
+        return [node.target, node.func]
+    if kind == 'assign':
+        return node.targets + node.exprs
+    if kind == 'callstat':
+        return [node.call]
+    if kind in ('do', 'function'):
+        return list(node.body)
+    if kind == 'while':
+        return [node.cond] + node.body
+    if kind == 'repeat':
+        return node.body + [node.cond]
+    if kind == 'if':
+        out = []
+        for cond, body in node.clauses:
+            out.append(cond)
+            out.extend(body)
+        return out + (node.orelse or [])
+    if kind == 'fornum':
+        return [node.start, node.stop] + ([node.step] if node.step else []) + node.body
+    if kind == 'forin':
+        return node.exprs + node.body
+    if kind == 'call':
+        return [node.func] + node.args
+    if kind == 'method':
+        return [node.obj] + node.args
+    if kind == 'index':
+        return [node.obj, node.key]
+    if kind == 'paren':
+        return [node.expr]
+    if kind == 'operation':
+        return list(node.operands)
+    if kind == 'table':
+        return [part for field in node.fields for part in (field.key, field.value) if part]
+    return []
+
+
+def _descendants(nodes, functions=False):
+    """Every node under nodes, depth first, entering function bodies only
+    when functions is true."""
+    stack = list(reversed(nodes))
+    while stack:
+        node = stack.pop()
+        yield node
+        if functions or node.kind != 'function':
+            stack.extend(reversed(_children(node)))
+
+
+class _Binding:
+    """One local name: how it was declared, the expression it was declared
+    with, whether it is assigned again, how it is used and which fields are
+    defined through it."""
+
+    def __init__(self, node, kind, value=None, owner=None, index=None):
+        self.node, self.kind, self.value = node, kind, value
+        self.owner, self.index = owner, index
+        self.assigned, self.uses, self.fields = [], [], {}
+
+
+class _Resolver:
+    """Lexical resolution of one parsed file: each name node gets its local
+    binding or None (a global)."""
+
+    def __init__(self):
+        self.localfunctions = []
+
+    def lookup(self, scopes, name):
+        for scope in reversed(scopes):
+            if name in scope:
+                return scope[name]
+        return None
+
+    def declare(self, scopes, node, kind, **fields):
+        binding = _Binding(node, kind, **fields)
+        scopes[-1][node.value] = binding
+        node.binding = binding
+        return binding
+
+    def reference(self, scopes, node, use):
+        binding = self.lookup(scopes, node.value)
+        node.binding = binding
+        if binding is not None:
+            binding.uses.append(use)
+            if use == 'target':
+                binding.assigned.append(node)
+
+    def block(self, body, scopes):
+        scopes = scopes + [{}]
+        for stmt in body:
+            self.statement(stmt, scopes)
+
+    def function(self, func, scopes):
+        scopes = scopes + [{}]
+        if func.method:
+            self.declare(scopes, _Node('name', func, value='self', binding=None), 'param',
+                         owner=func, index=None)
+        for index, param in enumerate(func.params):
+            self.declare(scopes, param, 'param', owner=func, index=index)
+        self.block(func.body, scopes)
+
+    def target(self, node, scopes):
+        if node.kind == 'name':
+            self.reference(scopes, node, 'target')
+            return
+        if node.obj.kind == 'name':
+            self.reference(scopes, node.obj, 'field-target')
+            binding = node.obj.binding
+            if binding is not None and node.key.kind == 'string':
+                binding.fields[node.key.value] = binding.fields.get(node.key.value, 0) + 1
+        else:
+            self.expr(node.obj, scopes)
+        self.expr(node.key, scopes)
+
+    def statement(self, stmt, scopes):
+        kind = stmt.kind
+        if kind == 'local':
+            for expr in stmt.exprs:
+                self.expr(expr, scopes)
+            for index, name in enumerate(stmt.names):
+                value = stmt.exprs[index] if index < len(stmt.exprs) else None
+                self.declare(scopes, name, 'local', value=value)
+        elif kind == 'localfunction':
+            self.localfunctions.append(self.declare(scopes, stmt.name, 'localfunction',
+                                                    value=stmt.func))
+            self.function(stmt.func, scopes)
+        elif kind == 'funcstat':
+            self.target(stmt.target, scopes)
+            self.function(stmt.func, scopes)
+        elif kind == 'assign':
+            for expr in stmt.exprs:
+                self.expr(expr, scopes)
+            for target in stmt.targets:
+                self.target(target, scopes)
+        elif kind == 'callstat':
+            self.expr(stmt.call, scopes)
+        elif kind == 'do':
+            self.block(stmt.body, scopes)
+        elif kind == 'while':
+            self.expr(stmt.cond, scopes)
+            self.block(stmt.body, scopes)
+        elif kind == 'repeat':
+            # The until condition sees the locals of the loop body.
+            inner = scopes + [{}]
+            for item in stmt.body:
+                self.statement(item, inner)
+            self.expr(stmt.cond, inner)
+        elif kind == 'if':
+            for cond, body in stmt.clauses:
+                self.expr(cond, scopes)
+                self.block(body, scopes)
+            if stmt.orelse is not None:
+                self.block(stmt.orelse, scopes)
+        elif kind == 'fornum':
+            for expr in (stmt.start, stmt.stop, stmt.step):
+                if expr is not None:
+                    self.expr(expr, scopes)
+            inner = scopes + [{}]
+            self.declare(inner, stmt.var, 'for')
+            self.block(stmt.body, inner)
+        elif kind == 'forin':
+            for expr in stmt.exprs:
+                self.expr(expr, scopes)
+            inner = scopes + [{}]
+            for name in stmt.names:
+                self.declare(inner, name, 'for')
+            self.block(stmt.body, inner)
+        elif kind == 'return':
+            for expr in stmt.exprs:
+                self.expr(expr, scopes)
+
+    def expr(self, node, scopes):
+        kind = node.kind
+        if kind == 'name':
+            self.reference(scopes, node, 'value')
+        elif kind == 'index':
+            if node.obj.kind == 'name':
+                self.reference(scopes, node.obj, 'index')
+            else:
+                self.expr(node.obj, scopes)
+            self.expr(node.key, scopes)
+        elif kind == 'call':
+            if node.func.kind == 'name':
+                self.reference(scopes, node.func, 'call')
+            else:
+                self.expr(node.func, scopes)
+            for arg in node.args:
+                self.expr(arg, scopes)
+        elif kind == 'function':
+            self.function(node, scopes)
+        else:
+            for child in _children(node):
+                self.expr(child, scopes)
+
+
+def _path(node, loose=False, depth=0):
+    """The dotted Nexus path an expression names ('Nexus',
+    'Nexus.Localization', ...) through the global Nexus, literal fields and
+    local aliases, else None. An alias that is assigned again names no path;
+    loose=True ignores that, to tell a broken alias of a path apart from an
+    unrelated name."""
+    if depth > 64:
+        return None
+    kind = node.kind
+    if kind == 'paren':
+        return _path(node.expr, loose, depth + 1)
+    if kind == 'name':
+        binding = node.binding
+        if binding is None:
+            return 'Nexus' if node.value == 'Nexus' else None
+        if binding.kind != 'local' or binding.value is None or (binding.assigned and not loose):
+            return None
+        return _path(binding.value, loose, depth + 1)
+    if kind == 'index':
+        base = _path(node.obj, loose, depth + 1)
+        if base is not None and node.key.kind == 'string' and node.key.value is not None:
+            return base + '.' + node.key.value
+    return None
+
+
+def _seam_method(path):
+    """The seam method name a path names (Nexus.Localization.<name>), else None."""
+    prefix = _LOCALIZATION + '.'
+    if path is not None and path.startswith(prefix) and '.' not in path[len(prefix):]:
+        return path[len(prefix):]
+    return None
+
+
+def _literal_map(binding, string_values):
+    """[(code, value node)] of a read-only local table of literal string keys
+    (and literal string values when string_values), else None. The table
+    must never be assigned again and only ever be indexed."""
+    if binding is None or binding.kind != 'local' or binding.value is None:
+        return None
+    table = binding.value
+    if table.kind != 'table' or binding.assigned or any(use != 'index' for use in binding.uses):
+        return None
+    entries, seen = [], set()
+    for field in table.fields:
+        if field.key is None or field.key.kind != 'string' or field.key.value is None:
+            return None
+        if string_values and (field.value.kind != 'string' or field.value.value is None):
+            return None
+        if field.key.value in seen:
+            return None
+        seen.add(field.key.value)
+        entries.append((field.key.value, field.value))
+    return entries
+
+
+def _frames(ctx):
+    """The context chain of the walker as a list, outermost first."""
+    frames = []
+    while ctx is not None:
+        ctx, entry = ctx
+        frames.append(entry)
+    frames.reverse()
+    return frames
+
+
+class _Unit:
+    """One loaded Lua source and its parse."""
+
+    def __init__(self, path, data, order, fresh):
+        self.path, self.data, self.order = path, data, order
+        self.body, self.error, self.leads, self.localfunctions = _parsed(data, fresh)
+
+
+class _BindingAnalysis:
+    """The binding walk over every parsed unit (see the S8 notes above)."""
+
+    def __init__(self, units, declarations):
+        self.units, self.declarations = units, declarations
+        self.sites = {key: [] for key in declarations}
+        self.problems, self.dynamic, self.shadowed = [], [], []
+        self.wrappers, self.internal = {}, set()
+        self.path_calls, self.path_assignments = {}, {}
+        self.candidates, self.chains = [], []
+
+    # -- recording ---------------------------------------------------------
+
+    def problem(self, unit, node, code, **fields):
+        row = {'code': code, 'path': unit.path, 'line': node.line, 'column': node.column}
+        row.update(fields)
+        self.problems.append(((unit.order, node.line, node.column), row))
+
+    def unknown(self, unit, node, construct, **fields):
+        row = {'path': unit.path, 'line': node.line, 'column': node.column,
+               'construct': construct}
+        row.update(fields)
+        self.dynamic.append(((unit.order, node.line, node.column), row))
+
+    def literal(self, unit, arg, method, kind, site):
+        """A literal key reaching a seam method: a site, an orphan or a
+        kind mismatch."""
+        key = arg.value
+        declaration = self.declarations.get(key)
+        if declaration is None:
+            self.problem(unit, arg, 'binding-orphan', key=key, method=method)
+        elif kind is None:
+            return
+        elif declaration['kind'] != kind:
+            self.problem(unit, arg, 'binding-kind', key=key, method=method,
+                         declaredKind=declaration['kind'])
+        else:
+            row = {'path': unit.path, 'line': arg.line, 'column': arg.column}
+            row.update(site)
+            self.sites[key].append(((unit.order, arg.line, arg.column), row))
+
+    # -- wrappers ----------------------------------------------------------
+
+    def find_wrappers(self):
+        """A local function is a wrapper when a consumer-method call on a
+        receiver in its own body takes one of its parameters, never
+        assigned, as the key. Through a reassigned alias it is no wrapper;
+        the walk reports that call as unresolved."""
+        for unit in self.units:
+            for binding in unit.localfunctions:
+                func = binding.value
+                found = []
+                for node in _descendants(func.body):
+                    if node.kind != 'call' or not node.args or node.args[0].kind != 'name':
+                        continue
+                    param = node.args[0].binding
+                    if param is None or param.kind != 'param' or param.owner is not func:
+                        continue
+                    method = _seam_method(_path(node.func))
+                    if method in _KEY_METHODS and not param.assigned:
+                        found.append((node, param.index, method))
+                kinds = {(index, _KEY_METHODS[method]) for _, index, method in found}
+                if len(kinds) > 1:
+                    self.problem(unit, binding.node, 'binding-unresolved', construct='wrapper',
+                                 detail='the wrapper passes different parameters or kinds')
+                    continue
+                if found:
+                    index, kind = kinds.pop()
+                    self.wrappers[binding] = {
+                        'name': binding.node.value, 'path': unit.path,
+                        'line': binding.node.line, 'parameter': index, 'kind': kind,
+                        'method': found[0][2]}
+                    self.internal.update(id(node) for node, _, _ in found)
+
+    # -- the walk ----------------------------------------------------------
+
+    def walk(self):
+        for unit in self.units:
+            if unit.body is not None:
+                self.block(unit, unit.body, (None, ('function', None, None)))
+
+    def block(self, unit, body, ctx):
+        for index, stmt in enumerate(body):
+            self.statement(unit, stmt, (ctx, ('statement', body, index)))
+
+    def statement(self, unit, stmt, ctx):
+        kind = stmt.kind
+        if kind == 'localfunction':
+            self.function(unit, stmt.func, ctx, None)
+        elif kind == 'funcstat':
+            self.target(unit, stmt.target, stmt.func, ctx)
+            self.function(unit, stmt.func, ctx, stmt)
+        elif kind == 'assign':
+            for expr in stmt.exprs:
+                self.expr(unit, expr, ctx, None)
+            for index, target in enumerate(stmt.targets):
+                value = stmt.exprs[index] if index < len(stmt.exprs) else None
+                self.target(unit, target, value, ctx)
+        elif kind in ('do', 'while', 'repeat', 'if', 'fornum', 'forin'):
+            for child in _children(stmt):
+                if child.kind in _STATEMENTS:
+                    continue
+                self.expr(unit, child, ctx, None)
+            for body in _bodies(stmt):
+                self.block(unit, body, ctx)
+        elif kind == 'local':
+            for expr in stmt.exprs:
+                self.expr(unit, expr, ctx, 'local')
+        elif kind == 'return':
+            for expr in stmt.exprs:
+                self.expr(unit, expr, ctx, 'return')
+        elif kind == 'callstat':
+            self.expr(unit, stmt.call, ctx, 'statement')
+
+    def function(self, unit, func, ctx, funcstat):
+        self.block(unit, func.body, (ctx, ('function', func, funcstat)))
+
+    def target(self, unit, target, value, ctx):
+        """An assignment or function definition target: seam mutation and
+        Nexus path assignments are recorded."""
+        if target.kind == 'index':
+            if target.obj.kind != 'name':
+                self.expr(unit, target.obj, ctx, None)
+            self.expr(unit, target.key, ctx, None)
+        path = _path(target)
+        if path is None:
+            return
+        self.path_assignments.setdefault(path, []).append((unit, target, value))
+        if path == 'Nexus':
+            bootstrap = (value is not None and value.kind == 'operation' and value.ops == ['or']
+                         and value.operands[0].kind == 'name'
+                         and value.operands[0].binding is None
+                         and value.operands[0].value == 'Nexus'
+                         and value.operands[1].kind == 'table'
+                         and not value.operands[1].fields)
+            if not bootstrap:
+                self.problem(unit, target, 'binding-mutation', construct='nexus-reassigned',
+                             detail='the global Nexus is assigned something other than '
+                                    'Nexus or {}')
+        elif (path == _LOCALIZATION or path.startswith(_LOCALIZATION + '.')) \
+                and unit.path != _AUTHORITY:
+            self.problem(unit, target, 'binding-mutation', construct='seam-assignment',
+                         detail='%s is assigned outside %s' % (path, _AUTHORITY))
+
+    def expr(self, unit, node, ctx, sink):
+        kind = node.kind
+        if kind == 'call':
+            self.call(unit, node, ctx, sink)
+        elif kind == 'method':
+            if _path(node.obj, True) == _LOCALIZATION and node.name in _SEAM_METHODS:
+                self.problem(unit, node, 'binding-unresolved', construct='method-call',
+                             detail='%s:%s passes the seam table as its key'
+                                    % (_LOCALIZATION, node.name))
+            self.expr(unit, node.obj, ctx, None)
+            for arg in node.args:
+                self.expr(unit, arg, ctx, 'argument:' + node.name)
+        elif kind == 'index':
+            self.member(unit, node, ctx)
+        elif kind == 'paren':
+            self.expr(unit, node.expr, ctx, sink)
+        elif kind == 'function':
+            self.function(unit, node, ctx, None)
+        else:
+            for child in _children(node):
+                self.expr(unit, child, ctx, None)
+
+    def member(self, unit, node, ctx, checked=False):
+        """A field read. A consumer method read without being called (other
+        than inside type()) is an indirect reference; a computed field of
+        the seam is a dynamic member."""
+        path = _path(node)
+        if not checked and _seam_method(path) in _KEY_METHODS:
+            self.problem(unit, node, 'binding-unresolved', construct='indirect-key-method',
+                         detail='%s is read without being called' % path)
+        elif node.key.kind != 'string' and _path(node.obj) == _LOCALIZATION:
+            self.unknown(unit, node, 'dynamic-member')
+        if node.obj.kind != 'name':
+            self.expr(unit, node.obj, ctx, None)
+        self.expr(unit, node.key, ctx, None)
+
+    def call(self, unit, node, ctx, sink):
+        func, args = node.func, node.args
+        path = _path(func)
+        method = _seam_method(path)
+        if method in _SEAM_METHODS:
+            self.seam_call(unit, node, method, sink)
+        elif path is None and _seam_method(_path(func, True)) in _SEAM_METHODS:
+            self.problem(unit, node, 'binding-unresolved', construct='alias',
+                         detail='a local alias of %s on the way is assigned again'
+                                % _LOCALIZATION)
+        elif path is None and func.kind == 'index' and func.key.kind == 'string' \
+                and func.key.value in _KEY_METHODS and func.obj.kind == 'index' \
+                and func.obj.key.kind == 'string' and func.obj.key.value == 'Localization' \
+                and args and args[0].kind == 'string':
+            self.unknown(unit, node, 'unresolved-receiver', literal=args[0].value)
+        elif func.kind == 'name' and func.binding in self.wrappers:
+            self.wrapper_call(unit, node, func.binding, ctx)
+        if path is not None:
+            self.path_calls.setdefault(path, []).append((unit, node, ctx))
+        if func.kind == 'index':
+            self.member(unit, func, ctx, checked=True)
+        elif func.kind != 'name':
+            self.expr(unit, func, ctx, None)
+        global_name = func.value if func.kind == 'name' and func.binding is None else None
+        if global_name == 'rawget' and len(args) >= 2 and _path(args[0]) == _LOCALIZATION:
+            if args[1].kind != 'string':
+                self.unknown(unit, node, 'dynamic-member')
+            elif args[1].value in _KEY_METHODS:
+                self.problem(unit, node, 'binding-unresolved', construct='indirect-key-method',
+                             detail='rawget reads %s.%s' % (_LOCALIZATION, args[1].value))
+        name = (func.key.value if func.kind == 'index' and func.key.kind == 'string'
+                else func.value if func.kind == 'name' else None)
+        for arg in args:
+            if global_name == 'type' and len(args) == 1 and arg.kind == 'index':
+                self.member(unit, arg, ctx, checked=True)
+            else:
+                self.expr(unit, arg, ctx, None if name is None else 'argument:' + name)
+
+    def seam_call(self, unit, node, method, sink):
+        func = node.func
+        while func.kind == 'paren':
+            func = func.expr
+        if func.kind != 'index':
+            # A local alias of the method itself: its declaration is already
+            # an indirect-key-method problem, and the call never binds.
+            return
+        arg = node.args[0] if node.args else None
+        if arg is not None and arg.kind == 'string' and arg.value is not None:
+            obj = func.obj
+            while obj.kind == 'paren':
+                obj = obj.expr
+            if obj.kind == 'name' and obj.binding is not None:
+                receiver = {'form': 'alias', 'name': obj.value, 'line': obj.binding.node.line}
+            else:
+                receiver = {'form': 'path', 'name': _LOCALIZATION}
+            self.literal(unit, arg, method, _KEY_METHODS.get(method), {
+                'site': 'direct-call', 'method': method, 'receiver': receiver, 'context': sink})
+        elif method in _KEY_METHODS and id(node) not in self.internal:
+            self.unknown(unit, node, 'dynamic-key', method=method)
+
+    def wrapper_call(self, unit, node, binding, ctx):
+        wrapper = self.wrappers[binding]
+        if binding.assigned:
+            self.problem(unit, node, 'binding-unresolved', construct='wrapper',
+                         detail='the wrapper %s is assigned again' % wrapper['name'])
+            return
+        index = wrapper['parameter']
+        arg = node.args[index] if index < len(node.args) else None
+        if arg is not None and arg.kind == 'string' and arg.value is not None:
+            self.literal(unit, arg, wrapper['method'], wrapper['kind'], {
+                'site': 'wrapper-call', 'method': wrapper['method'],
+                'wrapper': {'name': wrapper['name'], 'path': wrapper['path'],
+                            'line': wrapper['line']}})
+        elif arg is not None and arg.kind == 'index' and arg.obj.kind == 'name' \
+                and arg.key.kind == 'name' and arg.obj.binding is not None \
+                and arg.obj.binding.kind == 'local' and arg.obj.binding.value is not None \
+                and arg.obj.binding.value.kind == 'table':
+            # A local table constructor indexed by a name: a map dispatch,
+            # bound or explicitly unresolved, never silently dynamic.
+            self.dispatch(unit, node, wrapper, arg, ctx)
+        else:
+            self.unknown(unit, node, 'dynamic-wrapper-argument', wrapper=wrapper['name'])
+
+    # -- map dispatch ------------------------------------------------------
+
+    def dispatch(self, unit, node, wrapper, arg, ctx):
+        """A wrapper(MAP[v], ...) call: checked here for its local shape and
+        preceding guards, and later (resolve_dispatches) for its exported
+        dispatcher and callers."""
+        mapping, variable = arg.obj.binding, arg.key.binding
+        entries = _literal_map(mapping, True)
+        if entries is None:
+            self.problem(unit, node, 'binding-unresolved', construct='map',
+                         detail='%s is not a read-only local table of literal string pairs'
+                                % arg.obj.value)
+            return
+        reason, shadow, frames = None, {}, _frames(ctx)
+        start = max(index for index, entry in enumerate(frames) if entry[0] == 'function')
+        _, func, funcstat = frames[start]
+        tail = frames[start + 1:]
+        statement = tail[0][1][tail[0][2]] if len(tail) == 2 and func is not None else None
+        if statement is None or tail[0][1] is not func.body or statement.kind != 'if' \
+                or len(statement.clauses) != 1 or statement.orelse is not None \
+                or tail[1][1] is not statement.clauses[0][1]:
+            reason = 'the call is not the return of an if MAP[v] then ... end in a function body'
+        else:
+            cond, returned = statement.clauses[0][0], tail[1][1][tail[1][2]]
+            if not (cond.kind == 'index' and cond.obj.kind == 'name'
+                    and cond.obj.binding is mapping and cond.key.kind == 'name'
+                    and cond.key.binding is variable and returned.kind == 'return'
+                    and len(returned.exprs) == 1 and returned.exprs[0] is node):
+                reason = 'the call is not the sole return guarded by the same MAP[v]'
+            elif not _unassigned_until(variable, func, tail[0][2]):
+                reason = ('the dispatch variable is not a local of this function left unassigned '
+                          'up to the dispatch')
+            elif funcstat is None or funcstat.method is not None \
+                    or funcstat.target.kind != 'index' or funcstat.target.obj.kind != 'name':
+                reason = 'the dispatch is not in a function T.Name of a module table'
+        if reason is None:
+            for earlier in func.body[:tail[0][2]]:
+                guard = _guard(earlier, variable)
+                if guard is not None:
+                    codes = _literal_map(guard.binding, False)
+                    if codes is None:
+                        reason = '%s is not a read-only local table of literal keys' % guard.value
+                        break
+                    for code, _ in codes:
+                        shadow.setdefault(code, guard.value)
+                elif any(item.kind == 'return' for item in _descendants([earlier])):
+                    reason = 'an earlier statement at line %d can return first' % earlier.line
+                    break
+        if reason is not None:
+            self.problem(unit, node, 'binding-unresolved', construct='dispatch', detail=reason)
+            return
+        self.candidates.append({'unit': unit, 'node': node, 'wrapper': wrapper, 'map': mapping,
+                                'entries': entries, 'shadow': shadow, 'func': func,
+                                'funcstat': funcstat})
+
+    def resolve_dispatches(self):
+        for candidate in self.candidates:
+            unit, node, funcstat = candidate['unit'], candidate['node'], candidate['funcstat']
+            module, field = funcstat.target.obj.binding, funcstat.target.key.value
+            exports = sorted({path for path, rows in self.path_assignments.items()
+                              for _, _, value in rows
+                              if value is not None and value.kind == 'name'
+                              and value.binding is module and module is not None})
+            reason, callers = None, []
+            if module is None or module.kind != 'local' or module.value is None \
+                    or module.value.kind != 'table' or module.assigned:
+                reason = 'the function is not defined on a local module table'
+            elif module.fields.get(field) != 1:
+                reason = '%s.%s is defined more than once' % (module.node.value, field)
+            elif not exports:
+                reason = 'the module table is not exported as a Nexus path'
+            else:
+                for export in exports:
+                    others = [row for row in self.path_assignments.get(export, ())
+                              if not (row[2] is not None and row[2].kind == 'name'
+                                      and row[2].binding is module)]
+                    if others or self.path_assignments.get(export + '.' + field):
+                        reason = '%s or %s.%s is assigned elsewhere' % (export, export, field)
+                        break
+                    for caller_unit, call, ctx in self.path_calls.get(export + '.' + field, ()):
+                        if not any(entry[0] == 'function' and entry[1] is candidate['func']
+                                   for entry in _frames(ctx)):
+                            callers.append(((caller_unit.order, call.line, call.column),
+                                            {'path': caller_unit.path, 'line': call.line,
+                                             'column': call.column}))
+                if reason is None and not callers:
+                    reason = 'no call outside the dispatcher reaches %s' % ' or '.join(
+                        export + '.' + field for export in exports)
+            if reason is not None:
+                self.problem(unit, node, 'binding-unresolved', construct='dispatcher',
+                             detail=reason)
+                continue
+            wrapper, bound, shadowed = candidate['wrapper'], [], []
+            dispatcher = exports[0] + '.' + field
+            for code, value in candidate['entries']:
+                if code in candidate['shadow']:
+                    row = {'code': code, 'key': value.value, 'path': unit.path,
+                           'line': value.line, 'column': value.column,
+                           'shadowedBy': candidate['shadow'][code]}
+                    shadowed.append(row)
+                    self.shadowed.append(((unit.order, value.line, value.column), row))
+                    continue
+                before = len(self.sites.get(value.value, ()))
+                self.literal(unit, value, wrapper['method'], wrapper['kind'], {
+                    'site': 'map-value', 'code': code, 'map': candidate['map'].node.value,
+                    'dispatcher': dispatcher})
+                if len(self.sites.get(value.value, ())) > before:
+                    bound.append(value.value)
+            callers.sort(key=lambda item: item[0])
+            self.chains.append({
+                'map': {'name': candidate['map'].node.value, 'path': unit.path,
+                        'line': candidate['map'].node.line},
+                'wrapper': {'name': wrapper['name'], 'path': wrapper['path'],
+                            'line': wrapper['line'], 'method': wrapper['method']},
+                'dispatch': {'path': unit.path, 'line': node.line, 'column': node.column},
+                'dispatcher': dispatcher, 'externalCallers': [row for _, row in callers],
+                'entries': len(candidate['entries']), 'boundKeys': bound,
+                'shadowedEntries': shadowed})
+
+
+_STATEMENTS = frozenset(('local', 'localfunction', 'funcstat', 'assign', 'callstat', 'do',
+                         'while', 'repeat', 'if', 'fornum', 'forin', 'return', 'break'))
+
+
+def _bodies(stmt):
+    """The nested blocks of a compound statement."""
+    if stmt.kind == 'if':
+        return [body for _, body in stmt.clauses] + ([stmt.orelse] if stmt.orelse else [])
+    return [stmt.body]
+
+
+def _unassigned_until(variable, func, index):
+    """True when variable is a parameter of func or a local declared by an
+    earlier statement of its body, and no statement of the body up to and
+    including statement index, closures included, assigns it."""
+    if variable is None:
+        return False
+    body = func.body[:index + 1]
+    declared = (variable.kind == 'param' and variable.owner is func) or (
+        variable.kind == 'local' and any(stmt.kind == 'local' and any(
+            name.binding is variable for name in stmt.names) for stmt in body[:-1]))
+    early = {id(node) for node in _descendants(body, True)}
+    return declared and not any(id(node) in early for node in variable.assigned)
+
+
+def _guard(stmt, variable):
+    """The table name node of an 'if OTHER[v] then ... end' statement over
+    the same variable, else None."""
+    if stmt.kind != 'if' or len(stmt.clauses) != 1 or stmt.orelse is not None:
+        return None
+    cond = stmt.clauses[0][0]
+    if cond.kind == 'index' and cond.obj.kind == 'name' and cond.key.kind == 'name' \
+            and cond.key.binding is variable and variable is not None:
+        return cond.obj
+    return None
+
+
+# Parsed files memoized by the SHA-256 of their exact bytes, oldest dropped
+# first. A parse depends only on those bytes and the analysis never changes
+# a parsed tree, so a memoized parse is the same parse; nothing is read or
+# written. Two equal files of one call get separate parses (fresh), so their
+# local names stay distinct.
+_PARSE_MEMO = {}
+_PARSE_MEMO_LIMIT = 256
+
+
+def _parsed(data, fresh=False):
+    """(syntax tree or None, error or None, string literals as (value, line,
+    column), local functions) of the exact bytes of one Lua file."""
+    digest = hashlib.sha256(data).digest()
+    if digest in _PARSE_MEMO and not fresh:
+        return _PARSE_MEMO[digest]
+    try:
+        text = data.decode('utf-8')
+    except UnicodeDecodeError:
+        result = None, {'code': 'not-utf8'}, [], []
+    else:
+        try:
+            tokens = _lua_tokens(text)
+            body = _LuaParser(tokens).chunk()
+            resolver = _Resolver()
+            resolver.block(body, [])
+        except CatalogSyntaxError as error:
+            result = None, {'code': error.code, 'line': error.line, 'column': error.column}, [], []
+        except RecursionError:
+            result = None, {'code': 'nesting-too-deep'}, [], []
+        else:
+            leads = [(token.value, token.line, token.column) for token in tokens
+                     if token.kind == 'string']
+            result = body, None, leads, resolver.localfunctions
+    while len(_PARSE_MEMO) >= _PARSE_MEMO_LIMIT:
+        del _PARSE_MEMO[next(iter(_PARSE_MEMO))]
+    _PARSE_MEMO[digest] = result
+    return result
+
+
+def consumer_binding_report(english_source: bytes, packs_source: bytes, key_context_json: bytes,
+                            release_json: bytes, localization_source: bytes, toc_records,
+                            source_records) -> dict:
+    """The static consumer binding receipt (see above) for the exact bytes of
+    the five registry-bound inputs, the TOC records and the source records.
+    A non-bytes registry input is a TypeError, an invalid catalog raises its
+    strict error unchanged and a record failure raises CatalogConsumerError.
+    No file is read or written, nothing is fetched, executed or modified, and
+    only the in-memory parse memo (_PARSE_MEMO) is kept between calls."""
+    registry = (english_source, packs_source, key_context_json, release_json,
+                localization_source)
+    for name, value in zip(('english_source', 'packs_source', 'key_context_json',
+                            'release_json', 'localization_source'), registry):
+        if not isinstance(value, (bytes, bytearray)):
+            raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
+    registry = tuple(bytes(value) for value in registry)
+    tocs, supplied, listed = _consumer_inputs(
+        (registry[0], registry[1], registry[4]), toc_records, source_records)
+    # The strict registry-bound verdict first: an invalid catalog gets no receipt.
+    registry_catalog_report(*registry)
+    validated = validate_registry_catalog_data(*registry)
+    declarations, context = validated['declarations'], validated['keyContext']
+    units, contents = [], set()
+    for path in listed:
+        data = supplied[path]
+        units.append(_Unit(path, data, listed[path][2], data in contents))
+        contents.add(data)
+    analysis = _BindingAnalysis([unit for unit in units if unit.body is not None], declarations)
+    analysis.find_wrappers()
+    analysis.walk()
+    analysis.resolve_dispatches()
+    for unit in units:
+        if unit.error is not None:
+            row = {'code': 'binding-unparsed', 'path': unit.path}
+            row.update({('detail' if field == 'code' else field): value
+                        for field, value in unit.error.items()})
+            analysis.problems.append(((unit.order, 0, 0), row))
+    families = {}
+    for family in context['windowFamilies']:
+        for key in family['adoptedKeys']:
+            families.setdefault(key, []).append({
+                'name': family['name'], 'semanticStatus': family['semanticStatus'],
+                'coverageStatus': family['coverageStatus']})
+    surfaces = {row['key']: row.get('familySurface') for row in context['keys']
+                if type(row) is dict}
+    positions = {(row['path'], row['line'], row['column'])
+                 for sites in analysis.sites.values() for _, row in sites}
+    leads = {key: {} for key in declarations}
+    for unit in units:
+        for value, line, column in unit.leads:
+            if value in leads and (unit.path, line, column) not in positions:
+                leads[value][unit.path] = leads[value].get(unit.path, 0) + 1
+    rows, unbound = [], []
+    for key, declaration in declarations.items():
+        sites = [row for _, row in sorted(analysis.sites[key], key=lambda item: item[0])]
+        kinds = {row['site'] for row in sites}
+        binding = (_DIRECT if kinds & {'direct-call', 'wrapper-call'}
+                   else _MAPPED if kinds else _UNBOUND)
+        if binding == _UNBOUND:
+            unbound.append({'code': 'binding-unbound', 'path': None, 'key': key,
+                            'detail': 'no genuine static consumer of this declared key'})
+        declared = families.get(key, [])
+        rows.append({'key': key, 'kind': declaration['kind'], 'binding': binding,
+                     'sites': sites,
+                     'excludedLiteralLeads': {'count': sum(leads[key].values()),
+                                              'byPath': leads[key]},
+                     'family': {'state': 'DECLARED' if declared else 'UNCLASSIFIED',
+                                'families': declared, 'familySurface': surfaces.get(key)}})
+    problems = [row for _, row in sorted(analysis.problems, key=lambda item: item[0])] + unbound
+    return {
+        'schema': CONSUMER_SCHEMA,
+        'schemaVersion': CONSUMER_SCHEMA_VERSION,
+        'tool': _TOOL_PATH,
+        'status': STATUS,
+        'scope': CONSUMER_SCOPE,
+        'mode': _CONSUMER_MODE,
+        'inputs': _input_rows(_REGISTRY_INPUTS, registry),
+        'hashBasis': _HASH_BASIS,
+        'tocs': [{'path': path, 'sha256': hashlib.sha256(data).hexdigest(),
+                  'byteLength': len(data),
+                  'loaded': [entry for entry, (toc, _, _) in listed.items() if toc == path]}
+                 for path, data in tocs],
+        'sources': [{'path': unit.path, 'toc': listed[unit.path][0],
+                     'tocLine': listed[unit.path][1],
+                     'sha256': hashlib.sha256(unit.data).hexdigest(),
+                     'byteLength': len(unit.data),
+                     'role': ('provider' if unit.path == _AUTHORITY else 'catalog-data'
+                              if unit.path in (_ENGLISH_SOURCE, _PACKS_SOURCE) else 'scanned'),
+                     'analysis': 'UNPARSED' if unit.error else 'PARSED'} for unit in units],
+        'valid': not problems,
+        'counts': {
+            'keys': len(rows),
+            _DIRECT: sum(1 for row in rows if row['binding'] == _DIRECT),
+            _MAPPED: sum(1 for row in rows if row['binding'] == _MAPPED),
+            _UNBOUND: len(unbound),
+            'sites': sum(len(row['sites']) for row in rows),
+            'problems': len(problems),
+            'dynamicUnknown': len(analysis.dynamic),
+            'shadowedMapEntries': len(analysis.shadowed)},
+        'keys': rows,
+        'mapChains': analysis.chains,
+        'shadowedMapEntries': [row for _, row in sorted(analysis.shadowed,
+                                                        key=lambda item: item[0])],
+        'dynamicUnknown': [row for _, row in sorted(analysis.dynamic, key=lambda item: item[0])],
+        'problems': problems,
+        'bindingRule': _BINDING_RULE,
+        'familyRule': _FAMILY_RULE,
+        'limits': list(_CONSUMER_LIMITS),
+        'completeness': {'established': False, 'rule': _CONSUMER_COMPLETENESS},
+        'nonexecution': 'sources are tokenized and parsed from the supplied bytes; no Lua is '
+                        'executed',
+    }
+
+
+def _cli_consumers(root, data, localization, toc, require_complete):
+    """Read both TOCs and every Lua file they load from the confined root,
+    write one consumers record on stdout and return its exit status: 2
+    while the receipt is not valid, else 1 with --require-complete (never
+    established) or 0."""
+    read = {_ENGLISH_SOURCE: data[0], _PACKS_SOURCE: data[1], _AUTHORITY: localization,
+            _MAIN_TOC: data[-1]}
+    tocs, sources, seen = [], [], set()
+    for toc_path in _CONSUMER_TOCS:
+        if toc_path not in read:
+            read[toc_path] = _cli_read(root, toc_path)
+        tocs.append(toc_path)
+    for toc_path in tocs:
+        for path, _ in _toc_entries(toc_path, read[toc_path]):
+            if path in seen:
+                continue
+            seen.add(path)
+            if path not in read:
+                read[path] = _cli_read(root, path)
+            sources.append(path)
+
+    def records(paths):
+        return [{'path': path, 'sha256': hashlib.sha256(read[path]).hexdigest(),
+                 'byteLength': len(read[path]), 'data': read[path]} for path in paths]
+    receipt = consumer_binding_report(data[0], data[1], data[2], data[3], localization,
+                                      records(tocs), records(sources))
+    if not receipt['valid']:
+        exit_code = _EXIT_ERROR
+    else:
+        exit_code = _EXIT_NOT_ESTABLISHED if require_complete else _EXIT_REPORT
+    _cli_emit(sys.stdout, {
+        'schema': CLI_SCHEMA,
+        'schemaVersion': CLI_SCHEMA_VERSION,
+        'record': 'consumers',
+        'tool': _TOOL_PATH,
+        'status': STATUS,
+        'requireComplete': 'requested' if require_complete else 'not_requested',
+        'registryBinding': 'requested',
+        'exitCode': exit_code,
+        'inputBinding': _CONSUMER_INPUT_BINDING,
+        'toc': toc,
+        'consumers': receipt,
     })
     return exit_code
 
