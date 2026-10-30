@@ -4277,8 +4277,13 @@ end
 -- field a text slot, in that order). An entry may add nested = {field =
 -- {[exact value] = key}}: that text field's captured value, when it is
 -- exactly one of those code-owned values, is shown through its key; any
--- other value (player data) stays verbatim. At most MAX_PHRASE_ENTRIES
--- entries.
+-- other value (player data) stays verbatim. nested = {field = true} shows
+-- the value through the same book instead (an inner reason the same owner
+-- produced). spec.segments = true makes the exact texts also segment units:
+-- a raw text that consists only of exact texts, one directly after another
+-- or separated by one ASCII space, is shown unit by unit (each through its
+-- key, the spaces kept); any byte no unit covers leaves the text raw. At
+-- most MAX_PHRASE_ENTRIES entries.
 -- L.Phrase(raw, book) -> shown, matched: the exact entry, else the first
 -- format whose anchored pattern matches, rendered with L.Text / L.Format.
 -- A %d capture is used only when it is a whole number >= 0 that tostring
@@ -4320,6 +4325,7 @@ end
 function L.PhraseBook(spec)
     local book = {exact = {}, formats = {}, size = 0}
     if type(spec) ~= "table" then return book end
+    book.segments = spec.segments == true
     if type(spec.exact) == "table" then
         for raw, key in pairs(spec.exact) do
             if book.size < MAX_PHRASE_ENTRIES and type(raw) == "string" and ValidKey(key) then
@@ -4372,6 +4378,8 @@ function L.Phrase(raw, book)
                     if nestedKey and ValidKey(nestedKey) then
                         local shown, source = L.Text(nestedKey)
                         if source ~= "unavailable" then value = shown end
+                    elseif map == true and value ~= raw then
+                        value = (L.Phrase(value, book))
                     end
                     args[name] = value
                 end
@@ -4382,6 +4390,47 @@ function L.Phrase(raw, book)
             end
             return raw, false
         end
+    end
+    if book.segments == true then
+        local units = book.units
+        if not units then
+            -- Exact texts by their first byte, longest first.
+            units = {}
+            for text in pairs(book.exact) do
+                local first = text:sub(1, 1)
+                units[first] = units[first] or {}
+                table.insert(units[first], text)
+            end
+            for _, list in pairs(units) do
+                table.sort(list, function(a, c) return #a > #c end)
+            end
+            book.units = units
+        end
+        local length, failed = #raw, {}
+        local function Parse(index)
+            if index > length then return {} end
+            if failed[index] then return nil end
+            local starts = {index}
+            if index > 1 and raw:sub(index, index) == " " then starts[2] = index + 1 end
+            for s = 1, #starts do
+                local at = starts[s]
+                for _, unit in ipairs(units[raw:sub(at, at)] or {}) do
+                    if raw:sub(at, at + #unit - 1) == unit then
+                        local rest = Parse(at + #unit)
+                        if rest then
+                            local shown, source = L.Text(book.exact[unit])
+                            if source == "unavailable" then return nil end
+                            table.insert(rest, 1, (at > index and " " or "") .. shown)
+                            return rest
+                        end
+                    end
+                end
+            end
+            failed[index] = true
+            return nil
+        end
+        local parts = length > 0 and Parse(1) or nil
+        if parts and #parts > 1 then return table.concat(parts), true end
     end
     return raw, false
 end

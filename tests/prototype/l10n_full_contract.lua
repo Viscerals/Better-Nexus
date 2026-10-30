@@ -167,11 +167,12 @@ do
   ['orb.status.plain']=TEXT,
   ['orb.status.counted']='{kind = "template", fields = {"have", "limit"}, slots = {"count", "count"}, resultLimit = 300}',
   ['orb.status.named']='{kind = "template", fields = {"name", "count"}, slots = {"text", "count"}, resultLimit = 300}',
+  ['orb.status.kept']=TEXT,['orb.status.done']=TEXT,
  }
- local eng={['orb.status.plain']='Session interrupted.',
+ local eng={['orb.status.plain']='Session interrupted.',['orb.status.kept']=' Kept.',['orb.status.done']='Done.',
   ['orb.status.counted']='It lists {have} occupied records, more than the {limit} allowed.',
   ['orb.status.named']='{name} needs {count} more copies.'}
- local packs={frFR={name='Fran\195\167ais',entries={['orb.status.plain']='Session interrompue.',
+ local packs={frFR={name='Fran\195\167ais',entries={['orb.status.plain']='Session interrompue.',['orb.status.kept']=' Gard\195\169.',['orb.status.done']='Fini.',
   ['orb.status.counted']='{limit} max, {have} vus.',['orb.status.named']='{name} : encore {count}.'}}}
  local m=load(decl,eng,packs)
  local book=m.PhraseBook({
@@ -208,6 +209,19 @@ do
   nested={name={['Session interrupted.']='orb.status.plain'}}}}})
  check(m.Phrase('Session interrupted. needs 2 more copies.',nb)=='Session interrompue. : encore 2.','EXPECT a nested exact value is shown in the active language')
  check(m.Phrase('Plan A needs 2 more copies.',nb)=='Plan A : encore 2.','GUARD a value outside the nested map stays verbatim')
+ -- nested = true: the captured value is shown through the same book.
+ local rb=m.PhraseBook({exact={['Session interrupted.']='orb.status.plain'},
+  formats={{format='%s needs %d more copies.',key='orb.status.named',fields={'name','count'},nested={name=true}}}})
+ check(m.Phrase('Session interrupted. needs 4 more copies.',rb)=='Session interrompue. : encore 4.','EXPECT a nested=true value goes through the book')
+ -- segments = true: a text made only of known units (single spaces between
+ -- them kept) is shown unit by unit; any uncovered byte leaves it raw.
+ local sb=m.PhraseBook({segments=true,exact={['Session interrupted.']='orb.status.plain',
+  [' Kept.']='orb.status.kept',['Done.']='orb.status.done'}})
+ check(sb.segments==true,'EXPECT a segment book')
+ check(m.Phrase('Session interrupted. Kept.',sb)=='Session interrompue. Gard\195\169.','EXPECT a leading-space unit joins')
+ check(m.Phrase('Session interrupted. Done.',sb)=='Session interrompue. Fini.','EXPECT a single space between units is kept')
+ check(m.Phrase('Session interrupted. Unknown tail.',sb)=='Session interrupted. Unknown tail.','GUARD partial coverage shows the raw text unchanged')
+ check(m.Phrase('Session interrupted.  Done.',sb)=='Session interrupted.  Done.','GUARD only one separating space is allowed')
 end
 
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData and Nexus.LocalizationPacks==realPacks,'GUARD real seam restored')
