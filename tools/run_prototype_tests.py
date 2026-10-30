@@ -414,6 +414,12 @@ NAMES += ['crimson_pause_panel_orb_integration']
 NAMES += ['native_panel_input_continuity']
 # Issue #169 (with #131 / #163), owner-approved FAQ readability: each Reference > Questions (FAQ) question is a gold line of its own, answers keep the white body font, groups are one more blank line apart; wording, other pages and passive reading unchanged; measured height and scroll range cover every wrapped row at the stated font models (EXPECT fails at b1ef408; native colour, contrast and glyph fit NOT_RUN).
 NAMES += ['faq_readability']
+# Owner-approved usability follow-up 2026-10-30, Panel/menu lane (#171, #165, #174, #164, #175, #169; displayed items 1, 2+9, 7, 8, 12, 14, 15): confirmed-pause banner with one Resume, unknown/failed pause honest; shorter grouped Options with every distinct route and current setting values; complete cached extra-copies window that stays truthful after a failed render and fits the screen; once-per-hide restore guidance; plain update copy; Soul Ash / Intensity / DPS hover; header FAQ shortcut; visible Auto OFF unchanged (synthetic fixtures; native NOT_RUN).
+NAMES += ['owner14_panel_usability']
+# Owner-approved usability follow-up 2026-10-30, Wishlist editor lane (#173; displayed items 3, 4, 6): the locked-slot automation caption readable without hover, always-visible counts and Owned text with long UTF-8 / escaped-pipe names and measured row pitch at default, 16 px and 2.0 text, and the destination row's assigned-now versus opened wording; reading changes nothing (stated font models only; native fit NOT_RUN).
+NAMES += ['owner14_editor_usability']
+# Owner-approved usability follow-up 2026-10-30, guide/Help/shared-copy lane (#131, #173, #169; displayed items 5, 6, 11, 13): shorter plain coach wording with consent, refusal and saved place kept; UserText.DestinationFields assigned now versus captured; Help page tabs apart from window buttons; one checklist marker language beside status words; every Auto OFF wording exact (EXPECT fails at f8cce3f4 by design; native NOT_RUN).
+NAMES += ['owner14_guide_help_usability']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
