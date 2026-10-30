@@ -296,3 +296,403 @@ assert(P.AutoSelectedNow()==autoBefore and f._autoBtn:GetText()==autoText,'openi
 assert(f:IsShown()==shownBefore,'opening the menu leaves the panel as it was')
 print('PASS Options click route: direct choices and More help and windows, nothing changed')
 print('PASS panel options label')
+
+-- 6. Issue #146 O1: an expanded Options label admitted by the REAL loader and
+-- consumed by the REAL header, hover and menu. Sections 1-3 reach the label
+-- through an L.Text stand-in and a direct SetText; here nothing stands in for
+-- the label. Fresh real-TOC boots (format5_support F.Boot) of synthetic saved
+-- data: right after data\LocalizationPacks.lua loads, a scoped F.fileHooks
+-- entry copies the in-memory packs and sets only the copied frFR
+-- "panel.button.options" (the shipped frFR holds none); the real
+-- core/Localization.lua then checks and copies it, frFR is chosen only in the
+-- synthetic settings, and Panel.Render, OptionsLabel / OptionsText,
+-- PlaceOptionsButton and the registered OnEnter / OnLeave / OnClick of the
+-- actual NexusPanel._menuBtn do the rest. TEST-ONLY expansion text: no new
+-- language ID, no shipped pack, key, cap or data change, no translation.
+-- Geometry is the stated uniform-character models of layout_geometry_support
+-- (default, 16 px face, 0.75, 2.0) and the 125% conservative model of section
+-- 2, at UI scales 1 and 0.64, 420 / 640 px panels and a 640x480 screen: a
+-- regression model, not native glyph, wide-script font or pixel proof. Native
+-- focus, Escape, hit order and tooltip drawing are NOT RUN; a harness Click is
+-- not a native click. The fixed 92x22 control is shortened, never grown; its
+-- own hover recovers the complete label. Self-contained: it reads nothing the
+-- sections above set up, and restores the globals it replaces.
+do
+ -- Every global as it is now; each boot's harness replaces many of them.
+ local before={}
+ for name,value in pairs(_G)do before[name]=value end
+ local F=dofile('tests/prototype/format5_support.lua')
+ local G=dofile('tests/prototype/layout_geometry_support.lua')
+ local S=dofile('tests/prototype/startup_support.lua')
+ local same=S.Equal
+ local checks=0
+ local function check(ok,why)assert(ok,why);checks=checks+1 end
+ local KEY='panel.button.options'
+ -- Deterministic test-only text from bounded valid UTF-8 pieces: accented
+ -- Latin, CJK (wide in the client, one model character here), fullwidth
+ -- Latin and Cyrillic, then ASCII padding to an exact byte length.
+ local PIECES={'R\195\169glages ','\232\168\173\229\174\154 ',
+  '\239\188\175\239\189\144\239\189\148\239\189\137\239\189\143\239\189\142\239\189\147 ',
+  '\195\137tat ','\208\157\208\176\209\129\209\130\209\128\208\190\208\185\208\186\208\184 '}
+ local function Expanded(bytes)
+  local out,n,i={},0,0
+  while n+#PIECES[i%#PIECES+1]<=bytes-3 do
+   local piece=PIECES[i%#PIECES+1];out[#out+1]=piece;n=n+#piece;i=i+1
+  end
+  out[#out+1]=string.rep('.',bytes-3-n)..'fin'
+  return table.concat(out)
+ end
+ local LONG=Expanded(256)
+ local SHORT='R\195\169glages'
+ local BANG='! R\195\169glages'
+ check(#LONG==256 and LONG:sub(1,10)=='R\195\169glages ' and LONG:sub(-3)=='fin' and not LONG:find('[%z\1-\31\127|]'),
+  'SETUP O1: the expanded candidate is exactly 256 bytes of plain text: '..#LONG)
+ local BAD={
+  {'257 bytes',LONG..'.'},
+  {'pipe markup','R\195\169glages |cffff0000rouge|r'},
+  {'control byte','R\195\169glages\1suite'},
+  {'newline','R\195\169glages\nsuite'},
+  {'malformed UTF-8','R\195\169glages \195'},
+ }
+ check(#BAD[1][2]==257,'SETUP O1: the over-long candidate is 257 bytes')
+ -- 125%: the conservative model section 2 measures with (8.75 px a
+ -- character, a 15 px owned font), as a geometry model beside the four above.
+ local C125={name='125% conservative',char=8.75,line=17,size=15}
+ local MODELS={G.MODELS.default,G.MODELS.px16,G.MODELS.small,G.MODELS.double,C125}
+ -- Literal fits of the short control in the 80 px label room: visible
+ -- characters x model width ("Réglages" 8, "! Réglages" 10).
+ local SHORT_CUT={[G.MODELS.default]={false,false},[G.MODELS.px16]={false,false},
+  [G.MODELS.small]={false,false},[G.MODELS.double]={true,true},[C125]={false,true}}
+ local HELP='Help and setup, settings, notices, logs and panel actions. Plan, Explore and Orbs are on the footer.'
+ local NOTICE='Update available: 1.20.0-beta.1 test.9029'
+ local function Want(label,notice,shortened)
+  local out={}
+  if shortened then out[#out+1]={(notice and '! ' or '')..label,1,1,1,true} end
+  out[#out+1]={label,1,1,1}
+  out[#out+1]={HELP,0.8,0.8,0.8,true}
+  if notice then
+   out[#out+1]={' '}
+   out[#out+1]={NOTICE,1,0.82,0,true}
+   out[#out+1]={'Open this menu for the manual Releases-page link.',0.8,0.8,0.8,true}
+  end
+  return out
+ end
+ local NAME='Synthetic || Wishlist Caf\195\169'
+ local function Model(o)
+  o=o or {}
+  local complete=o.complete==true
+  return {
+   progress={wishlistName=NAME,total=79,owned=complete and 79 or 12,activeSlot=3,
+    activeSlotName='Synthetic || Saved Build',missing=complete and {} or {'Echo 1','Echo 2','Echo 3'},
+    shed={},toLock={},unknownTomes={}},
+   auto=false,level=complete and 80 or 40,character='Thelongestnm',
+   assignment={state='ready',name=NAME},
+   updateNotice=o.notice and {display='1.20.0-beta.1 test.9029',version='1.20.0-beta.1+test.9029'} or nil,
+   cards=o.offer and {{text='Echo 4 (Rare)'}} or nil,recommendation=o.offer and 'Take' or nil,
+   charges=o.offer and {banish=0,freeze=7} or nil,
+  }
+ end
+ local H,log,shipped
+ -- One fresh real-TOC boot; options nil boots the shipped data unchanged.
+ local function Boot(language,options)
+  local db=F.Database({version=2});db.settings.uiLanguage=language
+  local prior=F.fileHooks
+  shipped=nil
+  F.fileHooks=options~=nil and {['data\\LocalizationPacks.lua']=function()
+   shipped=Nexus.LocalizationPacks
+   local packs={}
+   for id,pack in pairs(shipped)do
+    local entries={};for key,text in pairs(pack.entries)do entries[key]=text end
+    packs[id]={name=pack.name,entries=entries}
+   end
+   packs.frFR.entries[KEY]=options
+   Nexus.LocalizationPacks=packs
+  end} or nil
+  -- A new harness measures with its defaults until G.UseFont; an earlier
+  -- synthetic NexusFontNormal would keep reporting an earlier font size.
+  log={};G.model=nil;NexusFontNormal=nil
+  local ok,booted=pcall(F.Boot,db,function()
+   local methods=G.RegionMethods();local set=methods.SetText
+   -- MODEL (as terminology_consumers #143): a Button draws its text with one
+   -- FontString of its own (GetFontString), made on first use at the
+   -- button's centre and as wide as its text until its owner sizes it;
+   -- Button:SetText sets it. Not modelled: per-state fonts, pushed offsets,
+   -- drawn clipping or ellipsis, native measurement.
+   methods.GetFontString=function(self)
+    if self.kind~='Button' then return nil end
+    local label=rawget(self,'_fixtureLabel')
+    if not label then
+     label=self:CreateFontString()
+     label.width,label.height,label.text=nil,nil,self.text
+     label.GetWidth=function(fs)return fs.width or fs:GetStringWidth()end
+     label.GetHeight=function(fs)return fs.height or (G.model and G.model.line or 14)end
+     label:SetPoint('CENTER',self,'CENTER',0,0)
+     rawset(self,'_fixtureLabel',label)
+    end
+    return label
+   end
+   methods.SetText=function(self,text,...)
+    log[#log+1]={self,text}
+    local result=set(self,text,...)
+    local label=rawget(self,'_fixtureLabel')
+    if label then label.text=self.text end
+    return result
+   end
+   methods.SetWordWrap=function(self,value)self.wordWrap=value end
+  end)
+  F.fileHooks=prior
+  if not ok then error(booted,0)end
+  H=booted
+  UIParent:SetSize(1920,1080)
+  check(F.fileHooks==nil and Nexus.StartupStatus().coreReady==true
+   and Nexus.Localization.ActiveLanguage()==(language or 'enUS') and (options==nil)==(shipped==nil),
+   'SETUP O1: real TOC boot ready with '..tostring(language or 'enUS')..' active; the scoped hook ran once and is gone')
+  Nexus.Panel.Show()
+  return Nexus.Localization
+ end
+ local function Hover(owner)
+  local lines,owners={},{}
+  local add,own=rawget(GameTooltip,'AddLine'),rawget(GameTooltip,'SetOwner')
+  rawset(GameTooltip,'AddLine',function(_,text,r,g,b,wrap)lines[#lines+1]={text,r,g,b,wrap}end)
+  rawset(GameTooltip,'SetOwner',function(_,who,anchor)owners[#owners+1]={who,anchor}end)
+  GameTooltip:Hide()
+  local ok,err=pcall(owner:GetScript('OnEnter'),owner)
+  local shown=GameTooltip:IsShown()
+  rawset(GameTooltip,'AddLine',add);rawset(GameTooltip,'SetOwner',own)
+  assert(ok,err)
+  owner:GetScript('OnLeave')(owner)
+  return lines,owners,shown==true and not GameTooltip:IsShown()
+ end
+ local function Effects()
+  local id,initialized,automatic=Nexus.Localization.ActiveLanguage()
+  return {db=F.Serialize(NexusDB),settings=H.Clone(Nexus.Store.Settings()),language=id,initialized=initialized,
+   automatic=automatic,actions=#H.actions,sent=#H.sent,chat=#H.chat,popup=H.popup~=nil,
+   auto=Nexus.RecomputeStats().autoEnabled==true,
+   option=ProjectEbonholdOptionsService:GetSetting('autoAcceptLoadoutEchoes')==true,
+   readOnly=tostring(Nexus.MainInternals.SavedRootReadOnlyV1()),warning=Nexus.OverwriteWarning.IsOpen()==true,
+   assignment=H.Clone(Nexus.GameAdapter.AssignmentActionSnapshot())}
+ end
+ local function Menu()
+  local opened
+  EasyMenu=function(list,frame,anchor)opened={list=list,frame=frame,anchor=anchor}end
+  NexusPanel._menuBtn:Click()
+  EasyMenu=nil
+  return opened
+ end
+ local function TopTexts(opened)
+  local out={}
+  for _,item in ipairs(opened and opened.list or {})do
+   local text=tostring(item.text)
+   if not text:find('^Language') then out[#out+1]=text end
+  end
+  return out
+ end
+ -- The literal header line 1 slots (Panel M.HeaderSlots: Close 24 px at the
+ -- 10 px edge, Options 92 px with an 80 px label, Auto 84 px, 8 px gaps,
+ -- the 22 px grip at 8 and the title from 36), as {left, top, right, bottom}.
+ local function Slots(W)
+  return {options={W-134,7,W-42,29},label={W-128,7,W-48,29},close={W-34,7,W-10,29},
+   auto={W-226,7,W-142,29},state={W-226,9,W-142,27},grip={8,7,30,29},title={36,8,W-234,28}}
+ end
+ local function Header(W,why,want,expectShort,notice)
+  local f,P=NexusPanel,Nexus.Panel
+  if W~=420 then f:SetWidth(W);P.UpdateContextHeader(P._lastModel);P.PlaceOptionsButton() end
+  check(f:GetWidth()==W,'SETUP O1 '..why..': the panel is '..W..' px wide')
+  local menu=f._menuBtn
+  local label=menu:GetFontString()
+  local shown=(notice and '! ' or '')..want
+  check(menu:GetText()==shown and label and label:GetText()==shown,
+   why..': the actual Options control and its FontString show the admitted text exactly ('..tostring(menu:GetText())..')')
+  check(menu:GetWidth()==92 and menu:GetHeight()==22 and label:GetWidth()==80 and label:GetHeight()==22
+   and label.wordWrap==false,why..': Options keeps its fixed 92x22 slot and a one-line 80x22 label; it does not grow')
+  local slots=Slots(W)
+  local autoShown=f._autoBtn:IsShown()
+  local r={options=G.Rect(menu,f),label=G.Rect(label,f),close=G.Rect(f._closeBtn,f),
+   auto=G.Rect(autoShown and f._autoBtn or f._contextAutoState,f),grip=G.Rect(f._dragGrip,f),title=G.Rect(f._contextTitle,f)}
+  check(same(r.options,slots.options) and same(r.label,slots.label) and same(r.close,slots.close)
+   and same(r.auto,autoShown and slots.auto or slots.state) and same(r.grip,slots.grip) and same(r.title,slots.title),
+   why..': header line 1 keeps its literal slots: Options '..G.Text(r.options)..', label '..G.Text(r.label)..', Auto '..G.Text(r.auto))
+  check(G.Inside(r.label,{r.options[1]+6,r.options[2],r.options[3]-6,r.options[4]}),why..': the label stays inside Options less its end caps')
+  check(r.auto[3]+8<=r.options[1] and r.options[3]+8<=r.close[1] and r.grip[3]<=r.title[1] and r.title[3]<=r.auto[1],
+   why..': grip, title, Auto, Options and Close stay in order with the 8 px gaps')
+  local names={'options','close','auto','grip','title'}
+  for i=1,#names do for j=i+1,#names do
+   check(G.Apart(r[names[i]],r[names[j]]),why..': '..names[i]..' and '..names[j]..' do not overlap')
+  end end
+  check(G.Inside(r.options,{0,0,W,f:GetHeight()}) and G.Inside(r.close,{0,0,W,f:GetHeight()}),why..': line 1 stays inside the panel')
+  check(G.Visible(autoShown and f._autoBtn:GetText() or f._contextAutoState:GetText())=='Auto OFF',why..': Auto reads exactly Auto OFF')
+  check(Nexus.LayoutMetrics.Shortened(label)==expectShort,
+   why..': the 80 px label is '..(expectShort and 'shortened' or 'whole')..' in this model ('..label:GetStringWidth()..' px)')
+  local lines,owners,cycle=Hover(menu)
+  check(same(lines,Want(want,notice,expectShort)) and #owners==1 and owners[1][1]==menu
+   and owners[1][2]=='ANCHOR_TOPLEFT' and cycle,
+   why..': the registered hover takes the tooltip once and gives '..(expectShort and 'the complete label once, first, then ' or '')
+    ..'the control name, its help'..(notice and ' and the complete trusted notice' or '')..' ('..#lines..' lines)')
+  local full=0
+  for _,line in ipairs(lines)do if line[1]==shown and line[5]==true then full=full+1 end end
+  check(full==(expectShort and 1 or 0),why..': the complete shown label is recovered exactly '..(expectShort and 'once' or 'never (it fits)'))
+  if W~=420 then f:SetWidth(420) end
+  return r
+ end
+ local function Sweep(language,want,cut,tag)
+  local uiScale=rawget(UIParent,'GetEffectiveScale')
+  for _,model in ipairs(MODELS)do
+   for _,ui in ipairs({1,0.64})do
+    G.UseFont(model);rawset(UIParent,'GetEffectiveScale',function()return ui end)
+    local fontScale,uiNow=Nexus.LayoutMetrics.RuntimeMetrics()
+    check(fontScale==model.size/12 and uiNow==ui,'SETUP O1 '..tag..', '..model.name..', UI '..ui..': the runtime metrics follow the stated model')
+    for _,complete in ipairs({false,true})do
+     for _,notice in ipairs({false,true})do
+      check(Nexus.Panel.Render(Model({notice=notice,complete=complete})),'SETUP O1: render')
+      for _,W in ipairs({420,640})do
+       Header(W,tag..', '..model.name..', UI '..ui..', '..(complete and 'finished' or 'in progress')
+        ..(notice and ', notice' or '')..', '..W..' px',want,cut(model)[notice and 2 or 1],notice)
+      end
+     end
+    end
+   end
+   -- The 640x480 floor: the panel is fitted to the screen as a whole; header
+   -- line 1 keeps its slots in panel units.
+   UIParent:SetSize(640,480)
+   check(Nexus.Panel.Render(Model({notice=true})),'SETUP O1: render at 640x480')
+   local scale=NexusPanel:GetScale()
+   check(scale>0 and scale<=1 and NexusPanel:GetWidth()*scale<=616+1e-6 and NexusPanel:GetHeight()*scale<=456+1e-6,
+    tag..', '..model.name..': at a 640x480 screen the whole panel fits less the 24 px margin (scale '..scale..')')
+   Header(420,tag..', '..model.name..', 640x480 screen',want,cut(model)[2],true)
+   UIParent:SetSize(1920,1080)
+  end
+  rawset(UIParent,'GetEffectiveScale',uiScale)
+  G.UseFont(G.MODELS.default)
+ end
+ local function Admitted(L,want,tag)
+  local text,source,reason=L.Text(KEY)
+  check(text==want and source=='candidate' and reason==nil,tag..': the real loader admitted the test candidate ('..tostring(source)..')')
+  local base,baseSource=L.Resolve(KEY)
+  check(base=='Options' and baseSource=='base' and Nexus.LocalizationEnglish[KEY]=='Options',tag..': pure Resolve and the English base stay Options')
+  local row
+  for _,r in ipairs(L.Diagnostics().packs.rows)do if r.id=='frFR' then row=r end end
+  local ids={}
+  for _,language in ipairs(L.Languages())do ids[#ids+1]=language.id..'='..language.name end
+  check(table.concat(ids,',')=='enUS=English,frFR=Fran\195\167ais,deDE=Deutsch,esES=Espa\195\177ol,plPL=Polski,ptBR=Portugu\195\170s (Brasil),ruRU=\208\160\209\131\209\129\209\129\208\186\208\184\208\185'
+   and L.Diagnostics().packs.adopted==6 and L.Diagnostics().packs.refused==0 and row and row.accepted==28 and row.rejected==0,
+   tag..': the same seven offered languages, no pseudo language; frFR copied all 28 entries ('..table.concat(ids,',')..')')
+  check(shipped and shipped.frFR.entries[KEY]==nil and Nexus.LocalizationPacks.frFR.entries[KEY]==want,
+   tag..': only the in-memory copy holds the test text; the shipped frFR has no Options entry')
+ end
+ -- A. English control: the shipped data, no hook.
+ local L=Boot(nil,nil)
+ G.UseFont(G.MODELS.default)
+ check(L.Text(KEY)=='Options' and select(2,L.Text(KEY))=='base','SETUP O1 English: the shipped data shows Options')
+ check(Nexus.Panel.Render(Model()),'SETUP O1 English: render')
+ local englishWishlist=NexusPanel._contextWishlist:GetText()
+ local englishMenu=TopTexts(Menu())
+ check(englishWishlist=='Wishlist: Synthetic |||| Wishlist Caf\195\169 (assigned)' and #englishMenu>10,
+  'SETUP O1 English: the escaped Wishlist name and the Options menu ('..tostring(englishWishlist)..')')
+ -- B. The exact 256-byte expanded candidate through the real loader.
+ L=Boot('frFR',LONG)
+ Admitted(L,LONG,'O1 expanded')
+ G.UseFont(G.MODELS.default)
+ check(Nexus.Panel.Render(Model()),'SETUP O1 expanded: first render')
+ local f,P=NexusPanel,Nexus.Panel
+ local menu=f._menuBtn
+ check(menu:GetText()==LONG and P.OptionsLabel()==LONG and P.OptionsText(true)=='! '..LONG,
+  'O1 expanded: OptionsLabel and OptionsText give the admitted bytes; only the trusted notice adds "! "')
+ Sweep('frFR',LONG,function()return {true,true}end,'O1 expanded')
+ -- Notice on, then off (the notice-only update path), copied, raw
+ -- and committed re-renders, hide / reopen and the menu, on the same
+ -- warm control with its own handlers.
+ local raw=Model({notice=true});local pristine=H.Clone(raw)
+ check(P.Render(raw) and same(raw,pristine),'O1 expanded: Render leaves the raw model untouched')
+ Header(420,'O1 expanded, notice on',LONG,true,true)
+ local stats=P.RenderStats()
+ check(P.Render(Model()) and P.RenderStats().layouts==stats.layouts and P.RenderStats().noticePasses==stats.noticePasses+1,
+  'SETUP O1 expanded: the notice change takes the notice-only update path')
+ Header(420,'O1 expanded, notice gone',LONG,true,false)
+ local frames=#H.frames
+ local opened=Menu()
+ check(opened and opened.anchor==menu and opened.frame==P._moreMenu and opened.list[1].isTitle,'O1 expanded: the click opens the Options menu at the control')
+ local menuTexts=TopTexts(opened)
+ check(same(menuTexts,englishMenu),'O1 expanded: the Options menu offers the same rows as in English (Language aside)')
+ for _,text in ipairs(menuTexts)do check(not text:find(LONG,1,true),'O1 expanded: the menu rows do not carry the label') end
+ frames=#H.frames
+ local warm={label=menu:GetFontString(),regions=#menu.regions,children=#menu.children,enter=menu:GetScript('OnEnter'),
+  leave=menu:GetScript('OnLeave'),click=menu:GetScript('OnClick')}
+ local effects=Effects()
+ local saved=P.SavedLayoutRoot()
+ check(P.Render(H.Clone(P._lastModel)) and P.Render(Model({notice=true})) and P.Render(Model()),'SETUP O1 expanded: copied and raw renders')
+ check(P.Render(P._lastModel) and menu:GetText()==LONG and P.OptionsLabel()==LONG,'O1 expanded: rendering the committed model again keeps the admitted label once')
+ check(P.Render(Model()),'SETUP O1 expanded: render')
+ P.Hide()
+ check(rawget(saved,'panelHidden')==true and not f:IsShown(),'SETUP O1 expanded: the hide records the existing panelHidden display choice')
+ P.Show()
+ check(rawget(saved,'panelHidden')==nil and f:IsShown(),'SETUP O1 expanded: the reopen removes it again')
+ for _=1,2 do
+  Hover(menu)
+  opened=Menu()
+  check(opened and opened.anchor==menu and opened.frame==P._moreMenu and same(TopTexts(opened),menuTexts),'O1 expanded: reopening the menu keeps its anchor, frame and rows')
+ end
+ Header(420,'O1 expanded, after refreshes, reopen and menus',LONG,true,false)
+ check(#H.frames==frames and menu==f._menuBtn and menu:GetFontString()==warm.label and #menu.regions==warm.regions
+  and #menu.children==warm.children and menu:GetScript('OnEnter')==warm.enter and menu:GetScript('OnLeave')==warm.leave
+  and menu:GetScript('OnClick')==warm.click and rawget(menu,'_nexusOneLine')==nil,
+  'O1 expanded: the same warm control, FontString and registered handlers; no frame, label or hook added')
+ check(same(Effects(),effects),'O1 expanded: renders, refreshes, hovers, hide / reopen and the menu change no saved root, setting, language, Auto, assignment, action, send, chat, popup or consent')
+ check(rawget(NexusDB.settings,'uiLanguage')=='frFR' and Nexus.RecomputeStats().autoEnabled~=true,'O1 expanded: the synthetic frFR choice and Auto OFF stay')
+ local sets=0
+ for _,entry in ipairs(log)do
+  if entry[1]==menu then
+   sets=sets+1
+   check(entry[2]==LONG or entry[2]=='! '..LONG,'O1 expanded: every SetText of the control is the admitted label (no English reset or double mark): '..tostring(entry[2]):sub(1,40))
+  end
+ end
+ check(sets>=3,'SETUP O1 expanded: the control was set on creation and on renders ('..sets..')')
+ -- Charges and names keep their own semantics beside the expanded label.
+ check(P.Render(Model({offer=true})) and f._chargesText:IsShown() and f._chargesText:GetText()=='Ban:0 Rel:? Gel:7',
+  'O1 expanded: the real charge row keeps the copied frFR template: known 0, unknown ?, known 7')
+ check(Nexus.Readout.ChargesLine({banish=0,freeze=7,trustworthy=false})=='Ban:0 Rel:? Gel:7 ~'
+  and L.Format('readout.charge_counts',{banish={known=true,value=0},reroll={known=false},freeze={known=true,value=7}},{})=='B:0 R:? F:7',
+  'O1 expanded: the estimate mark follows the whole row; an explicit {} pack gives the English row')
+ check(f._contextWishlist:GetText()==englishWishlist and P._lastModel.progress.wishlistName==NAME,
+  'O1 expanded: the escaped Wishlist name is shown byte for byte as in English and kept raw')
+ -- C. The short control: the same route; whole where the model fits it.
+ L=Boot('frFR',SHORT)
+ Admitted(L,SHORT,'O1 short')
+ Sweep('frFR',SHORT,function(model)return SHORT_CUT[model]end,'O1 short')
+ -- D. A candidate that begins with "!" is admitted text but never a notice.
+ L=Boot('frFR',BANG)
+ Admitted(L,BANG,'O1 bang')
+ G.UseFont(G.MODELS.default)
+ check(Nexus.Panel.OptionsLabel()=='Options' and Nexus.Panel.OptionsText(false)=='Options','O1 bang: OptionsLabel falls back to the English base')
+ check(Nexus.Panel.Render(Model()),'SETUP O1 bang: render')
+ Header(420,'O1 bang, no notice',"Options",false,false)
+ check(Nexus.Panel.Render(Model({notice=true})),'SETUP O1 bang: render with the notice')
+ Header(420,'O1 bang, trusted notice',"Options",false,true)
+ -- E. Refusals: each invalid candidate is left out by the real loader and
+ -- the actual control shows the reviewed English, the rest of frFR intact.
+ for _,bad in ipairs(BAD)do
+  L=Boot('frFR',bad[2])
+  local tag='O1 refused '..bad[1]
+  local text,source,reason=L.Text(KEY)
+  local row
+  for _,r in ipairs(L.Diagnostics().packs.rows)do if r.id=='frFR' then row=r end end
+  check(text=='Options' and source=='base' and reason=='missing_candidate' and row.accepted==27 and row.rejected==1,
+   tag..': the loader refused the entry and Options falls back to English ('..tostring(reason)..', rejected '..tostring(row and row.rejected)..')')
+  check(select(3,L.Resolve(KEY,{[KEY]=bad[2]}))=='invalid_candidate','SETUP '..tag..': the same bytes are an invalid candidate under the text contract')
+  check(Nexus.LocalizationPacks.frFR.entries[KEY]==bad[2] and #Nexus.LocalizationPacks.frFR.entries[KEY]==#bad[2],
+   'SETUP '..tag..': the test data kept its own raw bytes ('..#bad[2]..')')
+  check(select(2,L.Text('panel.button.my_builds'))=='candidate' and L.Text('panel.button.my_builds')=='Mes builds',
+   'SETUP '..tag..': the rest of the frFR fixture pack is still active')
+  G.UseFont(G.MODELS.default)
+  check(Nexus.Panel.Render(Model({notice=true})),'SETUP '..tag..': render')
+  Header(420,tag,'Options',false,true)
+ end
+ rawset(UIParent,'GetEffectiveScale',nil)
+ F.fileHooks=nil
+ for name in pairs(_G)do if before[name]==nil then rawset(_G,name,nil)end end
+ for name,value in pairs(before)do rawset(_G,name,value)end
+ local restored=true
+ for name,value in pairs(_G)do restored=restored and before[name]==value end
+ for name,value in pairs(before)do restored=restored and rawget(_G,name)==value end
+ check(restored and F.fileHooks==nil,'O1: the replaced globals, fonts and hooks are restored')
+ print('PASS #146 O1 real-loader Options expansion checks='..checks..' (offline models; native NOT_RUN)')
+end
