@@ -45,8 +45,8 @@ unchanged.
   splits one way, otherwise the raw text is shown). Name-bearing Wishlist chat lines are
   presented from the producer's own typed values; so are the Orb saved-format marker
   refusal (the runtime's display facts for that exact text) and the adapter's
-  identity-found note (UserText says it without its lead, the Orb window whole, as each
-  showed before). The Journal splits only the tome-state reason lists the producers join
+  identity-found note (UserText and /nexus wishlist say it without its lead; the Orb
+  window and the /nexus status advisor line say it whole, as each showed before). The Journal splits only the tome-state reason lists the producers join
   with "; ": each known reason through its key, an unknown one as given. A missing or
   invalid pack entry shows the exact English.
 - English output is byte-identical except these recorded, authorized changes:
@@ -89,10 +89,9 @@ are separate gates owned outside this source change.
     code-formatted (no temporal or number grammar; the surrounding words are keyed), and
     exact client-locale class and NPC names (keyed Nexus copy; equality with the client's
     own names is UNKNOWN);
-  - not done, outside this change's paths: `/nexus status` inserts the identity-found
-    note into its "TARGET: none" line as given (core/Main.lua), and the Journal tome
-    row's generated fallback names ("Tome name unavailable: ...", "Echo name unavailable
-    (#...)", core/GameAdapter.lua) are shown in English.
+  - not done, outside this change's paths: the Journal tome row's generated fallback
+    names ("Tome name unavailable: ...", "Echo name unavailable (#...)",
+    core/GameAdapter.lua) are shown in English.
 - In-text legacy rewrites of UserText.Message whose source fragment has no producer at
   this source (ARMED/UNARMED, tight horizon, waiting for owned-echo sync, "non-conformant
   data") are kept for compatibility; this is not proof that no external text reaches
