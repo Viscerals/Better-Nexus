@@ -50,6 +50,28 @@ function P.Text(mode)
     return nil
 end
 
+-- Display only (full UI localization): the shown sentence of a mode through
+-- the Nexus.Localization seam, looked up at call time. Text above keeps the
+-- raw English that is returned as a refusal reason and compared
+-- (IsModeReason, callers); never compare or parse DisplayText's result.
+local DISPLAY_KEYS = {off="sync.status.mode_off", manual="sync.status.mode_manual"}
+function P.DisplayText(mode)
+    mode = mode or P.Mode()
+    local key = DISPLAY_KEYS[mode]
+    if not key then return nil end
+    local localization = Nexus.Localization
+    if not (localization and type(localization.Text) == "function") then return P.Text(mode) end
+    return (localization.Text(key))
+end
+
+-- A refusal reason as shown: this policy's own reason in its display words,
+-- every other reason unchanged.
+function P.DisplayReason(reason)
+    if reason == OFF_TEXT then return P.DisplayText("off") end
+    if reason == MANUAL_TEXT then return P.DisplayText("manual") end
+    return reason
+end
+
 local CHOICES = {automatic=true, manual=true, off=true}
 
 -- Read-only status of the explicit choice (core/Store.lua
