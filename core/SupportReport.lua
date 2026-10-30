@@ -2178,10 +2178,16 @@ function M.StorageStatus()
 end
 
 -- What the player is told after a successful preparation. It states exactly
--- what has and has not happened.
+-- what has and has not happened. Visible page text only, never part of a
+-- report: its words come from Nexus.Localization (issues #143-#148); the
+-- report ID is inserted verbatim.
 function M.WrittenNotice(meta)
-    local id = type(meta) == "table" and meta.id or "?"
-    return "Report " .. safeText(id, 48) .. " is prepared in memory. WoW writes the "
+    local id = safeText(type(meta) == "table" and meta.id or "?", 48)
+    local localization = Nexus and Nexus.Localization
+    if localization and type(localization.Format) == "function" then
+        return (localization.Format("support.status.report_prepared", {id = id}))
+    end
+    return "Report " .. id .. " is prepared in memory. WoW writes the "
         .. "file when you reload, log out, or exit normally. It is not yet "
         .. "verified on disk. Nexus does not reload or log out for you."
 end

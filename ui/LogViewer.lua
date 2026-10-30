@@ -9,19 +9,29 @@ Nexus = Nexus or {}
 local M = {}
 Nexus.LogViewer = M
 
+-- Full UI localization (issues #143-#148): the window's own labels, buttons,
+-- hovers and status lines come from Nexus.Localization, looked up when they
+-- are shown. The log text itself (the provider's pages and the diagnostic
+-- report) is a support payload: it is never translated and its bytes are
+-- unchanged. Numbers are formatted here; "|" separators stay in code.
+local function T(key) return (Nexus.Localization.Text(key)) end
+local function TF(key, args) return (Nexus.Localization.Format(key, args)) end
+
+-- key: the provider's tab code (never shown); label: English reference;
+-- textKey: the semantic key of the shown label.
 local TABS = {
-    { key = "boards",   label = "Recent choices" },
-    { key = "mismatch", label = "Manual overrides" },
-    { key = "wishlist", label = "Wishlist" },
-    { key = "locked",   label = "Locked Echoes" },
-    { key = "state",    label = "Status" },
-    { key = "sync",     label = "Sync" },
-    { key = "dps",      label = "DPS" },
-    { key = "autolock", label = "Slot actions" },
-    { key = "perf",     label = "Performance" },
-    { key = "trace",    label = "Roll trace" },
-    { key = "errors",   label = "Errors" },
-    { key = "peer",     label = "Advanced peer" },
+    { key = "boards",   label = "Recent choices",   textKey = "log.tab.recent_choices" },
+    { key = "mismatch", label = "Manual overrides", textKey = "log.tab.manual_overrides" },
+    { key = "wishlist", label = "Wishlist",         textKey = "log.tab.wishlist" },
+    { key = "locked",   label = "Locked Echoes",    textKey = "log.tab.locked_echoes" },
+    { key = "state",    label = "Status",           textKey = "log.tab.status" },
+    { key = "sync",     label = "Sync",             textKey = "log.tab.sync" },
+    { key = "dps",      label = "DPS",              textKey = "log.tab.dps" },
+    { key = "autolock", label = "Slot actions",     textKey = "log.tab.slot_actions" },
+    { key = "perf",     label = "Performance",      textKey = "log.tab.performance" },
+    { key = "trace",    label = "Roll trace",       textKey = "log.tab.roll_trace" },
+    { key = "errors",   label = "Errors",           textKey = "log.tab.errors" },
+    { key = "peer",     label = "Advanced peer",    textKey = "log.tab.advanced_peer" },
 }
 
 local frame, editBox, scroll, tabButtons, statusFS, exportButton
@@ -40,8 +50,9 @@ local copyRanges={{1,0}}
 local pagePrevious, pageNext
 -- Shown in place of a page that Identity.DisplaySafeText refuses, never a
 -- stripped, escaped or partial copy of its bytes. No "|": the edit box would
--- read it as markup.
-local REFUSED_COPY_PAGE = "This page is not shown: it contains text that this window cannot display safely, for example a control character such as a TAB, invalid UTF-8, or an invisible or combining mark. Its text cannot be copied from this window, so a report copied page by page will be missing this page."
+-- read it as markup (the localized text contract refuses "|" as well). The
+-- English is log.body.page_refused in data/LocalizationEnglish.lua.
+local function RefusedCopyPage() return T("log.body.page_refused") end
 
 local function InertCopyText(value, maxBytes)
     value = tostring(value or "")
@@ -49,7 +60,7 @@ local function InertCopyText(value, maxBytes)
         and Nexus.Identity.DisplaySafeText
     if not displayText then return "" end
     return displayText(value, tonumber(maxBytes) or #value, true, true)
-        or REFUSED_COPY_PAGE
+        or RefusedCopyPage()
 end
 
 local function RenderCopyPage()
@@ -60,7 +71,10 @@ local function RenderCopyPage()
     editBox:SetCursorPosition(0)
     if pagePrevious then if copyPage>1 then pagePrevious:Enable() else pagePrevious:Disable() end end
     if pageNext then if copyPage<copyPages then pageNext:Enable() else pageNext:Disable() end end
-    if statusFS then statusFS:SetText(string.format("Page %d/%d | %d total bytes | copy pages in order (no inserted separators)",copyPage,copyPages,#copyText)) end
+    -- Three parts joined by the code-owned " | " separator.
+    if statusFS then statusFS:SetText(TF("log.status.page_of",{page=string.format("%d",copyPage),pages=string.format("%d",copyPages)})
+        .." | "..TF("log.status.total_bytes",{bytes=string.format("%d",#copyText)})
+        .." | "..T("log.status.copy_pages_in_order")) end
 end
 
 -- keepPage: the same report repainted in place keeps the reader's page,
@@ -184,16 +198,19 @@ local function StartExport()
     StopExport()
     activeTab = "ai_export"
     for _, b in ipairs(tabButtons or {}) do b:UnlockHighlight() end
-    editBox:SetText("Preparing the diagnostic report in steps.\n\nLarge reports may take a moment. You can cancel preparation.")
-    statusFS:SetText("Preparing export...")
+    editBox:SetText(T("log.body.preparing_report_steps").."\n\n"..T("log.body.large_report_cancel"))
+    statusFS:SetText(T("log.status.preparing_export"))
     local factory = Nexus and Nexus.NewAIExportCoroutine
     if type(factory) ~= "function" then
-        editBox:SetText("Diagnostic export builder is unavailable.")
+        editBox:SetText(T("log.error.export_builder_unavailable"))
         return
     end
     local ok, job = pcall(factory)
     if not ok or type(job) ~= "thread" then
-        editBox:SetText("Could not start diagnostic export: " .. tostring(job))
+        local raw = tostring(job)
+        editBox:SetText(#raw <= Nexus.Localization.MAX_SLOT_TEXT_BYTES
+            and TF("log.error.export_start_failed",{error=raw})
+            or "Could not start diagnostic export: " .. raw)
         return
     end
     exportJob = job
@@ -213,8 +230,11 @@ local function StartExport()
             if not okResume then
                 exportJob = nil
                 self:SetScript("OnUpdate", nil); self:Hide()
-                editBox:SetText("Diagnostic export failed: " .. tostring(value))
-                statusFS:SetText("export failed")
+                local raw = tostring(value)
+                editBox:SetText(#raw <= Nexus.Localization.MAX_SLOT_TEXT_BYTES
+                    and TF("log.error.export_failed",{error=raw})
+                    or "Diagnostic export failed: " .. raw)
+                statusFS:SetText(T("log.status.export_failed"))
                 return
             end
             if coroutine.status(exportJob) == "dead" then
@@ -239,7 +259,12 @@ local function StartExport()
                 return
             end
             if updateElapsed >= 0.12 then
-                statusFS:SetText(tostring(value or "Building full diagnostic log...") .. " -- large reports may take a moment")
+                -- The progress line comes from the report builder as it is.
+                local progress = value and tostring(value)
+                    or T("log.status.building_full_log")
+                statusFS:SetText(#progress <= Nexus.Localization.MAX_SLOT_TEXT_BYTES
+                    and TF("log.status.export_progress",{progress=progress})
+                    or progress .. " -- large reports may take a moment")
                 updateElapsed = 0
             end
         end
@@ -274,7 +299,7 @@ local function EnsureFrame()
             clearResetRunner:Hide()
         end
         if clearResetButton then
-            clearResetButton:SetText("Clear Log")
+            clearResetButton:SetText(T("log.button.clear_log"))
             clearResetButton = nil
         end
     end)
@@ -288,7 +313,7 @@ local function EnsureFrame()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -10)
-    title:SetText("Nexus -- data log")
+    title:SetText(T("log.title.data_log"))
 
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
@@ -297,7 +322,8 @@ local function EnsureFrame()
     local prev
     for i, tab in ipairs(TABS) do
         local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-        b:SetSize(math.max(56, #tab.label * 6 + 18), 22)
+        local label = T(tab.textKey)
+        b:SetSize(math.max(56, #label * 6 + 18), 22)
         if i == 6 then
             b:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -56)
         elseif prev then
@@ -305,7 +331,7 @@ local function EnsureFrame()
         else
             b:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -30)
         end
-        b:SetText(tab.label)
+        b:SetText(label)
         b.tabKey = tab.key
         b:SetScript("OnClick", function(self)
             StopExport()
@@ -320,6 +346,8 @@ local function EnsureFrame()
     local selectAll = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     selectAll:SetSize(116, 22)
     selectAll:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -30, -82)
+    -- "Select this page" and "Prepare full diagnostic report" stay literal:
+    -- Help quotes them by name (help_action_first checks the source).
     selectAll:SetText("Select this page")
     selectAll:SetScript("OnClick", function()
         if editBox then
@@ -331,7 +359,7 @@ local function EnsureFrame()
     local refresh = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     refresh:SetSize(70, 22)
     refresh:SetPoint("RIGHT", selectAll, "LEFT", -4, 0)
-    refresh:SetText("Refresh")
+    refresh:SetText(T("log.button.refresh"))
     refresh:SetScript("OnClick", function()
         if activeTab == "ai_export" then StartExport() else ScheduleRepaint() end
     end)
@@ -339,17 +367,17 @@ local function EnsureFrame()
     pagePrevious=CreateFrame("Button", "NexusLogPreviousPage", frame, "UIPanelButtonTemplate")
     pagePrevious:SetSize(48,22)
     pagePrevious:SetPoint("RIGHT",refresh,"LEFT",-4,0)
-    pagePrevious:SetText("< Page")
+    pagePrevious:SetText(T("log.button.previous_page"))
     pagePrevious:SetScript("OnClick",function() M.SetPage(copyPage-1) end)
     pageNext=CreateFrame("Button", "NexusLogNextPage", frame, "UIPanelButtonTemplate")
     pageNext:SetSize(48,22)
     pageNext:SetPoint("RIGHT",pagePrevious,"LEFT",-4,0)
-    pageNext:SetText("Page >")
+    pageNext:SetText(T("log.button.next_page"))
     pageNext:SetScript("OnClick",function() M.SetPage(copyPage+1) end)
 
     peerLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     peerLabel:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 12, 42)
-    peerLabel:SetText("Peer event filter (optional)")
+    peerLabel:SetText(T("log.label.peer_event_filter"))
 
     peerEdit = CreateFrame("EditBox", "NexusPeerTestTarget", frame,
         "InputBoxTemplate")
@@ -362,7 +390,7 @@ local function EnsureFrame()
     peerStart = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     peerStart:SetSize(62, 22)
     peerStart:SetPoint("LEFT", peerEdit, "RIGHT", 4, 0)
-    peerStart:SetText("Start")
+    peerStart:SetText(T("log.button.peer_start"))
     peerStart:SetScript("OnClick", function()
         local debugOwner = Nexus and Nexus.PeerDebug
         if debugOwner and type(debugOwner.Start) == "function" then
@@ -376,7 +404,7 @@ local function EnsureFrame()
     peerStop = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     peerStop:SetSize(62, 22)
     peerStop:SetPoint("LEFT", peerStart, "RIGHT", 4, 0)
-    peerStop:SetText("Stop")
+    peerStop:SetText(T("log.button.peer_stop"))
     peerStop:SetScript("OnClick", function()
         local debugOwner = Nexus and Nexus.PeerDebug
         if debugOwner and type(debugOwner.Stop) == "function" then
@@ -394,8 +422,8 @@ local function EnsureFrame()
     exportButton:SetScript("OnClick", StartExport)
     exportButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Prepare the retained diagnostic report")
-        GameTooltip:AddLine("The report is displayed in pages. Use Select this page and Ctrl-C, then copy each page in order without adding separators. Normal tabs show shorter views.", 1, 1, 1, true)
+        GameTooltip:SetText(T("log.tooltip.prepare_report_title"))
+        GameTooltip:AddLine(T("log.tooltip.prepare_report_pages"), 1, 1, 1, true)
         GameTooltip:Show()
     end)
     exportButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -403,7 +431,7 @@ local function EnsureFrame()
     local clearButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     clearButton:SetSize(86, 22)
     clearButton:SetPoint("RIGHT", exportButton, "LEFT", -6, 0)
-    clearButton:SetText("Clear Log")
+    clearButton:SetText(T("log.button.clear_log"))
     clearButton:SetScript("OnClick", function(self)
         StopExport()
         local errorsOnly = activeTab == "errors"
@@ -415,14 +443,14 @@ local function EnsureFrame()
             activeTab = "state"
         end
         if ok and result ~= false then
-            self:SetText("Cleared")
+            self:SetText(T("log.button.cleared"))
             if statusFS then
-                statusFS:SetText(errorsOnly and "Error history cleared"
-                    or "Diagnostic history cleared")
+                statusFS:SetText(T(errorsOnly and "log.status.error_history_cleared"
+                    or "log.status.diagnostic_history_cleared"))
             end
         else
-            self:SetText("Clear Failed")
-            if statusFS then statusFS:SetText("Could not clear diagnostic history") end
+            self:SetText(T("log.button.clear_failed"))
+            if statusFS then statusFS:SetText(T("log.status.clear_failed")) end
         end
         ScheduleRepaint()
         clearResetGeneration = clearResetGeneration + 1
@@ -440,14 +468,14 @@ local function EnsureFrame()
             f:SetScript("OnUpdate", nil)
             f:Hide()
             if myResetGeneration ~= clearResetGeneration then return end
-            if self then self:SetText("Clear Log") end
+            if self then self:SetText(T("log.button.clear_log")) end
             clearResetButton = nil
         end)
     end)
     clearButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Clear diagnostic history")
-        GameTooltip:AddLine("On Errors, clears only retained errors. On Roll trace, clears only the local roll record. On Advanced peer diagnostics, clears only that session. Other tabs clear retained boards, audits, UI probes, sync events, DPS debug lines, and errors; the local roll record is kept. Settings, builds, and automation are unchanged.", 1, 1, 1, true)
+        GameTooltip:SetText(T("log.tooltip.clear_history_title"))
+        GameTooltip:AddLine(T("log.tooltip.clear_history_scope"), 1, 1, 1, true)
         GameTooltip:Show()
     end)
     clearButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -518,7 +546,7 @@ function M.Show(tabKey)
     if tabKey then activeTab = tabKey end
     SyncPeerRefreshState()
     frame:Show()
-    if editBox then editBox:SetText("Loading " .. tostring(activeTab) .. " log...") end
+    if editBox then editBox:SetText(TF("log.status.loading_tab",{tab=tostring(activeTab)})) end
     ScheduleRepaint()
 end
 
