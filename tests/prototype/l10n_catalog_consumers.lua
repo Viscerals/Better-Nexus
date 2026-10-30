@@ -35,6 +35,9 @@ for _,path in ipairs(files) do
  for key in src:gmatch('"([a-z][a-z0-9_]*%.[a-z0-9_.]*[a-z0-9_])"') do
   used[key]=used[key] or path
  end
+ for key in src:gmatch("'([a-z][a-z0-9_]*%.[a-z0-9_.]*[a-z0-9_])'") do
+  used[key]=used[key] or path
+ end
  for key in src:gmatch('[Ll]ocalization%.Text%("([^"]+)"') do static[#static+1]={key,path} end
  local aliasL=src:find('local L = Nexus%.Localization')
  if aliasL then for key in src:gmatch('%f[%w_]L%.Text%("([^"]+)"') do static[#static+1]={key,path} end end
@@ -55,7 +58,30 @@ for _,item in ipairs(formatted) do
  check(kind=='format' or kind=='template','formatted lookup of an unknown or static key: '..item[1]..' in '..item[2])
 end
 check(#static+#formatted>=20,'SETUP consumer lookups found: '..(#static+#formatted))
+-- Path-derived consumers: a module may list the keys it derives from code
+-- identifiers at display time (ui/GuidedSetup.lua L10nDerivedKeys, the
+-- coach's words). Each listed key must be reviewed, or its words would show
+-- English; listed keys count as consumed.
+-- A derived leaf may stay English only when it is named here with its reason.
+local DERIVED_PENDING={
+ ['guide.body.target_c_active']='its shipped English (core/UserText.lua Guide target.cActive) says "right away", which the ux_record_scope_terms R5 copy rule refuses in the catalog; wording is unchanged and a copy decision is pending (Root)',
+}
+local derived,derivedCount,undeclaredDerived={},0,{}
+for name,module in pairs(Nexus) do
+ local list=type(module)=='table' and rawget(module,'L10nDerivedKeys')
+ if type(list)=='function' then
+  for _,key in ipairs(list()) do
+   derived[key]=name;derivedCount=derivedCount+1
+   if not L.Has(key) and not DERIVED_PENDING[key] then undeclaredDerived[#undeclaredDerived+1]=name..':'..key end
+  end
+ end
+end
+table.sort(undeclaredDerived)
+for key in pairs(DERIVED_PENDING) do
+ check(derived[key]~=nil and not L.Has(key),'a pending derived key is still derived and still unreviewed (remove it here once adopted): '..key)
+end
+check(#undeclaredDerived==0,'every path-derived key is a reviewed key: '..table.concat(undeclaredDerived,', '))
 local orphans={}
-for _,key in ipairs(L.Keys()) do if not used[key] then orphans[#orphans+1]=key end end
+for _,key in ipairs(L.Keys()) do if not used[key] and not derived[key] then orphans[#orphans+1]=key end end
 check(#orphans==0,'every reviewed key has a runtime consumer literal; orphans: '..table.concat(orphans,', '))
-print(('PASS l10n_catalog_consumers keys=%d lookups=%d checks=%d (static source + real seam; native NOT_RUN)'):format(#L.Keys(),#static+#formatted,checks))
+print(('PASS l10n_catalog_consumers keys=%d lookups=%d derived=%d checks=%d (static source + real seam; native NOT_RUN)'):format(#L.Keys(),#static+#formatted,derivedCount,checks))

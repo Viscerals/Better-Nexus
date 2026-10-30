@@ -235,6 +235,36 @@ local EXTRA = {
     status = {observed = {glyph = '=', word = 'Already linked'}},
 }
 local function Extra() return LocalCopy(EXTRA) end
+-- The catalog keys this view derives (CopyKey) from the live copy tables,
+-- UserText Guide and EXTRA: one per static word leaf, exactly the leaves
+-- LocalizeCopy looks up, whatever the seam resolves now. Pure; it exists so
+-- catalog/consumer parity checks can see these path-derived consumers.
+function U.L10nDerivedKeys()
+    local out = {}
+    local function Walk(node, path)
+        for k, v in pairs(node) do
+            local seg = k
+            if type(k) == 'number' then
+                seg = type(v) == 'table' and (type(v.id) == 'string' and v.id or type(v.page) == 'string' and v.page)
+                    or tostring(k)
+            end
+            if type(v) == 'table' then
+                path[#path + 1] = seg
+                Walk(v, path)
+                path[#path] = nil
+            elseif type(v) == 'string' and not COPY_SKIP[k] and not v:find('%', 1, true) and v:find('%a%a') then
+                path[#path + 1] = seg
+                out[#out + 1] = CopyKey(path)
+                path[#path] = nil
+            end
+        end
+    end
+    local t = Nexus.UserText
+    Walk(type(t) == 'table' and type(t.Guide) == 'table' and t.Guide or {}, {})
+    Walk(EXTRA, {})
+    table.sort(out)
+    return out
+end
 local function Words(group, key)
     local c = Copy()[group]
     local v = type(c) == 'table' and c[key] or nil
