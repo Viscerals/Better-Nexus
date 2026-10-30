@@ -27,7 +27,7 @@
       "open": "-- NEXUS-L10N-REGISTRY BEGIN",
       "close": "-- NEXUS-L10N-REGISTRY END"
     },
-    "declaredKeys": 988,
+    "declaredKeys": 1249,
     "checkedFields": [
       "kind",
       "placeholders",
@@ -13298,6 +13298,3425 @@
       "consumer": "refresh frame.incident",
       "familySurface": "records: Support report window (/nexus support): read an incident, copy a summary, prepare a report file (value); family coverage PENDING review",
       "cohort": "fullui:records"
+    },
+    {
+      "key": "count.copies_progress",
+      "kind": "template",
+      "english": "{have} / {want} copies",
+      "placeholders": [
+        {
+          "name": "have",
+          "type": "count",
+          "meaning": "how many (whole number)"
+        },
+        {
+          "name": "want",
+          "type": "count",
+          "meaning": "of how many (whole number, > 0)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "count",
+      "meaning": "Count line for an unnamed count kind (plain copies).",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.copies_unavailable",
+      "kind": "text",
+      "english": "Copies: unavailable",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count line for an unnamed count kind when unknown; never 0.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.echo_families",
+      "kind": "text",
+      "english": "Echo families represented",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count unit. Echo families present; a family counts once whatever its copies. These units are never merged.",
+      "consumer": "UserText.COUNT_UNITS",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.families_progress",
+      "kind": "template",
+      "english": "{have} / {want} Echo families represented",
+      "placeholders": [
+        {
+          "name": "have",
+          "type": "count",
+          "meaning": "how many (whole number)"
+        },
+        {
+          "name": "want",
+          "type": "count",
+          "meaning": "of how many (whole number, > 0)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "count",
+      "meaning": "Count line \"have / want\" in this unit. Echo families present; a family counts once whatever its copies. No plural grammar: one wording for every number.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.families_unavailable",
+      "kind": "text",
+      "english": "Echo families represented: unavailable",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count line when either number is unknown. Echo families present; a family counts once whatever its copies. \"unavailable\" is never 0.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.locked_progress",
+      "kind": "template",
+      "english": "{have} / {want} locked targets",
+      "placeholders": [
+        {
+          "name": "have",
+          "type": "count",
+          "meaning": "how many (whole number)"
+        },
+        {
+          "name": "want",
+          "type": "count",
+          "meaning": "of how many (whole number, > 0)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "count",
+      "meaning": "Count line \"have / want\" in this unit. Planned copies for locked Echo slots. No plural grammar: one wording for every number.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.locked_targets",
+      "kind": "text",
+      "english": "locked targets",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count unit. Planned copies for locked Echo slots. These units are never merged.",
+      "consumer": "UserText.COUNT_UNITS",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.locked_unavailable",
+      "kind": "text",
+      "english": "Locked targets: unavailable",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count line when either number is unknown. Planned copies for locked Echo slots. \"unavailable\" is never 0.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.planned_copies",
+      "kind": "text",
+      "english": "rolled copies planned",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count unit. Copies the plan designs (planned), not copies rolled this run. These units are never merged.",
+      "consumer": "UserText.COUNT_UNITS",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.planned_progress",
+      "kind": "template",
+      "english": "{have} / {want} rolled copies planned",
+      "placeholders": [
+        {
+          "name": "have",
+          "type": "count",
+          "meaning": "how many (whole number)"
+        },
+        {
+          "name": "want",
+          "type": "count",
+          "meaning": "of how many (whole number, > 0)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "count",
+      "meaning": "Count line \"have / want\" in this unit. Copies the plan designs (planned), not copies rolled this run. No plural grammar: one wording for every number.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.planned_unavailable",
+      "kind": "text",
+      "english": "Rolled copies planned: unavailable",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count line when either number is unknown. Copies the plan designs (planned), not copies rolled this run. \"unavailable\" is never 0.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.rolled_unavailable_compact",
+      "kind": "text",
+      "english": "Rolled: unavailable",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Compact run progress when unknown (narrow panel line); never 0.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.run_copies",
+      "kind": "text",
+      "english": "rolled copies this run",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count unit. Copies rolled in this run, not the plan. These units are never merged.",
+      "consumer": "UserText.COUNT_UNITS",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.run_progress",
+      "kind": "template",
+      "english": "{have} / {want} rolled copies this run",
+      "placeholders": [
+        {
+          "name": "have",
+          "type": "count",
+          "meaning": "how many (whole number)"
+        },
+        {
+          "name": "want",
+          "type": "count",
+          "meaning": "of how many (whole number, > 0)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "count",
+      "meaning": "Count line \"have / want\" in this unit. Copies rolled in this run, not the plan. No plural grammar: one wording for every number.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.run_progress_compact",
+      "kind": "template",
+      "english": "{have} / {want} rolled",
+      "placeholders": [
+        {
+          "name": "have",
+          "type": "count",
+          "meaning": "how many (whole number)"
+        },
+        {
+          "name": "want",
+          "type": "count",
+          "meaning": "of how many (whole number, > 0)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "count",
+      "meaning": "Compact run progress (narrow panel line): rolled copies this run.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.run_to_lock",
+      "kind": "template",
+      "english": "{have} / {want} rolled, {outstanding} still to lock",
+      "placeholders": [
+        {
+          "name": "have",
+          "type": "count",
+          "meaning": "how many (whole number)"
+        },
+        {
+          "name": "want",
+          "type": "count",
+          "meaning": "of how many (whole number, > 0)"
+        },
+        {
+          "name": "outstanding",
+          "type": "count",
+          "meaning": "locked targets still to lock (whole number > 0)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "count",
+      "meaning": "Run progress: rolled copies have/want, plus locked targets still to place in locked Echo slots. Not \"complete\".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.run_to_lock_compact",
+      "kind": "template",
+      "english": "{have} / {want} rolled, {outstanding} to lock",
+      "placeholders": [
+        {
+          "name": "have",
+          "type": "count",
+          "meaning": "how many (whole number)"
+        },
+        {
+          "name": "want",
+          "type": "count",
+          "meaning": "of how many (whole number, > 0)"
+        },
+        {
+          "name": "outstanding",
+          "type": "count",
+          "meaning": "locked targets still to lock (whole number > 0)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "count",
+      "meaning": "Compact run progress with locked targets still to lock (narrow panel line).",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.run_unavailable",
+      "kind": "text",
+      "english": "Rolled copies this run: unavailable",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count line when either number is unknown. Copies rolled in this run, not the plan. \"unavailable\" is never 0.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.saved_build_copies",
+      "kind": "text",
+      "english": "Wishlist copies in this Saved Build",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count unit. The Wishlist's copies found in a Saved Build. These units are never merged.",
+      "consumer": "UserText.COUNT_UNITS",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.saved_build_progress",
+      "kind": "template",
+      "english": "{have} / {want} Wishlist copies in this Saved Build",
+      "placeholders": [
+        {
+          "name": "have",
+          "type": "count",
+          "meaning": "how many (whole number)"
+        },
+        {
+          "name": "want",
+          "type": "count",
+          "meaning": "of how many (whole number, > 0)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "count",
+      "meaning": "Count line \"have / want\" in this unit. The Wishlist's copies found in a Saved Build. No plural grammar: one wording for every number.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "count.saved_build_unavailable",
+      "kind": "text",
+      "english": "Wishlist copies in this Saved Build: unavailable",
+      "placeholders": [],
+      "group": "count",
+      "meaning": "Count line when either number is unknown. The Wishlist's copies found in a Saved Build. \"unavailable\" is never 0.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Count lines on the Nexus panel progress row, Build Library cards and other count readers (UserText.CountText / RunProgressText / COUNT_UNITS) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.assign_wishlist_targets",
+      "kind": "text",
+      "english": "Assign a Wishlist to use its targets",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Imperative hint: assign a Wishlist so its target Echoes are used. Assigning happens elsewhere; this line assigns nothing. Mapped from the raw producer reason(s) \"no wishlist\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.banish_find_targets",
+      "kind": "text",
+      "english": "Banish to find Wishlist targets",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation: use the game's Banish action to look for Wishlist targets. Mapped from the raw producer reason(s) \"Banish to find Wishlist targets (EchoWeaver)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.banish_unneeded_before_reroll",
+      "kind": "text",
+      "english": "Banish an unneeded Echo before Reroll",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation (experimental policy): Banish an unneeded Echo, then Reroll. Mapped from the raw producer reason(s) \"Banish an unwanted Echo before Reroll (EchoWeaver, experimental)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.choose_locked_targets",
+      "kind": "template",
+      "english": "Choose this Wishlist's locked Echo targets in the editor. Your planned build does not have to match the equipped build. Details: {details}",
+      "placeholders": [
+        {
+          "name": "details",
+          "type": "text",
+          "meaning": "the raw producer reason text, shown verbatim for support (English, never translated)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "reason",
+      "meaning": "Shown while locked-Echo roles are unknown: the player should pick the locked targets in the Wishlist Editor. The planned build may differ from the equipped one.",
+      "consumer": "core/UserText.lua T.Message, locked-role wait inputs",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.complete_take_outside",
+      "kind": "text",
+      "english": "Wishlist complete; take an Echo outside the Wishlist",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation once all Wishlist targets are met: take an Echo outside the Wishlist. Mapped from the raw producer reason(s) \"Wishlist complete; take filler (EchoWeaver)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.draft_changed",
+      "kind": "template",
+      "english": "This draft changed. Reopen it and review the current targets before saving. Details: {details}",
+      "placeholders": [
+        {
+          "name": "details",
+          "type": "text",
+          "meaning": "the raw producer reason text, shown verbatim for support (English, never translated)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "reason",
+      "meaning": "Refusal: the Wishlist draft changed since it was previewed; reopen and review before saving. Nothing was saved.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.few_selections_remain",
+      "kind": "text",
+      "english": "Few selections remain",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Status: only a few Echo choices remain in this run. Mapped from the raw producer reason(s) \"tight horizon\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.freeze_needed_before_search",
+      "kind": "text",
+      "english": "Freeze a needed Echo before searching for another target",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation: use the game's Freeze action on a needed Echo, then search (Banish/Reroll) for another target. Mapped from the raw producer reason(s) \"Freeze wanted Echo before search (EchoWeaver)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.freeze_one_needed",
+      "kind": "text",
+      "english": "Freeze one of the needed offers",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation (experimental policy): Freeze one of two needed offers to keep it. Mapped from the raw producer reason(s) \"Freeze one wanted Echo to keep a second wanted offer (EchoWeaver, experimental)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.guaranteed_offer_marked",
+      "kind": "text",
+      "english": "The server marked a current offer guaranteed; no future offer is assumed",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Status: a current offer is marked guaranteed by the server. Must not imply future guaranteed offers. Mapped from the raw producer reason(s) \"armed (guaranteed queue live)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.library_preparing",
+      "kind": "text",
+      "english": "The build library is still being prepared",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Wait status: the Build Library data is still loading. Mapped from the raw producer reason(s) \"ROOT_PENDING\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.no_guarantee_after_activate",
+      "kind": "text",
+      "english": "No guaranteed offer was shown after activation; no future guarantee is assumed",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Status: no guaranteed offer appeared after activation. Mapped from the raw producer reason(s) \"Activate did not guarantee -- treating as unarmed\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.no_wishlist_advisor",
+      "kind": "text",
+      "english": "No Wishlist assigned - recommendations only",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Status when no Wishlist is assigned: Nexus only recommends and does not act. \"Wishlist\" is the Nexus plan of target Echoes. Mapped from the raw producer reason(s) \"no wishlist set - advisor only\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.not_saved_adds_excess",
+      "kind": "text",
+      "english": "Not saved: this run adds excess or wrong-quality copies compared with the saved build.",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Save refusal: the run was not saved because it would add extra or wrong-quality Echo copies.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.not_saved_coverage_lost",
+      "kind": "text",
+      "english": "Not saved: some previously matched Wishlist targets would be lost. See diagnostics for the exact targets.",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Save refusal: saving would lose previously matched Wishlist targets.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.not_saved_fewer_copies",
+      "kind": "template",
+      "english": "Not saved: this run matches {lost} fewer Wishlist copies ({gained} gained, {fewer} fewer than the saved build).",
+      "placeholders": [
+        {
+          "name": "lost",
+          "type": "count",
+          "meaning": "net Wishlist copies fewer than the saved build"
+        },
+        {
+          "name": "gained",
+          "type": "count",
+          "meaning": "Wishlist copies this run gained"
+        },
+        {
+          "name": "fewer",
+          "type": "count",
+          "meaning": "Wishlist copies this run has fewer than the saved build"
+        }
+      ],
+      "resultLimitBytes": 600,
+      "group": "reason",
+      "meaning": "Save refusal: the finished run was NOT saved over the Saved Build because it matches fewer Wishlist copies. Counts are numbers from the comparison. No plural grammar exists; English uses \"copies\" for every count.",
+      "consumer": "core/UserText.lua T.Message, \"exact wishlist progress regressed\" input",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.not_saved_no_gain",
+      "kind": "text",
+      "english": "Not saved: no additional matching Wishlist copies were confirmed.",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Save refusal: the run was not saved because it confirmed no extra matching Wishlist copies.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.orb_active_or_unconfirmed",
+      "kind": "text",
+      "english": "Ordinary rolling paused while the Orb choice is active or cannot be confirmed",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Pause status: ordinary Echo rolling is paused because an Orb choice is open or its state cannot be confirmed. \"Orb\" (Lost Memories) is the game's refining currency/mode. Mapped from the raw producer reason(s) \"Orb state active or unknown\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.orb_knownness_unreported",
+      "kind": "text",
+      "english": "Ordinary rolling paused: the game's Orb service does not report whether its state is known, so Nexus cannot confirm that no Orb choice is open",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Pause status: the Orb service does not say whether its state is known, so Nexus cannot rule out an open Orb choice. Long; keep both halves. Mapped from the raw producer reason(s) \"orb state capability missing\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.orb_offer_active",
+      "kind": "text",
+      "english": "An Orb offer is active; use Orb mode or resolve it in the game",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Status: an Orb offer is open; the player resolves it in Orb mode or in the game. Nexus does not act on it. Mapped from the raw producer reason(s) \"Orb offer active -- manual action required\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.orb_state_not_confirmed",
+      "kind": "text",
+      "english": "Ordinary rolling paused: the server's Orb state is not confirmed yet",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Pause status: the server has not yet confirmed the Orb state. Mapped from the raw producer reason(s) \"orb state not yet known\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.orb_state_unexposed",
+      "kind": "text",
+      "english": "Ordinary rolling paused: the game's Orb service does not expose its pending-offer state",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Pause status: the game's Orb service offers no way to read whether an Orb offer is pending. Mapped from the raw producer reason(s) \"orb state unavailable\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.orb_state_unreadable",
+      "kind": "text",
+      "english": "Ordinary rolling paused: the game's Orb state could not be read",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Pause status: the game's Orb state could not be read. Mapped from the raw producer reason(s) \"orb state unknown\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.record_key_unsupported",
+      "kind": "text",
+      "english": "A saved record has an unsupported long key. Keep your backup and report this code",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Error: a saved record cannot be read. Asks the player to keep a backup and report it. Mapped from the raw producer reason(s) \"SOURCE_KEY_WIDTH_EXCEEDED\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.removing_expired_requests",
+      "kind": "text",
+      "english": "Removing expired requests",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Status: Nexus is removing expired Sync requests. Mapped from the raw producer reason(s) \"cleaning\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.reroll_no_requested",
+      "kind": "text",
+      "english": "Reroll: no requested Echo on board",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation: use the game's Reroll action because no requested Echo is on the current board (the three offered cards). Mapped from the raw producer reason(s) \"Reroll: no requested Echo on board (EchoWeaver)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.reroll_none_needed",
+      "kind": "text",
+      "english": "Reroll: no Echo on this board is still needed",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation: Reroll because no Echo on this board is still needed (targets on it are already met). Mapped from the raw producer reason(s) \"Reroll: no needed Echo on board (EchoWeaver)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.reroll_unneeded_guaranteed",
+      "kind": "text",
+      "english": "Reroll the unneeded guaranteed offer under the enabled policy",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation: Reroll a guaranteed but unneeded offer, as the enabled policy allows. Mapped from the raw producer reason(s) \"bracket fishing: reroll filler guarantee\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.safety_disablements_cleared",
+      "kind": "text",
+      "english": "Temporary safety-assumption disablements cleared; new evidence can disable them again",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Status: temporarily disabled safety assumptions are re-enabled; new evidence can disable them again. Mapped from the raw producer reason(s) \"flag demotions cleared (they re-arm on fresh evidence)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.saved_build_invalid",
+      "kind": "text",
+      "english": "This Saved Build is unavailable or not valid for this action. Check My Builds",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Refusal: the Saved Build (game build slot) cannot be used for this action. \"My Builds\" is the game's page of Saved Builds. Mapped from the raw producer reason(s) \"invalid loadout\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.shared_data_preparing",
+      "kind": "text",
+      "english": "Preparing shared-build data",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Wait status: shared-build data is being prepared. Mapped from the raw producer reason(s) \"preparing\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.take_available",
+      "kind": "text",
+      "english": "Take an available Echo",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation: take an offered Echo (no needed one is offered). Mapped from the raw producer reason(s) \"Take available Echo (EchoWeaver)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.take_held_needed",
+      "kind": "text",
+      "english": "Take the held needed Echo instead of searching",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation (experimental policy): take the needed Echo already held (frozen) instead of searching further. Mapped from the raw producer reason(s) \"Take the held wanted Echo instead of searching (EchoWeaver, experimental)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.take_needed",
+      "kind": "text",
+      "english": "Take a needed Echo",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation: take (pick) an offered Echo that the Wishlist still needs. \"Take\" is the game's board action. Mapped from the raw producer reason(s) \"Take wanted Echo (EchoWeaver)\", \"Take wanted Echo\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.take_outside_no_search",
+      "kind": "text",
+      "english": "Take an Echo outside the Wishlist; no permitted Banish or Reroll action",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation: take a non-Wishlist Echo because no Banish or Reroll is permitted (settings or charges). Mapped from the raw producer reason(s) \"Take filler; search unavailable (EchoWeaver)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.take_outside_wishlist",
+      "kind": "text",
+      "english": "Take an available Echo outside the Wishlist",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation: take an offered Echo that is not on the Wishlist. Mapped from the raw producer reason(s) \"Take available filler (EchoWeaver)\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.unknown_code",
+      "kind": "template",
+      "english": "This action is not available yet. Check the status or diagnostics. Details: {code}",
+      "placeholders": [
+        {
+          "name": "code",
+          "type": "text",
+          "meaning": "raw upper-case reason code (identifier), never translated"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "reason",
+      "meaning": "Shown for an unrecognized upper-case code. {code} is the raw code, never translated. \"Details:\" introduces support detail.",
+      "consumer": "core/UserText.lua T.Message, code-shaped input",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.use_shown_offer",
+      "kind": "text",
+      "english": "Use the offer shown on this board; no future offer is assumed",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Recommendation: use the offer on the current board; no later offer is promised. Mapped from the raw producer reason(s) \"drain guaranteed queue\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.wait_echo_data",
+      "kind": "text",
+      "english": "Waiting for current Echo data from the server - automatic choices paused",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Wait status: Nexus has not yet received the server's current list of the player's Echoes, so automatic choices are paused. \"Echo\" is the game's Echo. Not network Sync between players. Mapped from the raw producer reason(s) \"unsynced\", \"waiting for owned-echo sync\", \"waiting for owned-state sync\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.wait_locked_echo_list",
+      "kind": "template",
+      "english": "Waiting for the server's current locked Echo list. Details: {details}",
+      "placeholders": [
+        {
+          "name": "details",
+          "type": "text",
+          "meaning": "the raw producer reason text, shown verbatim for support (English, never translated)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "reason",
+      "meaning": "Wait status: the server has not yet sent the current list of locked Echoes.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.wait_remaining_choice_count",
+      "kind": "text",
+      "english": "Waiting for the remaining-choice count",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Wait status: the number of Echo choices still to make in this run is not known yet. Mapped from the raw producer reason(s) \"pending-pick count\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.wait_send_rate",
+      "kind": "text",
+      "english": "Waiting for the permitted network send rate",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Wait status: Nexus is waiting so that it sends within the permitted network rate. Mapped from the raw producer reason(s) \"throttled\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.wait_server_wishlist",
+      "kind": "template",
+      "english": "The saved Wishlist is not available from the server yet. Details: {details}",
+      "placeholders": [
+        {
+          "name": "details",
+          "type": "text",
+          "meaning": "the raw producer reason text, shown verbatim for support (English, never translated)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "reason",
+      "meaning": "Wait status: the saved Wishlist has not arrived from the server yet.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "reason.wishlist_unusable",
+      "kind": "text",
+      "english": "This Wishlist cannot be used yet. Open it in the editor to check its targets",
+      "placeholders": [],
+      "group": "reason",
+      "meaning": "Refusal: the Wishlist is not usable; the player should open it in the Wishlist Editor. No trailing period in English (keep the style). Mapped from the raw producer reason(s) \"invalid wishlist\", which stay untranslated codes.",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "term.best_known",
+      "kind": "text",
+      "english": "Best known",
+      "placeholders": [],
+      "group": "term",
+      "meaning": "Record-scope term: the best shared record THIS client holds, not a complete or server-wide ranking. Also a heading fragment on the panel.",
+      "consumer": "UserText.BEST_KNOWN / Terms.bestKnown",
+      "familySurface": "usertext: DPS record hovers on the Nexus panel, Leaderboard rows and Build Library details (record scope words) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "term.echo_availability_controls",
+      "kind": "text",
+      "english": "Echo availability controls",
+      "placeholders": [],
+      "group": "term",
+      "meaning": "Heading for the game's tome-based controls that make Echoes available or unavailable. Mapped from the raw producer reason \"Tome levers\" (untranslated). Help calls these \"tomes\".",
+      "consumer": "core/UserText.lua T.Message (reasons table via SeamReason); presented once by ui/Panel.lua Present and other callers",
+      "familySurface": "usertext: Echo Journal Nexus Progress section heading; any line showing the raw reason \"Tome levers\" (heading); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "term.first_run_target",
+      "kind": "text",
+      "english": "first-run target",
+      "placeholders": [],
+      "group": "term",
+      "meaning": "The destination used when no Saved Build is in use (lower case in prose).",
+      "consumer": "UserText.Terms.firstRun",
+      "familySurface": "usertext: Reference term read through UserText.Terms by callers that name the concept in prose (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "term.mine_scope",
+      "kind": "text",
+      "english": "Mine",
+      "placeholders": [],
+      "group": "term",
+      "meaning": "Build Library scope that lists your own Saved Builds and shared listings (opposite of \"All Shared\").",
+      "consumer": "UserText.Terms.mineScope",
+      "familySurface": "usertext: Reference term read through UserText.Terms by callers that name the concept in prose (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "term.my_builds",
+      "kind": "text",
+      "english": "My Builds",
+      "placeholders": [],
+      "group": "term",
+      "meaning": "The game's page that lists your Saved Builds. Follow the client's own name for the page.",
+      "consumer": "UserText.Terms.myBuildsPage",
+      "familySurface": "usertext: Reference term read through UserText.Terms by callers that name the concept in prose (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "term.options",
+      "kind": "text",
+      "english": "Options",
+      "placeholders": [],
+      "group": "term",
+      "meaning": "Name of the Nexus panel header button that opens its menu of direct choices (must match panel.button.options).",
+      "consumer": "UserText.Terms.options / menuAndStatus",
+      "familySurface": "usertext: Reference term read through UserText.Terms by callers that name the concept in prose (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "term.saved_build_named",
+      "kind": "template",
+      "english": "Saved Build '{name}'",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Saved Build name (player data)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "term",
+      "meaning": "Label of a game Saved Build known only by its name.",
+      "consumer": "core/UserText.lua T.SavedBuildLabel",
+      "familySurface": "usertext: Setup checklist rows and destination lines (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "term.saved_build_named_slot",
+      "kind": "template",
+      "english": "Saved Build '{name}' (slot {slot})",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Saved Build name (player data, never translated)"
+        },
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "slot number (identifier digits)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "term",
+      "meaning": "Label of a game Saved Build (build slot) with its name and slot number.",
+      "consumer": "core/UserText.lua T.SavedBuildLabel",
+      "familySurface": "usertext: Setup checklist rows and destination lines (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "term.saved_build_slot",
+      "kind": "template",
+      "english": "Saved Build {slot}",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "slot number (identifier digits)"
+        }
+      ],
+      "resultLimitBytes": 200,
+      "group": "term",
+      "meaning": "Label of a game Saved Build known only by its slot number.",
+      "consumer": "core/UserText.lua T.SavedBuildLabel",
+      "familySurface": "usertext: Setup checklist rows and destination lines (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "term.show_records",
+      "kind": "text",
+      "english": "Show DPS records",
+      "placeholders": [],
+      "group": "term",
+      "meaning": "Name of the \"Show DPS records\" choice.",
+      "consumer": "UserText.Terms.showRecords",
+      "familySurface": "usertext: Reference term read through UserText.Terms by callers that name the concept in prose (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.body.glossary",
+      "kind": "block",
+      "english": "Counts: planned copies (the plan), rolled copies this run, the Wishlist's copies in a Saved Build and locked targets are different counts, and Echo families represented counts a family once. Unavailable is not 0, and a plan is not a finished build. Best known: the best shared DPS record this client holds for the exact same Echoes; it is not a complete or server-wide ranking. My Builds is the game's page of your Saved Builds; in Build Library, the Mine scope lists your Saved Builds and shared listings. Options: the Options button on the Nexus panel header opens its menu of direct choices; point at it for the current status.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "One paragraph defining Nexus count units and terms. Keep every distinction: planned vs this run vs Saved Build copies vs locked targets vs families; unavailable is not 0; Best known is not a ranking. Use the same translations as count.*, term.* keys.",
+      "consumer": "UserText.GLOSSARY",
+      "familySurface": "usertext: Glossary paragraph (UserText.GLOSSARY) for reference readers (body); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.availability_control",
+      "kind": "template",
+      "english": "Echo-availability control #{id}",
+      "placeholders": [
+        {
+          "name": "id",
+          "type": "text",
+          "meaning": "control number (identifier digits)"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "usertext",
+      "meaning": "Name of an Echo-availability control when its tome name is not known.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.card_different_quality",
+      "kind": "text",
+      "english": "Different quality from target",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Card annotation: the Echo's quality differs from the target's. Short label; the card line is narrow.",
+      "consumer": "core/UserText.lua T.Annotation",
+      "familySurface": "usertext: Nexus panel offer cards and Readout card lines (annotation after the Echo name) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.card_frozen_offer",
+      "kind": "text",
+      "english": "Frozen offer",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Card annotation: the offer is frozen (game Freeze action). Short label; the card line is narrow.",
+      "consumer": "core/UserText.lua T.Annotation",
+      "familySurface": "usertext: Nexus panel offer cards and Readout card lines (annotation after the Echo name) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.card_held_offer",
+      "kind": "text",
+      "english": "Held offer",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Card annotation: an offer held on the board (banked). Short label; the card line is narrow.",
+      "consumer": "core/UserText.lua T.Annotation",
+      "familySurface": "usertext: Nexus panel offer cards and Readout card lines (annotation after the Echo name) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.card_needed",
+      "kind": "text",
+      "english": "Needed",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Card annotation: this offered Echo is needed by the Wishlist. Short label; the card line is narrow.",
+      "consumer": "core/UserText.lua T.Annotation",
+      "familySurface": "usertext: Nexus panel offer cards and Readout card lines (annotation after the Echo name) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.card_not_on_wishlist",
+      "kind": "text",
+      "english": "Not on Wishlist",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Card annotation: the Echo is not on the Wishlist. Short label; the card line is narrow.",
+      "consumer": "core/UserText.lua T.Annotation",
+      "familySurface": "usertext: Nexus panel offer cards and Readout card lines (annotation after the Echo name) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.card_not_taken_now",
+      "kind": "text",
+      "english": "Not taken now; a later offer is not guaranteed",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Card annotation: not taken now; it must not promise that the Echo returns later. Short label; the card line is narrow.",
+      "consumer": "core/UserText.lua T.Annotation",
+      "familySurface": "usertext: Nexus panel offer cards and Readout card lines (annotation after the Echo name) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.card_target_met",
+      "kind": "text",
+      "english": "Target already met",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Card annotation: this Echo's target count is already met. Short label; the card line is narrow.",
+      "consumer": "core/UserText.lua T.Annotation",
+      "familySurface": "usertext: Nexus panel offer cards and Readout card lines (annotation after the Echo name) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.category_both",
+      "kind": "text",
+      "english": "Both records",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "DPS record category combining both (Training Dummy and Lich King) records.",
+      "consumer": "core/UserText.lua T.CategoryName",
+      "familySurface": "usertext: DPS record hovers on the Nexus panel, Leaderboard rows and Build Library details (record scope words) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.category_lich_king",
+      "kind": "text",
+      "english": "Lich King",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "DPS record category: the Lich King encounter. Use the client's own name for the boss if it differs.",
+      "consumer": "core/UserText.lua T.CategoryName",
+      "familySurface": "usertext: DPS record hovers on the Nexus panel, Leaderboard rows and Build Library details (record scope words) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.category_training_dummy",
+      "kind": "text",
+      "english": "Training Dummy",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "DPS record category: fights against a training dummy. Use the client's own name.",
+      "consumer": "core/UserText.lua T.CategoryName",
+      "familySurface": "usertext: DPS record hovers on the Nexus panel, Leaderboard rows and Build Library details (record scope words) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.character_line",
+      "kind": "template",
+      "english": "Character: {name}",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "character name (player data)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Destination line naming the character (owner) of the destination.",
+      "consumer": "core/UserText.lua T.DestinationLines",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.destination_line",
+      "kind": "template",
+      "english": "Destination: {destination}",
+      "placeholders": [
+        {
+          "name": "destination",
+          "type": "text",
+          "meaning": "destination words or Saved Build label, already shown text"
+        }
+      ],
+      "resultLimitBytes": 1800,
+      "group": "usertext",
+      "meaning": "Destination line: where a save or assignment applies (a Saved Build or the first-run target).",
+      "consumer": "core/UserText.lua T.DestinationLines",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.details",
+      "kind": "template",
+      "english": "Details: {code}",
+      "placeholders": [
+        {
+          "name": "code",
+          "type": "text",
+          "meaning": "raw code or detail (identifier), never translated"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Support detail suffix after a message. {code} is a raw code, never translated.",
+      "consumer": "core/UserText.lua T.Details",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.details_no_code",
+      "kind": "text",
+      "english": "Details: unknown",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Support detail suffix when no code was supplied (\"unknown\" means no code is known).",
+      "consumer": "core/UserText.lua T.Details",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.field_character",
+      "kind": "text",
+      "english": "Character",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Label of one destination cell in its hover line (\"<label>: <value>\"). \"State\" is the destination's state, not a country/region.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.field_saved_build",
+      "kind": "text",
+      "english": "Saved Build",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Label of one destination cell in its hover line (\"<label>: <value>\"). \"State\" is the destination's state, not a country/region.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.field_state",
+      "kind": "text",
+      "english": "State",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Label of one destination cell in its hover line (\"<label>: <value>\"). \"State\" is the destination's state, not a country/region.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.field_wishlist",
+      "kind": "text",
+      "english": "Wishlist",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Label of one destination cell in its hover line (\"<label>: <value>\"). \"State\" is the destination's state, not a country/region.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.leaderboard_scope",
+      "kind": "text",
+      "english": "Best known exact loadout per character",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Leaderboard scope: the best known exact loadout of each character (this client's knowledge).",
+      "consumer": "UserText.LEADERBOARD_SCOPE",
+      "familySurface": "usertext: Leaderboard window scope line (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.mark_done",
+      "kind": "text",
+      "english": "[done]",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status marker before a checklist row: done. Keep the brackets style; never colour alone.",
+      "consumer": "UserText.CHECK_MARKS[status], read by ui/QuickStart.lua",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.mark_info",
+      "kind": "text",
+      "english": "[info]",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status marker before a checklist row: information only. Keep the brackets style; never colour alone.",
+      "consumer": "UserText.CHECK_MARKS[status], read by ui/QuickStart.lua",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.mark_not_known",
+      "kind": "text",
+      "english": "[not known]",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status marker before a checklist row: not known. Keep the brackets style; never colour alone.",
+      "consumer": "UserText.CHECK_MARKS[status], read by ui/QuickStart.lua",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.mark_todo",
+      "kind": "text",
+      "english": "[to do]",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status marker before a checklist row: still to do. Keep the brackets style; never colour alone.",
+      "consumer": "UserText.CHECK_MARKS[status], read by ui/QuickStart.lua",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.mark_waiting",
+      "kind": "text",
+      "english": "[waiting]",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status marker before a checklist row: waiting. Keep the brackets style; never colour alone.",
+      "consumer": "UserText.CHECK_MARKS[status], read by ui/QuickStart.lua",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.owner_not_established",
+      "kind": "text",
+      "english": "Owner identity not established",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Record owner flag: the owner identity is not established (not \"fake\").",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: DPS record hovers on the Nexus panel, Leaderboard rows and Build Library details (record scope words) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.owner_verified",
+      "kind": "text",
+      "english": "Owner verified",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Record owner flag: the record's owner identity is verified.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: DPS record hovers on the Nexus panel, Leaderboard rows and Build Library details (record scope words) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.setup_destination",
+      "kind": "text",
+      "english": "Destination",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Checklist row label (a setup step). Shown as \"<mark> <label>: <text>\".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.setup_startup",
+      "kind": "text",
+      "english": "Start-up",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Checklist row label (a setup step). Shown as \"<mark> <label>: <text>\".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.setup_wishlist",
+      "kind": "text",
+      "english": "Wishlist",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Checklist row label (a setup step). Shown as \"<mark> <label>: <text>\".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.tome_control",
+      "kind": "template",
+      "english": "{name} (control #{id})",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "tome name from the game catalog (game data, not translated)"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "meaning": "control number (identifier digits)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Name of an Echo-availability control: the tome's name from game data plus its control number.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.label.wishlist_line",
+      "kind": "template",
+      "english": "Wishlist: {wishlist}",
+      "placeholders": [
+        {
+          "name": "wishlist",
+          "type": "text",
+          "meaning": "Wishlist words (usertext.value.wishlist_*), already shown text"
+        }
+      ],
+      "resultLimitBytes": 1800,
+      "group": "usertext",
+      "meaning": "Destination line naming the Wishlist and its assignment state.",
+      "consumer": "core/UserText.lua T.DestinationLines",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (label); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.note.record_scope",
+      "kind": "text",
+      "english": "Best known: the best shared record this client holds for these exact Echoes. It is not a complete or server-wide ranking.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Hover note defining \"Best known\" (term.best_known). Must keep \"not a complete or server-wide ranking\".",
+      "consumer": "UserText.RECORD_SCOPE",
+      "familySurface": "usertext: DPS record hovers on the Nexus panel, Leaderboard rows and Build Library details (record scope words) (note); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.auto_not_known",
+      "kind": "text",
+      "english": "Auto: not known right now.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. Auto state cannot be read.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.auto_off",
+      "kind": "text",
+      "english": "Auto: OFF. Recommendations only; turning Auto ON is your choice (read its warning first).",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. Auto is OFF; Nexus only recommends. Turning it on is the player's choice after its warning.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.auto_on",
+      "kind": "text",
+      "english": "Auto: ON",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. Auto (the automation master switch) is ON. ON/OFF match the Auto button wording.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.auto_on_held",
+      "kind": "template",
+      "english": "Auto: ON - not acting now: {reason}",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "the panel's current Auto hold note (already shown text, or a recorded raw reason)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "usertext",
+      "meaning": "Status line. Auto is ON but not acting now; {reason} says why.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.control_detail",
+      "kind": "template",
+      "english": "{control}: {detail}",
+      "placeholders": [
+        {
+          "name": "control",
+          "type": "text",
+          "meaning": "the control name (usertext.label.tome_control or usertext.label.availability_control, already shown text)"
+        },
+        {
+          "name": "detail",
+          "type": "text",
+          "meaning": "raw producer detail about the control (English producer text, never translated)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "usertext",
+      "meaning": "A control name followed by the producer's raw detail for it. Keep the separator natural for the language; the detail stays English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.disabling_control",
+      "kind": "template",
+      "english": "Disabling off-Wishlist {control}",
+      "placeholders": [
+        {
+          "name": "control",
+          "type": "text",
+          "meaning": "the control name (usertext.label.tome_control or usertext.label.availability_control, already shown text)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Status: Nexus is turning off an Echo-availability control (tome) that is not needed by the Wishlist.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.enabling_control",
+      "kind": "template",
+      "english": "Enabling Wishlist {control}",
+      "placeholders": [
+        {
+          "name": "control",
+          "type": "text",
+          "meaning": "the control name (usertext.label.tome_control or usertext.label.availability_control, already shown text)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Status: Nexus is turning on an Echo-availability control (tome) that the Wishlist needs.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Shared reason text: Nexus panel status/recommendation line and its Options hover, Readout status and Auto hold notes, chat lines after the \"Nexus:\" prefix, Echo Journal Nexus Progress lines, Wishlist Editor notices (whichever shows this raw reason) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_last_reason",
+      "kind": "template",
+      "english": "Last reason Nexus recorded: {reason}",
+      "placeholders": [
+        {
+          "name": "reason",
+          "type": "text",
+          "meaning": "recorded reason text (data, verbatim, ends with punctuation)"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "usertext",
+      "meaning": "Status line. The last reason the Orb owner recorded; not a fresh check.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_line",
+      "kind": "template",
+      "english": "Orbs (optional): {state}.",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "Orb run state words (usertext.status.orb_state_*), already shown text"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "usertext",
+      "meaning": "Status line. Orb run status line.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_line_pending",
+      "kind": "template",
+      "english": "Orbs (optional): {state}; a result is pending.",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "Orb run state words (usertext.status.orb_state_*), already shown text"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "usertext",
+      "meaning": "Status line. Orb run status line when a result is still pending.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_none_approved",
+      "kind": "text",
+      "english": "Orbs (optional): no Orb run approved this session.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. No Orb run was approved this session.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_not_read",
+      "kind": "text",
+      "english": "Orbs (optional): not known. Orb status has not been read this session, so an unresolved earlier Orb action is not ruled out. Open Orbs to check.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. Orb status not read this session. \"Open Orbs\" names the button/window.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_operation",
+      "kind": "template",
+      "english": "Original operation (as recorded): '{name}'.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "recorded operation name (data), never translated"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "usertext",
+      "meaning": "Status line. The Orb run's recorded operation name; not a Resume target.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_review",
+      "kind": "text",
+      "english": "Open Orbs to review it now and see the actions available there.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. Closing sentence of the Orb line. \"Open Orbs\" names the button/window.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_code",
+      "kind": "template",
+      "english": "run in state {code}",
+      "placeholders": [
+        {
+          "name": "code",
+          "type": "text",
+          "meaning": "raw upper-case Orb run state code (identifier), never translated"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run in an unlisted state; {code} is the raw state code.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_complete",
+      "kind": "text",
+      "english": "run ended: its selected targets were met",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state: ended because selected targets were met.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_finished",
+      "kind": "text",
+      "english": "run finished",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state: finished.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_limit",
+      "kind": "text",
+      "english": "run stopped at its approved maximum",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state: stopped at the approved maximum Orb spend.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_no_sources",
+      "kind": "text",
+      "english": "run ended: no safe source copies were left",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state: ended with no safe source copies left.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_not_known",
+      "kind": "text",
+      "english": "run state not known",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state not known.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_out_of_orbs",
+      "kind": "text",
+      "english": "run ended: no Orbs were left",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state: ended with no Orbs left.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_paused",
+      "kind": "text",
+      "english": "run paused",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state: paused.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_rolled_complete",
+      "kind": "text",
+      "english": "run ended: its rolled targets were met",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state: ended because rolled targets were met.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_running",
+      "kind": "text",
+      "english": "run running",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state: running.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_stopped",
+      "kind": "text",
+      "english": "run stopped",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state: stopped.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_state_unresolved",
+      "kind": "text",
+      "english": "an earlier Orb action is unresolved",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Words inside the Orb line (lower case; follows \"Orbs (optional): \"). Orb run state: an earlier Orb action is unresolved.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.orb_status_not_known",
+      "kind": "text",
+      "english": "Orbs (optional): status not known right now.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. Orb status unknown.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_after_startup",
+      "kind": "text",
+      "english": "Not known until start-up finishes.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination and Wishlist rows before start-up finishes. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_active",
+      "kind": "text",
+      "english": "A Saved Build is active in the game.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step done: a Saved Build is active. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_active_named",
+      "kind": "template",
+      "english": "{build} is active in the game.",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "Saved Build label (term.saved_build_*), already shown text with the name verbatim"
+        }
+      ],
+      "resultLimitBytes": 1600,
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step done: the named Saved Build is active. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_empty",
+      "kind": "text",
+      "english": "The selected Saved Build holds no Echoes, so a Wishlist cannot be assigned to it. Load a Saved Build that holds Echoes in the game's build window.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step to do: the (unnamed) selected Saved Build is empty. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_empty_named",
+      "kind": "template",
+      "english": "{build} holds no Echoes, so a Wishlist cannot be assigned to it. Load a Saved Build that holds Echoes in the game's build window.",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "Saved Build label (term.saved_build_*), already shown text with the name verbatim"
+        }
+      ],
+      "resultLimitBytes": 1600,
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step to do: the named Saved Build is empty. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_first_run",
+      "kind": "text",
+      "english": "The first-run target (no Saved Build in use).",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step done: the first-run target. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_not_confirmed",
+      "kind": "text",
+      "english": "Not confirmed right now.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step unknown. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_not_loaded",
+      "kind": "text",
+      "english": "Not known yet: Saved Build data is not loaded.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step waiting. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_restoring",
+      "kind": "text",
+      "english": "Not known yet: the saved assignment is being restored.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step waiting. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_unavailable",
+      "kind": "text",
+      "english": "The Saved Build is not available right now.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step: the Saved Build is unavailable. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_unavailable_named",
+      "kind": "template",
+      "english": "{build} is not available right now.",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "Saved Build label (term.saved_build_*), already shown text with the name verbatim"
+        }
+      ],
+      "resultLimitBytes": 1600,
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step: the named Saved Build is unavailable. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_dest_unconfirmed",
+      "kind": "text",
+      "english": "A Saved Build's plan is in use, but which Saved Build is active is not confirmed.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination step unknown. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_no_run_shown",
+      "kind": "text",
+      "english": "The Nexus panel has not shown a run yet.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Destination and Wishlist rows before the panel showed a run. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_startup_loading",
+      "kind": "text",
+      "english": "Local saved data is still being restored (see the loading panel).",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Start-up step waiting. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_startup_ready",
+      "kind": "text",
+      "english": "Local saved data is restored.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Start-up step done. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_startup_unknown",
+      "kind": "text",
+      "english": "Start-up status cannot be read.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Start-up step unknown. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_wishlist_assigned",
+      "kind": "text",
+      "english": "A Wishlist is assigned.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Wishlist step done. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_wishlist_assigned_named",
+      "kind": "template",
+      "english": "'{name}' is assigned.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Wishlist name (player data), never translated"
+        }
+      ],
+      "resultLimitBytes": 1600,
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Wishlist step done: the named Wishlist is assigned now. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_wishlist_needs_build",
+      "kind": "text",
+      "english": "Needs a Saved Build that holds Echoes first.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Wishlist step to do (empty Saved Build). Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_wishlist_none",
+      "kind": "text",
+      "english": "None assigned. Assign Wishlist... opens the chooser; nothing is assigned until you choose. No Wishlist yet? Create one in the Wishlist Editor.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Wishlist step to do. \"Assign Wishlist...\" names the panel button (match its translation); nothing is assigned until the player chooses. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_wishlist_not_known",
+      "kind": "text",
+      "english": "Not known right now.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Wishlist step unknown. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_wishlist_restoring",
+      "kind": "text",
+      "english": "The saved assignment is being restored.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Wishlist step waiting. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_wishlist_unavailable",
+      "kind": "text",
+      "english": "The assignment is unavailable right now.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Wishlist step unknown. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.setup_wishlist_unavailable_named",
+      "kind": "template",
+      "english": "'{name}' is unavailable right now.",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "Wishlist name (player data), never translated"
+        }
+      ],
+      "resultLimitBytes": 1600,
+      "group": "usertext",
+      "meaning": "Setup checklist row text. Wishlist step unknown: the named Wishlist is unavailable. Worded from current facts only; never claims done for loading/unknown.",
+      "consumer": "core/UserText.lua T.SetupChecklist",
+      "familySurface": "usertext: Setup checklist window (ui/QuickStart.lua checklist rows, from UserText.SetupChecklist) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.sync_automatic",
+      "kind": "text",
+      "english": "Sync: Automatic. Nexus may send shared builds and DPS records without a click; what is sent may reach no one.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. Sync mode Automatic: Nexus may SEND data to other players without a click. Must keep the sending consequence.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.sync_manual",
+      "kind": "text",
+      "english": "Sync: Manual. Nexus sends only what you start (Sync Now or Share).",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. Sync mode Manual. \"Sync Now\" and \"Share\" name buttons; match their translations.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.sync_not_known",
+      "kind": "text",
+      "english": "Sync: mode not known right now.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. Sync mode cannot be read.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.sync_not_saved_choice",
+      "kind": "template",
+      "english": "{line} (Not a choice you saved.)",
+      "placeholders": [
+        {
+          "name": "line",
+          "type": "text",
+          "meaning": "the Sync mode line (usertext.status.sync_*), already shown text"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "usertext",
+      "meaning": "Status line. A Sync mode line followed by a note that this mode is the default, not one the player saved.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.status.sync_off",
+      "kind": "text",
+      "english": "Sync: Off. Nexus sends nothing; local records are kept.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Status line. Sync mode Off.",
+      "consumer": "core/UserText.lua T.StatusLines",
+      "familySurface": "usertext: Setup checklist window, status lines under the steps (UserText.StatusLines) (status); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.tooltip.captured_lead",
+      "kind": "text",
+      "english": "Captured: shown as captured earlier, the destination held when this edit or view opened.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Hover sentence: this destination was captured when the edit or view opened; it is not a fresh check. Followed (code-joined with one space) by one of usertext.tooltip.captured_refused/_stated/_unchecked.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.tooltip.captured_refused",
+      "kind": "text",
+      "english": "Assigning to it is refused: the Saved Build holds no Echoes.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Second hover sentence after captured_lead: assigning to the captured empty Saved Build is refused.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.tooltip.captured_stated",
+      "kind": "text",
+      "english": "Its Wishlist line gives the assignment as stated for it; assigned now means the current link, which the Nexus panel shows.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Second hover sentence after captured_lead: the Wishlist line states the assignment; \"assigned now\" means the current link shown on the Nexus panel.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.tooltip.captured_unchecked",
+      "kind": "text",
+      "english": "It is not checked as assigned now: assigned now means the current link, which the Nexus panel shows.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Second hover sentence after captured_lead: the captured Wishlist is not checked as the current assignment.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.tooltip.field_line",
+      "kind": "template",
+      "english": "{label}: {value}",
+      "placeholders": [
+        {
+          "name": "label",
+          "type": "text",
+          "meaning": "cell label (usertext.label.field_*), already shown text"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "meaning": "the cell's complete value, already shown text with names verbatim"
+        }
+      ],
+      "resultLimitBytes": 2048,
+      "group": "usertext",
+      "meaning": "One hover line: a destination cell label and its full value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.tooltip.preview",
+      "kind": "text",
+      "english": "Preview: a Community Build preview is shown; it is not this destination's assignment.",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Hover line: a Community Build preview is shown, which is not the assignment of this destination.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (tooltip); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_active",
+      "kind": "text",
+      "english": "active in the game",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. The Saved Build is the active one in the game. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_active_cell",
+      "kind": "text",
+      "english": "Active in the game",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. The Saved Build is the active one in the game. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_cell_none_captured",
+      "kind": "text",
+      "english": "None captured",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build cell when nothing was captured. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_cell_none_in_use",
+      "kind": "text",
+      "english": "None in use",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build cell for the first-run target: no Saved Build is in use. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_cell_not_confirmed",
+      "kind": "text",
+      "english": "Not confirmed right now",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build cell when no destination can be confirmed. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_cell_not_known_yet",
+      "kind": "text",
+      "english": "Not known yet",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build cell while the saved assignment is being restored. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_cell_not_loaded_yet",
+      "kind": "text",
+      "english": "Not loaded yet",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build cell while Saved Build data is not loaded. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_empty",
+      "kind": "text",
+      "english": "empty: it holds no Echoes, so assigning to it is refused",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. The Saved Build is empty, so assigning a Wishlist to it is refused. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_empty_cell",
+      "kind": "text",
+      "english": "Empty: it holds no Echoes, so assigning to it is refused",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. The Saved Build is empty, so assigning a Wishlist to it is refused. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_inactive",
+      "kind": "text",
+      "english": "not active in the game",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. The Saved Build is not the active one in the game. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_inactive_cell",
+      "kind": "text",
+      "english": "Not active in the game",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. The Saved Build is not the active one in the game. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_name_slot",
+      "kind": "template",
+      "english": "{name} (slot {slot})",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "display-safe name (player data: Wishlist, Saved Build or character name), never translated"
+        },
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "Saved Build slot number (identifier digits)"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Saved Build cell: its name and slot number.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_slot",
+      "kind": "template",
+      "english": "Slot {slot}",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "Saved Build slot number (identifier digits)"
+        }
+      ],
+      "resultLimitBytes": 200,
+      "group": "usertext",
+      "meaning": "Saved Build cell known only by slot number.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_state_not_known",
+      "kind": "text",
+      "english": "active state not known",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. Whether this Saved Build is active is not stated. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_state_not_known_cell",
+      "kind": "text",
+      "english": "Active state not known",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. Whether this Saved Build is active is not stated. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_unavailable",
+      "kind": "text",
+      "english": "not available right now",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. The Saved Build cannot be read right now. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_unavailable_cell",
+      "kind": "text",
+      "english": "Not available right now",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. The Saved Build cannot be read right now. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_unconfirmed",
+      "kind": "text",
+      "english": "not confirmed as the active Saved Build",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. It is not confirmed that this Saved Build is the active one. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_unconfirmed_cell",
+      "kind": "text",
+      "english": "Not confirmed as the active Saved Build",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Saved Build state words. It is not confirmed that this Saved Build is the active one. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.build_with_state",
+      "kind": "template",
+      "english": "{build} - {state}",
+      "placeholders": [
+        {
+          "name": "build",
+          "type": "text",
+          "meaning": "Saved Build label (term.saved_build_* or usertext.value.selected_build), already shown text"
+        },
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "state words (usertext.value.build_*), already shown text"
+        }
+      ],
+      "resultLimitBytes": 1600,
+      "group": "usertext",
+      "meaning": "A Saved Build label followed by its state words (lower-case in-sentence form).",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.character_not_known",
+      "kind": "text",
+      "english": "Not known",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Character cell: the character is not known.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_build_active",
+      "kind": "text",
+      "english": "Active",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: the Saved Build is active in the game. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_build_empty",
+      "kind": "text",
+      "english": "Empty",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: the Saved Build holds no Echoes. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_build_inactive",
+      "kind": "text",
+      "english": "Inactive",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: the Saved Build is not active in the game. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_build_name_slot",
+      "kind": "template",
+      "english": "#{slot} {name}",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "Saved Build slot number (identifier digits)"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "display-safe name (player data: Wishlist, Saved Build or character name), never translated"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Compact Saved Build cell: \"#\" + slot number, then its name. Keep it very short.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_build_not_known",
+      "kind": "text",
+      "english": "Not known",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: whether the Saved Build is active is not stated. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_build_selected",
+      "kind": "text",
+      "english": "Selected",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact Saved Build cell when name and slot are unknown (\"the selected Saved Build\").",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_build_slot",
+      "kind": "template",
+      "english": "#{slot}",
+      "placeholders": [
+        {
+          "name": "slot",
+          "type": "text",
+          "meaning": "Saved Build slot number (identifier digits)"
+        }
+      ],
+      "resultLimitBytes": 200,
+      "group": "usertext",
+      "meaning": "Compact Saved Build cell: the slot number marker only.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_build_unavailable",
+      "kind": "text",
+      "english": "Unavailable",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: the Saved Build is unavailable right now. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_build_unconfirmed",
+      "kind": "text",
+      "english": "Unconfirmed",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: not confirmed as the active Saved Build. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_dest_build_none",
+      "kind": "text",
+      "english": "None",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact Saved Build cell for the first-run target (no Saved Build in use). The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_dest_first_run",
+      "kind": "text",
+      "english": "First run",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: first-run target (no Saved Build in use). The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_dest_none",
+      "kind": "text",
+      "english": "None",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: nothing captured. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_dest_not_loaded",
+      "kind": "text",
+      "english": "Not loaded",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: Saved Build data is not loaded yet. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_dest_restoring",
+      "kind": "text",
+      "english": "Restoring",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: the saved assignment is being restored. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_dest_unconfirmed",
+      "kind": "text",
+      "english": "Unconfirmed",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state: no destination can be confirmed right now. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_state_captured",
+      "kind": "template",
+      "english": "Captured: {state}",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "compact state word, already shown text"
+        }
+      ],
+      "resultLimitBytes": 400,
+      "group": "usertext",
+      "meaning": "Compact state cell of a captured destination.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_state_captured_first_run",
+      "kind": "text",
+      "english": "Captured: first-run target",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact state cell of a captured first-run destination (keeps the whole \"first-run target\" term).",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_state_preview",
+      "kind": "template",
+      "english": "Preview: {state}",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "compact state words, already shown text"
+        }
+      ],
+      "resultLimitBytes": 600,
+      "group": "usertext",
+      "meaning": "Compact state cell while a Community Build preview is shown.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_wishlist_assigned",
+      "kind": "text",
+      "english": "Assigned",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact Wishlist cell: assigned now (name unknown). Keep very short.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_wishlist_none",
+      "kind": "text",
+      "english": "None",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact Wishlist cell: none assigned. Keep very short.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_wishlist_refused",
+      "kind": "text",
+      "english": "Refused",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact Wishlist cell: assignment refused (empty Saved Build). Keep very short.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_wishlist_refused_named",
+      "kind": "template",
+      "english": "Refused: {name}",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "display-safe name (player data: Wishlist, Saved Build or character name), never translated"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Compact: the named Wishlist's assignment is refused (empty Saved Build). The meaning marker must precede the name.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_wishlist_restoring",
+      "kind": "text",
+      "english": "Restoring",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact Wishlist cell: the saved assignment is being restored. Keep very short.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_wishlist_unavailable",
+      "kind": "text",
+      "english": "N/A",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Compact Wishlist cell: assignment unavailable right now. Keep very short.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_wishlist_unavailable_named",
+      "kind": "template",
+      "english": "N/A: {name}",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "display-safe name (player data: Wishlist, Saved Build or character name), never translated"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Compact: the named Wishlist's assignment is unavailable right now. The meaning marker must precede the name.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.compact_wishlist_unknown_named",
+      "kind": "template",
+      "english": "?: {name}",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "display-safe name (player data: Wishlist, Saved Build or character name), never translated"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Compact: the named Wishlist's assignment is not known (\"?\" means not known). The meaning marker must precede the name.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.dest_first_run",
+      "kind": "text",
+      "english": "first-run target (no Saved Build in use)",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Destination words. Destination is the first-run target: no Saved Build is in use. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.dest_first_run_cell",
+      "kind": "text",
+      "english": "First-run target (no Saved Build in use)",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Destination words (State cell). Destination is the first-run target: no Saved Build is in use. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.dest_none",
+      "kind": "text",
+      "english": "none captured",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Destination words. No destination was captured. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.dest_none_cell",
+      "kind": "text",
+      "english": "None captured",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Destination words (State cell). No destination was captured. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.dest_not_loaded",
+      "kind": "text",
+      "english": "Saved Build data is not loaded yet",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Destination words. Destination not known: Saved Build data is not loaded yet. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.dest_not_loaded_cell",
+      "kind": "text",
+      "english": "Saved Build data is not loaded yet",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Destination words (State cell). Destination not known: Saved Build data is not loaded yet. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.dest_restoring",
+      "kind": "text",
+      "english": "not known yet (the saved assignment is being restored)",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Destination words. Destination not known yet while the saved assignment is restored. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.dest_restoring_cell",
+      "kind": "text",
+      "english": "Not known yet (the saved assignment is being restored)",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Destination words (State cell). Destination not known yet while the saved assignment is restored. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.dest_unconfirmed",
+      "kind": "text",
+      "english": "not confirmed right now",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Destination words. Neither the first-run target nor a Saved Build can be confirmed as the destination. In-sentence form (lower case in English): it follows \"Destination: \" or \"Captured; \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.dest_unconfirmed_cell",
+      "kind": "text",
+      "english": "Not confirmed right now",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Destination words (State cell). Neither the first-run target nor a Saved Build can be confirmed as the destination. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.fight_duration",
+      "kind": "template",
+      "english": "{duration} fight",
+      "placeholders": [
+        {
+          "name": "duration",
+          "type": "text",
+          "meaning": "fight duration formatted m:ss by code"
+        }
+      ],
+      "resultLimitBytes": 200,
+      "group": "usertext",
+      "meaning": "Record detail: the fight length.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: DPS record hovers on the Nexus panel, Leaderboard rows and Build Library details (record scope words) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.minimum_build_active",
+      "kind": "text",
+      "english": "On",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Narrowest state: active in the game. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.minimum_build_empty",
+      "kind": "text",
+      "english": "Empty",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Narrowest state: the Saved Build holds no Echoes. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.minimum_build_inactive",
+      "kind": "text",
+      "english": "Off",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Narrowest state: not active in the game. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.minimum_build_unavailable",
+      "kind": "text",
+      "english": "N/A",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Narrowest state: unavailable right now. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.minimum_dest_first_run",
+      "kind": "text",
+      "english": "1st",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Narrowest state: first-run target. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.minimum_dest_none",
+      "kind": "text",
+      "english": "None",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Narrowest state: nothing captured. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.minimum_dest_restoring",
+      "kind": "text",
+      "english": "Wait",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Narrowest state: the saved assignment is being restored. The hover shows the full words; keep this as short as the English.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.minimum_state_captured",
+      "kind": "template",
+      "english": "C:{mark}",
+      "placeholders": [
+        {
+          "name": "mark",
+          "type": "text",
+          "meaning": "one code-owned glyph for the state: + active, - not active, x unavailable, ~ restoring, 0 empty, 1 first-run, ? not known, _ nothing captured"
+        }
+      ],
+      "resultLimitBytes": 64,
+      "group": "usertext",
+      "meaning": "Narrowest state cell: \"C\" abbreviates Captured, then the state glyph. At most 3 glyphs; use a one-letter abbreviation.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.minimum_state_preview",
+      "kind": "template",
+      "english": "P{mark}",
+      "placeholders": [
+        {
+          "name": "mark",
+          "type": "text",
+          "meaning": "one code-owned glyph for the state: + active, - not active, x unavailable, ~ restoring, 0 empty, 1 first-run, ? not known, _ nothing captured"
+        }
+      ],
+      "resultLimitBytes": 64,
+      "group": "usertext",
+      "meaning": "Narrowest state cell: \"P\" abbreviates Preview, then the state glyph. At most 2 glyphs.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.minimum_state_preview_captured",
+      "kind": "template",
+      "english": "PC{mark}",
+      "placeholders": [
+        {
+          "name": "mark",
+          "type": "text",
+          "meaning": "one code-owned glyph for the state: + active, - not active, x unavailable, ~ restoring, 0 empty, 1 first-run, ? not known, _ nothing captured"
+        }
+      ],
+      "resultLimitBytes": 64,
+      "group": "usertext",
+      "meaning": "Narrowest state cell: \"P\" Preview and \"C\" Captured abbreviations, then the state glyph. At most 3 glyphs.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.record_level",
+      "kind": "template",
+      "english": "Level {level}",
+      "placeholders": [
+        {
+          "name": "level",
+          "type": "text",
+          "meaning": "character level digits"
+        }
+      ],
+      "resultLimitBytes": 200,
+      "group": "usertext",
+      "meaning": "Record detail: the character level when recorded.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: DPS record hovers on the Nexus panel, Leaderboard rows and Build Library details (record scope words) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.recorded_date",
+      "kind": "template",
+      "english": "Recorded {date} (UTC)",
+      "placeholders": [
+        {
+          "name": "date",
+          "type": "text",
+          "meaning": "date formatted YYYY-MM-DD by code (UTC)"
+        }
+      ],
+      "resultLimitBytes": 200,
+      "group": "usertext",
+      "meaning": "Record detail: the UTC date the record was made.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: DPS record hovers on the Nexus panel, Leaderboard rows and Build Library details (record scope words) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.selected_build",
+      "kind": "text",
+      "english": "the selected Saved Build",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "The Saved Build when its name and slot are unknown. In-sentence form (lower case in English): it follows \"Destination: \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.selected_build_cell",
+      "kind": "text",
+      "english": "The selected Saved Build",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "The Saved Build when its name and slot are unknown. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.state_captured",
+      "kind": "template",
+      "english": "Captured; {state}",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "state words, already shown text"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "State cell of a destination captured when the edit or view opened, whose assignment is stated. \"Captured\" is not \"assigned now\".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.state_captured_unchecked",
+      "kind": "template",
+      "english": "Captured; {state}; not checked as assigned now",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "state words, already shown text"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "State cell of a captured destination whose current assignment is not checked. Must say it is not checked as assigned now.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.state_preview",
+      "kind": "template",
+      "english": "Preview; {state}",
+      "placeholders": [
+        {
+          "name": "state",
+          "type": "text",
+          "meaning": "state words, already shown text"
+        }
+      ],
+      "resultLimitBytes": 1600,
+      "group": "usertext",
+      "meaning": "State cell while a Community Build preview is shown (not this destination's plan), then the underlying state.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_assigned",
+      "kind": "text",
+      "english": "assigned",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". A Wishlist is assigned (name unknown). In-sentence form after \"Wishlist: \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_assigned_cell",
+      "kind": "text",
+      "english": "Assigned",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". A Wishlist is assigned (name unknown). Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_assigned_named",
+      "kind": "template",
+      "english": "{name} (assigned)",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "display-safe name (player data: Wishlist, Saved Build or character name), never translated"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". The named Wishlist is assigned now.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_captured_named",
+      "kind": "template",
+      "english": "{name} (captured; not checked as assigned now)",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "display-safe name (player data: Wishlist, Saved Build or character name), never translated"
+        }
+      ],
+      "resultLimitBytes": 1500,
+      "group": "usertext",
+      "meaning": "The Wishlist held when this edit or view opened (\"captured\"). It is NOT checked as the current assignment (\"assigned now\"); never call it assigned or in use.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_none_assigned",
+      "kind": "text",
+      "english": "none assigned",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". No Wishlist is assigned. In-sentence form after \"Wishlist: \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_none_assigned_cell",
+      "kind": "text",
+      "english": "None assigned",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". No Wishlist is assigned. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_not_known",
+      "kind": "text",
+      "english": "Not known",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Wishlist cell: no Wishlist and no state is known.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_refused",
+      "kind": "text",
+      "english": "No valid assignment (the Saved Build holds no Echoes)",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". Refusal: the Saved Build is empty, so no Wishlist assignment is valid.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_refused_named",
+      "kind": "template",
+      "english": "{name} - no valid assignment (the Saved Build holds no Echoes)",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "display-safe name (player data: Wishlist, Saved Build or character name), never translated"
+        }
+      ],
+      "resultLimitBytes": 1500,
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". Refusal: the Saved Build is empty, so the named Wishlist has no valid assignment there.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_restoring",
+      "kind": "text",
+      "english": "restoring the saved assignment",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". The saved assignment is being restored. In-sentence form after \"Wishlist: \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_restoring_cell",
+      "kind": "text",
+      "english": "Restoring the saved assignment",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". The saved assignment is being restored. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_unavailable",
+      "kind": "text",
+      "english": "unavailable right now",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". The assignment cannot be read right now. In-sentence form after \"Wishlist: \".",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_unavailable_cell",
+      "kind": "text",
+      "english": "Unavailable right now",
+      "placeholders": [],
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". The assignment cannot be read right now. Whole-cell form (first letter raised in English): it stands alone as a cell value.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_unavailable_named",
+      "kind": "template",
+      "english": "{name} - unavailable right now",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "display-safe name (player data: Wishlist, Saved Build or character name), never translated"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "Wishlist assignment words. \"Assigned\" means the CURRENT link of the Wishlist to this destination (\"assigned now\"), distinct from \"captured\". The named Wishlist's assignment cannot be read right now.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
+    },
+    {
+      "key": "usertext.value.wishlist_unknown_named",
+      "kind": "template",
+      "english": "{name} (assignment not known)",
+      "placeholders": [
+        {
+          "name": "name",
+          "type": "text",
+          "meaning": "display-safe name (player data: Wishlist, Saved Build or character name), never translated"
+        }
+      ],
+      "resultLimitBytes": 1400,
+      "group": "usertext",
+      "meaning": "A Wishlist name whose assignment state is not known.",
+      "consumer": "core/UserText.lua",
+      "familySurface": "usertext: Nexus panel destination strip / context header and its hover, Wishlist Editor and Build Library destination rows (UserText.DestinationFields / DestinationLines) (value); family coverage PENDING review",
+      "cohort": "fullui:usertext"
     }
   ],
   "currentAdoption": {
@@ -14188,13 +17607,14 @@
       "format",
       "template"
     ],
-    "totalKeys": 988,
+    "totalKeys": 1249,
     "originalKeys": 28,
     "byFamily": {
       "library": 358,
       "chat": 160,
       "records": 276,
-      "hud": 166
+      "hud": 166,
+      "usertext": 261
     },
     "note": "Rows with cohort fullui:<family> are generated from the family fragments; the original 28 rows and every historical pin above are unchanged. Family coverage, competent language review and native evidence remain PENDING, UNASSIGNED and NOT_RUN. tools/l10n_catalog.py does not yet accept block/template kinds or more than 64 keys (S8-owned integration dependency)."
   }

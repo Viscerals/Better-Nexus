@@ -440,6 +440,8 @@ NAMES += ['l10n_ui_chat']
 NAMES += ['l10n_ui_records']
 # Full-UI family hud (helper ae8fa98fd17184856): Readout builders and charge legend, Theme, unit tooltip, Callboard, server notice and layout labels at their real receivers under a pseudo pack; exact English, unknown vs zero (synthetic; native NOT_RUN).
 NAMES += ['l10n_ui_hud']
+# Full-UI family usertext (helper a1d43a30c9cab02fd): every visible UserText output except T.Guide through the seam from the real raw inputs; exact English, raw codes kept, count/zero/unknown distinct, one real Panel render (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_usertext']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
