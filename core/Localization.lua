@@ -4136,6 +4136,116 @@ function L.Count(value)
     return {known = false}
 end
 
+-- Display phrasebook (full visible-UI remainder). A producer that keeps its
+-- raw English (it is compared, recorded, queued or sent) is shown through a
+-- code-owned book at the display boundary: an exact producer text, or the
+-- producer's own string.format pattern ("%d" and "%s" conversions only, "%%"
+-- a literal percent), names a reviewed key. L.PhraseBook(spec) compiles
+--   spec = {exact = {[raw] = key, ...},
+--           formats = {{format = fmt, key = key, fields = {name, ...}}, ...}}
+-- into a book; a format entry is kept only when its conversions are all %d
+-- or %s and their number equals #fields (a %d field is a count slot, a %s
+-- field a text slot, in that order). At most MAX_PHRASE_ENTRIES entries.
+-- L.Phrase(raw, book) -> shown, matched: the exact entry, else the first
+-- format whose anchored pattern matches, rendered with L.Text / L.Format.
+-- A %d capture is used only when it is a whole number >= 0 that tostring
+-- gives back byte for byte, so English output never changes; otherwise, or
+-- when no entry matches or the key is unavailable, the raw text is returned
+-- unchanged (matched = false). Pure display: it reads only its arguments and
+-- the seam, keeps nothing and never raises. The patterns are code-owned
+-- (made from producer English); a translation is only a template.
+local MAX_PHRASE_ENTRIES = 1024
+L.MAX_PHRASE_ENTRIES = MAX_PHRASE_ENTRIES
+
+local function CompileFormat(format, fieldCount)
+    if type(format) ~= "string" or #format == 0 then return nil end
+    local parts, slots, index, length = {"^"}, {}, 1, #format
+    while index <= length do
+        local c = format:sub(index, index)
+        if c == "%" then
+            local n = format:sub(index + 1, index + 1)
+            if n == "%" then
+                parts[#parts + 1] = "%%"
+            elseif n == "d" then
+                parts[#parts + 1] = "(%d+)"; slots[#slots + 1] = "count"
+            elseif n == "s" then
+                parts[#parts + 1] = "(.-)"; slots[#slots + 1] = "text"
+            else
+                return nil
+            end
+            index = index + 2
+        else
+            parts[#parts + 1] = c:find("^[%^%$%(%)%%%.%[%]%*%+%-%?]$") and ("%" .. c) or c
+            index = index + 1
+        end
+    end
+    if #slots == 0 or #slots ~= fieldCount then return nil end
+    parts[#parts + 1] = "$"
+    return table.concat(parts), slots
+end
+
+function L.PhraseBook(spec)
+    local book = {exact = {}, formats = {}, size = 0}
+    if type(spec) ~= "table" then return book end
+    if type(spec.exact) == "table" then
+        for raw, key in pairs(spec.exact) do
+            if book.size < MAX_PHRASE_ENTRIES and type(raw) == "string" and ValidKey(key) then
+                book.exact[raw] = key
+                book.size = book.size + 1
+            end
+        end
+    end
+    if type(spec.formats) == "table" then
+        for _, entry in ipairs(spec.formats) do
+            local fields = type(entry) == "table" and entry.fields
+            if book.size < MAX_PHRASE_ENTRIES and type(fields) == "table" and ValidKey(entry.key) then
+                local pattern, slots = CompileFormat(entry.format, #fields)
+                if pattern then
+                    book.formats[#book.formats + 1] = {pattern = pattern, key = entry.key,
+                        fields = fields, slots = slots, format = entry.format}
+                    book.size = book.size + 1
+                end
+            end
+        end
+    end
+    return book
+end
+
+function L.Phrase(raw, book)
+    if type(raw) ~= "string" or type(book) ~= "table" then return raw, false end
+    local key = type(book.exact) == "table" and book.exact[raw] or nil
+    if key then
+        local text, source = L.Text(key)
+        if source ~= "unavailable" then return text, true end
+        return raw, false
+    end
+    for _, entry in ipairs(type(book.formats) == "table" and book.formats or {}) do
+        local captures = {raw:match(entry.pattern)}
+        if captures[1] ~= nil then
+            local args, usable = {}, true
+            for i, name in ipairs(entry.fields) do
+                local value = captures[i]
+                if entry.slots[i] == "count" then
+                    local n = tonumber(value)
+                    if not n or n < 0 or n ~= math.floor(n) or tostring(n) ~= value then
+                        usable = false
+                        break
+                    end
+                    args[name] = {known = true, value = n}
+                else
+                    args[name] = value
+                end
+            end
+            if usable then
+                local text, source = L.Format(entry.key, args)
+                if source ~= "unavailable" then return text, true end
+            end
+            return raw, false
+        end
+    end
+    return raw, false
+end
+
 -- Whether the English base holds a reviewed text or template for the key.
 function L.Has(key)
     return ValidKey(key) and (base[key] ~= nil or templates[key] ~= nil)

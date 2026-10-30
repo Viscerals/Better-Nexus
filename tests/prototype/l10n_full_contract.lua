@@ -156,5 +156,52 @@ do
  check(L.Count(0).known==true and L.Count(0).value==0,'EXPECT zero is a known count')
 end
 
+-- 5. Display phrasebook (full-UI remainder): a producer keeps its raw
+-- English (compared, recorded, sent); the display boundary maps that exact
+-- English, or the producer's own format string, to a reviewed key. Captured
+-- %d values become count slots, %s values text slots; an unmatched or
+-- unavailable result shows the raw text unchanged. Pure; never raises.
+check(type(L.Phrase)=='function' and type(L.PhraseBook)=='function','EXPECT phrasebook helpers')
+do
+ local decl={
+  ['orb.status.plain']=TEXT,
+  ['orb.status.counted']='{kind = "template", fields = {"have", "limit"}, slots = {"count", "count"}, resultLimit = 300}',
+  ['orb.status.named']='{kind = "template", fields = {"name", "count"}, slots = {"text", "count"}, resultLimit = 300}',
+ }
+ local eng={['orb.status.plain']='Session interrupted.',
+  ['orb.status.counted']='It lists {have} occupied records, more than the {limit} allowed.',
+  ['orb.status.named']='{name} needs {count} more copies.'}
+ local packs={frFR={name='Fran\195\167ais',entries={['orb.status.plain']='Session interrompue.',
+  ['orb.status.counted']='{limit} max, {have} vus.',['orb.status.named']='{name} : encore {count}.'}}}
+ local m=load(decl,eng,packs)
+ local book=m.PhraseBook({
+  exact={['Session interrupted.']='orb.status.plain'},
+  formats={
+   {format='It lists %d occupied records, more than the %d allowed.',key='orb.status.counted',fields={'have','limit'}},
+   {format='%s needs %d more copies.',key='orb.status.named',fields={'name','count'}},
+  }})
+ check(book.size==3,'EXPECT the book compiles every entry')
+ local t,hit=m.Phrase('Session interrupted.',book)
+ check(t=='Session interrupted.' and hit==true,'EXPECT English session: exact entry resolves to the same English')
+ t,hit=m.Phrase('It lists 7 occupied records, more than the 6 allowed.',book)
+ check(t=='It lists 7 occupied records, more than the 6 allowed.' and hit,'EXPECT a format entry renders its exact English')
+ t,hit=m.Phrase('Something else entirely.',book)
+ check(t=='Something else entirely.' and hit==false,'GUARD unmatched raw text is shown unchanged')
+ t=m.Phrase(nil,book);check(t==nil,'GUARD nil stays nil')
+ check(m.InitializeActiveLanguage('frFR')=='frFR','SETUP frFR active')
+ t,hit=m.Phrase('Session interrupted.',book)
+ check(t=='Session interrompue.' and hit,'EXPECT exact entry shows the active language')
+ t=m.Phrase('It lists 7 occupied records, more than the 6 allowed.',book)
+ check(t=='6 max, 7 vus.','EXPECT format captures become typed slots in the translation order')
+ t=m.Phrase('Ash|cffff0000Red|r needs 3 more copies.',book)
+ check(t=='Ash|cffff0000Red|r : encore 3.','EXPECT a text capture is inserted verbatim (escaped data kept)')
+ t=m.Phrase('It lists x occupied records, more than the 6 allowed.',book)
+ check(t=='It lists x occupied records, more than the 6 allowed.','GUARD a non-number never matches a %d slot')
+ t=m.Phrase('It lists 7 occupied records, more than the 6 allowed. Extra',book)
+ check(t=='It lists 7 occupied records, more than the 6 allowed. Extra','GUARD formats are anchored: trailing text is not dropped')
+ local bad=m.PhraseBook({formats={{format='%q oops',key='orb.status.plain',fields={'x'}},{format='%d only',key='orb.status.counted',fields={'have','limit'}}}})
+ check(bad.size==0,'GUARD unsupported conversions and field-count mismatches are left out')
+end
+
 check(Nexus.Localization==real and Nexus.LocalizationEnglish==realData and Nexus.LocalizationPacks==realPacks,'GUARD real seam restored')
 print('l10n_full_contract: '..checks..' checks')
