@@ -48,6 +48,18 @@ Public seam:
         .code (stable, one of CODES), .line and .column (1-based, counted in
         characters, at the start of the token; None for not-utf8)
 
+Registry-bound seam (R union of #147, at the end of this file):
+
+    parse_registry_declarations(source: bytes) -> dict
+        semantic key -> declaration, from the declaration block of the bytes
+        of core/Localization.lua, parsed without executing Lua
+    validate_registry_catalog_data(english, packs, key context, release,
+                                   localization: bytes) -> dict
+    registry_catalog_report(the same five byte strings) -> dict
+        report schemaVersion 2; the four-input API keeps schemaVersion 1
+    CatalogRegistryError
+        .code (stable, one of REGISTRY_CODES), .path and .key
+
 Both functions take the exact bytes of a source (bytes or bytearray), never a
 filename. They read and write no file. They never evaluate, import or execute
 Lua, never call back into the data and never interpret its text. After Lua 5.1
@@ -112,7 +124,7 @@ Error codes (CODES):
 
 Run directly, this file is the read-only report command line:
 
-    python tools/l10n_catalog.py [--root DIR] [--require-complete]
+    python tools/l10n_catalog.py [--root DIR] [--require-complete] [--registry]
 
 DIR defaults to the repository that contains this tool, never the current
 directory. Inside the resolved root it reads exactly
@@ -132,7 +144,10 @@ established; at this stage it never is, because no trusted external
 acceptance-record contract exists. An argument, root, input, TOC, syntax,
 schema or evidence failure writes one ASCII JSON error record with a stable
 code on stderr and exits 2. Nothing is written, imported from the root,
-executed, fetched or read from Git. Python 3.9+, standard library only.
+executed, fetched or read from Git. With --registry, core/Localization.lua is also read as bytes under the
+same root rules and the registry-bound report v2 replaces the report; the
+record then carries registryBinding "requested". Python 3.9+, standard
+library only.
 """
 from __future__ import annotations
 
@@ -452,6 +467,11 @@ _ASCII_WHITESPACE = (9, 10, 11, 12, 13, 32)
 _SLOT_TYPE = 'count'
 _FORMAT_FIELDS = types.MappingProxyType({'readout.charge_counts': ('banish', 'reroll', 'freeze')})
 _FORMAT_LIMITS = types.MappingProxyType({'readout.charge_counts': _MAX_TEXT_BYTES - 2})
+# The four-input API's fixed format schema as {key: (fields, result limit)}.
+# The registry-bound API (end of this file) passes the parsed declarations
+# instead and never reads these constants.
+_V1_FORMATS = types.MappingProxyType({key: (fields, _FORMAT_LIMITS[key])
+                                      for key, fields in _FORMAT_FIELDS.items()})
 _LITERAL_BRACES = {'{{': '{', '}}': '}'}
 _CONTRACT_KIND = 'declarative_metadata_only'
 _AUTHORITY = 'core/Localization.lua'
@@ -607,12 +627,12 @@ def _valid_template(text, fields):
     return len(seen) == len(fields)
 
 
-def _check_value(text, key, path):
-    fields = _FORMAT_FIELDS.get(key)
-    if fields is None:
+def _check_value(text, key, path, formats=_V1_FORMATS):
+    schema = formats.get(key)
+    if schema is None:
         _require(_valid_text(text), 'invalid-text', path, key)
     else:
-        _require(_valid_template(text, fields), 'invalid-template', path, key)
+        _require(_valid_template(text, schema[0]), 'invalid-template', path, key)
 
 
 def _slots_match(placeholders, fields):
@@ -626,15 +646,15 @@ def _slots_match(placeholders, fields):
     return len(names) == len(fields) and set(names) == set(fields)
 
 
-def _check_english(english):
+def _check_english(english, formats=_V1_FORMATS):
     _require(len(english) > 0, 'english-empty', 'english')
     _require(len(english) <= _MAX_BASE_ENTRIES, 'english-too-many', 'english')
     for key, text in english.items():
         _require(_valid_key(key), 'invalid-key', 'english', key)
-        _check_value(text, key, 'english')
+        _check_value(text, key, 'english', formats)
 
 
-def _check_context(document, english):
+def _check_context(document, english, formats=_V1_FORMATS):
     """The key-context document: header, containers, the limits this stage
     uses, and one row per English key whose kind, English text, meaning,
     placeholders and result limit agree with the source and runtime schema."""
@@ -683,7 +703,8 @@ def _check_context(document, english):
     drift = sorted(set(english).symmetric_difference(rows))
     _require(not drift, 'context-key-mismatch', where + '.keys', drift[0] if drift else None)
     for key, (path, row) in rows.items():
-        fields = _FORMAT_FIELDS.get(key)
+        schema = formats.get(key)
+        fields = None if schema is None else schema[0]
         _require(row.get('kind') == ('text' if fields is None else 'format'),
                  'context-kind', path + '.kind', key)
         _require(type(row.get('english')) is str and row['english'] == english[key],
@@ -700,7 +721,7 @@ def _check_context(document, english):
         else:
             _require(_slots_match(placeholders, fields), 'context-placeholders',
                      path + '.placeholders', key)
-            _require(_is_int(row.get('resultLimitBytes'), _FORMAT_LIMITS[key]),
+            _require(_is_int(row.get('resultLimitBytes'), schema[1]),
                      'context-result-limit', path + '.resultLimitBytes', key)
 
 
@@ -746,7 +767,7 @@ def _check_release(document):
     return found
 
 
-def _check_packs(packs, english, products):
+def _check_packs(packs, english, products, formats=_V1_FORMATS):
     """The packs: within the runtime pack limit, no English pack, exactly the
     selected optional products, each autonym and entry inside the contract
     and each autonym equal to the release metadata. A missing entry is valid
@@ -769,7 +790,7 @@ def _check_packs(packs, english, products):
         for key, text in entries.items():
             _require(_valid_key(key), 'invalid-key', path + '.entries', key)
             _require(key in english, 'orphan-entry', path + '.entries', key)
-            _check_value(text, key, path + '.entries')
+            _check_value(text, key, path + '.entries', formats)
         product_path, product = products[pack_id]
         _require(product['autonym'] == pack['name'], 'release-autonym', product_path + '.autonym',
                  pack_id)
@@ -1118,8 +1139,17 @@ def catalog_report(english_source: bytes, packs_source: bytes, key_context_json:
     declaration is not evidence of fluent competence, contributor rights or
     native truth, and data inspection establishes no native client fact.
     Nothing is read, written, fetched, rendered or executed."""
-    validated = validate_catalog_data(english_source, packs_source, key_context_json,
-                                      release_json)
+    sources = (english_source, packs_source, key_context_json, release_json)
+    validated = validate_catalog_data(*sources)
+    return _coverage_report(validated, sources, _REPORT_INPUTS, REPORT_SCHEMA_VERSION,
+                            NOTICE['validationScope'])
+
+
+def _coverage_report(validated, sources, input_names, schema_version, scope):
+    """The report derivation shared by catalog_report and the registry-bound
+    registry_catalog_report: the evidence and metadata checks, then the
+    report of validated data, with one input row per (name, source) of
+    input_names and its exact bytes in sources."""
     english, packs = validated['english'], validated['packs']
     context, release = validated['keyContext'], validated['release']
     products = release['products']
@@ -1133,9 +1163,8 @@ def catalog_report(english_source: bytes, packs_source: bytes, key_context_json:
     decisions, declaration_count = _check_declarations(release, english, packs,
                                                        frozenset(optional_ids))
     ordered = sorted(english)
-    sources = (english_source, packs_source, key_context_json, release_json)
     inputs = [{'name': name, 'source': source, 'sha256': hashlib.sha256(bytes(data)).hexdigest(),
-               'byteLength': len(data)} for (name, source), data in zip(_REPORT_INPUTS, sources)]
+               'byteLength': len(data)} for (name, source), data in zip(input_names, sources)]
     reasons, lists, rows = [], {}, []
     for item in optional:
         product_id = item['productId']
@@ -1217,11 +1246,11 @@ def catalog_report(english_source: bytes, packs_source: bytes, key_context_json:
                                metadata['native'][field]))
     return {
         'schema': REPORT_SCHEMA,
-        'schemaVersion': REPORT_SCHEMA_VERSION,
+        'schemaVersion': schema_version,
         'tool': _TOOL_PATH,
         'status': STATUS,
         'fullValidation': NOTICE['fullValidation'],
-        'validationScope': NOTICE['validationScope'],
+        'validationScope': scope,
         'inputs': inputs,
         'categories': list(ENTRY_CATEGORIES),
         'englishBaseline': {
@@ -1334,13 +1363,14 @@ _CLI_FAILURES = (CatalogCliError, CatalogSyntaxError, CatalogValidationError,
 
 
 def _cli_arguments(arguments):
-    """Return (root or None, require_complete). Only --root DIR, --root=DIR
-    and --require-complete are accepted, each at most once."""
-    root, require_complete, seen, index = None, False, set(), 0
+    """Return (root or None, require_complete, registry). Only --root DIR,
+    --root=DIR, --require-complete and --registry are accepted, each at most
+    once."""
+    root, require_complete, registry, seen, index = None, False, False, set(), 0
     while index < len(arguments):
         argument, position = arguments[index], index
         index += 1
-        if argument == '--require-complete':
+        if argument in ('--require-complete', '--registry'):
             name, value = argument, None
         elif argument == '--root':
             if index >= len(arguments):
@@ -1354,13 +1384,15 @@ def _cli_arguments(arguments):
         if name in seen:
             raise CatalogCliError('argument-duplicate', name)
         seen.add(name)
-        if value is None:
+        if value is None and name == '--registry':
+            registry = True
+        elif value is None:
             require_complete = True
         elif value == '':
             raise CatalogCliError('argument-missing-value', name)
         else:
             root = value
-    return root, require_complete
+    return root, require_complete, registry
 
 
 def _cli_root(root):
@@ -1487,26 +1519,34 @@ def _cli_emit(stream, record):
 def main(argv=None) -> int:
     """The read-only report command line described in the module documentation:
 
-        python tools/l10n_catalog.py [--root DIR] [--require-complete]
+        python tools/l10n_catalog.py [--root DIR] [--require-complete] [--registry]
 
     Exactly one ASCII JSON record is written: a report on stdout or an error
     on stderr. The return value is 0 for a valid report, also for partial
     data; 1 with --require-complete while external readiness is not
-    established; 2 for an argument, root, input, TOC, syntax, schema or
-    evidence error."""
+    established; 2 for an argument, root, input, TOC, syntax, schema,
+    registry or evidence error. Without --registry the record is unchanged
+    (report schemaVersion 1). With it, core/Localization.lua is read as a
+    sixth fixed input and the report is registry_catalog_report
+    (schemaVersion 2), marked registryBinding "requested"."""
     arguments = sys.argv[1:] if argv is None else list(argv)
     try:
-        root, require_complete = _cli_arguments(arguments)
+        root, require_complete, registry = _cli_arguments(arguments)
         resolved = _cli_root(_DEFAULT_ROOT if root is None else root)
         data = [_cli_read(resolved, source) for source in _CLI_INPUTS]
+        if registry:
+            localization = _cli_read(resolved, _AUTHORITY)
         toc_entries = _cli_toc(data[-1])
-        report = catalog_report(*data[:-1])
-    except _CLI_FAILURES as error:
+        if registry:
+            report = registry_catalog_report(*data[:-1], localization)
+        else:
+            report = catalog_report(*data[:-1])
+    except _CLI_FAILURES + (CatalogRegistryError,) as error:
         _cli_emit(sys.stderr, _cli_error(error))
         return _EXIT_ERROR
     blocking, readiness = _cli_readiness(report)
     exit_code = _EXIT_NOT_ESTABLISHED if require_complete and blocking else _EXIT_REPORT
-    _cli_emit(sys.stdout, {
+    record = {
         'schema': CLI_SCHEMA,
         'schemaVersion': CLI_SCHEMA_VERSION,
         'record': 'report',
@@ -1524,7 +1564,10 @@ def main(argv=None) -> int:
         'technicalCatalog': _cli_technical(report),
         'externalReadiness': readiness,
         'report': report,
-    })
+    }
+    if registry:
+        record['registryBinding'] = 'requested'
+    _cli_emit(sys.stdout, record)
     return exit_code
 
 
@@ -1619,6 +1662,245 @@ def _parse_literal_table(source):
     if token.kind != 'eof':
         parser.fail('trailing-content', token)
     return result
+
+
+# ---------------------------------------------------------------------------
+# R union (Refs #147, slices S2 and S5): the registry-bound catalog.
+# core/Localization.lua owns one literal declaration table, DECLARATIONS,
+# between the exact lines _REGISTRY_OPEN and _REGISTRY_CLOSE (the S1 marker
+# contract: the token appears in exactly those two whole lines, BEGIN
+# first). The runtime admits English only for a declared key in its declared
+# kind and derives its format schemas from the declarations.
+#
+# parse_registry_declarations reads those bytes without evaluating,
+# importing or executing Lua. Between the markers, after Lua 5.1 whitespace
+# and comments, the only accepted form is
+#
+#     local DECLARATIONS = { ["key"] = <declaration>, ... }
+#
+# in the restricted literal-table grammar of _parse_literal_table above, so
+# an expression, call, variable, operator, computed key, semicolon or second
+# statement is a CatalogSyntaxError with an existing CODES code and a
+# repeated key is duplicate-key. Each declaration must be exactly
+# {kind = "text"} or exactly {kind = "format", fields = {"name", ...},
+# slot = "count", resultLimit = 254}: one or more distinct lower-case field
+# names, the count slot type and the runtime's MAX_TEXT_BYTES - 2 limit. Any
+# other declaration, key or count is a CatalogRegistryError (REGISTRY_CODES).
+# The runtime leaves such a declaration out at load; offline it fails.
+#
+# validate_registry_catalog_data and registry_catalog_report are the
+# five-input registry-bound API and report schemaVersion 2. They take the
+# exact bytes of the four catalog inputs plus core/Localization.lua, and the
+# parsed declarations, never _FORMAT_FIELDS or _FORMAT_LIMITS, govern the
+# English, pack and key-context checks. They add: every English key is
+# declared (undeclared-entry), every declared key has English
+# (english-incomplete), and each key-context row's kind, placeholder names in
+# order with their type, and result limit equal its declaration
+# (context-declaration-mismatch). validate_catalog_data and catalog_report
+# above keep four inputs, report schemaVersion 1 and their scoped label; they
+# are not registry validation. Nothing here reads a file: main() passes the
+# sixth fixed input only when --registry is given.
+
+REGISTRY_CODES = (
+    'registry-marker', 'registry-structure', 'registry-too-many', 'registry-key',
+    'registry-kind', 'registry-field', 'registry-placeholders', 'registry-slot',
+    'registry-limit', 'undeclared-entry', 'english-incomplete',
+    'context-declaration-mismatch',
+)
+REGISTRY_REPORT_SCHEMA_VERSION = 2
+REGISTRY_SCOPE = (
+    'Registry-bound scoped draft: the English base, the packs and the key-context rows are '
+    'checked against the declarations of core/Localization.lua, parsed without executing Lua, '
+    'for the currently declared static keys and the single charge-count template; not whole '
+    '#147. Plural variants, dynamic-key coverage per family, runtime load/fallback parity, '
+    'per-pack translator provenance/rights and approved terminology validation are not '
+    'implemented by this component.')
+_REGISTRY_TOKEN = 'NEXUS-L10N-REGISTRY'
+_REGISTRY_OPEN = '-- NEXUS-L10N-REGISTRY BEGIN'
+_REGISTRY_CLOSE = '-- NEXUS-L10N-REGISTRY END'
+_REGISTRY_TABLE = 'DECLARATIONS'
+_TEXT_DECLARATION = frozenset(('kind',))
+_FORMAT_DECLARATION = frozenset(('kind', 'fields', 'slot', 'resultLimit'))
+_FIELD_NAME = re.compile('[a-z][a-z0-9_]*')
+_REGISTRY_INPUTS = _REPORT_INPUTS + (('localization', _AUTHORITY),)
+_NONEXECUTION = 'declarations are parsed from the supplied bytes; no Lua is executed'
+
+
+class CatalogRegistryError(ValueError):
+    """Raised for a missing or malformed declaration block, a malformed
+    declaration, or registry-bound catalog data that disagrees with the
+    declarations. It carries a stable code (one of REGISTRY_CODES) and, when
+    known, the path in the input and the key concerned."""
+
+    def __init__(self, code: str, path: str = None, key=None):
+        detail = '' if path is None else ' at ' + path
+        if key is not None:
+            detail += ' (%r)' % (key,)
+        super().__init__(code + detail)
+        self.code, self.path, self.key = code, path, key
+
+
+def _registry(condition, code, path, key=None):
+    if not condition:
+        raise CatalogRegistryError(code, path, key)
+
+
+def _declaration_block(text):
+    """The text between the two marker lines, preceded by one newline per
+    earlier line so token line numbers stay those of the whole source."""
+    lines = [line[:-1] if line.endswith('\r') else line for line in text.split('\n')]
+    opens = [index for index, line in enumerate(lines) if line == _REGISTRY_OPEN]
+    closes = [index for index, line in enumerate(lines) if line == _REGISTRY_CLOSE]
+    _registry(len(opens) == 1 and len(closes) == 1 and opens[0] < closes[0]
+              and text.count(_REGISTRY_TOKEN) == 2, 'registry-marker', _AUTHORITY)
+    return '\n' * (opens[0] + 1) + '\n'.join(lines[opens[0] + 1:closes[0]])
+
+
+def _declaration(key, value):
+    """One checked declaration as {'kind': 'text'} or {'kind': 'format',
+    'fields': (names...), 'slot': 'count', 'resultLimit': 254}."""
+    path = '%s[%r]' % (_REGISTRY_TABLE, key)
+    _registry(_valid_key(key), 'registry-key', path, key)
+    _registry(type(value) is dict and value, 'registry-structure', path, key)
+    kind = value.get('kind')
+    _registry(kind in ('text', 'format'), 'registry-kind', path + '.kind', key)
+    if kind == 'text':
+        _registry(set(value) == _TEXT_DECLARATION, 'registry-field', path, key)
+        return {'kind': 'text'}
+    _registry(set(value) == _FORMAT_DECLARATION, 'registry-field', path, key)
+    fields = value['fields']
+    _registry(type(fields) is list and fields and len(set(map(repr, fields))) == len(fields)
+              and all(type(name) is str and len(name) <= _MAX_KEY_BYTES
+                      and _FIELD_NAME.fullmatch(name) is not None for name in fields),
+              'registry-placeholders', path + '.fields', key)
+    _registry(value['slot'] == _SLOT_TYPE, 'registry-slot', path + '.slot', key)
+    _registry(_is_int(value['resultLimit'], _MAX_TEXT_BYTES - 2), 'registry-limit',
+              path + '.resultLimit', key)
+    return {'kind': 'format', 'fields': tuple(fields), 'slot': _SLOT_TYPE,
+            'resultLimit': value['resultLimit']}
+
+
+def parse_registry_declarations(source: bytes) -> dict:
+    """Parse the declaration block of the exact bytes of core/Localization.lua
+    into {key: declaration} in source order (grammar above). The source is
+    never evaluated, imported or executed. A syntax failure raises
+    CatalogSyntaxError (CODES); a marker or declaration failure raises
+    CatalogRegistryError (REGISTRY_CODES)."""
+    if not isinstance(source, (bytes, bytearray)):
+        raise TypeError('source must be bytes, not %s' % type(source).__name__)
+    try:
+        text = bytes(source).decode('utf-8')
+    except UnicodeDecodeError:
+        raise CatalogSyntaxError('not-utf8') from None
+    parser = _LiteralParser(_tokens(_declaration_block(text), integers=True))
+    for kind, value in (('name', 'local'), ('name', _REGISTRY_TABLE), ('punct', '='),
+                        ('punct', '{')):
+        parser.take(kind, value)
+    table = parser.table(1)
+    token = parser.tokens[parser.index]
+    if token.kind != 'eof':
+        parser.fail('trailing-content', token)
+    _registry(type(table) is dict and table, 'registry-structure', _REGISTRY_TABLE)
+    _registry(len(table) <= _MAX_BASE_ENTRIES, 'registry-too-many', _REGISTRY_TABLE)
+    return {key: _declaration(key, value) for key, value in table.items()}
+
+
+def _declared_formats(declarations):
+    return types.MappingProxyType({key: (value['fields'], value['resultLimit'])
+                                   for key, value in declarations.items()
+                                   if value['kind'] == 'format'})
+
+
+def _context_shape(declaration):
+    """The key-context kind, placeholders and result limit a declaration
+    requires (None: no resultLimitBytes member)."""
+    if declaration['kind'] == 'text':
+        return 'text', [], None
+    return ('format', [{'name': name, 'type': declaration['slot']}
+                       for name in declaration['fields']], declaration['resultLimit'])
+
+
+def _check_registry(declarations, english, context):
+    """Complete English against the declarations, then each key-context row
+    of a declared key against its declaration. Rows of other shapes are left
+    to _check_context."""
+    for key in english:
+        _registry(key in declarations, 'undeclared-entry', 'english', key)
+    for key in declarations:
+        _registry(key in english, 'english-incomplete', _REGISTRY_TABLE, key)
+    rows = context.get('keys')
+    for index, row in enumerate(rows if type(rows) is list else ()):
+        key = row.get('key') if type(row) is dict else None
+        if type(key) is not str or key not in declarations:
+            continue
+        kind, placeholders, limit = _context_shape(declarations[key])
+        found = row.get('resultLimitBytes')
+        limit_ok = ('resultLimitBytes' not in row) if limit is None else _is_int(found, limit)
+        _registry(row.get('kind') == kind and row.get('placeholders') == placeholders
+                  and limit_ok, 'context-declaration-mismatch', 'keyContext.keys[%d]' % index, key)
+
+
+def validate_registry_catalog_data(english_source: bytes, packs_source: bytes,
+                                  key_context_json: bytes, release_json: bytes,
+                                  localization_source: bytes) -> dict:
+    """The registry-bound schema API: validate the exact bytes of the four
+    catalog inputs of validate_catalog_data plus core/Localization.lua, with
+    the parsed declarations governing (see above), and return a dict with
+    english, packs, keyContext, release and declarations. Each argument must
+    be bytes or bytearray, else TypeError. Failures raise CatalogSyntaxError,
+    CatalogValidationError or CatalogRegistryError; nothing is executed."""
+    for name, value in (('english_source', english_source), ('packs_source', packs_source),
+                        ('key_context_json', key_context_json), ('release_json', release_json),
+                        ('localization_source', localization_source)):
+        if not isinstance(value, (bytes, bytearray)):
+            raise TypeError('%s must be bytes, not %s' % (name, type(value).__name__))
+    english = parse_english(english_source)
+    packs = parse_packs(packs_source)
+    key_context = _strict_json(key_context_json, 'keyContext')
+    release = _strict_json(release_json, 'release')
+    declarations = parse_registry_declarations(localization_source)
+    formats = _declared_formats(declarations)
+    _check_english(english, formats)
+    _check_registry(declarations, english, key_context)
+    _check_context(key_context, english, formats)
+    products = _check_release(release)
+    _check_packs(packs, english, products, formats)
+    return {'english': english, 'packs': packs, 'keyContext': key_context, 'release': release,
+            'declarations': declarations}
+
+
+def registry_catalog_report(english_source: bytes, packs_source: bytes,
+                            key_context_json: bytes, release_json: bytes,
+                            localization_source: bytes) -> dict:
+    """Report schemaVersion 2: validate_registry_catalog_data on the five
+    inputs, then the catalog_report derivation with five input rows, the
+    registry-bound validationScope and a registry section listing the
+    declarations. An invalid input gets no report."""
+    sources = (english_source, packs_source, key_context_json, release_json,
+               localization_source)
+    validated = validate_registry_catalog_data(*sources)
+    report = _coverage_report(validated, sources, _REGISTRY_INPUTS,
+                              REGISTRY_REPORT_SCHEMA_VERSION, REGISTRY_SCOPE)
+    rows = []
+    for key, declaration in validated['declarations'].items():
+        kind, placeholders, limit = _context_shape(declaration)
+        row = {'key': key, 'kind': kind}
+        if limit is not None:
+            row.update({'placeholders': placeholders, 'resultLimitBytes': limit})
+        rows.append(row)
+    report['registry'] = {
+        'source': _AUTHORITY,
+        'markers': {'open': _REGISTRY_OPEN, 'close': _REGISTRY_CLOSE},
+        'declarationCount': len(rows),
+        'englishKeys': len(validated['english']),
+        'keyContextRows': len(validated['keyContext']['keys']),
+        'declarations': rows,
+        'rule': ('the declared keys, the English keys and the key-context rows are one set; '
+                 'kind, placeholder names in order with their type, and result limit come '
+                 'from the declarations'),
+        'nonexecution': _NONEXECUTION,
+    }
+    return report
 
 
 if __name__ == '__main__':

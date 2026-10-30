@@ -15,6 +15,15 @@
   "contractKind": "declarative_metadata_only",
   "authority": "core/Localization.lua",
   "englishBase": "data/LocalizationEnglish.lua",
+  "registryBinding": {
+    "declarations": {"path": "core/Localization.lua", "open": "-- NEXUS-L10N-REGISTRY BEGIN", "close": "-- NEXUS-L10N-REGISTRY END"},
+    "declaredKeys": 28,
+    "checkedFields": ["kind", "placeholders", "resultLimitBytes"],
+    "rule": "each keys[] row must equal its declaration: kind, placeholder names in declared order with the declared slot type, and resultLimitBytes for a format (absent for text); the declarations, not this document, own those facts",
+    "checkedBy": "tools/l10n_catalog.py validate_registry_catalog_data",
+    "mismatchCode": "context-declaration-mismatch",
+    "status": "IMPLEMENTED_DRAFT_REVIEW_PENDING"
+  },
   "keySchema": {
     "minBytes": 3,
     "maxBytes": 64,

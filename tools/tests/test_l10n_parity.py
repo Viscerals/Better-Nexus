@@ -1,11 +1,12 @@
 """Offline side of the shared runtime/offline localization parity corpus and
-the registry interlock sentinel (Refs #147, slice S1).
+the registry interlock sentinel (Refs #147, slice S1 and the R union).
 
 The corpus is tests/prototype/fixtures/l10n_parity: cases.lua and one
 directory per committed case holding english.lua and packs.lua in the real
 data grammars. tests/prototype/localization_parity.lua loads the same bytes
-into the unchanged core/Localization.lua under LuaJIT and checks each case's
-runtime expectation. This file parses the same bytes and never evaluates,
+into core/Localization.lua under LuaJIT (with a declaration block derived
+from each case's test-only English keys) and checks each case's runtime
+expectation. This file parses the same bytes and never evaluates,
 imports or executes Lua: cases.lua is read with the private restricted
 literal-table parser _parse_literal_table of tools/l10n_catalog.py, and each
 case's offline verdict is the first CatalogSyntaxError or
@@ -23,8 +24,13 @@ appear only as the two whole lines "-- NEXUS-L10N-REGISTRY BEGIN" and
 declaration block. Any other occurrence of the token is malformed. The
 sentinel passes only when the marker, the registry-bound parser
 (parse_registry_declarations in tools/l10n_catalog.py) and bound registry
-rows (R-P1..R-P3 of cases.lua) are all absent, as today, or all present: a
-U1-only marker, a U3-only parser or U2-only complete-English rows fail.
+rows (R-P1..R-P3 of cases.lua) are all absent or all present: a U1-only
+marker, a U3-only parser or U2-only complete-English rows fail. With the R
+union all three are present, and presence alone is not enough: the binding
+check parses the real declaration block, requires the declared, English and
+KEY_CONTEXT key sets to be equal, requires the five real inputs to pass the
+registry-bound validate_registry_catalog_data, and reproduces each bound
+row's expected offline verdict from its in-memory edit of a real input.
 
 Synthetic offline evidence, not native evidence. Python 3.9+, standard
 library only. Registered in PYTHON_TESTS of tools/run_prototype_tests.py.
@@ -34,6 +40,7 @@ Run directly:  python tools/tests/test_l10n_parity.py -v
 
 import copy
 import importlib.util
+import json
 import re
 import sys
 import types
@@ -178,6 +185,96 @@ def registry_sentinel(localization_source, catalog, registry):
     return problems
 
 
+REGISTRY_INPUTS = ("data/LocalizationEnglish.lua", "data/LocalizationPacks.lua",
+                   "docs/localization/KEY_CONTEXT.json",
+                   "docs/localization/RELEASE_LANGUAGES.json", "core/Localization.lua")
+REGISTRY_API = "validate_registry_catalog_data"
+
+
+def edited_input(data, edit):
+    """The bytes of a real input with a bound row's edit applied: one whole
+    line inserted after or removed, or one exact text replaced, which must
+    each occur exactly once. Line edits keep the input's line breaks."""
+    if "replace" in edit:
+        old, new = edit["replace"].encode("utf-8"), edit["with"].encode("utf-8")
+        if data.count(old) != 1:
+            raise ValueError("the replaced text must occur exactly once")
+        return data.replace(old, new)
+    newline = b"\r\n" if b"\r\n" in data else b"\n"
+    lines, found = data.split(newline), 0
+    target = (edit.get("after") or edit.get("remove")).encode("utf-8")
+    out = []
+    for line in lines:
+        if "remove" in edit and line == target:
+            found += 1
+            continue
+        out.append(line)
+        if "after" in edit and line == target:
+            found += 1
+            out.append(edit["line"].encode("utf-8"))
+    if found != 1:
+        raise ValueError("the edited line must occur exactly once")
+    return newline.join(out)
+
+
+def registry_verdicts(catalog, row, inputs):
+    """The registry-bound offline verdict of a bound row, as {code, key},
+    for each line-break variant of the edited Lua input (one entry for a
+    document edit)."""
+    index = REGISTRY_INPUTS.index(row["input"]["file"])
+    data = edited_input(inputs[index], row["input"])
+    errors = (catalog.CatalogSyntaxError, catalog.CatalogValidationError,
+              getattr(catalog, "CatalogRegistryError", catalog.CatalogValidationError))
+    variants_of = variants(data) if row["input"]["file"].endswith(".lua") else {"exact": data}
+    verdicts = {}
+    for name, value in variants_of.items():
+        changed = list(inputs)
+        changed[index] = value
+        try:
+            getattr(catalog, REGISTRY_API)(*changed)
+            verdicts[name] = {"code": "valid"}
+        except errors as error:
+            verdicts[name] = {"code": error.code, "key": getattr(error, "key", None)}
+    return verdicts
+
+
+def registry_binding(catalog, registry, inputs):
+    """The genuine R-union binding beyond presence (see the module
+    documentation): a list of problems, empty when it holds."""
+    problems = []
+    parser = getattr(catalog, REGISTRY_PARSER, None)
+    api = getattr(catalog, REGISTRY_API, None)
+    if not callable(parser) or not callable(api):
+        return ["registry parser and registry-bound API must both exist"]
+    try:
+        declared = parser(inputs[4])
+        english = catalog.parse_english(inputs[0])
+        context = {row.get("key") for row in json.loads(inputs[2].decode("utf-8"))["keys"]}
+    except Exception as error:  # a failed parse is a binding problem, reported, not raised
+        return ["real inputs do not parse: %r" % (error,)]
+    if not (set(declared) == set(english) == context) or not declared:
+        problems.append("declared, English and KEY_CONTEXT key sets differ: %d, %d, %d"
+                        % (len(declared), len(english), len(context)))
+    try:
+        api(*inputs)
+    except Exception as error:
+        problems.append("the real inputs fail the registry-bound API: %r" % (error,))
+    for row in registry["rows"]:
+        want = (row.get("expect") or {}).get("offline")
+        if row.get("state") != BOUND or not want or "input" not in row:
+            problems.append("%s: not a bound row with an input and an expected verdict" % row["id"])
+            continue
+        try:
+            verdicts = registry_verdicts(catalog, row, inputs)
+        except Exception as error:
+            problems.append("%s: verdict not reproducible: %r" % (row["id"], error))
+            continue
+        for name, verdict in verdicts.items():
+            if verdict != want:
+                problems.append("%s %s: offline %r, expected %r" % (row["id"], name, verdict, want))
+    return problems
+
+
 class LiteralTableParserTests(unittest.TestCase):
     """The private restricted literal-table parser reads data only."""
 
@@ -258,7 +355,9 @@ class LiteralTableParserTests(unittest.TestCase):
             "invalid-escape", "nested-long-bracket", "bad-bootstrap", "bad-assignment",
             "unexpected-token", "unexpected-end", "trailing-content", "duplicate-key",
             "duplicate-pack", "duplicate-field", "unknown-field", "missing-field"))
-        self.assertFalse(hasattr(self.catalog, REGISTRY_PARSER))
+        # R union: the registry-bound parser now exists, beside the unchanged
+        # public parsers and their unchanged CODES (S1 asserted its absence).
+        self.assertTrue(callable(getattr(self.catalog, REGISTRY_PARSER, None)))
 
 
 class ParityCorpusTests(unittest.TestCase):
@@ -399,15 +498,24 @@ class RegistrySentinelTests(unittest.TestCase):
         cls.catalog = load_catalog()
         cls.registry = cls.catalog._parse_literal_table(CASES.read_bytes())["registry"]
         cls.source = LOCALIZATION.read_bytes()
-        # The synthetic cases below derive from a fixed marker-free source and
-        # stand-in catalogs, so they test the sentinel apart from the current
-        # state; only test_current_source_passes reads the real file and tool.
+        cls.inputs = [(ROOT / relative).read_bytes() for relative in REGISTRY_INPUTS]
+        # The synthetic cases below derive from a fixed marker-free source,
+        # stand-in catalogs and explicit pending or bound copies of the rows,
+        # so they test the sentinel apart from the current state; only the
+        # current-source and binding tests read the real files and tool.
         cls.plain = b"-- synthetic core/Localization.lua\r\nlocal L = {}\r\n"
 
     def bound(self):
         registry = copy.deepcopy(self.registry)
         for row in registry["rows"]:
             row["state"] = BOUND
+        return registry
+
+    def pending(self):
+        # The S1 state of the rows, now that the committed rows are bound.
+        registry = copy.deepcopy(self.registry)
+        for row in registry["rows"]:
+            row["state"] = PENDING
         return registry
 
     @staticmethod
@@ -432,18 +540,63 @@ class RegistrySentinelTests(unittest.TestCase):
 
     def test_current_source_passes(self):
         self.assertEqual(registry_sentinel(self.source, self.catalog, self.registry), [])
+        # R union: presence is not enough; the binding itself must hold.
+        self.assertEqual([row["state"] for row in self.registry["rows"]], [BOUND] * 3)
+        self.assertEqual(registry_binding(self.catalog, self.registry, self.inputs), [])
+
+    def test_bound_rows_reproduce_their_offline_verdicts(self):
+        # C14 / R-P1..R-P3: undeclared English, context mismatch, missing English.
+        expected = {"R-P1": {"code": "undeclared-entry", "key": "parity.undeclared"},
+                    "R-P2": {"code": "context-declaration-mismatch", "key": "readout.charge_counts"},
+                    "R-P3": {"code": "english-incomplete", "key": "panel.button.options"}}
+        for row in self.registry["rows"]:
+            with self.subTest(row=row["id"]):
+                self.assertEqual(row["expect"]["offline"], expected[row["id"]])
+                verdicts = registry_verdicts(self.catalog, row, self.inputs)
+                self.assertEqual(sorted(verdicts), ["crlf", "lf"] if row["input"]["file"]
+                                 .endswith(".lua") else ["exact"])
+                self.assertEqual(list(verdicts.values()), [expected[row["id"]]] * len(verdicts))
+        # The unedited real inputs pass, so each verdict comes from its edit.
+        self.catalog.validate_registry_catalog_data(*self.inputs)
+
+    def test_registry_enum_is_the_release_product_list(self):
+        release = json.loads(self.inputs[3].decode("utf-8"))
+        self.assertEqual(self.registry["enum"], [p["productId"] for p in release["products"]])
+
+    def test_binding_fails_for_stand_ins_and_wrong_rows(self):
+        catalog = self.catalog
+        empty = types.SimpleNamespace(**{REGISTRY_PARSER: lambda source: {},
+                                         REGISTRY_API: catalog.validate_registry_catalog_data,
+                                         "parse_english": catalog.parse_english})
+        self.assertTrue(any("key sets differ" in p
+                            for p in registry_binding(empty, self.registry, self.inputs)))
+        no_api = types.SimpleNamespace(**{REGISTRY_PARSER: catalog.parse_registry_declarations})
+        self.assertEqual(registry_binding(no_api, self.registry, self.inputs),
+                         ["registry parser and registry-bound API must both exist"])
+        wrong = copy.deepcopy(self.registry)
+        wrong["rows"][0]["expect"]["offline"] = {"code": "valid"}
+        problems = registry_binding(catalog, wrong, self.inputs)
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(all(problem.startswith("R-P1") for problem in problems))
+        flagged = copy.deepcopy(self.registry)
+        del flagged["rows"][2]["input"]
+        self.assertEqual(registry_binding(catalog, flagged, self.inputs),
+                         ["R-P3: not a bound row with an input and an expected verdict"])
+        drifted = list(self.inputs)
+        drifted[0] = drifted[0].replace(b'    ["panel.button.options"] = "Options",\r\n', b"")
+        self.assertTrue(registry_binding(catalog, self.registry, drifted))
 
     def test_u1_only_marker_fails(self):
-        problems = registry_sentinel(self.marked(), self.without_parser(), self.registry)
+        problems = registry_sentinel(self.marked(), self.without_parser(), self.pending())
         self.assertEqual(len(problems), 1)
         self.assertIn("absent ['bound complete-English registry rows', "
                       "'registry-bound parser parse_registry_declarations']", problems[0])
 
     def test_partial_unions_fail(self):
         for name, source, catalog, registry in (
-                ("U3 parser only", self.plain, self.with_parser(), self.registry),
+                ("U3 parser only", self.plain, self.with_parser(), self.pending()),
                 ("U2 rows only", self.plain, self.without_parser(), self.bound()),
-                ("U1 and U3 without U2", self.marked(), self.with_parser(), self.registry),
+                ("U1 and U3 without U2", self.marked(), self.with_parser(), self.pending()),
                 ("U1 and U2 without U3", self.marked(), self.without_parser(), self.bound())):
             with self.subTest(name=name):
                 self.assertTrue(registry_sentinel(source, catalog, registry))
@@ -459,13 +612,13 @@ class RegistrySentinelTests(unittest.TestCase):
                 self.assertTrue(any(problem.startswith("malformed") for problem in problems))
 
     def test_partly_bound_rows_fail(self):
-        registry = copy.deepcopy(self.registry)
+        registry = self.pending()
         registry["rows"][0]["state"] = BOUND
         self.assertTrue(registry_sentinel(self.marked(), self.with_parser(), registry))
         self.assertTrue(registry_sentinel(self.plain, self.without_parser(), registry))
 
     def test_absent_union_and_complete_union_pass(self):
-        self.assertEqual(registry_sentinel(self.plain, self.without_parser(), self.registry), [])
+        self.assertEqual(registry_sentinel(self.plain, self.without_parser(), self.pending()), [])
         self.assertEqual(registry_sentinel(self.marked(), self.with_parser(), self.bound()), [])
 
 
