@@ -84,6 +84,55 @@ local ENGLISH={
     ["orb.column.history_replacement"]="Replacement",
     ["orb.column.history_result"]="Result",
     ["orb.column.history_why"]="Why selected",
+    ["orb.error.all_rolled_complete"]="All rolled targets are already complete. No Orbs are needed.",
+    ["orb.error.assign_resolved"]="Assign a resolved Wishlist through My Builds or the Wishlist Editor.",
+    ["orb.error.assignment_fixed"]="Orb mode uses the assigned Wishlist. Change its assignment through My Builds or the Wishlist Editor.",
+    ["orb.error.auto_accept_first"]="Turn off the game's automatic Echo acceptance first.",
+    ["orb.error.balance_invalid"]="Orb balance is unavailable or invalid.",
+    ["orb.error.balance_server_invalid"]="The server's Orb balance is invalid.",
+    ["orb.error.balance_state_unavailable"]="Orb balance state is unavailable.",
+    ["orb.error.balance_unsupported"]="The client does not expose the Orb balance capability.",
+    ["orb.error.balance_waiting"]="Waiting for the server's Orb balance.",
+    ["orb.error.balance_waiting_recheck"]="Waiting for the server's Orb balance. Use Recheck once it is available.",
+    ["orb.error.catalog_not_ready"]="The local Echo catalog is not ready.",
+    ["orb.error.changed_while_confirming"]="Echoes or resources changed while confirming. Review again.",
+    ["orb.error.choose_echo"]="Choose an Echo first.",
+    ["orb.error.choose_maximum"]="Choose a maximum, or press Max, before starting.",
+    ["orb.error.confirmation_expired"]="The confirmation expired. Review the plan again.",
+    ["orb.error.echo_data_waiting"]="Waiting for current rolled and locked Echo data from the server.",
+    ["orb.error.exclusions_fixed"]="Exclusions are fixed during this run.",
+    ["orb.error.limit_range"]="Choose a whole-number Orb limit from 1 to 10,000.",
+    ["orb.error.max_changed_start"]="The maximum changed. Review it, then press Start again.",
+    ["orb.error.max_fixed"]="The maximum is fixed during this run.",
+    ["orb.error.max_fixed_unchanged"]="The maximum is fixed during this run. Nothing was changed.",
+    ["orb.error.max_needs_balance"]="Max needs a confirmed Orb balance above zero. Your maximum was not changed.",
+    ["orb.error.new_run_needs_balance"]="A new run needs a confirmed Orb balance above zero. Your maximum was not changed.",
+    ["orb.error.new_run_needs_finished"]="Only a finished run can be followed by a new one.",
+    ["orb.error.no_confirmed_orbs"]="No confirmed Orbs are available.",
+    ["orb.error.no_safe_surplus"]="No safe surplus copies are available. Required and locked copies remain protected.",
+    ["orb.error.orb_state_unreadable"]="The game's Orb state could not be read. No Orb will be spent.",
+    ["orb.error.order_follows_wishlist"]="Target order follows the assigned Wishlist. Edit the Wishlist to change its targets.",
+    ["orb.error.recheck_failed"]="The read-only refresh failed; no new action was requested.",
+    ["orb.error.recheck_session_paused"]="Nexus is paused for this session. No refresh was requested.",
+    ["orb.error.recheck_wait"]="Please wait before requesting another refresh.",
+    ["orb.error.recycle_fixed"]="Recycling permission is fixed during this run.",
+    ["orb.error.replaceable_changed"]="Your approved replaceable counts changed. Review them again.",
+    ["orb.error.resume_context_changed"]="The original character/run/service no longer matches. This run cannot resume.",
+    ["orb.error.resume_not_owner"]="This run no longer owns the action. Stop and approve a new run after settlement.",
+    ["orb.error.resume_only_paused"]="Only an explicitly paused run can resume.",
+    ["orb.error.resume_settle_first"]="The original operation must settle before Resume can adopt a changed assignment. Pending exposure is retained.",
+    ["orb.error.resume_spend_unknown"]="The spend outcome remains unknown. No action will be repeated.",
+    ["orb.error.resume_wait_wishlist"]="Wait for the assigned Wishlist to resolve.",
+    ["orb.error.rival_addon"]="Disable the other Echo automation addon before starting Orb mode.",
+    ["orb.error.rolled_complete_locked"]="Rolled targets are complete. Remaining locked Echo targets cannot be changed by Orbs; no spend will start.",
+    ["orb.error.run_owns_action"]="An Orb run already owns this action.",
+    ["orb.error.session_paused"]="Nexus is paused for this session. Resume Nexus first; no Orb action was sent.",
+    ["orb.error.source_count_invalid"]="Choose a valid source-copy count.",
+    ["orb.error.source_protected"]="That would replace a protected or unavailable copy.",
+    ["orb.error.source_unsafe"]="An approved source is no longer safe. Review the replacement pool.",
+    ["orb.error.sources_fixed"]="Replaceable copies are fixed during this run.",
+    ["orb.error.state_unreadable"]="The current Orb state could not be read. No new action was sent.",
+    ["orb.error.wishlist_changed_start"]="The selected Wishlist changed or is unavailable. Choose it again before starting.",
     ["orb.heading.copy_report"]="Copy this report",
     ["orb.heading.history_timeline"]="Recorded timeline (intermediate steps have no saved timestamps):",
     ["orb.label.details"]="Details:",
@@ -289,6 +338,46 @@ local ENGLISH={
     ["orb.status.review_state_changed"]="The review changed after it was shown; nothing was reviewed or cancelled. Check the target shown now. Nothing was spent.",
     ["orb.status.review_target_changed"]="The target changed after it was shown; nothing was reviewed. Check the target shown now, then review it again. Nothing was spent.",
     ["orb.status.rolled_missing"]="{count} rolled target copies still missing",
+    ["orb.status.run_all_complete"]="All selected targets are complete.",
+    ["orb.status.run_approved"]="Approved. Preparing one Orb replacement.",
+    ["orb.status.run_auto_accept"]="Turn off the game's automatic Echo acceptance before continuing.",
+    ["orb.status.run_balance_changed"]="The Orb balance changed unexpectedly. No further action will be submitted.",
+    ["orb.status.run_choice_different"]="A different Echo choice appeared. Resolve it manually before continuing.",
+    ["orb.status.run_choice_sent"]="Choice sent; waiting for the confirmed replacement.",
+    ["orb.status.run_confirmed_next"]="Replacement confirmed. Preparing the next approved Orb.",
+    ["orb.status.run_confirmed_paused"]="Last replacement confirmed; no next Orb will be spent until you explicitly continue.",
+    ["orb.status.run_context_changed"]="Character, run, or service changed. The pending operation will not be replayed.",
+    ["orb.status.run_idle"]="Choose a maximum, then Start to use safe surplus copies for the assigned Wishlist.",
+    ["orb.status.run_internal_error"]="Orb mode encountered an internal error. No automatic repeat will be sent.",
+    ["orb.status.run_internal_error_stopped"]="Orb mode stopped after an internal error. Check diagnostics; no automatic repeat will be sent.",
+    ["orb.status.run_loading_interrupted"]="Loading interrupted the approved Orb run. Waiting to reconcile the current choice; no action is repeated.",
+    ["orb.status.run_locked_changed"]="Locked Echoes changed; no further Orb action will be submitted.",
+    ["orb.status.run_locked_changed_resolve"]="Locked Echoes changed during the operation. Resolve the result manually.",
+    ["orb.status.run_log_offer_observed"]="The actual offer was observed.",
+    ["orb.status.run_log_receipt_failed"]="The receipt could not be saved; no Orb was requested.",
+    ["orb.status.run_log_requested"]="One Orb requested for this source copy.",
+    ["orb.status.run_no_orbs"]="No Orbs remain. New resources will not restart this run automatically.",
+    ["orb.status.run_no_sources"]="No safe surplus source copies remain. Required and locked copies stay protected.",
+    ["orb.status.run_offer_changed"]="The pending Orb offer changed unexpectedly. Resolve the original operation manually.",
+    ["orb.status.run_original_confirmed_review"]="Original replacement confirmed. Review the new assigned Wishlist, then Resume; usage is unchanged.",
+    ["orb.status.run_other_action"]="Another Echo action is active. Resolve it first.",
+    ["orb.status.run_ownership_mismatch"]="Echo ownership does not match the expected replacement. No further Orb will be spent.",
+    ["orb.status.run_paused"]="Paused before the next spend.",
+    ["orb.status.run_paused_pending"]="Paused. A submitted spend may still finish; the native offer remains available.",
+    ["orb.status.run_previous_confirmed"]="Previous result confirmed. No spending restarted; review a new run explicitly.",
+    ["orb.status.run_recovery_restored"]="An earlier Orb action is unresolved. Nothing will restart. Nexus is checking, read-only, whether its offer is still open.",
+    ["orb.status.run_requested"]="One Orb requested; waiting for the actual offer.",
+    ["orb.status.run_requested_balance"]="One Orb requested; waiting for the actual offer and balance confirmation.",
+    ["orb.status.run_rival_picker"]="Another Echo picker is active. Disable it before continuing.",
+    ["orb.status.run_rolled_changed"]="Rolled Echoes changed outside the pending sacrifice; resolve the offer manually.",
+    ["orb.status.run_rolled_complete"]="Rolled targets are complete. Remaining locked targets are unchanged; no more Orbs will be spent.",
+    ["orb.status.run_spend_visible"]="The spend outcome is now visible. Review the offer and press Resume, or resolve it manually.",
+    ["orb.status.run_stopped"]="Stopped. No further Orb will be spent.",
+    ["orb.status.run_stopped_pending"]="Stopped. A submitted operation may still finish; resolve any pending offer manually.",
+    ["orb.status.run_waiting_after_loading"]="Waiting briefly after loading before acting. Cached data is not proof of a fresh server answer.",
+    ["orb.status.run_wishlist_changed_resolve"]="The selected Wishlist changed; resolve the pending offer manually.",
+    ["orb.status.run_wishlist_changed_review"]="The assigned Wishlist changed. Review it and Resume without resetting this run's usage.",
+    ["orb.status.run_world_unavailable"]="The game state is still unavailable after loading. No Orb action was repeated. Recheck, then Resume when readable.",
     ["orb.status.segment_awaiting_result"]="awaiting Orb result",
     ["orb.status.segment_current_exposure"]="current exposure: {value}",
     ["orb.status.segment_history_reload"]="earlier outcome/check totals unavailable after reload",
@@ -480,7 +569,101 @@ local OBSOLETE_TEXT={
 -- Exact raw runtime texts this window can say in the active language (the
 -- display boundary only; the runtime keeps and compares its raw English). A
 -- text not listed here is shown exactly as the runtime wrote it.
-local RUNTIME_TEXT={}
+-- ORB-RUNTIME BEGIN (exact raw runtime text -> key; generated from the fragment)
+local RUNTIME_TEXT={
+    ["A different Echo choice appeared. Resolve it manually before continuing."]="orb.status.run_choice_different",
+    ["A new run needs a confirmed Orb balance above zero. Your maximum was not changed."]="orb.error.new_run_needs_balance",
+    ["All rolled targets are already complete. No Orbs are needed."]="orb.error.all_rolled_complete",
+    ["All selected targets are complete."]="orb.status.run_all_complete",
+    ["An Orb run already owns this action."]="orb.error.run_owns_action",
+    ["An approved source is no longer safe. Review the replacement pool."]="orb.error.source_unsafe",
+    ["An earlier Orb action is unresolved. Nothing will restart. Nexus is checking, read-only, whether its offer is still open."]="orb.status.run_recovery_restored",
+    ["Another Echo action is active. Resolve it first."]="orb.status.run_other_action",
+    ["Another Echo picker is active. Disable it before continuing."]="orb.status.run_rival_picker",
+    ["Approved. Preparing one Orb replacement."]="orb.status.run_approved",
+    ["Assign a resolved Wishlist through My Builds or the Wishlist Editor."]="orb.error.assign_resolved",
+    ["Character, run, or service changed. The pending operation will not be replayed."]="orb.status.run_context_changed",
+    ["Choice sent; waiting for the confirmed replacement."]="orb.status.run_choice_sent",
+    ["Choose a maximum, or press Max, before starting."]="orb.error.choose_maximum",
+    ["Choose a maximum, then Start to use safe surplus copies for the assigned Wishlist."]="orb.status.run_idle",
+    ["Choose a valid source-copy count."]="orb.error.source_count_invalid",
+    ["Choose a whole-number Orb limit from 1 to 10,000."]="orb.error.limit_range",
+    ["Choose an Echo first."]="orb.error.choose_echo",
+    ["Disable the other Echo automation addon before starting Orb mode."]="orb.error.rival_addon",
+    ["Echo ownership does not match the expected replacement. No further Orb will be spent."]="orb.status.run_ownership_mismatch",
+    ["Echoes or resources changed while confirming. Review again."]="orb.error.changed_while_confirming",
+    ["Exclusions are fixed during this run."]="orb.error.exclusions_fixed",
+    ["Last replacement confirmed; no next Orb will be spent until you explicitly continue."]="orb.status.run_confirmed_paused",
+    ["Loading interrupted the approved Orb run. Waiting to reconcile the current choice; no action is repeated."]="orb.status.run_loading_interrupted",
+    ["Locked Echoes changed during the operation. Resolve the result manually."]="orb.status.run_locked_changed_resolve",
+    ["Locked Echoes changed; no further Orb action will be submitted."]="orb.status.run_locked_changed",
+    ["Max needs a confirmed Orb balance above zero. Your maximum was not changed."]="orb.error.max_needs_balance",
+    ["Nexus is paused for this session. No refresh was requested."]="orb.error.recheck_session_paused",
+    ["Nexus is paused for this session. Resume Nexus first; no Orb action was sent."]="orb.error.session_paused",
+    ["No Orbs remain. New resources will not restart this run automatically."]="orb.status.run_no_orbs",
+    ["No confirmed Orbs are available."]="orb.error.no_confirmed_orbs",
+    ["No safe surplus copies are available. Required and locked copies remain protected."]="orb.error.no_safe_surplus",
+    ["No safe surplus source copies remain. Required and locked copies stay protected."]="orb.status.run_no_sources",
+    ["One Orb requested for this source copy."]="orb.status.run_log_requested",
+    ["One Orb requested; waiting for the actual offer and balance confirmation."]="orb.status.run_requested_balance",
+    ["One Orb requested; waiting for the actual offer."]="orb.status.run_requested",
+    ["Only a finished run can be followed by a new one."]="orb.error.new_run_needs_finished",
+    ["Only an explicitly paused run can resume."]="orb.error.resume_only_paused",
+    ["Orb balance is unavailable or invalid."]="orb.error.balance_invalid",
+    ["Orb balance state is unavailable."]="orb.error.balance_state_unavailable",
+    ["Orb mode encountered an internal error. No automatic repeat will be sent."]="orb.status.run_internal_error",
+    ["Orb mode stopped after an internal error. Check diagnostics; no automatic repeat will be sent."]="orb.status.run_internal_error_stopped",
+    ["Orb mode uses the assigned Wishlist. Change its assignment through My Builds or the Wishlist Editor."]="orb.error.assignment_fixed",
+    ["Original replacement confirmed. Review the new assigned Wishlist, then Resume; usage is unchanged."]="orb.status.run_original_confirmed_review",
+    ["Paused before the next spend."]="orb.status.run_paused",
+    ["Paused. A submitted spend may still finish; the native offer remains available."]="orb.status.run_paused_pending",
+    ["Please wait before requesting another refresh."]="orb.error.recheck_wait",
+    ["Previous result confirmed. No spending restarted; review a new run explicitly."]="orb.status.run_previous_confirmed",
+    ["Recycling permission is fixed during this run."]="orb.error.recycle_fixed",
+    ["Replaceable copies are fixed during this run."]="orb.error.sources_fixed",
+    ["Replacement confirmed. Preparing the next approved Orb."]="orb.status.run_confirmed_next",
+    ["Rolled Echoes changed outside the pending sacrifice; resolve the offer manually."]="orb.status.run_rolled_changed",
+    ["Rolled targets are complete. Remaining locked Echo targets cannot be changed by Orbs; no spend will start."]="orb.error.rolled_complete_locked",
+    ["Rolled targets are complete. Remaining locked targets are unchanged; no more Orbs will be spent."]="orb.status.run_rolled_complete",
+    ["Stopped. A submitted operation may still finish; resolve any pending offer manually."]="orb.status.run_stopped_pending",
+    ["Stopped. No further Orb will be spent."]="orb.status.run_stopped",
+    ["Target order follows the assigned Wishlist. Edit the Wishlist to change its targets."]="orb.error.order_follows_wishlist",
+    ["That would replace a protected or unavailable copy."]="orb.error.source_protected",
+    ["The Orb balance changed unexpectedly. No further action will be submitted."]="orb.status.run_balance_changed",
+    ["The actual offer was observed."]="orb.status.run_log_offer_observed",
+    ["The approved maximum is reached. Stop, then start a new run with a higher maximum."]="orb.status.max_reached_stop",
+    ["The assigned Wishlist changed. Review it and Resume without resetting this run's usage."]="orb.status.run_wishlist_changed_review",
+    ["The client does not expose the Orb balance capability."]="orb.error.balance_unsupported",
+    ["The confirmation expired. Review the plan again."]="orb.error.confirmation_expired",
+    ["The current Orb state could not be read. No new action was sent."]="orb.error.state_unreadable",
+    ["The game state is still unavailable after loading. No Orb action was repeated. Recheck, then Resume when readable."]="orb.status.run_world_unavailable",
+    ["The game's Orb state could not be read. No Orb will be spent."]="orb.error.orb_state_unreadable",
+    ["The local Echo catalog is not ready."]="orb.error.catalog_not_ready",
+    ["The maximum cannot change during a run. Stop this run, then start a new run with a higher maximum."]="orb.status.max_fixed_during_run",
+    ["The maximum changed. Review it, then press Start again."]="orb.error.max_changed_start",
+    ["The maximum is fixed during this run."]="orb.error.max_fixed",
+    ["The maximum is fixed during this run. Nothing was changed."]="orb.error.max_fixed_unchanged",
+    ["The original character/run/service no longer matches. This run cannot resume."]="orb.error.resume_context_changed",
+    ["The original operation must settle before Resume can adopt a changed assignment. Pending exposure is retained."]="orb.error.resume_settle_first",
+    ["The pending Orb offer changed unexpectedly. Resolve the original operation manually."]="orb.status.run_offer_changed",
+    ["The read-only refresh failed; no new action was requested."]="orb.error.recheck_failed",
+    ["The receipt could not be saved; no Orb was requested."]="orb.status.run_log_receipt_failed",
+    ["The selected Wishlist changed or is unavailable. Choose it again before starting."]="orb.error.wishlist_changed_start",
+    ["The selected Wishlist changed; resolve the pending offer manually."]="orb.status.run_wishlist_changed_resolve",
+    ["The server's Orb balance is invalid."]="orb.error.balance_server_invalid",
+    ["The spend outcome is now visible. Review the offer and press Resume, or resolve it manually."]="orb.status.run_spend_visible",
+    ["The spend outcome remains unknown. No action will be repeated."]="orb.error.resume_spend_unknown",
+    ["This run no longer owns the action. Stop and approve a new run after settlement."]="orb.error.resume_not_owner",
+    ["Turn off the game's automatic Echo acceptance before continuing."]="orb.status.run_auto_accept",
+    ["Turn off the game's automatic Echo acceptance first."]="orb.error.auto_accept_first",
+    ["Wait for the assigned Wishlist to resolve."]="orb.error.resume_wait_wishlist",
+    ["Waiting briefly after loading before acting. Cached data is not proof of a fresh server answer."]="orb.status.run_waiting_after_loading",
+    ["Waiting for current rolled and locked Echo data from the server."]="orb.error.echo_data_waiting",
+    ["Waiting for the server's Orb balance."]="orb.error.balance_waiting",
+    ["Waiting for the server's Orb balance. Use Recheck once it is available."]="orb.error.balance_waiting_recheck",
+    ["Your approved replaceable counts changed. Review them again."]="orb.error.replaceable_changed",
+}
+-- ORB-RUNTIME END
 UI.RUNTIME_TEXT_KEYS=RUNTIME_TEXT
 local function truthful(value)
     if value==nil then return nil end
@@ -1406,7 +1589,12 @@ local function logDetailText(details,history)
         add(TF("orb.body.history_eligible_surplus",{value=tostring(details.eligibleSurplus)}))
     end
     if details.recycled then add(T("orb.body.history_recycle_candidate")) end
-    if details.note then add(T("orb.label.recorded_note").." "..details.note) end
+    if details.note then
+        -- A note the runtime recorded: its raw text says the meaning it maps to.
+        local raw=details.technical and details.technical.reason
+        local key=type(raw)=="string" and RUNTIME_TEXT[raw]
+        add(T("orb.label.recorded_note").." "..(key and T(key) or details.note))
+    end
     local t=details.technical
     add(TF("orb.body.history_technical",{serial=tostring(t.serial or details.serial),state=tostring(t.state),
         source=tostring(t.sourceKey),selected=tostring(t.selectedKey),kind=tostring(t.selectionKind),
@@ -1432,7 +1620,10 @@ local function logRowTip(model,history)
     if detail then lines[#lines+1]=detail end
     lines[#lines+1]=TF("orb.tooltip.history_result",{result=resultText(model.result)})
     local note=model.entry and model.entry.reason
-    if note then lines[#lines+1]=T("orb.label.recorded_note").." "..history.Display(note) end
+    if note then
+        local key=type(note)=="string" and RUNTIME_TEXT[note]
+        lines[#lines+1]=T("orb.label.recorded_note").." "..(key and T(key) or history.Display(note))
+    end
     return lines
 end
 function refreshLog(force)
@@ -1834,7 +2025,7 @@ function UI.AttachMainPanel(parent)
     -- The legacy one-button entry (Pause while running, Resume while paused):
     -- hidden, so it cannot be clicked, and kept for programmatic callers with
     -- the same gates as the fixed buttons below.
-    f.primary=button(f,8,-65,87,T("orb.button.pause"),function()
+    f.primary=button(f,8,-65,87,"",function()
         local s=Nexus.OrbRuntime.CompactStatus()
         if s and s.running then Nexus.OrbRuntime.Pause()
         elseif s and s.canResume and not changedTarget(s.resumeTarget) then Nexus.OrbRuntime.Resume()end
@@ -1844,18 +2035,18 @@ function UI.AttachMainPanel(parent)
     -- Separate fixed Pause and Resume, as in the mini panel: a repeated press
     -- of one never becomes the other. A changed target resumes only after the
     -- review in the Orb window (Details).
-    f.pause=button(f,8,-65,55,T("orb.button.pause"),function()
+    f.pause=button(f,8,-65,55,"",function()
         local s=Nexus.OrbRuntime.CompactStatus()
         if s and s.running then Nexus.OrbRuntime.Pause()end
         f.refresh()
     end)
-    f.resume=button(f,69,-65,62,T("orb.button.resume"),function()
+    f.resume=button(f,69,-65,62,"",function()
         local s=Nexus.OrbRuntime.CompactStatus()
         if s and not s.running and s.canResume and not changedTarget(s.resumeTarget) then Nexus.OrbRuntime.Resume()end
         f.refresh()
     end)
-    f.stop=button(f,137,-65,48,T("orb.button.stop"),function()Nexus.OrbRuntime.Stop();f.refresh()end)
-    f.details=button(f,191,-65,69,T("orb.button.details"),function()UI.Show()end)
+    f.stop=button(f,137,-65,48,"",function()Nexus.OrbRuntime.Stop();f.refresh()end)
+    f.details=button(f,191,-65,69,"",function()UI.Show()end)
     -- Hide for a settled, ended run only (issue #167). Presentation only: it
     -- hides this strip, not Nexus, and spends, chooses, saves, releases or
     -- resets nothing. It is remembered in memory only, for that one run of the
@@ -1878,7 +2069,7 @@ function UI.AttachMainPanel(parent)
     local function sameRun(a,b)
         return a~=nil and b~=nil and a.runtime==b.runtime and a.runId==b.runId and a.startedAt==b.startedAt
     end
-    f.dismiss=button(f,8,-65,177,T("orb.button.hide_until_next_run"),function()
+    f.dismiss=button(f,8,-65,177,"",function()
         -- Only the run this strip showed, read again at the click: a click
         -- that arrives after a new run began hides nothing.
         local now=settledRun(Nexus.OrbRuntime.CompactStatus())
@@ -1914,6 +2105,14 @@ function UI.AttachMainPanel(parent)
         end
         f.shownRun=settled
         f:Show()
+        -- The strip is shown only for a known run: its fixed labels are said
+        -- the first time it shows (a hidden strip resolves no text).
+        if not f.labelled then
+            f.labelled=true
+            f.pause:SetText(T("orb.button.pause"));f.resume:SetText(T("orb.button.resume"))
+            f.stop:SetText(T("orb.button.stop"));f.details:SetText(T("orb.button.details"))
+            f.dismiss:SetText(T("orb.button.hide_until_next_run"))
+        end
         local usage=s.limitKnown==false and TF("orb.status.strip_usage_no_max",{spent=N(s.spent)})
             or TF("orb.status.usage_head",{spent=N(s.spent),limit=TF("orb.value.limit_approved",{count=N(s.limit)})})
         -- Exposure stays beside the observed usage, never folded into it.
