@@ -450,6 +450,8 @@ NAMES += ['l10n_ui_panel']
 NAMES += ['l10n_ui_wishlist']
 # Full-UI family orb (helper a2e9c1797a97d607b): Orb window states, history, Continue chrome, strip, mini panel and hovers under a pseudo pack; runtime texts mapped at display; no spend/action/send/write (synthetic; native NOT_RUN).
 NAMES += ['l10n_ui_orb']
+# Full-UI family guide (helper aa74953994bed3b99): Help pages and FAQ (blocks), Welcome/checklist, guided coach, Auto overwrite consent, Settings window and workspace labels under a pseudo pack; long, missing-entry and English phases; passivity (synthetic; native NOT_RUN).
+NAMES += ['l10n_ui_guide']
 
 # Python unittest files, as POSIX paths from the repository root. They are registered here, apart
 # from NAMES, because CONTRIBUTING.md requires every new test file to be listed in this runner.
